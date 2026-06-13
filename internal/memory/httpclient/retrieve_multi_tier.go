@@ -45,6 +45,26 @@ type MultiTierRequest struct {
 	Purposes      []string `json:"purposes,omitempty"`
 	MinConfidence float64  `json:"min_confidence,omitempty"`
 	Limit         int      `json:"limit,omitempty"`
+
+	// Multi-mode recall: graph traversal from seed entities and exact
+	// structured lookups, merged with the tier-filtered results. All optional.
+	SeedEntityIDs     []string           `json:"seed_entity_ids,omitempty"`
+	MaxGraphHops      int                `json:"max_graph_hops,omitempty"`
+	RelationTypes     []string           `json:"relation_types,omitempty"`
+	StructuredLookups []StructuredLookup `json:"structured_lookups,omitempty"`
+}
+
+// StructuredLookup is the client-side form of an exact structured lookup.
+// Mirrors api.StructuredLookupParam — redeclared to preserve dependency
+// direction (httpclient must not import the api package). WorkspaceID is
+// omitted; the server fills it from the request's workspace_id.
+type StructuredLookup struct {
+	UserID     string   `json:"user_id,omitempty"`
+	AgentID    string   `json:"agent_id,omitempty"`
+	Kinds      []string `json:"kinds,omitempty"`
+	NamePrefix string   `json:"name_prefix,omitempty"`
+	Purpose    string   `json:"purpose,omitempty"`
+	Limit      int      `json:"limit,omitempty"`
 }
 
 // MultiTierMemory is a decoded response entry with tier annotation and score.

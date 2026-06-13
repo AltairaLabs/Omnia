@@ -87,6 +87,39 @@ func TestRetrieveMultiTier_Direct(t *testing.T) {
 	assert.Equal(t, 0.87, res.Memories[0].Score)
 }
 
+func TestRetrieveMultiTier_SendsMultiModeFields(t *testing.T) {
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		require.NoError(t, json.Unmarshal(b, &gotBody))
+		_, _ = w.Write([]byte(`{"memories":[],"total":0}`))
+	}))
+	defer srv.Close()
+
+	store := NewStore(srv.URL, logr.Discard())
+	_, err := store.RetrieveMultiTier(context.Background(), MultiTierRequest{
+		WorkspaceID:   "ws-1",
+		SeedEntityIDs: []string{"e-1", "e-2"},
+		MaxGraphHops:  2,
+		RelationTypes: []string{"ABOUT"},
+		StructuredLookups: []StructuredLookup{
+			{Kinds: []string{"policy"}, NamePrefix: "refund", Purpose: "support_continuity", Limit: 5},
+		},
+	})
+	require.NoError(t, err)
+
+	assert.Equal(t, []any{"e-1", "e-2"}, gotBody["seed_entity_ids"])
+	assert.InDelta(t, 2, gotBody["max_graph_hops"], 0)
+	assert.Equal(t, []any{"ABOUT"}, gotBody["relation_types"])
+	lookups, ok := gotBody["structured_lookups"].([]any)
+	require.True(t, ok)
+	require.Len(t, lookups, 1)
+	lookup := lookups[0].(map[string]any)
+	assert.Equal(t, []any{"policy"}, lookup["kinds"])
+	assert.Equal(t, "refund", lookup["name_prefix"])
+	assert.Equal(t, "support_continuity", lookup["purpose"])
+}
+
 func TestRetrieveMultiTier_ErrorStatus(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
