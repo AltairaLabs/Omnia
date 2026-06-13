@@ -41,9 +41,9 @@ func (h *OptOutHandler) RegisterRoutes(mux *http.ServeMux) {
 
 // OptOutRequest is the JSON body for opt-out operations.
 type OptOutRequest struct {
-	VirtualUserID string `json:"virtualUserId"`
-	Scope         string `json:"scope"`
-	Target        string `json:"target,omitempty"`
+	UserID string `json:"userId"`
+	Scope  string `json:"scope"`
+	Target string `json:"target,omitempty"`
 }
 
 // handleSetOptOut sets an opt-out preference for a user.
@@ -59,8 +59,8 @@ func (h *OptOutHandler) handleSetOptOut(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	if err := h.store.SetOptOut(r.Context(), req.VirtualUserID, req.Scope, req.Target); err != nil {
-		h.log.Error(err, "SetOptOut failed", "userHash", logging.HashID(req.VirtualUserID))
+	if err := h.store.SetOptOut(r.Context(), req.UserID, req.Scope, req.Target); err != nil {
+		h.log.Error(err, "SetOptOut failed", "userHash", logging.HashID(req.UserID))
 		writeErr(w, http.StatusInternalServerError, "internal server error")
 		return
 	}
@@ -81,12 +81,12 @@ func (h *OptOutHandler) handleRemoveOptOut(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	if err := h.store.RemoveOptOut(r.Context(), req.VirtualUserID, req.Scope, req.Target); err != nil {
+	if err := h.store.RemoveOptOut(r.Context(), req.UserID, req.Scope, req.Target); err != nil {
 		if errors.Is(err, ErrPreferencesNotFound) {
 			writeErr(w, http.StatusNotFound, "user preferences not found")
 			return
 		}
-		h.log.Error(err, "RemoveOptOut failed", "userHash", logging.HashID(req.VirtualUserID))
+		h.log.Error(err, "RemoveOptOut failed", "userHash", logging.HashID(req.UserID))
 		writeErr(w, http.StatusInternalServerError, "internal server error")
 		return
 	}
@@ -131,8 +131,8 @@ func writeErr(w http.ResponseWriter, status int, msg string) {
 
 // validateOptOutRequest validates the opt-out request fields.
 func validateOptOutRequest(req OptOutRequest) error {
-	if req.VirtualUserID == "" {
-		return errors.New("virtualUserId is required")
+	if req.UserID == "" {
+		return errors.New("userId is required")
 	}
 	switch req.Scope {
 	case ScopeAll:

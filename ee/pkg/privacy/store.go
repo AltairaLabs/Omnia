@@ -37,7 +37,7 @@ var ErrPreferencesNotFound = errors.New("privacy: user preferences not found")
 
 // Preferences represents a user's privacy opt-out preferences.
 type Preferences struct {
-	VirtualUserID    string            `json:"virtualUserId"`
+	UserID           string            `json:"userId"`
 	OptOutAll        bool              `json:"optOutAll"`
 	OptOutWorkspaces []string          `json:"optOutWorkspaces"`
 	OptOutAgents     []string          `json:"optOutAgents"`
@@ -69,11 +69,11 @@ var _ ConsentSource = (*PreferencesPostgresStore)(nil)
 
 // GetPreferences retrieves privacy preferences for a user.
 func (s *PreferencesPostgresStore) GetPreferences(ctx context.Context, userID string) (*Preferences, error) {
-	p := &Preferences{VirtualUserID: userID}
+	p := &Preferences{UserID: userID}
 	var grants []string
 	err := s.pool.QueryRow(ctx,
 		`SELECT opt_out_all, opt_out_workspaces, opt_out_agents, consent_grants, created_at, updated_at
-		 FROM user_privacy_preferences WHERE virtual_user_id = $1`, userID,
+		 FROM user_privacy_preferences WHERE user_id = $1`, userID,
 	).Scan(&p.OptOutAll, &p.OptOutWorkspaces, &p.OptOutAgents, &grants, &p.CreatedAt, &p.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrPreferencesNotFound
@@ -122,7 +122,7 @@ func (s *PreferencesPostgresStore) RemoveOptOut(ctx context.Context, userID, sco
 func (s *PreferencesPostgresStore) GetConsentGrants(ctx context.Context, userID string) ([]ConsentCategory, error) {
 	var grants []string
 	err := s.pool.QueryRow(ctx,
-		`SELECT consent_grants FROM user_privacy_preferences WHERE virtual_user_id = $1`, userID,
+		`SELECT consent_grants FROM user_privacy_preferences WHERE user_id = $1`, userID,
 	).Scan(&grants)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return []ConsentCategory{}, nil
@@ -170,9 +170,9 @@ func normalizeSlices(p *Preferences) {
 
 func (s *PreferencesPostgresStore) upsertOptOutAll(ctx context.Context, userID string) error {
 	_, err := s.pool.Exec(ctx,
-		`INSERT INTO user_privacy_preferences (virtual_user_id, opt_out_all, updated_at)
+		`INSERT INTO user_privacy_preferences (user_id, opt_out_all, updated_at)
 		 VALUES ($1, TRUE, NOW())
-		 ON CONFLICT (virtual_user_id) DO UPDATE SET opt_out_all = TRUE, updated_at = NOW()`,
+		 ON CONFLICT (user_id) DO UPDATE SET opt_out_all = TRUE, updated_at = NOW()`,
 		userID)
 	return err
 }
@@ -180,7 +180,7 @@ func (s *PreferencesPostgresStore) upsertOptOutAll(ctx context.Context, userID s
 func (s *PreferencesPostgresStore) clearOptOutAll(ctx context.Context, userID string) error {
 	tag, err := s.pool.Exec(ctx,
 		`UPDATE user_privacy_preferences SET opt_out_all = FALSE, updated_at = NOW()
-		 WHERE virtual_user_id = $1`, userID)
+		 WHERE user_id = $1`, userID)
 	if err != nil {
 		return err
 	}
@@ -194,9 +194,9 @@ func (s *PreferencesPostgresStore) upsertArrayElement(
 	ctx context.Context, userID, column, value string,
 ) error {
 	//nolint:gosec // column is validated by the caller (SetOptOut switch)
-	query := `INSERT INTO user_privacy_preferences (virtual_user_id, ` + column + `, updated_at)
+	query := `INSERT INTO user_privacy_preferences (user_id, ` + column + `, updated_at)
 		VALUES ($1, ARRAY[$2]::TEXT[], NOW())
-		ON CONFLICT (virtual_user_id) DO UPDATE SET
+		ON CONFLICT (user_id) DO UPDATE SET
 			` + column + ` = CASE
 				WHEN $2 = ANY(user_privacy_preferences.` + column + `)
 				THEN user_privacy_preferences.` + column + `
@@ -213,7 +213,7 @@ func (s *PreferencesPostgresStore) removeArrayElement(
 	//nolint:gosec // column is validated by the caller (RemoveOptOut switch)
 	query := `UPDATE user_privacy_preferences SET
 		` + column + ` = array_remove(` + column + `, $2), updated_at = NOW()
-		WHERE virtual_user_id = $1`
+		WHERE user_id = $1`
 	tag, err := s.pool.Exec(ctx, query, userID, value)
 	if err != nil {
 		return err

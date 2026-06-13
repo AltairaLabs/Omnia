@@ -288,13 +288,13 @@ CREATE INDEX idx_deletion_requests_status ON deletion_requests (status);
 
 -- user_privacy_preferences: per-user recording opt-out (not partitioned).
 CREATE TABLE user_privacy_preferences (
-    virtual_user_id    TEXT        NOT NULL,
+    user_id            TEXT        NOT NULL,
     opt_out_all        BOOLEAN     DEFAULT false,
     opt_out_workspaces TEXT[]      DEFAULT '{}'::text[],
     opt_out_agents     TEXT[]      DEFAULT '{}'::text[],
     created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
-    PRIMARY KEY (virtual_user_id)
+    PRIMARY KEY (user_id)
 );
 
 CREATE INDEX idx_privacy_prefs_updated ON user_privacy_preferences (updated_at);

@@ -200,8 +200,8 @@ func (h *ConsentHandler) emitAudit(r *http.Request, eventType, userID string, ca
 	h.audit.LogEvent(r.Context(), &api.AuditEntry{
 		EventType: eventType,
 		Metadata: map[string]string{
-			"virtual_user_id": userID,
-			"category":        string(cat),
+			"user_id":  userID,
+			"category": string(cat),
 		},
 	})
 }
