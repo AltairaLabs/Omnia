@@ -366,9 +366,12 @@ func (f *flags) reembedWorkerOptions(embeddingSvc *memory.EmbeddingService) (mem
 		return memory.ReembedWorkerOptions{}, false
 	}
 	return memory.ReembedWorkerOptions{
-		Interval:     interval,
-		BatchSize:    f.reembedBatchSize,
-		CurrentModel: f.embeddingProviderName,
+		Interval:  interval,
+		BatchSize: f.reembedBatchSize,
+		// MAINT-5: read the identifier the EmbeddingService actually stamps
+		// (provider/model), not the bare provider name, so the worker's
+		// staleness comparison matches what was written.
+		CurrentModel: embeddingSvc.ModelName(),
 	}, true
 }
 
@@ -1254,13 +1257,28 @@ func createEmbeddingService(ctx context.Context, providerName, workspaceName, wo
 	// write path, and the re-embed worker — emits the embed_* metrics
 	// without touching individual call sites.
 	metered := memory.NewMeteredEmbeddingProvider(&embeddingProviderAdapter{inner: embeddingProvider, usage: usageRecorder})
-	svc := memory.NewEmbeddingService(store, metered, log).WithModelName(providerName)
+	modelID := embeddingModelIdentifier(providerName, provider.Spec.Model)
+	svc := memory.NewEmbeddingService(store, metered, log).WithModelName(modelID)
 	log.Info("embedding service enabled",
 		"provider", providerName,
 		"type", provider.Spec.Type,
 		"model", provider.Spec.Model,
+		"modelIdentifier", modelID,
 	)
 	return svc
+}
+
+// embeddingModelIdentifier is the value stamped on every embedding write so the
+// re-embed worker can detect a model swap (MAINT-5). It combines the Provider
+// CRD name with the resolved model so editing spec.model in place (same CRD
+// name) still changes the identifier and triggers a re-embed — keying on the
+// CRD name alone missed that, silently mixing vector spaces. When the provider
+// exposes no model, the bare CRD name is used (no spurious re-embed).
+func embeddingModelIdentifier(providerName, model string) string {
+	if model == "" {
+		return providerName
+	}
+	return providerName + "/" + model
 }
 
 // createEmbeddingProviderFromCRD translates an Omnia Provider CRD into a
