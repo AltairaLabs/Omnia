@@ -76,6 +76,15 @@ function loadYaml<T>(content: string): T | null {
     return null;
   }
 }
+// Like loadYaml but reports whether parsing threw, so the caller can tell a
+// malformed document (genuine error) apart from valid-but-empty YAML.
+function tryLoadYaml<T>(content: string): { value: T | null; ok: boolean } {
+  try {
+    return { value: (yaml.load(content) as T) ?? null, ok: true };
+  } catch {
+    return { value: null, ok: false };
+  }
+}
 function providerEntries(providers: NonNullable<ArenaConfigShape["spec"]>["providers"]): ProviderEntry[] {
   if (Array.isArray(providers)) return providers;
   if (providers) return Object.values(providers);
@@ -223,14 +232,17 @@ export function parseArenaProject(input: {
   readFile: ReadFile;
 }): { parsed: ArenaParsed | null; error: string | null } {
   const { configPath, configContent, readFile } = input;
-  const cfg = loadYaml<ArenaConfigShape>(configContent);
-  if (!cfg?.spec) return { parsed: null, error: "Could not parse arena config" };
+  const { value, ok } = tryLoadYaml<ArenaConfigShape>(configContent);
+  // Only malformed YAML is an error. Valid YAML with no `spec` (e.g. a brand-new
+  // project's metadata-only config) is just an empty workload.
+  if (!ok) return { parsed: null, error: "Could not parse arena config" };
+  const cfg = value ?? {};
   const dir = dirOf(configPath);
 
   const content: PromptPackContent = {
     prompts: buildPrompts(cfg, dir, readFile),
-    workflow: cfg.spec.workflow,
-    agents: cfg.spec.agents,
+    workflow: cfg.spec?.workflow,
+    agents: cfg.spec?.agents,
   };
   return {
     parsed: {

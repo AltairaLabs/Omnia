@@ -128,6 +128,21 @@ describe("parseArenaProject", () => {
     expect(error).toMatch(/config/i);
   });
 
+  it("treats valid YAML with no spec as an empty workload, not an error", () => {
+    // A brand-new project writes a metadata-only config.arena.yaml (no spec).
+    const { parsed, error } = parseArenaProject({
+      configPath: "config.arena.yaml",
+      configContent: "name: my-project\ndescription: just metadata\ntags: []\n",
+      readFile,
+    });
+    expect(error).toBeNull();
+    expect(parsed).not.toBeNull();
+    expect(parsed!.content.prompts).toEqual({});
+    expect(parsed!.providers).toEqual([]);
+    expect(parsed!.scenarios).toEqual([]);
+    expect(parsed!.persona).toBeUndefined();
+  });
+
   it("omits the persona when self_play is disabled", () => {
     const noSelfPlay = CONFIG.replace("enabled: true", "enabled: false");
     const { parsed } = parseArenaProject({ configPath: "config.arena.yaml", configContent: noSelfPlay, readFile });
