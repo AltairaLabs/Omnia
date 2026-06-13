@@ -68,6 +68,15 @@ ENABLE_FULL_STACK = os.getenv('ENABLE_FULL_STACK', '').lower() in ('true', '1', 
 # Can be set via environment: ENABLE_ENTERPRISE=true tilt up
 ENABLE_ENTERPRISE = os.getenv('ENABLE_ENTERPRISE', '').lower() in ('true', '1', 'yes') or False
 
+# Set to True to build the dashboard as a PRODUCTION image (next build --webpack,
+# NODE_ENV=production) instead of the fast Turbopack dev server.
+# This is the only way to run the Monaco LSP editor locally: Turbopack (the Next 16
+# dev default) can't load monaco-languageclient, so the editor is gated off in dev.
+# A prod build is the deployed bundler/mode, so it both enables the LSP editor and
+# faithfully reproduces deployed behaviour. Trade-off: NO hot reload — the dashboard
+# image rebuilds on change. Enable with: DASHBOARD_PROD=1 tilt up
+DASHBOARD_PROD = os.getenv('DASHBOARD_PROD', '').lower() in ('true', '1', 'yes') or False
+
 # Set to True to enable Entra ID (Azure AD) OAuth for the dashboard.
 # Requires a one-time setup: run `./scripts/setup-entra-dev.sh --create-secret`
 # to register the app, create the `dashboard-oauth` Secret, and generate
@@ -168,20 +177,30 @@ if ENABLE_FULL_STACK:
 # Dashboard - Hot reload development
 # ============================================================================
 
-# Build dashboard with live_update for instant file sync
-docker_build(
-    'omnia-dashboard-dev',
-    context='./dashboard',
-    dockerfile='./dashboard/Dockerfile.dev',
-    live_update=[
-        # If package.json changes, need full rebuild (must be first)
-        fall_back_on(['./dashboard/package.json', './dashboard/package-lock.json']),
+# Build dashboard. Default: fast Turbopack dev server with live_update (HMR).
+# DASHBOARD_PROD=1: production webpack build (NODE_ENV=production) so the Monaco
+# LSP editor loads — no HMR, full image rebuild on change.
+if DASHBOARD_PROD:
+    print("Dashboard: PRODUCTION build (next build --webpack) — LSP editor enabled, NO hot reload")
+    docker_build(
+        'omnia-dashboard-dev',
+        context='./dashboard',
+        dockerfile='./dashboard/Dockerfile',
+    )
+else:
+    docker_build(
+        'omnia-dashboard-dev',
+        context='./dashboard',
+        dockerfile='./dashboard/Dockerfile.dev',
+        live_update=[
+            # If package.json changes, need full rebuild (must be first)
+            fall_back_on(['./dashboard/package.json', './dashboard/package-lock.json']),
 
-        # Sync source files - triggers Next.js hot reload
-        sync('./dashboard/src', '/app/src'),
-        sync('./dashboard/public', '/app/public'),
-    ],
-)
+            # Sync source files - triggers Next.js hot reload
+            sync('./dashboard/src', '/app/src'),
+            sync('./dashboard/public', '/app/public'),
+        ],
+    )
 
 # ============================================================================
 # Operator - Rebuild on changes (Go doesn't hot reload)
@@ -628,6 +647,12 @@ helm_set = [
     'dashboard.livenessProbe.initialDelaySeconds=60',
     'dashboard.livenessProbe.failureThreshold=6',
 ]
+
+# A production-mode dashboard (DASHBOARD_PROD=1) runs with NODE_ENV=production,
+# where the auth boot guard refuses to start under the local 'anonymous' auth
+# mode unless explicitly acknowledged. Local Tilt is a sandbox, so opt in.
+if DASHBOARD_PROD:
+    helm_set.append('dashboard.auth.allowAnonymous=true')
 
 # Bitnami Redis subchart — enabled unconditionally for dev so the
 # memory-api read-through cache, the dashboard session store, the
