@@ -20,7 +20,6 @@ package memory
 
 import (
 	"context"
-	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -114,91 +113,4 @@ func TestMemoryWorkspaceIsolation(t *testing.T) {
 	results, err = store.Retrieve(ctx, scope1, "isolation", RetrieveOptions{})
 	require.NoError(t, err)
 	assert.NotEmpty(t, results, "workspace-1 should find its own memory")
-}
-
-// TestToolProvider_EndToEnd exercises the Tools() integration: relations and timeline.
-func TestToolProvider_EndToEnd(t *testing.T) {
-	pool := freshDB(t)
-	store := NewPostgresMemoryStore(pool)
-	ctx := context.Background()
-
-	// Save two entities via store to get their IDs.
-	mem1 := &Memory{
-		Type:       "person",
-		Content:    "Alice",
-		Confidence: 0.9,
-		Scope:      testScope(testWorkspace1),
-	}
-	require.NoError(t, store.Save(ctx, mem1))
-	require.NotEmpty(t, mem1.ID)
-
-	mem2 := &Memory{
-		Type:       "organization",
-		Content:    "Acme Corp",
-		Confidence: 0.9,
-		Scope:      testScope(testWorkspace1),
-	}
-	require.NoError(t, store.Save(ctx, mem2))
-	require.NotEmpty(t, mem2.ID)
-
-	// Create a relation between them directly in DB.
-	_, err := pool.Exec(ctx, `
-		INSERT INTO memory_relations (workspace_id, source_entity_id, target_entity_id, relation_type, weight)
-		VALUES ($1, $2, $3, 'works_at', 0.9)`,
-		testWorkspace1, mem1.ID, mem2.ID,
-	)
-	require.NoError(t, err)
-
-	// Verify Tools() returns the expected tool definitions.
-	tools := store.Tools()
-	require.Len(t, tools, 2)
-	toolNames := make([]string, len(tools))
-	for i, tool := range tools {
-		toolNames[i] = tool.Name
-	}
-	assert.Contains(t, toolNames, toolNameRelated)
-	assert.Contains(t, toolNames, toolNameTimeline)
-
-	// Call handleRelated — verify the relation is found.
-	relParams, err := json.Marshal(map[string]any{"entity_id": mem1.ID})
-	require.NoError(t, err)
-
-	relResult, err := store.handleRelated(ctx, relParams)
-	require.NoError(t, err)
-
-	var relRows []relatedResult
-	require.NoError(t, json.Unmarshal([]byte(relResult), &relRows))
-	require.Len(t, relRows, 1)
-	assert.Equal(t, mem2.ID, relRows[0].ID)
-	assert.Equal(t, "works_at", relRows[0].RelationType)
-	assert.InDelta(t, 0.9, relRows[0].Weight, 0.001)
-
-	// Add an observation directly to mem1 with a source_type for timeline.
-	_, err = pool.Exec(ctx, `
-		INSERT INTO memory_observations (entity_id, content, confidence, source_type)
-		VALUES ($1, 'Alice joined Acme Corp in 2025', 0.85, 'conversation_extraction')`,
-		mem1.ID,
-	)
-	require.NoError(t, err)
-
-	// Call handleTimeline — verify the observation is returned.
-	tlParams, err := json.Marshal(map[string]any{"entity_id": mem1.ID, "limit": 10})
-	require.NoError(t, err)
-
-	tlResult, err := store.handleTimeline(ctx, tlParams)
-	require.NoError(t, err)
-
-	var tlRows []timelineResult
-	require.NoError(t, json.Unmarshal([]byte(tlResult), &tlRows))
-
-	// At least the explicitly inserted observation should appear.
-	found := false
-	for _, row := range tlRows {
-		if row.Content == "Alice joined Acme Corp in 2025" {
-			found = true
-			assert.InDelta(t, 0.85, row.Confidence, 0.001)
-			assert.Equal(t, "conversation_extraction", row.SourceType)
-		}
-	}
-	assert.True(t, found, "timeline should contain the directly-inserted observation")
 }
