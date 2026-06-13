@@ -28,6 +28,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/altairalabs/omnia/internal/memory"
 	"github.com/go-logr/logr"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
@@ -103,6 +104,52 @@ func TestMemoryPrivacyMiddleware_OversizedBody_Returns413(t *testing.T) {
 	handler.ServeHTTP(w, r)
 
 	assert.Equal(t, http.StatusRequestEntityTooLarge, w.Code, "oversized body should get 413")
+}
+
+// SEC-2: scope carried in the JSON body (the canonical httpclient shape, no
+// query params) must drive the opt-out check — query-only scope reading
+// silently skipped opt-out + per-workspace redaction on the main write path.
+func TestMemoryPrivacyMiddleware_BodyScopeDrivesOptOut(t *testing.T) {
+	next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
+		t.Fatal("opted-out write must be suppressed, not reach the handler")
+	})
+	mw := newTestMiddleware(optedOutChecker, noOpRedact)
+	handler := mw.Wrap(next)
+
+	body, err := json.Marshal(SaveMemoryRequest{
+		Type: "fact", Content: "x",
+		Scope: map[string]string{memory.ScopeWorkspaceID: "ws-1", memory.ScopeUserID: "user-abc"},
+	})
+	require.NoError(t, err)
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/memories", bytes.NewReader(body))
+	r.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, r)
+
+	assert.Equal(t, http.StatusNoContent, w.Code, "body-scoped opt-out must be honored")
+}
+
+// MAINT-1: a non-save route (supersede) must pass through untouched — the
+// middleware must not decode it as SaveMemoryRequest, run opt-out/redaction, or
+// re-marshal it (which would drop fields like source_ids and 400 the handler).
+func TestMemoryPrivacyMiddleware_NonSaveRoutePassesThroughUntouched(t *testing.T) {
+	var gotBody []byte
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotBody, _ = io.ReadAll(r.Body)
+		w.WriteHeader(http.StatusOK)
+	})
+	// panicOptOut/panicRedact assert neither runs for a non-save route.
+	mw := newTestMiddleware(panicOptOut, panicRedact)
+	handler := mw.Wrap(next)
+
+	raw := `{"source_ids":["a","b"],"content":"ssn 123-45-6789"}`
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/memories/supersede", bytes.NewReader([]byte(raw)))
+	r.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, r)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.JSONEq(t, raw, string(gotBody), "non-save route body must reach the handler untouched")
 }
 
 func TestMemoryPrivacyMiddleware_OptedOutUser_Returns204(t *testing.T) {
