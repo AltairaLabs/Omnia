@@ -427,6 +427,32 @@ type ensureSessionStore struct {
 	createCalls int
 }
 
+type ensureSessionMetricsSpy struct {
+	sessionCreated int
+}
+
+func (m *ensureSessionMetricsSpy) ConnectionOpened() {}
+func (m *ensureSessionMetricsSpy) ConnectionClosed() {}
+func (m *ensureSessionMetricsSpy) SessionClosed()    {}
+func (m *ensureSessionMetricsSpy) RequestStarted()   {}
+func (m *ensureSessionMetricsSpy) RequestCompleted(context.Context, string, float64, string) {
+}
+func (m *ensureSessionMetricsSpy) MessageReceived() {}
+func (m *ensureSessionMetricsSpy) MessageSent()     {}
+func (m *ensureSessionMetricsSpy) UploadStarted()   {}
+func (m *ensureSessionMetricsSpy) UploadCompleted(int64, float64) {
+}
+func (m *ensureSessionMetricsSpy) UploadFailed()    {}
+func (m *ensureSessionMetricsSpy) DownloadStarted() {}
+func (m *ensureSessionMetricsSpy) DownloadCompleted(int64) {
+}
+func (m *ensureSessionMetricsSpy) DownloadFailed() {}
+func (m *ensureSessionMetricsSpy) MediaChunkSent(bool, int) {
+}
+func (m *ensureSessionMetricsSpy) SessionCreated() {
+	m.sessionCreated++
+}
+
 func (s *ensureSessionStore) GetSession(ctx context.Context, sessionID string) (*session.Session, error) {
 	if s.getErr != nil {
 		return nil, s.getErr
@@ -477,6 +503,40 @@ func TestEnsureSession_CreatesWhenSessionNotFound(t *testing.T) {
 	}
 	if _, err := backingStore.GetSession(context.Background(), sessionID); err != nil {
 		t.Fatalf("GetSession(created): %v", err)
+	}
+}
+
+func TestEnsureSession_ResumedSessionIncrementsSessionCreatedMetric(t *testing.T) {
+	backingStore := session.NewMemoryStore()
+	t.Cleanup(func() { _ = backingStore.Close() })
+
+	store := &ensureSessionStore{Store: backingStore}
+	metrics := &ensureSessionMetricsSpy{}
+	server := NewServer(DefaultServerConfig(), store, nil, logr.Discard(), WithMetrics(metrics))
+	conn := &Connection{agentName: "agent", namespace: "default", workspaceName: "ws"}
+
+	_, err := backingStore.CreateSession(context.Background(), session.CreateSessionOptions{
+		ID:            "existing-session-id",
+		AgentName:     "agent",
+		Namespace:     "default",
+		WorkspaceName: "ws",
+	})
+	if err != nil {
+		t.Fatalf("CreateSession(existing): %v", err)
+	}
+
+	sessionID, err := server.ensureSession(context.Background(), conn, "existing-session-id", logr.Discard())
+	if err != nil {
+		t.Fatalf("ensureSession(resume): %v", err)
+	}
+	if sessionID != "existing-session-id" {
+		t.Fatalf("sessionID = %q, want %q", sessionID, "existing-session-id")
+	}
+	if store.createCalls != 0 {
+		t.Fatalf("CreateSession called %d times, want 0", store.createCalls)
+	}
+	if metrics.sessionCreated != 1 {
+		t.Fatalf("SessionCreated metric calls = %d, want 1", metrics.sessionCreated)
 	}
 }
 
