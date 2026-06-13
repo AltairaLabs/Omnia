@@ -260,6 +260,7 @@ func (s *Server) ensureSession(ctx context.Context, c *Connection, sessionID str
 		// Try to resume existing session
 		sess, err := s.sessionStore.GetSession(ctx, sessionID)
 		if err == nil {
+			s.metrics.SessionCreated()
 			// Refresh TTL
 			if err := s.sessionStore.RefreshTTL(ctx, sessionID, s.config.SessionTTL); err != nil {
 				log.Error(err, "failed to refresh session TTL")
