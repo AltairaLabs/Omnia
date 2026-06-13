@@ -87,6 +87,24 @@ func makePostRequest(t *testing.T, content, workspace, userID string) *http.Requ
 
 // --- Tests ---
 
+// PERF-1: an oversized POST body must be rejected with 413 before the body is
+// fully read, so an unauthenticated caller can't OOM the pod.
+func TestMemoryPrivacyMiddleware_OversizedBody_Returns413(t *testing.T) {
+	next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
+		t.Fatal("next handler must not run for an oversized body")
+	})
+	mw := newTestMiddleware(panicOptOut, panicRedact)
+	handler := mw.Wrap(next)
+
+	body := bytes.NewReader(bytes.Repeat([]byte("a"), int(DefaultMaxBodySize)+1024))
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/memories", body)
+	r.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, r)
+
+	assert.Equal(t, http.StatusRequestEntityTooLarge, w.Code, "oversized body should get 413")
+}
+
 func TestMemoryPrivacyMiddleware_OptedOutUser_Returns204(t *testing.T) {
 	var handlerCalled bool
 	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

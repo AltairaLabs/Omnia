@@ -152,12 +152,16 @@ func provenanceFromMetadata(meta map[string]any) string {
 	return v
 }
 
-// readAndDecode reads the request body and attempts to decode it as a SaveMemoryRequest.
-// Returns the raw bytes, the decoded request, and whether decoding succeeded.
-func readAndDecode(r *http.Request) ([]byte, SaveMemoryRequest, bool, error) {
+// readAndDecode reads the request body (capped at DefaultMaxBodySize so an
+// unauthenticated multi-GB POST can't OOM the pod — PERF-1; this middleware
+// runs before the handler installs its own MaxBytesReader) and attempts to
+// decode it as a SaveMemoryRequest. Returns the raw bytes, the decoded
+// request, and whether decoding succeeded.
+func readAndDecode(w http.ResponseWriter, r *http.Request) ([]byte, SaveMemoryRequest, bool, error) {
 	var data []byte
 	if r.Body != nil {
 		var err error
+		r.Body = http.MaxBytesReader(w, r.Body, DefaultMaxBodySize)
 		data, err = io.ReadAll(r.Body)
 		_ = r.Body.Close()
 		if err != nil {
@@ -181,8 +185,12 @@ func (m *MemoryPrivacyMiddleware) Wrap(next http.Handler) http.Handler {
 		workspace := r.URL.Query().Get("workspace")
 		userID := r.URL.Query().Get("user_id")
 
-		data, req, decoded, err := readAndDecode(r)
+		data, req, decoded, err := readAndDecode(w, r)
 		if err != nil {
+			if isMaxBytesError(err) {
+				writeError(w, ErrBodyTooLarge)
+				return
+			}
 			http.Error(w, "failed to read body", http.StatusInternalServerError)
 			return
 		}
