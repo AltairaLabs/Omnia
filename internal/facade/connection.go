@@ -136,6 +136,7 @@ func (s *Server) cleanupConnection(c *Connection, log logr.Logger) {
 
 	s.metrics.ConnectionClosed()
 
+<<<<<<< HEAD
 	// Snapshot session ID once under the mutex; the closure runs in a goroutine
 	// and must not race against concurrent writers of c.sessionID.
 	sessionID := c.SessionID()
@@ -215,3 +216,4 @@ func (s *Server) sendPing(c *Connection) bool {
 	}
 	return true
 }
+
