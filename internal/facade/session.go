@@ -34,6 +34,7 @@ import (
 	"github.com/altairalabs/omnia/internal/session/httpclient"
 	"github.com/altairalabs/omnia/internal/session/otlp"
 	"github.com/altairalabs/omnia/internal/tracing"
+	"github.com/altairalabs/omnia/pkg/identity"
 	"github.com/altairalabs/omnia/pkg/logctx"
 	"github.com/altairalabs/omnia/pkg/policy"
 )
@@ -270,6 +271,19 @@ func (s *Server) ensureSession(ctx context.Context, c *Connection, sessionID str
 		log.V(1).Info("session not found, creating", "sessionID", sessionID)
 	}
 
+	// virtual_user_id is a NOT-NULL column and session-api 400s an empty
+	// value (design principle: "no sessions without a user"). c.userID is the
+	// per-user pseudonym resolved at upgrade (ResolveUserPseudonym). For a
+	// truly anonymous connection (no auth identity, no device_id, no Istio
+	// header) c.userID is empty, so fall back to a per-connection anonymous
+	// pseudonym derived from this session's id — each anonymous session
+	// becomes its own deterministic virtual user.
+	fallbackSeed := sessionID
+	if fallbackSeed == "" {
+		fallbackSeed = c.SessionID()
+	}
+	virtualUserID := virtualUserIDForSession(c.userID, fallbackSeed)
+
 	// Create new session, preserving the requested ID when provided.
 	sess, err := s.sessionStore.CreateSession(ctx, session.CreateSessionOptions{
 		ID:                sessionID,
@@ -283,6 +297,7 @@ func (s *Server) ensureSession(ctx context.Context, c *Connection, sessionID str
 		InitialState:      buildSessionState(c, s.config),
 		CohortID:          c.cohortID,
 		Variant:           c.variant,
+		VirtualUserID:     virtualUserID,
 	})
 	if err != nil {
 		return "", err
@@ -291,6 +306,18 @@ func (s *Server) ensureSession(ctx context.Context, c *Connection, sessionID str
 	s.metrics.SessionCreated()
 
 	return sess.ID, nil
+}
+
+// virtualUserIDForSession returns the non-empty virtual_user_id to persist on
+// a new session. It prefers the resolved per-user pseudonym; when that is empty
+// (a truly anonymous connection) it falls back to a per-connection anonymous
+// pseudonym derived from the session id, so the NOT-NULL create still succeeds
+// and each anonymous session is its own deterministic virtual user.
+func virtualUserIDForSession(userID, sessionID string) string {
+	if userID != "" {
+		return userID
+	}
+	return identity.PseudonymizeID(sessionID)
 }
 
 // buildSessionTags creates tags for a new interactive session.

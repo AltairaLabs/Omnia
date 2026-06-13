@@ -343,6 +343,74 @@ func TestProcessMessage_NoTracingProvider(t *testing.T) {
 	}
 }
 
+// TestEnsureSession_SetsVirtualUserID verifies that a session created for an
+// authenticated connection carries VirtualUserID = c.userID, so the NOT-NULL
+// virtual_user_id column on the session is populated for attribution.
+func TestEnsureSession_SetsVirtualUserID(t *testing.T) {
+	store := session.NewMemoryStore()
+	t.Cleanup(func() { _ = store.Close() })
+
+	cfg := DefaultServerConfig()
+	server := NewServer(cfg, store, nil, logr.Discard())
+
+	c := &Connection{
+		agentName: "agent-1",
+		namespace: "ns-1",
+		userID:    identity.PseudonymizeID("alice"),
+		sessionID: "11111111-1111-1111-1111-111111111111",
+	}
+
+	id, err := server.ensureSession(context.Background(), c, "", logr.Discard())
+	if err != nil {
+		t.Fatalf("ensureSession: %v", err)
+	}
+
+	sess, err := store.GetSession(context.Background(), id)
+	if err != nil {
+		t.Fatalf("GetSession: %v", err)
+	}
+	if sess.VirtualUserID != c.userID {
+		t.Errorf("VirtualUserID = %q, want %q (c.userID)", sess.VirtualUserID, c.userID)
+	}
+}
+
+// TestEnsureSession_AnonymousFallbackVirtualUserID verifies the anonymous
+// fallback: when c.userID is empty (truly anonymous), VirtualUserID falls back
+// to PseudonymizeID(sessionID) so the NOT-NULL create still succeeds and each
+// anonymous session becomes its own deterministic virtual user.
+func TestEnsureSession_AnonymousFallbackVirtualUserID(t *testing.T) {
+	store := session.NewMemoryStore()
+	t.Cleanup(func() { _ = store.Close() })
+
+	cfg := DefaultServerConfig()
+	server := NewServer(cfg, store, nil, logr.Discard())
+
+	const sessID = "22222222-2222-2222-2222-222222222222"
+	c := &Connection{
+		agentName: "agent-1",
+		namespace: "ns-1",
+		userID:    "", // anonymous
+		sessionID: sessID,
+	}
+
+	id, err := server.ensureSession(context.Background(), c, sessID, logr.Discard())
+	if err != nil {
+		t.Fatalf("ensureSession: %v", err)
+	}
+
+	sess, err := store.GetSession(context.Background(), id)
+	if err != nil {
+		t.Fatalf("GetSession: %v", err)
+	}
+	want := identity.PseudonymizeID(sessID)
+	if sess.VirtualUserID == "" {
+		t.Fatal("VirtualUserID is empty for anonymous session; NOT-NULL create would 400")
+	}
+	if sess.VirtualUserID != want {
+		t.Errorf("VirtualUserID = %q, want %q (pseudonymize(sessionID))", sess.VirtualUserID, want)
+	}
+}
+
 func TestBuildSessionTags_Anonymous(t *testing.T) {
 	c := &Connection{agentName: "agent-1"}
 	tags := buildSessionTags(c)
