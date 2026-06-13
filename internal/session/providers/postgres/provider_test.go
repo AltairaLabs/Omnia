@@ -47,6 +47,8 @@ const sourceArenaTag = "source:arena"
 
 const testVirtualUserID = "vu-test"
 
+const testAgentArenaWorker = "arena-worker"
+
 func TestMain(m *testing.M) {
 	flag.Parse()
 
@@ -1403,7 +1405,7 @@ func TestConcurrentSessionCreation_100VU(t *testing.T) {
 			id := fmt.Sprintf("a0eebc99-9c0b-4ef8-bb6d-%012d", idx)
 			s := &session.Session{
 				ID:            id,
-				AgentName:     "arena-worker",
+				AgentName:     testAgentArenaWorker,
 				Namespace:     "default",
 				Status:        session.SessionStatusActive,
 				Tags:          []string{"source:arena", fmt.Sprintf("vu:%d", idx)},
@@ -1453,7 +1455,7 @@ func TestConcurrentMixedLoad(t *testing.T) {
 			defer wg.Done()
 			s := &session.Session{
 				ID:            ids[idx],
-				AgentName:     "arena-worker",
+				AgentName:     testAgentArenaWorker,
 				Namespace:     "default",
 				Status:        session.SessionStatusActive,
 				CreatedAt:     time.Now(),
@@ -1482,7 +1484,7 @@ func TestConcurrentMixedLoad(t *testing.T) {
 			defer wg.Done()
 			assert.NoError(t, p.UpdateSession(ctx, &session.Session{
 				ID:            ids[idx],
-				AgentName:     "arena-worker",
+				AgentName:     testAgentArenaWorker,
 				Namespace:     "default",
 				Status:        session.SessionStatusCompleted,
 				UpdatedAt:     time.Now(),
@@ -1496,7 +1498,7 @@ func TestConcurrentMixedLoad(t *testing.T) {
 	for i, id := range ids {
 		s, err := p.GetSession(ctx, id)
 		require.NoErrorf(t, err, "session %d should exist", i)
-		assert.Equal(t, "arena-worker", s.AgentName)
+		assert.Equal(t, testAgentArenaWorker, s.AgentName)
 	}
 	t.Logf("mixed load: %d sessions created, written, and completed", sessions)
 }
@@ -1524,7 +1526,7 @@ func TestConcurrentSessionCreation_ScaleLimit(t *testing.T) {
 					id := fmt.Sprintf("d3ffbc99-9c0b-4ef8-%04x-%012d", n, idx)
 					s := &session.Session{
 						ID:            id,
-						AgentName:     "arena-worker",
+						AgentName:     testAgentArenaWorker,
 						Namespace:     "default",
 						Status:        session.SessionStatusActive,
 						CreatedAt:     time.Now(),

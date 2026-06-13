@@ -33,6 +33,12 @@ import (
 
 const testUserID1 = "user-1"
 
+const (
+	testReasonGDPR        = "gdpr_erasure"
+	testReasonCCPA        = "ccpa_delete"
+	testReasonUserRequest = "user_request"
+)
+
 // --- Mock implementations ---------------------------------------------------
 
 // MockDeletionStore is an in-memory mock for DeletionStore.
@@ -175,15 +181,15 @@ func TestCreateRequest_Success(t *testing.T) {
 
 	req, err := svc.CreateRequest(context.Background(), &CreateDeletionRequest{
 		VirtualUserID: testUserID1,
-		Reason:        "gdpr_erasure",
-		Scope:         "all",
+		Reason:        testReasonGDPR,
+		Scope:         ScopeAll,
 	})
 
 	require.NoError(t, err)
 	assert.NotEmpty(t, req.ID)
 	assert.Equal(t, testUserID1, req.VirtualUserID)
-	assert.Equal(t, "gdpr_erasure", req.Reason)
-	assert.Equal(t, "all", req.Scope)
+	assert.Equal(t, testReasonGDPR, req.Reason)
+	assert.Equal(t, ScopeAll, req.Scope)
 	assert.Equal(t, "pending", req.Status)
 	assert.NotZero(t, req.CreatedAt)
 
@@ -197,7 +203,7 @@ func TestCreateRequest_MissingUserID(t *testing.T) {
 	svc := newTestService(store, NewMockSessionDeleter(), nil)
 
 	_, err := svc.CreateRequest(context.Background(), &CreateDeletionRequest{
-		Reason: "gdpr_erasure",
+		Reason: testReasonGDPR,
 	})
 
 	assert.ErrorIs(t, err, ErrMissingVirtualUserID)
@@ -221,7 +227,7 @@ func TestCreateRequest_InvalidScope(t *testing.T) {
 
 	_, err := svc.CreateRequest(context.Background(), &CreateDeletionRequest{
 		VirtualUserID: testUserID1,
-		Reason:        "ccpa_delete",
+		Reason:        testReasonCCPA,
 		Scope:         "invalid_scope",
 	})
 
@@ -234,15 +240,15 @@ func TestCreateRequest_DefaultScope(t *testing.T) {
 
 	req, err := svc.CreateRequest(context.Background(), &CreateDeletionRequest{
 		VirtualUserID: testUserID1,
-		Reason:        "user_request",
+		Reason:        testReasonUserRequest,
 	})
 
 	require.NoError(t, err)
-	assert.Equal(t, "all", req.Scope)
+	assert.Equal(t, ScopeAll, req.Scope)
 }
 
 func TestCreateRequest_AllReasons(t *testing.T) {
-	reasons := []string{"gdpr_erasure", "ccpa_delete", "user_request"}
+	reasons := []string{testReasonGDPR, testReasonCCPA, testReasonUserRequest}
 	for _, reason := range reasons {
 		t.Run(reason, func(t *testing.T) {
 			store := NewMockDeletionStore()
@@ -250,7 +256,7 @@ func TestCreateRequest_AllReasons(t *testing.T) {
 			req, err := svc.CreateRequest(context.Background(), &CreateDeletionRequest{
 				VirtualUserID: testUserID1,
 				Reason:        reason,
-				Scope:         "all",
+				Scope:         ScopeAll,
 			})
 			require.NoError(t, err)
 			assert.Equal(t, reason, req.Reason)
@@ -264,7 +270,7 @@ func TestCreateRequest_AllScopes(t *testing.T) {
 		scope    string
 		dateFrom *time.Time
 	}{
-		{"all", nil},
+		{ScopeAll, nil},
 		{"workspace", nil},
 		{"date_range", &from},
 	}
@@ -274,7 +280,7 @@ func TestCreateRequest_AllScopes(t *testing.T) {
 			svc := newTestService(store, NewMockSessionDeleter(), nil)
 			req, err := svc.CreateRequest(context.Background(), &CreateDeletionRequest{
 				VirtualUserID: testUserID1,
-				Reason:        "gdpr_erasure",
+				Reason:        testReasonGDPR,
 				Scope:         sc.scope,
 				DateFrom:      sc.dateFrom,
 			})
@@ -296,8 +302,8 @@ func TestProcessRequest_HappyPath(t *testing.T) {
 
 	req, err := svc.CreateRequest(context.Background(), &CreateDeletionRequest{
 		VirtualUserID: testUserID1,
-		Reason:        "gdpr_erasure",
-		Scope:         "all",
+		Reason:        testReasonGDPR,
+		Scope:         ScopeAll,
 	})
 	require.NoError(t, err)
 
@@ -307,7 +313,7 @@ func TestProcessRequest_HappyPath(t *testing.T) {
 	// Verify the request was completed.
 	updated, err := store.GetRequest(context.Background(), req.ID)
 	require.NoError(t, err)
-	assert.Equal(t, "completed", updated.Status)
+	assert.Equal(t, StatusCompleted, updated.Status)
 	assert.Equal(t, 3, updated.SessionsDeleted)
 	assert.Empty(t, updated.Errors)
 	assert.NotNil(t, updated.StartedAt)
@@ -330,8 +336,8 @@ func TestProcessRequest_PartialFailure(t *testing.T) {
 
 	req, err := svc.CreateRequest(context.Background(), &CreateDeletionRequest{
 		VirtualUserID: testUserID1,
-		Reason:        "gdpr_erasure",
-		Scope:         "all",
+		Reason:        testReasonGDPR,
+		Scope:         ScopeAll,
 	})
 	require.NoError(t, err)
 
@@ -361,8 +367,8 @@ func TestProcessRequest_AlreadyProcessing(t *testing.T) {
 
 	req, err := svc.CreateRequest(context.Background(), &CreateDeletionRequest{
 		VirtualUserID: testUserID1,
-		Reason:        "gdpr_erasure",
-		Scope:         "all",
+		Reason:        testReasonGDPR,
+		Scope:         ScopeAll,
 	})
 	require.NoError(t, err)
 
@@ -382,8 +388,8 @@ func TestProcessRequest_NoSessions(t *testing.T) {
 	// No sessions for this user.
 	req, err := svc.CreateRequest(context.Background(), &CreateDeletionRequest{
 		VirtualUserID: "user-no-sessions",
-		Reason:        "gdpr_erasure",
-		Scope:         "all",
+		Reason:        testReasonGDPR,
+		Scope:         ScopeAll,
 	})
 	require.NoError(t, err)
 
@@ -392,7 +398,7 @@ func TestProcessRequest_NoSessions(t *testing.T) {
 
 	updated, err := store.GetRequest(context.Background(), req.ID)
 	require.NoError(t, err)
-	assert.Equal(t, "completed", updated.Status)
+	assert.Equal(t, StatusCompleted, updated.Status)
 	assert.Equal(t, 0, updated.SessionsDeleted)
 }
 
@@ -405,7 +411,7 @@ func TestProcessRequest_WithWorkspace(t *testing.T) {
 
 	req, err := svc.CreateRequest(context.Background(), &CreateDeletionRequest{
 		VirtualUserID: testUserID1,
-		Reason:        "user_request",
+		Reason:        testReasonUserRequest,
 		Scope:         "workspace",
 		Workspace:     "my-workspace",
 	})
@@ -416,7 +422,7 @@ func TestProcessRequest_WithWorkspace(t *testing.T) {
 
 	updated, err := store.GetRequest(context.Background(), req.ID)
 	require.NoError(t, err)
-	assert.Equal(t, "completed", updated.Status)
+	assert.Equal(t, StatusCompleted, updated.Status)
 	assert.Equal(t, 2, updated.SessionsDeleted)
 }
 
@@ -429,8 +435,8 @@ func TestProcessRequest_NilAuditLogger(t *testing.T) {
 
 	req, err := svc.CreateRequest(context.Background(), &CreateDeletionRequest{
 		VirtualUserID: testUserID1,
-		Reason:        "gdpr_erasure",
-		Scope:         "all",
+		Reason:        testReasonGDPR,
+		Scope:         ScopeAll,
 	})
 	require.NoError(t, err)
 
@@ -447,8 +453,8 @@ func TestGetRequest_Found(t *testing.T) {
 
 	created, err := svc.CreateRequest(context.Background(), &CreateDeletionRequest{
 		VirtualUserID: testUserID1,
-		Reason:        "gdpr_erasure",
-		Scope:         "all",
+		Reason:        testReasonGDPR,
+		Scope:         ScopeAll,
 	})
 	require.NoError(t, err)
 
@@ -474,23 +480,23 @@ func TestListRequestsByUser_Found(t *testing.T) {
 
 	_, err := svc.CreateRequest(context.Background(), &CreateDeletionRequest{
 		VirtualUserID: testUserID1,
-		Reason:        "gdpr_erasure",
-		Scope:         "all",
+		Reason:        testReasonGDPR,
+		Scope:         ScopeAll,
 	})
 	require.NoError(t, err)
 
 	_, err = svc.CreateRequest(context.Background(), &CreateDeletionRequest{
 		VirtualUserID: testUserID1,
-		Reason:        "ccpa_delete",
-		Scope:         "all",
+		Reason:        testReasonCCPA,
+		Scope:         ScopeAll,
 	})
 	require.NoError(t, err)
 
 	// Different user, should not appear.
 	_, err = svc.CreateRequest(context.Background(), &CreateDeletionRequest{
 		VirtualUserID: "user-2",
-		Reason:        "gdpr_erasure",
-		Scope:         "all",
+		Reason:        testReasonGDPR,
+		Scope:         ScopeAll,
 	})
 	require.NoError(t, err)
 
@@ -601,9 +607,9 @@ func TestHandleGet_Success(t *testing.T) {
 	dr := &DeletionRequest{
 		ID:            "req-123",
 		VirtualUserID: testUserID1,
-		Reason:        "gdpr_erasure",
-		Scope:         "all",
-		Status:        "completed",
+		Reason:        testReasonGDPR,
+		Scope:         ScopeAll,
+		Status:        StatusCompleted,
 		CreatedAt:     time.Now().UTC(),
 		Errors:        []string{},
 	}
@@ -622,7 +628,7 @@ func TestHandleGet_Success(t *testing.T) {
 	err := json.NewDecoder(w.Body).Decode(&resp)
 	require.NoError(t, err)
 	assert.Equal(t, "req-123", resp.ID)
-	assert.Equal(t, "completed", resp.Status)
+	assert.Equal(t, StatusCompleted, resp.Status)
 }
 
 func TestHandleGet_NotFound(t *testing.T) {
@@ -645,9 +651,9 @@ func TestHandleList_Success(t *testing.T) {
 		dr := &DeletionRequest{
 			ID:            id,
 			VirtualUserID: testUserID1,
-			Reason:        "gdpr_erasure",
-			Scope:         "all",
-			Status:        "completed",
+			Reason:        testReasonGDPR,
+			Scope:         ScopeAll,
+			Status:        StatusCompleted,
 			CreatedAt:     time.Now().UTC().Add(time.Duration(i) * time.Minute),
 			Errors:        []string{},
 		}
@@ -994,7 +1000,7 @@ func TestCreateRequest_DateRangeScopeMissingDates(t *testing.T) {
 
 	_, err := svc.CreateRequest(context.Background(), &CreateDeletionRequest{
 		VirtualUserID: testUserID1,
-		Reason:        "gdpr_erasure",
+		Reason:        testReasonGDPR,
 		Scope:         "date_range",
 		// No DateFrom or DateTo provided
 	})
@@ -1009,7 +1015,7 @@ func TestCreateRequest_DateRangeScopeWithDateFrom(t *testing.T) {
 	from := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	req, err := svc.CreateRequest(context.Background(), &CreateDeletionRequest{
 		VirtualUserID: testUserID1,
-		Reason:        "gdpr_erasure",
+		Reason:        testReasonGDPR,
 		Scope:         "date_range",
 		DateFrom:      &from,
 	})
@@ -1035,7 +1041,7 @@ func TestProcessRequest_DateRangeOnlyDeletesMatchingSessions(t *testing.T) {
 	to := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
 	req, err := svc.CreateRequest(context.Background(), &CreateDeletionRequest{
 		VirtualUserID: testUserID1,
-		Reason:        "gdpr_erasure",
+		Reason:        testReasonGDPR,
 		Scope:         "date_range",
 		DateFrom:      &from,
 		DateTo:        &to,
@@ -1047,7 +1053,7 @@ func TestProcessRequest_DateRangeOnlyDeletesMatchingSessions(t *testing.T) {
 
 	updated, err := store.GetRequest(context.Background(), req.ID)
 	require.NoError(t, err)
-	assert.Equal(t, "completed", updated.Status)
+	assert.Equal(t, StatusCompleted, updated.Status)
 	// Only sess-in-range should be deleted (sess-old is before range, sess-recent is after).
 	assert.Equal(t, 1, updated.SessionsDeleted)
 
@@ -1065,8 +1071,8 @@ func TestProcessRequest_AllScopePassesNilDates(t *testing.T) {
 
 	req, err := svc.CreateRequest(context.Background(), &CreateDeletionRequest{
 		VirtualUserID: testUserID1,
-		Reason:        "gdpr_erasure",
-		Scope:         "all",
+		Reason:        testReasonGDPR,
+		Scope:         ScopeAll,
 	})
 	require.NoError(t, err)
 
@@ -1092,8 +1098,8 @@ func TestProcessRequest_ListSessionsError(t *testing.T) {
 
 	req, err := svc.CreateRequest(context.Background(), &CreateDeletionRequest{
 		VirtualUserID: testUserID1,
-		Reason:        "gdpr_erasure",
-		Scope:         "all",
+		Reason:        testReasonGDPR,
+		Scope:         ScopeAll,
 	})
 	require.NoError(t, err)
 
@@ -1231,8 +1237,8 @@ func TestPostgresDeletionStore_CreateRequest_Success(t *testing.T) {
 	req := &DeletionRequest{
 		ID:            "req-1",
 		VirtualUserID: testUserID1,
-		Reason:        "gdpr_erasure",
-		Scope:         "all",
+		Reason:        testReasonGDPR,
+		Scope:         ScopeAll,
 		Status:        "pending",
 		CreatedAt:     time.Now().UTC(),
 		Errors:        []string{},
@@ -1267,7 +1273,7 @@ func TestPostgresDeletionStore_UpdateRequest_Success(t *testing.T) {
 
 	req := &DeletionRequest{
 		ID:     "req-1",
-		Status: "completed",
+		Status: StatusCompleted,
 		Errors: []string{},
 	}
 	err := store.UpdateRequest(context.Background(), req)
@@ -1356,9 +1362,9 @@ func TestScanDeletionRequest_Success(t *testing.T) {
 
 	row := &mockSuccessRow{
 		values: []any{
-			"req-1", testUserID1, "gdpr_erasure", "all",
+			"req-1", testUserID1, testReasonGDPR, ScopeAll,
 			&workspace, (*time.Time)(nil), (*time.Time)(nil),
-			"completed", now, &now, &now, 5, errorsJSON,
+			StatusCompleted, now, &now, &now, 5, errorsJSON,
 		},
 	}
 	req, err := scanDeletionRequest(row)
@@ -1373,7 +1379,7 @@ func TestScanDeletionRequest_NilWorkspace(t *testing.T) {
 	now := time.Now().UTC()
 	row := &mockSuccessRow{
 		values: []any{
-			"req-1", testUserID1, "gdpr_erasure", "all",
+			"req-1", testUserID1, testReasonGDPR, ScopeAll,
 			(*string)(nil), (*time.Time)(nil), (*time.Time)(nil),
 			"pending", now, (*time.Time)(nil),
 			(*time.Time)(nil), 0, []byte(`[]`),
@@ -1500,8 +1506,8 @@ func TestProcessRequest_WithMediaDeletion(t *testing.T) {
 
 	req, err := svc.CreateRequest(context.Background(), &CreateDeletionRequest{
 		VirtualUserID: testUserID1,
-		Reason:        "gdpr_erasure",
-		Scope:         "all",
+		Reason:        testReasonGDPR,
+		Scope:         ScopeAll,
 	})
 	require.NoError(t, err)
 
@@ -1513,7 +1519,7 @@ func TestProcessRequest_WithMediaDeletion(t *testing.T) {
 
 	updated, err := store.GetRequest(context.Background(), req.ID)
 	require.NoError(t, err)
-	assert.Equal(t, "completed", updated.Status)
+	assert.Equal(t, StatusCompleted, updated.Status)
 	assert.Equal(t, 2, updated.SessionsDeleted)
 }
 
@@ -1529,8 +1535,8 @@ func TestProcessRequest_MediaFailure(t *testing.T) {
 
 	req, err := svc.CreateRequest(context.Background(), &CreateDeletionRequest{
 		VirtualUserID: testUserID1,
-		Reason:        "gdpr_erasure",
-		Scope:         "all",
+		Reason:        testReasonGDPR,
+		Scope:         ScopeAll,
 	})
 	require.NoError(t, err)
 
@@ -1556,8 +1562,8 @@ func TestProcessRequest_NoOpMediaDeleter(t *testing.T) {
 
 	req, err := svc.CreateRequest(context.Background(), &CreateDeletionRequest{
 		VirtualUserID: testUserID1,
-		Reason:        "gdpr_erasure",
-		Scope:         "all",
+		Reason:        testReasonGDPR,
+		Scope:         ScopeAll,
 	})
 	require.NoError(t, err)
 
@@ -1566,7 +1572,7 @@ func TestProcessRequest_NoOpMediaDeleter(t *testing.T) {
 
 	updated, err := store.GetRequest(context.Background(), req.ID)
 	require.NoError(t, err)
-	assert.Equal(t, "completed", updated.Status)
+	assert.Equal(t, StatusCompleted, updated.Status)
 }
 
 // --- Batch processing tests -------------------------------------------------
@@ -1586,8 +1592,8 @@ func TestProcessRequest_BatchProcessing(t *testing.T) {
 
 	req, err := svc.CreateRequest(context.Background(), &CreateDeletionRequest{
 		VirtualUserID: testUserID1,
-		Reason:        "gdpr_erasure",
-		Scope:         "all",
+		Reason:        testReasonGDPR,
+		Scope:         ScopeAll,
 	})
 	require.NoError(t, err)
 
@@ -1596,7 +1602,7 @@ func TestProcessRequest_BatchProcessing(t *testing.T) {
 
 	updated, err := store.GetRequest(context.Background(), req.ID)
 	require.NoError(t, err)
-	assert.Equal(t, "completed", updated.Status)
+	assert.Equal(t, StatusCompleted, updated.Status)
 	assert.Equal(t, 7, updated.SessionsDeleted)
 }
 
@@ -1612,8 +1618,8 @@ func TestProcessRequest_BatchWithPartialFailure(t *testing.T) {
 
 	req, err := svc.CreateRequest(context.Background(), &CreateDeletionRequest{
 		VirtualUserID: testUserID1,
-		Reason:        "gdpr_erasure",
-		Scope:         "all",
+		Reason:        testReasonGDPR,
+		Scope:         ScopeAll,
 	})
 	require.NoError(t, err)
 
@@ -1637,8 +1643,8 @@ func TestProcessRequest_SingleItemBatches(t *testing.T) {
 
 	req, err := svc.CreateRequest(context.Background(), &CreateDeletionRequest{
 		VirtualUserID: testUserID1,
-		Reason:        "gdpr_erasure",
-		Scope:         "all",
+		Reason:        testReasonGDPR,
+		Scope:         ScopeAll,
 	})
 	require.NoError(t, err)
 
@@ -1681,7 +1687,7 @@ func TestGetProgress_Completed(t *testing.T) {
 	req := &DeletionRequest{
 		ID:              "req-1",
 		VirtualUserID:   testUserID1,
-		Status:          "completed",
+		Status:          StatusCompleted,
 		CompletedAt:     &now,
 		SessionsDeleted: 10,
 		Errors:          []string{},
@@ -1784,7 +1790,7 @@ func TestDeletionService_WithMemoryDeleter(t *testing.T) {
 
 	req, err := svc.CreateRequest(context.Background(), &CreateDeletionRequest{
 		VirtualUserID: testUserID1,
-		Reason:        "gdpr_erasure",
+		Reason:        testReasonGDPR,
 		Scope:         "workspace",
 		Workspace:     "ws-a",
 	})
@@ -1819,8 +1825,8 @@ func TestDeletionService_MemoryDeleterError(t *testing.T) {
 
 	req, err := svc.CreateRequest(context.Background(), &CreateDeletionRequest{
 		VirtualUserID: testUserID1,
-		Reason:        "gdpr_erasure",
-		Scope:         "all",
+		Reason:        testReasonGDPR,
+		Scope:         ScopeAll,
 	})
 	require.NoError(t, err)
 
@@ -1849,8 +1855,8 @@ func TestDeletionService_NoMemoryDeleter(t *testing.T) {
 
 	req, err := svc.CreateRequest(context.Background(), &CreateDeletionRequest{
 		VirtualUserID: testUserID1,
-		Reason:        "user_request",
-		Scope:         "all",
+		Reason:        testReasonUserRequest,
+		Scope:         ScopeAll,
 	})
 	require.NoError(t, err)
 
