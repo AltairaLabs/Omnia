@@ -53,19 +53,7 @@ export function WorkloadGraph({
 }: Readonly<{ model: WorkloadModel; className?: string; namespace?: string }>) {
   const [selectedId, setSelectedId] = useState<string | undefined>();
   const [showData, setShowData] = useState(true);
-  const visibleModel = useMemo(() => {
-    if (showData) return model;
-    // Only the data overlay (variables + artifacts) hides — the UML ●/◉ markers
-    // are control flow and always stay.
-    const dataKinds = new Set(["variable", "artifact"]);
-    const drop = new Set(model.nodes.filter((n) => dataKinds.has(n.kind)).map((n) => n.id));
-    return {
-      ...model,
-      nodes: model.nodes.filter((n) => !drop.has(n.id)),
-      edges: model.edges.filter((e) => !drop.has(e.source) && !drop.has(e.target)),
-    };
-  }, [model, showData]);
-  const flow = useMemo(() => modelToFlow(visibleModel, setSelectedId), [visibleModel]);
+  const flow = useMemo(() => modelToFlow(model, setSelectedId), [model]);
   const [nodes, setNodes, onNodesChange] = useNodesState(flow.nodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(flow.edges);
   const rf = useRef<WorkloadFlowInstance | null>(null);
@@ -102,8 +90,27 @@ export function WorkloadGraph({
     return () => { cancelled = true; };
   }, [flow, setNodes, setEdges]);
 
-  const selected: WorkloadNode | undefined = visibleModel.nodes.find((n) => n.id === selectedId);
-  const hasData = model.nodes.some((n) => n.kind === "variable" || n.kind === "artifact");
+  // The data-flow toggle HIDES variable/artifact nodes (and their edges) rather
+  // than rebuilding the graph — so node positions, including manual drags, survive
+  // the toggle. The UML ●/◉ markers are control flow and always stay.
+  const dataNodeIds = useMemo(
+    () => new Set(model.nodes.filter((n) => n.kind === "variable" || n.kind === "artifact").map((n) => n.id)),
+    [model],
+  );
+  const displayNodes = useMemo(
+    () => nodes.map((n) => (dataNodeIds.has(n.id) ? { ...n, hidden: !showData } : n)),
+    [nodes, dataNodeIds, showData],
+  );
+  const displayEdges = useMemo(
+    () =>
+      edges.map((e) =>
+        dataNodeIds.has(e.source) || dataNodeIds.has(e.target) ? { ...e, hidden: !showData } : e,
+      ),
+    [edges, dataNodeIds, showData],
+  );
+
+  const selected: WorkloadNode | undefined = model.nodes.find((n) => n.id === selectedId);
+  const hasData = dataNodeIds.size > 0;
   const banner =
     model.altitude === "deployment" ? deploymentBanner(model) : "Definition · abstract workload";
 
@@ -123,8 +130,8 @@ export function WorkloadGraph({
         style={{ width: "100%", height: `${height}px` }}
       >
         <ReactFlow
-          nodes={nodes}
-          edges={edges}
+          nodes={displayNodes}
+          edges={displayEdges}
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
           nodeTypes={workloadNodeTypes}
