@@ -19,6 +19,7 @@ package facade
 import (
 	"context"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"runtime/debug"
 	"strings"
@@ -264,6 +265,10 @@ func (s *Server) ensureSession(ctx context.Context, c *Connection, sessionID str
 				log.Error(err, "failed to refresh session TTL")
 			}
 			return sess.ID, nil
+		}
+		if !errors.Is(err, session.ErrSessionNotFound) {
+			log.Error(err, "failed to resume session", "sessionID", sessionID)
+			return "", err
 		}
 		// Session not found or expired — create with the requested ID so the
 		// client-visible session ID stays stable.

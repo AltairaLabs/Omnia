@@ -22,6 +22,7 @@ import (
 	"crypto/rsa"
 	"crypto/sha256"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"math/big"
 	"net/http"
@@ -414,6 +415,65 @@ func TestBuildSessionState_PartialUser(t *testing.T) {
 	}
 	if state["promptpack.name"] != "pack-1" {
 		t.Errorf("promptpack.name = %q", state["promptpack.name"])
+	}
+}
+
+type ensureSessionStore struct {
+	session.Store
+	getErr      error
+	createCalls int
+}
+
+func (s *ensureSessionStore) GetSession(ctx context.Context, sessionID string) (*session.Session, error) {
+	if s.getErr != nil {
+		return nil, s.getErr
+	}
+	return s.Store.GetSession(ctx, sessionID)
+}
+
+func (s *ensureSessionStore) CreateSession(ctx context.Context, opts session.CreateSessionOptions) (*session.Session, error) {
+	s.createCalls++
+	return s.Store.CreateSession(ctx, opts)
+}
+
+func TestEnsureSession_DoesNotCreateOnGetSessionError(t *testing.T) {
+	backingStore := session.NewMemoryStore()
+	t.Cleanup(func() { _ = backingStore.Close() })
+
+	getErr := errors.New("session-api unavailable")
+	store := &ensureSessionStore{Store: backingStore, getErr: getErr}
+	server := NewServer(DefaultServerConfig(), store, nil, logr.Discard())
+	conn := &Connection{agentName: "agent", namespace: "default", workspaceName: "ws"}
+
+	_, err := server.ensureSession(context.Background(), conn, "existing-session-id", logr.Discard())
+	if !errors.Is(err, getErr) {
+		t.Fatalf("ensureSession error = %v, want %v", err, getErr)
+	}
+	if store.createCalls != 0 {
+		t.Fatalf("CreateSession called %d times, want 0", store.createCalls)
+	}
+}
+
+func TestEnsureSession_CreatesWhenSessionNotFound(t *testing.T) {
+	backingStore := session.NewMemoryStore()
+	t.Cleanup(func() { _ = backingStore.Close() })
+
+	store := &ensureSessionStore{Store: backingStore, getErr: session.ErrSessionNotFound}
+	server := NewServer(DefaultServerConfig(), store, nil, logr.Discard())
+	conn := &Connection{agentName: "agent", namespace: "default", workspaceName: "ws"}
+
+	sessionID, err := server.ensureSession(context.Background(), conn, "existing-session-id", logr.Discard())
+	if err != nil {
+		t.Fatalf("ensureSession: %v", err)
+	}
+	if sessionID != "existing-session-id" {
+		t.Fatalf("sessionID = %q, want %q", sessionID, "existing-session-id")
+	}
+	if store.createCalls != 1 {
+		t.Fatalf("CreateSession called %d times, want 1", store.createCalls)
+	}
+	if _, err := backingStore.GetSession(context.Background(), sessionID); err != nil {
+		t.Fatalf("GetSession(created): %v", err)
 	}
 }
 
