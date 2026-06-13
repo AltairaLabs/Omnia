@@ -18,17 +18,8 @@ describe("workload nodes", () => {
     const onClick = vi.fn();
     wrap(<WorkloadAgentNode data={{ node, onClick }} />);
     expect(screen.getByText("Triage")).toBeInTheDocument();
-    expect(screen.getByText("Start")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button"));
     expect(onClick).toHaveBeenCalledWith("a");
-  });
-
-  it("renders a terminal node with an End marker", () => {
-    const node: WorkloadNode = {
-      id: "z", kind: "state", label: "Closer", isTerminal: true, badges: [], detail: {},
-    };
-    wrap(<WorkloadAgentNode data={{ node }} />);
-    expect(screen.getByText("End")).toBeInTheDocument();
   });
 
   it("renders a provider node with model", () => {

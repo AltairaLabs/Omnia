@@ -60,7 +60,10 @@ describe("deriveWorkloadTier — workflow", () => {
     const model = deriveWorkloadTier(content);
 
     expect(model.tier).toBe("workflow");
-    expect(model.nodes.map((n) => n.id).sort()).toEqual(["refund", "triage"]);
+    expect(model.nodes.filter((n) => n.kind === "state").map((n) => n.id).sort()).toEqual(["refund", "triage"]);
+    // the dataflow layer adds UML pseudo-states
+    expect(model.nodes.some((n) => n.kind === "initial")).toBe(true);
+    expect(model.nodes.some((n) => n.kind === "final")).toBe(true);
     const triage = model.nodes.find((n) => n.id === "triage")!;
     expect(triage.kind).toBe("state");
     expect(triage.isEntry).toBe(true);
@@ -69,7 +72,8 @@ describe("deriveWorkloadTier — workflow", () => {
     expect(refund.badges.some((b) => b.icon === "loop")).toBe(true);
 
     // approved (triage→refund), retry (refund→triage), on_max_visits (refund→triage loop)
-    expect(model.edges).toHaveLength(3);
+    expect(model.edges.some((e) => e.source === "triage" && e.target === "refund")).toBe(true);
+    expect(model.edges.filter((e) => e.style === "loop")).toHaveLength(1);
     const loopEdge = model.edges.find((e) => e.style === "loop")!;
     expect(loopEdge.source).toBe("refund");
     expect(loopEdge.target).toBe("triage");
@@ -155,5 +159,31 @@ describe("deriveWorkloadTier — malformed", () => {
       agents: { entry: "a", members: {} },
     });
     expect(model.tier).toBe("single");
+  });
+});
+
+describe("deriveWorkloadTier — dataflow", () => {
+  it("workflow tier gains initial/final/variable/artifact nodes", () => {
+    const model = deriveWorkloadTier({
+      id: "p",
+      prompts: { writer: { id: "writer", variables: [{ name: "topic", type: "string" }], system_template: "{{artifacts.notes}}" } },
+      workflow: { version: 1, entry: "s", states: { s: { prompt_task: "writer", terminal: true, artifacts: { notes: {} } } } },
+    });
+    const kinds = model.nodes.map((n) => n.kind);
+    expect(kinds).toContain("initial");
+    expect(kinds).toContain("final");
+    expect(kinds).toContain("variable");
+    expect(kinds).toContain("artifact");
+  });
+
+  it("single tier gains variable inputs only (no initial/final/artifact)", () => {
+    const model = deriveWorkloadTier({
+      id: "p",
+      prompts: { main: { id: "main", name: "Main", system_template: "hi", variables: [{ name: "topic", type: "string" }] } },
+    });
+    const kinds = model.nodes.map((n) => n.kind);
+    expect(kinds).toContain("variable");
+    expect(kinds).not.toContain("initial");
+    expect(kinds).not.toContain("artifact");
   });
 });

@@ -19,8 +19,8 @@ import { Info } from "lucide-react";
 import { modelToFlow, type WorkloadNodeData } from "./to-flow";
 import { layoutFlow } from "./layout";
 import { workloadNodeTypes } from "./workload-nodes";
-import { workloadEdgeTypes } from "./workload-edge";
 import { NodeDrawer } from "./node-drawer";
+import { usePersistedNodeLayout } from "@/hooks/use-persisted-node-layout";
 import type { WorkloadModel, WorkloadNode, WorkloadBudget } from "./types";
 
 type WorkloadFlowInstance = ReactFlowInstance<FlowNode<WorkloadNodeData>, FlowEdge>;
@@ -51,12 +51,16 @@ export function WorkloadGraph({
   model,
   className,
   namespace,
-}: Readonly<{ model: WorkloadModel; className?: string; namespace?: string }>) {
+  storageKey,
+}: Readonly<{ model: WorkloadModel; className?: string; namespace?: string; storageKey?: string }>) {
   const [selectedId, setSelectedId] = useState<string | undefined>();
+  const [showData, setShowData] = useState(true);
   const flow = useMemo(() => modelToFlow(model, setSelectedId), [model]);
-  const [nodes, setNodes] = useNodesState(flow.nodes);
-  const [edges, setEdges] = useEdgesState(flow.edges);
+  const [nodes, setNodes, onNodesChange] = useNodesState(flow.nodes);
+  const [edges, setEdges, onEdgesChange] = useEdgesState(flow.edges);
   const rf = useRef<WorkloadFlowInstance | null>(null);
+  const { applyLayout, onNodeDragStop, reset } = usePersistedNodeLayout(storageKey ?? "");
+  const [layoutNonce, setLayoutNonce] = useState(0);
 
   // Fill the viewport below the graph's own top edge, so the box accounts for
   // whatever sits above it (the dev licensing banner, page header, tabs) instead
@@ -81,18 +85,37 @@ export function WorkloadGraph({
 
   useEffect(() => {
     let cancelled = false;
-    layoutFlow(flow.nodes, flow.edges).then(({ nodes: laid, routes }) => {
+    layoutFlow(flow.nodes, flow.edges).then(({ nodes: laid }) => {
       if (cancelled) return;
-      setNodes(laid);
-      setEdges(
-        flow.edges.map((e) => ({ ...e, data: { ...e.data, points: routes.get(e.id) } })),
-      );
+      // overlay any saved drag positions on top of the fresh elk layout
+      setNodes(applyLayout(laid));
+      setEdges(flow.edges);
       fitViewAfterPaint(rf.current);
     });
     return () => { cancelled = true; };
-  }, [flow, setNodes, setEdges]);
+  }, [flow, setNodes, setEdges, applyLayout, layoutNonce]);
+
+  // The data-flow toggle HIDES variable/artifact nodes (and their edges) rather
+  // than rebuilding the graph — so node positions, including manual drags, survive
+  // the toggle. The UML ●/◉ markers are control flow and always stay.
+  const dataNodeIds = useMemo(
+    () => new Set(model.nodes.filter((n) => n.kind === "variable" || n.kind === "artifact").map((n) => n.id)),
+    [model],
+  );
+  const displayNodes = useMemo(
+    () => nodes.map((n) => (dataNodeIds.has(n.id) ? { ...n, hidden: !showData } : n)),
+    [nodes, dataNodeIds, showData],
+  );
+  const displayEdges = useMemo(
+    () =>
+      edges.map((e) =>
+        dataNodeIds.has(e.source) || dataNodeIds.has(e.target) ? { ...e, hidden: !showData } : e,
+      ),
+    [edges, dataNodeIds, showData],
+  );
 
   const selected: WorkloadNode | undefined = model.nodes.find((n) => n.id === selectedId);
+  const hasData = dataNodeIds.size > 0;
   const banner =
     model.altitude === "deployment" ? deploymentBanner(model) : "Definition · abstract workload";
 
@@ -112,10 +135,12 @@ export function WorkloadGraph({
         style={{ width: "100%", height: `${height}px` }}
       >
         <ReactFlow
-          nodes={nodes}
-          edges={edges}
+          nodes={displayNodes}
+          edges={displayEdges}
+          onNodesChange={onNodesChange}
+          onEdgesChange={onEdgesChange}
+          onNodeDragStop={onNodeDragStop}
           nodeTypes={workloadNodeTypes}
-          edgeTypes={workloadEdgeTypes}
           onInit={(inst) => { rf.current = inst; }}
           fitView
           fitViewOptions={{ padding: 0.08 }}
@@ -137,6 +162,31 @@ export function WorkloadGraph({
                 <span className="font-medium text-foreground">Budget</span>{" "}
                 <span className="text-muted-foreground">{budgetLabel(model.meta.budget)}</span>
               </div>
+            </Panel>
+          )}
+          {hasData && (
+            <Panel position="bottom-left">
+              <label className="flex items-center gap-1.5 text-xs text-muted-foreground bg-background/85 backdrop-blur rounded border px-2 py-1 cursor-pointer">
+                <input
+                  type="checkbox"
+                  role="switch"
+                  aria-label="Data flow"
+                  checked={showData}
+                  onChange={(e) => setShowData(e.target.checked)}
+                />
+                Data flow
+              </label>
+            </Panel>
+          )}
+          {storageKey && (
+            <Panel position="bottom-right">
+              <button
+                type="button"
+                onClick={() => { reset(); setLayoutNonce((n) => n + 1); }}
+                className="text-xs text-muted-foreground bg-background/85 backdrop-blur rounded border px-2 py-1 hover:text-foreground"
+              >
+                Reset layout
+              </button>
             </Panel>
           )}
           <Controls />

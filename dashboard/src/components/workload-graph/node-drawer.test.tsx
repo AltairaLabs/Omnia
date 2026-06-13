@@ -67,4 +67,26 @@ describe("NodeDrawer", () => {
     const link = screen.getByRole("link", { name: /Skills explorer/i });
     expect(link).toHaveAttribute("href", "/skills/anthropic?namespace=dev-agents");
   });
+
+  it("shows variable detail for a variable node", () => {
+    const node: WorkloadNode = {
+      id: "var:topic", kind: "variable", label: "topic", badges: [],
+      detail: { varType: "string", required: true, example: "AI" },
+    };
+    render(<NodeDrawer node={node} onClose={vi.fn()} />);
+    expect(screen.getByText(/string/)).toBeInTheDocument();
+    expect(screen.getByText(/required/i)).toBeInTheDocument();
+    expect(screen.getByText(/AI/)).toBeInTheDocument();
+  });
+
+  it("shows producers and consumers for an artifact node", () => {
+    const node: WorkloadNode = {
+      id: "artifact:notes", kind: "artifact", label: "notes", badges: [],
+      detail: { artifactMode: "append", producers: ["gather"], consumers: ["answer"] },
+    };
+    render(<NodeDrawer node={node} onClose={vi.fn()} />);
+    expect(screen.getByText(/append/)).toBeInTheDocument();
+    expect(screen.getByText(/gather/)).toBeInTheDocument();
+    expect(screen.getByText(/answer/)).toBeInTheDocument();
+  });
 });

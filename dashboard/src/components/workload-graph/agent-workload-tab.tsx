@@ -47,5 +47,5 @@ export function AgentWorkloadTab({
     skillRefs: promptPack?.spec?.skills,
     skillSources,
   });
-  return <WorkloadGraph model={model} namespace={ns} />;
+  return <WorkloadGraph model={model} namespace={ns} storageKey={`agent:${ns}:${agent.metadata.name}`} />;
 }
