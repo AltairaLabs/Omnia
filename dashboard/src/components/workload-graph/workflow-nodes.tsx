@@ -20,7 +20,7 @@ export const WorkflowStateNode = memo(({ data }: Readonly<{ data: WorkloadNodeDa
   const { width, height } = nodeSize("state");
   return (
     <div className="relative" style={{ width, height }}>
-      <Handle type="target" position={Position.Left} className="!bg-blue-500" />
+      <Handle type="target" position={Position.Top} className="!bg-blue-500" />
       <button
         type="button"
         onClick={() => onClick?.(node.id)}
@@ -38,7 +38,7 @@ export const WorkflowStateNode = memo(({ data }: Readonly<{ data: WorkloadNodeDa
           </span>
         )}
       </button>
-      <Handle type="source" position={Position.Right} className="!bg-blue-500" />
+      <Handle type="source" position={Position.Bottom} className="!bg-blue-500" />
     </div>
   );
 });
@@ -49,7 +49,7 @@ export const InitialNode = memo(({ data }: Readonly<{ data: WorkloadNodeData }>)
   return (
     <div className="relative" style={{ width, height }} data-node={data.node.id}>
       <div data-testid="marker-initial" style={{ width, height }} className="rounded-full bg-foreground" />
-      <Handle type="source" position={Position.Right} className="!bg-foreground" />
+      <Handle type="source" position={Position.Bottom} className="!bg-foreground" />
     </div>
   );
 });
@@ -59,7 +59,7 @@ export const FinalNode = memo(({ data }: Readonly<{ data: WorkloadNodeData }>) =
   const { width, height } = nodeSize("final");
   return (
     <div className="relative" style={{ width, height }} data-node={data.node.id}>
-      <Handle type="target" position={Position.Left} className="!bg-foreground" />
+      <Handle type="target" position={Position.Top} className="!bg-foreground" />
       <div data-testid="marker-final" style={{ width, height }} className="rounded-full border-2 border-foreground flex items-center justify-center">
         <div className="rounded-full bg-foreground" style={{ width: width - 10, height: height - 10 }} />
       </div>
@@ -94,7 +94,7 @@ export const ArtifactNode = memo(({ data }: Readonly<{ data: WorkloadNodeData }>
   const muted = node.resolution === "unresolved";
   return (
     <div className="relative" style={{ width, height }}>
-      <Handle type="target" position={Position.Left} className="!bg-teal-500" />
+      <Handle type="target" position={Position.Top} className="!bg-teal-500" />
       <button
         type="button"
         onClick={() => onClick?.(node.id)}
@@ -109,7 +109,7 @@ export const ArtifactNode = memo(({ data }: Readonly<{ data: WorkloadNodeData }>
           <span className="truncate font-mono">{node.label}</span>
         </span>
       </button>
-      <Handle type="source" position={Position.Right} className="!bg-teal-500" />
+      <Handle type="source" position={Position.Bottom} className="!bg-teal-500" />
     </div>
   );
 });

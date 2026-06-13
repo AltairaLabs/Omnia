@@ -46,7 +46,7 @@ export async function layoutFlow<T extends Node>(
     id: "root",
     layoutOptions: {
       "elk.algorithm": "layered",
-      "elk.direction": "RIGHT",
+      "elk.direction": "DOWN",
       "elk.edgeRouting": "ORTHOGONAL",
       "elk.spacing.nodeNode": "20",
       "elk.layered.spacing.nodeNodeBetweenLayers": "44",

@@ -58,7 +58,7 @@ export const WorkloadAgentNode = memo(({ data }: Readonly<{ data: WorkloadNodeDa
   const iconColor = iconColorClass(node);
   return (
     <div className="relative">
-      <Handle type="target" position={Position.Left} className="!bg-blue-500" />
+      <Handle type="target" position={Position.Top} className="!bg-blue-500" />
       <button
         type="button"
         className={cn(base, nodeBorderClass(node), muted && "opacity-50")}
@@ -74,7 +74,7 @@ export const WorkloadAgentNode = memo(({ data }: Readonly<{ data: WorkloadNodeDa
         </div>
         <BadgeRow badges={node.badges} />
       </button>
-      <Handle type="source" position={Position.Right} className="!bg-blue-500" />
+      <Handle type="source" position={Position.Bottom} className="!bg-blue-500" />
     </div>
   );
 });
@@ -84,7 +84,7 @@ export const WorkloadProviderNode = memo(({ data }: Readonly<{ data: WorkloadNod
   const { node, onClick } = data;
   return (
     <div className="relative">
-      <Handle type="target" position={Position.Left} className="!bg-green-500" />
+      <Handle type="target" position={Position.Top} className="!bg-green-500" />
       <button
         type="button"
         className={cn(base, "border-2 border-green-500 border-dashed")}
@@ -111,7 +111,7 @@ export const WorkloadSkillNode = memo(({ data }: Readonly<{ data: WorkloadNodeDa
   const phaseLabel = node.badges[0]?.label ?? node.detail.skillPhase;
   return (
     <div className="relative">
-      <Handle type="target" position={Position.Left} className="!bg-violet-500" />
+      <Handle type="target" position={Position.Top} className="!bg-violet-500" />
       <button
         type="button"
         className={cn(base, "border-2 border-violet-500 border-dashed", muted && "opacity-60")}
