@@ -135,6 +135,22 @@ func (r *WorkspaceReconciler) reconcileManagedServiceGroup(
 		}
 	}
 
+	// When internal service auth is enabled, session-api validates caller
+	// tokens via the TokenReview API, which requires its ServiceAccount to be
+	// able to create TokenReviews (cluster-scoped). Bind the session-api SA to
+	// the install-wide tokenreview ClusterRole (provisioned by the chart).
+	if err := r.reconcileSessionAPITokenReviewBinding(ctx, workspace, namespace, sessionDepName); err != nil {
+		return omniav1alpha1.ServiceGroupStatus{}, fmt.Errorf("session tokenreview binding: %w", err)
+	}
+
+	// Internal-service-auth network hardening: default-deny ingress +
+	// allow-from-known-callers NetworkPolicy for session-api/memory-api, and
+	// (when Istio mTLS is requested) a STRICT PeerAuthentication. No-op when
+	// auth is disabled.
+	if err := r.reconcileServiceAuthNetworkHardening(ctx, workspace, namespace); err != nil {
+		return omniav1alpha1.ServiceGroupStatus{}, fmt.Errorf("service auth network hardening: %w", err)
+	}
+
 	// Reconcile session-api deployment and service
 	sessionDep := r.ServiceBuilder.BuildSessionDeployment(workspace.Name, namespace, sg)
 	if err := r.reconcileManagedDeployment(ctx, workspace, namespace, sessionDep); err != nil {
@@ -310,6 +326,49 @@ func (r *WorkspaceReconciler) reconcileServicePodSA(
 		return err
 	}
 
+	return nil
+}
+
+// reconcileSessionAPITokenReviewBinding binds the per-workspace session-api
+// ServiceAccount to the install-wide tokenreview ClusterRole when internal
+// service auth is enabled. session-api validates caller bearer tokens via the
+// TokenReview API (authentication.k8s.io/tokenreviews: create), which is a
+// cluster-scoped resource, so the grant must be a ClusterRole + ClusterRole
+// Binding. The ClusterRole itself is provisioned by the Helm chart; here we
+// only create the binding for this workspace's session-api SA. No-op when auth
+// is disabled or the ClusterRole name is unset.
+func (r *WorkspaceReconciler) reconcileSessionAPITokenReviewBinding(
+	ctx context.Context,
+	workspace *omniav1alpha1.Workspace,
+	namespace, sessionSAName string,
+) error {
+	if r.ServiceBuilder == nil || !r.ServiceBuilder.ServiceAuth.Enabled {
+		return nil
+	}
+	if r.SessionAPITokenReviewClusterRole == "" {
+		return nil
+	}
+
+	crbName := fmt.Sprintf("session-tokenreview-%s-%s", namespace, sessionSAName)
+	crb := &rbacv1.ClusterRoleBinding{
+		ObjectMeta: metav1.ObjectMeta{Name: crbName},
+		Subjects: []rbacv1.Subject{{
+			Kind:      "ServiceAccount",
+			Name:      sessionSAName,
+			Namespace: namespace,
+		}},
+		RoleRef: rbacv1.RoleRef{
+			APIGroup: "rbac.authorization.k8s.io",
+			Kind:     "ClusterRole",
+			Name:     r.SessionAPITokenReviewClusterRole,
+		},
+	}
+	existing := &rbacv1.ClusterRoleBinding{}
+	if err := r.Get(ctx, client.ObjectKeyFromObject(crb), existing); apierrors.IsNotFound(err) {
+		return r.Create(ctx, crb)
+	} else if err != nil {
+		return err
+	}
 	return nil
 }
 

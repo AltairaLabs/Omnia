@@ -1,0 +1,24 @@
+{{- if .Values.internalServiceAuth.enabled }}
+{{- /*
+  Internal service-to-service auth (SEC-1/SEC-5). When enabled, the
+  operator-managed per-workspace session-api validates caller bearer tokens
+  via the Kubernetes TokenReview API, which requires its ServiceAccount to be
+  able to create TokenReviews. TokenReview is a cluster-scoped subresource, so
+  the grant must be a ClusterRole; the operator binds each per-workspace
+  session-api ServiceAccount to this ClusterRole at reconcile time (it is told
+  the name via --session-api-tokenreview-clusterrole).
+*/}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "omnia.fullname" . }}-session-api-tokenreview
+  labels:
+    {{- include "omnia.labels" . | nindent 4 }}
+rules:
+  - apiGroups:
+      - authentication.k8s.io
+    resources:
+      - tokenreviews
+    verbs:
+      - create
+{{- end }}

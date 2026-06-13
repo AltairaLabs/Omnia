@@ -93,6 +93,12 @@ func main() {
 	var agentWorkspaceReaderClusterRole string
 	var apiBindAddress string
 	var toolTestAllowedSubjects string
+	var sessionAPIAuthEnabled bool
+	var sessionAPIAuthAudience string
+	var sessionAPIAuthTokenExpirationSeconds int64
+	var sessionAPIAuthIstioMTLS bool
+	var sessionAPIAuthExtraSubjects string
+	var sessionAPITokenReviewClusterRole string
 	var enterpriseEnabled bool
 	var licenseServerURL string
 	var clusterName string
@@ -184,6 +190,30 @@ func main() {
 			"(e.g. system:serviceaccount:omnia-system:omnia-dashboard). Each request must present a "+
 			"bearer token that TokenReview authenticates to one of these subjects. If empty, the "+
 			"tool-test API runs WITHOUT authentication (local/dev only).")
+	flag.BoolVar(&sessionAPIAuthEnabled, "session-api-auth-enabled", false,
+		"Require ServiceAccount auth on the operator-managed per-workspace session-api "+
+			"(SEC-1/SEC-5). When set, the operator renders SESSION_API_AUTH_* env onto each "+
+			"session-api Deployment, grants its ServiceAccount RBAC to create TokenReviews, and "+
+			"mounts an audience-bound projected SA token onto every caller pod it manages "+
+			"(facade, memory-api, eval-worker). Default off (opt-in).")
+	flag.StringVar(&sessionAPIAuthAudience, "session-api-auth-audience", "",
+		"Audience bound into caller projected SA tokens and enforced by session-api "+
+			"(--auth-audiences). Required when --session-api-auth-enabled is set.")
+	flag.Int64Var(&sessionAPIAuthTokenExpirationSeconds, "session-api-auth-token-expiration-seconds", 3600,
+		"Expiration (seconds) for caller projected SA tokens. The kubelet rotates the token "+
+			"before expiry. Only used when --session-api-auth-enabled is set.")
+	flag.BoolVar(&sessionAPIAuthIstioMTLS, "session-api-auth-istio-mtls", false,
+		"Additionally provision a STRICT Istio PeerAuthentication for session-api/memory-api in "+
+			"each workspace namespace (defence-in-depth mTLS on top of SA-token auth). Requires "+
+			"Istio. Only used when --session-api-auth-enabled is set.")
+	flag.StringVar(&sessionAPIAuthExtraSubjects, "session-api-auth-extra-subjects", "",
+		"Comma-separated extra ServiceAccount subjects added to the session-api allowlist beyond "+
+			"the per-workspace caller SAs the operator creates (e.g. the chart-owned dashboard SA: "+
+			"system:serviceaccount:omnia-system:omnia-dashboard).")
+	flag.StringVar(&sessionAPITokenReviewClusterRole, "session-api-tokenreview-clusterrole", "",
+		"Name of the install-wide ClusterRole granting authentication.k8s.io/tokenreviews:create. "+
+			"When --session-api-auth-enabled is set, the operator binds each per-workspace session-api "+
+			"ServiceAccount to it so session-api can validate caller tokens. Provisioned by the chart.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
 	flag.BoolVar(&enableLeaderElection, "leader-elect", false,
 		"Enable leader election for controller manager. "+
@@ -298,6 +328,17 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Internal service-to-service auth config (SEC-1/SEC-5), shared by the
+	// session-api server side (ServiceBuilder) and the facade / eval-worker
+	// caller side (AgentRuntimeReconciler). Zero value = disabled.
+	serviceAuth := controller.ServiceAuthConfig{
+		Enabled:                sessionAPIAuthEnabled,
+		Audience:               sessionAPIAuthAudience,
+		TokenExpirationSeconds: sessionAPIAuthTokenExpirationSeconds,
+		IstioMTLS:              sessionAPIAuthIstioMTLS,
+		ExtraSubjects:          splitAndTrim(sessionAPIAuthExtraSubjects),
+	}
+
 	if err := (&controller.AgentRuntimeReconciler{
 		Client:                   mgr.GetClient(),
 		Scheme:                   mgr.GetScheme(),
@@ -322,6 +363,7 @@ func main() {
 		MgmtPlaneJWKSURL:                mgmtPlaneJWKSURL,
 		Recorder:                        mgr.GetEventRecorderFor("agentruntime-controller"),
 		MeshEnabled:                     meshEnabled,
+		ServiceAuth:                     serviceAuth,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, errUnableToCreateController, logKeyController, "AgentRuntime")
 		os.Exit(1)
@@ -374,9 +416,11 @@ func main() {
 				Name: sessionRedisURLSecretName,
 				Key:  sessionRedisURLSecretKey,
 			},
+			ServiceAuth: serviceAuth,
 		},
-		AgentWorkspaceReaderClusterRole: agentWorkspaceReaderClusterRole,
-		OperatorNamespace:               os.Getenv("POD_NAMESPACE"),
+		AgentWorkspaceReaderClusterRole:  agentWorkspaceReaderClusterRole,
+		OperatorNamespace:                os.Getenv("POD_NAMESPACE"),
+		SessionAPITokenReviewClusterRole: sessionAPITokenReviewClusterRole,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, errUnableToCreateController, logKeyController, "Workspace")
 		os.Exit(1)

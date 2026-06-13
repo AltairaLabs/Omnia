@@ -485,6 +485,35 @@
       }
     },
 
+    "internalServiceAuth": {
+      "type": "object",
+      "description": "Internal service-to-service ServiceAccount auth for session-api (TokenReview + allowlist). Opt-in; closes SEC-1/SEC-5.",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Require ServiceAccount auth on session-api. Default false (opt-in). Set true in production."
+        },
+        "audience": {
+          "type": "string",
+          "description": "Audience bound into caller projected SA tokens and enforced by session-api."
+        },
+        "tokenExpirationSeconds": {
+          "type": "integer",
+          "minimum": 600,
+          "description": "Expiration (seconds) for the projected SA token. Kubelet rotates before expiry."
+        },
+        "istio": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Additionally enforce STRICT mTLS for session-api/memory-api via PeerAuthentication."
+            }
+          }
+        }
+      }
+    },
+
     "sessionRetention": {
       "type": "object",
       "properties": {

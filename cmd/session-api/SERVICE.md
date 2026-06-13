@@ -52,6 +52,40 @@
   - `GET /api/v1/privacy-policy?namespace={ns}&agent={agent}` — returns the facade-visible subset of the effective SessionPrivacyPolicy (`{"recording":{"enabled","facadeData","richData"}}`); 204 when no policy applies
 - **gRPC/HTTP** OTLP trace ingestion (optional)
 
+## Authentication (internal service-to-service)
+
+Opt-in, off by default; gated by the chart value `internalServiceAuth.enabled`
+(closes SEC-1 unauthenticated JSON API, SEC-5 unauthenticated OTLP listeners).
+When enabled, **every** caller must present a Kubernetes ServiceAccount bearer
+token, validated server-side via the **TokenReview API** against an allowlist of
+caller subjects. `/healthz` is exempt.
+
+Flags / env (read by `cmd/session-api`):
+- `--auth-enabled` / `SESSION_API_AUTH_ENABLED` — require auth (fails closed: if
+  the allowlist is empty when enabled, the binary refuses to start).
+- `--auth-allowed-subjects` / `SESSION_API_AUTH_ALLOWED_SUBJECTS` — comma-
+  separated `system:serviceaccount:<ns>:<name>` allowlist.
+- `--auth-audiences` / `SESSION_API_AUTH_AUDIENCES` — comma-separated accepted
+  token audiences (the projected token's audience must match).
+
+The session-api ServiceAccount needs RBAC `authentication.k8s.io/tokenreviews:
+create` (cluster-scoped → ClusterRole + ClusterRoleBinding). The Helm chart
+provisions the ClusterRole; the operator binds each per-workspace session-api
+ServiceAccount to it and renders the `SESSION_API_AUTH_*` env. Callers (facade,
+dashboard, memory-api, eval-worker) mount an audience-bound projected SA token
+at `/var/run/secrets/omnia/session-api/token` and set `SESSION_API_TOKEN_PATH`
+to it; the HTTP client / dashboard proxy send it as `Authorization: Bearer`.
+
+**OTLP listeners** (`--otlp-enabled`) are gated by the same auth when enabled:
+any OTLP sender targeting session-api must present an SA token. NOTE: the default
+Helm trace path is `agents → alloy → Tempo` only — alloy does **not** export to
+session-api's OTLP, so no bearer token is wired on alloy. If you add an OTLP
+exporter that targets session-api while auth is on, configure it with a
+`bearer_token_file` pointing at that sender's own projected SA token.
+
+An additional defence-in-depth layer (STRICT Istio mTLS via PeerAuthentication
+for session-api/memory-api) is available behind `internalServiceAuth.istio.enabled`.
+
 ## Outputs
 - **HTTP** responses with JSON payloads to callers
 - **PostgreSQL** writes: sessions, messages, tool_calls, provider_calls, runtime_events, eval_results, message_artifacts

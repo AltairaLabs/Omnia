@@ -153,6 +153,12 @@ type AgentRuntimeReconciler struct {
 	// Gates whether `mode: mesh` is usable; when false, mesh requests degrade
 	// to replicaWeighted.
 	MeshEnabled bool
+
+	// ServiceAuth carries internal service-to-service ServiceAccount auth
+	// settings (SEC-1/SEC-5). When enabled, facade pods (which write sessions
+	// to session-api via httpclient) and eval-worker pods get an audience-bound
+	// projected SA token + SESSION_API_TOKEN_PATH. Zero value = disabled.
+	ServiceAuth ServiceAuthConfig
 }
 
 // +kubebuilder:rbac:groups=omnia.altairalabs.ai,resources=agentruntimes,verbs=get;list;watch;create;update;patch;delete

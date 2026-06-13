@@ -193,6 +193,17 @@ spec:
             - name: OMNIA_DASHBOARD_SERVICE_TOKEN_ALLOWED_SAS
               value: {{ join "," $sas | quote }}
             {{- end }}
+            {{- /*
+              Internal service-to-service auth (SEC-1/SEC-5). When enabled,
+              session-api/memory-api require an audience-bound ServiceAccount
+              bearer token. The dashboard server-side proxy reads it from
+              SESSION_API_TOKEN_PATH (a projected SA token, mounted below) and
+              forwards it on every outbound session-api/memory-api call.
+            */}}
+            {{- if .Values.internalServiceAuth.enabled }}
+            - name: SESSION_API_TOKEN_PATH
+              value: /var/run/secrets/omnia/session-api/token
+            {{- end }}
             {{- with .Values.dashboard.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
@@ -235,6 +246,11 @@ spec:
             - name: mgmt-plane-signing-key
               mountPath: /etc/omnia/mgmt-plane
               readOnly: true
+            {{- if .Values.internalServiceAuth.enabled }}
+            - name: session-api-token
+              mountPath: /var/run/secrets/omnia/session-api
+              readOnly: true
+            {{- end }}
             {{- $vmMounts := concat (.Values.dashboard.extraVolumeMounts | default list) ($po.extraVolumeMounts | default list) }}
             {{- with $vmMounts }}
             {{- toYaml . | nindent 12 }}
@@ -254,6 +270,17 @@ spec:
           secret:
             secretName: {{ .Values.dashboard.signingKey.existingSecret | default (printf "%s-signing-keypair" (include "omnia.dashboard.fullname" .)) }}
             defaultMode: 0o400
+        {{- if .Values.internalServiceAuth.enabled }}
+        # Audience-bound projected SA token the dashboard proxy presents to
+        # session-api/memory-api. The kubelet rotates it before expiry.
+        - name: session-api-token
+          projected:
+            sources:
+              - serviceAccountToken:
+                  path: token
+                  audience: {{ .Values.internalServiceAuth.audience }}
+                  expirationSeconds: {{ .Values.internalServiceAuth.tokenExpirationSeconds }}
+        {{- end }}
         {{- $vols := concat (.Values.dashboard.extraVolumes | default list) ($po.extraVolumes | default list) }}
         {{- with $vols }}
         {{- toYaml . | nindent 8 }}

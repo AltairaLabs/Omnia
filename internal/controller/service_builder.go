@@ -107,6 +107,12 @@ type ServiceBuilder struct {
 	// the actual Redis URL when SessionRedisURL is the placeholder
 	// "$(REDIS_URL)". Mirrors MemoryRedisURLSecret.
 	SessionRedisURLSecret SecretKeyRef
+
+	// ServiceAuth carries internal service-to-service ServiceAccount auth
+	// settings (SEC-1/SEC-5). When enabled, session-api Deployments get
+	// SESSION_API_AUTH_* env and memory-api (a session-api caller) gets an
+	// audience-bound projected token. Zero value = disabled (no-op).
+	ServiceAuth ServiceAuthConfig
 }
 
 // SecretKeyRef points at a single key within a Kubernetes Secret. Used
@@ -140,6 +146,8 @@ func (sb *ServiceBuilder) BuildSessionDeployment(workspaceName, namespace string
 	}
 	dep := buildServiceDeployment(name, namespace, sb.SessionImage, sb.SessionImagePullPolicy, args, labels, overrides)
 	addMemoryRedisURLEnv(dep, redisSecret)
+	// Server side: enforce ServiceAccount auth (SEC-1/SEC-5) when enabled.
+	sb.ServiceAuth.applySessionAPIServerAuthEnv(dep, workspaceName, sg.Name, namespace)
 	if dep.Spec.Template.Annotations == nil {
 		dep.Spec.Template.Annotations = map[string]string{}
 	}
@@ -319,6 +327,10 @@ func (sb *ServiceBuilder) BuildMemoryDeployment(workspaceName, namespace string,
 	dep := buildServiceDeployment(name, namespace, sb.MemoryImage, sb.MemoryImagePullPolicy, args, labels, overrides)
 	addPodNamespaceEnv(dep)
 	addMemoryRedisURLEnv(dep, redisSecret)
+	// Caller side: memory-api emits provider_usage to the co-located
+	// session-api, so it presents an audience-bound projected SA token when
+	// auth is enabled (SEC-1/SEC-5).
+	sb.ServiceAuth.applyCallerToken(&dep.Spec.Template.Spec)
 	if dep.Spec.Template.Annotations == nil {
 		dep.Spec.Template.Annotations = map[string]string{}
 	}

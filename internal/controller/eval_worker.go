@@ -263,6 +263,12 @@ func (r *AgentRuntimeReconciler) buildEvalWorkerDeployment(
 		},
 	}
 
+	// Internal service auth (SEC-1/SEC-5): the eval-worker reads eval results
+	// from session-api, so it presents an audience-bound projected SA token
+	// when enabled. Applied before podOverrides so user extraVolumeMounts win
+	// on collision. No-op when disabled.
+	r.ServiceAuth.applyCallerToken(&dep.Spec.Template.Spec)
+
 	if podOverrides != nil {
 		podoverrides.ApplyPod(&dep.Spec.Template.Spec, &dep.Spec.Template.ObjectMeta, podOverrides)
 		for i := range dep.Spec.Template.Spec.Containers {
