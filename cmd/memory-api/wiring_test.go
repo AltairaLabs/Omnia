@@ -280,6 +280,36 @@ func TestReembedWorkerOptions_DisabledWhenIntervalEmpty(t *testing.T) {
 	}
 }
 
+// TestEmbeddingModelIdentifier proves the staleness key combines the Provider
+// CRD name with the resolved model (MAINT-5), falling back to the bare name
+// when the provider exposes no model.
+func TestEmbeddingModelIdentifier(t *testing.T) {
+	if got := embeddingModelIdentifier("openai", "text-embedding-3-large"); got != "openai/text-embedding-3-large" {
+		t.Errorf("with model: got %q, want openai/text-embedding-3-large", got)
+	}
+	if got := embeddingModelIdentifier("ollama", ""); got != "ollama" {
+		t.Errorf("empty model should yield the bare provider name: got %q", got)
+	}
+}
+
+// TestReembedWorkerOptions_CurrentModelFromService proves the wiring fix: the
+// worker's staleness comparison value is the identifier the EmbeddingService
+// stamps (provider/model), not the bare provider name — so an in-place
+// spec.model edit (same CRD name) is actually detected (MAINT-5).
+func TestReembedWorkerOptions_CurrentModelFromService(t *testing.T) {
+	const modelID = "openai/text-embedding-3-large"
+	svc := memory.NewEmbeddingService(&memory.PostgresMemoryStore{}, nil, logr.Discard()).WithModelName(modelID)
+	f := &flags{reembedInterval: "30m", embeddingProviderName: "openai"}
+
+	opts, enabled := f.reembedWorkerOptions(svc)
+	if !enabled {
+		t.Fatal("expected reembed worker enabled")
+	}
+	if opts.CurrentModel != modelID {
+		t.Errorf("CurrentModel: got %q, want %q (must match EmbeddingService.ModelName, not the bare provider name)", opts.CurrentModel, modelID)
+	}
+}
+
 // TestTombstoneWorkerOptions_DisabledWhenIntervalEmpty proves the
 // guard fires when no interval is set — without it the worker
 // would tick on the zero-duration default and spam RunOnce.
@@ -336,15 +366,16 @@ func TestTombstoneWorkerOptions_PopulatesFromFlags(t *testing.T) {
 
 // TestReembedWorkerOptions_PopulatesFromFlags proves the happy
 // path: a valid interval + an embedding service produces enabled
-// options carrying the configured CurrentModel (the provider name)
-// and BatchSize.
+// options carrying the BatchSize and the CurrentModel sourced from the
+// service's stamped identifier (provider/model), not the bare flag (MAINT-5).
 func TestReembedWorkerOptions_PopulatesFromFlags(t *testing.T) {
 	f := &flags{
 		reembedInterval:       "15m",
 		reembedBatchSize:      25,
-		embeddingProviderName: "openai-embed-3-small",
+		embeddingProviderName: "openai-embed",
 	}
-	svc := memory.NewEmbeddingService(&memory.PostgresMemoryStore{}, nil, logr.Discard())
+	svc := memory.NewEmbeddingService(&memory.PostgresMemoryStore{}, nil, logr.Discard()).
+		WithModelName("openai-embed/text-embedding-3-small")
 	opts, enabled := f.reembedWorkerOptions(svc)
 	if !enabled {
 		t.Fatal("expected reembed worker to be enabled")
@@ -355,8 +386,8 @@ func TestReembedWorkerOptions_PopulatesFromFlags(t *testing.T) {
 	if opts.BatchSize != 25 {
 		t.Errorf("expected batch size 25, got %d", opts.BatchSize)
 	}
-	if opts.CurrentModel != "openai-embed-3-small" {
-		t.Errorf("expected provider name as model, got %q", opts.CurrentModel)
+	if opts.CurrentModel != "openai-embed/text-embedding-3-small" {
+		t.Errorf("expected the stamped provider/model identifier, got %q", opts.CurrentModel)
 	}
 }
 
