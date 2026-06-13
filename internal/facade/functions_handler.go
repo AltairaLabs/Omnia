@@ -187,14 +187,14 @@ func (h *FunctionsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				fmt.Sprintf("request body exceeds %d bytes", h.maxBodyBytes))
 			return
 		}
-		writeError(w, http.StatusBadRequest, "read_body_failed", err.Error())
+		writeError(w, http.StatusBadRequest, "read_body_failed", "failed to read request body")
 		return
 	}
 
 	result, err := h.funcInvoker.Invoke(r.Context(), name, body)
 	if err != nil {
 		h.log.Error(err, "function invocation failed")
-		writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
+		writeError(w, http.StatusInternalServerError, "internal_error", "internal server error")
 		return
 	}
 	if result == nil {
@@ -213,7 +213,7 @@ func (h *FunctionsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case OutcomeInputInvalid:
 		writeError(w, http.StatusBadRequest, "input_invalid", result.ErrorDetail)
 	case OutcomeRuntimeError:
-		writeError(w, http.StatusBadGateway, "runtime_error", result.ErrorDetail)
+		writeError(w, http.StatusBadGateway, "runtime_error", "runtime invocation failed")
 	case OutcomeOutputInvalid:
 		writeOutputValidationError(w, errors.New(result.ErrorDetail), result.RawOutput)
 	case OutcomePayloadTooLarge:
