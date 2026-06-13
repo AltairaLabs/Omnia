@@ -76,11 +76,17 @@ import (
 	"github.com/altairalabs/omnia/pkg/servicediscovery"
 )
 
+// auditEventSink is the subset of ee/pkg/audit.Logger the adapter needs,
+// extracted so auditLoggerAdapter is unit-testable with a recording fake.
+type auditEventSink interface {
+	LogEvent(ctx context.Context, entry *sessionapi.AuditEntry)
+}
+
 // auditLoggerAdapter adapts ee/pkg/audit.Logger to memoryapi.MemoryAuditLogger.
 // It converts MemoryAuditEntry fields into the session/api.AuditEntry shape,
 // placing memory-specific fields (MemoryID, Kind) in Metadata.
 type auditLoggerAdapter struct {
-	inner *eeaudit.Logger
+	inner auditEventSink
 }
 
 func (a *auditLoggerAdapter) LogEvent(ctx context.Context, entry *memoryapi.MemoryAuditEntry) {
@@ -93,6 +99,12 @@ func (a *auditLoggerAdapter) LogEvent(ctx context.Context, entry *memoryapi.Memo
 	}
 	if entry.Kind != "" {
 		meta["kind"] = entry.Kind
+	}
+	// SEC-6: sessionapi.AuditEntry has no user field, so carry the subject as a
+	// hashed metadata key — otherwise the audit trail can't answer "who
+	// accessed/deleted user X's memories". Hashed per the project's PII rule.
+	if entry.UserID != "" {
+		meta["userHash"] = logging.HashID(entry.UserID)
 	}
 	a.inner.LogEvent(ctx, &sessionapi.AuditEntry{
 		EventType: entry.EventType,
