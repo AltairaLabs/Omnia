@@ -353,7 +353,7 @@ const (
 // initPool creates and returns a pgxpool connection pool with configured limits.
 // Pool settings are read from environment variables with sensible defaults:
 //
-//	PG_MAX_CONNS (default 25), PG_MIN_CONNS (default 5),
+//	PG_MAX_CONNS (default 50), PG_MIN_CONNS (default 5),
 //	PG_MAX_CONN_LIFETIME (default 1h), PG_MAX_CONN_IDLE_TIME (default 30m).
 func initPool(ctx context.Context, connStr string) (*pgxpool.Pool, error) {
 	poolCfg, err := pgxpool.ParseConfig(connStr)

@@ -106,7 +106,8 @@ type Handler struct {
 }
 
 // NewHandler creates a new session API handler.
-// An optional maxBodySize can be passed (first value used); defaults to 10 MB.
+// An optional maxBodySize can be passed (first value used); defaults to
+// DefaultMaxBodySize (16 MB).
 func NewHandler(service *SessionService, log logr.Logger, maxBodySize ...int64) *Handler {
 	mbs := DefaultMaxBodySize
 	if len(maxBodySize) > 0 && maxBodySize[0] > 0 {
