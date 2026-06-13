@@ -237,7 +237,7 @@ func (s *Server) processRegularMessage(ctx context.Context, c *Connection, sessi
 	// Handle message
 	if s.handler != nil {
 		if err := safeHandleMessage(s.handler, ctx, sessionID, msg, recWriter, log); err != nil {
-			s.sendError(c, sessionID, ErrorCodeInternalError, err.Error())
+			s.sendError(c, sessionID, ErrorCodeInternalError, "internal server error")
 			return err
 		}
 	} else {

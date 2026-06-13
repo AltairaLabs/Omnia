@@ -249,7 +249,7 @@ func TestFunctionsHandler_RuntimeError(t *testing.T) {
 	var resp errorResponse
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
 	assert.Equal(t, "runtime_error", resp.Error)
-	assert.Contains(t, resp.Detail, "simulated upstream failure")
+	assert.Equal(t, "runtime invocation failed", resp.Detail)
 }
 
 func TestFunctionsHandler_UnknownFunctionIs404(t *testing.T) {
