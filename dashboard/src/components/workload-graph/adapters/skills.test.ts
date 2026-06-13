@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { skillNodesAndEdges, attachSkills } from "./skills";
+import { attachSkills } from "./skills";
 import type { SkillSource, SkillSourcePhase } from "@/types/skill-source";
 import type { WorkloadModel } from "../types";
 
@@ -13,63 +13,23 @@ function source(name: string, phase?: SkillSourcePhase, skillCount?: number): Sk
   } as SkillSource;
 }
 
-describe("skillNodesAndEdges", () => {
-  it("resolves a Ready source to a resolved node with count, attached to entry", () => {
-    const sources = new Map([["anthropic", source("anthropic", "Ready", 12)]]);
-    const { nodes, edges } = skillNodesAndEdges(
-      [{ source: "anthropic", include: ["pdf"], mountAs: "skills" }],
-      sources,
-      "plan",
-    );
-    expect(nodes).toHaveLength(1);
-    expect(nodes[0]).toMatchObject({
-      id: "skill:anthropic",
-      kind: "skill",
-      resolution: "resolved",
-      detail: { skillSource: "anthropic", include: ["pdf"], mountAs: "skills", skillCount: 12, skillPhase: "Ready" },
-    });
-    expect(nodes[0].badges[0].label).toBe("Ready · 12");
-    expect(edges).toEqual([
-      { id: "plan--provides-->skill:anthropic", source: "plan", target: "skill:anthropic", style: "provides" },
-    ]);
-  });
-
-  it("maps Fetching to unresolved and Error to unavailable", () => {
-    const sources = new Map([
-      ["a", source("a", "Fetching")],
-      ["b", source("b", "Error")],
-    ]);
-    const { nodes } = skillNodesAndEdges(
-      [{ source: "a" }, { source: "b" }],
-      sources,
-      "entry",
-    );
-    expect(nodes[0].resolution).toBe("unresolved");
-    expect(nodes[1].resolution).toBe("unavailable");
-  });
-
-  it("marks a missing source unavailable with phase 'missing'", () => {
-    const { nodes } = skillNodesAndEdges([{ source: "ghost" }], new Map(), "entry");
-    expect(nodes[0].resolution).toBe("unavailable");
-    expect(nodes[0].detail.skillPhase).toBe("missing");
-    expect(nodes[0].badges[0].label).toBe("missing");
-  });
-
-  it("emits no edges when there is no entry node", () => {
-    const sources = new Map([["a", source("a", "Ready", 1)]]);
-    const { edges } = skillNodesAndEdges([{ source: "a" }], sources, undefined);
-    expect(edges).toEqual([]);
-  });
-
-  it("returns nothing for no refs", () => {
-    expect(skillNodesAndEdges(undefined, new Map(), "e")).toEqual({ nodes: [], edges: [] });
-  });
-});
-
 const base: WorkloadModel = {
   tier: "flow",
   altitude: "definition",
-  nodes: [{ id: "plan", kind: "state", label: "Plan", isEntry: true, badges: [], detail: {} }],
+  nodes: [
+    {
+      id: "plan",
+      kind: "state",
+      label: "Plan",
+      isEntry: true,
+      badges: [
+        { icon: "tool", label: "0" },
+        { icon: "skill", label: "0" },
+      ],
+      detail: {},
+    },
+    { id: "provider:x", kind: "provider", label: "x", badges: [], detail: {} },
+  ],
   edges: [],
   meta: { counts: { agents: 1, tools: 0, skills: 0, states: 1 } },
 };
@@ -80,20 +40,31 @@ describe("attachSkills", () => {
     expect(attachSkills(base, [], [])).toBe(base);
   });
 
-  it("appends skill nodes/edges and bumps the skill count", () => {
-    const out = attachSkills(base, [{ source: "anthropic" }], [source("anthropic", "Ready", 5)]);
+  it("decorates agent/state nodes with the resolved skill source, not a separate node", () => {
+    const out = attachSkills(
+      base,
+      [{ source: "anthropic", mountAs: "skills", include: ["pdf"] }],
+      [source("anthropic", "Ready", 18)],
+    );
+    // no new nodes — the provider node is left alone, no skill node added
     expect(out.nodes).toHaveLength(2);
-    expect(out.edges).toHaveLength(1);
-    expect(out.meta.counts.skills).toBe(1);
-    expect(out.nodes[1].id).toBe("skill:anthropic");
+    const plan = out.nodes.find((n) => n.id === "plan")!;
+    expect(plan.detail.skillSource).toBe("anthropic");
+    expect(plan.detail.mountAs).toBe("skills");
+    expect(plan.detail.include).toEqual(["pdf"]);
+    expect(plan.detail.skillCount).toBe(18);
+    expect(plan.detail.skillPhase).toBe("Ready");
+    // the existing skill badge reflects the resolved count
+    expect(plan.badges.find((b) => b.icon === "skill")?.label).toBe("18");
+    // provider node untouched
+    expect(out.nodes.find((n) => n.id === "provider:x")!.detail.skillSource).toBeUndefined();
+    expect(out.meta.counts.skills).toBe(18);
   });
 
-  it("falls back to the first node when no entry is flagged", () => {
-    const noEntry: WorkloadModel = {
-      ...base,
-      nodes: [{ id: "first", kind: "agent", label: "First", badges: [], detail: {} }],
-    };
-    const out = attachSkills(noEntry, [{ source: "a" }], [source("a", "Ready", 1)]);
-    expect(out.edges[0].source).toBe("first");
+  it("falls back to the phase label when the source is missing or unsynced", () => {
+    const out = attachSkills(base, [{ source: "ghost" }], []);
+    const plan = out.nodes.find((n) => n.id === "plan")!;
+    expect(plan.detail.skillPhase).toBe("missing");
+    expect(plan.badges.find((b) => b.icon === "skill")?.label).toBe("missing");
   });
 });

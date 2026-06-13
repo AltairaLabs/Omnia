@@ -18,7 +18,7 @@ describe("promptPackToWorkload", () => {
     expect(model.nodes).toEqual([]);
   });
 
-  it("appends a resolved SkillSource node from spec.skills", () => {
+  it("decorates the workload node with the resolved SkillSource (no separate node)", () => {
     const model = promptPackToWorkload(
       { id: "g", prompts: { main: { id: "main", name: "Greeter", system_template: "hi" } } },
       {
@@ -34,9 +34,10 @@ describe("promptPackToWorkload", () => {
         ],
       },
     );
-    const skill = model.nodes.find((n) => n.kind === "skill");
-    expect(skill?.resolution).toBe("resolved");
-    expect(skill?.detail.skillCount).toBe(9);
-    expect(model.meta.counts.skills).toBe(1);
+    expect(model.nodes).toHaveLength(1);
+    expect(model.nodes.find((n) => n.kind === "skill")).toBeUndefined();
+    expect(model.nodes[0].detail.skillSource).toBe("anthropic");
+    expect(model.nodes[0].detail.skillCount).toBe(9);
+    expect(model.meta.counts.skills).toBe(9);
   });
 });

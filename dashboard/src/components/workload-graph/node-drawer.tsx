@@ -53,8 +53,9 @@ function SkillSourceDetail({
     <div className="mb-3 space-y-2 text-sm">
       <div className="space-y-1">
         <div>
-          <span className="text-muted-foreground">Phase: </span>
-          <span>{node.detail.skillPhase}</span>
+          <span className="text-muted-foreground">Skill source: </span>
+          <span className="font-mono">{source}</span>
+          <span className="text-muted-foreground"> ({node.detail.skillPhase})</span>
         </div>
         {node.detail.mountAs && (
           <div>

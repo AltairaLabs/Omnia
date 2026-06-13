@@ -39,8 +39,10 @@ export function modelToFlow(
     source: e.source,
     target: e.target,
     label: e.label,
+    type: "workloadEdge",
     animated: e.style === "loop",
     style: edgeStyle(e.style),
+    data: {}, // elk route points are injected after layout
   }));
 
   return { nodes, edges };

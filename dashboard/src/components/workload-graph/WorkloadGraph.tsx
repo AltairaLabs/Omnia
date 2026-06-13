@@ -7,6 +7,7 @@ import {
   Controls,
   Panel,
   BackgroundVariant,
+  MarkerType,
   useNodesState,
   useEdgesState,
   type ReactFlowInstance,
@@ -18,6 +19,7 @@ import { Info } from "lucide-react";
 import { modelToFlow, type WorkloadNodeData } from "./to-flow";
 import { layoutFlow } from "./layout";
 import { workloadNodeTypes } from "./workload-nodes";
+import { workloadEdgeTypes } from "./workload-edge";
 import { NodeDrawer } from "./node-drawer";
 import type { WorkloadModel, WorkloadNode, WorkloadBudget } from "./types";
 
@@ -56,12 +58,35 @@ export function WorkloadGraph({
   const [edges, setEdges] = useEdgesState(flow.edges);
   const rf = useRef<WorkloadFlowInstance | null>(null);
 
+  // Fill the viewport below the graph's own top edge, so the box accounts for
+  // whatever sits above it (the dev licensing banner, page header, tabs) instead
+  // of guessing with a vh fraction that overshoots.
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const [height, setHeight] = useState(560);
+  useEffect(() => {
+    const compute = () => {
+      const el = containerRef.current;
+      if (!el) return;
+      const top = el.getBoundingClientRect().top;
+      setHeight(Math.max(360, window.innerHeight - top - 16));
+    };
+    compute();
+    const raf = requestAnimationFrame(compute);
+    window.addEventListener("resize", compute);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener("resize", compute);
+    };
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
-    layoutFlow(flow.nodes, flow.edges).then((laid) => {
+    layoutFlow(flow.nodes, flow.edges).then(({ nodes: laid, routes }) => {
       if (cancelled) return;
       setNodes(laid);
-      setEdges(flow.edges);
+      setEdges(
+        flow.edges.map((e) => ({ ...e, data: { ...e.data, points: routes.get(e.id) } })),
+      );
       fitViewAfterPaint(rf.current);
     });
     return () => { cancelled = true; };
@@ -82,19 +107,23 @@ export function WorkloadGraph({
   return (
     <div className={className}>
       <div
+        ref={containerRef}
         className="relative border rounded-lg"
-        style={{ width: "100%", height: "clamp(560px, 76vh, 900px)" }}
+        style={{ width: "100%", height: `${height}px` }}
       >
         <ReactFlow
           nodes={nodes}
           edges={edges}
           nodeTypes={workloadNodeTypes}
+          edgeTypes={workloadEdgeTypes}
           onInit={(inst) => { rf.current = inst; }}
           fitView
           fitViewOptions={{ padding: 0.08 }}
           minZoom={0.2}
           maxZoom={2}
-          defaultEdgeOptions={{ type: "smoothstep" }}
+          defaultEdgeOptions={{
+            markerEnd: { type: MarkerType.ArrowClosed, width: 18, height: 18 },
+          }}
         >
           <Panel position="top-left">
             <div className="flex items-center gap-1.5 text-xs text-muted-foreground bg-background/85 backdrop-blur rounded border px-2 py-1">

@@ -21,6 +21,7 @@ vi.mock("@xyflow/react", () => ({
   Controls: () => null,
   Panel: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
   BackgroundVariant: { Dots: "dots" },
+  MarkerType: { ArrowClosed: "arrowclosed" },
   useNodesState: (init: unknown[]) => [init, vi.fn(), vi.fn()],
   useEdgesState: (init: unknown[]) => [init, vi.fn(), vi.fn()],
 }));

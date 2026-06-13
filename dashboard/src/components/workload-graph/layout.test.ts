@@ -9,14 +9,17 @@ describe("layoutFlow", () => {
       { id: "b", type: "workloadState", position: { x: 0, y: 0 }, data: {} },
     ];
     const edges: Edge[] = [{ id: "e", source: "a", target: "b" }];
-    const out = await layoutFlow(nodes, edges);
+    const { nodes: out, routes } = await layoutFlow(nodes, edges);
     expect(out).toHaveLength(2);
     const [a, b] = out;
     expect(a.position).not.toEqual(b.position);
+    // elk produces an orthogonal route for the edge
+    expect(routes.has("e")).toBe(true);
   });
 
   it("returns nodes unchanged when there are none", async () => {
-    const out = await layoutFlow([], []);
+    const { nodes: out, routes } = await layoutFlow([], []);
     expect(out).toEqual([]);
+    expect(routes.size).toBe(0);
   });
 });

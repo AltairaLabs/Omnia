@@ -7,8 +7,12 @@ import { cn } from "@/lib/utils";
 import type { WorkloadNodeData } from "./to-flow";
 import type { WorkloadBadge, WorkloadNode } from "./types";
 
+// Fixed size so elk's layout/routing matches the rendered box exactly (no gaps
+// between node borders and edge endpoints). border-box keeps the outer size at
+// 200x68 regardless of border thickness, so entry/terminal can use thicker
+// borders without breaking elk alignment.
 const base =
-  "px-4 py-3 rounded-lg border-2 shadow-sm min-w-[160px] cursor-pointer transition-all hover:shadow-md text-left bg-card";
+  "box-border w-[200px] h-[68px] px-3 py-2 rounded-lg shadow-sm cursor-pointer transition-all hover:shadow-md text-left bg-card overflow-hidden flex flex-col justify-center";
 
 function badgeIcon(icon?: WorkloadBadge["icon"]) {
   if (icon === "tool") return <Wrench className="h-3 w-3" />;
@@ -17,28 +21,36 @@ function badgeIcon(icon?: WorkloadBadge["icon"]) {
   return null;
 }
 
+// Endpoints get a thick, strongly-coloured border (emerald=start, rose=end) so
+// they read as the most important nodes; everything else is a thinner blue.
 function nodeBorderClass(node: WorkloadNode): string {
-  if (node.isEntry) return "border-emerald-500";
-  if (node.isTerminal) return "border-zinc-400";
-  return "border-blue-500";
+  if (node.isEntry) return "border-4 border-emerald-500 ring-2 ring-emerald-500/20";
+  if (node.isTerminal) return "border-4 border-rose-500 ring-2 ring-rose-500/20";
+  return "border-2 border-blue-500";
 }
 
 function EndpointPill({ node }: Readonly<{ node: WorkloadNode }>) {
   if (node.isEntry) {
     return (
-      <span className="absolute -top-2.5 left-2 z-10 inline-flex items-center gap-0.5 rounded bg-emerald-500 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white shadow">
+      <span className="absolute -top-2.5 left-2 z-10 inline-flex items-center gap-0.5 rounded bg-emerald-500 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white shadow-md">
         <Play className="h-2.5 w-2.5 fill-current" />Start
       </span>
     );
   }
   if (node.isTerminal) {
     return (
-      <span className="absolute -top-2.5 left-2 z-10 inline-flex items-center gap-0.5 rounded bg-zinc-600 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white shadow">
+      <span className="absolute -top-2.5 left-2 z-10 inline-flex items-center gap-0.5 rounded bg-rose-500 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white shadow-md">
         <Flag className="h-2.5 w-2.5" />End
       </span>
     );
   }
   return null;
+}
+
+function iconColorClass(node: WorkloadNode): string {
+  if (node.isEntry) return "text-emerald-600";
+  if (node.isTerminal) return "text-rose-600";
+  return "text-blue-600";
 }
 
 function BadgeRow({ badges }: Readonly<{ badges: WorkloadBadge[] }>) {
@@ -58,7 +70,7 @@ function BadgeRow({ badges }: Readonly<{ badges: WorkloadBadge[] }>) {
 export const WorkloadAgentNode = memo(({ data }: Readonly<{ data: WorkloadNodeData }>) => {
   const { node, onClick } = data;
   const muted = node.resolution === "unavailable";
-  const iconColor = node.isEntry ? "text-emerald-600" : "text-blue-600";
+  const iconColor = iconColorClass(node);
   return (
     <div className="relative">
       <EndpointPill node={node} />
@@ -91,7 +103,7 @@ export const WorkloadProviderNode = memo(({ data }: Readonly<{ data: WorkloadNod
       <Handle type="target" position={Position.Left} className="!bg-green-500" />
       <button
         type="button"
-        className={cn(base, "border-green-500 border-dashed")}
+        className={cn(base, "border-2 border-green-500 border-dashed")}
         onClick={() => onClick?.(node.id)}
       >
         <div className="flex flex-col">
@@ -118,7 +130,7 @@ export const WorkloadSkillNode = memo(({ data }: Readonly<{ data: WorkloadNodeDa
       <Handle type="target" position={Position.Left} className="!bg-violet-500" />
       <button
         type="button"
-        className={cn(base, "border-violet-500 border-dashed", muted && "opacity-60")}
+        className={cn(base, "border-2 border-violet-500 border-dashed", muted && "opacity-60")}
         onClick={() => onClick?.(node.id)}
       >
         <div className="flex items-center gap-2">
