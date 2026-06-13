@@ -1,11 +1,12 @@
 "use client";
 
-import { useCallback, useMemo, useEffect } from "react";
+import { useCallback, useMemo, useEffect, useState } from "react";
 import {
   ReactFlow,
   Controls,
   Background,
   MiniMap,
+  Panel,
   useNodesState,
   useEdgesState,
   BackgroundVariant,
@@ -15,6 +16,7 @@ import "@xyflow/react/dist/style.css";
 
 import { nodeTypes } from "./nodes";
 import { buildTopologyGraph, applyLayoutToGraph } from "./graph-builder";
+import { usePersistedNodeLayout } from "@/hooks/use-persisted-node-layout";
 import type { AgentRuntime, PromptPack, ToolRegistry, Provider } from "@/types";
 import type { NotesMap } from "@/lib/notes-storage";
 
@@ -28,6 +30,8 @@ interface TopologyGraphProps {
   onNoteEdit?: (type: string, namespace: string, name: string) => void;
   onNoteDelete?: (type: string, namespace: string, name: string) => void;
   className?: string;
+  /** localStorage key for persisted drag layout (default "topology"). */
+  storageKey?: string;
 }
 
 export function TopologyGraph({
@@ -40,7 +44,10 @@ export function TopologyGraph({
   onNoteEdit,
   onNoteDelete,
   className,
+  storageKey = "topology",
 }: Readonly<TopologyGraphProps>) {
+  const { applyLayout, onNodeDragStop, reset } = usePersistedNodeLayout(storageKey);
+  const [layoutNonce, setLayoutNonce] = useState(0);
   // Build the initial graph
   const initialGraph = useMemo(
     () => {
@@ -66,20 +73,21 @@ export function TopologyGraph({
   useEffect(() => {
     let cancelled = false;
 
-    async function applyLayout() {
+    async function runLayout() {
       const layoutedGraph = await applyLayoutToGraph(initialGraph);
       if (!cancelled) {
-        setNodes(layoutedGraph.nodes);
+        // overlay any saved drag positions on the fresh elk layout
+        setNodes(applyLayout(layoutedGraph.nodes));
         setEdges(layoutedGraph.edges);
       }
     }
 
-    applyLayout();
+    runLayout();
 
     return () => {
       cancelled = true;
     };
-  }, [initialGraph, setNodes, setEdges]);
+  }, [initialGraph, setNodes, setEdges, applyLayout, layoutNonce]);
 
   // Custom mini-map node color
   const nodeColor = useCallback((node: Node) => {
@@ -108,6 +116,7 @@ export function TopologyGraph({
         edges={edges}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
+        onNodeDragStop={onNodeDragStop}
         nodeTypes={nodeTypes}
         fitView
         fitViewOptions={{ padding: 0.2 }}
@@ -117,6 +126,15 @@ export function TopologyGraph({
           type: "smoothstep",
         }}
       >
+        <Panel position="bottom-right">
+          <button
+            type="button"
+            onClick={() => { reset(); setLayoutNonce((n) => n + 1); }}
+            className="text-xs text-muted-foreground bg-background/85 backdrop-blur rounded border px-2 py-1 hover:text-foreground"
+          >
+            Reset layout
+          </button>
+        </Panel>
         <Controls />
         <MiniMap
           nodeColor={nodeColor}
