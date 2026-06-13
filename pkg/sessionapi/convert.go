@@ -89,6 +89,9 @@ func SessionToAPI(id string, opts session.CreateSessionOptions) CreateSessionReq
 	if opts.Variant != "" {
 		req.Variant = ptr(opts.Variant)
 	}
+	if opts.VirtualUserID != "" {
+		req.VirtualUserId = ptr(opts.VirtualUserID)
+	}
 	return req
 }
 

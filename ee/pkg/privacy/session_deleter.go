@@ -10,10 +10,15 @@ package privacy
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/altairalabs/omnia/internal/session/providers"
 )
+
+// ErrMissingVirtualUserID is returned when a user-scoped delete is attempted
+// without a pseudonym. Fail closed — never fall back to listing all sessions.
+var ErrMissingVirtualUserID = errors.New("virtual_user_id is required for user-scoped session deletion")
 
 // WarmStoreSessionDeleter adapts a WarmStoreProvider to the SessionDeleter interface.
 type WarmStoreSessionDeleter struct {
@@ -25,12 +30,19 @@ func NewWarmStoreSessionDeleter(warm providers.WarmStoreProvider) *WarmStoreSess
 	return &WarmStoreSessionDeleter{warm: warm}
 }
 
-// ListSessionsByUser lists session IDs for a user, optionally filtered by workspace and date range.
+// ListSessionsByUser lists session IDs for a pseudonymous subject, optionally
+// filtered by workspace and date range. It fails closed: an empty virtualUserID
+// returns ErrMissingVirtualUserID and never queries the store, so a per-user
+// erasure request can never degrade into listing every user's sessions.
 func (d *WarmStoreSessionDeleter) ListSessionsByUser(
-	ctx context.Context, userID string, workspace string, dateFrom *time.Time, dateTo *time.Time,
+	ctx context.Context, virtualUserID string, workspace string, dateFrom *time.Time, dateTo *time.Time,
 ) ([]string, error) {
+	if virtualUserID == "" {
+		return nil, ErrMissingVirtualUserID
+	}
 	opts := providers.SessionListOpts{
 		WorkspaceName: workspace,
+		VirtualUserID: virtualUserID,
 	}
 	if dateFrom != nil {
 		opts.CreatedAfter = *dateFrom

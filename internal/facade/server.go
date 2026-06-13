@@ -37,7 +37,6 @@ import (
 	"github.com/altairalabs/omnia/internal/media"
 	"github.com/altairalabs/omnia/internal/session"
 	"github.com/altairalabs/omnia/internal/tracing"
-	"github.com/altairalabs/omnia/pkg/identity"
 	"github.com/altairalabs/omnia/pkg/logctx"
 	"github.com/altairalabs/omnia/pkg/logging"
 	"github.com/altairalabs/omnia/pkg/policy"
@@ -517,39 +516,25 @@ func (s *Server) resolveAgentContext(r *http.Request) (requestAgentContext, erro
 	}, nil
 }
 
+// resolveUserContext extracts the user identity for a request. The pseudonym
+// resolution (mgmt-plane header > device_id > subject, with Istio fallback)
+// lives in the shared ResolveUserPseudonym helper so the WS path and the
+// session-create path agree on a single stable id; roles/email stay inline
+// (auth Identity is authoritative, else the Istio-injected headers).
 func (s *Server) resolveUserContext(r *http.Request, authIdentity *policy.AuthenticatedIdentity) requestUserContext {
 	var (
-		rawUserID string
 		userRoles string
 		userEmail string
 	)
 	if authIdentity != nil {
-		// Mgmt-plane JWTs identify the *dashboard operator* (the human
-		// using "Try this agent"), not the end user whose memories /
-		// sessions we're scoping. mgmtPlaneUserID resolves the end-user
-		// id from the trusted on-behalf-of header (falling back to the
-		// device_id query param, then the token subject) so memories
-		// saved during a debug session show up in the user's "My
-		// Memories" view. (The operator pseudonym still flows separately
-		// into audit logs via authIdentity.Subject.)
-		if authIdentity.Origin == policy.OriginManagementPlane {
-			rawUserID = mgmtPlaneUserID(r, authIdentity.EndUser)
-		} else {
-			rawUserID = authIdentity.EndUser
-		}
 		userRoles = authIdentity.Role
 		userEmail = authIdentity.Claims["email"]
 	} else {
-		rawUserID = r.Header.Get(policy.IstioHeaderUserID)
 		userRoles = r.Header.Get(policy.IstioHeaderUserRoles)
 		userEmail = r.Header.Get(policy.IstioHeaderUserEmail)
 	}
-	if rawUserID == "" {
-		rawUserID = r.URL.Query().Get("device_id")
-	}
-	userID := identity.PseudonymizeID(rawUserID)
+	userID := ResolveUserPseudonym(r, authIdentity)
 	s.log.V(1).Info("user identity extracted",
-		"hasRawUserID", rawUserID != "",
 		"hasUserID", userID != "",
 		"hasAuthIdentity", authIdentity != nil,
 		"headerName", policy.IstioHeaderUserID,

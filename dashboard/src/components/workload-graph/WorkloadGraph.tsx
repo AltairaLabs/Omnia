@@ -47,6 +47,21 @@ function deploymentBanner(model: WorkloadModel): string {
   return `Deployment · resolved against ${models || "—"}`;
 }
 
+function testBanner(model: WorkloadModel): string {
+  const providers = model.nodes.filter((n) => n.kind === "provider").length;
+  const scenarioNode = model.nodes.find((n) => n.kind === "scenario");
+  const scenarios = scenarioNode?.detail.scenarios?.length ?? 0;
+  const p = `${providers} provider${providers === 1 ? "" : "s"}`;
+  const s = `${scenarios} scenario${scenarios === 1 ? "" : "s"}`;
+  return `Arena test topology · ${p} × ${s}`;
+}
+
+function bannerLabel(model: WorkloadModel): string {
+  if (model.altitude === "deployment") return deploymentBanner(model);
+  if (model.altitude === "test") return testBanner(model);
+  return "Definition · abstract workload";
+}
+
 export function WorkloadGraph({
   model,
   className,
@@ -116,8 +131,7 @@ export function WorkloadGraph({
 
   const selected: WorkloadNode | undefined = model.nodes.find((n) => n.id === selectedId);
   const hasData = dataNodeIds.size > 0;
-  const banner =
-    model.altitude === "deployment" ? deploymentBanner(model) : "Definition · abstract workload";
+  const banner = bannerLabel(model);
 
   if (model.nodes.length === 0) {
     return (

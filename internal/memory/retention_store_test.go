@@ -37,6 +37,46 @@ func mustFetchEntityExists(t *testing.T, store *PostgresMemoryStore, id string) 
 	return count > 0
 }
 
+// TestSoftDeleteExpiredTTL_CategoryScope proves the consent-category filter
+// (#1376): `exclude` leaves the named category to its own pass while still
+// sweeping NULL/other categories, and `only` sweeps exactly the named category.
+func TestSoftDeleteExpiredTTL_CategoryScope(t *testing.T) {
+	store := newStore(t)
+	ctx := context.Background()
+	past := time.Now().Add(-1 * time.Hour)
+
+	// Insert institutional rows directly so we control consent_category
+	// (SaveInstitutional doesn't carry it; only the user-scoped Save path does).
+	insertCat := func(content, category string) string {
+		var id string
+		var catArg any
+		if category != "" {
+			catArg = category
+		}
+		require.NoError(t, store.pool.QueryRow(ctx,
+			`INSERT INTO memory_entities (workspace_id, name, kind, metadata, consent_category, expires_at)
+			 VALUES ($1, $2, 'fact', '{}', $3, $4) RETURNING id`,
+			testWorkspace1, content, catArg, past).Scan(&id))
+		return id
+	}
+	const healthCat = "memory:health"
+	healthID := insertCat("health row", healthCat)
+	generalID := insertCat("general row", "")
+
+	// Exclude health → only the NULL-category general row is swept.
+	n, err := store.SoftDeleteExpiredTTL(ctx, TierInstitutional, categoryScope{exclude: []string{healthCat}}, 100)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), n)
+	assert.False(t, mustFetchEntityForgotten(t, store, healthID), "excluded category must be left alone")
+	assert.True(t, mustFetchEntityForgotten(t, store, generalID))
+
+	// Only health → the health row is now swept by its own pass.
+	n, err = store.SoftDeleteExpiredTTL(ctx, TierInstitutional, categoryScope{only: healthCat}, 100)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), n)
+	assert.True(t, mustFetchEntityForgotten(t, store, healthID))
+}
+
 func TestSoftDeleteExpiredTTL_InstitutionalTier(t *testing.T) {
 	store := newStore(t)
 	ctx := context.Background()
@@ -57,7 +97,7 @@ func TestSoftDeleteExpiredTTL_InstitutionalTier(t *testing.T) {
 	require.NoError(t, store.SaveInstitutional(ctx, expired))
 	require.NoError(t, store.SaveInstitutional(ctx, keep))
 
-	n, err := store.SoftDeleteExpiredTTL(ctx, TierInstitutional, 100)
+	n, err := store.SoftDeleteExpiredTTL(ctx, TierInstitutional, categoryScope{}, 100)
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), n)
 	assert.True(t, mustFetchEntityForgotten(t, store, expired.ID))
@@ -83,7 +123,7 @@ func TestSoftDeleteExpiredTTL_TierIsolation(t *testing.T) {
 	require.NoError(t, store.SaveInstitutional(ctx, inst))
 	require.NoError(t, store.Save(ctx, userMem))
 
-	n, err := store.SoftDeleteExpiredTTL(ctx, TierUser, 100)
+	n, err := store.SoftDeleteExpiredTTL(ctx, TierUser, categoryScope{}, 100)
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), n)
 	assert.False(t, mustFetchEntityForgotten(t, store, inst.ID))
@@ -93,7 +133,7 @@ func TestSoftDeleteExpiredTTL_TierIsolation(t *testing.T) {
 func TestSoftDeleteExpiredTTL_BatchSizeZeroIsNoOp(t *testing.T) {
 	store := newStore(t)
 	ctx := context.Background()
-	n, err := store.SoftDeleteExpiredTTL(ctx, TierInstitutional, 0)
+	n, err := store.SoftDeleteExpiredTTL(ctx, TierInstitutional, categoryScope{}, 0)
 	require.NoError(t, err)
 	assert.Equal(t, int64(0), n)
 }
@@ -127,7 +167,7 @@ func TestSoftDeleteLRU_MarksOldestRowsFirst(t *testing.T) {
 		old.ID)
 	require.NoError(t, err)
 
-	n, err := store.SoftDeleteLRU(ctx, TierInstitutional, 30*time.Minute, 100)
+	n, err := store.SoftDeleteLRU(ctx, TierInstitutional, 30*time.Minute, categoryScope{}, 100)
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), n)
 	assert.True(t, mustFetchEntityForgotten(t, store, old.ID))
@@ -137,7 +177,7 @@ func TestSoftDeleteLRU_MarksOldestRowsFirst(t *testing.T) {
 func TestSoftDeleteLRU_ZeroStaleIsNoOp(t *testing.T) {
 	store := newStore(t)
 	ctx := context.Background()
-	n, err := store.SoftDeleteLRU(ctx, TierInstitutional, 0, 100)
+	n, err := store.SoftDeleteLRU(ctx, TierInstitutional, 0, categoryScope{}, 100)
 	require.NoError(t, err)
 	assert.Equal(t, int64(0), n)
 }

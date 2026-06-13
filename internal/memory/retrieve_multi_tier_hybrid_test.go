@@ -16,6 +16,31 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// TestRetrieveMultiTierHybrid_CosineArmUsesHNSWIndex proves the cosine arm is
+// index-eligible: with seq scans disabled (forcing the planner to prefer
+// indexes), the plan drives the cosine ranker through the HNSW index
+// idx_memory_observations_embedding rather than a full materialise+sort. The
+// pre-#1369 shape windowed the whole filtered set inside the candidates CTE,
+// which no index could satisfy; this guards that regression.
+func TestRetrieveMultiTierHybrid_CosineArmUsesHNSWIndex(t *testing.T) {
+	store := newStore(t)
+
+	emb := oneHotFloat(7, 1536)
+	insertHybridMemory(t, store, "", "", hybridKindFact, hybridRefundContent, 0.9, emb)
+
+	sql, args, err := buildMultiTierHybridQuery(MultiTierRequest{
+		WorkspaceID: testWorkspace1,
+		AgentID:     multiTierAgentID,
+		Query:       hybridRefundQuery,
+		Limit:       10,
+	}, emb, TierHalfLife{}.orDefaults())
+	require.NoError(t, err)
+
+	used, plan := explainUsesEmbeddingIndex(t, store, sql, args...)
+	assert.True(t, used,
+		"cosine arm must drive recall through the HNSW index, not a full materialise.\nplan:\n%s", plan)
+}
+
 // insertHybridMemory seeds a memory_entities + memory_observations row at the
 // tier implied by user/agent (empty => NULL => institutional / non-agent) with
 // an explicit embedding, returning the entity ID. Mirrors insertRawMemory but
@@ -50,6 +75,9 @@ func insertHybridMemory(t *testing.T, store *PostgresMemoryStore, user, agent, k
 const (
 	hybridTestUser = "user-1"
 	hybridKindFact = "fact"
+	// Reused across the hybrid recall tests (semantic match + HNSW index guards).
+	hybridRefundContent = "Refunds are processed within five business days."
+	hybridRefundQuery   = "money back timeframe"
 )
 
 // TestRetrieveMultiTierHybrid_SemanticOnlyMatchAcrossTiers proves the core
@@ -62,13 +90,12 @@ func TestRetrieveMultiTierHybrid_SemanticOnlyMatchAcrossTiers(t *testing.T) {
 
 	emb := oneHotFloat(7, 1536)
 	// Institutional doc: query shares NO FTS tokens with this content.
-	insertHybridMemory(t, store, "", "", hybridKindFact,
-		"Refunds are processed within five business days.", 0.9, emb)
+	insertHybridMemory(t, store, "", "", hybridKindFact, hybridRefundContent, 0.9, emb)
 
 	res, err := store.RetrieveMultiTierHybrid(ctx, MultiTierRequest{
 		WorkspaceID: testWorkspace1,
 		AgentID:     multiTierAgentID,
-		Query:       "money back timeframe",
+		Query:       hybridRefundQuery,
 		Limit:       10,
 	}, emb)
 	require.NoError(t, err)

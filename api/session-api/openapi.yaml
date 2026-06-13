@@ -777,6 +777,9 @@ components:
         variant:
           type: string
           description: Rollout variant (e.g., stable, canary)
+        virtualUserId:
+          type: string
+          description: Virtual (synthetic) user the session is attributed to
 
     Message:
       type: object
@@ -1045,6 +1048,9 @@ components:
         variant:
           type: string
           description: Rollout variant (e.g., stable, canary)
+        virtualUserId:
+          type: string
+          description: Virtual (synthetic) user the session is attributed to (required, non-empty)
 
     RefreshTTLRequest:
       type: object

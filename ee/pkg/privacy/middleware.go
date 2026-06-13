@@ -22,8 +22,9 @@ import (
 	"github.com/altairalabs/omnia/internal/session/api"
 )
 
-// UserIDHeader is the HTTP header carrying the originating user's identity.
-// The facade and runtime set this header on all write requests.
+// UserIDHeader is the HTTP header carrying the originating subject's
+// pseudonymous virtual-user identity (not a raw user ID). The facade and
+// runtime set this header on all write requests.
 const UserIDHeader = "X-Omnia-User-ID"
 
 // sessionIDPattern extracts the session ID from write endpoint paths.

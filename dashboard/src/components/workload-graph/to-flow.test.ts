@@ -71,4 +71,22 @@ describe("modelToFlow — data-flow kinds", () => {
     expect(nodes.find((n) => n.id === "artifact:notes")!.type).toBe("workflowArtifact");
     expect(edges[0].style).toMatchObject({ strokeDasharray: "3 3" });
   });
+
+  it("maps arena harness kinds to their node types", () => {
+    const m: WorkloadModel = {
+      tier: "single", altitude: "test",
+      nodes: [
+        { id: "scenarios", kind: "scenario", label: "3 scenarios", badges: [], detail: {} },
+        { id: "judge:r", kind: "judge", label: "r", badges: [], detail: {} },
+        { id: "persona:p", kind: "persona", label: "p", badges: [], detail: {} },
+      ],
+      edges: [],
+      meta: { counts: { agents: 1, tools: 0, skills: 0, states: 0 } },
+    };
+    const { nodes } = modelToFlow(m);
+    expect(nodes.find((n) => n.id === "scenarios")!.type).toBe("workflowScenario");
+    expect(nodes.find((n) => n.id === "judge:r")!.type).toBe("workflowJudge");
+    expect(nodes.find((n) => n.id === "persona:p")!.type).toBe("workflowPersona");
+    expect(nodes.find((n) => n.id === "scenarios")!.width).toBe(170);
+  });
 });

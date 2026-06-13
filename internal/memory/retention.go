@@ -129,15 +129,8 @@ func (w *RetentionWorker) runOnce(ctx context.Context) {
 		if cfg == nil {
 			continue
 		}
-		branches := branchesForMode(cfg.Mode)
-		for _, branch := range branches {
-			if err := w.runBranch(ctx, tier, branch, cfg, batchSize); err != nil {
-				anyErr = true
-				metrics.observeBranchError(tier, branch)
-				w.log.Error(err, "retention branch failed",
-					"tier", string(tier),
-					"branch", string(branch))
-			}
+		if w.runTierBranches(ctx, tier, cfg, batchSize, metrics) {
+			anyErr = true
 		}
 	}
 
@@ -302,30 +295,69 @@ func (w *RetentionWorker) emitConsentAudit(
 	)
 }
 
-// runBranch dispatches one (tier, branch) pair to the appropriate
-// store call.
+// runTierBranches runs a tier's retention, honouring per-consent-category
+// overrides (#1376). Rows whose consent_category has an override are excluded
+// from the tier-wide sweep and processed under their own leaf config's mode;
+// everything else (NULL or non-overridden categories) follows the tier mode.
+// Returns true if any branch errored.
+func (w *RetentionWorker) runTierBranches(
+	ctx context.Context,
+	tier Tier,
+	cfg *omniav1alpha1.MemoryTierConfig,
+	batchSize int32,
+	metrics *retentionMetrics,
+) bool {
+	overrides := sortedKeys(cfg.PerCategory)
+
+	anyErr := false
+	runMode := func(mode omniav1alpha1.MemoryRetentionMode, lru *omniav1alpha1.MemoryLRUConfig, cat categoryScope) {
+		for _, branch := range branchesForMode(mode) {
+			if err := w.runBranch(ctx, tier, branch, lru, cat, batchSize); err != nil {
+				anyErr = true
+				metrics.observeBranchError(tier, branch)
+				w.log.Error(err, "retention branch failed",
+					"tier", string(tier), "branch", string(branch))
+			}
+		}
+	}
+
+	// Tier-wide sweep, leaving overridden categories to their own pass.
+	runMode(cfg.Mode, cfg.LRU, categoryScope{exclude: overrides})
+
+	// One pass per overridden category, under that category's own mode.
+	for _, category := range overrides {
+		leaf := cfg.PerCategory[category]
+		runMode(leaf.Mode, leaf.LRU, categoryScope{only: category})
+	}
+	return anyErr
+}
+
+// runBranch dispatches one (tier, branch) pair to the appropriate store call,
+// scoped to the supplied consent-category filter. lru carries the LRU config
+// for the branch's source (the tier config or a per-category leaf).
 func (w *RetentionWorker) runBranch(
 	ctx context.Context,
 	tier Tier,
 	branch RetentionBranch,
-	cfg *omniav1alpha1.MemoryTierConfig,
+	lru *omniav1alpha1.MemoryLRUConfig,
+	cat categoryScope,
 	batchSize int32,
 ) error {
 	metrics := defaultRetentionMetrics.Load()
 	switch branch {
 	case BranchTTL:
-		n, err := w.store.SoftDeleteExpiredTTL(ctx, tier, int(batchSize))
+		n, err := w.store.SoftDeleteExpiredTTL(ctx, tier, cat, int(batchSize))
 		if err != nil {
 			return err
 		}
 		metrics.observeSoftDelete(tier, branch, n)
 		return nil
 	case BranchLRU:
-		stale, err := resolveStaleAfter(cfg.LRU)
+		stale, err := resolveStaleAfter(lru)
 		if err != nil || stale <= 0 {
 			return err
 		}
-		n, err := w.store.SoftDeleteLRU(ctx, tier, stale, int(batchSize))
+		n, err := w.store.SoftDeleteLRU(ctx, tier, stale, cat, int(batchSize))
 		if err != nil {
 			return err
 		}

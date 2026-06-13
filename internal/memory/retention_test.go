@@ -99,6 +99,54 @@ func TestRetentionWorker_Run_SoftDeletesExpiredEntities(t *testing.T) {
 	<-workerDone
 }
 
+// TestRetentionWorker_PerCategoryOverride proves a per-category override
+// (#1376): the user tier runs TTL, but a perCategory entry pins "memory:health"
+// to Manual, so an expired health row survives the pass while an expired
+// general (NULL-category) row in the same tier is soft-deleted.
+func TestRetentionWorker_PerCategoryOverride(t *testing.T) {
+	store := newStore(t)
+	ctx := context.Background()
+	scope := testScope(testWorkspace1) // user-scoped → user tier
+	past := time.Now().Add(-1 * time.Hour)
+	const healthCat = "memory:health"
+
+	health := &Memory{
+		Type: "fact", Content: "protected health note", Confidence: 0.9,
+		Scope: scope, ExpiresAt: &past,
+		Metadata: map[string]any{MetaKeyConsentCategory: healthCat},
+	}
+	general := &Memory{
+		Type: "fact", Content: "ordinary note", Confidence: 0.9,
+		Scope: scope, ExpiresAt: &past,
+	}
+	require.NoError(t, store.Save(ctx, health))
+	require.NoError(t, store.Save(ctx, general))
+
+	ttl := omniav1alpha1.MemoryRetentionModeTTL
+	manual := omniav1alpha1.MemoryRetentionModeManual
+	loader := &StaticPolicyLoader{Policy: &omniav1alpha1.MemoryPolicy{
+		Spec: omniav1alpha1.MemoryPolicySpec{
+			Tiers: omniav1alpha1.MemoryRetentionTierSet{
+				User: &omniav1alpha1.MemoryTierConfig{
+					Mode: ttl,
+					PerCategory: map[string]omniav1alpha1.MemoryTierLeafConfig{
+						healthCat: {Mode: manual},
+					},
+				},
+			},
+			Schedule: "@every 10ms",
+		},
+	}}
+	w := NewRetentionWorker(store, loader, zap.New(zap.UseDevMode(true)))
+
+	w.runOnce(ctx)
+
+	assert.True(t, mustFetchEntityForgotten(t, store, general.ID),
+		"general row should be TTL-swept by the tier-wide pass")
+	assert.False(t, mustFetchEntityForgotten(t, store, health.ID),
+		"health row should be protected by the perCategory Manual override")
+}
+
 func TestRetentionWorker_Run_SkipsWhenNoPolicy(t *testing.T) {
 	store := newStore(t)
 	log := zap.New(zap.UseDevMode(true))

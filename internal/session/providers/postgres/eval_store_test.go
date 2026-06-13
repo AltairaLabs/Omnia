@@ -47,10 +47,11 @@ func seedSession(t *testing.T, store *EvalStoreImpl, sessionID string) {
 	_, err := store.pool.Exec(ctx, `INSERT INTO sessions (
 		id, agent_name, namespace, workspace_name, status,
 		created_at, updated_at, message_count, tool_call_count,
-		total_input_tokens, total_output_tokens, estimated_cost_usd, tags
-	) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+		total_input_tokens, total_output_tokens, estimated_cost_usd, tags,
+		virtual_user_id
+	) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
 		sessionID, "test-agent", "default", "test-workspace", "active",
-		now, now, 0, 0, 0, 0, 0, []string{},
+		now, now, 0, 0, 0, 0, 0, []string{}, "vu-test",
 	)
 	require.NoError(t, err)
 }

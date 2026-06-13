@@ -369,6 +369,65 @@ paths:
                 $ref: '#/components/schemas/BatchDeleteResponse'
 
   /memories/{id}:
+    get:
+      operationId: openMemory
+      summary: Open a memory's full body
+      description: Returns the full memory record (content + metadata) for one entity.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: workspace
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The memory record
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemoryResponse'
+        '400':
+          description: Missing memory ID or workspace
+        '404':
+          description: Memory not found
+    patch:
+      operationId: updateMemory
+      summary: Update a memory (supersede prior observation)
+      description: |
+        Atomically supersedes the entity's prior active observation and inserts
+        a new one carrying the request body's content, so recall sees the new
+        value immediately. Responds with `action=auto_superseded` and the
+        superseded observation IDs.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateMemoryRequest'
+      responses:
+        '200':
+          description: Memory updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SaveMemoryResponse'
+        '400':
+          description: Missing content or scope.user_id
+        '404':
+          description: Memory not found
     delete:
       operationId: deleteMemory
       summary: Forget a memory
@@ -392,6 +451,130 @@ paths:
           description: Missing memory ID or workspace
         '404':
           description: Memory not found
+
+  /memories/supersede:
+    post:
+      operationId: supersedeMemories
+      summary: Collapse N entities into one canonical memory
+      description: |
+        Marks each source entity's active observation inactive and lands a
+        single new observation under `source_ids[0]` — used to resolve
+        duplicate-fact noise in one round trip.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SupersedeRequest'
+      responses:
+        '200':
+          description: Memories superseded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SaveMemoryResponse'
+        '400':
+          description: Empty source_ids, missing content, or missing scope.user_id
+
+  /memories/conflicts:
+    get:
+      operationId: listConflicts
+      summary: List conflicted entities
+      description: |
+        Returns entities whose active observation count is greater than one —
+        a signal that a write path bypassed the supersede/dedup machinery.
+        Operators triage these in the dashboard.
+      parameters:
+        - name: workspace
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Conflicted entities
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConflictsResponse'
+
+  /relations:
+    post:
+      operationId: linkMemories
+      summary: Link two entities with a relation
+      description: |
+        Inserts a row into memory_relations connecting source_id to target_id
+        with the given relation_type, so derived facts survive renames of the
+        anchor entity.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LinkRequest'
+      responses:
+        '201':
+          description: Relation created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LinkResponse'
+        '400':
+          description: Missing source_id, target_id, relation_type, or scope.workspace_id
+        '404':
+          description: Source or target entity not found
+
+  /ingest/summary-candidates:
+    get:
+      operationId: listSummaryCandidates
+      summary: List pending document-summary work items
+      description: |
+        Read-only queue the summarizer agent polls to discover documents
+        awaiting summarization.
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+            maximum: 200
+      responses:
+        '200':
+          description: Pending summary candidates
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListSummaryCandidatesResponse'
+
+  /ingest/summaries:
+    post:
+      operationId: saveDocumentSummary
+      summary: Persist a completed document summary
+      description: |
+        The summarizer agent posts the summary it produced for a pending work
+        item; memory-api stores it (chunking first for summaryThenChunk) and
+        completes the item.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SaveDocumentSummaryRequest'
+      responses:
+        '201':
+          description: Summary stored
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SaveDocumentSummaryResponse'
+        '400':
+          description: Missing workspace_id
+        '404':
+          description: Work item not found
 
   /institutional/ingest:
     post:
@@ -688,6 +871,37 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /admin/embedding-dimension-change:
+    servers:
+      - url: /
+        description: Admin route, served outside the /api/v1 prefix.
+    post:
+      operationId: recordEmbeddingDimensionChange
+      summary: Record consent for an embedding-dimension change
+      description: |
+        Records one-shot consent to change the memory embedding vector
+        dimension. The startup reconciler consumes the marker the next time it
+        performs a (destructive) reshape to that dimension (#1309). This only
+        records intent — it does not itself alter the schema. Responds 503 when
+        the binary wasn't wired with a consent recorder.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmbeddingDimensionChangeRequest'
+      responses:
+        '200':
+          description: Consent recorded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmbeddingDimensionChangeResponse'
+        '400':
+          description: target_dim out of range
+        '503':
+          description: Consent recording unavailable (recorder not wired)
+
 components:
   schemas:
     Memory:
@@ -838,8 +1052,52 @@ components:
           format: float
         limit:
           type: integer
+        seed_entity_ids:
+          type: array
+          items:
+            type: string
+          description: |
+            Multi-mode graph recall: entities reachable from these seeds
+            (following `relation_types` up to `max_graph_hops`) are merged into
+            the tier-filtered results. Empty disables graph traversal.
+        max_graph_hops:
+          type: integer
+          description: Maximum relation hops to follow from `seed_entity_ids`.
+        relation_types:
+          type: array
+          items:
+            type: string
+          description: Edge types followed during traversal (e.g. ABOUT, MENTIONS). Empty follows all types.
+        structured_lookups:
+          type: array
+          items:
+            $ref: '#/components/schemas/StructuredLookup'
+          description: Exact filter queries merged into the result set alongside ranked recall.
       required:
         - workspace_id
+
+    StructuredLookup:
+      type: object
+      description: |
+        Exact filter query (by kind, name-prefix, purpose) merged into
+        multi-tier recall. `workspace_id` is taken from the enclosing request.
+      properties:
+        user_id:
+          type: string
+          description: Empty = only institutional/agent rows.
+        agent_id:
+          type: string
+          description: Empty = only non-agent rows.
+        kinds:
+          type: array
+          items:
+            type: string
+        name_prefix:
+          type: string
+        purpose:
+          type: string
+        limit:
+          type: integer
 
     RetrieveMultiTierResponse:
       type: object
@@ -1056,3 +1314,192 @@ components:
           description: Maximum results to return (default 20, max 100)
       required:
         - workspace_id
+
+    UpdateMemoryRequest:
+      type: object
+      description: |
+        Body for PATCH /memories/{id}. The path identifies the entity; the
+        new observation is attached and the prior active one superseded in the
+        same transaction.
+      properties:
+        content:
+          type: string
+        type:
+          type: string
+        confidence:
+          type: number
+          format: float
+        scope:
+          type: object
+          additionalProperties:
+            type: string
+          description: Must include user_id.
+      required:
+        - content
+        - scope
+
+    SupersedeRequest:
+      type: object
+      properties:
+        source_ids:
+          type: array
+          items:
+            type: string
+          description: Entity IDs whose active observations are marked inactive. The new observation lands under source_ids[0].
+        content:
+          type: string
+        type:
+          type: string
+        confidence:
+          type: number
+          format: float
+        scope:
+          type: object
+          additionalProperties:
+            type: string
+          description: Must include user_id.
+      required:
+        - source_ids
+        - content
+        - scope
+
+    SaveMemoryResponse:
+      type: object
+      description: |
+        Result of a write that may have superseded prior observations.
+        `action` reflects what the dedup pipeline did (e.g. saved,
+        auto_superseded).
+      properties:
+        memory:
+          $ref: '#/components/schemas/Memory'
+        action:
+          type: string
+        supersedes:
+          type: array
+          items:
+            type: string
+          description: Observation IDs superseded by this write.
+        supersede_reason:
+          type: string
+        potential_duplicates:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+
+    ConflictsResponse:
+      type: object
+      properties:
+        conflicts:
+          type: array
+          items:
+            $ref: '#/components/schemas/ConflictedEntity'
+        total:
+          type: integer
+
+    ConflictedEntity:
+      type: object
+      properties:
+        entity_id:
+          type: string
+        kind:
+          type: string
+        user_id:
+          type: string
+        agent_id:
+          type: string
+        active_count:
+          type: integer
+
+    LinkRequest:
+      type: object
+      properties:
+        source_id:
+          type: string
+        target_id:
+          type: string
+        relation_type:
+          type: string
+        weight:
+          type: number
+          format: float
+        scope:
+          type: object
+          additionalProperties:
+            type: string
+          description: Must include workspace_id.
+      required:
+        - source_id
+        - target_id
+        - relation_type
+        - scope
+
+    LinkResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          description: The newly-created relation ID.
+
+    ListSummaryCandidatesResponse:
+      type: object
+      properties:
+        candidates:
+          type: array
+          items:
+            $ref: '#/components/schemas/SummaryCandidateResponse'
+        total:
+          type: integer
+
+    SummaryCandidateResponse:
+      type: object
+      properties:
+        workspace_id:
+          type: string
+        about_key:
+          type: string
+        title:
+          type: string
+        url:
+          type: string
+        site:
+          type: string
+        text:
+          type: string
+        strategy:
+          type: string
+
+    SaveDocumentSummaryRequest:
+      type: object
+      properties:
+        workspace_id:
+          type: string
+        about_key:
+          type: string
+        summary:
+          type: string
+      required:
+        - workspace_id
+
+    SaveDocumentSummaryResponse:
+      type: object
+      properties:
+        stored_items:
+          type: integer
+
+    EmbeddingDimensionChangeRequest:
+      type: object
+      properties:
+        target_dim:
+          type: integer
+          description: Desired embedding vector dimension (1..MaxIndexableEmbeddingDim).
+      required:
+        - target_dim
+
+    EmbeddingDimensionChangeResponse:
+      type: object
+      properties:
+        status:
+          type: string
+        target_dim:
+          type: integer

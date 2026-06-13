@@ -89,15 +89,15 @@ func (h *DeletionHandler) handleGet(w http.ResponseWriter, r *http.Request) {
 
 // handleList processes a GET request to list deletion requests by user.
 func (h *DeletionHandler) handleList(w http.ResponseWriter, r *http.Request) {
-	userID := r.URL.Query().Get("user_id")
-	if userID == "" {
-		writeJSONError(w, http.StatusBadRequest, "missing user_id query parameter")
+	virtualUserID := r.URL.Query().Get("virtual_user_id")
+	if virtualUserID == "" {
+		writeJSONError(w, http.StatusBadRequest, "missing virtual_user_id query parameter")
 		return
 	}
 
-	requests, err := h.service.ListRequestsByUser(r.Context(), userID)
+	requests, err := h.service.ListRequestsByUser(r.Context(), virtualUserID)
 	if err != nil {
-		h.log.Error(err, "listing deletion requests failed", "userHash", logging.HashID(userID))
+		h.log.Error(err, "listing deletion requests failed", "userHash", logging.HashID(virtualUserID))
 		writeJSONError(w, http.StatusInternalServerError, "internal server error")
 		return
 	}

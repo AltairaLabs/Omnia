@@ -29,6 +29,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/altairalabs/omnia/internal/session"
+	"github.com/altairalabs/omnia/pkg/identity"
 
 	commonpb "go.opentelemetry.io/proto/otlp/common/v1"
 	tracepb "go.opentelemetry.io/proto/otlp/trace/v1"
@@ -210,6 +211,11 @@ func (t *Transformer) ensureSession(ctx context.Context, sessionID string, sc sp
 		UpdatedAt:         now,
 		Status:            session.SessionStatusActive,
 		State:             buildSessionState(spanAttrs),
+		// No richer identity is available on the trace path, so attribute the
+		// session to a deterministic pseudonym of its id (anonymous-fallback
+		// pattern). Guarantees a non-empty virtual_user_id so the row is visible
+		// to per-user DSAR erasure and satisfies the DB CHECK.
+		VirtualUserID: identity.PseudonymizeID(sessionID),
 	}
 
 	return t.writer.CreateSession(ctx, sess)

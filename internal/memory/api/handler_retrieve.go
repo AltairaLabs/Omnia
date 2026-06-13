@@ -45,6 +45,43 @@ type RetrieveMultiTierRequest struct {
 	Purposes      []string `json:"purposes,omitempty"`
 	MinConfidence float64  `json:"min_confidence,omitempty"`
 	Limit         int      `json:"limit,omitempty"`
+
+	// Multi-mode recall: graph traversal from seed entities and exact
+	// structured lookups, merged with the tier-filtered results. All optional.
+	SeedEntityIDs     []string                `json:"seed_entity_ids,omitempty"`
+	MaxGraphHops      int                     `json:"max_graph_hops,omitempty"`
+	RelationTypes     []string                `json:"relation_types,omitempty"`
+	StructuredLookups []StructuredLookupParam `json:"structured_lookups,omitempty"`
+}
+
+// StructuredLookupParam is the request-surface form of memory.StructuredLookup.
+// WorkspaceID is omitted — the store fills it from the request's workspace_id.
+type StructuredLookupParam struct {
+	UserID     string   `json:"user_id,omitempty"`
+	AgentID    string   `json:"agent_id,omitempty"`
+	Kinds      []string `json:"kinds,omitempty"`
+	NamePrefix string   `json:"name_prefix,omitempty"`
+	Purpose    string   `json:"purpose,omitempty"`
+	Limit      int      `json:"limit,omitempty"`
+}
+
+// toStoreLookups converts request lookups to the store form.
+func toStoreLookups(params []StructuredLookupParam) []memory.StructuredLookup {
+	if len(params) == 0 {
+		return nil
+	}
+	out := make([]memory.StructuredLookup, len(params))
+	for i, p := range params {
+		out[i] = memory.StructuredLookup{
+			UserID:     p.UserID,
+			AgentID:    p.AgentID,
+			Kinds:      p.Kinds,
+			NamePrefix: p.NamePrefix,
+			Purpose:    p.Purpose,
+			Limit:      p.Limit,
+		}
+	}
+	return out
 }
 
 // RetrieveMultiTierResponse is the JSON response for the endpoint.
@@ -83,14 +120,18 @@ func (h *Handler) handleRetrieveMultiTier(w http.ResponseWriter, r *http.Request
 	}
 
 	storeReq := memory.MultiTierRequest{
-		WorkspaceID:   req.WorkspaceID,
-		UserID:        req.UserID,
-		AgentID:       req.AgentID,
-		Query:         req.Query,
-		Types:         req.Types,
-		Purposes:      req.Purposes,
-		MinConfidence: req.MinConfidence,
-		Limit:         limit,
+		WorkspaceID:       req.WorkspaceID,
+		UserID:            req.UserID,
+		AgentID:           req.AgentID,
+		Query:             req.Query,
+		Types:             req.Types,
+		Purposes:          req.Purposes,
+		MinConfidence:     req.MinConfidence,
+		Limit:             limit,
+		SeedEntityIDs:     req.SeedEntityIDs,
+		MaxGraphHops:      req.MaxGraphHops,
+		RelationTypes:     req.RelationTypes,
+		StructuredLookups: toStoreLookups(req.StructuredLookups),
 	}
 
 	result, err := h.service.RetrieveMultiTier(r.Context(), storeReq)

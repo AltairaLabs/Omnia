@@ -33,18 +33,19 @@ import (
 
 // Sentinel errors returned by the session service.
 var (
-	ErrWarmStoreRequired  = errors.New("warm store is required for this operation")
-	ErrMissingWorkspace   = errors.New("workspace parameter is required")
-	ErrMissingQuery       = errors.New("search query parameter is required")
-	ErrMissingSessionID   = errors.New("session ID is required")
-	ErrInvalidSessionID   = errors.New("session ID must be a valid UUID")
-	ErrMissingBody        = errors.New("request body is required")
-	ErrMissingAgentName   = errors.New("agentName is required")
-	ErrMissingNamespace   = errors.New("namespace parameter is required")
-	ErrBodyTooLarge       = errors.New("request body too large")
-	ErrInvalidStatus      = errors.New("invalid session status")
-	ErrSearchQueryTooLong = errors.New("search query too long")
-	ErrRateLimitExceeded  = errors.New("rate limit exceeded")
+	ErrWarmStoreRequired    = errors.New("warm store is required for this operation")
+	ErrMissingWorkspace     = errors.New("workspace parameter is required")
+	ErrMissingQuery         = errors.New("search query parameter is required")
+	ErrMissingSessionID     = errors.New("session ID is required")
+	ErrInvalidSessionID     = errors.New("session ID must be a valid UUID")
+	ErrMissingBody          = errors.New("request body is required")
+	ErrMissingAgentName     = errors.New("agentName is required")
+	ErrMissingNamespace     = errors.New("namespace parameter is required")
+	ErrMissingVirtualUserID = errors.New("virtualUserId is required")
+	ErrBodyTooLarge         = errors.New("request body too large")
+	ErrInvalidStatus        = errors.New("invalid session status")
+	ErrSearchQueryTooLong   = errors.New("search query too long")
+	ErrRateLimitExceeded    = errors.New("rate limit exceeded")
 )
 
 // DefaultCacheTTL is the default TTL for hot cache entries populated from warm/cold.

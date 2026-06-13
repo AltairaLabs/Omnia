@@ -137,6 +137,7 @@ func (v *MgmtPlaneValidator) Validate(ctx context.Context, r *http.Request) (*po
 		jwt.WithIssuer(v.issuer),
 		jwt.WithAudience(v.audience),
 		jwt.WithValidMethods([]string{jwt.SigningMethodRS256.Alg()}),
+		jwt.WithExpirationRequired(),
 		jwt.WithLeeway(jwtLeeway),
 	)
 	token, parseErr := parser.ParseWithClaims(tokenString, claims, func(t *jwt.Token) (any, error) {

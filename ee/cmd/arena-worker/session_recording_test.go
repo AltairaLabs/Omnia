@@ -21,6 +21,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/altairalabs/omnia/internal/session"
+	"github.com/altairalabs/omnia/pkg/identity"
 )
 
 // mockSessionStore implements session.Store for testing session creation and status updates.
@@ -220,6 +221,33 @@ func TestArenaSessionManager_OnEvent_CreatesSession(t *testing.T) {
 	assert.Equal(t, "test-job", sessions[0].InitialState["arena.job"])
 	assert.Equal(t, "customer-support", sessions[0].InitialState["arena.scenario"])
 	assert.Equal(t, "run-001", sessions[0].InitialState["arena.run_id"])
+}
+
+func TestArenaSessionManager_OnEvent_SetsVirtualUser(t *testing.T) {
+	store := newMockStore()
+	mgr := newArenaSessionManager(store, logr.Discard(), arenaSessionMetadata{
+		JobName:    "test-job",
+		Namespace:  "default",
+		ProviderID: "openai",
+	}, "test-item")
+
+	mgr.OnEvent(&events.Event{
+		Type:      events.EventProviderCallCompleted,
+		SessionID: "run-001",
+		Timestamp: time.Now(),
+		Data:      &events.ProviderCallCompletedData{Provider: "openai"},
+	})
+
+	time.Sleep(100 * time.Millisecond)
+
+	sessions := store.getCreatedSessions()
+	require.Len(t, sessions, 1)
+
+	expected := identity.PseudonymizeID("run-001")
+	assert.NotEmpty(t, expected, "pseudonym of non-empty runID must be non-empty")
+	assert.Equal(t, expected, sessions[0].VirtualUserID,
+		"loadtest session should be attributed to per-run virtual user")
+	assert.NotEmpty(t, sessions[0].VirtualUserID, "VirtualUserID must satisfy NOT-NULL constraint")
 }
 
 func TestArenaSessionManager_OnEvent_DeduplicatesSessions(t *testing.T) {

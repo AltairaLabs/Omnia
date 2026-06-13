@@ -32,6 +32,23 @@ vi.mock("@/hooks/use-agents", () => ({
   useAgents: () => ({ data: [], isLoading: false }),
 }));
 
+// Render the dropdown menu inline so its items are directly assertable
+// (radix menus rely on pointer-capture, which jsdom doesn't implement).
+// Keep the rest of the module's exports (Separator, etc.) so RunDropdown and
+// DeployButton, which also use this primitive, still render.
+vi.mock("@/components/ui/dropdown-menu", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/components/ui/dropdown-menu")>();
+  return {
+    ...actual,
+    DropdownMenu: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+    DropdownMenuTrigger: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+    DropdownMenuContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+    DropdownMenuItem: ({ children, onClick }: { children: React.ReactNode; onClick?: () => void }) => (
+      <button type="button" onClick={onClick}>{children}</button>
+    ),
+  };
+});
+
 // Mock useProjectJobs hooks (used by RunDropdown). Avoids needing a
 // QueryClientProvider wrapper around every render in this test.
 vi.mock("@/hooks/use-project-jobs", () => ({
@@ -86,6 +103,7 @@ describe("ProjectToolbar", () => {
     onProjectSelect: vi.fn(),
     onSave: vi.fn(),
     onNewProject: vi.fn(),
+    onNewFromTemplate: vi.fn(),
     onRefresh: vi.fn(),
     onDeleteProject: vi.fn(),
   };
@@ -177,15 +195,24 @@ describe("ProjectToolbar", () => {
     expect(screen.getByTitle("New Project")).toBeInTheDocument();
   });
 
-  it("should call onNewProject when new button is clicked", async () => {
+  it("should call onNewProject when 'New blank project' is clicked", async () => {
     const onNewProject = vi.fn();
     const user = userEvent.setup();
     render(<ProjectToolbar {...defaultProps} onNewProject={onNewProject} />);
 
-    const newButton = screen.getByTitle("New Project");
-    await user.click(newButton);
+    await user.click(screen.getByText("New blank project"));
 
     expect(onNewProject).toHaveBeenCalledTimes(1);
+  });
+
+  it("should call onNewFromTemplate when 'From template…' is clicked", async () => {
+    const onNewFromTemplate = vi.fn();
+    const user = userEvent.setup();
+    render(<ProjectToolbar {...defaultProps} onNewFromTemplate={onNewFromTemplate} />);
+
+    await user.click(screen.getByText("From template…"));
+
+    expect(onNewFromTemplate).toHaveBeenCalledTimes(1);
   });
 
   it("should show refresh button with title", () => {
