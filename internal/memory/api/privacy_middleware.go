@@ -28,6 +28,7 @@ import (
 
 	"github.com/go-logr/logr"
 
+	"github.com/altairalabs/omnia/internal/memory"
 	"github.com/altairalabs/omnia/pkg/logging"
 )
 
@@ -173,11 +174,33 @@ func readAndDecode(w http.ResponseWriter, r *http.Request) ([]byte, SaveMemoryRe
 	return data, req, decoded, nil
 }
 
+// isSaveShapedPath reports whether the path is one of the routes whose body is
+// a SaveMemoryRequest (the only routes the privacy middleware may decode and
+// re-encode). Matched exactly so e.g. /api/v1/memories/supersede is excluded.
+func isSaveShapedPath(p string) bool {
+	switch p {
+	case "/api/v1/memories", "/api/v1/institutional/memories", "/api/v1/agent-memories":
+		return true
+	default:
+		return false
+	}
+}
+
 // Wrap returns an http.Handler that enforces privacy policy before delegating
-// to next. Only POST requests are intercepted.
+// to next. Only POST requests to save-shaped routes are intercepted.
 func (m *MemoryPrivacyMiddleware) Wrap(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		// MAINT-1: only the save-shaped routes carry a SaveMemoryRequest body.
+		// Other POSTs (supersede, retrieve, compaction summaries, relations,
+		// ingest, admin) have different shapes — decoding + re-marshaling them as
+		// SaveMemoryRequest drops their fields and 400s the handler, so pass them
+		// straight through untouched.
+		if !isSaveShapedPath(r.URL.Path) {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -193,6 +216,20 @@ func (m *MemoryPrivacyMiddleware) Wrap(next http.Handler) http.Handler {
 			}
 			http.Error(w, "failed to read body", http.StatusInternalServerError)
 			return
+		}
+
+		// SEC-2: the canonical client (internal/memory/httpclient.Save) sends
+		// scope in the JSON body, not query params, so reading scope only from
+		// the query silently skipped opt-out gating and per-workspace PII
+		// redaction on the main write path. Prefer body scope; fall back to
+		// query params for callers that still use them.
+		if decoded {
+			if ws := req.Scope[memory.ScopeWorkspaceID]; ws != "" {
+				workspace = ws
+			}
+			if uid := req.Scope[memory.ScopeUserID]; uid != "" {
+				userID = uid
+			}
 		}
 
 		// Run the validator to fill / upgrade req.Category. The validator
