@@ -82,6 +82,44 @@ function SkillSourceDetail({
   );
 }
 
+function VariableDetail({ node }: Readonly<{ node: WorkloadNode }>) {
+  if (node.kind !== "variable") return null;
+  const d = node.detail;
+  return (
+    <div className="mb-3 space-y-1 text-sm">
+      <div>
+        <span className="text-muted-foreground">Type: </span>
+        <span className="font-mono">{d.varType}</span>
+        {d.required ? <span className="text-muted-foreground"> · required</span> : null}
+      </div>
+      {d.example && (
+        <div><span className="text-muted-foreground">Example: </span><span className="font-mono">{d.example}</span></div>
+      )}
+      {!!d.values?.length && (
+        <div><span className="text-muted-foreground">Values: </span><span className="font-mono">{d.values.join(", ")}</span></div>
+      )}
+    </div>
+  );
+}
+
+function ArtifactDetail({ node }: Readonly<{ node: WorkloadNode }>) {
+  if (node.kind !== "artifact") return null;
+  const d = node.detail;
+  return (
+    <div className="mb-3 space-y-1 text-sm">
+      {d.artifactMode && (
+        <div><span className="text-muted-foreground">Mode: </span><span className="font-mono">{d.artifactMode}</span></div>
+      )}
+      {!!d.producers?.length && (
+        <div><span className="text-muted-foreground">Produced by: </span><span className="font-mono">{d.producers.join(", ")}</span></div>
+      )}
+      {!!d.consumers?.length && (
+        <div><span className="text-muted-foreground">Consumed by: </span><span className="font-mono">{d.consumers.join(", ")}</span></div>
+      )}
+    </div>
+  );
+}
+
 export function NodeDrawer({
   node,
   onClose,
@@ -100,6 +138,8 @@ export function NodeDrawer({
         <p className="text-sm text-muted-foreground mb-3">{node.detail.description}</p>
       )}
       <SkillSourceDetail node={node} namespace={namespace} />
+      <VariableDetail node={node} />
+      <ArtifactDetail node={node} />
       {node.detail.systemTemplatePreview && (
         <pre className="text-xs bg-muted rounded p-2 whitespace-pre-wrap mb-3">
           {node.detail.systemTemplatePreview}
