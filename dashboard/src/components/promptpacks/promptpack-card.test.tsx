@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
-import { PromptPackCard } from "./promptpack-card";
+import { PromptPackCard, tierSummary } from "./promptpack-card";
 import type { PromptPack } from "@/types";
 
 // Mock next/link
@@ -16,7 +16,7 @@ vi.mock("next/link", () => ({
 
 // Stub the workload tier hook (the real one needs a QueryClient + data service).
 vi.mock("@/hooks/use-workload-tier", () => ({
-  useWorkloadTier: () => ({ tier: "crew", agents: 3, tools: 8, states: 2, isLoading: false }),
+  useWorkloadTier: () => ({ tier: "multiagent", agents: 3, tools: 8, states: 2, isLoading: false }),
 }));
 
 const mockPromptPack: PromptPack = {
@@ -134,8 +134,34 @@ describe("PromptPackCard", () => {
 
   it("renders the workload tier chip with agent and tool counts", () => {
     render(<PromptPackCard promptPack={mockPromptPack} />);
-    expect(screen.getByText(/Crew/)).toBeInTheDocument();
+    expect(screen.getByText(/Multi-agent/)).toBeInTheDocument();
     expect(screen.getByText(/3 agents/)).toBeInTheDocument();
     expect(screen.getByText(/8 tools/)).toBeInTheDocument();
+  });
+});
+
+describe("tierSummary", () => {
+  const base = { agents: 3, tools: 8, states: 2, isLoading: false } as const;
+
+  it("labels and summarises a multi-agent tier", () => {
+    expect(tierSummary({ ...base, tier: "multiagent" })).toEqual({
+      label: "Multi-agent",
+      parts: ["3 agents", "8 tools"],
+    });
+  });
+
+  it("labels and summarises a workflow tier", () => {
+    expect(tierSummary({ ...base, tier: "workflow" })).toEqual({
+      label: "Workflow",
+      parts: ["2 states", "8 tools"],
+    });
+  });
+
+  it("labels and summarises a single tier (and the undefined fallback)", () => {
+    expect(tierSummary({ ...base, tier: "single" })).toEqual({
+      label: "Single",
+      parts: ["8 tools"],
+    });
+    expect(tierSummary({ ...base, tier: undefined }).label).toBe("Single");
   });
 });

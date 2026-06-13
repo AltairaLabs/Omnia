@@ -2,7 +2,7 @@
 // Adapters (from-promptpack, from-agent, future from-arena) produce this;
 // WorkloadGraph consumes it. It must not reference packs, agents, or Arena.
 
-export type WorkloadTier = "solo" | "flow" | "crew";
+export type WorkloadTier = "single" | "workflow" | "multiagent";
 export type WorkloadAltitude = "definition" | "deployment";
 export type WorkloadNodeKind =
   | "agent" | "state" | "tool" | "skill" | "provider" | "scenario" | "judge";

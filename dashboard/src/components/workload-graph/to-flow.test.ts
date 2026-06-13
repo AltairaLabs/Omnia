@@ -3,7 +3,7 @@ import { modelToFlow } from "./to-flow";
 import type { WorkloadModel } from "./types";
 
 const model: WorkloadModel = {
-  tier: "flow",
+  tier: "workflow",
   altitude: "deployment",
   nodes: [
     { id: "a", kind: "state", label: "A", isEntry: true, badges: [], detail: {} },

@@ -14,7 +14,7 @@ function source(name: string, phase?: SkillSourcePhase, skillCount?: number): Sk
 }
 
 const base: WorkloadModel = {
-  tier: "flow",
+  tier: "workflow",
   altitude: "definition",
   nodes: [
     {

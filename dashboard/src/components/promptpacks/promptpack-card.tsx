@@ -6,20 +6,21 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { StatusBadge } from "@/components/agents";
 import { useWorkloadTier, type WorkloadTierSummary } from "@/hooks/use-workload-tier";
+import { workloadTierLabel } from "@/components/workload-graph";
 import type { PromptPack } from "@/types";
 
 interface PromptPackCardProps {
   promptPack: PromptPack;
 }
 
-function tierSummary(wl: WorkloadTierSummary): { label: string; parts: string[] } {
-  if (wl.tier === "crew") {
-    return { label: "Crew", parts: [`${wl.agents} agents`, `${wl.tools} tools`] };
+export function tierSummary(wl: WorkloadTierSummary): { label: string; parts: string[] } {
+  if (wl.tier === "multiagent") {
+    return { label: workloadTierLabel("multiagent"), parts: [`${wl.agents} agents`, `${wl.tools} tools`] };
   }
-  if (wl.tier === "flow") {
-    return { label: "Flow", parts: [`${wl.states} states`, `${wl.tools} tools`] };
+  if (wl.tier === "workflow") {
+    return { label: workloadTierLabel("workflow"), parts: [`${wl.states} states`, `${wl.tools} tools`] };
   }
-  return { label: "Solo", parts: [`${wl.tools} tools`] };
+  return { label: workloadTierLabel("single"), parts: [`${wl.tools} tools`] };
 }
 
 function formatRelativeTime(timestamp?: string): string {
