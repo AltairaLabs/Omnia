@@ -4,6 +4,7 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import { ReactFlowProvider } from "@xyflow/react";
 import {
   WorkflowStateNode, InitialNode, FinalNode, VariableNode, ArtifactNode,
+  ScenarioGroupNode, JudgeNode, PersonaNode,
 } from "./workflow-nodes";
 import type { WorkloadNode } from "./types";
 
@@ -47,5 +48,38 @@ describe("workflow shape nodes", () => {
   it("mutes an unresolved artifact", () => {
     wrap(<ArtifactNode data={{ node: { id: "a", kind: "artifact", label: "ghost", resolution: "unresolved", badges: [], detail: {} } }} />);
     expect(screen.getByText("ghost")).toBeInTheDocument();
+  });
+});
+
+describe("arena harness nodes", () => {
+  it("renders a scenario group with count and fires onClick", () => {
+    const node: WorkloadNode = {
+      id: "scenarios", kind: "scenario", label: "3 scenarios", badges: [],
+      detail: { scenarios: [{ id: "a" }, { id: "b" }, { id: "c" }] },
+    };
+    const onClick = vi.fn();
+    wrap(<ScenarioGroupNode data={{ node, onClick }} />);
+    expect(screen.getByText("3 scenarios")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button"));
+    expect(onClick).toHaveBeenCalledWith("scenarios");
+  });
+
+  it("renders a judge with its provider", () => {
+    const node: WorkloadNode = {
+      id: "judge:relevance", kind: "judge", label: "relevance", badges: [],
+      detail: { judgeProvider: "gpt-4" },
+    };
+    wrap(<JudgeNode data={{ node, onClick: vi.fn() }} />);
+    expect(screen.getByText("relevance")).toBeInTheDocument();
+    expect(screen.getByText(/gpt-4/)).toBeInTheDocument();
+  });
+
+  it("renders a persona node", () => {
+    const node: WorkloadNode = {
+      id: "persona:sre", kind: "persona", label: "sre-user", badges: [],
+      detail: { persona: { id: "sre-user", role: "sre-user" } },
+    };
+    wrap(<PersonaNode data={{ node, onClick: vi.fn() }} />);
+    expect(screen.getByText("sre-user")).toBeInTheDocument();
   });
 });
