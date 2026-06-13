@@ -670,22 +670,18 @@ func TestMessageRoundTrip(t *testing.T) {
 		Metadata:     map[string]string{"key": "val"},
 		InputTokens:  100,
 		OutputTokens: 50,
+		CostUSD:      0.0123,
 		ToolCallID:   "tc1",
 		SequenceNum:  3,
+		HasMedia:     true,
+		MediaTypes:   []string{"image", "audio"},
 	}
 
 	apiMsg := MessageToAPI(original)
 	roundTripped := MessageFromAPI(apiMsg)
 
-	assert.Equal(t, original.ID, roundTripped.ID)
-	assert.Equal(t, original.Role, roundTripped.Role)
-	assert.Equal(t, original.Content, roundTripped.Content)
-	assert.Equal(t, original.Timestamp, roundTripped.Timestamp)
-	assert.Equal(t, original.Metadata, roundTripped.Metadata)
-	assert.Equal(t, original.InputTokens, roundTripped.InputTokens)
-	assert.Equal(t, original.OutputTokens, roundTripped.OutputTokens)
-	assert.Equal(t, original.ToolCallID, roundTripped.ToolCallID)
-	assert.Equal(t, original.SequenceNum, roundTripped.SequenceNum)
+	// All fields must survive the round trip (MAINT-7).
+	assert.Equal(t, original, roundTripped)
 }
 
 func TestToolCallRoundTrip(t *testing.T) {
