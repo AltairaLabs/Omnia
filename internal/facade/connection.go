@@ -110,6 +110,20 @@ func (s *Server) handleConnection(ctx context.Context, c *Connection) {
 	s.readMessageLoop(connCtx, c, log)
 }
 
+// SessionID returns the connection's current session ID safely.
+func (c *Connection) SessionID() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.sessionID
+}
+
+// SessionPersisted reports whether the session has been written to the store.
+func (c *Connection) SessionPersisted() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.sessionPersisted
+}
+
 // cleanupConnection handles connection cleanup when it closes.
 func (s *Server) cleanupConnection(c *Connection, log logr.Logger) {
 	s.mu.Lock()
@@ -122,7 +136,10 @@ func (s *Server) cleanupConnection(c *Connection, log logr.Logger) {
 
 	s.metrics.ConnectionClosed()
 
-	if c.sessionID != "" && c.sessionPersisted {
+	// Snapshot session ID once under the mutex; the closure runs in a goroutine
+	// and must not race against concurrent writers of c.sessionID.
+	sessionID := c.SessionID()
+	if sessionID != "" && c.SessionPersisted() {
 		s.metrics.SessionClosed()
 		s.submitCompletion(func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -131,22 +148,22 @@ func (s *Server) cleanupConnection(c *Connection, log logr.Logger) {
 			// Read the session to check its current status. If the session
 			// already has a terminal status (e.g. "error"), do not overwrite
 			// it with "completed".
-			sess, err := s.sessionStore.GetSession(ctx, c.sessionID)
+			sess, err := s.sessionStore.GetSession(ctx, sessionID)
 			if err != nil {
-				log.Error(err, "session lookup for completion failed", "sessionID", c.sessionID)
+				log.Error(err, "session lookup for completion failed", "sessionID", sessionID)
 				return
 			}
 			if session.IsTerminalStatus(sess.Status) {
 				log.V(1).Info("session already terminal, skipping completion",
-					"sessionID", c.sessionID, "status", sess.Status)
+					"sessionID", sessionID, "status", sess.Status)
 				return
 			}
 
-			if err := s.sessionStore.UpdateSessionStatus(ctx, c.sessionID, session.SessionStatusUpdate{
+			if err := s.sessionStore.UpdateSessionStatus(ctx, sessionID, session.SessionStatusUpdate{
 				SetStatus:  session.SessionStatusCompleted,
 				SetEndedAt: time.Now(),
 			}); err != nil {
-				log.Error(err, "session completion failed", "sessionID", c.sessionID)
+				log.Error(err, "session completion failed", "sessionID", sessionID)
 			}
 		})
 	}
