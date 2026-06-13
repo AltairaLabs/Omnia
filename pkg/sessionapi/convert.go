@@ -107,9 +107,16 @@ func MessageToAPI(m session.Message) Message {
 		OutputTokens: ptrNonZero(m.OutputTokens),
 		ToolCallId:   ptrNonEmpty(m.ToolCallID),
 		SequenceNum:  ptrNonZero(m.SequenceNum),
+		HasMedia:     ptrNonZero(m.HasMedia),
 	}
 	if m.Metadata != nil {
 		msg.Metadata = &m.Metadata
+	}
+	if m.CostUSD != 0 {
+		msg.CostUsd = &m.CostUSD
+	}
+	if len(m.MediaTypes) > 0 {
+		msg.MediaTypes = &m.MediaTypes
 	}
 	return msg
 }
@@ -299,8 +306,11 @@ func MessageFromAPI(m Message) session.Message {
 		Timestamp:    deref(m.Timestamp),
 		InputTokens:  deref(m.InputTokens),
 		OutputTokens: deref(m.OutputTokens),
+		CostUSD:      deref(m.CostUsd),
 		ToolCallID:   deref(m.ToolCallId),
 		SequenceNum:  deref(m.SequenceNum),
+		HasMedia:     deref(m.HasMedia),
+		MediaTypes:   derefSlice(m.MediaTypes),
 		Metadata:     derefMap(m.Metadata),
 	}
 	if m.Role != nil {

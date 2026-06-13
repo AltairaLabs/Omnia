@@ -397,6 +397,13 @@ func (p *Provider) DeleteSessionsByScope(ctx context.Context, scope providers.Se
 }
 
 func (p *Provider) AppendMessage(ctx context.Context, sessionID string, msg *session.Message) error {
+	// Default the partition-key timestamp to now() when zero, so a zero-value
+	// (0001-01-01) doesn't fall outside every partition and trip
+	// "no partition of relation found for row".
+	if msg.Timestamp.IsZero() {
+		msg.Timestamp = time.Now().UTC()
+	}
+
 	// Auto-increment message_count only. Token/cost counters are derived from
 	// provider_calls (via RecordProviderCall) and tool_call_count from tool_calls
 	// (via RecordToolCall) to avoid double-counting.
@@ -752,6 +759,13 @@ func (p *Provider) UpdateSessionStatusReturning(ctx context.Context, sessionID s
 // --- Tool call and provider call management ---------------------------------
 
 func (p *Provider) RecordToolCall(ctx context.Context, sessionID string, tc *session.ToolCall) error {
+	// Default the partition-key timestamp to now() when zero, so a zero-value
+	// (0001-01-01) doesn't fall outside every partition and trip
+	// "no partition of relation found for row".
+	if tc.CreatedAt.IsZero() {
+		tc.CreatedAt = time.Now().UTC()
+	}
+
 	// Each tool call lifecycle event (started, completed, failed, client_request)
 	// is recorded as its own row. Rows sharing the same call_id represent the
 	// same logical tool invocation. Only "pending" events (the initial start)
@@ -799,6 +813,13 @@ func (p *Provider) RecordToolCall(ctx context.Context, sessionID string, tc *ses
 }
 
 func (p *Provider) RecordProviderCall(ctx context.Context, sessionID string, pc *session.ProviderCall) error {
+	// Default the partition-key timestamp to now() when zero, so a zero-value
+	// (0001-01-01) doesn't fall outside every partition and trip
+	// "no partition of relation found for row".
+	if pc.CreatedAt.IsZero() {
+		pc.CreatedAt = time.Now().UTC()
+	}
+
 	// Each provider call lifecycle event (completed, failed) is its own row.
 	// Only completed agent calls add tokens/cost to session counters.
 	// Judge and self-play calls are tracked separately.
@@ -943,6 +964,13 @@ func scanRuntimeEvent(row pgx.Row) (*session.RuntimeEvent, error) {
 }
 
 func (p *Provider) RecordRuntimeEvent(ctx context.Context, sessionID string, evt *session.RuntimeEvent) error {
+	// Default the partition-key timestamp to now() when zero, so a zero-value
+	// (0001-01-01) doesn't fall outside every partition and trip
+	// "no partition of relation found for row".
+	if evt.Timestamp.IsZero() {
+		evt.Timestamp = time.Now().UTC()
+	}
+
 	query := `INSERT INTO runtime_events (id, session_id, event_type, data, duration_ms, error_message, timestamp)
 		SELECT $1, $2, $3, $4, $5, $6, $7
 		WHERE EXISTS (SELECT 1 FROM sessions WHERE id = $2)`

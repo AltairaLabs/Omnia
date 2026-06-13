@@ -324,6 +324,62 @@ func TestHandleGetMessages_PlaintextPassthroughWhenNoEncryptor(t *testing.T) {
 	}
 }
 
+// TestHandleGetSession_DecryptsContent verifies that messages returned by
+// GET /sessions/{id} are decrypted when an encryptor is configured (SEC-6).
+func TestHandleGetSession_DecryptsContent(t *testing.T) {
+	h, warm := setupEncryptionHandler(t)
+	warm.sessions[encSessionA] = testSession(encSessionA)
+
+	enc := mockEncryptor{key: 0x5A}
+	h.SetEncryptorResolver(encResolverFor(encSessionA, enc))
+
+	// Store pre-encrypted content.
+	encrypted := encryptedString(t, enc, "hello world")
+	warm.messages[encSessionA] = []*session.Message{
+		{ID: "m1", Content: encrypted, SequenceNum: 1},
+	}
+
+	mux := serveMux(h)
+	req := newEncRequest(http.MethodGet, "/api/v1/sessions/"+encSessionA, "")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	resp := decodeBodyJSON[SessionResponse](t, rec)
+	if len(resp.Messages) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(resp.Messages))
+	}
+	if resp.Messages[0].Content != "hello world" {
+		t.Fatalf("expected decrypted content %q, got %q", "hello world", resp.Messages[0].Content)
+	}
+}
+
+// TestHandleGetSession_DecryptError_Returns500 verifies a decryption failure in
+// GET /sessions/{id} (SEC-6) propagates as a 5xx instead of leaking ciphertext.
+func TestHandleGetSession_DecryptError_Returns500(t *testing.T) {
+	h, warm := setupEncryptionHandler(t)
+	warm.sessions[encSessionA] = testSession(encSessionA)
+
+	// A value with the encrypted prefix that errEncryptor will fail to decrypt.
+	warm.messages[encSessionA] = []*session.Message{
+		{ID: "m1", Content: errMsgEncPrefix + "aW52YWxpZA==", SequenceNum: 1},
+	}
+	h.SetEncryptorResolver(EncryptorResolverFunc(func(_ string) (Encryptor, bool) {
+		return errEncryptor{}, true
+	}))
+
+	mux := serveMux(h)
+	req := newEncRequest(http.MethodGet, "/api/v1/sessions/"+encSessionA, "")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code < 500 {
+		t.Fatalf("expected 5xx, got %d", rec.Code)
+	}
+}
+
 // TestHandleRecordToolCall_EncryptsFields verifies that Arguments, Result, and
 // ErrorMessage are encrypted and Name stays plaintext in the stored tool call.
 func TestHandleRecordToolCall_EncryptsFields(t *testing.T) {

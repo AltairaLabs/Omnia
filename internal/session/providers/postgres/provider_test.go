@@ -1549,3 +1549,60 @@ func TestConcurrentSessionCreation_ScaleLimit(t *testing.T) {
 		})
 	}
 }
+
+// TestRecord_ZeroTimestampDefaultsToNow verifies that the four partition-keyed
+// write paths (AppendMessage, RecordToolCall, RecordProviderCall,
+// RecordRuntimeEvent) default a zero-value timestamp to now() instead of
+// failing with "no partition of relation found for row" (MAINT-5).
+func TestRecord_ZeroTimestampDefaultsToNow(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	p := newProvider(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Microsecond)
+
+	sess := makeSession("e0eebc99-9c0b-4ef8-bb6d-6bb9bd380e01", now)
+	require.NoError(t, p.CreateSession(ctx, sess))
+
+	t.Run("AppendMessage", func(t *testing.T) {
+		// Zero Timestamp.
+		require.NoError(t, p.AppendMessage(ctx, sess.ID, &session.Message{
+			ID:          uid(1001),
+			Role:        session.RoleUser,
+			Content:     "zero-ts message",
+			SequenceNum: 1,
+		}))
+		msgs, err := p.GetMessages(ctx, sess.ID, defaultMsgOpts)
+		require.NoError(t, err)
+		require.Len(t, msgs, 1)
+		assert.False(t, msgs[0].Timestamp.IsZero(), "timestamp should have been defaulted to now()")
+	})
+
+	t.Run("RecordToolCall", func(t *testing.T) {
+		require.NoError(t, p.RecordToolCall(ctx, sess.ID, &session.ToolCall{
+			ID:        uid(1002),
+			CallID:    "call_zero_ts",
+			Name:      "noop",
+			Status:    session.ToolCallStatusPending,
+			Arguments: map[string]any{},
+		}))
+	})
+
+	t.Run("RecordProviderCall", func(t *testing.T) {
+		require.NoError(t, p.RecordProviderCall(ctx, sess.ID, &session.ProviderCall{
+			ID:       uid(1003),
+			Provider: pcProviderAnthropic,
+			Model:    "claude-sonnet-4",
+			Status:   session.ProviderCallStatusCompleted,
+		}))
+	})
+
+	t.Run("RecordRuntimeEvent", func(t *testing.T) {
+		require.NoError(t, p.RecordRuntimeEvent(ctx, sess.ID, &session.RuntimeEvent{
+			ID:        uid(1004),
+			EventType: "pipeline.started",
+		}))
+	})
+}

@@ -371,7 +371,10 @@ BEGIN
             END IF;
         EXCEPTION
             WHEN OTHERS THEN
-                NULL;
+                -- Don't abort the whole retention sweep on one bad partition;
+                -- surface the failure as a warning instead of swallowing it.
+                RAISE WARNING 'drop_old_partitions: failed to drop partition %: %',
+                    rec.partition_name, SQLERRM;
         END;
     END LOOP;
     RETURN dropped_count;

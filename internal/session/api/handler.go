@@ -106,7 +106,8 @@ type Handler struct {
 }
 
 // NewHandler creates a new session API handler.
-// An optional maxBodySize can be passed (first value used); defaults to 10 MB.
+// An optional maxBodySize can be passed (first value used); defaults to
+// DefaultMaxBodySize (16 MB).
 func NewHandler(service *SessionService, log logr.Logger, maxBodySize ...int64) *Handler {
 	mbs := DefaultMaxBodySize
 	if len(maxBodySize) > 0 && maxBodySize[0] > 0 {
@@ -429,6 +430,17 @@ func (h *Handler) handleGetSession(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
+	enc := h.encryptorFor(sessionID)
+	if enc != nil {
+		for _, m := range msgPtrs {
+			if derr := decryptMessage(enc, m); derr != nil {
+				log.Error(derr, "DecryptMessage failed", "sessionID", sessionID)
+				writeError(w, derr)
+				return
+			}
+		}
+	}
+
 	msgs := make([]session.Message, 0, len(msgPtrs))
 	for _, m := range msgPtrs {
 		msgs = append(msgs, *m)
@@ -746,6 +758,11 @@ func (h *Handler) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 // handleBulkDeleteSessions deletes all sessions matching a namespace scope,
 // with optional agent and before-cutoff filters. Required: ?namespace=.
 // Returns {"deleted": <count>}. User-agnostic — removes any matching session.
+//
+// Visibility window (SEC-8): purged sessions remain readable by exact ID from
+// the hot cache for up to DefaultCacheTTL (15m) after this returns, because the
+// bulk delete does not proactively invalidate the cache. See
+// SessionService.DeleteSessionsByScope for the compliance implication.
 func (h *Handler) handleBulkDeleteSessions(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	namespace := q.Get("namespace")

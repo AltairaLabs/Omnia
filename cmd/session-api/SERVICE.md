@@ -23,7 +23,8 @@
 ## Inputs
 - **HTTP** from Facade, Runtime, Dashboard (proxied via Operator):
   - `POST /api/v1/sessions` — create session
-  - `GET /api/v1/sessions` — list/search sessions
+  - `GET /api/v1/sessions` — list sessions
+  - `GET /api/v1/sessions/search` — search sessions
   - `GET /api/v1/sessions/{id}` — retrieve session
   - `GET /api/v1/sessions/{id}/messages` — get messages
   - `POST /api/v1/sessions/{id}/messages` — append message
@@ -35,10 +36,19 @@
   - `GET /api/v1/sessions/{id}/events` — get runtime events
   - `POST /api/v1/eval-results` — record eval results
   - `GET /api/v1/sessions/{id}/eval-results` — get session eval results
+  - `GET /api/v1/sessions/{id}/eval-results/summary` — session eval result summary
+  - `POST /api/v1/sessions/{id}/evaluate` — evaluate a session
   - `GET /api/v1/eval-results` — list eval results with filters
+  - `GET /api/v1/eval-results/aggregate` — aggregate eval results (product dashboard, Prometheus-free)
+  - `GET /api/v1/eval-results/discover` — discover available evals
+  - `GET /api/v1/provider-calls/aggregate` — aggregate provider calls (cost/usage)
+  - `GET /api/v1/provider-calls/discover` — discover provider-call dimensions
+  - `POST /api/v1/provider-usage` — record workspace-scoped, session-less spend (embeddings, judge tokens)
   - `POST /api/v1/sessions/{id}/ttl` — refresh TTL
-  - `PATCH /api/v1/sessions/{id}/stats` — update session counters
-  - `DELETE /api/v1/sessions/{id}` — delete session
+  - `PATCH /api/v1/sessions/{id}/status` — update session status/ended-at (alias: `/stats`)
+  - `PATCH /api/v1/sessions/{id}/decorate` — decorate a session (labels/metadata)
+  - `DELETE /api/v1/sessions/{id}` — delete a single session
+  - `DELETE /api/v1/sessions?namespace={ns}` — bulk purge sessions by scope (optional `agent`/`before` filters). Note: purged sessions stay readable by ID until the hot-cache TTL expires (see service.go `DeleteSessionsByScope`).
   - `GET /api/v1/privacy-policy?namespace={ns}&agent={agent}` — returns the facade-visible subset of the effective SessionPrivacyPolicy (`{"recording":{"enabled","facadeData","richData"}}`); 204 when no policy applies
 - **gRPC/HTTP** OTLP trace ingestion (optional)
 
