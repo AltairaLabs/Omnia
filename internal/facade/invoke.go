@@ -27,6 +27,7 @@ import (
 
 	"github.com/altairalabs/omnia/internal/session"
 	"github.com/altairalabs/omnia/pkg/logctx"
+	"github.com/altairalabs/omnia/pkg/policy"
 	runtimev1 "github.com/altairalabs/omnia/pkg/runtime/v1"
 )
 
@@ -119,7 +120,14 @@ func (i *FunctionInvoker) Invoke(ctx context.Context, name string, input json.Ra
 		}, nil
 	}
 
-	i.openSession(ctx, invocationID, log)
+	// Attribute the session to a virtual user. This path (MCP adapter) has
+	// only a ctx — no *http.Request — so we resolve from the context identity
+	// injected by auth.Middleware rather than ResolveUserPseudonym. With no
+	// resolvable identity we pseudonymize the invocation id so the NOT-NULL
+	// virtual_user_id create never rejects an anonymous invocation. See #1285.
+	virtualUserID := pseudonymFromIdentity(policy.IdentityFromContext(ctx), invocationID)
+
+	i.openSession(ctx, invocationID, virtualUserID, log)
 	finalStatus := session.SessionStatusCompleted
 	var failureEvt *session.RuntimeEvent
 	defer func() {
@@ -183,7 +191,7 @@ func (i *FunctionInvoker) Invoke(ctx context.Context, name string, input json.Ra
 // openSession creates the session row for an invocation. Failure is
 // best-effort: a session-api outage logs but does not fail the
 // user-facing request.
-func (i *FunctionInvoker) openSession(ctx context.Context, invocationID string, log logr.Logger) {
+func (i *FunctionInvoker) openSession(ctx context.Context, invocationID, virtualUserID string, log logr.Logger) {
 	if i.cfg.SessionStore == nil {
 		return
 	}
@@ -194,6 +202,7 @@ func (i *FunctionInvoker) openSession(ctx context.Context, invocationID string, 
 		WorkspaceName:     i.cfg.SessionMeta.WorkspaceName,
 		PromptPackName:    i.cfg.SessionMeta.PromptPackName,
 		PromptPackVersion: i.cfg.SessionMeta.PromptPackVersion,
+		VirtualUserID:     virtualUserID,
 		Tags:              []string{FunctionSessionTag},
 	}); err != nil {
 		log.Error(err, "failed to create session row for function invocation (non-fatal)")

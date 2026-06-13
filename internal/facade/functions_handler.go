@@ -31,7 +31,9 @@ import (
 	"github.com/santhosh-tekuri/jsonschema/v6"
 
 	"github.com/altairalabs/omnia/internal/session"
+	"github.com/altairalabs/omnia/pkg/identity"
 	"github.com/altairalabs/omnia/pkg/logctx"
+	"github.com/altairalabs/omnia/pkg/policy"
 	runtimev1 "github.com/altairalabs/omnia/pkg/runtime/v1"
 )
 
@@ -181,12 +183,25 @@ func (h *FunctionsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx := logctx.WithInvocationID(r.Context(), invocationID)
 	log := h.log.WithValues("function", name, "invocationID", invocationID)
 
+	// Resolve the virtual user the session is attributed to. The request is
+	// already past auth (cmd/agent wraps this route with auth.Middleware,
+	// which injects the identity into the context), so we read that identity
+	// here. ResolveUserPseudonym honors the mgmt-plane on-behalf-of header,
+	// device_id, and validated EndUser. With no resolvable identity we fall
+	// back to pseudonymizing the invocation id so the NOT-NULL
+	// virtual_user_id create never rejects an anonymous invocation. See #1285.
+	authIdentity := policy.IdentityFromContext(r.Context())
+	virtualUserID := ResolveUserPseudonym(r, authIdentity)
+	if virtualUserID == "" {
+		virtualUserID = identity.PseudonymizeID(invocationID)
+	}
+
 	// Open the session row at the very start. The runtime's
 	// OmniaEventStore writes downstream audit rows (messages,
 	// tool_calls, provider_calls, eval_results, runtime_events)
 	// against this session_id. closeSession patches the terminal
 	// status before we return.
-	h.openSession(ctx, invocationID, log)
+	h.openSession(ctx, invocationID, virtualUserID, log)
 	finalStatus := session.SessionStatusCompleted
 	var failureEvt *session.RuntimeEvent
 	defer func() {
@@ -254,7 +269,7 @@ func (h *FunctionsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // best-effort: a session-api outage logs but does not fail the
 // user-facing request — the runtime can still produce its result and
 // the downstream audit rows simply land orphaned (parent missing).
-func (h *FunctionsHandler) openSession(ctx context.Context, invocationID string, log logr.Logger) {
+func (h *FunctionsHandler) openSession(ctx context.Context, invocationID, virtualUserID string, log logr.Logger) {
 	if h.sessionStore == nil {
 		return
 	}
@@ -265,6 +280,7 @@ func (h *FunctionsHandler) openSession(ctx context.Context, invocationID string,
 		WorkspaceName:     h.sessionMeta.WorkspaceName,
 		PromptPackName:    h.sessionMeta.PromptPackName,
 		PromptPackVersion: h.sessionMeta.PromptPackVersion,
+		VirtualUserID:     virtualUserID,
 		Tags:              []string{FunctionSessionTag},
 	}); err != nil {
 		log.Error(err, "failed to create session row for function invocation (non-fatal)")

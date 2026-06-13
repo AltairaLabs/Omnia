@@ -27,6 +27,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/altairalabs/omnia/internal/session"
+	"github.com/altairalabs/omnia/pkg/identity"
+	"github.com/altairalabs/omnia/pkg/policy"
 	runtimev1 "github.com/altairalabs/omnia/pkg/runtime/v1"
 )
 
@@ -384,6 +386,55 @@ func TestInvoker_SessionLifecycle_StoreFailuresAreNonFatal(t *testing.T) {
 	result, err := inv.Invoke(context.Background(), testFunctionName, []byte(`{}`))
 	require.NoError(t, err)
 	assert.Equal(t, OutcomeOK, result.Outcome, "store failures must not fail the invocation")
+}
+
+func TestInvoker_SessionLifecycle_VirtualUserFromIdentity(t *testing.T) {
+	// When the context carries an authenticated identity, the session is
+	// attributed to that end user's pseudonym.
+	inputSchema, err := CompileSchema([]byte(`{"type":"object"}`))
+	require.NoError(t, err)
+	outputSchema, err := CompileSchema([]byte(`{"type":"object"}`))
+	require.NoError(t, err)
+
+	store := &invokerSessionStore{}
+	rts := &invokerStub{resp: &runtimev1.InvocationResponse{OutputJson: `{}`}}
+	inv := newTestInvokerWithSession(t, map[string]*FunctionSpec{
+		testFunctionName: {Name: testFunctionName, InputSchema: inputSchema, OutputSchema: outputSchema},
+	}, rts, store)
+
+	id := &policy.AuthenticatedIdentity{EndUser: "mcp-user@example.com"}
+	ctx := policy.WithIdentity(context.Background(), id)
+	result, err := inv.Invoke(ctx, testFunctionName, []byte(`{}`))
+	require.NoError(t, err)
+	require.Equal(t, OutcomeOK, result.Outcome)
+
+	require.Len(t, store.creates, 1)
+	assert.Equal(t, identity.PseudonymizeID("mcp-user@example.com"), store.creates[0].VirtualUserID,
+		"session must be attributed to the context identity's end user")
+}
+
+func TestInvoker_SessionLifecycle_VirtualUserAnonymousFallback(t *testing.T) {
+	// No identity in context → fall back to pseudonymizing the invocation id
+	// so the NOT-NULL virtual_user_id is always populated.
+	inputSchema, err := CompileSchema([]byte(`{"type":"object"}`))
+	require.NoError(t, err)
+	outputSchema, err := CompileSchema([]byte(`{"type":"object"}`))
+	require.NoError(t, err)
+
+	store := &invokerSessionStore{}
+	rts := &invokerStub{resp: &runtimev1.InvocationResponse{OutputJson: `{}`}}
+	inv := newTestInvokerWithSession(t, map[string]*FunctionSpec{
+		testFunctionName: {Name: testFunctionName, InputSchema: inputSchema, OutputSchema: outputSchema},
+	}, rts, store)
+
+	result, err := inv.Invoke(context.Background(), testFunctionName, []byte(`{}`))
+	require.NoError(t, err)
+	require.Equal(t, OutcomeOK, result.Outcome)
+
+	require.Len(t, store.creates, 1)
+	opts := store.creates[0]
+	assert.NotEmpty(t, opts.VirtualUserID, "anonymous invocations must still get a non-empty virtual user id")
+	assert.Equal(t, identity.PseudonymizeID(opts.ID), opts.VirtualUserID)
 }
 
 func TestInvoker_NoSessionStore_TransientMode(t *testing.T) {

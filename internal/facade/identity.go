@@ -68,3 +68,22 @@ func ResolveUserPseudonym(r *http.Request, authIdentity *policy.AuthenticatedIde
 	}
 	return identity.PseudonymizeID(rawUserID)
 }
+
+// pseudonymFromIdentity resolves a non-empty virtual-user pseudonym from a
+// context-borne authenticated identity, falling back to pseudonymizing
+// fallbackSeed when no identity is resolvable. It is the request-less
+// counterpart to ResolveUserPseudonym, used by the MCP/invoke path which has
+// only a ctx (no *http.Request, so no on-behalf-of header or device_id query).
+//
+// The guaranteed-non-empty result keeps the NOT-NULL sessions.virtual_user_id
+// create from rejecting anonymous function invocations. With no identity, each
+// invocation becomes its own virtual user (fallbackSeed is the invocation id).
+// See #1285 (session attribution).
+func pseudonymFromIdentity(id *policy.AuthenticatedIdentity, fallbackSeed string) string {
+	if id != nil {
+		if pseudonym := identity.PseudonymizeID(id.EndUser); pseudonym != "" {
+			return pseudonym
+		}
+	}
+	return identity.PseudonymizeID(fallbackSeed)
+}
