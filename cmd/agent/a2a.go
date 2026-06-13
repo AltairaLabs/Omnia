@@ -160,8 +160,11 @@ func runA2AFacade(cfg *agent.Config, log logr.Logger, tracingProvider *tracing.P
 
 	// Serve A2A handler on the facade port.
 	facadeServer := &http.Server{
-		Addr:    fmt.Sprintf(":%d", cfg.FacadePort),
-		Handler: mux,
+		Addr:         fmt.Sprintf(":%d", cfg.FacadePort),
+		Handler:      mux,
+		ReadTimeout:  readTimeout,
+		WriteTimeout: writeTimeout,
+		IdleTimeout:  idleTimeout,
 	}
 
 	errChan := make(chan error, 1)

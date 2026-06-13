@@ -351,8 +351,11 @@ func startA2AServer(
 	a2aHandler := buildA2AHandler(a2aSrv.Handler(), a2aMetrics, tracingProvider, a2aChain, log)
 
 	a2aHTTPServer := &http.Server{
-		Addr:    fmt.Sprintf(":%d", cfg.A2APort),
-		Handler: a2aHandler,
+		Addr:         fmt.Sprintf(":%d", cfg.A2APort),
+		Handler:      a2aHandler,
+		ReadTimeout:  readTimeout,
+		WriteTimeout: writeTimeout,
+		IdleTimeout:  idleTimeout,
 	}
 
 	return a2aSrv, a2aHTTPServer
