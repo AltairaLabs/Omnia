@@ -55,7 +55,11 @@ export async function layoutFlow<T extends Node>(
       "elk.layered.nodePlacement.strategy": "NETWORK_SIMPLEX",
       "elk.layered.crossingMinimization.strategy": "LAYER_SWEEP",
     },
-    children: nodes.map((n) => ({ id: n.id, width: NODE_W, height: NODE_H })),
+    children: nodes.map((n) => ({
+      id: n.id,
+      width: (n as { width?: number }).width ?? NODE_W,
+      height: (n as { height?: number }).height ?? NODE_H,
+    })),
     edges: edges.map((e) => ({
       id: e.id,
       sources: [e.source],
