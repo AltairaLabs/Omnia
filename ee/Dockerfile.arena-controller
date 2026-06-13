@@ -12,7 +12,7 @@ COPY promptkit-local* /workspace/promptkit-local/
 
 # Set up go.work for local PromptKit if the source directory exists
 RUN if [ -d "/workspace/promptkit-local/tools/arena" ]; then \
-        echo "go 1.25.6" > go.work && \
+        echo "go 1.26.0" > go.work && \
         echo "" >> go.work && \
         echo "use (" >> go.work && \
         echo "    ." >> go.work && \
