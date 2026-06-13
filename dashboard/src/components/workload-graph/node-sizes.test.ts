@@ -14,4 +14,9 @@ describe("nodeSize", () => {
     expect(nodeSize("variable")).toEqual({ width: 120, height: 30 });
     expect(nodeSize("artifact")).toEqual({ width: 150, height: 44 });
   });
+  it("sizes arena harness nodes", () => {
+    expect(nodeSize("scenario")).toEqual({ width: 170, height: 56 });
+    expect(nodeSize("judge")).toEqual({ width: 170, height: 56 });
+    expect(nodeSize("persona")).toEqual({ width: 170, height: 56 });
+  });
 });

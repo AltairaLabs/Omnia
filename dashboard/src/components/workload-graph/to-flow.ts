@@ -13,12 +13,13 @@ const KIND_TO_TYPE: Record<WorkloadNodeKind, string> = {
   provider: "workloadProvider",
   tool: "workloadAgent",
   skill: "workloadSkill",
-  scenario: "workloadAgent",
-  judge: "workloadAgent",
+  scenario: "workflowScenario",
+  judge: "workflowJudge",
   initial: "workflowInitial",
   final: "workflowFinal",
   variable: "workflowVariable",
   artifact: "workflowArtifact",
+  persona: "workflowPersona",
 };
 
 function edgeStyle(style?: WorkloadModel["edges"][number]["style"]): FlowEdge["style"] {

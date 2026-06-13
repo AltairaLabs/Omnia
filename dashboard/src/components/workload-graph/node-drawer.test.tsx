@@ -89,4 +89,35 @@ describe("NodeDrawer", () => {
     expect(screen.getByText(/gather/)).toBeInTheDocument();
     expect(screen.getByText(/answer/)).toBeInTheDocument();
   });
+
+  it("shows pricing for a provider node", () => {
+    const provider: WorkloadNode = {
+      id: "provider:gpt", kind: "provider", label: "gpt", badges: [],
+      detail: { model: "gpt-4o", providerType: "openai", pricing: { inputPer1kTokens: 0.01, outputPer1kTokens: 0.03 } },
+    };
+    render(<NodeDrawer node={provider} onClose={vi.fn()} />);
+    expect(screen.getByText(/0.01/)).toBeInTheDocument();
+    expect(screen.getByText(/0.03/)).toBeInTheDocument();
+  });
+
+  it("lists scenarios for a scenario group node", () => {
+    const scenarios: WorkloadNode = {
+      id: "scenarios", kind: "scenario", label: "2 scenarios", badges: [],
+      detail: { scenarios: [{ id: "qa", turnCount: 2, tags: ["smoke"] }, { id: "edge" }] },
+    };
+    render(<NodeDrawer node={scenarios} onClose={vi.fn()} />);
+    expect(screen.getByText("qa")).toBeInTheDocument();
+    expect(screen.getByText("edge")).toBeInTheDocument();
+    expect(screen.getByText(/smoke/)).toBeInTheDocument();
+  });
+
+  it("shows the judge provider and persona role/provider", () => {
+    const judge: WorkloadNode = { id: "judge:r", kind: "judge", label: "r", badges: [], detail: { judgeProvider: "judge-gpt" } };
+    const { rerender } = render(<NodeDrawer node={judge} onClose={vi.fn()} />);
+    expect(screen.getByText(/judge-gpt/)).toBeInTheDocument();
+    const persona: WorkloadNode = { id: "persona:u", kind: "persona", label: "u", badges: [], detail: { persona: { id: "u", role: "user", provider: "selfplay" } } };
+    rerender(<NodeDrawer node={persona} onClose={vi.fn()} />);
+    expect(screen.getByText(/selfplay/)).toBeInTheDocument();
+    expect(screen.getByText(/user/)).toBeInTheDocument();
+  });
 });

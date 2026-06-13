@@ -2,7 +2,7 @@
 
 import { memo } from "react";
 import { Handle, Position } from "@xyflow/react";
-import { Wrench, Sparkles, RotateCcw, Variable, FileText } from "lucide-react";
+import { Wrench, Sparkles, RotateCcw, Variable, FileText, Layers, Scale, User } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { nodeSize } from "./node-sizes";
 import type { WorkloadNodeData } from "./to-flow";
@@ -114,3 +114,69 @@ export const ArtifactNode = memo(({ data }: Readonly<{ data: WorkloadNodeData }>
   );
 });
 ArtifactNode.displayName = "ArtifactNode";
+
+export const ScenarioGroupNode = memo(({ data }: Readonly<{ data: WorkloadNodeData }>) => {
+  const { node, onClick } = data;
+  const { width, height } = nodeSize("scenario");
+  return (
+    <div className="relative" style={{ width, height }}>
+      <Handle type="source" position={Position.Right} className="!bg-teal-500" />
+      <button
+        type="button"
+        onClick={() => onClick?.(node.id)}
+        style={{ width, height }}
+        className="box-border flex items-center gap-2 rounded-md border-2 border-teal-500 bg-teal-50 px-3 text-left cursor-pointer overflow-hidden hover:shadow-md dark:bg-teal-950/30"
+      >
+        <Layers className="h-4 w-4 shrink-0 text-teal-600" />
+        <span className="font-medium text-sm text-teal-900 truncate dark:text-teal-200">{node.label}</span>
+      </button>
+    </div>
+  );
+});
+ScenarioGroupNode.displayName = "ScenarioGroupNode";
+
+export const JudgeNode = memo(({ data }: Readonly<{ data: WorkloadNodeData }>) => {
+  const { node, onClick } = data;
+  const { width, height } = nodeSize("judge");
+  return (
+    <div className="relative" style={{ width, height }}>
+      <Handle type="target" position={Position.Left} className="!bg-purple-500" />
+      <button
+        type="button"
+        onClick={() => onClick?.(node.id)}
+        style={{ width, height }}
+        className="box-border flex flex-col justify-center rounded-md border-2 border-purple-500 bg-card px-3 text-left cursor-pointer overflow-hidden hover:shadow-md"
+      >
+        <span className="inline-flex items-center gap-2 font-medium text-sm truncate">
+          <Scale className="h-4 w-4 shrink-0 text-purple-600" />
+          {node.label}
+        </span>
+        {node.detail.judgeProvider && (
+          <span className="text-xs text-muted-foreground truncate">{node.detail.judgeProvider}</span>
+        )}
+      </button>
+    </div>
+  );
+});
+JudgeNode.displayName = "JudgeNode";
+
+export const PersonaNode = memo(({ data }: Readonly<{ data: WorkloadNodeData }>) => {
+  const { node, onClick } = data;
+  const { width, height } = nodeSize("persona");
+  return (
+    <div className="relative" style={{ width, height }}>
+      <Handle type="source" position={Position.Right} className="!bg-amber-500" />
+      <button
+        type="button"
+        onClick={() => onClick?.(node.id)}
+        style={{ width, height }}
+        className="box-border flex items-center gap-2 rounded-md border-2 border-dashed border-amber-500 bg-card px-3 text-left cursor-pointer overflow-hidden hover:shadow-md"
+      >
+        <User className="h-4 w-4 shrink-0 text-amber-600" />
+        <span className="font-medium text-sm truncate">{node.label}</span>
+      </button>
+      <Handle type="target" position={Position.Left} className="!bg-amber-500" />
+    </div>
+  );
+});
+PersonaNode.displayName = "PersonaNode";

@@ -56,6 +56,22 @@ describe("WorkloadGraph", () => {
     expect(screen.getByText(/claude-opus-4-8/)).toBeInTheDocument();
     expect(screen.getByText(/≤12 visits/)).toBeInTheDocument();
   });
+
+  it("shows an arena test-topology banner at the test altitude", () => {
+    const model: WorkloadModel = {
+      tier: "single", altitude: "test",
+      nodes: [
+        { id: "a", kind: "agent", label: "A", badges: [], detail: {} },
+        { id: "provider:gpt", kind: "provider", label: "gpt", badges: [], detail: {} },
+        { id: "scenarios", kind: "scenario", label: "2 scenarios", badges: [], detail: { scenarios: [{ id: "x" }, { id: "y" }] } },
+      ],
+      edges: [],
+      meta: { counts: { agents: 1, tools: 0, skills: 0, states: 0 } },
+    };
+    render(<WorkloadGraph model={model} />);
+    expect(screen.getByText(/Arena test topology/)).toBeInTheDocument();
+    expect(screen.getByText(/1 provider × 2 scenarios/)).toBeInTheDocument();
+  });
 });
 
 describe("fitViewAfterPaint", () => {

@@ -6,6 +6,7 @@ import { Bot, Workflow, Wrench, Sparkles, RotateCcw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   WorkflowStateNode, InitialNode, FinalNode, VariableNode, ArtifactNode,
+  ScenarioGroupNode, JudgeNode, PersonaNode,
 } from "./workflow-nodes";
 import type { WorkloadNodeData } from "./to-flow";
 import type { WorkloadBadge, WorkloadNode } from "./types";
@@ -141,4 +142,7 @@ export const workloadNodeTypes = {
   workflowFinal: FinalNode,
   workflowVariable: VariableNode,
   workflowArtifact: ArtifactNode,
+  workflowScenario: ScenarioGroupNode,
+  workflowJudge: JudgeNode,
+  workflowPersona: PersonaNode,
 };
