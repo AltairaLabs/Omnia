@@ -172,6 +172,28 @@ func TestSessionToAPI_EmptyCohortFields(t *testing.T) {
 	assert.Nil(t, result.Variant)
 }
 
+func TestSessionToAPI_WithVirtualUserID(t *testing.T) {
+	id := uuid.New().String()
+	result := SessionToAPI(id, session.CreateSessionOptions{
+		AgentName:     "a",
+		Namespace:     "ns",
+		VirtualUserID: "vu-42",
+	})
+
+	require.NotNil(t, result.VirtualUserId)
+	assert.Equal(t, "vu-42", *result.VirtualUserId)
+}
+
+func TestSessionToAPI_EmptyVirtualUserID(t *testing.T) {
+	id := uuid.New().String()
+	result := SessionToAPI(id, session.CreateSessionOptions{
+		AgentName: "a",
+		Namespace: "ns",
+	})
+
+	assert.Nil(t, result.VirtualUserId)
+}
+
 func TestSessionFromAPI_WithCohortFields(t *testing.T) {
 	sid := uuid.New()
 	s := &Session{

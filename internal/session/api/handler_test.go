@@ -1714,7 +1714,7 @@ func TestHandleCreateSession_OK(t *testing.T) {
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 
-	body := `{"id":"` + testSessionIDOther + `","agentName":"test-agent","namespace":"default","workspaceName":"test-ws","ttlSeconds":3600}`
+	body := `{"id":"` + testSessionIDOther + `","agentName":"test-agent","namespace":"default","workspaceName":"test-ws","ttlSeconds":3600,"virtualUserId":"vu-test"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/sessions", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
@@ -1741,7 +1741,7 @@ func TestHandleCreateSession_WithTagsAndInitialState(t *testing.T) {
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 
-	body := `{"id":"` + testSessionIDOther + `","agentName":"test-agent","namespace":"default","workspaceName":"test-ws","tags":["prod","v2"],"initialState":{"lang":"en","mode":"chat"}}`
+	body := `{"id":"` + testSessionIDOther + `","agentName":"test-agent","namespace":"default","workspaceName":"test-ws","tags":["prod","v2"],"initialState":{"lang":"en","mode":"chat"},"virtualUserId":"vu-test"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/sessions", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
@@ -1768,7 +1768,7 @@ func TestHandleCreateSession_EmptyTagsAndState(t *testing.T) {
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 
-	body := `{"id":"` + testSessionIDOther + `","agentName":"test-agent","namespace":"default","workspaceName":"test-ws"}`
+	body := `{"id":"` + testSessionIDOther + `","agentName":"test-agent","namespace":"default","workspaceName":"test-ws","virtualUserId":"vu-test"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/sessions", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
@@ -1809,7 +1809,7 @@ func TestHandleCreateSession_NoWarmStore(t *testing.T) {
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 
-	body := `{"id":"` + testSessionID + `","agentName":"a","namespace":"ns","workspaceName":"ws"}`
+	body := `{"id":"` + testSessionID + `","agentName":"a","namespace":"ns","workspaceName":"ws","virtualUserId":"vu-test"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/sessions", bytes.NewBufferString(body))
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
@@ -2197,7 +2197,7 @@ func TestHandleCreateSession_AuditEvent(t *testing.T) {
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 
-	body := `{"id":"` + testSessionIDOther + `","agentName":"a","namespace":"ns","workspaceName":"ws"}`
+	body := `{"id":"` + testSessionIDOther + `","agentName":"a","namespace":"ns","workspaceName":"ws","virtualUserId":"vu-test"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/sessions", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "TestBrowser/2.0")
@@ -2234,7 +2234,7 @@ func TestHandleRegisterRoutes_WriteEndpoints(t *testing.T) {
 		body   string
 		want   int
 	}{
-		{http.MethodPost, "/api/v1/sessions", `{"id":"` + testSessionIDOther + `","agentName":"a","namespace":"ns","workspaceName":"ws"}`, http.StatusCreated},
+		{http.MethodPost, "/api/v1/sessions", `{"id":"` + testSessionIDOther + `","agentName":"a","namespace":"ns","workspaceName":"ws","virtualUserId":"vu-test"}`, http.StatusCreated},
 		{http.MethodPost, "/api/v1/sessions/" + testSessionID + "/messages", `{"id":"m","role":"user","content":"hi"}`, http.StatusCreated},
 		{http.MethodPatch, "/api/v1/sessions/" + testSessionID + "/status", `{"addMessages":1}`, http.StatusOK},
 		{http.MethodPost, "/api/v1/sessions/" + testSessionID + "/ttl", `{"ttlSeconds":60}`, http.StatusOK},
@@ -2806,7 +2806,7 @@ func TestHandleCreateSession_EmptyID(t *testing.T) {
 	h.RegisterRoutes(mux)
 
 	// Empty ID should be allowed (server may assign one).
-	body := `{"id":"","agentName":"a","namespace":"ns","workspaceName":"ws"}`
+	body := `{"id":"","agentName":"a","namespace":"ns","workspaceName":"ws","virtualUserId":"vu-test"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/sessions", bytes.NewBufferString(body))
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
@@ -3513,7 +3513,7 @@ func TestHandleCreateSession_WithCohortFields(t *testing.T) {
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 
-	body := `{"id":"` + testSessionIDOther + `","agentName":"test-agent","namespace":"default","workspaceName":"test-ws","cohortId":"cohort-123","variant":"canary"}`
+	body := `{"id":"` + testSessionIDOther + `","agentName":"test-agent","namespace":"default","workspaceName":"test-ws","cohortId":"cohort-123","variant":"canary","virtualUserId":"vu-test"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/sessions", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
@@ -3537,7 +3537,7 @@ func TestHandleCreateSession_NoCohortFields(t *testing.T) {
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 
-	body := `{"id":"` + testSessionIDOther + `","agentName":"test-agent","namespace":"default","workspaceName":"test-ws"}`
+	body := `{"id":"` + testSessionIDOther + `","agentName":"test-agent","namespace":"default","workspaceName":"test-ws","virtualUserId":"vu-test"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/sessions", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
@@ -3552,5 +3552,58 @@ func TestHandleCreateSession_NoCohortFields(t *testing.T) {
 	}
 	if resp.Session.Variant != "" {
 		t.Errorf("Variant = %q, want empty", resp.Session.Variant)
+	}
+}
+
+func TestHandleCreateSession_EmptyVirtualUserID(t *testing.T) {
+	h, _, warm := setupHandler(t)
+
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	// virtualUserId is omitted — session-api must reject with 400 (the column is
+	// NOT NULL) rather than letting the database raise a 500.
+	body := `{"id":"` + testSessionIDOther + `","agentName":"test-agent","namespace":"default","workspaceName":"test-ws"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/sessions", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+	resp := decodeJSON[ErrorResponse](t, rec)
+	if resp.Error != ErrMissingVirtualUserID.Error() {
+		t.Fatalf("expected error %q, got %q", ErrMissingVirtualUserID.Error(), resp.Error)
+	}
+	if len(warm.createdSessions) != 0 {
+		t.Fatalf("store must not be called when virtualUserId is empty; got %d creates", len(warm.createdSessions))
+	}
+}
+
+func TestHandleCreateSession_VirtualUserID_ReachesStore(t *testing.T) {
+	h, _, warm := setupHandler(t)
+
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	body := `{"id":"` + testSessionIDOther + `","agentName":"test-agent","namespace":"default","workspaceName":"test-ws","virtualUserId":"vu-42"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/sessions", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if len(warm.createdSessions) != 1 {
+		t.Fatalf("expected 1 session created, got %d", len(warm.createdSessions))
+	}
+	if got := warm.createdSessions[0].VirtualUserID; got != "vu-42" {
+		t.Fatalf("VirtualUserID = %q, want %q", got, "vu-42")
+	}
+	resp := decodeJSON[SessionResponse](t, rec)
+	if resp.Session.VirtualUserID != "vu-42" {
+		t.Fatalf("response VirtualUserID = %q, want %q", resp.Session.VirtualUserID, "vu-42")
 	}
 }

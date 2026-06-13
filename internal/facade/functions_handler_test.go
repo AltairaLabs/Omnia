@@ -31,6 +31,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/altairalabs/omnia/internal/session"
+	"github.com/altairalabs/omnia/pkg/identity"
+	"github.com/altairalabs/omnia/pkg/policy"
 	runtimev1 "github.com/altairalabs/omnia/pkg/runtime/v1"
 )
 
@@ -524,6 +526,60 @@ func TestFunctionsHandler_Session_StoreFailuresAreNonFatal(t *testing.T) {
 	muxFor(h).ServeHTTP(rec, newJSONPost(t, "/functions/"+testFunctionName, `{}`))
 	assert.Equal(t, http.StatusOK, rec.Code,
 		"store failure must not fail the user-facing request")
+}
+
+func TestFunctionsHandler_Session_VirtualUserFromIdentity(t *testing.T) {
+	// A request whose context carries an authenticated identity attributes the
+	// function session to that identity's EndUser pseudonym. The function path
+	// resolves the virtual user from the context identity inside
+	// FunctionInvoker; the request-level on-behalf-of header precedence
+	// (ResolveUserPseudonym) applies to the WS path, not the function path.
+	inputSchema, err := CompileSchema([]byte(`{"type":"object"}`))
+	require.NoError(t, err)
+	outputSchema, err := CompileSchema([]byte(`{"type":"object"}`))
+	require.NoError(t, err)
+
+	invoker := &stubInvoker{resp: &runtimev1.InvocationResponse{OutputJson: `{}`}}
+	h, store := newHandlerWithSession(t, map[string]*FunctionSpec{
+		testFunctionName: {Name: testFunctionName, InputSchema: inputSchema, OutputSchema: outputSchema},
+	}, invoker)
+
+	req := newJSONPost(t, "/functions/"+testFunctionName, `{}`)
+	id := &policy.AuthenticatedIdentity{Origin: policy.OriginManagementPlane, EndUser: "operator@example.com"}
+	req = req.WithContext(policy.WithIdentity(req.Context(), id))
+
+	rec := httptest.NewRecorder()
+	muxFor(h).ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	require.Len(t, store.creates, 1)
+	assert.Equal(t, identity.PseudonymizeID("operator@example.com"), store.creates[0].VirtualUserID,
+		"function session must be attributed to the context identity's EndUser pseudonym")
+}
+
+func TestFunctionsHandler_Session_VirtualUserAnonymousFallback(t *testing.T) {
+	// No identity in context, no device_id → each invocation is its own
+	// virtual user, seeded by the invocation id. Must be non-empty so the
+	// NOT-NULL create never 400s.
+	inputSchema, err := CompileSchema([]byte(`{"type":"object"}`))
+	require.NoError(t, err)
+	outputSchema, err := CompileSchema([]byte(`{"type":"object"}`))
+	require.NoError(t, err)
+
+	invoker := &stubInvoker{resp: &runtimev1.InvocationResponse{OutputJson: `{}`}}
+	h, store := newHandlerWithSession(t, map[string]*FunctionSpec{
+		testFunctionName: {Name: testFunctionName, InputSchema: inputSchema, OutputSchema: outputSchema},
+	}, invoker)
+
+	rec := httptest.NewRecorder()
+	muxFor(h).ServeHTTP(rec, newJSONPost(t, "/functions/"+testFunctionName, `{}`))
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	require.Len(t, store.creates, 1)
+	opts := store.creates[0]
+	assert.NotEmpty(t, opts.VirtualUserID, "anonymous invocations must still get a non-empty virtual user id")
+	assert.Equal(t, identity.PseudonymizeID(opts.ID), opts.VirtualUserID,
+		"anonymous fallback pseudonymizes the invocation id")
 }
 
 func TestFunctionsHandler_Session_TransientWhenStoreUnwired(t *testing.T) {

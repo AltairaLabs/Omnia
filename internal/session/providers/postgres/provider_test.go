@@ -45,6 +45,10 @@ var testConnStr string
 
 const sourceArenaTag = "source:arena"
 
+const testVirtualUserID = "vu-test"
+
+const testAgentArenaWorker = "arena-worker"
+
 func TestMain(m *testing.M) {
 	flag.Parse()
 
@@ -161,6 +165,7 @@ func makeSession(id string, now time.Time) *session.Session {
 		EstimatedCostUSD:  0,
 		Tags:              []string{"tag1", "tag2"},
 		State:             map[string]string{"key": "value"},
+		VirtualUserID:     testVirtualUserID,
 	}
 }
 
@@ -209,6 +214,66 @@ func TestCreateGetSession(t *testing.T) {
 	assert.Equal(t, s.State, got.State)
 	assert.Equal(t, s.LastMessagePreview, got.LastMessagePreview)
 	assert.InDelta(t, s.EstimatedCostUSD, got.EstimatedCostUSD, 0.000001)
+}
+
+func TestCreateGetSession_VirtualUserID(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	p := newProvider(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Microsecond)
+
+	s := makeSession("a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11", now)
+	s.VirtualUserID = "vu-roundtrip"
+
+	require.NoError(t, p.CreateSession(ctx, s))
+
+	got, err := p.GetSession(ctx, s.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "vu-roundtrip", got.VirtualUserID)
+}
+
+// TestCreateSession_NullVirtualUserID_Rejected confirms the NOT NULL constraint
+// is enforced at the DB level. A Go string always scans to a non-NULL value, so we
+// must INSERT a literal NULL to trigger the constraint. This guards against a future
+// schema change that drops NOT NULL.
+func TestCreateSession_NullVirtualUserID_Rejected(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	p := newProvider(t)
+	ctx := context.Background()
+
+	_, err := p.pool.Exec(ctx, `INSERT INTO sessions (
+		id, agent_name, namespace, status, created_at, updated_at, virtual_user_id
+	) VALUES ($1,$2,$3,$4,now(),now(),NULL)`,
+		"a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a12", "test-agent", "default",
+		session.SessionStatusActive)
+	require.Error(t, err, "NULL virtual_user_id must violate the NOT NULL constraint")
+}
+
+// TestCreateSession_EmptyVirtualUserID_Rejected confirms the CHECK constraint
+// rejects an empty-string attribution at the DB level. The handler 400s empty
+// before insert and all five creators supply a non-empty pseudonym, so this is a
+// structural backstop: no path — current or future — can persist a session with
+// an empty virtual_user_id (which would be invisible to per-user DSAR erasure).
+func TestCreateSession_EmptyVirtualUserID_Rejected(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	p := newProvider(t)
+	ctx := context.Background()
+
+	_, err := p.pool.Exec(ctx, `INSERT INTO sessions (
+		id, agent_name, namespace, status, created_at, updated_at, virtual_user_id
+	) VALUES ($1,$2,$3,$4,now(),now(),'')`,
+		"a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a13", "test-agent", "default",
+		session.SessionStatusActive)
+	require.Error(t, err, "empty virtual_user_id must violate the CHECK constraint")
 }
 
 func TestCreateSession_Idempotent(t *testing.T) {
@@ -725,6 +790,30 @@ func TestListSessions_FilterAgent(t *testing.T) {
 	assert.Equal(t, "agent-a", page.Sessions[0].AgentName)
 }
 
+func TestListSessions_FilterVirtualUserID(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	p := newProvider(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Microsecond)
+
+	s1 := makeSession("a0eebc99-9c0b-4ef8-bb6d-6bb9bd380b01", now)
+	s1.VirtualUserID = "vu-alice"
+	s2 := makeSession("a0eebc99-9c0b-4ef8-bb6d-6bb9bd380b02", now.Add(time.Second))
+	s2.VirtualUserID = "vu-bob"
+	require.NoError(t, p.CreateSession(ctx, s1))
+	require.NoError(t, p.CreateSession(ctx, s2))
+
+	page, err := p.ListSessions(ctx, providers.SessionListOpts{VirtualUserID: "vu-alice", IncludeCount: true})
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), page.TotalCount)
+	require.Len(t, page.Sessions, 1)
+	assert.Equal(t, "vu-alice", page.Sessions[0].VirtualUserID)
+	assert.Equal(t, s1.ID, page.Sessions[0].ID)
+}
+
 func TestListSessions_FilterNamespace(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
@@ -1199,6 +1288,7 @@ func TestUpdateSessionStatus_Atomic(t *testing.T) {
 		MessageCount:      5,
 		CreatedAt:         time.Now(),
 		UpdatedAt:         time.Now(),
+		VirtualUserID:     testVirtualUserID,
 	}
 	require.NoError(t, p.CreateSession(ctx, s))
 
@@ -1242,6 +1332,7 @@ func TestUpdateSessionStatus_EmptyStatus(t *testing.T) {
 		Status:        session.SessionStatusActive,
 		CreatedAt:     time.Now(),
 		UpdatedAt:     time.Now(),
+		VirtualUserID: testVirtualUserID,
 	}
 	require.NoError(t, p.CreateSession(ctx, s))
 
@@ -1267,7 +1358,8 @@ func TestRefreshTTL(t *testing.T) {
 		ID:        "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
 		AgentName: "test", Namespace: "default",
 		Status: session.SessionStatusActive, CreatedAt: now,
-		ExpiresAt: now.Add(1 * time.Hour),
+		ExpiresAt:     now.Add(1 * time.Hour),
+		VirtualUserID: testVirtualUserID,
 	}
 	require.NoError(t, p.CreateSession(ctx, s))
 
@@ -1312,13 +1404,14 @@ func TestConcurrentSessionCreation_100VU(t *testing.T) {
 			defer wg.Done()
 			id := fmt.Sprintf("a0eebc99-9c0b-4ef8-bb6d-%012d", idx)
 			s := &session.Session{
-				ID:        id,
-				AgentName: "arena-worker",
-				Namespace: "default",
-				Status:    session.SessionStatusActive,
-				Tags:      []string{"source:arena", fmt.Sprintf("vu:%d", idx)},
-				CreatedAt: time.Now(),
-				UpdatedAt: time.Now(),
+				ID:            id,
+				AgentName:     testAgentArenaWorker,
+				Namespace:     "default",
+				Status:        session.SessionStatusActive,
+				Tags:          []string{"source:arena", fmt.Sprintf("vu:%d", idx)},
+				CreatedAt:     time.Now(),
+				UpdatedAt:     time.Now(),
+				VirtualUserID: fmt.Sprintf("vu-%d", idx),
 			}
 			results[idx] = p.CreateSession(ctx, s)
 		}(i)
@@ -1361,12 +1454,13 @@ func TestConcurrentMixedLoad(t *testing.T) {
 		go func(idx int) {
 			defer wg.Done()
 			s := &session.Session{
-				ID:        ids[idx],
-				AgentName: "arena-worker",
-				Namespace: "default",
-				Status:    session.SessionStatusActive,
-				CreatedAt: time.Now(),
-				UpdatedAt: time.Now(),
+				ID:            ids[idx],
+				AgentName:     testAgentArenaWorker,
+				Namespace:     "default",
+				Status:        session.SessionStatusActive,
+				CreatedAt:     time.Now(),
+				UpdatedAt:     time.Now(),
+				VirtualUserID: fmt.Sprintf("vu-%d", idx),
 			}
 			require.NoError(t, p.CreateSession(ctx, s))
 		}(i)
@@ -1389,11 +1483,12 @@ func TestConcurrentMixedLoad(t *testing.T) {
 		go func(idx int) {
 			defer wg.Done()
 			assert.NoError(t, p.UpdateSession(ctx, &session.Session{
-				ID:        ids[idx],
-				AgentName: "arena-worker",
-				Namespace: "default",
-				Status:    session.SessionStatusCompleted,
-				UpdatedAt: time.Now(),
+				ID:            ids[idx],
+				AgentName:     testAgentArenaWorker,
+				Namespace:     "default",
+				Status:        session.SessionStatusCompleted,
+				UpdatedAt:     time.Now(),
+				VirtualUserID: fmt.Sprintf("vu-%d", idx),
 			}))
 		}(i)
 	}
@@ -1403,7 +1498,7 @@ func TestConcurrentMixedLoad(t *testing.T) {
 	for i, id := range ids {
 		s, err := p.GetSession(ctx, id)
 		require.NoErrorf(t, err, "session %d should exist", i)
-		assert.Equal(t, "arena-worker", s.AgentName)
+		assert.Equal(t, testAgentArenaWorker, s.AgentName)
 	}
 	t.Logf("mixed load: %d sessions created, written, and completed", sessions)
 }
@@ -1430,12 +1525,13 @@ func TestConcurrentSessionCreation_ScaleLimit(t *testing.T) {
 					defer wg.Done()
 					id := fmt.Sprintf("d3ffbc99-9c0b-4ef8-%04x-%012d", n, idx)
 					s := &session.Session{
-						ID:        id,
-						AgentName: "arena-worker",
-						Namespace: "default",
-						Status:    session.SessionStatusActive,
-						CreatedAt: time.Now(),
-						UpdatedAt: time.Now(),
+						ID:            id,
+						AgentName:     testAgentArenaWorker,
+						Namespace:     "default",
+						Status:        session.SessionStatusActive,
+						CreatedAt:     time.Now(),
+						UpdatedAt:     time.Now(),
+						VirtualUserID: fmt.Sprintf("vu-%d", idx),
 					}
 					if err := p.CreateSession(ctx, s); err != nil {
 						failed.Add(1)

@@ -84,6 +84,8 @@ type SessionListOpts struct {
 	Namespace string
 	// WorkspaceName filters sessions by workspace name.
 	WorkspaceName string
+	// VirtualUserID filters sessions by pseudonymous subject (DSAR erasure).
+	VirtualUserID string
 	// Status filters sessions by lifecycle status.
 	Status session.SessionStatus
 	// CreatedAfter filters sessions created after this time.

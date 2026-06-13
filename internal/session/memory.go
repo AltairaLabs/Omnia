@@ -71,15 +71,16 @@ func (m *MemoryStore) CreateSession(ctx context.Context, opts CreateSessionOptio
 		id = uuid.New().String()
 	}
 	session := &Session{
-		ID:        id,
-		AgentName: opts.AgentName,
-		Namespace: opts.Namespace,
-		CreatedAt: now,
-		UpdatedAt: now,
-		Messages:  []Message{},
-		State:     make(map[string]string),
-		CohortID:  opts.CohortID,
-		Variant:   opts.Variant,
+		ID:            id,
+		AgentName:     opts.AgentName,
+		Namespace:     opts.Namespace,
+		CreatedAt:     now,
+		UpdatedAt:     now,
+		Messages:      []Message{},
+		State:         make(map[string]string),
+		CohortID:      opts.CohortID,
+		Variant:       opts.Variant,
+		VirtualUserID: opts.VirtualUserID,
 	}
 
 	if opts.TTL > 0 {
@@ -578,6 +579,7 @@ func (m *MemoryStore) copySession(s *Session) *Session {
 		PromptPackVersion:  s.PromptPackVersion,
 		CohortID:           s.CohortID,
 		Variant:            s.Variant,
+		VirtualUserID:      s.VirtualUserID,
 		Status:             s.Status,
 		EndedAt:            s.EndedAt,
 		MessageCount:       s.MessageCount,

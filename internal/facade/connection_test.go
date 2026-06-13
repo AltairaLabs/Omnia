@@ -204,13 +204,7 @@ func TestConnection_MaxInFlightMessagesPerConnection(t *testing.T) {
 		t.Fatalf("failed to write second message: %v", err)
 	}
 
-	if err := wsConn.SetReadDeadline(time.Now().Add(2 * time.Second)); err != nil {
-		t.Fatalf("failed to set read deadline: %v", err)
-	}
-	var errMsg ServerMessage
-	if err := wsConn.ReadJSON(&errMsg); err != nil {
-		t.Fatalf("failed to read rate-limit error: %v", err)
-	}
+	errMsg := readServerMsg(t, wsConn)
 	if errMsg.Type != MessageTypeError {
 		t.Fatalf("expected error message, got %q", errMsg.Type)
 	}
@@ -220,17 +214,26 @@ func TestConnection_MaxInFlightMessagesPerConnection(t *testing.T) {
 
 	close(release)
 
-	if err := wsConn.SetReadDeadline(time.Now().Add(2 * time.Second)); err != nil {
-		t.Fatalf("failed to set read deadline: %v", err)
-	}
-	var doneMsg ServerMessage
-	if err := wsConn.ReadJSON(&doneMsg); err != nil {
-		t.Fatalf("failed to read done response: %v", err)
-	}
+	doneMsg := readServerMsg(t, wsConn)
 	if doneMsg.Type != MessageTypeDone {
 		t.Fatalf("expected done message, got %q", doneMsg.Type)
 	}
 	if doneMsg.Content != "done: first" {
 		t.Fatalf("done content = %q, want %q", doneMsg.Content, "done: first")
 	}
+}
+
+// readServerMsg sets a short read deadline and decodes the next ServerMessage,
+// failing the test on error. Extracted to keep the in-flight-limit test within
+// the cyclomatic-complexity budget.
+func readServerMsg(t *testing.T, conn *websocket.Conn) ServerMessage {
+	t.Helper()
+	if err := conn.SetReadDeadline(time.Now().Add(2 * time.Second)); err != nil {
+		t.Fatalf("failed to set read deadline: %v", err)
+	}
+	var msg ServerMessage
+	if err := conn.ReadJSON(&msg); err != nil {
+		t.Fatalf("failed to read server message: %v", err)
+	}
+	return msg
 }

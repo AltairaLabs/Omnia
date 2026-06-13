@@ -198,6 +198,7 @@ type CreateSessionRequest struct {
 	InitialState      map[string]string `json:"initialState,omitempty"`
 	CohortID          string            `json:"cohortId,omitempty"`
 	Variant           string            `json:"variant,omitempty"`
+	VirtualUserID     string            `json:"virtualUserId"`
 }
 
 // AppendMessageRequest is the JSON body for POST /api/v1/sessions/{sessionID}/messages.
@@ -527,6 +528,12 @@ func (h *Handler) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	// virtualUserId is persisted as a NOT NULL column. Reject an empty value here
+	// so the API returns a 400 instead of letting the database raise a 500.
+	if req.VirtualUserID == "" {
+		writeError(w, ErrMissingVirtualUserID)
+		return
+	}
 
 	now := time.Now()
 	sess := &session.Session{
@@ -543,6 +550,7 @@ func (h *Handler) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 		UpdatedAt:         now,
 		CohortID:          req.CohortID,
 		Variant:           req.Variant,
+		VirtualUserID:     req.VirtualUserID,
 	}
 	if req.TTLSeconds > 0 {
 		sess.ExpiresAt = now.Add(time.Duration(req.TTLSeconds) * time.Second)
@@ -1107,6 +1115,9 @@ func writeError(w http.ResponseWriter, err error) {
 	case errors.Is(err, ErrMissingNamespace):
 		status = http.StatusBadRequest
 		msg = ErrMissingNamespace.Error()
+	case errors.Is(err, ErrMissingVirtualUserID):
+		status = http.StatusBadRequest
+		msg = ErrMissingVirtualUserID.Error()
 	case errors.Is(err, ErrInvalidStatus):
 		status = http.StatusBadRequest
 		msg = ErrInvalidStatus.Error()

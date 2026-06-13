@@ -184,6 +184,9 @@ type Session struct {
 	CohortID string `json:"cohortId,omitempty"`
 	// Variant identifies the rollout variant (e.g., "stable", "canary").
 	Variant string `json:"variant,omitempty"`
+	// VirtualUserID attributes the session to a virtual (synthetic) user. It is
+	// persisted as a NOT NULL column and must be non-empty when a session is created.
+	VirtualUserID string `json:"virtualUserId"`
 }
 
 // IsExpired returns true if the session has expired.
@@ -221,6 +224,8 @@ type CreateSessionOptions struct {
 	CohortID string
 	// Variant identifies the rollout variant (e.g., "stable", "canary").
 	Variant string
+	// VirtualUserID attributes the session to a virtual (synthetic) user.
+	VirtualUserID string
 }
 
 // SessionStatusUpdate contains lifecycle state changes for a session.

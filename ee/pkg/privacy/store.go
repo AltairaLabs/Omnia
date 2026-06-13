@@ -54,6 +54,8 @@ type PreferencesStore interface {
 }
 
 // PreferencesPostgresStore implements PreferencesStore using PostgreSQL.
+// NOTE: this store runs against BOTH the session and memory databases, so its
+// user_privacy_preferences column stays "user_id" until #1280 renames it in both schemas.
 type PreferencesPostgresStore struct {
 	pool dbPool
 }

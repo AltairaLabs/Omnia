@@ -22,7 +22,6 @@ import (
 
 // Sentinel errors returned by the deletion service.
 var (
-	ErrMissingUserID     = errors.New("user_id is required")
 	ErrInvalidReason     = errors.New("reason must be one of: gdpr_erasure, ccpa_delete, user_request")
 	ErrInvalidScope      = errors.New("scope must be one of: all, workspace, date_range")
 	ErrRequestNotFound   = errors.New("deletion request not found")
@@ -55,7 +54,7 @@ var (
 // DeletionRequest represents a user data deletion request.
 type DeletionRequest struct {
 	ID              string     `json:"id"`
-	UserID          string     `json:"userId"`
+	VirtualUserID   string     `json:"virtualUserId"`
 	Reason          string     `json:"reason"`
 	Scope           string     `json:"scope"`
 	Workspace       string     `json:"workspace,omitempty"`
@@ -71,12 +70,12 @@ type DeletionRequest struct {
 
 // CreateDeletionRequest is the input for creating a new deletion request.
 type CreateDeletionRequest struct {
-	UserID    string     `json:"userId"`
-	Reason    string     `json:"reason"`
-	Scope     string     `json:"scope"`
-	Workspace string     `json:"workspace,omitempty"`
-	DateFrom  *time.Time `json:"dateFrom,omitempty"`
-	DateTo    *time.Time `json:"dateTo,omitempty"`
+	VirtualUserID string     `json:"virtualUserId"`
+	Reason        string     `json:"reason"`
+	Scope         string     `json:"scope"`
+	Workspace     string     `json:"workspace,omitempty"`
+	DateFrom      *time.Time `json:"dateFrom,omitempty"`
+	DateTo        *time.Time `json:"dateTo,omitempty"`
 }
 
 // DeletionStore abstracts persistence for deletion requests.
@@ -84,13 +83,13 @@ type DeletionStore interface {
 	CreateRequest(ctx context.Context, req *DeletionRequest) error
 	GetRequest(ctx context.Context, id string) (*DeletionRequest, error)
 	UpdateRequest(ctx context.Context, req *DeletionRequest) error
-	ListRequestsByUser(ctx context.Context, userID string) ([]*DeletionRequest, error)
+	ListRequestsByUser(ctx context.Context, virtualUserID string) ([]*DeletionRequest, error)
 }
 
 // SessionDeleter abstracts session lookup and deletion across storage tiers.
 type SessionDeleter interface {
 	ListSessionsByUser(
-		ctx context.Context, userID, workspace string,
+		ctx context.Context, virtualUserID, workspace string,
 		dateFrom, dateTo *time.Time,
 	) ([]string, error)
 	DeleteSession(ctx context.Context, sessionID string) error
@@ -170,16 +169,16 @@ func (s *DeletionService) CreateRequest(ctx context.Context, input *CreateDeleti
 	}
 
 	req := &DeletionRequest{
-		ID:        uuid.New().String(),
-		UserID:    input.UserID,
-		Reason:    input.Reason,
-		Scope:     input.Scope,
-		Workspace: input.Workspace,
-		DateFrom:  input.DateFrom,
-		DateTo:    input.DateTo,
-		Status:    StatusPending,
-		CreatedAt: time.Now().UTC(),
-		Errors:    []string{},
+		ID:            uuid.New().String(),
+		VirtualUserID: input.VirtualUserID,
+		Reason:        input.Reason,
+		Scope:         input.Scope,
+		Workspace:     input.Workspace,
+		DateFrom:      input.DateFrom,
+		DateTo:        input.DateTo,
+		Status:        StatusPending,
+		CreatedAt:     time.Now().UTC(),
+		Errors:        []string{},
 	}
 
 	if err := s.store.CreateRequest(ctx, req); err != nil {
@@ -210,7 +209,7 @@ func (s *DeletionService) ProcessRequest(ctx context.Context, id string) error {
 	}
 
 	// Find sessions for the user, applying date range when scope requires it.
-	sessionIDs, err := s.deleter.ListSessionsByUser(ctx, req.UserID, req.Workspace, req.DateFrom, req.DateTo)
+	sessionIDs, err := s.deleter.ListSessionsByUser(ctx, req.VirtualUserID, req.Workspace, req.DateFrom, req.DateTo)
 	if err != nil {
 		return s.failRequest(ctx, req, fmt.Sprintf("listing sessions: %v", err))
 	}
@@ -220,10 +219,10 @@ func (s *DeletionService) ProcessRequest(ctx context.Context, id string) error {
 
 	// Delete all memories for the user. Errors are recorded but do not fail the request.
 	if s.memory != nil {
-		if err := s.memory.DeleteAllMemories(ctx, req.UserID, req.Workspace); err != nil {
+		if err := s.memory.DeleteAllMemories(ctx, req.VirtualUserID, req.Workspace); err != nil {
 			s.log.Error(err, "memory deletion failed",
 				"requestID", req.ID,
-				"userID", req.UserID,
+				"virtualUserID", req.VirtualUserID,
 			)
 			req.Errors = append(req.Errors, fmt.Sprintf("memory deletion: %v", err))
 		}
@@ -301,14 +300,14 @@ func (s *DeletionService) GetRequest(ctx context.Context, id string) (*DeletionR
 }
 
 // ListRequestsByUser retrieves all deletion requests for a given user.
-func (s *DeletionService) ListRequestsByUser(ctx context.Context, userID string) ([]*DeletionRequest, error) {
-	return s.store.ListRequestsByUser(ctx, userID)
+func (s *DeletionService) ListRequestsByUser(ctx context.Context, virtualUserID string) ([]*DeletionRequest, error) {
+	return s.store.ListRequestsByUser(ctx, virtualUserID)
 }
 
 // validateInput checks the CreateDeletionRequest fields.
 func validateInput(input *CreateDeletionRequest) error {
-	if input.UserID == "" {
-		return ErrMissingUserID
+	if input.VirtualUserID == "" {
+		return ErrMissingVirtualUserID
 	}
 	if !validReasons[input.Reason] {
 		return ErrInvalidReason
@@ -393,7 +392,7 @@ func (s *DeletionService) logAuditEvent(ctx context.Context, eventType string, r
 		EventType: eventType,
 		Metadata: map[string]string{
 			"deletion_request_id": req.ID,
-			"user_id":             req.UserID,
+			"virtual_user_id":     req.VirtualUserID,
 			"reason":              req.Reason,
 			"scope":               req.Scope,
 			"sessions_deleted":    fmt.Sprintf("%d", req.SessionsDeleted),
