@@ -26,14 +26,14 @@ func TestPostgresMemoryStore_Delete_NotFoundWrapsErrNotFound(t *testing.T) {
 func TestPostgresMemoryStore_SupersedeMany_NotFoundWrapsErrNotFound(t *testing.T) {
 	store := newStore(t)
 	_, _, err := store.SupersedeMany(context.Background(), []string{missingEntityID},
-		&Memory{Type: "fact", Content: "x", Confidence: 1.0, Scope: testScope(testWorkspace1)})
+		&Memory{Type: hybridKindFact, Content: "x", Confidence: 1.0, Scope: testScope(testWorkspace1)})
 	require.ErrorIs(t, err, ErrNotFound)
 }
 
 func TestPostgresMemoryStore_AppendObservationToEntity_NotFoundWrapsErrNotFound(t *testing.T) {
 	store := newStore(t)
 	_, err := store.AppendObservationToEntity(context.Background(), missingEntityID,
-		&Memory{Type: "fact", Content: "x", Confidence: 1.0, Scope: testScope(testWorkspace1)})
+		&Memory{Type: hybridKindFact, Content: "x", Confidence: 1.0, Scope: testScope(testWorkspace1)})
 	require.ErrorIs(t, err, ErrNotFound)
 }
 
@@ -46,7 +46,7 @@ func TestPostgresMemoryStore_ExportAll_PaginatesBeyondOnePage(t *testing.T) {
 	const total = 5
 	for i := 0; i < total; i++ {
 		require.NoError(t, store.Save(ctx, &Memory{
-			Type: "fact", Content: "export row", Confidence: 0.9, Scope: scope,
+			Type: hybridKindFact, Content: "export row", Confidence: 0.9, Scope: scope,
 		}))
 	}
 
