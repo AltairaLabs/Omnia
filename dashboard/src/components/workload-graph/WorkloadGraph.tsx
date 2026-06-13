@@ -20,6 +20,7 @@ import { modelToFlow, type WorkloadNodeData } from "./to-flow";
 import { layoutFlow } from "./layout";
 import { workloadNodeTypes } from "./workload-nodes";
 import { NodeDrawer } from "./node-drawer";
+import { usePersistedNodeLayout } from "@/hooks/use-persisted-node-layout";
 import type { WorkloadModel, WorkloadNode, WorkloadBudget } from "./types";
 
 type WorkloadFlowInstance = ReactFlowInstance<FlowNode<WorkloadNodeData>, FlowEdge>;
@@ -50,13 +51,16 @@ export function WorkloadGraph({
   model,
   className,
   namespace,
-}: Readonly<{ model: WorkloadModel; className?: string; namespace?: string }>) {
+  storageKey,
+}: Readonly<{ model: WorkloadModel; className?: string; namespace?: string; storageKey?: string }>) {
   const [selectedId, setSelectedId] = useState<string | undefined>();
   const [showData, setShowData] = useState(true);
   const flow = useMemo(() => modelToFlow(model, setSelectedId), [model]);
   const [nodes, setNodes, onNodesChange] = useNodesState(flow.nodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(flow.edges);
   const rf = useRef<WorkloadFlowInstance | null>(null);
+  const { applyLayout, onNodeDragStop, reset } = usePersistedNodeLayout(storageKey ?? "");
+  const [layoutNonce, setLayoutNonce] = useState(0);
 
   // Fill the viewport below the graph's own top edge, so the box accounts for
   // whatever sits above it (the dev licensing banner, page header, tabs) instead
@@ -83,12 +87,13 @@ export function WorkloadGraph({
     let cancelled = false;
     layoutFlow(flow.nodes, flow.edges).then(({ nodes: laid }) => {
       if (cancelled) return;
-      setNodes(laid);
+      // overlay any saved drag positions on top of the fresh elk layout
+      setNodes(applyLayout(laid));
       setEdges(flow.edges);
       fitViewAfterPaint(rf.current);
     });
     return () => { cancelled = true; };
-  }, [flow, setNodes, setEdges]);
+  }, [flow, setNodes, setEdges, applyLayout, layoutNonce]);
 
   // The data-flow toggle HIDES variable/artifact nodes (and their edges) rather
   // than rebuilding the graph — so node positions, including manual drags, survive
@@ -134,6 +139,7 @@ export function WorkloadGraph({
           edges={displayEdges}
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
+          onNodeDragStop={onNodeDragStop}
           nodeTypes={workloadNodeTypes}
           onInit={(inst) => { rf.current = inst; }}
           fitView
@@ -170,6 +176,17 @@ export function WorkloadGraph({
                 />
                 Data flow
               </label>
+            </Panel>
+          )}
+          {storageKey && (
+            <Panel position="bottom-right">
+              <button
+                type="button"
+                onClick={() => { reset(); setLayoutNonce((n) => n + 1); }}
+                className="text-xs text-muted-foreground bg-background/85 backdrop-blur rounded border px-2 py-1 hover:text-foreground"
+              >
+                Reset layout
+              </button>
             </Panel>
           )}
           <Controls />

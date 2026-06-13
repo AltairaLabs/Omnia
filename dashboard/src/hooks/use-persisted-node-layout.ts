@@ -11,7 +11,7 @@ import type { Node } from "@xyflow/react";
 type SavedPositions = Record<string, { x: number; y: number }>;
 
 function read(key: string): SavedPositions {
-  if (typeof window === "undefined") return {};
+  if (!key || typeof window === "undefined") return {};
   try {
     return JSON.parse(window.localStorage.getItem(key) ?? "{}") as SavedPositions;
   } catch {
@@ -20,6 +20,7 @@ function read(key: string): SavedPositions {
 }
 
 function write(key: string, saved: SavedPositions): void {
+  if (!key) return;
   try {
     window.localStorage.setItem(key, JSON.stringify(saved));
   } catch {

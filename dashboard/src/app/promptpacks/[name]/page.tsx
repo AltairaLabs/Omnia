@@ -288,6 +288,7 @@ export default function PromptPackDetailPage({ params }: Readonly<PromptPackDeta
                 skillSources,
               })}
               namespace={namespace}
+              storageKey={`promptpack:${namespace}:${name}`}
             />
           </TabsContent>
 
