@@ -294,9 +294,16 @@ func (s *SessionService) DeleteSessionsByScope(ctx context.Context, scope provid
 	if err != nil {
 		return 0, err
 	}
-	// Hot-cache entries for the purged sessions are left to expire by TTL; the
-	// warm store is now authoritative (they're gone), so a stale hot hit can't
-	// resurrect a deleted session beyond its short cache lifetime.
+	// KNOWN LIMITATION (SEC-8): hot-cache entries for the purged sessions are NOT
+	// proactively invalidated — they are left to expire by TTL (DefaultCacheTTL,
+	// 15m). The warm store is authoritative (the rows are gone), so the cache
+	// cannot be repopulated, but any session already cached before the purge stays
+	// readable by ID for up to 15 minutes after the DELETE returns.
+	//
+	// Compliance implication: a GDPR/CCPA erasure request is not fully effective
+	// until this window elapses — a caller fetching a just-purged session by its
+	// exact ID may still receive it. The proper fix is to invalidate the cache by
+	// scanning for matching keys; that is intentionally out of scope here.
 	s.auditSessionsPurged(ctx, scope, n)
 	return n, nil
 }
