@@ -27,6 +27,7 @@ import (
 	"io"
 	"net/http"
 	neturl "net/url"
+	"os"
 	"strconv"
 	"time"
 
@@ -35,9 +36,15 @@ import (
 	"github.com/sony/gobreaker/v2"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
+	"github.com/altairalabs/omnia/internal/serviceauth"
 	"github.com/altairalabs/omnia/internal/session"
 	"github.com/altairalabs/omnia/pkg/sessionapi"
 )
+
+// tokenPathEnv overrides the ServiceAccount token file path used to authenticate
+// requests to session-api. Unset → serviceauth.DefaultTokenPath. Lets ops mount
+// an audience-bound projected token at a custom path.
+const tokenPathEnv = "SESSION_API_TOKEN_PATH"
 
 // ErrNotImplemented is returned for Store methods not needed by the facade.
 var ErrNotImplemented = errors.New("not implemented by HTTP session client")
@@ -122,6 +129,7 @@ type Store struct {
 	healthClient *http.Client // uninstrumented client for Ping — avoids trace noise from K8s probes
 	cb           *gobreaker.CircuitBreaker[*http.Response]
 	log          logr.Logger
+	tokenSource  *serviceauth.TokenSource // SA token for session-api auth; no-op when token file absent
 
 	// Write buffer for transient failures.
 	buf           *writeBuffer
@@ -151,6 +159,7 @@ func NewStore(baseURL string, log logr.Logger, opts ...StoreOption) *Store {
 		flushInterval: defaultBufferFlushInterval,
 		bufferMaxAge:  defaultBufferMaxAge,
 		flushNotify:   make(chan struct{}, 1),
+		tokenSource:   serviceauth.NewTokenSource(os.Getenv(tokenPathEnv), 0),
 	}
 	for _, opt := range opts {
 		opt(s)
@@ -721,6 +730,9 @@ func (s *Store) doRequest(ctx context.Context, method, path string, body []byte)
 	req.Header.Set("Content-Type", "application/json")
 	if uid := UserIDFromContext(ctx); uid != "" {
 		req.Header.Set("X-Omnia-User-ID", uid)
+	}
+	if err := s.tokenSource.Authorize(req); err != nil {
+		return nil, fmt.Errorf("authorize request: %w", err)
 	}
 
 	s.log.V(2).Info("session-api request",

@@ -12,10 +12,12 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"os"
 	"time"
 
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
+	"github.com/altairalabs/omnia/internal/serviceauth"
 	"github.com/altairalabs/omnia/internal/session"
 	"github.com/altairalabs/omnia/internal/session/api"
 	"github.com/altairalabs/omnia/pkg/sessionapi"
@@ -23,6 +25,10 @@ import (
 
 // Default HTTP client timeout for session-api requests.
 const defaultHTTPTimeout = 10 * time.Second
+
+// tokenPathEnv overrides the ServiceAccount token file path used to authenticate
+// requests to session-api. Unset → serviceauth.DefaultTokenPath.
+const tokenPathEnv = "SESSION_API_TOKEN_PATH"
 
 // SessionAPIClient is the interface for communicating with the session-api service.
 // It provides both read and write operations for sessions, messages, and eval results.
@@ -67,8 +73,14 @@ func NewHTTPSessionAPIClient(baseURL string) (*HTTPSessionAPIClient, error) {
 		Timeout:   defaultHTTPTimeout,
 		Transport: otelhttp.NewTransport(http.DefaultTransport),
 	}
+	// SA token for session-api auth; a missing token file makes Authorize a
+	// no-op, so this is safe for local dev / auth-disabled clusters.
+	tokenSource := serviceauth.NewTokenSource(os.Getenv(tokenPathEnv), 0)
 	client, err := sessionapi.NewClientWithResponses(baseURL,
-		sessionapi.WithHTTPClient(httpClient))
+		sessionapi.WithHTTPClient(httpClient),
+		sessionapi.WithRequestEditorFn(func(_ context.Context, req *http.Request) error {
+			return tokenSource.Authorize(req)
+		}))
 	if err != nil {
 		return nil, fmt.Errorf("create session-api client: %w", err)
 	}

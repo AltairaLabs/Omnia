@@ -12,13 +12,19 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
 	"github.com/go-logr/logr"
 
 	"github.com/altairalabs/omnia/internal/memory"
+	"github.com/altairalabs/omnia/internal/serviceauth"
 )
+
+// tokenPathEnv overrides the ServiceAccount token file path used to authenticate
+// requests to session-api. Unset → serviceauth.DefaultTokenPath.
+const tokenPathEnv = "SESSION_API_TOKEN_PATH"
 
 // sessionUsageEmitter forwards workspace-scoped provider spend to session-api's
 // POST /api/v1/provider-usage endpoint. It is deliberately thin and
@@ -26,10 +32,11 @@ import (
 // they never block or fail the embedding path, and excess emits are dropped
 // (with a debug log) rather than queued unboundedly.
 type sessionUsageEmitter struct {
-	url    string // fully-qualified POST URL
-	client *http.Client
-	sem    chan struct{} // bounds concurrent in-flight emits
-	log    logr.Logger
+	url         string // fully-qualified POST URL
+	client      *http.Client
+	sem         chan struct{} // bounds concurrent in-flight emits
+	log         logr.Logger
+	tokenSource *serviceauth.TokenSource // SA token for session-api auth; no-op when token file absent
 }
 
 // sessionUsageEmitTimeout bounds a single emit's HTTP round trip.
@@ -61,10 +68,11 @@ func newSessionUsageEmitter(baseURL string, log logr.Logger) memory.ProviderUsag
 		return nil
 	}
 	return &sessionUsageEmitter{
-		url:    strings.TrimRight(baseURL, "/") + "/api/v1/provider-usage",
-		client: &http.Client{Timeout: sessionUsageEmitTimeout},
-		sem:    make(chan struct{}, sessionUsageEmitConcurrency),
-		log:    log.WithName("session-usage-emitter"),
+		url:         strings.TrimRight(baseURL, "/") + "/api/v1/provider-usage",
+		client:      &http.Client{Timeout: sessionUsageEmitTimeout},
+		sem:         make(chan struct{}, sessionUsageEmitConcurrency),
+		log:         log.WithName("session-usage-emitter"),
+		tokenSource: serviceauth.NewTokenSource(os.Getenv(tokenPathEnv), 0),
 	}
 }
 
@@ -110,6 +118,9 @@ func (e *sessionUsageEmitter) post(ctx context.Context, rec memory.ProviderUsage
 		return fmt.Errorf("build request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if err := e.tokenSource.Authorize(req); err != nil {
+		return fmt.Errorf("authorize request: %w", err)
+	}
 
 	resp, err := e.client.Do(req)
 	if err != nil {

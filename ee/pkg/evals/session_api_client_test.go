@@ -13,6 +13,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -23,6 +25,51 @@ import (
 	"github.com/altairalabs/omnia/internal/session/api"
 	"github.com/altairalabs/omnia/pkg/sessionapi"
 )
+
+func TestHTTPSessionAPIClient_SendsServiceAccountToken(t *testing.T) {
+	const token = "sa-evals-token-123"
+	dir := t.TempDir()
+	tokenPath := filepath.Join(dir, "token")
+	require.NoError(t, os.WriteFile(tokenPath, []byte(token+"\n"), 0o600))
+	t.Setenv(tokenPathEnv, tokenPath)
+
+	gotAuth := make(chan string, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case gotAuth <- r.Header.Get("Authorization"):
+		default:
+		}
+		w.WriteHeader(http.StatusCreated)
+	}))
+	defer server.Close()
+
+	client := newTestClient(t, server.URL)
+	err := client.WriteEvalResults(t.Context(), nil)
+	require.NoError(t, err)
+
+	assert.Equal(t, "Bearer "+token, <-gotAuth)
+}
+
+func TestHTTPSessionAPIClient_NoTokenFile_NoAuthHeader(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv(tokenPathEnv, filepath.Join(dir, "does-not-exist"))
+
+	gotAuth := make(chan string, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case gotAuth <- r.Header.Get("Authorization"):
+		default:
+		}
+		w.WriteHeader(http.StatusCreated)
+	}))
+	defer server.Close()
+
+	client := newTestClient(t, server.URL)
+	err := client.WriteEvalResults(t.Context(), nil)
+	require.NoError(t, err)
+
+	assert.Empty(t, <-gotAuth)
+}
 
 // newTestClient creates an HTTPSessionAPIClient pointed at the given test server.
 func newTestClient(t *testing.T, serverURL string) *HTTPSessionAPIClient {
