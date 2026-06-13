@@ -70,7 +70,10 @@ type CreateSessionRequest struct {
 	TtlSeconds *int `json:"ttlSeconds,omitempty"`
 
 	// Variant Rollout variant (e.g., stable, canary)
-	Variant       *string `json:"variant,omitempty"`
+	Variant *string `json:"variant,omitempty"`
+
+	// VirtualUserId Virtual (synthetic) user the session is attributed to (required, non-empty)
+	VirtualUserId *string `json:"virtualUserId,omitempty"`
 	WorkspaceName *string `json:"workspaceName,omitempty"`
 }
 

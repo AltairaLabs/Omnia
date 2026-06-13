@@ -97,7 +97,7 @@ const sessionColumns = `id, agent_name, namespace, workspace_name, status,
 	message_count, tool_call_count, total_input_tokens, total_output_tokens,
 	estimated_cost_usd, tags, state, last_message_preview,
 	prompt_pack_name, prompt_pack_version,
-	cohort_id, variant`
+	cohort_id, variant, virtual_user_id`
 
 // nullableSessionFields groups nullable columns scanned from a session row.
 type nullableSessionFields struct {
@@ -138,7 +138,7 @@ func scanSession(row pgx.Row) (*session.Session, error) {
 		&s.MessageCount, &s.ToolCallCount, &s.TotalInputTokens, &s.TotalOutputTokens,
 		&s.EstimatedCostUSD, &s.Tags, &n.stateJSON, &n.lastMsgPreview,
 		&n.promptPackName, &n.promptPackVersion,
-		&n.cohortID, &n.variant,
+		&n.cohortID, &n.variant, &s.VirtualUserID,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -283,8 +283,8 @@ func (p *Provider) CreateSession(ctx context.Context, s *session.Session) error 
 		message_count, tool_call_count, total_input_tokens, total_output_tokens,
 		estimated_cost_usd, tags, state, last_message_preview,
 		prompt_pack_name, prompt_pack_version,
-		cohort_id, variant
-	) SELECT $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21
+		cohort_id, variant, virtual_user_id
+	) SELECT $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22
 	WHERE NOT EXISTS (SELECT 1 FROM sessions WHERE id=$1)`
 
 	tags := s.Tags
@@ -298,7 +298,7 @@ func (p *Provider) CreateSession(ctx context.Context, s *session.Session) error 
 		s.MessageCount, s.ToolCallCount, s.TotalInputTokens, s.TotalOutputTokens,
 		s.EstimatedCostUSD, tags, pgutil.MarshalJSONB(s.State), pgutil.NullString(s.LastMessagePreview),
 		pgutil.NullString(s.PromptPackName), pgutil.NullString(s.PromptPackVersion),
-		pgutil.NullString(s.CohortID), pgutil.NullString(s.Variant),
+		pgutil.NullString(s.CohortID), pgutil.NullString(s.Variant), s.VirtualUserID,
 	)
 	if err != nil {
 		return fmt.Errorf("postgres: create session: %w", err)
@@ -320,7 +320,7 @@ func (p *Provider) UpdateSession(ctx context.Context, s *session.Session) error 
 		message_count=$9, tool_call_count=$10, total_input_tokens=$11, total_output_tokens=$12,
 		estimated_cost_usd=$13, tags=$14, state=$15, last_message_preview=$16,
 		prompt_pack_name=$17, prompt_pack_version=$18,
-		cohort_id=$19, variant=$20
+		cohort_id=$19, variant=$20, virtual_user_id=$21
 	WHERE id=$1`
 
 	tags := s.Tags
@@ -334,7 +334,7 @@ func (p *Provider) UpdateSession(ctx context.Context, s *session.Session) error 
 		s.MessageCount, s.ToolCallCount, s.TotalInputTokens, s.TotalOutputTokens,
 		s.EstimatedCostUSD, tags, pgutil.MarshalJSONB(s.State), pgutil.NullString(s.LastMessagePreview),
 		pgutil.NullString(s.PromptPackName), pgutil.NullString(s.PromptPackVersion),
-		pgutil.NullString(s.CohortID), pgutil.NullString(s.Variant),
+		pgutil.NullString(s.CohortID), pgutil.NullString(s.Variant), s.VirtualUserID,
 	)
 	if err != nil {
 		return fmt.Errorf("postgres: update session: %w", err)

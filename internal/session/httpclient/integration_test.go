@@ -273,6 +273,7 @@ func TestIntegration_FullRecordingChain(t *testing.T) {
 		Namespace:     "default",
 		WorkspaceName: "test-ws",
 		TTL:           30 * time.Minute,
+		VirtualUserID: "vu-test",
 	})
 	require.NoError(t, err, "CreateSession should succeed")
 	require.NotEmpty(t, sess.ID, "session ID should be set")
@@ -352,6 +353,7 @@ func TestIntegration_DecorateSession(t *testing.T) {
 		Namespace:     "default",
 		WorkspaceName: "test-ws",
 		Tags:          []string{"source:interactive"},
+		VirtualUserID: "vu-test",
 	})
 	require.NoError(t, err)
 
@@ -386,6 +388,7 @@ func TestIntegration_ToolCallRecording(t *testing.T) {
 		AgentName:     "tool-agent",
 		Namespace:     "default",
 		WorkspaceName: "test-ws",
+		VirtualUserID: "vu-test",
 	})
 	require.NoError(t, err)
 
@@ -445,6 +448,7 @@ func TestIntegration_ConcurrentSessionCreation(t *testing.T) {
 					"arena.job": "load-test",
 					"arena.vu":  fmt.Sprintf("%d", idx),
 				},
+				VirtualUserID: fmt.Sprintf("vu-%d", idx),
 			})
 			errors[idx] = err
 			if sess != nil {
@@ -500,6 +504,7 @@ func TestIntegration_ConcurrentMixedOperations(t *testing.T) {
 				AgentName:     "arena-worker",
 				Namespace:     "default",
 				WorkspaceName: "test-ws",
+				VirtualUserID: fmt.Sprintf("vu-%d", idx),
 			})
 			createErrors[idx] = err
 			if sess != nil {
@@ -568,6 +573,7 @@ func TestIntegration_NoWarmStore(t *testing.T) {
 		AgentName:     "test",
 		Namespace:     "default",
 		WorkspaceName: "test-ws",
+		VirtualUserID: "vu-test",
 	})
 	require.Error(t, err, "CreateSession should fail without warm store")
 	assert.Contains(t, err.Error(), "503", "should get 503 Service Unavailable")
