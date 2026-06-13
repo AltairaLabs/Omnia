@@ -22,6 +22,8 @@ import { useWorkspace } from "@/contexts/workspace-context";
 import { getRuntimeConfig } from "@/lib/config";
 import { NewItemDialog } from "./new-item-dialog";
 import { DeleteConfirmDialog } from "./delete-confirm-dialog";
+import { TemplateCreateFlow } from "./template-create-flow";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import {
   ValidationResultsDialog,
   type ValidationResults,
@@ -225,6 +227,22 @@ export function ProjectEditor({ className, initialProjectId }: ProjectEditorProp
     }
     setSelectedProjectId(projectId);
   }, [hasUnsavedChanges]);
+
+  // Create-from-template dialog (reuses the same TemplateBrowser/TemplateWizard
+  // flow as the Templates page, without leaving the editor).
+  const [templateDialogOpen, setTemplateDialogOpen] = useState(false);
+  const handleTemplateSuccess = useCallback(
+    (projectId: string) => {
+      setTemplateDialogOpen(false);
+      refetchProjects();
+      setSelectedProjectId(projectId);
+      toast({
+        title: "Project created",
+        description: "Your project has been created from the template.",
+      });
+    },
+    [refetchProjects, toast]
+  );
 
   // Handle file selection
   const handleSelectFile = useCallback(
@@ -765,6 +783,7 @@ export function ProjectEditor({ className, initialProjectId }: ProjectEditorProp
         onProjectSelect={handleProjectSelect}
         onSave={handleSave}
         onNewProject={() => setNewProjectDialogOpen(true)}
+        onNewFromTemplate={() => setTemplateDialogOpen(true)}
         onRefresh={handleRefresh}
         onDeleteProject={currentProject ? () => setDeleteProjectDialogOpen(true) : undefined}
         onValidateAll={lspEnabled ? handleValidateAll : undefined}
@@ -789,6 +808,16 @@ export function ProjectEditor({ className, initialProjectId }: ProjectEditorProp
         parentPath={null}
         onConfirm={handleNewProject}
       />
+
+      <Dialog open={templateDialogOpen} onOpenChange={setTemplateDialogOpen}>
+        <DialogContent className="max-w-6xl w-[95vw] h-[90vh] flex flex-col">
+          <DialogTitle className="sr-only">Create Project from Template</DialogTitle>
+          <TemplateCreateFlow
+            onSuccess={handleTemplateSuccess}
+            className="flex-1 overflow-hidden flex flex-col"
+          />
+        </DialogContent>
+      </Dialog>
 
       {currentProject && (
         <DeleteConfirmDialog
