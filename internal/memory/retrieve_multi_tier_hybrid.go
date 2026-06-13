@@ -170,13 +170,20 @@ func (s *PostgresMemoryStore) RetrieveMultiTierHybrid(ctx context.Context, req M
 		return nil, err
 	}
 
-	rows, err := s.pool.Query(ctx, sql, args...)
-	if err != nil {
-		return nil, fmt.Errorf("memory: multi-tier hybrid query: %w", err)
-	}
-	defer rows.Close()
+	// PERF-3: the cosine CTE over-fetches hybridFanout×4 from the HNSW index,
+	// so raise hnsw.ef_search to match or the index caps candidates at its
+	// default (40) before tier post-filtering.
+	var memories []*MultiTierMemory
+	err = s.withHNSWEFSearch(ctx, clampEFSearch(hybridFanout*4), func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, sql, args...)
+		if err != nil {
+			return fmt.Errorf("memory: multi-tier hybrid query: %w", err)
+		}
+		defer rows.Close()
 
-	memories, err := scanMultiTierHybridRows(rows, req.WorkspaceID)
+		memories, err = scanMultiTierHybridRows(rows, req.WorkspaceID)
+		return err
+	})
 	if err != nil {
 		return nil, err
 	}

@@ -46,16 +46,25 @@ export async function layoutFlow<T extends Node>(
     id: "root",
     layoutOptions: {
       "elk.algorithm": "layered",
-      "elk.direction": "RIGHT",
-      "elk.edgeRouting": "ORTHOGONAL",
-      "elk.spacing.nodeNode": "20",
-      "elk.layered.spacing.nodeNodeBetweenLayers": "44",
-      "elk.layered.spacing.edgeNodeBetweenLayers": "14",
-      "elk.layered.spacing.edgeEdgeBetweenLayers": "10",
-      "elk.layered.nodePlacement.strategy": "NETWORK_SIMPLEX",
+      "elk.direction": "DOWN",
+      // Break feedback loops by DFS so forward flow is preserved and only the
+      // genuine back-edges (need_more, revise) are reversed — otherwise the
+      // greedy default can flip a forward edge and lift a downstream state up to
+      // the entry's layer.
+      "elk.layered.cycleBreaking.strategy": "DEPTH_FIRST",
+      "elk.spacing.nodeNode": "44",
+      "elk.layered.spacing.nodeNodeBetweenLayers": "64",
+      // Brandes-Köpf with balanced alignment centres children under parents for
+      // a symmetric, tree-like top-down look.
+      "elk.layered.nodePlacement.strategy": "BRANDES_KOEPF",
+      "elk.layered.nodePlacement.bk.fixedAlignment": "BALANCED",
       "elk.layered.crossingMinimization.strategy": "LAYER_SWEEP",
     },
-    children: nodes.map((n) => ({ id: n.id, width: NODE_W, height: NODE_H })),
+    children: nodes.map((n) => ({
+      id: n.id,
+      width: (n as { width?: number }).width ?? NODE_W,
+      height: (n as { height?: number }).height ?? NODE_H,
+    })),
     edges: edges.map((e) => ({
       id: e.id,
       sources: [e.source],

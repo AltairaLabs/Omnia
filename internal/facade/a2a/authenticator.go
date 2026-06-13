@@ -10,6 +10,7 @@ SPDX-License-Identifier: Apache-2.0
 package a2a
 
 import (
+	"crypto/subtle"
 	"fmt"
 	"net/http"
 	"strings"
@@ -39,7 +40,7 @@ func (a *BearerAuthenticator) Authenticate(r *http.Request) error {
 		return fmt.Errorf("invalid Authorization scheme, expected Bearer")
 	}
 
-	if strings.TrimSpace(auth[len(prefix):]) != a.token {
+	if subtle.ConstantTimeCompare([]byte(strings.TrimSpace(auth[len(prefix):])), []byte(a.token)) != 1 {
 		return fmt.Errorf("invalid bearer token")
 	}
 

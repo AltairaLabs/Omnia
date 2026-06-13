@@ -31,9 +31,6 @@ import (
 	"github.com/santhosh-tekuri/jsonschema/v6"
 
 	"github.com/altairalabs/omnia/internal/session"
-	"github.com/altairalabs/omnia/pkg/identity"
-	"github.com/altairalabs/omnia/pkg/logctx"
-	"github.com/altairalabs/omnia/pkg/policy"
 	runtimev1 "github.com/altairalabs/omnia/pkg/runtime/v1"
 )
 
@@ -91,6 +88,7 @@ type FunctionsHandler struct {
 	invoker      InvocationInvoker
 	sessionStore session.Store
 	sessionMeta  FunctionSessionMeta
+	funcInvoker  *FunctionInvoker
 	log          logr.Logger
 
 	// maxBodyBytes caps the incoming request body. Defaults to 1 MiB,
@@ -108,12 +106,21 @@ func NewFunctionsHandler(registry FunctionRegistry, invoker InvocationInvoker, l
 	if log.GetSink() == nil {
 		log = logr.Discard()
 	}
-	return &FunctionsHandler{
+	h := &FunctionsHandler{
 		registry:     registry,
 		invoker:      invoker,
 		log:          log.WithName("functions-handler"),
 		maxBodyBytes: 1 << 20, // 1 MiB
 	}
+	h.funcInvoker = NewFunctionInvoker(FunctionInvokerConfig{
+		Registry:     h.registry,
+		Invoker:      h.invoker,
+		SessionStore: h.sessionStore,
+		SessionMeta:  h.sessionMeta,
+		MaxBodyBytes: 0,
+		Log:          h.log,
+	})
+	return h
 }
 
 // WithSessionStore wires session persistence onto the handler. Each
@@ -122,6 +129,14 @@ func NewFunctionsHandler(registry FunctionRegistry, invoker InvocationInvoker, l
 func (h *FunctionsHandler) WithSessionStore(store session.Store, meta FunctionSessionMeta) *FunctionsHandler {
 	h.sessionStore = store
 	h.sessionMeta = meta
+	h.funcInvoker = NewFunctionInvoker(FunctionInvokerConfig{
+		Registry:     h.registry,
+		Invoker:      h.invoker,
+		SessionStore: h.sessionStore,
+		SessionMeta:  h.sessionMeta,
+		MaxBodyBytes: 0,
+		Log:          h.log,
+	})
 	return h
 }
 
@@ -152,18 +167,6 @@ func (h *FunctionsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	spec, ok := h.registry.GetFunction(name)
-	if !ok {
-		// Distinguish "not configured" from "wrong mode" in logs but use
-		// 404 for both — leaking the existence of agent-mode runtimes
-		// at a function-mode endpoint isn't useful and authoring tools
-		// shouldn't depend on that distinction.
-		h.log.V(1).Info("function not registered", "name", name)
-		writeError(w, http.StatusNotFound, "function_not_found",
-			fmt.Sprintf("no function named %q is registered on this facade", name))
-		return
-	}
-
 	// Parse the media type so application/json; charset=utf-8 (default for
 	// many HTTP clients) is accepted. Only the bare media type is checked;
 	// parameters like charset are ignored.
@@ -176,142 +179,47 @@ func (h *FunctionsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Generate the invocation ID up-front so input_invalid still has a
-	// session_id for Loki + dashboard correlation. ctx carries it via
-	// logctx so every log line under this scope can be joined back.
-	invocationID := uuid.NewString()
-	ctx := logctx.WithInvocationID(r.Context(), invocationID)
-	log := h.log.WithValues("function", name, "invocationID", invocationID)
-
-	// Resolve the virtual user the session is attributed to. The request is
-	// already past auth (cmd/agent wraps this route with auth.Middleware,
-	// which injects the identity into the context), so we read that identity
-	// here. ResolveUserPseudonym honors the mgmt-plane on-behalf-of header,
-	// device_id, and validated EndUser. With no resolvable identity we fall
-	// back to pseudonymizing the invocation id so the NOT-NULL
-	// virtual_user_id create never rejects an anonymous invocation. See #1285.
-	authIdentity := policy.IdentityFromContext(r.Context())
-	virtualUserID := ResolveUserPseudonym(r, authIdentity)
-	if virtualUserID == "" {
-		virtualUserID = identity.PseudonymizeID(invocationID)
-	}
-
-	// Open the session row at the very start. The runtime's
-	// OmniaEventStore writes downstream audit rows (messages,
-	// tool_calls, provider_calls, eval_results, runtime_events)
-	// against this session_id. closeSession patches the terminal
-	// status before we return.
-	h.openSession(ctx, invocationID, virtualUserID, log)
-	finalStatus := session.SessionStatusCompleted
-	var failureEvt *session.RuntimeEvent
-	defer func() {
-		h.closeSession(ctx, invocationID, finalStatus, failureEvt, log)
-	}()
-
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, h.maxBodyBytes))
 	if err != nil {
 		var maxErr *http.MaxBytesError
 		if errors.As(err, &maxErr) {
-			finalStatus = session.SessionStatusError
-			failureEvt = newFailureEvent(invocationID, "function.payload_too_large", err.Error())
 			writeError(w, http.StatusRequestEntityTooLarge, "payload_too_large",
 				fmt.Sprintf("request body exceeds %d bytes", h.maxBodyBytes))
 			return
 		}
-		finalStatus = session.SessionStatusError
-		failureEvt = newFailureEvent(invocationID, "function.read_body_failed", err.Error())
-		writeError(w, http.StatusBadRequest, "read_body_failed", err.Error())
+		writeError(w, http.StatusBadRequest, "read_body_failed", "failed to read request body")
 		return
 	}
 
-	if err := ValidateJSON(spec.InputSchema, body); err != nil {
-		finalStatus = session.SessionStatusError
-		failureEvt = newFailureEvent(invocationID, "function.input_invalid", err.Error())
-		writeError(w, http.StatusBadRequest, "input_invalid", err.Error())
-		return
-	}
-
-	resp, err := h.invoker.Invoke(ctx, &runtimev1.InvocationRequest{
-		InputJson:    string(body),
-		InvocationId: invocationID,
-	})
+	result, err := h.funcInvoker.Invoke(r.Context(), name, body)
 	if err != nil {
-		log.Error(err, "runtime invoke failed")
-		finalStatus = session.SessionStatusError
-		failureEvt = newFailureEvent(invocationID, "function.runtime_error", err.Error())
-		writeError(w, http.StatusBadGateway, "runtime_error", err.Error())
+		h.log.Error(err, "function invocation failed")
+		writeError(w, http.StatusInternalServerError, "internal_error", "internal server error")
+		return
+	}
+	if result == nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "invocation result is nil")
 		return
 	}
 
-	rawOutput := []byte(resp.GetOutputJson())
-	if err := ValidateJSON(spec.OutputSchema, rawOutput); err != nil {
-		// 502 with raw output so the author can debug the pack.
-		log.Error(err, "function output failed schema validation",
-			"outputBytes", len(rawOutput))
-		finalStatus = session.SessionStatusError
-		failureEvt = newFailureEvent(invocationID, "function.output_invalid", err.Error())
-		writeOutputValidationError(w, err, rawOutput)
-		return
-	}
-
-	if err := writeSuccess(w, rawOutput, invocationID, resp); err != nil {
-		log.Error(err, "failed to write success response")
-		finalStatus = session.SessionStatusError
-		failureEvt = newFailureEvent(invocationID, "function.response_write_failed", err.Error())
-		return
-	}
-	log.V(1).Info("function invocation complete",
-		"durationMs", resp.GetDurationMs(),
-		"outputBytes", len(rawOutput))
-}
-
-// openSession creates the session row for an invocation. Failure is
-// best-effort: a session-api outage logs but does not fail the
-// user-facing request — the runtime can still produce its result and
-// the downstream audit rows simply land orphaned (parent missing).
-func (h *FunctionsHandler) openSession(ctx context.Context, invocationID, virtualUserID string, log logr.Logger) {
-	if h.sessionStore == nil {
-		return
-	}
-	if _, err := h.sessionStore.CreateSession(ctx, session.CreateSessionOptions{
-		ID:                invocationID,
-		AgentName:         h.sessionMeta.AgentName,
-		Namespace:         h.sessionMeta.Namespace,
-		WorkspaceName:     h.sessionMeta.WorkspaceName,
-		PromptPackName:    h.sessionMeta.PromptPackName,
-		PromptPackVersion: h.sessionMeta.PromptPackVersion,
-		VirtualUserID:     virtualUserID,
-		Tags:              []string{FunctionSessionTag},
-	}); err != nil {
-		log.Error(err, "failed to create session row for function invocation (non-fatal)")
-	}
-}
-
-// closeSession writes the terminal status (and any pre-runtime
-// failure event the facade itself observed) before returning. Errors
-// are logged and not propagated.
-func (h *FunctionsHandler) closeSession(
-	ctx context.Context,
-	invocationID string,
-	status session.SessionStatus,
-	failure *session.RuntimeEvent,
-	log logr.Logger,
-) {
-	if h.sessionStore == nil {
-		return
-	}
-	if failure != nil {
-		if err := h.sessionStore.RecordRuntimeEvent(ctx, invocationID, *failure); err != nil {
-			log.Error(err, "failed to record function failure event (non-fatal)",
-				"eventType", failure.EventType)
+	switch result.Outcome {
+	case OutcomeOK:
+		if err := writeSuccess(w, result); err != nil {
+			h.log.Error(err, "failed to write success response", "function", name,
+				"invocationID", result.InvocationID)
 		}
-	}
-	if err := h.sessionStore.UpdateSessionStatus(ctx, invocationID, session.SessionStatusUpdate{
-		SetStatus:  status,
-		SetEndedAt: time.Now().UTC(),
-	}); err != nil {
-		log.Error(err, "failed to close session for function invocation (non-fatal)",
-			"status", status)
+	case OutcomeFunctionNotFound:
+		writeError(w, http.StatusNotFound, "function_not_found", result.ErrorDetail)
+	case OutcomeInputInvalid:
+		writeError(w, http.StatusBadRequest, "input_invalid", result.ErrorDetail)
+	case OutcomeRuntimeError:
+		writeError(w, http.StatusBadGateway, "runtime_error", "runtime invocation failed")
+	case OutcomeOutputInvalid:
+		writeOutputValidationError(w, errors.New(result.ErrorDetail), result.RawOutput)
+	case OutcomePayloadTooLarge:
+		writeError(w, http.StatusRequestEntityTooLarge, "payload_too_large", result.ErrorDetail)
+	default:
+		writeError(w, http.StatusInternalServerError, "internal_error", "unknown invocation outcome")
 	}
 }
 
@@ -330,21 +238,19 @@ func newFailureEvent(invocationID, eventType, errMessage string) *session.Runtim
 	}
 }
 
-// writeSuccess emits the function-mode 200 response envelope. invocationID
-// is the facade-authoritative UUID generated when the request arrived;
-// it is the value returned to the caller regardless of what the runtime
-// echoed back in resp.GetInvocationId().
-func writeSuccess(w http.ResponseWriter, rawOutput []byte, invocationID string, resp *runtimev1.InvocationResponse) error {
+// writeSuccess emits the function-mode 200 response envelope using the
+// canonical result produced by FunctionInvoker.
+func writeSuccess(w http.ResponseWriter, result *InvocationResult) error {
 	envelope := map[string]any{
-		"output":        json.RawMessage(rawOutput),
-		"invocation_id": invocationID,
-		"duration_ms":   resp.GetDurationMs(),
+		"output":        result.OutputJSON,
+		"invocation_id": result.InvocationID,
+		"duration_ms":   result.DurationMs,
 	}
-	if u := resp.GetUsage(); u != nil {
+	if u := result.Usage; u != nil {
 		envelope["usage"] = map[string]any{
-			"input_tokens":  u.GetInputTokens(),
-			"output_tokens": u.GetOutputTokens(),
-			"cost_usd":      u.GetCostUsd(),
+			"input_tokens":  u.InputTokens,
+			"output_tokens": u.OutputTokens,
+			"cost_usd":      u.CostUsd,
 		}
 	}
 	w.Header().Set("Content-Type", "application/json")

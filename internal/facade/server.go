@@ -73,6 +73,9 @@ type ServerConfig struct {
 	MessageRateLimit float64
 	// MessageRateBurst is the maximum burst size for per-connection rate limiting.
 	MessageRateBurst int
+	// MaxInFlightMessagesPerConnection limits concurrently processed messages per
+	// connection. 0 disables this cap.
+	MaxInFlightMessagesPerConnection int
 	// WorkspaceName is the workspace this agent belongs to (for session metadata).
 	WorkspaceName string
 }
@@ -90,6 +93,9 @@ func DefaultServerConfig() ServerConfig {
 		SessionTTL:       24 * time.Hour,
 		MessageRateLimit: 50,
 		MessageRateBurst: 100,
+		// Keep one in-flight request per connection to avoid unbounded runtime
+		// stream fan-out and chunk interleaving the client cannot correlate.
+		MaxInFlightMessagesPerConnection: 1,
 	}
 }
 
@@ -466,21 +472,23 @@ func mgmtPlaneUserID(r *http.Request, endUser string) string {
 	return endUser
 }
 
-func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	s.mu.RLock()
-	if s.shutdown {
-		s.mu.RUnlock()
-		http.Error(w, "server is shutting down", http.StatusServiceUnavailable)
-		return
-	}
-	if s.config.MaxConnections > 0 && len(s.connections) >= s.config.MaxConnections {
-		s.mu.RUnlock()
-		http.Error(w, "connection limit reached", http.StatusServiceUnavailable)
-		return
-	}
-	s.mu.RUnlock()
+type requestAgentContext struct {
+	agentName     string
+	namespace     string
+	workspaceName string
+	binaryCapable bool
+}
 
-	// Extract agent info from query params, falling back to pod env vars
+type requestUserContext struct {
+	userID        string
+	userRoles     string
+	userEmail     string
+	authorization string
+	cohortID      string
+	variant       string
+}
+
+func (s *Server) resolveAgentContext(r *http.Request) (requestAgentContext, error) {
 	agentName := r.URL.Query().Get("agent")
 	if agentName == "" {
 		agentName = os.Getenv("OMNIA_AGENT_NAME")
@@ -496,36 +504,24 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if workspaceName == "" {
 		workspaceName = s.config.WorkspaceName
 	}
-
-	// Check if client requests binary frame support
-	binaryCapable := r.URL.Query().Get("binary") == "true"
-
 	if agentName == "" {
-		http.Error(w, "agent parameter is required", http.StatusBadRequest)
-		return
+		return requestAgentContext{}, errors.New("agent parameter is required")
 	}
 
-	// Run the auth chain (PR 1: mgmt-plane validator only). On admit the
-	// returned identity takes precedence over Istio-injected headers for
-	// user fields; on unambiguous reject (invalid/expired) 401 here and
-	// skip the upgrade entirely.
-	authIdentity, authErr := s.authenticateRequest(r)
-	if authErr != nil {
-		s.log.V(1).Info("auth rejected upgrade",
-			"reason", authErr.Error(),
-			"status", http.StatusUnauthorized,
-		)
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
-		return
-	}
+	return requestAgentContext{
+		agentName:     agentName,
+		namespace:     namespace,
+		workspaceName: workspaceName,
+		binaryCapable: r.URL.Query().Get("binary") == "true",
+	}, nil
+}
 
-	// Extract user identity. The user-id pseudonym resolution (mgmt-plane
-	// header > device_id > subject, with Istio fallback) lives in the shared
-	// ResolveUserPseudonym helper so the WS path and the session-create path
-	// agree on a single stable id. The roles/email extraction stays inline:
-	// when an auth validator admitted the request its Identity is the source
-	// of truth; otherwise fall back to the Istio-injected headers (preserved
-	// for deployments relying on the chart's authentication.enabled=true gate).
+// resolveUserContext extracts the user identity for a request. The pseudonym
+// resolution (mgmt-plane header > device_id > subject, with Istio fallback)
+// lives in the shared ResolveUserPseudonym helper so the WS path and the
+// session-create path agree on a single stable id; roles/email stay inline
+// (auth Identity is authoritative, else the Istio-injected headers).
+func (s *Server) resolveUserContext(r *http.Request, authIdentity *policy.AuthenticatedIdentity) requestUserContext {
 	var (
 		userRoles string
 		userEmail string
@@ -543,49 +539,25 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		"hasAuthIdentity", authIdentity != nil,
 		"headerName", policy.IstioHeaderUserID,
 	)
-	authorization := r.Header.Get("Authorization")
-	cohortID := r.Header.Get(policy.HeaderCohortID)
-	variant := r.Header.Get(policy.HeaderVariant)
 
-	conn, err := s.upgrader.Upgrade(w, r, nil)
-	if err != nil {
-		s.log.Error(err, "failed to upgrade connection")
-		return
-	}
-
-	// Create connection wrapper
-	c := &Connection{
-		conn:          conn,
-		agentName:     agentName,
-		namespace:     namespace,
-		workspaceName: workspaceName,
-		binaryCapable: binaryCapable,
+	return requestUserContext{
 		userID:        userID,
 		userRoles:     userRoles,
 		userEmail:     userEmail,
-		authorization: authorization,
-		cohortID:      cohortID,
-		variant:       variant,
+		authorization: r.Header.Get("Authorization"),
+		cohortID:      r.Header.Get(policy.HeaderCohortID),
+		variant:       r.Header.Get(policy.HeaderVariant),
 	}
-	if s.config.MessageRateLimit > 0 {
-		c.rateLimiter = rate.NewLimiter(rate.Limit(s.config.MessageRateLimit), s.config.MessageRateBurst)
-	}
+}
 
-	s.mu.Lock()
-	if s.shutdown {
-		s.mu.Unlock()
-		_ = conn.Close()
-		return
-	}
-	s.connections[conn] = c
-	s.mu.Unlock()
-
-	// Record connection metrics
-	s.metrics.ConnectionOpened()
-
-	// Create enriched context with connection info
-	connCtx := logctx.WithAgent(context.Background(), agentName)
-	connCtx = logctx.WithNamespace(connCtx, namespace)
+func (s *Server) buildConnectionContext(
+	r *http.Request,
+	agentCtx requestAgentContext,
+	userCtx requestUserContext,
+	authIdentity *policy.AuthenticatedIdentity,
+) context.Context {
+	connCtx := logctx.WithAgent(context.Background(), agentCtx.agentName)
+	connCtx = logctx.WithNamespace(connCtx, agentCtx.namespace)
 	connCtx = logctx.WithRequestID(connCtx, uuid.New().String())
 
 	// Extract W3C trace context (traceparent/tracestate) from upgrade headers.
@@ -605,17 +577,105 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if authIdentity != nil && len(authIdentity.Claims) > 0 {
 		validatorClaims = authIdentity.Claims
 	}
-	connCtx = policy.WithPropagationFields(connCtx, &policy.PropagationFields{
-		AgentName:     agentName,
-		Namespace:     namespace,
+	return policy.WithPropagationFields(connCtx, &policy.PropagationFields{
+		AgentName:     agentCtx.agentName,
+		Namespace:     agentCtx.namespace,
 		RequestID:     logctx.RequestID(connCtx),
-		UserID:        userID,
-		UserRoles:     userRoles,
-		UserEmail:     userEmail,
-		Authorization: authorization,
+		UserID:        userCtx.userID,
+		UserRoles:     userCtx.userRoles,
+		UserEmail:     userCtx.userEmail,
+		Authorization: userCtx.authorization,
 		Claims:        validatorClaims,
 		Identity:      authIdentity,
 	})
+}
+
+func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	s.mu.RLock()
+	if s.shutdown {
+		s.mu.RUnlock()
+		http.Error(w, "server is shutting down", http.StatusServiceUnavailable)
+		return
+	}
+	if s.config.MaxConnections > 0 && len(s.connections) >= s.config.MaxConnections {
+		s.mu.RUnlock()
+		http.Error(w, "connection limit reached", http.StatusServiceUnavailable)
+		return
+	}
+	s.mu.RUnlock()
+
+	agentCtx, err := s.resolveAgentContext(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// Run the auth chain (PR 1: mgmt-plane validator only). On admit the
+	// returned identity takes precedence over Istio-injected headers for
+	// user fields; on unambiguous reject (invalid/expired) 401 here and
+	// skip the upgrade entirely.
+	authIdentity, authErr := s.authenticateRequest(r)
+	if authErr != nil {
+		s.log.V(1).Info("auth rejected upgrade",
+			"reason", authErr.Error(),
+			"status", http.StatusUnauthorized,
+		)
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	// Extract user identity. When an auth validator admitted the request
+	// its Identity is the source of truth; otherwise fall back to the
+	// Istio-injected headers (preserved for deployments that currently
+	// rely on the chart's authentication.enabled=true gate).
+	userCtx := s.resolveUserContext(r, authIdentity)
+
+	conn, err := s.upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		s.log.Error(err, "failed to upgrade connection")
+		return
+	}
+
+	// Create connection wrapper
+	c := &Connection{
+		conn:          conn,
+		agentName:     agentCtx.agentName,
+		namespace:     agentCtx.namespace,
+		workspaceName: agentCtx.workspaceName,
+		binaryCapable: agentCtx.binaryCapable,
+		userID:        userCtx.userID,
+		userRoles:     userCtx.userRoles,
+		userEmail:     userCtx.userEmail,
+		authorization: userCtx.authorization,
+		cohortID:      userCtx.cohortID,
+		variant:       userCtx.variant,
+	}
+	if s.config.MaxInFlightMessagesPerConnection > 0 {
+		c.inFlightMessages = make(chan struct{}, s.config.MaxInFlightMessagesPerConnection)
+	}
+	if s.config.MessageRateLimit > 0 {
+		c.rateLimiter = rate.NewLimiter(rate.Limit(s.config.MessageRateLimit), s.config.MessageRateBurst)
+	}
+
+	s.mu.Lock()
+	if s.shutdown {
+		s.mu.Unlock()
+		_ = conn.Close()
+		return
+	}
+	if s.config.MaxConnections > 0 && len(s.connections) >= s.config.MaxConnections {
+		s.mu.Unlock()
+		_ = conn.Close()
+		return
+	}
+	s.connections[conn] = c
+	s.mu.Unlock()
+
+	// Record connection metrics
+	s.metrics.ConnectionOpened()
+
+	// Create enriched context with connection info
+	connCtx := s.buildConnectionContext(r, agentCtx, userCtx, authIdentity)
 
 	log := logctx.LoggerWithContext(s.log, connCtx)
 	log.Info("new connection")

@@ -137,7 +137,7 @@ data:
           "name": "Coverage Critic",
           "description": "Judges whether the gathered evidence is sufficient or needs another pass.",
           "version": "1.0.0",
-          "system_template": "You are a coverage critic for the research on {{topic}}.\n\n{{rigor}}\n\nReview the evidence collected so far against the plan's sub-questions. Identify gaps, weak sources, and unsupported claims. Decide: is coverage sufficient to synthesize, or is another gathering pass needed?",
+          "system_template": "You are a coverage critic for the research on {{topic}}.\n\n{{rigor}}\n\nReview the evidence collected so far ({{artifacts.evidence}}) against the plan's sub-questions. Identify gaps, weak sources, and unsupported claims. Decide: is coverage sufficient to synthesize, or is another gathering pass needed?",
           "variables": [
             {
               "name": "topic",
@@ -163,7 +163,7 @@ data:
           "name": "Synthesis Writer",
           "description": "Synthesizes the evidence into a structured, cited report.",
           "version": "1.0.0",
-          "system_template": "You are writing the research report on {{topic}}.\n\n{{rigor}}\n\nSynthesize the gathered evidence into a structured report: summary, findings (each with citations), and open questions. Save the report when complete.",
+          "system_template": "You are writing the research report on {{topic}}.\n\n{{rigor}}\n\nSynthesize the gathered evidence ({{artifacts.evidence}}) into a structured report: summary, findings (each with citations), and open questions. Save the report when complete.",
           "variables": [
             {
               "name": "topic",
@@ -189,7 +189,7 @@ data:
           "name": "Citation Reviewer",
           "description": "Verifies citations and report quality before completion.",
           "version": "1.0.0",
-          "system_template": "You are reviewing the research report on {{topic}}.\n\n{{rigor}}\n\nVerify that every factual claim is backed by a citation, that sources are credible, and that the report answers the original question. Approve the report, or send it back for revision with specific notes.",
+          "system_template": "You are reviewing the research report ({{artifacts.report}}) on {{topic}}.\n\n{{rigor}}\n\nVerify that every factual claim is backed by a citation, that sources are credible, and that the report answers the original question. Approve the report, or send it back for revision with specific notes.",
           "variables": [
             {
               "name": "topic",
@@ -232,7 +232,7 @@ data:
           "name": "Session Closer",
           "description": "Delivers the approved report and closes the session.",
           "version": "1.0.0",
-          "system_template": "You are closing the research session on {{topic}}.\n\n{{rigor}}\n\nPresent the approved report to the user, note any caveats or open questions, and end the session.",
+          "system_template": "You are closing the research session on {{topic}}.\n\n{{rigor}}\n\nPresent the approved report ({{artifacts.report}}) to the user, note any caveats or open questions, and end the session.",
           "variables": [
             {
               "name": "topic",
@@ -398,6 +398,13 @@ data:
             "on_max_visits": "synthesize",
             "on_event": {
               "assess": "assess"
+            },
+            "artifacts": {
+              "evidence": {
+                "type": "application/json",
+                "mode": "append",
+                "description": "Source-attributed facts accumulated across gathering passes"
+              }
             }
           },
           "assess": {
@@ -415,6 +422,13 @@ data:
             "persistence": "persistent",
             "on_event": {
               "done": "review"
+            },
+            "artifacts": {
+              "report": {
+                "type": "text/markdown",
+                "mode": "replace",
+                "description": "The synthesized, cited research report"
+              }
             }
           },
           "review": {

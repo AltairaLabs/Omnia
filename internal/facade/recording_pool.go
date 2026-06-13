@@ -17,6 +17,7 @@ limitations under the License.
 package facade
 
 import (
+	"errors"
 	"sync"
 
 	"github.com/go-logr/logr"
@@ -29,19 +30,22 @@ const (
 	DefaultRecordingQueueSize = 1000
 )
 
+var errRecordingQueueFull = errors.New("recording queue full")
+
 // RecordingPool is a bounded worker pool for asynchronous session recording.
 // It replaces unbounded goroutine creation with a fixed set of workers
 // and a buffered channel. If the queue is full, new tasks are dropped
 // with a warning log rather than blocking the caller.
 type RecordingPool struct {
-	queue chan func()
-	wg    sync.WaitGroup
-	log   logr.Logger
+	queue   chan func()
+	wg      sync.WaitGroup
+	log     logr.Logger
+	metrics ServerMetrics
 }
 
 // NewRecordingPool creates and starts a recording pool with the given worker
 // count and queue capacity.
-func NewRecordingPool(workers, queueSize int, log logr.Logger) *RecordingPool {
+func NewRecordingPool(workers, queueSize int, log logr.Logger, metrics ServerMetrics) *RecordingPool {
 	if workers <= 0 {
 		workers = DefaultRecordingPoolSize
 	}
@@ -49,9 +53,14 @@ func NewRecordingPool(workers, queueSize int, log logr.Logger) *RecordingPool {
 		queueSize = DefaultRecordingQueueSize
 	}
 
+	if metrics == nil {
+		metrics = &NoOpMetrics{}
+	}
+
 	p := &RecordingPool{
-		queue: make(chan func(), queueSize),
-		log:   log.WithName("recording-pool"),
+		queue:   make(chan func(), queueSize),
+		log:     log.WithName("recording-pool"),
+		metrics: metrics,
 	}
 
 	p.wg.Add(workers)
@@ -68,7 +77,8 @@ func (p *RecordingPool) Submit(task func()) {
 	select {
 	case p.queue <- task:
 	default:
-		p.log.V(1).Info("recording queue full, dropping task")
+		p.metrics.RecordingDropped()
+		p.log.Error(errRecordingQueueFull, "recording task dropped")
 	}
 }
 

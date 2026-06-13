@@ -24,6 +24,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"strconv"
 	"strings"
 	"time"
 
@@ -698,14 +699,16 @@ func (s *PostgresMemoryStore) Delete(ctx context.Context, scope map[string]strin
 		return errors.New(errWorkspaceRequired)
 	}
 
-	// Scope guard (#1268): a workspace-only check would let any caller in
-	// workspace W forget any user's memory in W by its UUID. Require the
-	// caller's user/agent partition to match the row's — a missing scope key
-	// means "no constraint on that dimension" (NULL), mirroring updateEntity.
+	// Scope guard (#1268, SEC-3): a workspace-only check would let any caller in
+	// workspace W forget any user's memory in W by its UUID. Anchor the user
+	// dimension — a missing user_id means NULL (IS NOT DISTINCT FROM), so an
+	// empty user_id can only forget institutional/agent rows, never another
+	// user's. The agent dimension stays permissive (a user-scoped DSAR forget
+	// must still reach that user's user_for_agent rows). Mirrors GetMemory.
 	tag, err := s.pool.Exec(ctx, `
 		UPDATE memory_entities SET forgotten = true, updated_at = now()
 		WHERE id = $1 AND workspace_id = $2
-		  AND ($3::text IS NULL OR virtual_user_id = $3)
+		  AND virtual_user_id IS NOT DISTINCT FROM $3::text
 		  AND ($4::uuid IS NULL OR agent_id = $4)`,
 		memoryID,
 		scope[ScopeWorkspaceID],
@@ -850,7 +853,7 @@ func (s *PostgresMemoryStore) GetMemory(ctx context.Context, scope map[string]st
 		  AND (o.valid_until IS NULL OR o.valid_until > now())
 		WHERE e.id = $1
 		  AND e.workspace_id = $2
-		  AND ($3::text IS NULL OR e.virtual_user_id = $3)
+		  AND e.virtual_user_id IS NOT DISTINCT FROM $3::text
 		  AND ($4::uuid IS NULL OR e.agent_id = $4)
 		  AND NOT e.forgotten
 		ORDER BY o.observed_at DESC
@@ -1259,42 +1262,96 @@ func (s *PostgresMemoryStore) FindSimilarObservations(
 	// max-distance bound for indexed range filtering.
 	maxDistance := 1.0 - minSimilarity
 
-	rows, err := s.pool.Query(ctx, `
-		SELECT o.id, e.id, o.content,
-		       1 - (o.embedding <=> $1) AS similarity
-		FROM memory_entities e
-		JOIN memory_observations o ON o.entity_id = e.id
-		WHERE e.workspace_id = $2
-		  AND ($3::text IS NULL OR e.virtual_user_id = $3)
-		  AND ($4::uuid IS NULL OR e.agent_id = $4)
-		  AND NOT e.forgotten
-		  AND o.superseded_by IS NULL
-		  AND (o.valid_until IS NULL OR o.valid_until > now())
-		  AND o.embedding IS NOT NULL
-		  AND o.embedding <=> $1 <= $5
-		ORDER BY o.embedding <=> $1
-		LIMIT $6`,
-		pgvector.NewVector(queryEmbedding),
-		scope[ScopeWorkspaceID],
-		scopeOrNil(scope, ScopeUserID),
-		scopeOrNil(scope, ScopeAgentID),
-		maxDistance,
-		k,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("memory: similar observations: %w", err)
-	}
-	defer rows.Close()
-
 	var out []SimilarObservation
-	for rows.Next() {
-		var m SimilarObservation
-		if err := rows.Scan(&m.ObservationID, &m.EntityID, &m.Content, &m.Similarity); err != nil {
-			return nil, fmt.Errorf("memory: similar scan: %w", err)
+	// PERF-3: raise hnsw.ef_search to at least k so the HNSW scan can return
+	// the k candidates the query asks for.
+	err := s.withHNSWEFSearch(ctx, clampEFSearch(k), func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `
+			SELECT o.id, e.id, o.content,
+			       1 - (o.embedding <=> $1) AS similarity
+			FROM memory_entities e
+			JOIN memory_observations o ON o.entity_id = e.id
+			WHERE e.workspace_id = $2
+			  AND ($3::text IS NULL OR e.virtual_user_id = $3)
+			  AND ($4::uuid IS NULL OR e.agent_id = $4)
+			  AND NOT e.forgotten
+			  AND o.superseded_by IS NULL
+			  AND (o.valid_until IS NULL OR o.valid_until > now())
+			  AND o.embedding IS NOT NULL
+			  AND o.embedding <=> $1 <= $5
+			ORDER BY o.embedding <=> $1
+			LIMIT $6`,
+			pgvector.NewVector(queryEmbedding),
+			scope[ScopeWorkspaceID],
+			scopeOrNil(scope, ScopeUserID),
+			scopeOrNil(scope, ScopeAgentID),
+			maxDistance,
+			k,
+		)
+		if err != nil {
+			return fmt.Errorf("memory: similar observations: %w", err)
 		}
-		out = append(out, m)
+		defer rows.Close()
+
+		for rows.Next() {
+			var m SimilarObservation
+			if err := rows.Scan(&m.ObservationID, &m.EntityID, &m.Content, &m.Similarity); err != nil {
+				return fmt.Errorf("memory: similar scan: %w", err)
+			}
+			out = append(out, m)
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return nil, err
 	}
-	return out, rows.Err()
+	return out, nil
+}
+
+// HNSW ef_search bounds. pgvector's default hnsw.ef_search is 40 — an HNSW
+// scan returns at most ef_search candidates, then scope/active/confidence
+// post-filtering thins those further, so the cosine arm silently under-returns
+// (and the FULL OUTER JOIN with FTS masks it) as tenant count grows (PERF-3).
+// We raise it per query to at least the cosine over-fetch, bounded to the
+// range pgvector accepts.
+const (
+	minHNSWEFSearch = 100
+	maxHNSWEFSearch = 1000
+)
+
+// clampEFSearch returns an hnsw.ef_search large enough to surface `want`
+// candidates from the HNSW scan, bounded to pgvector's accepted range.
+func clampEFSearch(want int) int {
+	switch {
+	case want < minHNSWEFSearch:
+		return minHNSWEFSearch
+	case want > maxHNSWEFSearch:
+		return maxHNSWEFSearch
+	default:
+		return want
+	}
+}
+
+// withHNSWEFSearch runs fn inside a transaction that first raises
+// hnsw.ef_search to efSearch via set_config(..., is_local => true), so the
+// HNSW scan returns enough candidates for the cosine over-fetch to survive
+// post-filtering (PERF-3). The setting is scoped to this transaction only;
+// fn must run its query and scan against the supplied tx before it returns,
+// since the rows are tied to the transaction's lifetime.
+func (s *PostgresMemoryStore) withHNSWEFSearch(ctx context.Context, efSearch int, fn func(pgx.Tx) error) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("memory: begin ef_search tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	if _, err := tx.Exec(ctx, "SELECT set_config('hnsw.ef_search', $1, true)", strconv.Itoa(efSearch)); err != nil {
+		return fmt.Errorf("memory: set hnsw.ef_search: %w", err)
+	}
+	if err := fn(tx); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }
 
 // hybridRetrieveSQL is the canonical RRF query template. Two ranked
@@ -1442,22 +1499,29 @@ func (s *PostgresMemoryStore) RetrieveHybrid(
 		minConfidence = 0
 	}
 
-	rows, err := s.pool.Query(ctx, hybridRetrieveSQL,
-		scope[ScopeWorkspaceID],
-		scopeOrNil(scope, ScopeUserID),
-		scopeOrNil(scope, ScopeAgentID),
-		query,
-		pgvector.NewVector(queryEmbedding),
-		fanout,
-		limit,
-		minConfidence,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("memory: hybrid retrieve: %w", err)
-	}
-	defer rows.Close()
+	// PERF-3: the cosine CTE over-fetches fanout×4 from the HNSW index, so
+	// raise hnsw.ef_search to match or the index caps candidates at its
+	// default (40) before post-filtering.
+	var mems []*Memory
+	err := s.withHNSWEFSearch(ctx, clampEFSearch(fanout*4), func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, hybridRetrieveSQL,
+			scope[ScopeWorkspaceID],
+			scopeOrNil(scope, ScopeUserID),
+			scopeOrNil(scope, ScopeAgentID),
+			query,
+			pgvector.NewVector(queryEmbedding),
+			fanout,
+			limit,
+			minConfidence,
+		)
+		if err != nil {
+			return fmt.Errorf("memory: hybrid retrieve: %w", err)
+		}
+		defer rows.Close()
 
-	mems, err := scanHybridMemories(rows, scope)
+		mems, err = scanHybridMemories(rows, scope)
+		return err
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -1746,8 +1810,15 @@ func formatVisibleToMeSQL(qb *pgutil.QueryBuilder, limit, offset int) string {
 
 // addScopeFilters appends optional user_id and agent_id filters.
 func addScopeFilters(qb *pgutil.QueryBuilder, scope map[string]string) {
+	// SEC-3: an empty user_id must mean "institutional/agent rows only"
+	// (virtual_user_id IS NULL), NOT "no constraint" — otherwise a
+	// workspace-scoped read (e.g. the runtime's semantic strategy, which
+	// passes no user) returns every user's private memories in the workspace.
+	// A populated user_id stays strict (that user's rows only).
 	if uid := scope[ScopeUserID]; uid != "" {
 		qb.Add(colVirtualUserID, uid)
+	} else {
+		qb.AddRaw("virtual_user_id IS NULL")
 	}
 	if aid := scope[ScopeAgentID]; aid != "" {
 		qb.Add("e.agent_id=$?", aid)

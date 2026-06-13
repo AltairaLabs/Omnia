@@ -1055,6 +1055,50 @@ func TestMemoryService_SaveWithExplicitExpiry(t *testing.T) {
 		"explicit ExpiresAt should not be overridden by DefaultTTL")
 }
 
+func TestMemoryService_PerTierTTLDefault(t *testing.T) {
+	pool := freshDB(t)
+	store := memory.NewPostgresMemoryStore(pool)
+	// Global default is 24h; the user-tier policy overrides it to 48h (#1336).
+	svc := NewMemoryService(store, nil, MemoryServiceConfig{DefaultTTL: 24 * time.Hour}, logr.Discard())
+	svc.SetPolicyLoader(&memory.StaticPolicyLoader{Policy: &omniav1alpha1.MemoryPolicy{
+		Spec: omniav1alpha1.MemoryPolicySpec{Tiers: omniav1alpha1.MemoryRetentionTierSet{
+			User: &omniav1alpha1.MemoryTierConfig{TTL: &omniav1alpha1.MemoryTTLConfig{Default: "48h"}},
+		}},
+	}})
+
+	before := time.Now()
+	mem := &memory.Memory{
+		Type: "fact", Content: "per-tier ttl", Confidence: 0.9,
+		Scope: map[string]string{memory.ScopeWorkspaceID: testWorkspaceID, memory.ScopeUserID: "u"},
+	}
+	require.NoError(t, svc.SaveMemory(context.Background(), mem))
+	require.NotNil(t, mem.ExpiresAt)
+	assert.True(t, mem.ExpiresAt.After(before.Add(47*time.Hour)), "tier default (48h) should win over the global 24h")
+	assert.True(t, mem.ExpiresAt.Before(before.Add(49*time.Hour)))
+}
+
+func TestMemoryService_TTLMaxAgeCapsClientExpiry(t *testing.T) {
+	pool := freshDB(t)
+	store := memory.NewPostgresMemoryStore(pool)
+	svc := NewMemoryService(store, nil, MemoryServiceConfig{}, logr.Discard())
+	svc.SetPolicyLoader(&memory.StaticPolicyLoader{Policy: &omniav1alpha1.MemoryPolicy{
+		Spec: omniav1alpha1.MemoryPolicySpec{Tiers: omniav1alpha1.MemoryRetentionTierSet{
+			User: &omniav1alpha1.MemoryTierConfig{TTL: &omniav1alpha1.MemoryTTLConfig{MaxAge: "30d"}},
+		}},
+	}})
+
+	before := time.Now()
+	farFuture := before.Add(365 * 24 * time.Hour)
+	mem := &memory.Memory{
+		Type: "fact", Content: "pinned forever", Confidence: 0.9, ExpiresAt: &farFuture,
+		Scope: map[string]string{memory.ScopeWorkspaceID: testWorkspaceID, memory.ScopeUserID: "u"},
+	}
+	require.NoError(t, svc.SaveMemory(context.Background(), mem))
+	require.NotNil(t, mem.ExpiresAt)
+	assert.True(t, mem.ExpiresAt.Before(before.Add(31*24*time.Hour)), "client expiry must be capped to maxAge (30d)")
+	assert.True(t, mem.ExpiresAt.After(before.Add(29*24*time.Hour)))
+}
+
 func TestMemoryService_SaveStampsDefaultPurpose(t *testing.T) {
 	pool := freshDB(t)
 	store := memory.NewPostgresMemoryStore(pool)

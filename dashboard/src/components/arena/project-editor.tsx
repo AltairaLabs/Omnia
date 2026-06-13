@@ -16,6 +16,8 @@ import { useEnterpriseConfig, useToast } from "@/hooks/core";
 import { FileTree } from "./file-tree";
 import { BindProviderDialog } from "./bind-provider-dialog";
 import { EditorTabs, EditorTabsEmptyState } from "./editor-tabs";
+import { EditorViewToggle, type EditorView } from "./editor-view-toggle";
+import { ArenaWorkloadView } from "./arena-workload-view";
 import { YamlEditor, YamlEditorEmptyState } from "./yaml-editor";
 import { ProjectToolbar } from "./project-toolbar";
 import { useWorkspace } from "@/contexts/workspace-context";
@@ -135,6 +137,15 @@ export function ProjectEditor({ className, initialProjectId }: ProjectEditorProp
   const [saving, setSaving] = useState(false);
   const [validating, setValidating] = useState(false);
   const [validationResults, setValidationResults] = useState<ValidationResults | null>(null);
+
+  // Editor pane view: YAML editor vs the workload graph. Reset to YAML when the
+  // project changes (adjust-state-during-render, no effect).
+  const [editorView, setEditorView] = useState<EditorView>("yaml");
+  const [viewProjectId, setViewProjectId] = useState<string | undefined>(currentProject?.id);
+  if (currentProject?.id !== viewProjectId) {
+    setViewProjectId(currentProject?.id);
+    setEditorView("yaml");
+  }
   const [problems, setProblems] = useState<Problem[]>([]);
   const [selectedProvider, setSelectedProvider] = useState<string | undefined>();
   const [bindProviderDialog, setBindProviderDialog] = useState<{
@@ -571,6 +582,9 @@ export function ProjectEditor({ className, initialProjectId }: ProjectEditorProp
 
   // Helper function to render the editor content
   const renderEditorContent = () => {
+    if (editorView === "workload" && currentProject) {
+      return <ArenaWorkloadView projectId={currentProject.id} />;
+    }
     if (activeFile) {
       // Use LSP editor in production when enabled, fall back to basic editor in dev
       if (lspEnabled && workspace && currentProject && LspYamlEditor) {
@@ -722,8 +736,15 @@ export function ProjectEditor({ className, initialProjectId }: ProjectEditorProp
             {/* Editor panel */}
             <ResizablePanel defaultSize={75}>
               <div className="flex flex-col h-full">
-                {/* Tabs */}
-                <EditorTabs />
+                {/* Tabs + view toggle */}
+                <div className="flex items-center justify-between border-b">
+                  <EditorTabs />
+                  {currentProject && (
+                    <div className="px-2 shrink-0">
+                      <EditorViewToggle view={editorView} onChange={setEditorView} />
+                    </div>
+                  )}
+                </div>
 
                 {/* Editor */}
                 <div className="flex-1 min-h-0">

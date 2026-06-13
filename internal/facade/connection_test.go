@@ -156,3 +156,84 @@ func TestCleanupConnection_ErrorStatusNotOverwritten(t *testing.T) {
 			updated.Status, session.SessionStatusError)
 	}
 }
+
+func TestConnection_MaxInFlightMessagesPerConnection(t *testing.T) {
+	started := make(chan struct{}, 1)
+	release := make(chan struct{})
+	handler := &mockHandler{
+		handleFunc: func(_ context.Context, _ string, msg *ClientMessage, writer ResponseWriter) error {
+			if msg.Content == "first" {
+				started <- struct{}{}
+				<-release
+			}
+			return writer.WriteDone("done: " + msg.Content)
+		},
+	}
+
+	server, ts := newTestServer(t, handler)
+	server.config.MaxInFlightMessagesPerConnection = 1
+
+	wsConn, resp, err := websocket.DefaultDialer.Dial(wsURL(ts.URL)+"?agent=test-agent", nil)
+	if err != nil {
+		t.Fatalf("dial failed: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	defer func() { _ = wsConn.Close() }()
+
+	// Read connected message to get session ID
+	var connectedMsg ServerMessage
+	if err := wsConn.ReadJSON(&connectedMsg); err != nil {
+		t.Fatalf("failed to read connected: %v", err)
+	}
+
+	first := ClientMessage{Type: MessageTypeMessage, SessionID: connectedMsg.SessionID, Content: "first"}
+	firstData, _ := json.Marshal(first)
+	if err := wsConn.WriteMessage(websocket.TextMessage, firstData); err != nil {
+		t.Fatalf("failed to write first message: %v", err)
+	}
+
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("first message was not started")
+	}
+
+	second := ClientMessage{Type: MessageTypeMessage, SessionID: connectedMsg.SessionID, Content: "second"}
+	secondData, _ := json.Marshal(second)
+	if err := wsConn.WriteMessage(websocket.TextMessage, secondData); err != nil {
+		t.Fatalf("failed to write second message: %v", err)
+	}
+
+	errMsg := readServerMsg(t, wsConn)
+	if errMsg.Type != MessageTypeError {
+		t.Fatalf("expected error message, got %q", errMsg.Type)
+	}
+	if errMsg.Error == nil || errMsg.Error.Code != ErrorCodeRateLimited {
+		t.Fatalf("expected %s error code, got %#v", ErrorCodeRateLimited, errMsg.Error)
+	}
+
+	close(release)
+
+	doneMsg := readServerMsg(t, wsConn)
+	if doneMsg.Type != MessageTypeDone {
+		t.Fatalf("expected done message, got %q", doneMsg.Type)
+	}
+	if doneMsg.Content != "done: first" {
+		t.Fatalf("done content = %q, want %q", doneMsg.Content, "done: first")
+	}
+}
+
+// readServerMsg sets a short read deadline and decodes the next ServerMessage,
+// failing the test on error. Extracted to keep the in-flight-limit test within
+// the cyclomatic-complexity budget.
+func readServerMsg(t *testing.T, conn *websocket.Conn) ServerMessage {
+	t.Helper()
+	if err := conn.SetReadDeadline(time.Now().Add(2 * time.Second)); err != nil {
+		t.Fatalf("failed to set read deadline: %v", err)
+	}
+	var msg ServerMessage
+	if err := conn.ReadJSON(&msg); err != nil {
+		t.Fatalf("failed to read server message: %v", err)
+	}
+	return msg
+}

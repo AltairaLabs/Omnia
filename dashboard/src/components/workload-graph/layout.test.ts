@@ -23,3 +23,14 @@ describe("layoutFlow", () => {
     expect(routes.size).toBe(0);
   });
 });
+
+describe("layoutFlow — per-node sizes", () => {
+  it("uses each node's own width/height for elk", async () => {
+    const nodes = [
+      { id: "a", type: "workflowInitial", width: 24, height: 24, position: { x: 0, y: 0 }, data: {} },
+      { id: "b", type: "workflowState", width: 200, height: 68, position: { x: 0, y: 0 }, data: {} },
+    ] as never[];
+    const { routes } = await layoutFlow(nodes, [{ id: "e", source: "a", target: "b" }]);
+    expect(routes.has("e")).toBe(true);
+  });
+});

@@ -8,12 +8,27 @@ package memory
 
 import (
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 )
+
+// sortedKeys returns a map's keys in deterministic (sorted) order so the
+// per-category retention passes run in a stable, reproducible sequence.
+func sortedKeys[V any](m map[string]V) []string {
+	if len(m) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
 
 // retentionTiers is the iteration order the composite worker uses.
 // UserForAgent rows collapse into the user tier for retention — the
@@ -50,6 +65,38 @@ func (t Tier) sqlPredicate() string {
 		return "virtual_user_id IS NOT NULL"
 	}
 	return "FALSE"
+}
+
+// TierTTL is the resolved write-time TTL policy for a memory's tier.
+// Zero durations mean "unset": the caller falls back to the global default
+// (for Default) or applies no cap (for MaxAge).
+type TierTTL struct {
+	Default time.Duration
+	MaxAge  time.Duration
+}
+
+// ResolveTierTTL returns the per-tier write-time TTL policy for a memory with
+// the given scope (#1336). It maps the scope to a retention tier
+// (user-for-agent collapses into user, mirroring retentionTiers) and reads
+// spec.tiers[tier].ttl.{default,maxAge}. Unparseable or non-positive values
+// are treated as unset.
+func ResolveTierTTL(policy *omniav1alpha1.MemoryPolicy, scope map[string]string) TierTTL {
+	tier := classifyTierFromScope(scope)
+	if tier == TierUserForAgent {
+		tier = TierUser
+	}
+	cfg := tierConfig(policy, tier)
+	if cfg == nil || cfg.TTL == nil {
+		return TierTTL{}
+	}
+	var out TierTTL
+	if d, err := parseRetentionDuration(cfg.TTL.Default); err == nil && d > 0 {
+		out.Default = d
+	}
+	if d, err := parseRetentionDuration(cfg.TTL.MaxAge); err == nil && d > 0 {
+		out.MaxAge = d
+	}
+	return out
 }
 
 // tierConfig returns the per-tier config from the cluster default,

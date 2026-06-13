@@ -38,3 +38,5 @@ export { useTemplateSources, useTemplateSourceMutations, useAllTemplates, useTem
 export { useDevSession } from "./use-dev-session";
 export { useArenaLiveStats } from "./use-arena-live-stats";
 export { useEventSource } from "./use-event-source";
+export { useArenaWorkloadModel } from "./arena/use-arena-workload-model";
+export type { ArenaWorkloadModelState } from "./arena/use-arena-workload-model";

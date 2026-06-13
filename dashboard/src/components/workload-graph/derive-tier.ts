@@ -11,6 +11,7 @@ import type {
   WorkloadBudget,
   WorkloadToolDetail,
 } from "./types";
+import { workflowDataflow, collectVariables, variableNodesAndEdges } from "./workflow-dataflow";
 
 function toolDetails(
   names: string[] | undefined,
@@ -182,11 +183,12 @@ export function deriveWorkloadTier(content: PromptPackContent): WorkloadModel {
     const nodes = memberKeys.map((k) => crewAgentNode(k, content));
     const edges = content.workflow ? flowEdges(content) : [];
     const stateCount = Object.keys(content.workflow?.states ?? {}).length;
+    const vin = variableNodesAndEdges(collectVariables(content), agentsCfg.entry);
     return {
       tier: "multiagent",
       altitude: "definition",
-      nodes,
-      edges,
+      nodes: [...nodes, ...vin.nodes],
+      edges: [...edges, ...vin.edges],
       meta: {
         budget: budgetFromWorkflow(content.workflow),
         counts: { agents: memberKeys.length, tools: sumTools(nodes), skills: skillCount, states: stateCount },
@@ -198,11 +200,12 @@ export function deriveWorkloadTier(content: PromptPackContent): WorkloadModel {
   if (wf && Object.keys(wf.states ?? {}).length > 0) {
     const stateIds = Object.keys(wf.states);
     const nodes = stateIds.map((id) => stateNode(id, content, id === wf.entry));
+    const df = workflowDataflow(content);
     return {
       tier: "workflow",
       altitude: "definition",
-      nodes,
-      edges: flowEdges(content),
+      nodes: [...nodes, ...df.nodes],
+      edges: [...flowEdges(content), ...df.edges],
       meta: {
         budget: budgetFromWorkflow(wf),
         counts: { agents: 1, tools: sumTools(nodes), skills: skillCount, states: stateIds.length },
@@ -215,12 +218,13 @@ export function deriveWorkloadTier(content: PromptPackContent): WorkloadModel {
   const nodes: WorkloadNode[] = first
     ? [agentNodeFromPrompt(first.id, first.prompt, content, true)]
     : [];
+  const vin = variableNodesAndEdges(collectVariables(content), first?.id);
 
   return {
     tier: "single",
     altitude: "definition",
-    nodes,
-    edges: [],
+    nodes: [...nodes, ...vin.nodes],
+    edges: vin.edges,
     meta: {
       counts: { agents: nodes.length, tools: sumTools(nodes), skills: skillCount, states: 0 },
     },

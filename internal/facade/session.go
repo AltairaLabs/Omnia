@@ -19,6 +19,7 @@ package facade
 import (
 	"context"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"runtime/debug"
 	"strings"
@@ -237,7 +238,7 @@ func (s *Server) processRegularMessage(ctx context.Context, c *Connection, sessi
 	// Handle message
 	if s.handler != nil {
 		if err := safeHandleMessage(s.handler, ctx, sessionID, msg, recWriter, log); err != nil {
-			s.sendError(c, sessionID, ErrorCodeInternalError, err.Error())
+			s.sendError(c, sessionID, ErrorCodeInternalError, "internal server error")
 			return err
 		}
 	} else {
@@ -260,11 +261,16 @@ func (s *Server) ensureSession(ctx context.Context, c *Connection, sessionID str
 		// Try to resume existing session
 		sess, err := s.sessionStore.GetSession(ctx, sessionID)
 		if err == nil {
+			s.metrics.SessionCreated()
 			// Refresh TTL
 			if err := s.sessionStore.RefreshTTL(ctx, sessionID, s.config.SessionTTL); err != nil {
 				log.Error(err, "failed to refresh session TTL")
 			}
 			return sess.ID, nil
+		}
+		if !errors.Is(err, session.ErrSessionNotFound) {
+			log.Error(err, "failed to resume session", "sessionID", sessionID)
+			return "", err
 		}
 		// Session not found or expired — create with the requested ID so the
 		// client-visible session ID stays stable.
@@ -334,9 +340,6 @@ func buildSessionState(c *Connection, cfg ServerConfig) map[string]string {
 	state := make(map[string]string)
 	if c.userID != "" {
 		state["user.id"] = c.userID
-	}
-	if c.userEmail != "" {
-		state["user.email"] = c.userEmail
 	}
 	if c.userRoles != "" {
 		state["user.roles"] = c.userRoles

@@ -18,7 +18,10 @@ package agent
 
 import (
 	"context"
+	"fmt"
 	"net"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -583,6 +586,26 @@ func (s *stallingRuntimeServer) Health(_ context.Context, _ *runtimev1.HealthReq
 	return &runtimev1.HealthResponse{Healthy: true, Status: "ok"}, nil
 }
 
+type cancelAwareRuntimeServer struct {
+	runtimev1.UnimplementedRuntimeServiceServer
+	started  chan struct{}
+	canceled chan struct{}
+}
+
+func (s *cancelAwareRuntimeServer) Converse(stream runtimev1.RuntimeService_ConverseServer) error {
+	if _, err := stream.Recv(); err != nil {
+		return err
+	}
+	close(s.started)
+	<-stream.Context().Done()
+	close(s.canceled)
+	return stream.Context().Err()
+}
+
+func (s *cancelAwareRuntimeServer) Health(_ context.Context, _ *runtimev1.HealthRequest) (*runtimev1.HealthResponse, error) {
+	return &runtimev1.HealthResponse{Healthy: true, Status: "ok"}, nil
+}
+
 func TestRuntimeHandler_HandleMessage_InactivityTimeout(t *testing.T) {
 	stallMock := &stallingRuntimeServer{}
 	lis, err := net.Listen("tcp", "localhost:0")
@@ -615,6 +638,56 @@ func TestRuntimeHandler_HandleMessage_InactivityTimeout(t *testing.T) {
 	}, writer)
 
 	require.Error(t, err, "expected error from stalled stream")
+}
+
+func TestRuntimeHandler_HandleMessage_InactivityTimeoutCancelsStream(t *testing.T) {
+	originalTimeout := defaultStreamInactivityTimeout
+	defaultStreamInactivityTimeout = 100 * time.Millisecond
+	t.Cleanup(func() { defaultStreamInactivityTimeout = originalTimeout })
+
+	mock := &cancelAwareRuntimeServer{
+		started:  make(chan struct{}),
+		canceled: make(chan struct{}),
+	}
+	lis, err := net.Listen("tcp", "localhost:0")
+	require.NoError(t, err)
+	grpcServer := grpc.NewServer()
+	runtimev1.RegisterRuntimeServiceServer(grpcServer, mock)
+	go func() { _ = grpcServer.Serve(lis) }()
+	t.Cleanup(func() { grpcServer.Stop() })
+
+	client, err := facade.NewRuntimeClient(facade.RuntimeClientConfig{
+		Address:     lis.Addr().String(),
+		DialTimeout: 5 * time.Second,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = client.Close() })
+
+	handler := NewRuntimeHandler(client)
+	writer := &mockResponseWriter{}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	err = handler.HandleMessage(ctx, "session-cancel", &facade.ClientMessage{
+		Type:    facade.MessageTypeMessage,
+		Content: "hello",
+	}, writer)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "runtime stream inactivity timeout")
+
+	select {
+	case <-mock.started:
+	case <-time.After(time.Second):
+		t.Fatal("runtime stream did not start")
+	}
+
+	select {
+	case <-mock.canceled:
+		// expected: HandleMessage canceled the stream context promptly
+	case <-time.After(time.Second):
+		t.Fatal("stream context was not canceled after inactivity timeout")
+	}
 }
 
 func (s *capturingRuntimeServer) Converse(stream runtimev1.RuntimeService_ConverseServer) error {
@@ -999,4 +1072,107 @@ func TestRuntimeHandler_SendToolResult_NoActiveHandler(t *testing.T) {
 		Result: "test",
 	})
 	assert.False(t, routed)
+}
+
+type multiClientToolRuntimeServer struct {
+	runtimev1.UnimplementedRuntimeServiceServer
+	seq      atomic.Int32
+	mu       sync.Mutex
+	received map[string]*runtimev1.ClientToolResult
+}
+
+func (s *multiClientToolRuntimeServer) Converse(stream runtimev1.RuntimeService_ConverseServer) error {
+	if _, err := stream.Recv(); err != nil {
+		return err
+	}
+
+	callID := fmt.Sprintf("ct-multi-%d", s.seq.Add(1))
+	if err := stream.Send(&runtimev1.ServerMessage{
+		Message: &runtimev1.ServerMessage_ToolCall{ToolCall: &runtimev1.ToolCall{
+			Id:        callID,
+			Name:      "multi_tool",
+			Execution: runtimev1.ToolExecution_TOOL_EXECUTION_CLIENT,
+		}},
+	}); err != nil {
+		return err
+	}
+
+	msg, err := stream.Recv()
+	if err != nil {
+		return err
+	}
+
+	s.mu.Lock()
+	if s.received == nil {
+		s.received = map[string]*runtimev1.ClientToolResult{}
+	}
+	s.received[callID] = msg.GetClientToolResult()
+	s.mu.Unlock()
+
+	return stream.Send(&runtimev1.ServerMessage{
+		Message: &runtimev1.ServerMessage_Done{Done: &runtimev1.Done{FinalContent: "ok " + callID}},
+	})
+}
+
+func (s *multiClientToolRuntimeServer) Health(_ context.Context, _ *runtimev1.HealthRequest) (*runtimev1.HealthResponse, error) {
+	return &runtimev1.HealthResponse{Healthy: true, Status: "ok"}, nil
+}
+
+func TestRuntimeHandler_ClientToolCall_ConcurrentSameSession(t *testing.T) {
+	mock := &multiClientToolRuntimeServer{}
+
+	lis, err := net.Listen("tcp", "localhost:0")
+	require.NoError(t, err)
+	server := grpc.NewServer()
+	runtimev1.RegisterRuntimeServiceServer(server, mock)
+	go func() { _ = server.Serve(lis) }()
+	t.Cleanup(func() { server.Stop() })
+
+	client, err := facade.NewRuntimeClient(facade.RuntimeClientConfig{
+		Address:     lis.Addr().String(),
+		DialTimeout: 5 * time.Second,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = client.Close() })
+
+	handler := NewRuntimeHandler(client)
+	handler.SetClientToolTimeout(2 * time.Second)
+
+	sessionID := "shared-session"
+	writerA := &mockResponseWriter{toolCallCh: make(chan *facade.ToolCallInfo, 1)}
+	writerB := &mockResponseWriter{toolCallCh: make(chan *facade.ToolCallInfo, 1)}
+
+	errCh := make(chan error, 2)
+	go func() {
+		errCh <- handler.HandleMessage(context.Background(), sessionID, &facade.ClientMessage{Content: "first"}, writerA)
+	}()
+	go func() {
+		errCh <- handler.HandleMessage(context.Background(), sessionID, &facade.ClientMessage{Content: "second"}, writerB)
+	}()
+
+	var tcA, tcB *facade.ToolCallInfo
+	select {
+	case tcA = <-writerA.toolCallCh:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for first tool call")
+	}
+	select {
+	case tcB = <-writerB.toolCallCh:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for second tool call")
+	}
+
+	assert.NotEqual(t, tcA.ID, tcB.ID, "tool call IDs should be distinct")
+
+	assert.True(t, handler.SendToolResult(sessionID, &facade.ClientToolResultInfo{CallID: tcA.ID, Result: "ok-a"}))
+	assert.True(t, handler.SendToolResult(sessionID, &facade.ClientToolResultInfo{CallID: tcB.ID, Result: "ok-b"}))
+
+	require.NoError(t, <-errCh)
+	require.NoError(t, <-errCh)
+
+	mock.mu.Lock()
+	defer mock.mu.Unlock()
+	require.Len(t, mock.received, 2)
+	assert.Contains(t, mock.received, tcA.ID)
+	assert.Contains(t, mock.received, tcB.ID)
 }

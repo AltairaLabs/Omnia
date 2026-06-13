@@ -53,9 +53,11 @@ const bearerPrefix = "Bearer "
 // — production wiring uses JWKSResolver pointed at the dashboard's
 // /api/auth/jwks endpoint, tests use StaticKeyResolver.
 type MgmtPlaneValidator struct {
-	keys     KeyResolver
-	issuer   string
-	audience string
+	keys              KeyResolver
+	issuer            string
+	audience          string
+	expectedAgent     string
+	expectedWorkspace string
 }
 
 // MgmtPlaneOption tunes a MgmtPlaneValidator.
@@ -71,6 +73,18 @@ func WithMgmtPlaneIssuer(iss string) MgmtPlaneOption {
 // DefaultMgmtPlaneAudience.
 func WithMgmtPlaneAudience(aud string) MgmtPlaneOption {
 	return func(v *MgmtPlaneValidator) { v.audience = aud }
+}
+
+// WithMgmtPlaneExpectedAgent enforces the `agent` claim when present.
+// Tokens that omit the claim continue to validate for backward compatibility.
+func WithMgmtPlaneExpectedAgent(agent string) MgmtPlaneOption {
+	return func(v *MgmtPlaneValidator) { v.expectedAgent = agent }
+}
+
+// WithMgmtPlaneExpectedWorkspace enforces the `workspace` claim when present.
+// Tokens that omit the claim continue to validate for backward compatibility.
+func WithMgmtPlaneExpectedWorkspace(workspace string) MgmtPlaneOption {
+	return func(v *MgmtPlaneValidator) { v.expectedWorkspace = workspace }
 }
 
 // NewMgmtPlaneValidatorWithResolver constructs a validator that delegates
@@ -96,7 +110,10 @@ func NewMgmtPlaneValidator(jwksURL string, opts ...MgmtPlaneOption) (*MgmtPlaneV
 	if jwksURL == "" {
 		return nil, errors.New("mgmt-plane: JWKS URL required")
 	}
-	return NewMgmtPlaneValidatorWithResolver(NewJWKSResolver(jwksURL), opts...), nil
+	return NewMgmtPlaneValidatorWithResolver(
+		NewJWKSResolver(jwksURL, WithJWKSMinRefreshInterval(2*time.Second)),
+		opts...,
+	), nil
 }
 
 // mgmtPlaneClaims is the dashboard-minted JWT shape.
@@ -120,6 +137,7 @@ func (v *MgmtPlaneValidator) Validate(ctx context.Context, r *http.Request) (*po
 		jwt.WithIssuer(v.issuer),
 		jwt.WithAudience(v.audience),
 		jwt.WithValidMethods([]string{jwt.SigningMethodRS256.Alg()}),
+		jwt.WithExpirationRequired(),
 		jwt.WithLeeway(jwtLeeway),
 	)
 	token, parseErr := parser.ParseWithClaims(tokenString, claims, func(t *jwt.Token) (any, error) {
@@ -143,6 +161,12 @@ func (v *MgmtPlaneValidator) Validate(ctx context.Context, r *http.Request) (*po
 	}
 	if claims.Origin != policy.OriginManagementPlane {
 		return nil, fmt.Errorf("%w: origin %q is not management-plane", ErrInvalidCredential, claims.Origin)
+	}
+	if v.expectedAgent != "" && claims.Agent != "" && claims.Agent != v.expectedAgent {
+		return nil, fmt.Errorf("%w: token agent %q does not match %q", ErrInvalidCredential, claims.Agent, v.expectedAgent)
+	}
+	if v.expectedWorkspace != "" && claims.Workspace != "" && claims.Workspace != v.expectedWorkspace {
+		return nil, fmt.Errorf("%w: token workspace %q does not match %q", ErrInvalidCredential, claims.Workspace, v.expectedWorkspace)
 	}
 
 	id := &policy.AuthenticatedIdentity{

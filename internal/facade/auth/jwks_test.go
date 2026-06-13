@@ -24,6 +24,7 @@ import (
 	"net/http/httptest"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/altairalabs/omnia/internal/facade/auth"
 )
@@ -193,5 +194,54 @@ func TestStaticKeyResolver(t *testing.T) {
 	}
 	if _, err := r.Resolve(context.Background(), "missing"); !errors.Is(err, auth.ErrUnknownKid) {
 		t.Errorf("err = %v, want ErrUnknownKid", err)
+	}
+}
+
+func TestJWKSResolver_UnknownKidIsRateLimited(t *testing.T) {
+	t.Parallel()
+	key, _ := rsa.GenerateKey(rand.Reader, 2048)
+	srv, hits := newJWKSServer(t, &key.PublicKey)
+	r := auth.NewJWKSResolver(srv.URL+"/jwks", auth.WithJWKSMinRefreshInterval(10*time.Minute))
+
+	if _, err := r.Resolve(context.Background(), "missing-kid"); !errors.Is(err, auth.ErrUnknownKid) {
+		t.Fatalf("first missing kid resolve err = %v, want ErrUnknownKid", err)
+	}
+	if _, err := r.Resolve(context.Background(), "missing-kid"); !errors.Is(err, auth.ErrUnknownKid) {
+		t.Fatalf("second missing kid resolve err = %v, want ErrUnknownKid", err)
+	}
+	if got := hits.Load(); got != 1 {
+		t.Errorf("expected one JWKS fetch under rate limit, got %d", got)
+	}
+}
+
+func TestJWKSResolver_ConcurrentUnknownKidFetchIsCoalesced(t *testing.T) {
+	t.Parallel()
+	key, _ := rsa.GenerateKey(rand.Reader, 2048)
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits.Add(1)
+		time.Sleep(50 * time.Millisecond)
+		jwks := []map[string]string{jwkFromKey(t, &key.PublicKey)}
+		_ = json.NewEncoder(w).Encode(map[string]any{"keys": jwks})
+	}))
+	t.Cleanup(srv.Close)
+
+	r := auth.NewJWKSResolver(srv.URL+"/jwks", auth.WithJWKSMinRefreshInterval(0))
+	const workers = 8
+	errs := make(chan error, workers)
+	for i := 0; i < workers; i++ {
+		go func() {
+			_, err := r.Resolve(context.Background(), "missing-kid")
+			errs <- err
+		}()
+	}
+	for i := 0; i < workers; i++ {
+		err := <-errs
+		if !errors.Is(err, auth.ErrUnknownKid) {
+			t.Fatalf("concurrent resolve err = %v, want ErrUnknownKid", err)
+		}
+	}
+	if got := hits.Load(); got != 1 {
+		t.Errorf("expected a single coalesced JWKS fetch, got %d", got)
 	}
 }

@@ -175,7 +175,8 @@ func sessionStoreFromResolver(
 	urls, err := resolver.ResolveServiceURLs(ctx, resolveServiceGroup())
 	if err != nil {
 		log.Error(err,
-			"session-api service discovery failed; falling back to in-memory session store — sessions will NOT be recorded",
+			"session store fallback",
+			"reason", "session-api service discovery failed",
 			"impact", "no session/token/cost product data; dashboard session views will be empty")
 		return session.NewMemoryStore(), agent.SessionStoreModeMemory, nil
 	}

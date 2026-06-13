@@ -251,7 +251,7 @@ func TestFunctionsHandler_RuntimeError(t *testing.T) {
 	var resp errorResponse
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
 	assert.Equal(t, "runtime_error", resp.Error)
-	assert.Contains(t, resp.Detail, "simulated upstream failure")
+	assert.Equal(t, "runtime invocation failed", resp.Detail)
 }
 
 func TestFunctionsHandler_UnknownFunctionIs404(t *testing.T) {
@@ -528,10 +528,12 @@ func TestFunctionsHandler_Session_StoreFailuresAreNonFatal(t *testing.T) {
 		"store failure must not fail the user-facing request")
 }
 
-func TestFunctionsHandler_Session_VirtualUserFromMgmtPlaneIdentity(t *testing.T) {
-	// A mgmt-plane request carrying an on-behalf-of X-Omnia-User-ID header
-	// must attribute the session to that end user's pseudonym — the same
-	// value ResolveUserPseudonym derives.
+func TestFunctionsHandler_Session_VirtualUserFromIdentity(t *testing.T) {
+	// A request whose context carries an authenticated identity attributes the
+	// function session to that identity's EndUser pseudonym. The function path
+	// resolves the virtual user from the context identity inside
+	// FunctionInvoker; the request-level on-behalf-of header precedence
+	// (ResolveUserPseudonym) applies to the WS path, not the function path.
 	inputSchema, err := CompileSchema([]byte(`{"type":"object"}`))
 	require.NoError(t, err)
 	outputSchema, err := CompileSchema([]byte(`{"type":"object"}`))
@@ -545,19 +547,14 @@ func TestFunctionsHandler_Session_VirtualUserFromMgmtPlaneIdentity(t *testing.T)
 	req := newJSONPost(t, "/functions/"+testFunctionName, `{}`)
 	id := &policy.AuthenticatedIdentity{Origin: policy.OriginManagementPlane, EndUser: "operator@example.com"}
 	req = req.WithContext(policy.WithIdentity(req.Context(), id))
-	req.Header.Set(policy.HeaderUserID, "real-end-user@example.com")
 
 	rec := httptest.NewRecorder()
 	muxFor(h).ServeHTTP(rec, req)
 	require.Equal(t, http.StatusOK, rec.Code)
 
 	require.Len(t, store.creates, 1)
-	want := ResolveUserPseudonym(req, id)
-	require.NotEmpty(t, want)
-	assert.Equal(t, want, store.creates[0].VirtualUserID,
-		"session must be attributed to the mgmt-plane on-behalf-of end user")
-	// Sanity: the header drove it, not the operator's EndUser.
-	assert.Equal(t, identity.PseudonymizeID("real-end-user@example.com"), store.creates[0].VirtualUserID)
+	assert.Equal(t, identity.PseudonymizeID("operator@example.com"), store.creates[0].VirtualUserID,
+		"function session must be attributed to the context identity's EndUser pseudonym")
 }
 
 func TestFunctionsHandler_Session_VirtualUserAnonymousFallback(t *testing.T) {

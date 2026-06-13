@@ -45,7 +45,7 @@ const envMgmtPlaneJWKSURL = "OMNIA_MGMT_PLANE_JWKS_URL"
 // see auth.JWKSResolver. Tested in
 // internal/facade/auth/mgmt_plane_test.go's
 // TestMgmtPlaneValidator_FetchesFromJWKSEndpoint.
-func loadMgmtPlaneValidator(log logr.Logger) (auth.Validator, error) {
+func loadMgmtPlaneValidator(log logr.Logger, agentName, workspaceName string) (auth.Validator, error) {
 	url := os.Getenv(envMgmtPlaneJWKSURL)
 	if url == "" {
 		log.V(1).Info("mgmt-plane validator skipped",
@@ -53,10 +53,20 @@ func loadMgmtPlaneValidator(log logr.Logger) (auth.Validator, error) {
 			"envVar", envMgmtPlaneJWKSURL)
 		return nil, nil
 	}
-	v, err := auth.NewMgmtPlaneValidator(url)
+	opts := []auth.MgmtPlaneOption{}
+	if agentName != "" {
+		opts = append(opts, auth.WithMgmtPlaneExpectedAgent(agentName))
+	}
+	if workspaceName != "" {
+		opts = append(opts, auth.WithMgmtPlaneExpectedWorkspace(workspaceName))
+	}
+	v, err := auth.NewMgmtPlaneValidator(url, opts...)
 	if err != nil {
 		return nil, err
 	}
-	log.Info("mgmt-plane validator enabled", "jwksURL", url)
+	log.Info("mgmt-plane validator enabled",
+		"jwksURL", url,
+		"hasExpectedAgent", agentName != "",
+		"hasExpectedWorkspace", workspaceName != "")
 	return v, nil
 }

@@ -32,7 +32,7 @@ import (
 // defaultStreamInactivityTimeout is the maximum time to wait between gRPC messages
 // from the runtime before cancelling the stream. This prevents hanging connections
 // when the LLM provider stalls mid-response.
-const defaultStreamInactivityTimeout = 120 * time.Second
+var defaultStreamInactivityTimeout = 120 * time.Second
 
 // defaultClientToolTimeout is the maximum time to wait for a client tool response.
 const defaultClientToolTimeout = 60 * time.Second
@@ -49,9 +49,9 @@ type RuntimeHandler struct {
 	clientToolTimeout  time.Duration
 	toolCallAckTimeout time.Duration
 
-	// toolResultChannels maps sessionID → channel for receiving client tool results.
+	// toolResultChannels maps tool callID -> channel for receiving client tool results.
 	toolResultChannels sync.Map
-	// toolAckChannels maps sessionID → chan string for receiving tool call ACKs.
+	// toolAckChannels maps tool callID -> chan string for receiving tool call ACKs.
 	toolAckChannels sync.Map
 }
 
@@ -81,7 +81,11 @@ func (h *RuntimeHandler) SetToolCallAckTimeout(d time.Duration) {
 
 // AckToolCall acknowledges receipt of a tool call, signaling the client is working on it.
 func (h *RuntimeHandler) AckToolCall(sessionID string, callID string) {
-	ch, ok := h.toolAckChannels.Load(sessionID)
+	_ = sessionID // Kept for interface compatibility; routing is keyed by callID.
+	if callID == "" {
+		return
+	}
+	ch, ok := h.toolAckChannels.Load(callID)
 	if !ok {
 		return
 	}
@@ -94,7 +98,11 @@ func (h *RuntimeHandler) AckToolCall(sessionID string, callID string) {
 // SendToolResult delivers a client tool result to the handler waiting for it.
 // Returns true if the result was routed successfully, false if no handler is waiting.
 func (h *RuntimeHandler) SendToolResult(sessionID string, result *facade.ClientToolResultInfo) bool {
-	ch, ok := h.toolResultChannels.Load(sessionID)
+	_ = sessionID // Kept for interface compatibility; routing is keyed by callID.
+	if result == nil || result.CallID == "" {
+		return false
+	}
+	ch, ok := h.toolResultChannels.Load(result.CallID)
 	if !ok {
 		return false
 	}
@@ -113,20 +121,16 @@ func (h *RuntimeHandler) HandleMessage(
 	msg *facade.ClientMessage,
 	writer facade.ResponseWriter,
 ) error {
+	// Use a per-message cancellable context so any early return path (timeout,
+	// forwarding error, client disconnect) unblocks stream.Recv immediately.
+	streamCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
 	// Open bidirectional stream to runtime
-	stream, err := h.client.Converse(ctx)
+	stream, err := h.client.Converse(streamCtx)
 	if err != nil {
 		return fmt.Errorf("failed to open stream to runtime: %w", err)
 	}
-
-	// Register channels for this session
-	toolResultCh := make(chan *facade.ClientToolResultInfo, 1)
-	h.toolResultChannels.Store(sessionID, toolResultCh)
-	defer h.toolResultChannels.Delete(sessionID)
-
-	ackCh := make(chan string, 1)
-	h.toolAckChannels.Store(sessionID, ackCh)
-	defer h.toolAckChannels.Delete(sessionID)
 
 	// Defer CloseSend — stream stays open for client tool results
 	defer func() { _ = stream.CloseSend() }()
@@ -149,7 +153,7 @@ func (h *RuntimeHandler) HandleMessage(
 		return fmt.Errorf("failed to send message to runtime: %w", err)
 	}
 
-	return h.receiveResponses(ctx, stream, writer, toolResultCh, ackCh)
+	return h.receiveResponses(streamCtx, stream, writer)
 }
 
 // recvResult holds the result of a single gRPC Recv call.
@@ -165,8 +169,6 @@ func (h *RuntimeHandler) receiveResponses(
 	ctx context.Context,
 	stream runtimev1.RuntimeService_ConverseClient,
 	writer facade.ResponseWriter,
-	toolResultCh <-chan *facade.ClientToolResultInfo,
-	ackCh <-chan string,
 ) error {
 	inactivityTimer := time.NewTimer(defaultStreamInactivityTimeout)
 	defer inactivityTimer.Stop()
@@ -180,7 +182,7 @@ func (h *RuntimeHandler) receiveResponses(
 	for {
 		select {
 		case result := <-ch:
-			err := h.handleRecvResult(ctx, stream, writer, result, toolResultCh, ackCh, inactivityTimer)
+			err := h.handleRecvResult(ctx, stream, writer, result, inactivityTimer)
 			if err == errStreamDone {
 				return nil
 			}
@@ -220,8 +222,6 @@ func (h *RuntimeHandler) handleRecvResult(
 	stream runtimev1.RuntimeService_ConverseClient,
 	writer facade.ResponseWriter,
 	result recvResult,
-	toolResultCh <-chan *facade.ClientToolResultInfo,
-	ackCh <-chan string,
 	inactivityTimer *time.Timer,
 ) error {
 	if result.err == io.EOF {
@@ -233,7 +233,7 @@ func (h *RuntimeHandler) handleRecvResult(
 	resetTimer(inactivityTimer, defaultStreamInactivityTimeout)
 
 	if isClientToolCall(result.resp) {
-		return h.handleClientToolCall(ctx, stream, writer, result.resp, toolResultCh, ackCh)
+		return h.handleClientToolCall(ctx, stream, writer, result.resp)
 	}
 
 	// Check if this is a Done message — the conversation turn is complete.
@@ -271,8 +271,6 @@ func (h *RuntimeHandler) handleClientToolCall(
 	stream runtimev1.RuntimeService_ConverseClient,
 	writer facade.ResponseWriter,
 	resp *runtimev1.ServerMessage,
-	toolResultCh <-chan *facade.ClientToolResultInfo,
-	ackCh <-chan string,
 ) error {
 	// Forward the tool call to the WebSocket client with execution=client
 	if err := h.forwardResponse(resp, writer); err != nil {
@@ -280,6 +278,17 @@ func (h *RuntimeHandler) handleClientToolCall(
 	}
 
 	callID := extractToolCallID(resp)
+	if callID == "" {
+		return fmt.Errorf("client tool call missing id")
+	}
+
+	toolResultCh := make(chan *facade.ClientToolResultInfo, 1)
+	h.toolResultChannels.Store(callID, toolResultCh)
+	defer h.toolResultChannels.Delete(callID)
+
+	ackCh := make(chan string, 1)
+	h.toolAckChannels.Store(callID, ackCh)
+	defer h.toolAckChannels.Delete(callID)
 
 	// Phase 1: Wait briefly for ACK or immediate result/rejection
 	ackTimer := time.NewTimer(h.toolCallAckTimeout)

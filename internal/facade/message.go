@@ -81,6 +81,11 @@ func (s *Server) handleClientMessage(ctx context.Context, c *Connection, message
 	if s.handleToolMessage(ctx, c, &clientMsg, log) {
 		return
 	}
+	if !c.tryAcquireInFlightMessage() {
+		log.V(1).Info("in-flight message limit exceeded")
+		s.sendError(c, c.sessionID, ErrorCodeRateLimited, "too many in-flight requests")
+		return
+	}
 
 	s.metrics.RequestStarted()
 
@@ -175,6 +180,8 @@ func (s *Server) recordClientToolResult(ctx context.Context, sessionID string, r
 // Runs in a goroutine from handleClientMessage so the WebSocket read loop
 // stays alive to receive tool_result messages during client tool execution.
 func (s *Server) processAndRecordMessage(ctx context.Context, c *Connection, msg *ClientMessage, log logr.Logger) {
+	defer c.releaseInFlightMessage()
+
 	startTime := time.Now()
 
 	err := s.processMessage(ctx, c, msg, log)
