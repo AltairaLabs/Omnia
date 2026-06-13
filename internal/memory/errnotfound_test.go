@@ -36,3 +36,22 @@ func TestPostgresMemoryStore_AppendObservationToEntity_NotFoundWrapsErrNotFound(
 		&Memory{Type: "fact", Content: "x", Confidence: 1.0, Scope: testScope(testWorkspace1)})
 	require.ErrorIs(t, err, ErrNotFound)
 }
+
+// SEC-7: the DSAR export must return every memory, not just the first page.
+func TestPostgresMemoryStore_ExportAll_PaginatesBeyondOnePage(t *testing.T) {
+	store := newStore(t)
+	ctx := context.Background()
+	scope := testScope(testWorkspace1)
+
+	const total = 5
+	for i := 0; i < total; i++ {
+		require.NoError(t, store.Save(ctx, &Memory{
+			Type: "fact", Content: "export row", Confidence: 0.9, Scope: scope,
+		}))
+	}
+
+	// Page size 2 over 5 rows exercises the multi-page loop (2+2+1).
+	all, err := store.exportAllPaged(ctx, scope, 2)
+	require.NoError(t, err)
+	require.Len(t, all, total, "export must return every row across pages, not just the first page")
+}
