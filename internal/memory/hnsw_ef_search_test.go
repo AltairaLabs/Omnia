@@ -8,6 +8,7 @@ package memory
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
@@ -53,6 +54,46 @@ func TestWithHNSWEFSearch_AppliesAndIsTransactionLocal(t *testing.T) {
 	var outside string
 	require.NoError(t, store.pool.QueryRow(ctx, "SHOW hnsw.ef_search").Scan(&outside))
 	assert.NotEqual(t, "321", outside, "SET LOCAL must not leak past the tx")
+}
+
+// TestWithHNSWEFSearch_ErrorPaths covers the wrapper's failure branches: a
+// callback error is propagated (and the tx rolled back), and a canceled context
+// fails at BEGIN before the callback runs.
+func TestWithHNSWEFSearch_ErrorPaths(t *testing.T) {
+	store := newStore(t)
+	ctx := context.Background()
+
+	sentinel := errors.New("boom")
+	require.ErrorIs(t, store.withHNSWEFSearch(ctx, 100, func(pgx.Tx) error { return sentinel }), sentinel)
+
+	canceled, cancel := context.WithCancel(ctx)
+	cancel()
+	require.Error(t, store.withHNSWEFSearch(canceled, 100, func(pgx.Tx) error { return nil }))
+}
+
+// TestEFSearchWrappedQueries_SurfaceQueryErrors drives the query-error branch
+// inside each ef_search-wrapped cosine path. A vector whose dimension differs
+// from the indexed column makes the `<=>` comparison fail at execution (one row
+// must exist for the operator to evaluate), so the error must surface from
+// inside the transaction wrapper.
+func TestEFSearchWrappedQueries_SurfaceQueryErrors(t *testing.T) {
+	store := newStore(t)
+	ctx := context.Background()
+	scope := map[string]string{ScopeWorkspaceID: testWorkspace1}
+	insertHybridMemoryWS(t, store, testWorkspace1, hybridKindFact, "a row to compare against", 0.9, oneHotFloat(1, 1536))
+
+	wrongDim := []float32{1, 2, 3} // column is 1536-dim; the <=> comparison fails
+
+	_, err := store.FindSimilarObservations(ctx, scope, wrongDim, 5, 0.5)
+	require.Error(t, err, "dimension-mismatch query error must surface")
+
+	_, err = store.RetrieveHybrid(ctx, scope, "q", wrongDim, RetrieveOptions{Limit: 5})
+	require.Error(t, err)
+
+	_, err = store.RetrieveMultiTierHybrid(ctx, MultiTierRequest{
+		WorkspaceID: testWorkspace1, Query: "q", Limit: 5,
+	}, wrongDim)
+	require.Error(t, err)
 }
 
 // TestClampEFSearch bounds the candidate-list size to pgvector's accepted range.
