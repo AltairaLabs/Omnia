@@ -52,6 +52,38 @@ func (t Tier) sqlPredicate() string {
 	return "FALSE"
 }
 
+// TierTTL is the resolved write-time TTL policy for a memory's tier.
+// Zero durations mean "unset": the caller falls back to the global default
+// (for Default) or applies no cap (for MaxAge).
+type TierTTL struct {
+	Default time.Duration
+	MaxAge  time.Duration
+}
+
+// ResolveTierTTL returns the per-tier write-time TTL policy for a memory with
+// the given scope (#1336). It maps the scope to a retention tier
+// (user-for-agent collapses into user, mirroring retentionTiers) and reads
+// spec.tiers[tier].ttl.{default,maxAge}. Unparseable or non-positive values
+// are treated as unset.
+func ResolveTierTTL(policy *omniav1alpha1.MemoryPolicy, scope map[string]string) TierTTL {
+	tier := classifyTierFromScope(scope)
+	if tier == TierUserForAgent {
+		tier = TierUser
+	}
+	cfg := tierConfig(policy, tier)
+	if cfg == nil || cfg.TTL == nil {
+		return TierTTL{}
+	}
+	var out TierTTL
+	if d, err := parseRetentionDuration(cfg.TTL.Default); err == nil && d > 0 {
+		out.Default = d
+	}
+	if d, err := parseRetentionDuration(cfg.TTL.MaxAge); err == nil && d > 0 {
+		out.MaxAge = d
+	}
+	return out
+}
+
 // tierConfig returns the per-tier config from the cluster default,
 // picking the matching field on the tier set. Nil means the tier is
 // not configured and should be skipped (implicit Manual).

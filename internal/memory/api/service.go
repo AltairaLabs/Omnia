@@ -259,10 +259,7 @@ func (s *MemoryService) SaveMemoryWithResult(ctx context.Context, mem *memory.Me
 	if err := s.enforceAboutForKind(ctx, mem); err != nil {
 		return nil, err
 	}
-	if mem.ExpiresAt == nil && s.config.DefaultTTL > 0 {
-		exp := time.Now().Add(s.config.DefaultTTL)
-		mem.ExpiresAt = &exp
-	}
+	s.applyTTLPolicy(ctx, mem)
 	// Stamp the service-configured purpose when the caller didn't set one.
 	// Same shape as DefaultTTL — the store reads Metadata[MetaKeyPurpose]
 	// into memory_entities.purpose at insert time.
@@ -475,6 +472,35 @@ func (s *MemoryService) embedAsync(mem *memory.Memory, cachedVector []float32) {
 // embeddingDedupEnabled resolves whether the embedding-similarity
 // dedup path runs. Defaults to true (the existing behaviour) when
 // no policy is configured or the policy doesn't speak to it.
+// applyTTLPolicy stamps the write-time expires_at and caps it (#1336). The
+// default comes from the memory's tier policy (spec.tiers[tier].ttl.default),
+// falling back to the global --default-ttl when the tier sets none. Any
+// expires_at (caller-supplied or defaulted) is then capped to the tier's
+// ttl.maxAge so a misbehaving caller can't pin a row indefinitely. The policy
+// snapshot is read from the request context stashed by SaveMemoryWithResult.
+func (s *MemoryService) applyTTLPolicy(ctx context.Context, mem *memory.Memory) {
+	policy, _ := policyFromContext(ctx)
+	ttl := memory.ResolveTierTTL(policy, mem.Scope)
+	now := time.Now()
+
+	if mem.ExpiresAt == nil {
+		d := ttl.Default
+		if d <= 0 {
+			d = s.config.DefaultTTL
+		}
+		if d > 0 {
+			exp := now.Add(d)
+			mem.ExpiresAt = &exp
+		}
+	}
+	if ttl.MaxAge > 0 && mem.ExpiresAt != nil {
+		capped := now.Add(ttl.MaxAge)
+		if mem.ExpiresAt.After(capped) {
+			mem.ExpiresAt = &capped
+		}
+	}
+}
+
 func (s *MemoryService) embeddingDedupEnabled(ctx context.Context) bool {
 	policy := s.loadPolicy(ctx)
 	if policy == nil {
