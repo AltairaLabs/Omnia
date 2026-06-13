@@ -19,6 +19,7 @@ import (
 
 	"github.com/altairalabs/omnia/internal/runtime"
 	"github.com/altairalabs/omnia/internal/session"
+	"github.com/altairalabs/omnia/pkg/identity"
 )
 
 // arenaSessionNamespace is the UUID namespace for deriving deterministic session
@@ -158,6 +159,9 @@ func (m *arenaSessionManager) OnEvent(event *events.Event) {
 		WorkspaceName: m.meta.WorkspaceName,
 		Tags:          arenaSessionTags(m.meta),
 		InitialState:  arenaSessionState(m.meta, runSessionID),
+		// Loadtest runs have no human; the per-run id is the synthetic subject.
+		// guaranteed non-empty: empty SessionID is rejected at the top of OnEvent.
+		VirtualUserID: identity.PseudonymizeID(runSessionID),
 	}
 
 	_, err := m.createSessionWithRetry(opts)
