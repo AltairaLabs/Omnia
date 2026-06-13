@@ -583,6 +583,26 @@ func (s *stallingRuntimeServer) Health(_ context.Context, _ *runtimev1.HealthReq
 	return &runtimev1.HealthResponse{Healthy: true, Status: "ok"}, nil
 }
 
+type cancelAwareRuntimeServer struct {
+	runtimev1.UnimplementedRuntimeServiceServer
+	started  chan struct{}
+	canceled chan struct{}
+}
+
+func (s *cancelAwareRuntimeServer) Converse(stream runtimev1.RuntimeService_ConverseServer) error {
+	if _, err := stream.Recv(); err != nil {
+		return err
+	}
+	close(s.started)
+	<-stream.Context().Done()
+	close(s.canceled)
+	return stream.Context().Err()
+}
+
+func (s *cancelAwareRuntimeServer) Health(_ context.Context, _ *runtimev1.HealthRequest) (*runtimev1.HealthResponse, error) {
+	return &runtimev1.HealthResponse{Healthy: true, Status: "ok"}, nil
+}
+
 func TestRuntimeHandler_HandleMessage_InactivityTimeout(t *testing.T) {
 	stallMock := &stallingRuntimeServer{}
 	lis, err := net.Listen("tcp", "localhost:0")
@@ -615,6 +635,56 @@ func TestRuntimeHandler_HandleMessage_InactivityTimeout(t *testing.T) {
 	}, writer)
 
 	require.Error(t, err, "expected error from stalled stream")
+}
+
+func TestRuntimeHandler_HandleMessage_InactivityTimeoutCancelsStream(t *testing.T) {
+	originalTimeout := defaultStreamInactivityTimeout
+	defaultStreamInactivityTimeout = 100 * time.Millisecond
+	t.Cleanup(func() { defaultStreamInactivityTimeout = originalTimeout })
+
+	mock := &cancelAwareRuntimeServer{
+		started:  make(chan struct{}),
+		canceled: make(chan struct{}),
+	}
+	lis, err := net.Listen("tcp", "localhost:0")
+	require.NoError(t, err)
+	grpcServer := grpc.NewServer()
+	runtimev1.RegisterRuntimeServiceServer(grpcServer, mock)
+	go func() { _ = grpcServer.Serve(lis) }()
+	t.Cleanup(func() { grpcServer.Stop() })
+
+	client, err := facade.NewRuntimeClient(facade.RuntimeClientConfig{
+		Address:     lis.Addr().String(),
+		DialTimeout: 5 * time.Second,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = client.Close() })
+
+	handler := NewRuntimeHandler(client)
+	writer := &mockResponseWriter{}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	err = handler.HandleMessage(ctx, "session-cancel", &facade.ClientMessage{
+		Type:    facade.MessageTypeMessage,
+		Content: "hello",
+	}, writer)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "runtime stream inactivity timeout")
+
+	select {
+	case <-mock.started:
+	case <-time.After(time.Second):
+		t.Fatal("runtime stream did not start")
+	}
+
+	select {
+	case <-mock.canceled:
+		// expected: HandleMessage canceled the stream context promptly
+	case <-time.After(time.Second):
+		t.Fatal("stream context was not canceled after inactivity timeout")
+	}
 }
 
 func (s *capturingRuntimeServer) Converse(stream runtimev1.RuntimeService_ConverseServer) error {

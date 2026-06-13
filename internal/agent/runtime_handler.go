@@ -32,7 +32,7 @@ import (
 // defaultStreamInactivityTimeout is the maximum time to wait between gRPC messages
 // from the runtime before cancelling the stream. This prevents hanging connections
 // when the LLM provider stalls mid-response.
-const defaultStreamInactivityTimeout = 120 * time.Second
+var defaultStreamInactivityTimeout = 120 * time.Second
 
 // defaultClientToolTimeout is the maximum time to wait for a client tool response.
 const defaultClientToolTimeout = 60 * time.Second
@@ -113,8 +113,13 @@ func (h *RuntimeHandler) HandleMessage(
 	msg *facade.ClientMessage,
 	writer facade.ResponseWriter,
 ) error {
+	// Use a per-message cancellable context so any early return path (timeout,
+	// forwarding error, client disconnect) unblocks stream.Recv immediately.
+	streamCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
 	// Open bidirectional stream to runtime
-	stream, err := h.client.Converse(ctx)
+	stream, err := h.client.Converse(streamCtx)
 	if err != nil {
 		return fmt.Errorf("failed to open stream to runtime: %w", err)
 	}
@@ -149,7 +154,7 @@ func (h *RuntimeHandler) HandleMessage(
 		return fmt.Errorf("failed to send message to runtime: %w", err)
 	}
 
-	return h.receiveResponses(ctx, stream, writer, toolResultCh, ackCh)
+	return h.receiveResponses(streamCtx, stream, writer, toolResultCh, ackCh)
 }
 
 // recvResult holds the result of a single gRPC Recv call.
