@@ -96,7 +96,7 @@ func (s *Server) handleToolMessage(ctx context.Context, c *Connection, clientMsg
 	// Route tool call ACK to the active handler
 	if clientMsg.Type == MessageTypeToolCallAck && clientMsg.ToolCallAck != nil {
 		if router, ok := s.handler.(ClientToolRouter); ok {
-			router.AckToolCall(c.sessionID, clientMsg.ToolCallAck.CallID)
+			router.AckToolCall(c.SessionID(), clientMsg.ToolCallAck.CallID)
 		}
 		return true
 	}
@@ -107,22 +107,24 @@ func (s *Server) handleToolMessage(ctx context.Context, c *Connection, clientMsg
 			CallID: clientMsg.ToolCallNack.CallID,
 			Error:  clientMsg.ToolCallNack.Reason,
 		}
+		sessionID := c.SessionID()
 		if router, ok := s.handler.(ClientToolRouter); ok {
-			router.SendToolResult(c.sessionID, result)
+			router.SendToolResult(sessionID, result)
 		}
-		s.recordClientToolResult(ctx, c.sessionID, result, log)
+		s.recordClientToolResult(ctx, sessionID, result, log)
 		return true
 	}
 
 	// Route client-side tool results to the active handler
 	if clientMsg.Type == MessageTypeToolResult && clientMsg.ToolResult != nil {
+		sessionID := c.SessionID()
 		if router, ok := s.handler.(ClientToolRouter); ok {
-			if router.SendToolResult(c.sessionID, clientMsg.ToolResult) {
-				s.recordClientToolResult(ctx, c.sessionID, clientMsg.ToolResult, log)
+			if router.SendToolResult(sessionID, clientMsg.ToolResult) {
+				s.recordClientToolResult(ctx, sessionID, clientMsg.ToolResult, log)
 				return true
 			}
 		}
-		s.sendError(c, c.sessionID, ErrorCodeInvalidMessage, "no pending tool call")
+		s.sendError(c, sessionID, ErrorCodeInvalidMessage, "no pending tool call")
 		return true
 	}
 
