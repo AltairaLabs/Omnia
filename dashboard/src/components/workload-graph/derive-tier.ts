@@ -183,7 +183,7 @@ export function deriveWorkloadTier(content: PromptPackContent): WorkloadModel {
     const edges = content.workflow ? flowEdges(content) : [];
     const stateCount = Object.keys(content.workflow?.states ?? {}).length;
     return {
-      tier: "crew",
+      tier: "multiagent",
       altitude: "definition",
       nodes,
       edges,
@@ -199,7 +199,7 @@ export function deriveWorkloadTier(content: PromptPackContent): WorkloadModel {
     const stateIds = Object.keys(wf.states);
     const nodes = stateIds.map((id) => stateNode(id, content, id === wf.entry));
     return {
-      tier: "flow",
+      tier: "workflow",
       altitude: "definition",
       nodes,
       edges: flowEdges(content),
@@ -217,7 +217,7 @@ export function deriveWorkloadTier(content: PromptPackContent): WorkloadModel {
     : [];
 
   return {
-    tier: "solo",
+    tier: "single",
     altitude: "definition",
     nodes,
     edges: [],

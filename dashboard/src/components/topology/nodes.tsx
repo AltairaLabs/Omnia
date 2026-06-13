@@ -4,6 +4,7 @@ import { memo } from "react";
 import { Handle, Position, type Node } from "@xyflow/react";
 import { Bot, FileText, Wrench, Package, MessageSquare, StickyNote, X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { workloadTierLabel } from "@/components/workload-graph";
 import { ProviderIcon } from "./provider-icons";
 import type { ProviderType } from "@/types";
 
@@ -126,7 +127,7 @@ export interface PromptPackNodeData extends Record<string, unknown>, NoteFields 
   namespace: string;
   version?: string;
   phase?: string;
-  tier?: "solo" | "flow" | "crew";
+  tier?: "single" | "workflow" | "multiagent";
   agentCount?: number;
   onClick?: () => void;
 }
@@ -230,9 +231,9 @@ export const PromptPackNodeComponent = memo(({ data }: Readonly<CustomNodeProps<
               {data.version ? `v${data.version}` : data.namespace}
             </span>
             {data.tier && (
-              <span className="text-[10px] text-muted-foreground inline-flex items-center gap-0.5 mt-0.5 capitalize">
-                {data.tier}
-                {data.tier === "crew" && typeof data.agentCount === "number"
+              <span className="text-[10px] text-muted-foreground inline-flex items-center gap-0.5 mt-0.5">
+                {workloadTierLabel(data.tier)}
+                {data.tier === "multiagent" && typeof data.agentCount === "number"
                   ? ` · ${data.agentCount}`
                   : ""}
               </span>

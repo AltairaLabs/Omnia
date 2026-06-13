@@ -13,13 +13,13 @@ interface PromptPackCardProps {
 }
 
 function tierSummary(wl: WorkloadTierSummary): { label: string; parts: string[] } {
-  if (wl.tier === "crew") {
-    return { label: "Crew", parts: [`${wl.agents} agents`, `${wl.tools} tools`] };
+  if (wl.tier === "multiagent") {
+    return { label: "Multi-agent", parts: [`${wl.agents} agents`, `${wl.tools} tools`] };
   }
-  if (wl.tier === "flow") {
-    return { label: "Flow", parts: [`${wl.states} states`, `${wl.tools} tools`] };
+  if (wl.tier === "workflow") {
+    return { label: "Workflow", parts: [`${wl.states} states`, `${wl.tools} tools`] };
   }
-  return { label: "Solo", parts: [`${wl.tools} tools`] };
+  return { label: "Single", parts: [`${wl.tools} tools`] };
 }
 
 function formatRelativeTime(timestamp?: string): string {

@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { deriveWorkloadTier } from "./derive-tier";
 import type { PromptPackContent } from "@/lib/data/types";
 
-describe("deriveWorkloadTier — solo", () => {
+describe("deriveWorkloadTier — single", () => {
   it("projects a single-prompt pack to one agent node", () => {
     const content: PromptPackContent = {
       id: "greeter",
@@ -20,7 +20,7 @@ describe("deriveWorkloadTier — solo", () => {
 
     const model = deriveWorkloadTier(content);
 
-    expect(model.tier).toBe("solo");
+    expect(model.tier).toBe("single");
     expect(model.altitude).toBe("definition");
     expect(model.nodes).toHaveLength(1);
     expect(model.nodes[0].kind).toBe("agent");
@@ -32,7 +32,7 @@ describe("deriveWorkloadTier — solo", () => {
   });
 });
 
-describe("deriveWorkloadTier — flow", () => {
+describe("deriveWorkloadTier — workflow", () => {
   it("projects workflow states to nodes and on_event to edges, with budget", () => {
     const content: PromptPackContent = {
       id: "refunds",
@@ -59,7 +59,7 @@ describe("deriveWorkloadTier — flow", () => {
 
     const model = deriveWorkloadTier(content);
 
-    expect(model.tier).toBe("flow");
+    expect(model.tier).toBe("workflow");
     expect(model.nodes.map((n) => n.id).sort()).toEqual(["refund", "triage"]);
     const triage = model.nodes.find((n) => n.id === "triage")!;
     expect(triage.kind).toBe("state");
@@ -78,7 +78,7 @@ describe("deriveWorkloadTier — flow", () => {
   });
 });
 
-describe("deriveWorkloadTier — crew", () => {
+describe("deriveWorkloadTier — multiagent", () => {
   it("projects A2A agents to first-class nodes, overlaying workflow hand-offs", () => {
     const content: PromptPackContent = {
       id: "crew",
@@ -105,7 +105,7 @@ describe("deriveWorkloadTier — crew", () => {
 
     const model = deriveWorkloadTier(content);
 
-    expect(model.tier).toBe("crew");
+    expect(model.tier).toBe("multiagent");
     expect(model.nodes).toHaveLength(2);
     const triage = model.nodes.find((n) => n.id === "triage")!;
     expect(triage.kind).toBe("agent");
@@ -122,7 +122,7 @@ describe("deriveWorkloadTier — crew", () => {
 describe("deriveWorkloadTier — malformed", () => {
   it("returns empty solo model for a pack with no prompts", () => {
     const model = deriveWorkloadTier({ id: "empty" });
-    expect(model.tier).toBe("solo");
+    expect(model.tier).toBe("single");
     expect(model.nodes).toEqual([]);
     expect(model.meta.counts.agents).toBe(0);
   });
@@ -143,7 +143,7 @@ describe("deriveWorkloadTier — malformed", () => {
       prompts: {},
       workflow: { entry: "a", states: { a: { prompt_task: "missing" } } },
     });
-    expect(model.tier).toBe("flow");
+    expect(model.tier).toBe("workflow");
     expect(model.nodes[0].label).toBe("missing"); // falls back to prompt_task
     expect(model.nodes[0].detail.tools).toEqual([]);
   });
@@ -154,6 +154,6 @@ describe("deriveWorkloadTier — malformed", () => {
       prompts: { a: { id: "a", name: "A", system_template: "t" } },
       agents: { entry: "a", members: {} },
     });
-    expect(model.tier).toBe("solo");
+    expect(model.tier).toBe("single");
   });
 });

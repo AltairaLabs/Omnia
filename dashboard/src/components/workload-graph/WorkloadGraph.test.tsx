@@ -29,12 +29,12 @@ vi.mock("@xyflow/react", () => ({
 import { WorkloadGraph, fitViewAfterPaint } from "./WorkloadGraph";
 
 const empty: WorkloadModel = {
-  tier: "solo", altitude: "definition", nodes: [], edges: [],
+  tier: "single", altitude: "definition", nodes: [], edges: [],
   meta: { counts: { agents: 0, tools: 0, skills: 0, states: 0 } },
 };
 
 const deployed: WorkloadModel = {
-  tier: "flow", altitude: "deployment",
+  tier: "workflow", altitude: "deployment",
   nodes: [{ id: "a", kind: "state", label: "A", badges: [], detail: {} }],
   edges: [],
   meta: {

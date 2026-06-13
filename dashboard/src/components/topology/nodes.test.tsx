@@ -4,13 +4,13 @@ import { ReactFlowProvider } from "@xyflow/react";
 import { PromptPackNodeComponent } from "./nodes";
 
 describe("PromptPackNodeComponent tier badge", () => {
-  it("shows the crew tier badge with agent count when tier data is present", () => {
+  it("shows the multi-agent tier badge with agent count when tier data is present", () => {
     render(
       <ReactFlowProvider>
-        <PromptPackNodeComponent data={{ label: "refunds", namespace: "demo", tier: "crew", agentCount: 3 }} />
+        <PromptPackNodeComponent data={{ label: "refunds", namespace: "demo", tier: "multiagent", agentCount: 3 }} />
       </ReactFlowProvider>
     );
-    expect(screen.getByText(/crew/i)).toBeInTheDocument();
+    expect(screen.getByText(/multi-agent/i)).toBeInTheDocument();
     expect(screen.getByText(/3/)).toBeInTheDocument();
   });
 
@@ -20,6 +20,6 @@ describe("PromptPackNodeComponent tier badge", () => {
         <PromptPackNodeComponent data={{ label: "refunds", namespace: "demo" }} />
       </ReactFlowProvider>
     );
-    expect(screen.queryByText(/crew|flow|solo/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/multi-agent|workflow|single/i)).not.toBeInTheDocument();
   });
 });
