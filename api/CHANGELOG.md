@@ -10,6 +10,29 @@ or `api/proto/`, add an entry below with the date, affected API, and reason.
 
 ## Unreleased
 
+### Added (session-api: per-user session attribution — #1285)
+
+- **`POST /api/v1/sessions`** (`CreateSessionRequest`): new **required** field
+  `virtualUserId` (string) — the pseudonymous subject the session belongs to
+  (`PseudonymizeID(subject)`, hash-at-rest). Requests with an empty/absent
+  `virtualUserId` now return `400`. The `Session` response object also carries
+  `virtualUserId`. Sessions are non-NULL attributed at the DB
+  (`virtual_user_id TEXT NOT NULL CHECK (virtual_user_id <> '')`), so every
+  session — browser, function, MCP, arena load-test, OTLP-ingested — has a
+  virtual user.
+
+### Changed (privacy/DSAR wire — #1285, #1280 session-side)
+
+- **`POST /api/v1/privacy/deletion-request`** and
+  **`GET /api/v1/privacy/deletion-requests`**: the request-body field `userId`
+  and the query parameter `user_id` are renamed to `virtualUserId` /
+  `virtual_user_id` (the value was always a pseudonym). Per-user session
+  deletion now filters by `virtual_user_id` and **fails closed** — it returns an
+  error rather than deleting all workspace sessions when no subject is supplied
+  (previously the user scope was silently ignored). The opt-out/consent
+  endpoints backed by `user_privacy_preferences` keep `user_id` for now
+  (cross-DB shared table; deferred to #1280).
+
 ### Added (session-api: decorate session with tags/state)
 
 - **`PATCH /api/v1/sessions/{sessionID}/decorate`** (new): merges tags and state
