@@ -519,10 +519,10 @@ func (m *ensureSessionMetricsSpy) DownloadCompleted(int64) {
 func (m *ensureSessionMetricsSpy) DownloadFailed() {}
 func (m *ensureSessionMetricsSpy) MediaChunkSent(bool, int) {
 }
+func (m *ensureSessionMetricsSpy) RecordingDropped() {}
 func (m *ensureSessionMetricsSpy) SessionCreated() {
 	m.sessionCreated++
 }
-func (m *ensureSessionMetricsSpy) RecordingDropped() {}
 
 func (s *ensureSessionStore) GetSession(ctx context.Context, sessionID string) (*session.Session, error) {
 	if s.getErr != nil {
