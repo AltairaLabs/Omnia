@@ -27,7 +27,6 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"github.com/altairalabs/omnia/internal/agent"
 	"github.com/altairalabs/omnia/internal/facade"
@@ -189,10 +188,7 @@ func buildFunctionRegistry(cfg *agent.Config) (facade.FunctionRegistry, error) {
 // newFunctionsHealthServer mounts /healthz + /readyz on the health
 // port. Readiness is "the runtime sidecar's gRPC Health says ok".
 func newFunctionsHealthServer(cfg *agent.Config, rc *facade.RuntimeClient) *http.Server {
-	mux := http.NewServeMux()
-	mux.HandleFunc("/healthz", healthzHandler)
-	mux.Handle("/metrics", promhttp.Handler())
-	mux.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {
+	return newHealthServer(cfg, func(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
 		defer cancel()
 		if _, err := rc.Health(ctx); err != nil {
@@ -203,12 +199,6 @@ func newFunctionsHealthServer(cfg *agent.Config, rc *facade.RuntimeClient) *http
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 	})
-	return &http.Server{
-		Addr:         fmt.Sprintf(":%d", cfg.HealthPort),
-		Handler:      mux,
-		ReadTimeout:  readTimeout,
-		WriteTimeout: writeTimeout,
-	}
 }
 
 // startFunctionsAndServe runs the facade + health (+ optional MCP)

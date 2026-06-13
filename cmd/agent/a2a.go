@@ -15,7 +15,6 @@ import (
 	"syscall"
 
 	"github.com/go-logr/logr"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/redis/go-redis/v9"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
@@ -166,19 +165,10 @@ func runA2AFacade(cfg *agent.Config, log logr.Logger, tracingProvider *tracing.P
 		IdleTimeout:  idleTimeout,
 	}
 
-	healthMux := http.NewServeMux()
-	healthMux.HandleFunc("/healthz", healthzHandler)
-	healthMux.HandleFunc("/readyz", func(w http.ResponseWriter, _ *http.Request) {
+	healthServer := newHealthServer(cfg, func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 	})
-	healthMux.Handle("/metrics", promhttp.Handler())
-	healthServer := &http.Server{
-		Addr:         fmt.Sprintf(":%d", cfg.HealthPort),
-		Handler:      healthMux,
-		ReadTimeout:  readTimeout,
-		WriteTimeout: writeTimeout,
-	}
 
 	errChan := make(chan error, 2)
 	go func() {
