@@ -74,6 +74,9 @@ type ServerConfig struct {
 	MessageRateLimit float64
 	// MessageRateBurst is the maximum burst size for per-connection rate limiting.
 	MessageRateBurst int
+	// MaxInFlightMessagesPerConnection limits concurrently processed messages per
+	// connection. 0 disables this cap.
+	MaxInFlightMessagesPerConnection int
 	// WorkspaceName is the workspace this agent belongs to (for session metadata).
 	WorkspaceName string
 }
@@ -91,6 +94,9 @@ func DefaultServerConfig() ServerConfig {
 		SessionTTL:       24 * time.Hour,
 		MessageRateLimit: 50,
 		MessageRateBurst: 100,
+		// Keep one in-flight request per connection to avoid unbounded runtime
+		// stream fan-out and chunk interleaving the client cannot correlate.
+		MaxInFlightMessagesPerConnection: 1,
 	}
 }
 
@@ -583,6 +589,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		authorization: authorization,
 		cohortID:      cohortID,
 		variant:       variant,
+	}
+	if s.config.MaxInFlightMessagesPerConnection > 0 {
+		c.inFlightMessages = make(chan struct{}, s.config.MaxInFlightMessagesPerConnection)
 	}
 	if s.config.MessageRateLimit > 0 {
 		c.rateLimiter = rate.NewLimiter(rate.Limit(s.config.MessageRateLimit), s.config.MessageRateBurst)
