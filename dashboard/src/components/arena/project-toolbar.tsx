@@ -16,7 +16,15 @@ import {
   RefreshCw,
   Trash2,
   CheckCircle2,
+  FilePlus2,
+  LayoutTemplate,
 } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from "@/components/ui/dropdown-menu";
 import type { ArenaProject } from "@/types/arena-project";
 import { cn } from "@/lib/utils";
 import { DeployButton } from "./deploy-button";
@@ -34,6 +42,7 @@ interface ProjectToolbarProps {
   readonly onProjectSelect: (projectId: string) => void;
   readonly onSave: () => void;
   readonly onNewProject: () => void;
+  readonly onNewFromTemplate: () => void;
   readonly onRefresh: () => void;
   readonly onDeleteProject?: () => void;
   readonly onValidateAll?: () => void;
@@ -55,6 +64,7 @@ export function ProjectToolbar({
   onProjectSelect,
   onSave,
   onNewProject,
+  onNewFromTemplate,
   onRefresh,
   onDeleteProject,
   onValidateAll,
@@ -87,16 +97,29 @@ export function ProjectToolbar({
           </SelectContent>
         </Select>
 
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-8 w-8"
-          onClick={onNewProject}
-          disabled={loading || !canWrite}
-          title={canWrite ? "New Project" : "Editor access required to create projects"}
-        >
-          <Plus className="h-4 w-4" />
-        </Button>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8"
+              disabled={loading || !canWrite}
+              title={canWrite ? "New Project" : "Editor access required to create projects"}
+            >
+              <Plus className="h-4 w-4" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start">
+            <DropdownMenuItem onClick={onNewProject}>
+              <FilePlus2 className="h-4 w-4 mr-2" />
+              New blank project
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={onNewFromTemplate}>
+              <LayoutTemplate className="h-4 w-4 mr-2" />
+              From template…
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
 
         <Button
           variant="ghost"
