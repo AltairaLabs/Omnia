@@ -765,6 +765,30 @@ func TestListSessions_FilterAgent(t *testing.T) {
 	assert.Equal(t, "agent-a", page.Sessions[0].AgentName)
 }
 
+func TestListSessions_FilterVirtualUserID(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	p := newProvider(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Microsecond)
+
+	s1 := makeSession("a0eebc99-9c0b-4ef8-bb6d-6bb9bd380b01", now)
+	s1.VirtualUserID = "vu-alice"
+	s2 := makeSession("a0eebc99-9c0b-4ef8-bb6d-6bb9bd380b02", now.Add(time.Second))
+	s2.VirtualUserID = "vu-bob"
+	require.NoError(t, p.CreateSession(ctx, s1))
+	require.NoError(t, p.CreateSession(ctx, s2))
+
+	page, err := p.ListSessions(ctx, providers.SessionListOpts{VirtualUserID: "vu-alice", IncludeCount: true})
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), page.TotalCount)
+	require.Len(t, page.Sessions, 1)
+	assert.Equal(t, "vu-alice", page.Sessions[0].VirtualUserID)
+	assert.Equal(t, s1.ID, page.Sessions[0].ID)
+}
+
 func TestListSessions_FilterNamespace(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")

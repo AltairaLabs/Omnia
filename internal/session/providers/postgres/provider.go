@@ -630,6 +630,9 @@ func (p *Provider) applySessionFilters(qb *pgutil.QueryBuilder, opts providers.S
 	if opts.WorkspaceName != "" {
 		qb.Add("workspace_name=$?", opts.WorkspaceName)
 	}
+	if opts.VirtualUserID != "" {
+		qb.Add("virtual_user_id=$?", opts.VirtualUserID)
+	}
 	if opts.Status != "" {
 		qb.Add("status=$?", string(opts.Status))
 	}

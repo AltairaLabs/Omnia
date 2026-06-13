@@ -734,10 +734,12 @@ func TestWriteJSONError(t *testing.T) {
 
 // MockWarmStoreProvider implements providers.WarmStoreProvider for testing.
 type MockWarmStoreProvider struct {
-	sessions   []*session.Session
-	listErr    error
-	deleteErr  error
-	deletedIDs []string
+	sessions           []*session.Session
+	listErr            error
+	deleteErr          error
+	deletedIDs         []string
+	listSessionsCalled bool
+	lastListOpts       providers.SessionListOpts
 }
 
 func (m *MockWarmStoreProvider) CreateSession(
@@ -799,8 +801,10 @@ func (m *MockWarmStoreProvider) GetMessages(
 }
 
 func (m *MockWarmStoreProvider) ListSessions(
-	_ context.Context, _ providers.SessionListOpts,
+	_ context.Context, opts providers.SessionListOpts,
 ) (*providers.SessionPage, error) {
+	m.listSessionsCalled = true
+	m.lastListOpts = opts
 	if m.listErr != nil {
 		return nil, m.listErr
 	}
@@ -923,6 +927,8 @@ func TestWarmStoreSessionDeleter_ListSessionsByUser(t *testing.T) {
 	ids, err := deleter.ListSessionsByUser(context.Background(), "user-1", "ws", nil, nil)
 	require.NoError(t, err)
 	assert.Equal(t, []string{"s1", "s2"}, ids)
+	// The filter must be applied so only this subject's sessions are listed.
+	assert.Equal(t, "user-1", mock.lastListOpts.VirtualUserID)
 }
 
 func TestWarmStoreSessionDeleter_ListSessionsByUser_Error(t *testing.T) {
@@ -940,6 +946,20 @@ func TestWarmStoreSessionDeleter_ListSessionsByUser_Empty(t *testing.T) {
 	ids, err := deleter.ListSessionsByUser(context.Background(), "user-1", "", nil, nil)
 	require.NoError(t, err)
 	assert.Empty(t, ids)
+	assert.Equal(t, "user-1", mock.lastListOpts.VirtualUserID)
+}
+
+func TestWarmStoreSessionDeleter_EmptyUser_FailsClosed(t *testing.T) {
+	mock := &MockWarmStoreProvider{
+		// Would return sessions if ListSessions were (wrongly) called.
+		sessions: []*session.Session{{ID: "s1"}, {ID: "s2"}},
+	}
+	deleter := NewWarmStoreSessionDeleter(mock)
+
+	ids, err := deleter.ListSessionsByUser(context.Background(), "", "ws", nil, nil)
+	require.ErrorIs(t, err, ErrMissingVirtualUserID)
+	assert.Nil(t, ids)
+	assert.False(t, mock.listSessionsCalled, "store must never be queried for an empty user id")
 }
 
 func TestWarmStoreSessionDeleter_DeleteSession(t *testing.T) {
