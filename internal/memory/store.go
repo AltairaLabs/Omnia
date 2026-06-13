@@ -698,14 +698,16 @@ func (s *PostgresMemoryStore) Delete(ctx context.Context, scope map[string]strin
 		return errors.New(errWorkspaceRequired)
 	}
 
-	// Scope guard (#1268): a workspace-only check would let any caller in
-	// workspace W forget any user's memory in W by its UUID. Require the
-	// caller's user/agent partition to match the row's — a missing scope key
-	// means "no constraint on that dimension" (NULL), mirroring updateEntity.
+	// Scope guard (#1268, SEC-3): a workspace-only check would let any caller in
+	// workspace W forget any user's memory in W by its UUID. Anchor the user
+	// dimension — a missing user_id means NULL (IS NOT DISTINCT FROM), so an
+	// empty user_id can only forget institutional/agent rows, never another
+	// user's. The agent dimension stays permissive (a user-scoped DSAR forget
+	// must still reach that user's user_for_agent rows). Mirrors GetMemory.
 	tag, err := s.pool.Exec(ctx, `
 		UPDATE memory_entities SET forgotten = true, updated_at = now()
 		WHERE id = $1 AND workspace_id = $2
-		  AND ($3::text IS NULL OR virtual_user_id = $3)
+		  AND virtual_user_id IS NOT DISTINCT FROM $3::text
 		  AND ($4::uuid IS NULL OR agent_id = $4)`,
 		memoryID,
 		scope[ScopeWorkspaceID],
@@ -850,7 +852,7 @@ func (s *PostgresMemoryStore) GetMemory(ctx context.Context, scope map[string]st
 		  AND (o.valid_until IS NULL OR o.valid_until > now())
 		WHERE e.id = $1
 		  AND e.workspace_id = $2
-		  AND ($3::text IS NULL OR e.virtual_user_id = $3)
+		  AND e.virtual_user_id IS NOT DISTINCT FROM $3::text
 		  AND ($4::uuid IS NULL OR e.agent_id = $4)
 		  AND NOT e.forgotten
 		ORDER BY o.observed_at DESC
@@ -1746,8 +1748,15 @@ func formatVisibleToMeSQL(qb *pgutil.QueryBuilder, limit, offset int) string {
 
 // addScopeFilters appends optional user_id and agent_id filters.
 func addScopeFilters(qb *pgutil.QueryBuilder, scope map[string]string) {
+	// SEC-3: an empty user_id must mean "institutional/agent rows only"
+	// (virtual_user_id IS NULL), NOT "no constraint" — otherwise a
+	// workspace-scoped read (e.g. the runtime's semantic strategy, which
+	// passes no user) returns every user's private memories in the workspace.
+	// A populated user_id stays strict (that user's rows only).
 	if uid := scope[ScopeUserID]; uid != "" {
 		qb.Add(colVirtualUserID, uid)
+	} else {
+		qb.AddRaw("virtual_user_id IS NULL")
 	}
 	if aid := scope[ScopeAgentID]; aid != "" {
 		qb.Add("e.agent_id=$?", aid)
