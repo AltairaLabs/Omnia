@@ -678,6 +678,11 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		_ = conn.Close()
 		return
 	}
+	if s.config.MaxConnections > 0 && len(s.connections) >= s.config.MaxConnections {
+		s.mu.Unlock()
+		_ = conn.Close()
+		return
+	}
 	s.connections[conn] = c
 	s.mu.Unlock()
 
