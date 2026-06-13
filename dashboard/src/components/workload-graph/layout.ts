@@ -47,6 +47,11 @@ export async function layoutFlow<T extends Node>(
     layoutOptions: {
       "elk.algorithm": "layered",
       "elk.direction": "DOWN",
+      // Break feedback loops by DFS so forward flow is preserved and only the
+      // genuine back-edges (need_more, revise) are reversed — otherwise the
+      // greedy default can flip a forward edge and lift a downstream state up to
+      // the entry's layer.
+      "elk.layered.cycleBreaking.strategy": "DEPTH_FIRST",
       "elk.spacing.nodeNode": "44",
       "elk.layered.spacing.nodeNodeBetweenLayers": "64",
       // Brandes-Köpf with balanced alignment centres children under parents for
