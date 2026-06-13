@@ -66,8 +66,8 @@ export function WorkloadGraph({
     };
   }, [model, showData]);
   const flow = useMemo(() => modelToFlow(visibleModel, setSelectedId), [visibleModel]);
-  const [nodes, setNodes] = useNodesState(flow.nodes);
-  const [edges, setEdges] = useEdgesState(flow.edges);
+  const [nodes, setNodes, onNodesChange] = useNodesState(flow.nodes);
+  const [edges, setEdges, onEdgesChange] = useEdgesState(flow.edges);
   const rf = useRef<WorkloadFlowInstance | null>(null);
 
   // Fill the viewport below the graph's own top edge, so the box accounts for
@@ -125,6 +125,8 @@ export function WorkloadGraph({
         <ReactFlow
           nodes={nodes}
           edges={edges}
+          onNodesChange={onNodesChange}
+          onEdgesChange={onEdgesChange}
           nodeTypes={workloadNodeTypes}
           onInit={(inst) => { rf.current = inst; }}
           fitView
