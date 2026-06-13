@@ -25,6 +25,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -52,6 +53,7 @@ import (
 	"github.com/altairalabs/omnia/ee/pkg/metrics"
 	"github.com/altairalabs/omnia/ee/pkg/privacy"
 	"github.com/altairalabs/omnia/ee/pkg/redaction"
+	"github.com/altairalabs/omnia/internal/serviceauth"
 	"github.com/altairalabs/omnia/internal/session/api"
 	"github.com/altairalabs/omnia/internal/session/otlp"
 	sessionpg "github.com/altairalabs/omnia/internal/session/postgres"
@@ -95,6 +97,13 @@ type flags struct {
 	tracingInsecure bool
 	workspace       string
 	serviceGroup    string
+
+	// ServiceAccount auth (opt-in). When authEnabled is true, the JSON API
+	// requires a Kubernetes ServiceAccount bearer token whose TokenReview
+	// subject is in authAllowedSubjects.
+	authEnabled         bool
+	authAllowedSubjects string // comma-separated SA subjects
+	authAudiences       string // comma-separated, optional
 }
 
 func parseFlags() *flags {
@@ -114,6 +123,13 @@ func parseFlags() *flags {
 	flag.StringVar(&f.otlpHTTPAddr, "otlp-http-addr", ":4318", "OTLP HTTP listen address")
 	flag.StringVar(&f.workspace, "workspace", "", "Workspace name (K8s CRD resolution mode)")
 	flag.StringVar(&f.serviceGroup, "service-group", "", "Service group name within workspace")
+	flag.BoolVar(&f.authEnabled, "auth-enabled", false,
+		"Require Kubernetes ServiceAccount bearer-token auth on the JSON API (opt-in)")
+	flag.StringVar(&f.authAllowedSubjects, "auth-allowed-subjects", "",
+		"Comma-separated allowed ServiceAccount subjects "+
+			"(e.g. system:serviceaccount:omnia-system:omnia-facade)")
+	flag.StringVar(&f.authAudiences, "auth-audiences", "",
+		"Comma-separated audiences for audience-bound projected tokens (optional; empty = default)")
 	flag.Parse()
 
 	f.applyEnvFallbacks()
@@ -136,6 +152,10 @@ func (f *flags) applyEnvFallbacks() {
 
 	envBoolFallback(&f.enterprise, "ENTERPRISE_ENABLED")
 	envBoolFallback(&f.otlpEnabled, "OTLP_ENABLED")
+
+	envBoolFallback(&f.authEnabled, "SESSION_API_AUTH_ENABLED")
+	envFallback(&f.authAllowedSubjects, "", "SESSION_API_AUTH_ALLOWED_SUBJECTS")
+	envFallback(&f.authAudiences, "", "SESSION_API_AUTH_AUDIENCES")
 
 	envBoolFallback(&f.tracingEnabled, "TRACING_ENABLED")
 	envBoolFallback(&f.tracingInsecure, "TRACING_INSECURE")
@@ -163,6 +183,18 @@ func envBoolFallback(dst *bool, envKey string) {
 	if !*dst && os.Getenv(envKey) == "true" {
 		*dst = true
 	}
+}
+
+// splitAndTrim splits a comma-separated string, trims whitespace from each
+// element, and drops empty elements. Returns nil for an empty/whitespace input.
+func splitAndTrim(s string) []string {
+	var out []string
+	for _, part := range strings.Split(s, ",") {
+		if trimmed := strings.TrimSpace(part); trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+	return out
 }
 
 func main() {
@@ -252,8 +284,14 @@ func run() error {
 		}
 	}
 
+	// --- ServiceAccount auth (opt-in) ---
+	reviewer, allowedSubjects, err := buildServiceAuth(f, log)
+	if err != nil {
+		return err
+	}
+
 	// --- Build API mux ---
-	apiMux, sessionService, auditCleanup := buildAPIMux(pool, registry, f, log)
+	apiMux, sessionService, auditCleanup := buildAPIMux(pool, registry, f, log, reviewer, allowedSubjects)
 	defer auditCleanup()
 
 	// --- Servers ---
@@ -454,10 +492,58 @@ func detectNamespace() string {
 	return string(data)
 }
 
+// buildServiceAuth constructs the ServiceAccount TokenReviewer and parses the
+// allowlist when --auth-enabled is set. It returns (nil, nil, nil) when auth is
+// disabled (after logging a clear startup WARNING that the API is
+// unauthenticated). It returns an error when auth is enabled but misconfigured
+// (empty allowlist) or the TokenReviewer cannot be built.
+//
+// The session-api ServiceAccount must have RBAC to create TokenReviews
+// (`authentication.k8s.io/tokenreviews: create`). The Role/RoleBinding is wired
+// in the Helm chart (a later task); without it the reviewer's TokenReview calls
+// fail closed (401).
+func buildServiceAuth(f *flags, log logr.Logger) (serviceauth.TokenReviewer, []string, error) {
+	if !f.authEnabled {
+		log.Info("WARNING: session-api JSON API is UNAUTHENTICATED " +
+			"(auth-enabled=false); set --auth-enabled to require ServiceAccount tokens")
+		return nil, nil, nil
+	}
+
+	allowedSubjects := splitAndTrim(f.authAllowedSubjects)
+	if len(allowedSubjects) == 0 {
+		return nil, nil, fmt.Errorf(
+			"--auth-enabled is set but --auth-allowed-subjects is empty; " +
+				"refusing to start (would allow every authenticated ServiceAccount)")
+	}
+
+	// In-cluster rest config — same source the privacy middleware uses.
+	cfg, err := rest.InClusterConfig()
+	if err != nil {
+		return nil, nil, fmt.Errorf("auth-enabled requires in-cluster config: %w", err)
+	}
+
+	audiences := splitAndTrim(f.authAudiences)
+	reviewer, err := serviceauth.NewK8sTokenReviewer(cfg, audiences)
+	if err != nil {
+		return nil, nil, fmt.Errorf("building token reviewer: %w", err)
+	}
+
+	log.Info("ServiceAccount auth enabled",
+		"allowedSubjects", allowedSubjects,
+		"audiences", audiences)
+	return reviewer, allowedSubjects, nil
+}
+
 // buildAPIMux assembles the HTTP handler with all API routes, wrapped with
 // Prometheus metrics middleware. Returns the handler and a cleanup function
 // for the audit logger (no-op when enterprise is disabled).
-func buildAPIMux(pool *pgxpool.Pool, registry *providers.Registry, f *flags, log logr.Logger) (http.Handler, *api.SessionService, func()) {
+//
+// reviewer and allowedSubjects wire ServiceAccount auth: when reviewer is
+// non-nil the JSON API requires a ServiceAccount bearer token whose subject is
+// in allowedSubjects (/healthz exempt). A nil reviewer leaves the API
+// unauthenticated. These are parameters (rather than read from f) so wiring
+// tests can inject a fake reviewer.
+func buildAPIMux(pool *pgxpool.Pool, registry *providers.Registry, f *flags, log logr.Logger, reviewer serviceauth.TokenReviewer, allowedSubjects []string) (http.Handler, *api.SessionService, func()) {
 	svcCfg := api.ServiceConfig{}
 	// Default cleanup is a no-op; only the enterprise audit-logger path below
 	// replaces it with a real Close() call. Keeping cleanup non-nil lets the
@@ -538,7 +624,12 @@ func buildAPIMux(pool *pgxpool.Pool, registry *providers.Registry, f *flags, log
 			return r.URL.Path != "/healthz"
 		}),
 	)
-	return rlMiddleware(api.MetricsMiddleware(httpMetrics, traced)), sessionService, cleanup
+
+	// ServiceAccount auth runs after rate-limiting but around the
+	// metrics/trace/handler chain. /healthz is exempt so liveness probes are
+	// never gated. A nil reviewer makes this a pass-through (unauthenticated).
+	authMW := serviceauth.RequireServiceAccount(reviewer, allowedSubjects, "/healthz")
+	return rlMiddleware(authMW(api.MetricsMiddleware(httpMetrics, traced))), sessionService, cleanup
 }
 
 // registerEnterpriseRoutes adds audit, GDPR deletion, and opt-out routes when
