@@ -66,6 +66,46 @@ func TestHandleRetrieveMultiTier_HappyPath(t *testing.T) {
 	assert.Equal(t, 5, call.Limit)
 }
 
+func TestHandleRetrieveMultiTier_PassesMultiModeFields(t *testing.T) {
+	store := &multiTierStoreStub{
+		mtResult: &memory.MultiTierResult{Memories: []*memory.MultiTierMemory{}, Total: 0},
+	}
+	h := newRetrieveTestHandler(t, store)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	body := `{
+		"workspace_id":"ws-1",
+		"query":"refunds",
+		"seed_entity_ids":["e-1","e-2"],
+		"max_graph_hops":2,
+		"relation_types":["ABOUT","MENTIONS"],
+		"structured_lookups":[
+			{"kinds":["policy"],"name_prefix":"refund","purpose":"support_continuity","limit":5}
+		]
+	}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/memories/retrieve", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	mux.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	require.Len(t, store.mtCalls, 1)
+	call := store.mtCalls[0]
+	assert.Equal(t, []string{"e-1", "e-2"}, call.SeedEntityIDs)
+	assert.Equal(t, 2, call.MaxGraphHops)
+	assert.Equal(t, []string{"ABOUT", "MENTIONS"}, call.RelationTypes)
+	require.Len(t, call.StructuredLookups, 1)
+	lookup := call.StructuredLookups[0]
+	assert.Equal(t, []string{"policy"}, lookup.Kinds)
+	assert.Equal(t, "refund", lookup.NamePrefix)
+	assert.Equal(t, "support_continuity", lookup.Purpose)
+	assert.Equal(t, 5, lookup.Limit)
+}
+
 func TestHandleRetrieveMultiTier_RejectsMissingWorkspace(t *testing.T) {
 	store := &multiTierStoreStub{}
 	h := newRetrieveTestHandler(t, store)
