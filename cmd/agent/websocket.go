@@ -88,11 +88,12 @@ func runWebSocketFacade(cfg *agent.Config, log logr.Logger, tracingProvider *tra
 	// Dual-protocol: optionally start A2A server alongside WebSocket.
 	var a2aSrv *facadea2a.Server
 	var a2aHTTPServer *http.Server
+	var a2aCleanup func()
 	if cfg.A2AEnabled {
-		a2aSrv, a2aHTTPServer = startA2AServer(cfg, log, tracingProvider)
+		a2aSrv, a2aHTTPServer, a2aCleanup = startA2AServer(cfg, log, tracingProvider)
 	}
 
-	startAndServe(log, wsServer, facadeServer, healthServer, a2aSrv, a2aHTTPServer)
+	startAndServe(log, wsServer, facadeServer, healthServer, a2aSrv, a2aHTTPServer, a2aCleanup)
 }
 
 // buildWebSocketServer creates the WebSocket server and HTTP mux.
@@ -201,6 +202,7 @@ func startAndServe(
 	facadeServer, healthServer *http.Server,
 	a2aSrv *facadea2a.Server,
 	a2aHTTPServer *http.Server,
+	a2aCleanup func(),
 ) {
 	errChan := make(chan error, 3)
 
@@ -237,7 +239,7 @@ func startAndServe(
 		log.Error(err, "server error")
 	}
 
-	shutdownAll(log, wsServer, facadeServer, healthServer, a2aSrv, a2aHTTPServer)
+	shutdownAll(log, wsServer, facadeServer, healthServer, a2aSrv, a2aHTTPServer, a2aCleanup)
 }
 
 // shutdownAll gracefully shuts down all servers.
@@ -247,6 +249,7 @@ func shutdownAll(
 	facadeServer, healthServer *http.Server,
 	a2aSrv *facadea2a.Server,
 	a2aHTTPServer *http.Server,
+	a2aCleanup func(),
 ) {
 	log.Info("shutting down...")
 	ctx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
@@ -265,6 +268,9 @@ func shutdownAll(
 			log.Error(err, "error shutting down A2A HTTP server")
 		}
 	}
+	if a2aCleanup != nil {
+		a2aCleanup()
+	}
 	if err := facadeServer.Shutdown(ctx); err != nil {
 		log.Error(err, "error shutting down facade server")
 	}
@@ -281,7 +287,7 @@ func startA2AServer(
 	cfg *agent.Config,
 	log logr.Logger,
 	tracingProvider *tracing.Provider,
-) (*facadea2a.Server, *http.Server) {
+) (*facadea2a.Server, *http.Server, func()) {
 	log.Info("dual-protocol mode: starting A2A alongside WebSocket",
 		"a2aPort", cfg.A2APort,
 		"taskTTL", cfg.A2ATaskTTL,
@@ -318,13 +324,6 @@ func startA2AServer(
 
 	// Build task store
 	taskStore, storeCleanup := buildTaskStore(cfg, log)
-	if storeCleanup != nil {
-		// Note: cleanup is handled by the deferred call in runA2AFacade for standalone mode.
-		// In dual-protocol mode, we register the cleanup here. The main goroutine will
-		// handle shutdown via signal.
-		// TODO: wire cleanup into the shutdown path if needed.
-		_ = storeCleanup
-	}
 
 	// Pack path: for A2A, the SDK reads the pack directly
 	packPath := cfg.PromptPackPath + "/pack.json"
@@ -355,5 +354,5 @@ func startA2AServer(
 		Handler: a2aHandler,
 	}
 
-	return a2aSrv, a2aHTTPServer
+	return a2aSrv, a2aHTTPServer, storeCleanup
 }
