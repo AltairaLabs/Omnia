@@ -8,12 +8,27 @@ package memory
 
 import (
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 )
+
+// sortedKeys returns a map's keys in deterministic (sorted) order so the
+// per-category retention passes run in a stable, reproducible sequence.
+func sortedKeys[V any](m map[string]V) []string {
+	if len(m) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
 
 // retentionTiers is the iteration order the composite worker uses.
 // UserForAgent rows collapse into the user tier for retention — the

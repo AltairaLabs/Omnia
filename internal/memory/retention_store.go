@@ -12,34 +12,67 @@ import (
 	"time"
 )
 
+// categoryScope narrows a retention sweep by consent category so a tier-wide
+// pass and the per-category override passes (#1376) don't double-process the
+// same rows. At most one of the fields is set:
+//   - only: restrict to exactly this consent_category (the override pass).
+//   - exclude: skip these consent_categories so the tier-wide pass leaves
+//     overridden rows to their own pass; NULL and non-overridden categories
+//     are still swept.
+//
+// The zero value sweeps everything (the pre-#1376 behaviour).
+type categoryScope struct {
+	only    string
+	exclude []string
+}
+
+// clause returns a SQL predicate fragment (with a leading " AND ") plus its
+// args, numbered from startIdx. The zero scope returns "" and nil so callers
+// emit no extra predicate.
+func (c categoryScope) clause(startIdx int) (string, []any) {
+	switch {
+	case c.only != "":
+		return fmt.Sprintf(" AND consent_category = $%d", startIdx), []any{c.only}
+	case len(c.exclude) > 0:
+		return fmt.Sprintf(" AND (consent_category IS NULL OR consent_category <> ALL($%d::text[]))", startIdx),
+			[]any{c.exclude}
+	default:
+		return "", nil
+	}
+}
+
 // SoftDeleteExpiredTTL soft-deletes up to batchSize entities in the
 // given tier whose expires_at is in the past and that aren't already
-// forgotten. Returns the number of rows flipped.
+// forgotten. The categoryScope narrows the sweep to or away from specific
+// consent categories (#1376). Returns the number of rows flipped.
 //
 // Uses `FOR UPDATE SKIP LOCKED` so concurrent worker instances in HA
 // deployments never block each other.
 func (s *PostgresMemoryStore) SoftDeleteExpiredTTL(
-	ctx context.Context, tier Tier, batchSize int,
+	ctx context.Context, tier Tier, cat categoryScope, batchSize int,
 ) (int64, error) {
 	if batchSize <= 0 {
 		return 0, nil
 	}
+	catClause, args := cat.clause(1)
+	limitIdx := len(args) + 1
+	args = append(args, batchSize)
 	q := fmt.Sprintf(`
 WITH target AS (
   SELECT id FROM memory_entities
   WHERE forgotten = false
     AND expires_at IS NOT NULL
     AND expires_at < now()
-    AND %s
+    AND %s%s
   ORDER BY expires_at ASC
-  LIMIT $1
+  LIMIT $%d
   FOR UPDATE SKIP LOCKED
 )
 UPDATE memory_entities
 SET forgotten = true, updated_at = now()
-WHERE id IN (SELECT id FROM target)`, tier.sqlPredicate())
+WHERE id IN (SELECT id FROM target)`, tier.sqlPredicate(), catClause, limitIdx)
 
-	tag, err := s.pool.Exec(ctx, q, batchSize)
+	tag, err := s.pool.Exec(ctx, q, args...)
 	if err != nil {
 		return 0, fmt.Errorf("memory: soft-delete ttl (%s): %w", tier, err)
 	}
@@ -53,11 +86,16 @@ WHERE id IN (SELECT id FROM target)`, tier.sqlPredicate())
 // staleAfter must be positive; the caller validates non-zero before
 // invoking so we can keep the query path cheap.
 func (s *PostgresMemoryStore) SoftDeleteLRU(
-	ctx context.Context, tier Tier, staleAfter time.Duration, batchSize int,
+	ctx context.Context, tier Tier, staleAfter time.Duration, cat categoryScope, batchSize int,
 ) (int64, error) {
 	if batchSize <= 0 || staleAfter <= 0 {
 		return 0, nil
 	}
+	catClause, args := cat.clause(1)
+	intervalIdx := len(args) + 1
+	args = append(args, fmt.Sprintf("%d seconds", int64(staleAfter.Seconds())))
+	limitIdx := len(args) + 1
+	args = append(args, batchSize)
 	q := fmt.Sprintf(`
 WITH last_seen AS (
   SELECT e.id,
@@ -69,22 +107,21 @@ WITH last_seen AS (
   LEFT JOIN memory_observations o
     ON o.entity_id = e.id AND o.superseded_by IS NULL
   WHERE e.forgotten = false
-    AND %s
+    AND %s%s
   GROUP BY e.id
 ),
 target AS (
   SELECT id FROM last_seen
-  WHERE last_activity < now() - $1::interval
+  WHERE last_activity < now() - $%d::interval
   ORDER BY last_activity ASC
-  LIMIT $2
+  LIMIT $%d
   FOR UPDATE SKIP LOCKED
 )
 UPDATE memory_entities
 SET forgotten = true, updated_at = now()
-WHERE id IN (SELECT id FROM target)`, tier.sqlPredicate())
+WHERE id IN (SELECT id FROM target)`, tier.sqlPredicate(), catClause, intervalIdx, limitIdx)
 
-	interval := fmt.Sprintf("%d seconds", int64(staleAfter.Seconds()))
-	tag, err := s.pool.Exec(ctx, q, interval, batchSize)
+	tag, err := s.pool.Exec(ctx, q, args...)
 	if err != nil {
 		return 0, fmt.Errorf("memory: soft-delete lru (%s): %w", tier, err)
 	}
