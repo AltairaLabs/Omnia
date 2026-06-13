@@ -56,7 +56,9 @@ export function WorkloadGraph({
   const [showData, setShowData] = useState(true);
   const visibleModel = useMemo(() => {
     if (showData) return model;
-    const dataKinds = new Set(["variable", "artifact", "initial", "final"]);
+    // Only the data overlay (variables + artifacts) hides — the UML ●/◉ markers
+    // are control flow and always stay.
+    const dataKinds = new Set(["variable", "artifact"]);
     const drop = new Set(model.nodes.filter((n) => dataKinds.has(n.kind)).map((n) => n.id));
     return {
       ...model,
@@ -104,9 +106,7 @@ export function WorkloadGraph({
   }, [flow, setNodes, setEdges]);
 
   const selected: WorkloadNode | undefined = visibleModel.nodes.find((n) => n.id === selectedId);
-  const hasData = model.nodes.some((n) =>
-    ["variable", "artifact", "initial", "final"].includes(n.kind),
-  );
+  const hasData = model.nodes.some((n) => n.kind === "variable" || n.kind === "artifact");
   const banner =
     model.altitude === "deployment" ? deploymentBanner(model) : "Definition · abstract workload";
 
