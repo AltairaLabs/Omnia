@@ -55,7 +55,7 @@ func TestHandleSetOptOut_Success(t *testing.T) {
 	}
 	h := newTestOptOutHandler(store)
 
-	body, _ := json.Marshal(OptOutRequest{UserID: "user1", Scope: ScopeAll})
+	body, _ := json.Marshal(OptOutRequest{VirtualUserID: "user1", Scope: ScopeAll})
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/privacy/opt-out", bytes.NewReader(body))
 	rec := httptest.NewRecorder()
 
@@ -74,7 +74,7 @@ func TestHandleSetOptOut_WorkspaceScope(t *testing.T) {
 	h := newTestOptOutHandler(store)
 
 	body, _ := json.Marshal(OptOutRequest{
-		UserID: "user1", Scope: ScopeWorkspace, Target: "my-workspace",
+		VirtualUserID: "user1", Scope: ScopeWorkspace, Target: "my-workspace",
 	})
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/privacy/opt-out", bytes.NewReader(body))
 	rec := httptest.NewRecorder()
@@ -107,7 +107,7 @@ func TestHandleSetOptOut_MissingUserID(t *testing.T) {
 func TestHandleSetOptOut_InvalidScope(t *testing.T) {
 	h := newTestOptOutHandler(&handlerMockPrefsStore{})
 
-	body, _ := json.Marshal(OptOutRequest{UserID: "user1", Scope: "invalid"})
+	body, _ := json.Marshal(OptOutRequest{VirtualUserID: "user1", Scope: "invalid"})
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/privacy/opt-out", bytes.NewReader(body))
 	rec := httptest.NewRecorder()
 
@@ -118,7 +118,7 @@ func TestHandleSetOptOut_InvalidScope(t *testing.T) {
 func TestHandleSetOptOut_MissingTarget(t *testing.T) {
 	h := newTestOptOutHandler(&handlerMockPrefsStore{})
 
-	body, _ := json.Marshal(OptOutRequest{UserID: "user1", Scope: ScopeWorkspace})
+	body, _ := json.Marshal(OptOutRequest{VirtualUserID: "user1", Scope: ScopeWorkspace})
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/privacy/opt-out", bytes.NewReader(body))
 	rec := httptest.NewRecorder()
 
@@ -134,7 +134,7 @@ func TestHandleSetOptOut_StoreError(t *testing.T) {
 	}
 	h := newTestOptOutHandler(store)
 
-	body, _ := json.Marshal(OptOutRequest{UserID: "user1", Scope: ScopeAll})
+	body, _ := json.Marshal(OptOutRequest{VirtualUserID: "user1", Scope: ScopeAll})
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/privacy/opt-out", bytes.NewReader(body))
 	rec := httptest.NewRecorder()
 
@@ -150,7 +150,7 @@ func TestHandleRemoveOptOut_Success(t *testing.T) {
 	}
 	h := newTestOptOutHandler(store)
 
-	body, _ := json.Marshal(OptOutRequest{UserID: "user1", Scope: ScopeAll})
+	body, _ := json.Marshal(OptOutRequest{VirtualUserID: "user1", Scope: ScopeAll})
 	req := httptest.NewRequest(http.MethodDelete, "/api/v1/privacy/opt-out", bytes.NewReader(body))
 	rec := httptest.NewRecorder()
 
@@ -166,7 +166,7 @@ func TestHandleRemoveOptOut_NotFound(t *testing.T) {
 	}
 	h := newTestOptOutHandler(store)
 
-	body, _ := json.Marshal(OptOutRequest{UserID: "missing", Scope: ScopeAll})
+	body, _ := json.Marshal(OptOutRequest{VirtualUserID: "missing", Scope: ScopeAll})
 	req := httptest.NewRequest(http.MethodDelete, "/api/v1/privacy/opt-out", bytes.NewReader(body))
 	rec := httptest.NewRecorder()
 
@@ -192,7 +192,7 @@ func TestHandleRemoveOptOut_StoreError(t *testing.T) {
 	}
 	h := newTestOptOutHandler(store)
 
-	body, _ := json.Marshal(OptOutRequest{UserID: "user1", Scope: ScopeAll})
+	body, _ := json.Marshal(OptOutRequest{VirtualUserID: "user1", Scope: ScopeAll})
 	req := httptest.NewRequest(http.MethodDelete, "/api/v1/privacy/opt-out", bytes.NewReader(body))
 	rec := httptest.NewRecorder()
 
@@ -216,7 +216,7 @@ func TestHandleGetPreferences_Success(t *testing.T) {
 	store := &handlerMockPrefsStore{
 		getPreferencesFn: func(_ context.Context, userID string) (*Preferences, error) {
 			return &Preferences{
-				UserID:           userID,
+				VirtualUserID:    userID,
 				OptOutAll:        true,
 				OptOutWorkspaces: []string{"ws1"},
 				OptOutAgents:     []string{},
@@ -239,7 +239,7 @@ func TestHandleGetPreferences_Success(t *testing.T) {
 	var prefs Preferences
 	err := json.NewDecoder(rec.Body).Decode(&prefs)
 	require.NoError(t, err)
-	assert.Equal(t, "user1", prefs.UserID)
+	assert.Equal(t, "user1", prefs.VirtualUserID)
 	assert.True(t, prefs.OptOutAll)
 }
 
@@ -287,29 +287,29 @@ func TestValidateOptOutRequest(t *testing.T) {
 	}{
 		{
 			name:    "valid all scope",
-			req:     OptOutRequest{UserID: "u1", Scope: ScopeAll},
+			req:     OptOutRequest{VirtualUserID: "u1", Scope: ScopeAll},
 			wantErr: false,
 		},
 		{
 			name:    "valid workspace scope",
-			req:     OptOutRequest{UserID: "u1", Scope: ScopeWorkspace, Target: "ws1"},
+			req:     OptOutRequest{VirtualUserID: "u1", Scope: ScopeWorkspace, Target: "ws1"},
 			wantErr: false,
 		},
 		{
 			name:    "valid agent scope",
-			req:     OptOutRequest{UserID: "u1", Scope: ScopeAgent, Target: "a1"},
+			req:     OptOutRequest{VirtualUserID: "u1", Scope: ScopeAgent, Target: "a1"},
 			wantErr: false,
 		},
 		{name: "missing user ID", req: OptOutRequest{Scope: ScopeAll}, wantErr: true},
-		{name: "invalid scope", req: OptOutRequest{UserID: "u1", Scope: "bad"}, wantErr: true},
+		{name: "invalid scope", req: OptOutRequest{VirtualUserID: "u1", Scope: "bad"}, wantErr: true},
 		{
 			name:    "workspace missing target",
-			req:     OptOutRequest{UserID: "u1", Scope: ScopeWorkspace},
+			req:     OptOutRequest{VirtualUserID: "u1", Scope: ScopeWorkspace},
 			wantErr: true,
 		},
 		{
 			name:    "agent missing target",
-			req:     OptOutRequest{UserID: "u1", Scope: ScopeAgent},
+			req:     OptOutRequest{VirtualUserID: "u1", Scope: ScopeAgent},
 			wantErr: true,
 		},
 	}
@@ -344,7 +344,7 @@ func TestOptOutRegisterRoutes(t *testing.T) {
 	h.RegisterRoutes(mux)
 
 	// POST opt-out
-	body, _ := json.Marshal(OptOutRequest{UserID: "u1", Scope: ScopeAll})
+	body, _ := json.Marshal(OptOutRequest{VirtualUserID: "u1", Scope: ScopeAll})
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, httptest.NewRequest(
 		http.MethodPost, "/api/v1/privacy/opt-out", bytes.NewReader(body),
@@ -352,7 +352,7 @@ func TestOptOutRegisterRoutes(t *testing.T) {
 	assert.Equal(t, http.StatusNoContent, rec.Code)
 
 	// DELETE opt-out
-	body, _ = json.Marshal(OptOutRequest{UserID: "u1", Scope: ScopeAll})
+	body, _ = json.Marshal(OptOutRequest{VirtualUserID: "u1", Scope: ScopeAll})
 	rec = httptest.NewRecorder()
 	mux.ServeHTTP(rec, httptest.NewRequest(
 		http.MethodDelete, "/api/v1/privacy/opt-out", bytes.NewReader(body),

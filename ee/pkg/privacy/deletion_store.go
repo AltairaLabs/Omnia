@@ -31,12 +31,12 @@ func NewPostgresDeletionStore(pool *pgxpool.Pool) *PostgresDeletionStore {
 var _ DeletionStore = (*PostgresDeletionStore)(nil)
 
 const insertDeletionRequestSQL = `
-	INSERT INTO deletion_requests (id, user_id, reason, scope, workspace,
+	INSERT INTO deletion_requests (id, virtual_user_id, reason, scope, workspace,
 		date_from, date_to, status, created_at, sessions_deleted, errors)
 	VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`
 
 const getDeletionRequestSQL = `
-	SELECT id, user_id, reason, scope, workspace,
+	SELECT id, virtual_user_id, reason, scope, workspace,
 		date_from, date_to, status, created_at,
 		started_at, completed_at, sessions_deleted, errors
 	FROM deletion_requests WHERE id = $1`
@@ -48,11 +48,11 @@ const updateDeletionRequestSQL = `
 	WHERE id = $6`
 
 const listDeletionRequestsByUserSQL = `
-	SELECT id, user_id, reason, scope, workspace,
+	SELECT id, virtual_user_id, reason, scope, workspace,
 		date_from, date_to, status, created_at,
 		started_at, completed_at, sessions_deleted, errors
 	FROM deletion_requests
-	WHERE user_id = $1
+	WHERE virtual_user_id = $1
 	ORDER BY created_at DESC`
 
 // CreateRequest inserts a new deletion request into the database.
@@ -65,7 +65,7 @@ func (s *PostgresDeletionStore) CreateRequest(
 	}
 
 	_, err = s.pool.Exec(ctx, insertDeletionRequestSQL,
-		req.ID, req.UserID, req.Reason, req.Scope,
+		req.ID, req.VirtualUserID, req.Reason, req.Scope,
 		nullableString(req.Workspace),
 		req.DateFrom, req.DateTo,
 		req.Status, req.CreatedAt, req.SessionsDeleted, errorsJSON,
@@ -105,9 +105,9 @@ func (s *PostgresDeletionStore) UpdateRequest(
 
 // ListRequestsByUser retrieves all deletion requests for a user.
 func (s *PostgresDeletionStore) ListRequestsByUser(
-	ctx context.Context, userID string,
+	ctx context.Context, virtualUserID string,
 ) ([]*DeletionRequest, error) {
-	rows, err := s.pool.Query(ctx, listDeletionRequestsByUserSQL, userID)
+	rows, err := s.pool.Query(ctx, listDeletionRequestsByUserSQL, virtualUserID)
 	if err != nil {
 		return nil, fmt.Errorf("query deletion requests: %w", err)
 	}
@@ -138,7 +138,7 @@ func scanDeletionRequest(row pgx.Row) (*DeletionRequest, error) {
 	var errorsJSON []byte
 
 	err := row.Scan(
-		&req.ID, &req.UserID, &req.Reason, &req.Scope, &workspace,
+		&req.ID, &req.VirtualUserID, &req.Reason, &req.Scope, &workspace,
 		&req.DateFrom, &req.DateTo, &req.Status, &req.CreatedAt,
 		&req.StartedAt, &req.CompletedAt, &req.SessionsDeleted,
 		&errorsJSON,

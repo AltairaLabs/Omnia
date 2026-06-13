@@ -268,7 +268,7 @@ func TestConsentHandlerPUT_AuditEventsEmitted(t *testing.T) {
 	require.Len(t, audit.events, 3)
 
 	assert.Equal(t, "consent_granted", audit.events[0].EventType)
-	assert.Equal(t, "user1", audit.events[0].Metadata["user_id"])
+	assert.Equal(t, "user1", audit.events[0].Metadata["virtual_user_id"])
 	assert.Equal(t, string(ConsentMemoryIdentity), audit.events[0].Metadata["category"])
 
 	assert.Equal(t, "consent_granted", audit.events[1].EventType)

@@ -66,7 +66,7 @@ func TestGetPreferences_Found(t *testing.T) {
 	store := NewPreferencesStore(pool)
 	prefs, err := store.GetPreferences(context.Background(), "user1")
 	require.NoError(t, err)
-	assert.Equal(t, "user1", prefs.UserID)
+	assert.Equal(t, "user1", prefs.VirtualUserID)
 	assert.True(t, prefs.OptOutAll)
 	assert.Equal(t, []string{"ws1"}, prefs.OptOutWorkspaces)
 	assert.Equal(t, []string{"agent1"}, prefs.OptOutAgents)
