@@ -120,6 +120,7 @@ func buildWebSocketServer(
 		facade.DefaultRecordingPoolSize,
 		facade.DefaultRecordingQueueSize,
 		log,
+		metrics,
 	)
 	serverOpts := []facade.ServerOption{
 		facade.WithMetrics(metrics),
