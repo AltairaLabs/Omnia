@@ -42,6 +42,7 @@ CREATE TABLE sessions (
     prompt_pack_version  TEXT,
     cohort_id            TEXT,
     variant              TEXT,
+    virtual_user_id      TEXT            NOT NULL,
     CONSTRAINT sessions_status_check CHECK (status IN ('active', 'completed', 'error', 'expired')),
     PRIMARY KEY (id, created_at)
 ) PARTITION BY RANGE (created_at);
@@ -54,6 +55,7 @@ CREATE INDEX idx_sessions_expires_at        ON sessions (expires_at) WHERE expir
 CREATE INDEX idx_sessions_id                ON sessions (id);
 CREATE INDEX idx_sessions_cohort_id         ON sessions (cohort_id) WHERE cohort_id IS NOT NULL;
 CREATE INDEX idx_sessions_variant           ON sessions (variant) WHERE variant IS NOT NULL;
+CREATE INDEX idx_sessions_virtual_user      ON sessions (virtual_user_id, created_at DESC);
 CREATE INDEX idx_sessions_tags              ON sessions USING GIN (tags);
 
 -- messages: conversation messages (partitioned weekly by timestamp).
@@ -263,7 +265,7 @@ CREATE INDEX idx_eval_results_namespace_agent_created ON eval_results (namespace
 -- deletion_requests: DSAR / right-to-erasure tracking (not partitioned).
 CREATE TABLE deletion_requests (
     id               TEXT        NOT NULL,
-    user_id          TEXT        NOT NULL,
+    virtual_user_id  TEXT        NOT NULL,
     reason           TEXT        NOT NULL,
     scope            TEXT        NOT NULL DEFAULT 'all',
     workspace        TEXT,
@@ -281,18 +283,18 @@ CREATE TABLE deletion_requests (
     PRIMARY KEY (id)
 );
 
-CREATE INDEX idx_deletion_requests_user   ON deletion_requests (user_id);
+CREATE INDEX idx_deletion_requests_user   ON deletion_requests (virtual_user_id);
 CREATE INDEX idx_deletion_requests_status ON deletion_requests (status);
 
 -- user_privacy_preferences: per-user recording opt-out (not partitioned).
 CREATE TABLE user_privacy_preferences (
-    user_id            TEXT        NOT NULL,
+    virtual_user_id    TEXT        NOT NULL,
     opt_out_all        BOOLEAN     DEFAULT false,
     opt_out_workspaces TEXT[]      DEFAULT '{}'::text[],
     opt_out_agents     TEXT[]      DEFAULT '{}'::text[],
     created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
-    PRIMARY KEY (user_id)
+    PRIMARY KEY (virtual_user_id)
 );
 
 CREATE INDEX idx_privacy_prefs_updated ON user_privacy_preferences (updated_at);

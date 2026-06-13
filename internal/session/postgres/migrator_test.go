@@ -336,8 +336,8 @@ func TestMigrator_DataOperations(t *testing.T) {
 	// Insert a session
 	sessionID := "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11"
 	_, err = db.Exec(`
-		INSERT INTO sessions (id, agent_name, namespace, status, created_at, updated_at)
-		VALUES ($1, 'test-agent', 'default', 'active', $2, $2)`,
+		INSERT INTO sessions (id, agent_name, namespace, status, created_at, updated_at, virtual_user_id)
+		VALUES ($1, 'test-agent', 'default', 'active', $2, $2, 'vu-test')`,
 		sessionID, now)
 	require.NoError(t, err)
 
@@ -393,8 +393,8 @@ func TestMigrator_DataOperations(t *testing.T) {
 
 	// Verify status check constraint
 	_, err = db.Exec(`
-		INSERT INTO sessions (id, agent_name, namespace, status, created_at, updated_at)
-		VALUES (gen_random_uuid(), 'test-agent', 'default', 'invalid_status', $1, $1)`, now)
+		INSERT INTO sessions (id, agent_name, namespace, status, created_at, updated_at, virtual_user_id)
+		VALUES (gen_random_uuid(), 'test-agent', 'default', 'invalid_status', $1, $1, 'vu-test')`, now)
 	assert.Error(t, err, "inserting session with invalid status should fail")
 
 	// Verify role check constraint
