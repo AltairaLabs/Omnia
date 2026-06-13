@@ -33,6 +33,11 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 
+# Patch OS packages ahead of the node:20-alpine base refresh. The base lags
+# Alpine's OpenSSL patch (libssl3/libcrypto3), which Trivy flags on every
+# release; upgrade just those two rather than the whole image.
+RUN apk upgrade --no-cache libssl3 libcrypto3
+
 # Create non-root user
 RUN addgroup --system --gid 1001 nodejs && \
     adduser --system --uid 1001 nextjs
