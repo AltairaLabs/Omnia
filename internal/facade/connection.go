@@ -62,10 +62,35 @@ type Connection struct {
 
 	// rateLimiter enforces per-connection message rate limiting. Nil when disabled.
 	rateLimiter *rate.Limiter
+	// inFlightMessages limits concurrently processed non-tool messages per connection.
+	// Nil when disabled.
+	inFlightMessages chan struct{}
 
 	// policyCache caches the effective recording policy for this connection.
 	// Nil when no PolicyFetcher is configured (memory store, test mode).
 	policyCache *RecordingPolicyCache
+}
+
+func (c *Connection) tryAcquireInFlightMessage() bool {
+	if c.inFlightMessages == nil {
+		return true
+	}
+	select {
+	case c.inFlightMessages <- struct{}{}:
+		return true
+	default:
+		return false
+	}
+}
+
+func (c *Connection) releaseInFlightMessage() {
+	if c.inFlightMessages == nil {
+		return
+	}
+	select {
+	case <-c.inFlightMessages:
+	default:
+	}
 }
 
 // handleConnection manages the lifecycle of a WebSocket connection.
