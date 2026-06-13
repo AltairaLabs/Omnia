@@ -20,7 +20,7 @@ const model: WorkloadModel = {
 describe("modelToFlow", () => {
   it("maps node kinds to xyflow node types and carries data", () => {
     const { nodes } = modelToFlow(model);
-    expect(nodes.find((n) => n.id === "a")?.type).toBe("workloadState");
+    expect(nodes.find((n) => n.id === "a")?.type).toBe("workflowState");
     expect(nodes.find((n) => n.id === "provider:default")?.type).toBe("workloadProvider");
     expect(nodes.find((n) => n.id === "a")?.data.node.isEntry).toBe(true);
   });
@@ -50,5 +50,25 @@ describe("modelToFlow", () => {
     const onClick = () => {};
     const { nodes } = modelToFlow(model, onClick);
     expect(nodes[0].data.onClick).toBe(onClick);
+  });
+});
+
+describe("modelToFlow — data-flow kinds", () => {
+  it("maps new kinds to node types, sets size, and styles data edges", () => {
+    const m: WorkloadModel = {
+      tier: "workflow", altitude: "definition",
+      nodes: [
+        { id: "initial", kind: "initial", label: "", badges: [], detail: {} },
+        { id: "var:topic", kind: "variable", label: "topic", badges: [], detail: {} },
+        { id: "artifact:notes", kind: "artifact", label: "notes", badges: [], detail: {} },
+      ],
+      edges: [{ id: "e", source: "var:topic", target: "initial", style: "data" }],
+      meta: { counts: { agents: 0, tools: 0, skills: 0, states: 0 } },
+    };
+    const { nodes, edges } = modelToFlow(m);
+    expect(nodes.find((n) => n.id === "initial")!.type).toBe("workflowInitial");
+    expect(nodes.find((n) => n.id === "var:topic")!.width).toBe(120);
+    expect(nodes.find((n) => n.id === "artifact:notes")!.type).toBe("workflowArtifact");
+    expect(edges[0].style).toMatchObject({ strokeDasharray: "3 3" });
   });
 });
