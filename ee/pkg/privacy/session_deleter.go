@@ -20,14 +20,20 @@ import (
 // without a pseudonym. Fail closed — never fall back to listing all sessions.
 var ErrMissingVirtualUserID = errors.New("virtual_user_id is required for user-scoped session deletion")
 
+// defaultDeletionPageSize is the number of session IDs fetched per page when
+// listing a subject's sessions for erasure. It is a page size, not a total cap:
+// ListSessionsByUser pages until the store is exhausted.
+const defaultDeletionPageSize = 10000
+
 // WarmStoreSessionDeleter adapts a WarmStoreProvider to the SessionDeleter interface.
 type WarmStoreSessionDeleter struct {
-	warm providers.WarmStoreProvider
+	warm     providers.WarmStoreProvider
+	pageSize int
 }
 
 // NewWarmStoreSessionDeleter creates a SessionDeleter backed by a WarmStoreProvider.
 func NewWarmStoreSessionDeleter(warm providers.WarmStoreProvider) *WarmStoreSessionDeleter {
-	return &WarmStoreSessionDeleter{warm: warm}
+	return &WarmStoreSessionDeleter{warm: warm, pageSize: defaultDeletionPageSize}
 }
 
 // ListSessionsByUser lists session IDs for a pseudonymous subject, optionally
@@ -50,18 +56,31 @@ func (d *WarmStoreSessionDeleter) ListSessionsByUser(
 	if dateTo != nil {
 		opts.CreatedBefore = *dateTo
 	}
-	// Use a large limit to get all sessions. In production, this should
-	// be paginated, but for deletion workflows we need all IDs.
-	opts.Limit = 10000
 
-	page, err := d.warm.ListSessions(ctx, opts)
-	if err != nil {
-		return nil, err
+	pageSize := d.pageSize
+	if pageSize <= 0 {
+		pageSize = defaultDeletionPageSize
 	}
+	opts.Limit = pageSize
 
-	ids := make([]string, 0, len(page.Sessions))
-	for _, s := range page.Sessions {
-		ids = append(ids, s.ID)
+	// Page through every matching session. A single capped pass would leave a
+	// subject with more than pageSize sessions partially erased while still
+	// reporting completion (issue #1392). Listing is read-only and runs before
+	// any deletion, so offset paging walks a stable result set: each full page
+	// advances the offset until a short (or empty) page signals exhaustion.
+	var ids []string
+	for {
+		opts.Offset = len(ids)
+		page, err := d.warm.ListSessions(ctx, opts)
+		if err != nil {
+			return nil, err
+		}
+		for _, s := range page.Sessions {
+			ids = append(ids, s.ID)
+		}
+		if len(page.Sessions) < pageSize {
+			break
+		}
 	}
 	return ids, nil
 }
