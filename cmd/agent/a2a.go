@@ -165,10 +165,7 @@ func runA2AFacade(cfg *agent.Config, log logr.Logger, tracingProvider *tracing.P
 		IdleTimeout:  idleTimeout,
 	}
 
-	healthServer := newHealthServer(cfg, func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("ok"))
-	})
+	healthServer := newHealthServer(cfg, readyzOKHandler)
 
 	errChan := make(chan error, 2)
 	go func() {

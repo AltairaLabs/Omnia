@@ -30,3 +30,10 @@ func newHealthServer(cfg *agent.Config, readyHandler http.HandlerFunc) *http.Ser
 		WriteTimeout: writeTimeout,
 	}
 }
+
+// readyzOKHandler is a static readiness endpoint used by components that only
+// need to report process-level readiness.
+func readyzOKHandler(w http.ResponseWriter, _ *http.Request) {
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte("ok"))
+}
