@@ -32,6 +32,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/altairalabs/omnia/internal/memory"
+	"github.com/altairalabs/omnia/pkg/logging"
 )
 
 // --- mockMemoryStore --------------------------------------------------------
@@ -250,8 +251,49 @@ func TestRedisMemoryEventPublisher_Publish(t *testing.T) {
 	assert.Equal(t, "mem-001", decoded.MemoryID)
 	assert.Equal(t, eventTypeMemoryCreated, decoded.EventType)
 	assert.Equal(t, "ws-abc", decoded.WorkspaceID)
-	assert.Equal(t, "user-1", decoded.UserID)
+	// SEC-5: the user id is hashed on the wire, never raw.
+	assert.Equal(t, logging.HashID("user-1"), decoded.UserID)
+	assert.NotContains(t, payload, "user-1")
 	assert.Equal(t, "preference", decoded.Kind)
+}
+
+// SEC-5: a raw user id must never reach the Redis stream — it is hashed to a
+// stable, non-reversible value before publish; an empty user id stays absent.
+func TestRedisMemoryEventPublisher_HashesUserID(t *testing.T) {
+	mr := miniredis.RunT(t)
+	client := goredis.NewClient(&goredis.Options{Addr: mr.Addr()})
+	defer func() { _ = client.Close() }()
+
+	pub := NewRedisMemoryEventPublisher(client, logr.Discard())
+
+	const rawUser = "alice@example.com"
+	require.NoError(t, pub.PublishMemoryEvent(context.Background(), MemoryEvent{
+		EventType:   eventTypeMemoryCreated,
+		MemoryID:    "mem-sec5",
+		WorkspaceID: "ws-sec5",
+		UserID:      rawUser,
+		Timestamp:   time.Now().UTC().Format(time.RFC3339),
+	}))
+	// An institutional event (no user) must not gain a hashed-empty value.
+	require.NoError(t, pub.PublishMemoryEvent(context.Background(), MemoryEvent{
+		EventType:   eventTypeMemoryCreated,
+		MemoryID:    "mem-inst",
+		WorkspaceID: "ws-sec5",
+		Timestamp:   time.Now().UTC().Format(time.RFC3339),
+	}))
+
+	msgs, err := client.XRange(context.Background(), MemoryStreamKey("ws-sec5"), "-", "+").Result()
+	require.NoError(t, err)
+	require.Len(t, msgs, 2)
+
+	first := msgs[0].Values["payload"].(string)
+	assert.NotContains(t, first, rawUser, "raw user id must not appear in the stream payload")
+	var decoded MemoryEvent
+	require.NoError(t, json.Unmarshal([]byte(first), &decoded))
+	assert.Equal(t, logging.HashID(rawUser), decoded.UserID)
+
+	second := msgs[1].Values["payload"].(string)
+	assert.NotContains(t, second, "userId", "empty user id must stay omitted, not hashed")
 }
 
 func TestRedisMemoryEventPublisher_PublishError(t *testing.T) {

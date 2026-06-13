@@ -28,6 +28,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	goredis "github.com/redis/go-redis/v9"
+
+	"github.com/altairalabs/omnia/pkg/logging"
 )
 
 // Stream key and MAXLEN constants for Redis Streams memory event publishing.
@@ -105,6 +107,14 @@ func NewRedisMemoryEventPublisher(client goredis.UniversalClient, log logr.Logge
 
 // PublishMemoryEvent publishes a memory event to the workspace-scoped Redis Stream.
 func (p *RedisMemoryEventPublisher) PublishMemoryEvent(ctx context.Context, event MemoryEvent) error {
+	// SEC-5: never publish a raw user id to the stream (retained up to
+	// memoryStreamMaxLen entries). Hash it to a stable, non-reversible value
+	// so downstream consumers can still correlate per-user without holding
+	// PII. Empty stays empty (institutional/agent events carry no user).
+	if event.UserID != "" {
+		event.UserID = logging.HashID(event.UserID)
+	}
+
 	payload, err := json.Marshal(event)
 	if err != nil {
 		return fmt.Errorf("marshal memory event: %w", err)
