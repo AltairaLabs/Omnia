@@ -47,12 +47,12 @@ export async function layoutFlow<T extends Node>(
     layoutOptions: {
       "elk.algorithm": "layered",
       "elk.direction": "DOWN",
-      "elk.edgeRouting": "ORTHOGONAL",
-      "elk.spacing.nodeNode": "20",
-      "elk.layered.spacing.nodeNodeBetweenLayers": "44",
-      "elk.layered.spacing.edgeNodeBetweenLayers": "14",
-      "elk.layered.spacing.edgeEdgeBetweenLayers": "10",
-      "elk.layered.nodePlacement.strategy": "NETWORK_SIMPLEX",
+      "elk.spacing.nodeNode": "44",
+      "elk.layered.spacing.nodeNodeBetweenLayers": "64",
+      // Brandes-Köpf with balanced alignment centres children under parents for
+      // a symmetric, tree-like top-down look.
+      "elk.layered.nodePlacement.strategy": "BRANDES_KOEPF",
+      "elk.layered.nodePlacement.bk.fixedAlignment": "BALANCED",
       "elk.layered.crossingMinimization.strategy": "LAYER_SWEEP",
     },
     children: nodes.map((n) => ({

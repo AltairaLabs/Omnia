@@ -50,10 +50,9 @@ export function modelToFlow(
     source: e.source,
     target: e.target,
     label: e.label,
-    type: "workloadEdge",
+    // default xyflow edge type = smooth bezier, connecting top/bottom handles
     animated: e.style === "loop",
     style: edgeStyle(e.style),
-    data: {}, // elk route points are injected after layout
   }));
 
   return { nodes, edges };

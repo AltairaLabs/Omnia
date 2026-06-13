@@ -19,7 +19,6 @@ import { Info } from "lucide-react";
 import { modelToFlow, type WorkloadNodeData } from "./to-flow";
 import { layoutFlow } from "./layout";
 import { workloadNodeTypes } from "./workload-nodes";
-import { workloadEdgeTypes } from "./workload-edge";
 import { NodeDrawer } from "./node-drawer";
 import type { WorkloadModel, WorkloadNode, WorkloadBudget } from "./types";
 
@@ -94,12 +93,10 @@ export function WorkloadGraph({
 
   useEffect(() => {
     let cancelled = false;
-    layoutFlow(flow.nodes, flow.edges).then(({ nodes: laid, routes }) => {
+    layoutFlow(flow.nodes, flow.edges).then(({ nodes: laid }) => {
       if (cancelled) return;
       setNodes(laid);
-      setEdges(
-        flow.edges.map((e) => ({ ...e, data: { ...e.data, points: routes.get(e.id) } })),
-      );
+      setEdges(flow.edges);
       fitViewAfterPaint(rf.current);
     });
     return () => { cancelled = true; };
@@ -129,7 +126,6 @@ export function WorkloadGraph({
           nodes={nodes}
           edges={edges}
           nodeTypes={workloadNodeTypes}
-          edgeTypes={workloadEdgeTypes}
           onInit={(inst) => { rf.current = inst; }}
           fitView
           fitViewOptions={{ padding: 0.08 }}
