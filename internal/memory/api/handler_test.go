@@ -1103,6 +1103,19 @@ func TestHandleDeleteMemory_StoreError(t *testing.T) {
 	assert.Equal(t, http.StatusInternalServerError, rr.Code)
 }
 
+// MAINT-2: a store ErrNotFound must surface as 404, not 500.
+func TestHandleDeleteMemory_NotFound_Returns404(t *testing.T) {
+	store := &mockStore{delErr: memory.ErrNotFound}
+	h := newTestHandler(store)
+	mux := setupMux(h)
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/memories/mem-123?workspace=ws1", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusNotFound, rr.Code)
+}
+
 // --- DeleteAll tests ---
 
 func TestHandleDeleteAllMemories_Success(t *testing.T) {

@@ -35,6 +35,7 @@ import (
 	"github.com/go-logr/logr"
 
 	pkmemory "github.com/AltairaLabs/PromptKit/runtime/memory"
+	"github.com/altairalabs/omnia/pkg/logging"
 	"github.com/altairalabs/omnia/pkg/policy"
 )
 
@@ -84,7 +85,7 @@ func NewStore(baseURL string, log logr.Logger) *Store {
 func (s *Store) Save(ctx context.Context, mem *pkmemory.Memory) error {
 	s.log.V(1).Info("memory save request",
 		"hasScope", len(mem.Scope) > 0,
-		"scopeUserID", mem.Scope["user_id"],
+		"scopeUserIDHash", logging.HashID(mem.Scope["user_id"]),
 		"scopeWorkspaceID", mem.Scope["workspace_id"],
 		"contentLen", len(mem.Content),
 	)

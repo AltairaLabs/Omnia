@@ -407,9 +407,22 @@ func (c *CachedStore) getVersion(ctx context.Context, sh string) string {
 	return ""
 }
 
-// bumpVersion increments the scope version, invalidating all cached keys for that scope.
+// workspaceVersionHash derives the invalidation-version key dimension from a
+// scope. Versioning is WORKSPACE-level (not exact-scope) so any write/delete in
+// a workspace invalidates every cached read in it — otherwise a DSAR
+// DeleteAll{ws,user} would not invalidate a Retrieve cached under
+// {ws,user,agent} (different exact-scope hash), leaving deleted memories
+// readable until the TTL expired (SEC-8). The tradeoff is coarser invalidation
+// (more cache misses on workspace writes), which is the correct bias for a
+// right-to-be-forgotten guarantee.
+func workspaceVersionHash(scope map[string]string) string {
+	return scopeHash(map[string]string{ScopeWorkspaceID: scope[ScopeWorkspaceID]})
+}
+
+// bumpVersion increments the workspace version, invalidating all cached
+// read/list keys for every scope in that workspace.
 func (c *CachedStore) bumpVersion(ctx context.Context, scope map[string]string) {
-	sh := scopeHash(scope)
+	sh := workspaceVersionHash(scope)
 	if err := c.redis.Incr(ctx, versionKey(sh)).Err(); err != nil {
 		c.log.V(1).Info("cache version bump failed", "scopeHash", sh, "error", err)
 		recordRedisError("bump_version")
@@ -422,8 +435,8 @@ func (c *CachedStore) bumpVersion(ctx context.Context, scope map[string]string) 
 // retrieveKey builds a versioned cache key for a Retrieve call.
 // Returns "" if the version cannot be fetched (Redis down).
 func (c *CachedStore) retrieveKey(ctx context.Context, scope map[string]string, query string, opts RetrieveOptions) string {
-	sh := scopeHash(scope)
-	v := c.getVersion(ctx, sh)
+	sh := scopeHash(scope) // per-scope entry key
+	v := c.getVersion(ctx, workspaceVersionHash(scope))
 	if v == "" {
 		return ""
 	}
@@ -434,8 +447,8 @@ func (c *CachedStore) retrieveKey(ctx context.Context, scope map[string]string, 
 // listKey builds a versioned cache key for a List call.
 // Returns "" if the version cannot be fetched (Redis down).
 func (c *CachedStore) listKey(ctx context.Context, scope map[string]string, opts ListOptions) string {
-	sh := scopeHash(scope)
-	v := c.getVersion(ctx, sh)
+	sh := scopeHash(scope) // per-scope entry key
+	v := c.getVersion(ctx, workspaceVersionHash(scope))
 	if v == "" {
 		return ""
 	}

@@ -487,7 +487,7 @@ func updateEntity(ctx context.Context, tx pgx.Tx, mem *Memory) error {
 		return fmt.Errorf("memory: update entity: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
-		return fmt.Errorf("memory: entity %s not found in scope", mem.ID)
+		return fmt.Errorf("memory: entity %s not found in scope: %w", mem.ID, ErrNotFound)
 	}
 	return nil
 }
@@ -715,7 +715,7 @@ func (s *PostgresMemoryStore) Delete(ctx context.Context, scope map[string]strin
 		return fmt.Errorf("memory: delete: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
-		return fmt.Errorf("memory: entity %s not found", memoryID)
+		return fmt.Errorf("memory: entity %s not found: %w", memoryID, ErrNotFound)
 	}
 	return nil
 }
@@ -782,26 +782,50 @@ func buildBatchDeleteQuery(scope map[string]string, limit int) (string, *pgutil.
 	return sql, &qb
 }
 
-// exportAllLimit is the maximum number of memories returned by ExportAll (DSAR cap).
-const exportAllLimit = 10000
+// exportPageSize bounds each DSAR export page. ExportAll loops over pages
+// until a short page signals the end, so a data subject with more than one
+// page still receives a *complete* export (SEC-7) — a truncated GDPR Art. 15
+// export that looks complete is worse than a slow one.
+const exportPageSize = 10000
 
-// ExportAll returns all memories for a scope without pagination (DSAR export).
-// It uses a high limit cap to avoid unbounded result sets while still returning
-// all practical user data.
+// ExportAll returns every memory for a scope (DSAR export), paginating
+// internally until exhausted. formatMemorySQL orders by the unique entity id,
+// so offset paging is stable across pages.
 func (s *PostgresMemoryStore) ExportAll(ctx context.Context, scope map[string]string) ([]*Memory, error) {
+	return s.exportAllPaged(ctx, scope, exportPageSize)
+}
+
+// exportAllPaged is ExportAll with an explicit page size so tests can exercise
+// the multi-page loop without seeding exportPageSize rows.
+func (s *PostgresMemoryStore) exportAllPaged(ctx context.Context, scope map[string]string, pageSize int) ([]*Memory, error) {
 	if scope[ScopeWorkspaceID] == "" {
 		return nil, errors.New(errWorkspaceRequired)
 	}
 
-	qb := buildBaseMemoryQuery(scope, nil, "")
-	sql := formatMemorySQL(qb, exportAllLimit, 0)
+	var all []*Memory
+	for offset := 0; ; offset += pageSize {
+		page, err := s.exportPage(ctx, scope, pageSize, offset)
+		if err != nil {
+			return nil, err
+		}
+		all = append(all, page...)
+		if len(page) < pageSize {
+			break
+		}
+	}
+	return all, nil
+}
 
+// exportPage reads one page of the export. A fresh QueryBuilder per page is
+// required because AppendPagination mutates the builder's args.
+func (s *PostgresMemoryStore) exportPage(ctx context.Context, scope map[string]string, pageSize, offset int) ([]*Memory, error) {
+	qb := buildBaseMemoryQuery(scope, nil, "")
+	sql := formatMemorySQL(qb, pageSize, offset)
 	rows, err := s.pool.Query(ctx, sql, qb.Args()...)
 	if err != nil {
 		return nil, fmt.Errorf("memory: export all query: %w", err)
 	}
 	defer rows.Close()
-
 	return scanMemories(rows, scope)
 }
 
@@ -1197,8 +1221,8 @@ func assertEntitiesInScope(ctx context.Context, tx pgx.Tx, entityIDs []string, s
 		return fmt.Errorf("memory: scope assertion iter: %w", err)
 	}
 	if n != len(uniqueIDs) {
-		return fmt.Errorf("memory: %d of %d source entities not found in scope",
-			len(uniqueIDs)-n, len(uniqueIDs))
+		return fmt.Errorf("memory: %d of %d source entities not found in scope: %w",
+			len(uniqueIDs)-n, len(uniqueIDs), ErrNotFound)
 	}
 	return nil
 }
@@ -1603,7 +1627,7 @@ func (s *PostgresMemoryStore) UpdateObservationEmbedding(
 		return fmt.Errorf("memory: update observation embedding: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
-		return fmt.Errorf("memory: observation %s not found", observationID)
+		return fmt.Errorf("memory: observation %s not found: %w", observationID, ErrNotFound)
 	}
 	return nil
 }

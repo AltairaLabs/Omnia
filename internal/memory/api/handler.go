@@ -463,7 +463,9 @@ func (h *Handler) handleSearchMemories(w http.ResponseWriter, r *http.Request) {
 
 	memories, err := h.service.SearchMemories(r.Context(), scope, query, opts)
 	if err != nil {
-		h.log.Error(err, "SearchMemories failed", "workspace", scope[memory.ScopeWorkspaceID], "query", query)
+		// Recall queries routinely carry personal content ("what is my home
+		// address") — log length, never the verbatim query (SEC-11).
+		h.log.Error(err, "SearchMemories failed", "workspace", scope[memory.ScopeWorkspaceID], "queryLen", len(query))
 		writeError(w, err)
 		return
 	}
@@ -1013,6 +1015,9 @@ func writeError(w http.ResponseWriter, err error) {
 	case errors.Is(err, ErrAboutRequired):
 		status = http.StatusBadRequest
 		msg = ErrAboutRequired.Error()
+	case errors.Is(err, memory.ErrNotFound):
+		status = http.StatusNotFound
+		msg = "memory not found"
 	}
 
 	w.Header().Set(httputil.HeaderContentType, httputil.ContentTypeJSON)
