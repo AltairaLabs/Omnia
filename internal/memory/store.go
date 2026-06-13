@@ -1388,35 +1388,38 @@ WITH fts AS (
 ), fts_ranked AS (
     SELECT entity_id, row_number() OVER (ORDER BY fts_rank DESC) AS fts_rn
     FROM fts
+), cosine_ann AS (
+    -- Bare ORDER BY o.embedding <=> $5 LIMIT N over the base observations
+    -- table so the HNSW index drives the scan. There is deliberately NO
+    -- window function here: a row_number() OVER (PARTITION ...) in this
+    -- SELECT forces the planner to materialise and sort the whole filtered
+    -- set before the LIMIT, defeating the index (#1369). Over-fetch
+    -- (fanout × 4) so the per-entity dedup below still lands $6 distinct
+    -- entities even when one entity has many close-by observations.
+    SELECT o.entity_id, o.embedding <=> $5 AS cos_dist
+    FROM memory_observations o
+    JOIN memory_entities e ON e.id = o.entity_id
+        AND e.workspace_id = $1
+        AND ($2::text IS NULL OR e.virtual_user_id = $2)
+        AND ($3::uuid IS NULL OR e.agent_id = $3)
+        AND e.forgotten = false
+    WHERE o.superseded_by IS NULL
+      AND (o.valid_until IS NULL OR o.valid_until > now())
+      AND o.embedding IS NOT NULL
+      AND o.confidence >= $8
+    ORDER BY o.embedding <=> $5
+    LIMIT $6 * 4
 ), cosine AS (
-    -- The inner ORDER BY o.embedding <=> $5 LIMIT N is what unlocks
-    -- the HNSW index — putting DISTINCT ON / GROUP BY in front of
-    -- it forces the planner to seq-scan and sort. We over-fetch
-    -- (fanout × 4) to give the per-entity dedup enough candidates
-    -- to land $6 distinct entities even when one entity has many
-    -- close-by observations.
-    SELECT entity_id, cos_dist
-    FROM (
-        SELECT o.entity_id, o.embedding <=> $5 AS cos_dist,
-               row_number() OVER (PARTITION BY o.entity_id ORDER BY o.embedding <=> $5) AS rn
-        FROM memory_observations o
-        JOIN memory_entities e ON e.id = o.entity_id
-            AND e.workspace_id = $1
-            AND ($2::text IS NULL OR e.virtual_user_id = $2)
-            AND ($3::uuid IS NULL OR e.agent_id = $3)
-            AND e.forgotten = false
-        WHERE o.superseded_by IS NULL
-          AND (o.valid_until IS NULL OR o.valid_until > now())
-          AND o.embedding IS NOT NULL
-          AND o.confidence >= $8
-        ORDER BY o.embedding <=> $5
-        LIMIT $6 * 4
-    ) ann
-    WHERE rn = 1
-    LIMIT $6
+    -- Per-entity dedup over the bounded ANN candidate set, keeping each
+    -- entity's nearest observation.
+    SELECT DISTINCT ON (entity_id) entity_id, cos_dist
+    FROM cosine_ann
+    ORDER BY entity_id, cos_dist
 ), cosine_ranked AS (
     SELECT entity_id, row_number() OVER (ORDER BY cos_dist) AS cos_rn
     FROM cosine
+    ORDER BY cos_dist
+    LIMIT $6
 ), fused AS (
     -- Reciprocal Rank Fusion. The 60.0 constant is the k from
     -- Cormack 2009 reproduced by Weaviate, Vespa, OpenSearch,
