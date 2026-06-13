@@ -11,8 +11,6 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"os/signal"
-	"syscall"
 
 	"github.com/go-logr/logr"
 	"github.com/redis/go-redis/v9"
@@ -166,31 +164,11 @@ func runA2AFacade(cfg *agent.Config, log logr.Logger, tracingProvider *tracing.P
 	}
 
 	healthServer := newHealthServer(cfg, readyzOKHandler)
-
 	errChan := make(chan error, 2)
-	go func() {
-		log.Info("starting A2A server", "addr", facadeServer.Addr)
-		if err := facadeServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			errChan <- fmt.Errorf("a2a server error: %w", err)
-		}
-	}()
-	go func() {
-		log.Info("starting health server", "addr", healthServer.Addr)
-		if err := healthServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			errChan <- fmt.Errorf("health server error: %w", err)
-		}
-	}()
+	startServerGoroutine("A2A server", facadeServer, errChan, log)
+	startServerGoroutine("health server", healthServer, errChan, log)
 
-	// Wait for shutdown signal or error
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-
-	select {
-	case sig := <-sigChan:
-		log.Info("received shutdown signal", "signal", sig)
-	case err := <-errChan:
-		log.Error(err, "server error")
-	}
+	waitForShutdownSignal(log, errChan)
 
 	// Graceful shutdown
 	log.Info("shutting down...")
@@ -200,12 +178,10 @@ func runA2AFacade(cfg *agent.Config, log logr.Logger, tracingProvider *tracing.P
 	if err := a2aSrv.Shutdown(ctx); err != nil {
 		log.Error(err, "error shutting down A2A server")
 	}
-	if err := facadeServer.Shutdown(ctx); err != nil {
-		log.Error(err, "error shutting down HTTP server")
-	}
-	if err := healthServer.Shutdown(ctx); err != nil {
-		log.Error(err, "error shutting down health server")
-	}
+	shutdownServers(log, map[string]*http.Server{
+		"HTTP server":   facadeServer,
+		"health server": healthServer,
+	})
 
 	log.Info("shutdown complete")
 }
