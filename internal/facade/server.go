@@ -473,21 +473,23 @@ func mgmtPlaneUserID(r *http.Request, endUser string) string {
 	return endUser
 }
 
-func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	s.mu.RLock()
-	if s.shutdown {
-		s.mu.RUnlock()
-		http.Error(w, "server is shutting down", http.StatusServiceUnavailable)
-		return
-	}
-	if s.config.MaxConnections > 0 && len(s.connections) >= s.config.MaxConnections {
-		s.mu.RUnlock()
-		http.Error(w, "connection limit reached", http.StatusServiceUnavailable)
-		return
-	}
-	s.mu.RUnlock()
+type requestAgentContext struct {
+	agentName     string
+	namespace     string
+	workspaceName string
+	binaryCapable bool
+}
 
-	// Extract agent info from query params, falling back to pod env vars
+type requestUserContext struct {
+	userID        string
+	userRoles     string
+	userEmail     string
+	authorization string
+	cohortID      string
+	variant       string
+}
+
+func (s *Server) resolveAgentContext(r *http.Request) (requestAgentContext, error) {
 	agentName := r.URL.Query().Get("agent")
 	if agentName == "" {
 		agentName = os.Getenv("OMNIA_AGENT_NAME")
@@ -503,33 +505,19 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if workspaceName == "" {
 		workspaceName = s.config.WorkspaceName
 	}
-
-	// Check if client requests binary frame support
-	binaryCapable := r.URL.Query().Get("binary") == "true"
-
 	if agentName == "" {
-		http.Error(w, "agent parameter is required", http.StatusBadRequest)
-		return
+		return requestAgentContext{}, errors.New("agent parameter is required")
 	}
 
-	// Run the auth chain (PR 1: mgmt-plane validator only). On admit the
-	// returned identity takes precedence over Istio-injected headers for
-	// user fields; on unambiguous reject (invalid/expired) 401 here and
-	// skip the upgrade entirely.
-	authIdentity, authErr := s.authenticateRequest(r)
-	if authErr != nil {
-		s.log.V(1).Info("auth rejected upgrade",
-			"reason", authErr.Error(),
-			"status", http.StatusUnauthorized,
-		)
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
-		return
-	}
+	return requestAgentContext{
+		agentName:     agentName,
+		namespace:     namespace,
+		workspaceName: workspaceName,
+		binaryCapable: r.URL.Query().Get("binary") == "true",
+	}, nil
+}
 
-	// Extract user identity. When an auth validator admitted the request
-	// its Identity is the source of truth; otherwise fall back to the
-	// Istio-injected headers (preserved for deployments that currently
-	// rely on the chart's authentication.enabled=true gate).
+func (s *Server) resolveUserContext(r *http.Request, authIdentity *policy.AuthenticatedIdentity) requestUserContext {
 	var (
 		rawUserID string
 		userRoles string
@@ -566,9 +554,96 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		"hasAuthIdentity", authIdentity != nil,
 		"headerName", policy.IstioHeaderUserID,
 	)
-	authorization := r.Header.Get("Authorization")
-	cohortID := r.Header.Get(policy.HeaderCohortID)
-	variant := r.Header.Get(policy.HeaderVariant)
+
+	return requestUserContext{
+		userID:        userID,
+		userRoles:     userRoles,
+		userEmail:     userEmail,
+		authorization: r.Header.Get("Authorization"),
+		cohortID:      r.Header.Get(policy.HeaderCohortID),
+		variant:       r.Header.Get(policy.HeaderVariant),
+	}
+}
+
+func (s *Server) buildConnectionContext(
+	r *http.Request,
+	agentCtx requestAgentContext,
+	userCtx requestUserContext,
+	authIdentity *policy.AuthenticatedIdentity,
+) context.Context {
+	connCtx := logctx.WithAgent(context.Background(), agentCtx.agentName)
+	connCtx = logctx.WithNamespace(connCtx, agentCtx.namespace)
+	connCtx = logctx.WithRequestID(connCtx, uuid.New().String())
+
+	// Extract W3C trace context (traceparent/tracestate) from upgrade headers.
+	// If no traceparent header is present, the context is unchanged (no-op).
+	connCtx = otel.GetTextMapPropagator().Extract(connCtx, propagation.HeaderCarrier(r.Header))
+
+	// Store policy propagation fields for gRPC metadata forwarding.
+	// When an auth validator admitted the request we attach the Identity
+	// too — downstream in-process code can inspect it, but it does not
+	// travel over gRPC (the flat UserID/UserRoles/UserEmail/Claims carry
+	// what runtime needs, via ToOutboundHeaders).
+	//
+	// Also propagate the validator's claim map so downstream HTTP tool
+	// calls see X-Omnia-Claim-<name> headers — ToolPolicy's requiredClaims
+	// contract relies on this regardless of which validator admitted.
+	var validatorClaims map[string]string
+	if authIdentity != nil && len(authIdentity.Claims) > 0 {
+		validatorClaims = authIdentity.Claims
+	}
+	return policy.WithPropagationFields(connCtx, &policy.PropagationFields{
+		AgentName:     agentCtx.agentName,
+		Namespace:     agentCtx.namespace,
+		RequestID:     logctx.RequestID(connCtx),
+		UserID:        userCtx.userID,
+		UserRoles:     userCtx.userRoles,
+		UserEmail:     userCtx.userEmail,
+		Authorization: userCtx.authorization,
+		Claims:        validatorClaims,
+		Identity:      authIdentity,
+	})
+}
+
+func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	s.mu.RLock()
+	if s.shutdown {
+		s.mu.RUnlock()
+		http.Error(w, "server is shutting down", http.StatusServiceUnavailable)
+		return
+	}
+	if s.config.MaxConnections > 0 && len(s.connections) >= s.config.MaxConnections {
+		s.mu.RUnlock()
+		http.Error(w, "connection limit reached", http.StatusServiceUnavailable)
+		return
+	}
+	s.mu.RUnlock()
+
+	agentCtx, err := s.resolveAgentContext(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// Run the auth chain (PR 1: mgmt-plane validator only). On admit the
+	// returned identity takes precedence over Istio-injected headers for
+	// user fields; on unambiguous reject (invalid/expired) 401 here and
+	// skip the upgrade entirely.
+	authIdentity, authErr := s.authenticateRequest(r)
+	if authErr != nil {
+		s.log.V(1).Info("auth rejected upgrade",
+			"reason", authErr.Error(),
+			"status", http.StatusUnauthorized,
+		)
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	// Extract user identity. When an auth validator admitted the request
+	// its Identity is the source of truth; otherwise fall back to the
+	// Istio-injected headers (preserved for deployments that currently
+	// rely on the chart's authentication.enabled=true gate).
+	userCtx := s.resolveUserContext(r, authIdentity)
 
 	conn, err := s.upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -579,16 +654,16 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Create connection wrapper
 	c := &Connection{
 		conn:          conn,
-		agentName:     agentName,
-		namespace:     namespace,
-		workspaceName: workspaceName,
-		binaryCapable: binaryCapable,
-		userID:        userID,
-		userRoles:     userRoles,
-		userEmail:     userEmail,
-		authorization: authorization,
-		cohortID:      cohortID,
-		variant:       variant,
+		agentName:     agentCtx.agentName,
+		namespace:     agentCtx.namespace,
+		workspaceName: agentCtx.workspaceName,
+		binaryCapable: agentCtx.binaryCapable,
+		userID:        userCtx.userID,
+		userRoles:     userCtx.userRoles,
+		userEmail:     userCtx.userEmail,
+		authorization: userCtx.authorization,
+		cohortID:      userCtx.cohortID,
+		variant:       userCtx.variant,
 	}
 	if s.config.MaxInFlightMessagesPerConnection > 0 {
 		c.inFlightMessages = make(chan struct{}, s.config.MaxInFlightMessagesPerConnection)
@@ -610,38 +685,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.metrics.ConnectionOpened()
 
 	// Create enriched context with connection info
-	connCtx := logctx.WithAgent(context.Background(), agentName)
-	connCtx = logctx.WithNamespace(connCtx, namespace)
-	connCtx = logctx.WithRequestID(connCtx, uuid.New().String())
-
-	// Extract W3C trace context (traceparent/tracestate) from upgrade headers.
-	// If no traceparent header is present, the context is unchanged (no-op).
-	connCtx = otel.GetTextMapPropagator().Extract(connCtx, propagation.HeaderCarrier(r.Header))
-
-	// Store policy propagation fields for gRPC metadata forwarding.
-	// When an auth validator admitted the request we attach the Identity
-	// too — downstream in-process code can inspect it, but it does not
-	// travel over gRPC (the flat UserID/UserRoles/UserEmail/Claims carry
-	// what runtime needs, via ToOutboundHeaders).
-	//
-	// Also propagate the validator's claim map so downstream HTTP tool
-	// calls see X-Omnia-Claim-<name> headers — ToolPolicy's requiredClaims
-	// contract relies on this regardless of which validator admitted.
-	var validatorClaims map[string]string
-	if authIdentity != nil && len(authIdentity.Claims) > 0 {
-		validatorClaims = authIdentity.Claims
-	}
-	connCtx = policy.WithPropagationFields(connCtx, &policy.PropagationFields{
-		AgentName:     agentName,
-		Namespace:     namespace,
-		RequestID:     logctx.RequestID(connCtx),
-		UserID:        userID,
-		UserRoles:     userRoles,
-		UserEmail:     userEmail,
-		Authorization: authorization,
-		Claims:        validatorClaims,
-		Identity:      authIdentity,
-	})
+	connCtx := s.buildConnectionContext(r, agentCtx, userCtx, authIdentity)
 
 	log := logctx.LoggerWithContext(s.log, connCtx)
 	log.Info("new connection")
