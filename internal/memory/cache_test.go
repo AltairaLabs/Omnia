@@ -760,8 +760,9 @@ func TestCachedStore_SaveAgentScoped_DelegatesAndBumps(t *testing.T) {
 		t.Fatalf("inner SaveAgentScoped calls = %d, want 1", inner.saveAgentScopedCalls)
 	}
 
-	// Save must bump the cache version for the (workspace, agent) scope.
-	sh := scopeHash(map[string]string{ScopeWorkspaceID: "ws-1", ScopeAgentID: "agent-1"})
+	// Save must bump the workspace-level cache version (SEC-8: any workspace
+	// write invalidates every scope's cached reads).
+	sh := scopeHash(map[string]string{ScopeWorkspaceID: "ws-1"})
 	v, err := mr.Get(versionKey(sh))
 	if err != nil {
 		t.Fatalf("version key missing after save: %v", err)
@@ -806,13 +807,51 @@ func TestCachedStore_DeleteAgentScoped_DelegatesAndBumps(t *testing.T) {
 		t.Errorf("inner DeleteAgentScoped calls = %d, want 1", inner.deleteAgentScopedCalls)
 	}
 
-	sh := scopeHash(map[string]string{ScopeWorkspaceID: "ws-1", ScopeAgentID: "agent-1"})
+	sh := scopeHash(map[string]string{ScopeWorkspaceID: "ws-1"})
 	v, err := mr.Get(versionKey(sh))
 	if err != nil {
 		t.Fatalf("version key missing after delete: %v", err)
 	}
 	if v != "1" {
 		t.Errorf("version=%q, want %q", v, "1")
+	}
+}
+
+// SEC-8: a delete under one scope must invalidate cached reads for OTHER scopes
+// in the same workspace, so deleted memories aren't served from cache until TTL.
+func TestCachedStore_WorkspaceDelete_InvalidatesOtherScopeReads(t *testing.T) {
+	inner := &cacheTestStore{memories: []*Memory{{ID: "m1", Content: "secret"}}}
+	cs, _ := newTestCache(t, inner)
+	ctx := context.Background()
+	readScope := map[string]string{ScopeWorkspaceID: "ws-1", ScopeUserID: "u1", ScopeAgentID: "a1"}
+
+	if _, err := cs.Retrieve(ctx, readScope, "q", RetrieveOptions{Limit: 5}); err != nil {
+		t.Fatalf("first retrieve: %v", err)
+	}
+	if _, err := cs.Retrieve(ctx, readScope, "q", RetrieveOptions{Limit: 5}); err != nil {
+		t.Fatalf("second retrieve: %v", err)
+	}
+	if inner.retrieveCalls != 1 {
+		t.Fatalf("expected cache hit on second read, inner calls = %d", inner.retrieveCalls)
+	}
+
+	// DSAR delete under a narrower scope in the same workspace; rows now gone.
+	inner.mu.Lock()
+	inner.memories = nil
+	inner.mu.Unlock()
+	if err := cs.DeleteAll(ctx, map[string]string{ScopeWorkspaceID: "ws-1", ScopeUserID: "u1"}); err != nil {
+		t.Fatalf("DeleteAll: %v", err)
+	}
+
+	got, err := cs.Retrieve(ctx, readScope, "q", RetrieveOptions{Limit: 5})
+	if err != nil {
+		t.Fatalf("post-delete retrieve: %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("deleted memories served from cache (SEC-8): got %d rows", len(got))
+	}
+	if inner.retrieveCalls != 2 {
+		t.Errorf("post-delete read must miss cache and hit store, inner calls = %d", inner.retrieveCalls)
 	}
 }
 
