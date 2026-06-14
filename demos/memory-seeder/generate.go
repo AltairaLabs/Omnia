@@ -110,7 +110,7 @@ func genHotObservations(s Scenario) []HotObservation {
 		key := fmt.Sprintf("hot-entity-%02d", e)
 		for o := 0; o < s.ObsPerHotEntity; o++ {
 			out = append(out, HotObservation{
-				AboutKind: "support_topic",
+				AboutKind: aboutKindSupportTopic,
 				AboutKey:  key,
 				Content:   fmt.Sprintf("Observation %d about %s: customer reported recurring issue.", o, key),
 			})

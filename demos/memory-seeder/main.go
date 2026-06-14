@@ -22,7 +22,7 @@ func run(ctx context.Context, c *Client, g Generated) error {
 		}
 	}
 	var instIDs []string
-	for i := 0; i < 20; i++ {
+	for i := range 20 {
 		id, err := c.SaveInstitutional(ctx, "policy",
 			fmt.Sprintf("Hawkridge policy fact %d", i), 0.9)
 		if err != nil {

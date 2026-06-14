@@ -36,7 +36,7 @@ func TestRunPostsAllTiers(t *testing.T) {
 			}
 		}
 		w.WriteHeader(http.StatusCreated)
-		_ = json.NewEncoder(w).Encode(map[string]any{"memory": map[string]any{"id": "ent"}})
+		_ = json.NewEncoder(w).Encode(map[string]any{fieldMemory: map[string]any{"id": "ent"}})
 	}))
 	defer srv.Close()
 

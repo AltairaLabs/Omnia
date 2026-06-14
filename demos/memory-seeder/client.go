@@ -11,6 +11,16 @@ import (
 	"github.com/altairalabs/omnia/pkg/identity"
 )
 
+// JSON field-name and value constants shared across request bodies. These are
+// wire-contract strings, extracted so repeated literals stay in one place.
+const (
+	fieldWorkspaceID      = "workspace_id"
+	fieldConfidence       = "confidence"
+	fieldType             = "type"
+	fieldContent          = "content"
+	aboutKindSupportTopic = "support_topic"
+)
+
 // Client posts seed data to a memory-api instance for one workspace.
 type Client struct {
 	base         string
@@ -60,8 +70,8 @@ func (c *Client) postJSON(
 // Ingest posts a document for chunk-strategy institutional ingestion (202).
 func (c *Client) Ingest(ctx context.Context, d Doc) error {
 	body := map[string]any{
-		"workspace_id": c.workspaceUID,
-		"title":        d.Title, "url": d.URL, "site": d.Site, "text": d.Text,
+		fieldWorkspaceID: c.workspaceUID,
+		"title":          d.Title, "url": d.URL, "site": d.Site, "text": d.Text,
 	}
 	_, err := c.postJSON(ctx, "/api/v1/institutional/ingest", nil, body, http.StatusAccepted)
 	return err
@@ -70,7 +80,7 @@ func (c *Client) Ingest(ctx context.Context, d Doc) error {
 // SaveInstitutional saves a single institutional fact directly (201).
 func (c *Client) SaveInstitutional(ctx context.Context, typ, content string, confidence float64) (string, error) {
 	body := map[string]any{
-		"workspace_id": c.workspaceUID, "type": typ, "content": content, "confidence": confidence,
+		fieldWorkspaceID: c.workspaceUID, fieldType: typ, fieldContent: content, fieldConfidence: confidence,
 	}
 	return c.saveID(ctx, "/api/v1/institutional/memories", nil, body)
 }
@@ -78,8 +88,8 @@ func (c *Client) SaveInstitutional(ctx context.Context, typ, content string, con
 // SaveAgentMemory saves an agent-tier memory (201).
 func (c *Client) SaveAgentMemory(ctx context.Context, m AgentMemory) (string, error) {
 	body := map[string]any{
-		"workspace_id": c.workspaceUID, "agent_id": m.AgentID,
-		"type": m.Type, "content": m.Content, "confidence": m.Confidence,
+		fieldWorkspaceID: c.workspaceUID, "agent_id": m.AgentID,
+		fieldType: m.Type, fieldContent: m.Content, fieldConfidence: m.Confidence,
 	}
 	return c.saveID(ctx, "/api/v1/agent-memories", nil, body)
 }
@@ -89,9 +99,9 @@ func (c *Client) SaveUserMemory(ctx context.Context, m UserMemory) (string, erro
 	hashed := identity.PseudonymizeID(m.RawUserID)
 	q := url.Values{"workspace": {c.workspaceUID}, "user_id": {hashed}}
 	body := map[string]any{
-		"type": m.Type, "content": m.Content, "confidence": m.Confidence,
+		fieldType: m.Type, fieldContent: m.Content, fieldConfidence: m.Confidence,
 		"category": m.Category,
-		"scope":    map[string]string{"workspace_id": c.workspaceUID, "user_id": hashed},
+		"scope":    map[string]string{fieldWorkspaceID: c.workspaceUID, "user_id": hashed},
 		"metadata": map[string]any{"provenance": "user_requested"},
 	}
 	return c.saveID(ctx, "/api/v1/memories", q, body)
@@ -101,9 +111,9 @@ func (c *Client) SaveUserMemory(ctx context.Context, m UserMemory) (string, erro
 func (c *Client) SaveObservation(ctx context.Context, o HotObservation) (string, error) {
 	q := url.Values{"workspace": {c.workspaceUID}}
 	body := map[string]any{
-		"type": "support_topic", "content": o.Content, "confidence": 0.5,
+		fieldType: aboutKindSupportTopic, fieldContent: o.Content, fieldConfidence: 0.5,
 		"about":    map[string]string{"kind": o.AboutKind, "key": o.AboutKey},
-		"scope":    map[string]string{"workspace_id": c.workspaceUID},
+		"scope":    map[string]string{fieldWorkspaceID: c.workspaceUID},
 		"metadata": map[string]any{"provenance": "system_generated"},
 	}
 	return c.saveID(ctx, "/api/v1/memories", q, body)
@@ -113,7 +123,7 @@ func (c *Client) SaveObservation(ctx context.Context, o HotObservation) (string,
 func (c *Client) Link(ctx context.Context, srcID, tgtID, relType string, weight float64) error {
 	body := map[string]any{
 		"source_id": srcID, "target_id": tgtID, "relation_type": relType,
-		"weight": weight, "scope": map[string]string{"workspace_id": c.workspaceUID},
+		"weight": weight, "scope": map[string]string{fieldWorkspaceID: c.workspaceUID},
 	}
 	_, err := c.postJSON(ctx, "/api/v1/relations", nil, body, http.StatusCreated)
 	return err

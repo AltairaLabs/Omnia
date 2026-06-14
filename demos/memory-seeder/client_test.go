@@ -11,6 +11,12 @@ import (
 	"github.com/altairalabs/omnia/pkg/identity"
 )
 
+// Test-scoped constants for repeated literals (keeps goconst quiet).
+const (
+	fieldMemory = "memory"
+	testWSUID   = "ws-uid"
+)
+
 func decode(t *testing.T, r *http.Request) map[string]any {
 	t.Helper()
 	body, _ := io.ReadAll(r.Body)
@@ -30,11 +36,11 @@ func TestSaveUserMemoryHashesUserAndScopes(t *testing.T) {
 		gotUserParam = r.URL.Query().Get("user_id")
 		gotBody = decode(t, r)
 		w.WriteHeader(http.StatusCreated)
-		_ = json.NewEncoder(w).Encode(map[string]any{"memory": map[string]any{"id": "ent-1"}})
+		_ = json.NewEncoder(w).Encode(map[string]any{fieldMemory: map[string]any{"id": "ent-1"}})
 	}))
 	defer srv.Close()
 
-	c := NewClient(srv.URL, "ws-uid")
+	c := NewClient(srv.URL, testWSUID)
 	id, err := c.SaveUserMemory(context.Background(), UserMemory{
 		RawUserID: "customer-001", Category: "memory:identity",
 		Type: "profile", Content: "hello", Confidence: 0.9,
@@ -48,7 +54,7 @@ func TestSaveUserMemoryHashesUserAndScopes(t *testing.T) {
 	if gotPath != "/api/v1/memories" {
 		t.Errorf("path = %q", gotPath)
 	}
-	if gotWorkspace != "ws-uid" {
+	if gotWorkspace != testWSUID {
 		t.Errorf("workspace param = %q", gotWorkspace)
 	}
 	wantHash := identity.PseudonymizeID("customer-001")
@@ -56,7 +62,7 @@ func TestSaveUserMemoryHashesUserAndScopes(t *testing.T) {
 		t.Errorf("user_id param = %q, want hashed %q", gotUserParam, wantHash)
 	}
 	scope, _ := gotBody["scope"].(map[string]any)
-	if scope["workspace_id"] != "ws-uid" || scope["user_id"] != wantHash {
+	if scope[fieldWorkspaceID] != testWSUID || scope["user_id"] != wantHash {
 		t.Errorf("body scope = %v", scope)
 	}
 	if gotBody["category"] != "memory:identity" {
@@ -79,7 +85,7 @@ func TestIngestPostsDocAndAccepts202(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := NewClient(srv.URL, "ws-uid")
+	c := NewClient(srv.URL, testWSUID)
 	err := c.Ingest(context.Background(), Doc{Title: "t", URL: "kb://1", Site: "s", Text: "body"})
 	if err != nil {
 		t.Fatalf("Ingest: %v", err)
@@ -94,19 +100,19 @@ func TestSaveObservationRepeatsAboutKey(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotBody = decode(t, r)
 		w.WriteHeader(http.StatusCreated)
-		_ = json.NewEncoder(w).Encode(map[string]any{"memory": map[string]any{"id": "ent-2"}})
+		_ = json.NewEncoder(w).Encode(map[string]any{fieldMemory: map[string]any{"id": "ent-2"}})
 	}))
 	defer srv.Close()
 
-	c := NewClient(srv.URL, "ws-uid")
+	c := NewClient(srv.URL, testWSUID)
 	_, err := c.SaveObservation(context.Background(), HotObservation{
-		AboutKind: "support_topic", AboutKey: "hot-entity-00", Content: "obs",
+		AboutKind: aboutKindSupportTopic, AboutKey: "hot-entity-00", Content: "obs",
 	})
 	if err != nil {
 		t.Fatalf("SaveObservation: %v", err)
 	}
 	about, _ := gotBody["about"].(map[string]any)
-	if about["kind"] != "support_topic" || about["key"] != "hot-entity-00" {
+	if about["kind"] != aboutKindSupportTopic || about["key"] != "hot-entity-00" {
 		t.Errorf("about = %v", about)
 	}
 	meta, _ := gotBody["metadata"].(map[string]any)
@@ -122,11 +128,11 @@ func TestSaveInstitutionalPostsFact(t *testing.T) {
 		gotPath = r.URL.Path
 		gotBody = decode(t, r)
 		w.WriteHeader(http.StatusCreated)
-		_ = json.NewEncoder(w).Encode(map[string]any{"memory": map[string]any{"id": "inst-1"}})
+		_ = json.NewEncoder(w).Encode(map[string]any{fieldMemory: map[string]any{"id": "inst-1"}})
 	}))
 	defer srv.Close()
 
-	c := NewClient(srv.URL, "ws-uid")
+	c := NewClient(srv.URL, testWSUID)
 	id, err := c.SaveInstitutional(context.Background(), "policy", "always escalate", 0.8)
 	if err != nil {
 		t.Fatalf("SaveInstitutional: %v", err)
@@ -137,8 +143,8 @@ func TestSaveInstitutionalPostsFact(t *testing.T) {
 	if gotPath != "/api/v1/institutional/memories" {
 		t.Errorf("path = %q", gotPath)
 	}
-	if gotBody["workspace_id"] != "ws-uid" {
-		t.Errorf("workspace_id = %v", gotBody["workspace_id"])
+	if gotBody[fieldWorkspaceID] != testWSUID {
+		t.Errorf("workspace_id = %v", gotBody[fieldWorkspaceID])
 	}
 	if gotBody["type"] != "policy" {
 		t.Errorf("type = %v", gotBody["type"])
@@ -155,11 +161,11 @@ func TestSaveAgentMemoryPostsFact(t *testing.T) {
 		gotPath = r.URL.Path
 		gotBody = decode(t, r)
 		w.WriteHeader(http.StatusCreated)
-		_ = json.NewEncoder(w).Encode(map[string]any{"memory": map[string]any{"id": "agent-1"}})
+		_ = json.NewEncoder(w).Encode(map[string]any{fieldMemory: map[string]any{"id": "agent-1"}})
 	}))
 	defer srv.Close()
 
-	c := NewClient(srv.URL, "ws-uid")
+	c := NewClient(srv.URL, testWSUID)
 	id, err := c.SaveAgentMemory(context.Background(), AgentMemory{
 		AgentID: "support-agent", Type: "resolution_pattern", Content: "step 3", Confidence: 0.7,
 	})
@@ -172,7 +178,7 @@ func TestSaveAgentMemoryPostsFact(t *testing.T) {
 	if gotPath != "/api/v1/agent-memories" {
 		t.Errorf("path = %q", gotPath)
 	}
-	if gotBody["workspace_id"] != "ws-uid" || gotBody["agent_id"] != "support-agent" {
+	if gotBody[fieldWorkspaceID] != testWSUID || gotBody["agent_id"] != "support-agent" {
 		t.Errorf("body = %v", gotBody)
 	}
 }
@@ -187,7 +193,7 @@ func TestLinkPostsRelation(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := NewClient(srv.URL, "ws-uid")
+	c := NewClient(srv.URL, testWSUID)
 	err := c.Link(context.Background(), "src-1", "tgt-1", "relates_to", 0.4)
 	if err != nil {
 		t.Fatalf("Link: %v", err)
@@ -205,7 +211,7 @@ func TestLinkPostsRelation(t *testing.T) {
 		t.Errorf("weight = %v", gotBody["weight"])
 	}
 	scope, _ := gotBody["scope"].(map[string]any)
-	if scope["workspace_id"] != "ws-uid" {
+	if scope[fieldWorkspaceID] != testWSUID {
 		t.Errorf("scope = %v", scope)
 	}
 }
@@ -217,7 +223,7 @@ func TestPostJSONErrorOnNon2xx(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := NewClient(srv.URL, "ws-uid")
+	c := NewClient(srv.URL, testWSUID)
 	_, err := c.SaveInstitutional(context.Background(), "policy", "x", 0.5)
 	if err == nil {
 		t.Fatal("expected error on 500, got nil")
