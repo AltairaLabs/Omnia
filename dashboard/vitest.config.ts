@@ -58,6 +58,7 @@ export default defineConfig({
         "src/components/arena/run-dropdown.tsx", // Run dropdown visual component
         "src/components/arena/quick-run-dialog.tsx", // Quick run dialog visual component
         "src/lib/lsp/**", // Monaco LSP client infrastructure (browser-specific)
+        "src/lib/monaco-config.ts", // Monaco loader/worker bootstrap (browser-only: Worker + import.meta.url, not unit-testable)
         "src/lib/stubs/**", // Node.js polyfills for browser builds
         "src/components/arena/validation-results-dialog.tsx", // Validation results dialog
         "src/components/console/**",
