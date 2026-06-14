@@ -19,6 +19,7 @@ import (
 )
 
 const testReloadMetadataKey = "reload"
+const testReloadMetadataValue = "true"
 
 func TestResolveReloadPath_AllowsRelativeUnderBase(t *testing.T) {
 	basePath := defaultReloadBasePath
@@ -51,7 +52,7 @@ func TestHandleReload_PathModeReturnsReloadError(t *testing.T) {
 	msg := &facade.ClientMessage{
 		Content: "configs/missing.yaml",
 		Metadata: map[string]string{
-			testReloadMetadataKey: "true",
+			testReloadMetadataKey: testReloadMetadataValue,
 		},
 	}
 
