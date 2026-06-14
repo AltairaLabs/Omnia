@@ -142,6 +142,13 @@ if [ -n "$CHANGED_GO_FILES" ] && [ -f coverage.out ]; then
 			# Convert Sonar glob to a sh case pattern. ** → *, * stays.
 			local glob=${pat//\*\*/\*}
 			case "$file" in $glob) return 0 ;; esac
+			# Sonar's leading "**/" matches zero or more leading segments,
+			# but the converted "*/..." requires at least one segment, so it
+			# misses root-level files (e.g. "**/test/**" vs "test/utils/x.go").
+			# Retry once with the leading "*/" stripped to cover the zero case.
+			case "$glob" in
+			\*/*) case "$file" in ${glob#\*/}) return 0 ;; esac ;;
+			esac
 		done
 		return 1
 	}
