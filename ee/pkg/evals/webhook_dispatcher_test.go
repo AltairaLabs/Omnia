@@ -385,6 +385,32 @@ func TestCheckAndFire_MalformedWebhookURL(t *testing.T) {
 	}
 }
 
+func TestValidateWebhookURL(t *testing.T) {
+	tests := []struct {
+		name    string
+		rawURL  string
+		wantErr bool
+	}{
+		{name: "valid https URL", rawURL: "https://example.com/webhook", wantErr: false},
+		{name: "relative URL rejected", rawURL: "/webhook", wantErr: true},
+		{name: "unsupported scheme rejected", rawURL: "file:///tmp/webhook.json", wantErr: true},
+		{name: "missing hostname rejected", rawURL: "https://", wantErr: true},
+		{name: "parse error rejected", rawURL: "://bad url", wantErr: true},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validateWebhookURL(tc.rawURL)
+			if tc.wantErr && err == nil {
+				t.Fatalf("expected error for %q", tc.rawURL)
+			}
+			if !tc.wantErr && err != nil {
+				t.Fatalf("unexpected error for %q: %v", tc.rawURL, err)
+			}
+		})
+	}
+}
+
 func TestCheckAndFire_EmptyResults(t *testing.T) {
 	var received atomic.Int32
 
