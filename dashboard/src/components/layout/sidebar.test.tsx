@@ -40,6 +40,12 @@ describe("Sidebar", () => {
     expect(screen.getByText("Overview")).toBeInTheDocument();
   });
 
+  it("no longer lists Console (moved to the header)", () => {
+    render(<Sidebar />);
+    expect(screen.queryByText("Console")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Console")).not.toBeInTheDocument();
+  });
+
   it("hides the wordmark and labels when collapsed", () => {
     useSidebarStore.setState({ collapsed: true });
     render(<Sidebar />);

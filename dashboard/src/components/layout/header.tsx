@@ -1,7 +1,9 @@
 "use client";
 
+import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { Button } from "@/components/ui/button";
-import { RefreshCw, Moon, Sun } from "lucide-react";
+import { RefreshCw, Moon, Sun, Terminal } from "lucide-react";
 import { useTheme } from "next-themes";
 import { useQueryClient, useIsFetching } from "@tanstack/react-query";
 import { UserMenu } from "./user-menu";
@@ -18,6 +20,8 @@ export function Header({ title, description, children }: Readonly<HeaderProps>) 
   const { theme, setTheme } = useTheme();
   const queryClient = useQueryClient();
   const isFetching = useIsFetching() > 0;
+  const pathname = usePathname();
+  const consoleActive = pathname === "/console" || pathname.startsWith("/console/");
 
   return (
     <header className="flex h-16 items-center justify-between border-b border-border bg-card px-6">
@@ -29,6 +33,19 @@ export function Header({ title, description, children }: Readonly<HeaderProps>) 
       </div>
       <div className="flex items-center gap-3">
         <WorkspaceSwitcher />
+        <Button
+          asChild
+          variant="ghost"
+          size="icon"
+          aria-label="Open Console"
+          data-testid="console-link"
+          data-active={consoleActive}
+          className={cn(consoleActive && "bg-accent text-accent-foreground")}
+        >
+          <Link href="/console">
+            <Terminal className="h-4 w-4" />
+          </Link>
+        </Button>
         {children}
         <Button
           variant="ghost"
