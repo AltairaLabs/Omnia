@@ -3,9 +3,9 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const { mockUseAuth, mockUseMemoryProjection, mockDeleteMutate, mockGetItem, mockSetItem } =
+const { mockUseWorkspace, mockUseMemoryProjection, mockDeleteMutate, mockGetItem, mockSetItem } =
   vi.hoisted(() => ({
-    mockUseAuth: vi.fn(),
+    mockUseWorkspace: vi.fn(),
     mockUseMemoryProjection: vi.fn(),
     mockDeleteMutate: vi.fn(),
     mockGetItem: vi.fn((_key: string) => null as string | null),
@@ -28,17 +28,8 @@ vi.mock("@/components/layout", () => ({
   ),
 }));
 
-vi.mock("@/hooks/use-auth", () => ({
-  useAuth: mockUseAuth,
-}));
 vi.mock("@/contexts/workspace-context", () => ({
-  useWorkspace: () => ({
-    workspaces: [],
-    currentWorkspace: { name: "test-ws" },
-    setCurrentWorkspace: vi.fn(),
-    isLoading: false,
-    error: null,
-  }),
+  useWorkspace: () => mockUseWorkspace(),
 }));
 vi.mock("@/hooks/use-memory-projection", () => ({
   useMemoryProjection: mockUseMemoryProjection,
@@ -174,12 +165,7 @@ function makePoint(
 describe("MemoriesPage (galaxy)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockUseAuth.mockReturnValue({
-      user: { id: "test-user" },
-      isAuthenticated: true,
-      hasMemoryIdentity: true,
-      memoryUserId: "test-user",
-    });
+    mockUseWorkspace.mockReturnValue({ currentWorkspace: { name: "test-ws" } });
     mockUseMemoryProjection.mockReturnValue({
       data: { points: [], total: 0, capped: false, model: "tsne", embeddingModel: "text-embedding-3-small", embeddingDim: 1536, computedAt: new Date().toISOString() },
       isLoading: false,
@@ -259,19 +245,14 @@ describe("MemoriesPage (galaxy)", () => {
     expect(mockDeleteMutate).toHaveBeenCalledWith("p1");
   });
 
-  describe("anonymous user without identity", () => {
+  describe("without a workspace", () => {
     beforeEach(() => {
-      mockUseAuth.mockReturnValue({
-        user: null,
-        isAuthenticated: false,
-        hasMemoryIdentity: false,
-        memoryUserId: undefined,
-      });
+      mockUseWorkspace.mockReturnValue({ currentWorkspace: null });
     });
 
-    it("shows the anonymous notice instead of the empty state", () => {
+    it("shows the no-workspace notice instead of the empty state", () => {
       render(<MemoriesPage />);
-      expect(screen.getByTestId("memory-anonymous-notice")).toBeTruthy();
+      expect(screen.getByTestId("no-workspace-notice")).toBeTruthy();
       expect(screen.queryByTestId("empty-state")).toBeNull();
     });
 
@@ -280,11 +261,26 @@ describe("MemoriesPage (galaxy)", () => {
       expect(screen.queryByTestId("memories-toolbar")).toBeNull();
       expect(screen.queryByTestId("tier-rail")).toBeNull();
     });
+  });
 
-    it("mentions signing in", () => {
-      render(<MemoriesPage />);
-      expect(screen.getByText(/sign in/i)).toBeTruthy();
+  it("renders the galaxy for an anonymous session that has a workspace", () => {
+    // No auth identity is involved at all — only a workspace is required.
+    mockUseMemoryProjection.mockReturnValue({
+      data: {
+        points: [makePoint("p1", "anon-visible")],
+        total: 1,
+        capped: false,
+        model: "tsne",
+        embeddingModel: "text-embedding-3-small",
+        embeddingDim: 1536,
+        computedAt: new Date().toISOString(),
+      },
+      isLoading: false,
+      error: null,
     });
+    render(<MemoriesPage />);
+    expect(screen.getByTestId("memory-galaxy")).toBeTruthy();
+    expect(screen.queryByTestId("no-workspace-notice")).toBeNull();
   });
 
   it("shows semantic clustering hint by default", () => {

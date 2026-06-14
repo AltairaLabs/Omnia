@@ -16,8 +16,7 @@ import {
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Brain, Search, AlertCircle, LogIn, Library } from "lucide-react";
-import { useAuth } from "@/hooks/use-auth";
+import { Brain, Search, AlertCircle, Library } from "lucide-react";
 import { useMemoryProjection } from "@/hooks/use-memory-projection";
 import { usePersistedViewMode } from "@/hooks/use-persisted-view-mode";
 import { MemoryDetailPanel } from "@/components/memories/memory-detail-panel";
@@ -61,7 +60,7 @@ function pointToMemory(p: GalaxyPoint): MemoryEntity {
 }
 
 interface GalaxyBodyState {
-  hasMemoryIdentity: boolean;
+  hasWorkspace: boolean;
   error: unknown;
   isLoading: boolean;
   points: GalaxyPoint[];
@@ -72,13 +71,13 @@ interface GalaxyBodyState {
 }
 
 function renderGalaxyBody(s: GalaxyBodyState): ReactNode {
-  if (!s.hasMemoryIdentity) {
+  if (!s.hasWorkspace) {
     return (
-      <Alert data-testid="memory-anonymous-notice">
-        <LogIn className="h-4 w-4" />
-        <AlertTitle>Sign-in required</AlertTitle>
+      <Alert data-testid="no-workspace-notice">
+        <AlertCircle className="h-4 w-4" />
+        <AlertTitle>No workspace selected</AlertTitle>
         <AlertDescription>
-          The memory galaxy needs an authenticated session. Sign in to view it.
+          Select a workspace to view its memory galaxy.
         </AlertDescription>
       </Alert>
     );
@@ -121,9 +120,12 @@ function renderGalaxyBody(s: GalaxyBodyState): ReactNode {
 }
 
 export default function MemoriesPage() {
-  const { hasMemoryIdentity } = useAuth();
+  // Workspace-scoped, operator/demo view. The Next.js → memory-api proxy
+  // authenticates service-to-service, so the browser user does NOT need a
+  // personal memory identity — anonymous sessions with a workspace can view it.
   const { currentWorkspace } = useWorkspace();
-  const { data, isLoading, error } = useMemoryProjection({ enabled: hasMemoryIdentity });
+  const hasWorkspace = !!currentWorkspace;
+  const { data, isLoading, error } = useMemoryProjection();
 
   const [selected, setSelected] = useState<GalaxyPoint | null>(null);
   const [categoryFilter, setCategoryFilter] = useState("all");
@@ -164,7 +166,7 @@ export default function MemoriesPage() {
       />
 
       <div className="flex-1 space-y-4 overflow-auto p-6">
-        {hasMemoryIdentity && (
+        {hasWorkspace && (
           <div className="flex flex-wrap items-center gap-3" data-testid="memories-toolbar">
             <div className="relative min-w-[200px] max-w-sm flex-1">
               <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -213,10 +215,10 @@ export default function MemoriesPage() {
           </div>
         )}
 
-        {hasMemoryIdentity && <TierRail counts={counts} hidden={hidden} onToggle={toggleTier} />}
+        {hasWorkspace && <TierRail counts={counts} hidden={hidden} onToggle={toggleTier} />}
 
         {renderGalaxyBody({
-          hasMemoryIdentity,
+          hasWorkspace,
           error,
           isLoading,
           points,
