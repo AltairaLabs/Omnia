@@ -66,11 +66,11 @@ The chart intentionally has no default for `dashboard.auth.mode` (prevents accid
 
 Resolution: schema allows `""` in the enum; `_helpers.tpl` `omnia.validateAuth` fails render-time only when `dashboard.enabled=true` AND mode is empty. Don't add `required: ["mode"]` to the schema — it breaks dashboard-disabled installs.
 
-### 5. Visible default changes need a Chart.yaml version bump
+### 5. Don't bump `Chart.yaml` version in feature/fix PRs — only at release
 
-If a values default changes in a way that affects `helm template` output for an existing installation, bump `Chart.yaml` `version:` (semver minor for additive/default-flip changes). Recent example: `enterprise.communityTemplates.enabled: true → false` shipped as 0.9.0-beta.6 → 0.9.0-beta.7.
+`version` and `appVersion` track the last git-tagged release. They are bumped **once, when cutting a release** (the release workflow also rewrites them at package-time as a safety net). Do NOT bump `version:` in a feature or fix PR, even when the change alters `helm template` output for an existing installation.
 
-Document the change in the commit + PR body so the CHANGELOG generator picks it up.
+Instead, document any rendered-output change in the commit + PR body so the CHANGELOG generator picks it up at release time.
 
 ### 6. CRDs are too big for client-side `kubectl apply`
 
@@ -109,10 +109,9 @@ CI gates enforce these (`test-helm-e2e.yml`). E2E workflows **do NOT** fire on `
 
 ## When to bump `Chart.yaml`
 
-- Add a new `.Values.*` key → no bump needed (additive).
-- Change a default in a way that alters rendered output → minor bump.
-- Remove or rename a `.Values.*` key → major bump + migration note in `NOTES.txt`.
-- Chart appVersion tracks app releases; bump both together when cutting a release.
+**Only at release time.** `version` and `appVersion` track the last git-tagged release; bump both together in the release commit, before tagging. Feature/fix PRs must NOT bump the chart version — regardless of whether they add values, change defaults, or alter rendered output. Document those changes in the PR body so the CHANGELOG generator picks them up at release.
+
+A rename/removal of a `.Values.*` key still needs a migration note in `NOTES.txt` in the same PR — just not a version bump.
 
 ## See also
 
