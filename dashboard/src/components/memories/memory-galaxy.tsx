@@ -363,12 +363,13 @@ export function MemoryGalaxy({
         }}
       />
 
-      <div className="absolute bottom-3 right-3 flex flex-col gap-1">
+      <div className="absolute bottom-3 right-3 flex flex-col gap-1 rounded-lg border bg-background/85 p-1 shadow-lg backdrop-blur">
         <Button
           size="icon"
-          variant={labelsOn ? "secondary" : "outline"}
+          variant={labelsOn ? "secondary" : "ghost"}
           aria-label={labelsOn ? "Hide labels" : "Show labels"}
           aria-pressed={labelsOn}
+          title="Toggle labels"
           data-testid="toggle-labels"
           onClick={() => setLabelsPref(labelsOn ? "off" : "on")}
         >
@@ -376,9 +377,10 @@ export function MemoryGalaxy({
         </Button>
         <Button
           size="icon"
-          variant={showConfidence ? "secondary" : "outline"}
+          variant={showConfidence ? "secondary" : "ghost"}
           aria-label={showConfidence ? "Hide confidence" : "Show confidence"}
           aria-pressed={showConfidence}
+          title="Toggle confidence scores"
           data-testid="toggle-confidence"
           onClick={() => setConfPref(showConfidence ? "off" : "on")}
         >
@@ -386,21 +388,23 @@ export function MemoryGalaxy({
         </Button>
         <Button
           size="icon"
-          variant={ageFade ? "secondary" : "outline"}
+          variant={ageFade ? "secondary" : "ghost"}
           aria-label={ageFade ? "Disable age fade" : "Enable age fade"}
           aria-pressed={ageFade}
+          title="Toggle age fade"
           data-testid="toggle-age-fade"
           onClick={() => setAgePref(ageFade ? "off" : "on")}
         >
           <Clock className="h-4 w-4" />
         </Button>
-        <Button size="icon" variant="secondary" aria-label="Zoom in" onClick={() => zoomByButton(1.3)}>
+        <div className="my-0.5 h-px bg-border" />
+        <Button size="icon" variant="ghost" aria-label="Zoom in" title="Zoom in" onClick={() => zoomByButton(1.3)}>
           <Plus className="h-4 w-4" />
         </Button>
-        <Button size="icon" variant="secondary" aria-label="Zoom out" onClick={() => zoomByButton(1 / 1.3)}>
+        <Button size="icon" variant="ghost" aria-label="Zoom out" title="Zoom out" onClick={() => zoomByButton(1 / 1.3)}>
           <Minus className="h-4 w-4" />
         </Button>
-        <Button size="icon" variant="secondary" aria-label="Reset view" onClick={() => setView(DEFAULT_VIEW)}>
+        <Button size="icon" variant="ghost" aria-label="Reset view" title="Reset view" onClick={() => setView(DEFAULT_VIEW)}>
           <Maximize className="h-4 w-4" />
         </Button>
       </div>
