@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { Header } from "@/components/layout";
 import { useMemoryAggregate } from "@/hooks/use-memory-aggregate";
 import { useConsentStats } from "@/hooks/use-consent-stats";
+import { useEnforcementStats } from "@/hooks/use-enforcement-stats";
 import { useAgents } from "@/hooks/use-agents";
 import { TierLegend } from "@/components/memory-analytics/tier-legend";
 import { TierQuadCard } from "@/components/memory-analytics/tier-quad-card";
@@ -29,6 +30,11 @@ const EMPTY_CONSENT = {
   totalUsers: 0,
   optedOutAll: 0,
   grantsByCategory: {},
+};
+
+const EMPTY_ENFORCEMENT = {
+  piiBlocked: 0,
+  redactions: 0,
 };
 
 function toUtcMidnight(date: Date): string {
@@ -77,6 +83,7 @@ export default function MemoryAnalyticsPage() {
     metric: "distinct_users",
   });
   const consentQuery = useConsentStats();
+  const enforcementQuery = useEnforcementStats();
   const agentsQuery = useAgents();
   const consolidationQuery = useConsolidationStats({ rangeDays });
 
@@ -103,10 +110,13 @@ export default function MemoryAnalyticsPage() {
   );
   const activeUsers = activeUsersRow?.value ?? 0;
 
+  const enforcement = enforcementQuery.data ?? EMPTY_ENFORCEMENT;
+
   const summaryLoading =
     categoryQuery.isLoading ||
     activeUsersQuery.isLoading ||
-    todayQuery.isLoading;
+    todayQuery.isLoading ||
+    enforcementQuery.isLoading;
 
   return (
     <div className="flex flex-col h-full">
@@ -122,7 +132,7 @@ export default function MemoryAnalyticsPage() {
           totalMemories={totalMemories}
           activeUsers={activeUsers}
           memoriesToday={memoriesToday}
-          piiBlocked={0}
+          piiBlocked={enforcement.piiBlocked}
           loading={summaryLoading}
         />
 
@@ -147,7 +157,10 @@ export default function MemoryAnalyticsPage() {
 
         <AgentChart rows={agentRows} />
 
-        <PrivacyPosture stats={consentQuery.data ?? EMPTY_CONSENT} />
+        <PrivacyPosture
+          stats={consentQuery.data ?? EMPTY_CONSENT}
+          redactions={enforcement.redactions}
+        />
       </main>
     </div>
   );

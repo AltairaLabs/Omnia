@@ -17,6 +17,7 @@ import type {
 import type {
   AggregateRow,
   ConsentStats,
+  EnforcementStats,
   MemoryAggregateOptions,
 } from "@/lib/memory-analytics/types";
 
@@ -212,6 +213,24 @@ export class MemoryApiService {
       totalUsers: raw.totalUsers ?? 0,
       optedOutAll: raw.optedOutAll ?? 0,
       grantsByCategory: raw.grantsByCategory ?? {},
+    };
+  }
+
+  async getEnforcementStats(workspace: string): Promise<EnforcementStats> {
+    const response = await fetch(
+      `${MEMORY_API_BASE}/${encodeURIComponent(workspace)}/privacy/enforcement-stats`,
+    );
+    if (!response.ok) {
+      if (response.status === 401 || response.status === 403 || response.status === 404) {
+        return { piiBlocked: 0, redactions: 0 };
+      }
+      throw new Error(`Failed to fetch enforcement stats: ${response.statusText}`);
+    }
+    // Normalize: default missing fields to 0 so callers never see undefined.
+    const raw = (await response.json()) as Partial<EnforcementStats>;
+    return {
+      piiBlocked: raw.piiBlocked ?? 0,
+      redactions: raw.redactions ?? 0,
     };
   }
 }
