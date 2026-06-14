@@ -20,7 +20,6 @@ import (
 
 	"github.com/AltairaLabs/PromptKit/pkg/config"
 	corev1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -129,7 +128,7 @@ func (d *Discovery) secretExists(ctx context.Context, secretName string) bool {
 		Namespace: d.namespace,
 	}, secret)
 
-	return err == nil || !apierrors.IsNotFound(err)
+	return err == nil
 }
 
 // GetAPIKeyEnvVars returns the environment variable names for a provider type.
