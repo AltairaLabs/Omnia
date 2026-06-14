@@ -1,7 +1,9 @@
 "use client";
+// Memory Galaxy — workspace-scoped operator view of the memory projection.
 
-import { useState, useMemo, type ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { Header } from "@/components/layout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -13,264 +15,225 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from "@/components/ui/alert-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Brain, Download, Trash2, Search, AlertCircle, LogIn, Library } from "lucide-react";
-import { useAuth } from "@/hooks/use-auth";
-import { useMemories } from "@/hooks/use-memories";
+import { Brain, Search, AlertCircle, Library } from "lucide-react";
+import { useMemoryProjection } from "@/hooks/use-memory-projection";
+import { usePersistedViewMode } from "@/hooks/use-persisted-view-mode";
+import { FacetRail, type Facet } from "@/components/memories/facet-rail";
+import { facetCounts, parseHiddenTiers } from "@/lib/memory-galaxy/galaxy-math";
 import {
-  useDeleteMemory,
-  useDeleteAllMemories,
-  useExportMemories,
-} from "@/hooks/use-memory-mutations";
-import { MemoryGraph } from "@/components/memories/memory-graph";
-import { MemoryDetailPanel } from "@/components/memories/memory-detail-panel";
-import { ConsentBanner } from "@/components/memories/consent-banner";
-import type { MemoryEntity } from "@/lib/data/types";
+  TIER_COLORS,
+  TIER_LABELS,
+  TIER_DESCRIPTIONS,
+  CATEGORY_COLORS,
+} from "@/lib/memory-analytics/colors";
+import type { GalaxyPoint } from "@/lib/memory-galaxy/types";
+import type { Tier } from "@/lib/memory-analytics/types";
+import { useDeleteMemory } from "@/hooks/use-memory-mutations";
 
-const CATEGORIES = [
-  { value: "all", label: "All Categories" },
-  { value: "memory:identity", label: "Identity" },
-  { value: "memory:context", label: "Context" },
-  { value: "memory:health", label: "Health" },
-  { value: "memory:location", label: "Location" },
-  { value: "memory:preferences", label: "Preferences" },
-  { value: "memory:history", label: "History" },
+const MemoryGalaxy = dynamic(
+  () => import("@/components/memories/memory-galaxy").then((m) => m.MemoryGalaxy),
+  { ssr: false },
+);
+
+const TIER_KEYS: Tier[] = ["institutional", "agent", "user", "user_for_agent"];
+const CATEGORY_KEYS = [
+  "memory:identity",
+  "memory:context",
+  "memory:health",
+  "memory:location",
+  "memory:preferences",
+  "memory:history",
 ];
 
-interface MemoriesBodyState {
-  hasMemoryIdentity: boolean;
-  error: unknown;
-  isLoading: boolean;
-  filtered: MemoryEntity[];
-  onSelect: (memory: MemoryEntity) => void;
+function categoryLabel(cat: string): string {
+  const s = cat.replace(/^memory:/, "");
+  return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
-function renderMemoriesBody({
-  hasMemoryIdentity,
-  error,
-  isLoading,
-  filtered,
-  onSelect,
-}: MemoriesBodyState): ReactNode {
-  if (!hasMemoryIdentity) {
+function buildFacets(points: GalaxyPoint[], colorBy: "tier" | "category"): Facet[] {
+  const counts = facetCounts(points, colorBy);
+  if (colorBy === "tier") {
+    return TIER_KEYS.map((t) => ({
+      key: t,
+      label: TIER_LABELS[t],
+      color: TIER_COLORS[t],
+      count: counts[t] ?? 0,
+      description: TIER_DESCRIPTIONS[t],
+    }));
+  }
+  return CATEGORY_KEYS.map((c) => ({
+    key: c,
+    label: categoryLabel(c),
+    color: CATEGORY_COLORS[c] ?? CATEGORY_COLORS.unknown,
+    count: counts[c] ?? 0,
+  }));
+}
+
+interface GalaxyBodyState {
+  hasWorkspace: boolean;
+  error: unknown;
+  isLoading: boolean;
+  points: GalaxyPoint[];
+  colorBy: "tier" | "category";
+  hidden: Set<string>;
+  search: string;
+  onDelete: (id: string) => void;
+}
+
+function renderGalaxyBody(s: GalaxyBodyState): ReactNode {
+  if (!s.hasWorkspace) {
     return (
-      <Alert data-testid="memory-anonymous-notice">
-        <LogIn className="h-4 w-4" />
-        <AlertTitle>Memories require sign-in</AlertTitle>
-        <AlertDescription>
-          You&apos;re viewing as an anonymous user. Memories are scoped to
-          authenticated identities so each user&apos;s data stays private. Sign
-          in to start saving memories.
-        </AlertDescription>
+      <Alert data-testid="no-workspace-notice">
+        <AlertCircle className="h-4 w-4" />
+        <AlertTitle>No workspace selected</AlertTitle>
+        <AlertDescription>Select a workspace to view its memory galaxy.</AlertDescription>
       </Alert>
     );
   }
-  if (error) {
+  if (s.error) {
     return (
       <Alert variant="destructive" data-testid="memory-error">
         <AlertCircle className="h-4 w-4" />
-        <AlertTitle>Could not load memories</AlertTitle>
+        <AlertTitle>Could not load the memory galaxy</AlertTitle>
         <AlertDescription>
-          {error instanceof Error
-            ? error.message
-            : "Failed to connect to the Memory API. Check that the service is running."}
+          {s.error instanceof Error ? s.error.message : "Failed to reach the Memory API."}
         </AlertDescription>
       </Alert>
     );
   }
-  if (isLoading) {
-    return <Skeleton className="w-full h-[600px] rounded-lg" />;
+  if (s.isLoading) {
+    return <Skeleton className="h-[70vh] min-h-[360px] w-full rounded-lg" data-testid="galaxy-loading" />;
   }
-  if (filtered.length === 0) {
+  if (s.points.length === 0) {
     return (
       <div
-        className="flex flex-col items-center justify-center h-[400px] text-muted-foreground"
+        className="flex h-[70vh] min-h-[360px] flex-col items-center justify-center text-muted-foreground"
         data-testid="empty-state"
       >
-        <Brain className="h-16 w-16 mb-4 opacity-30" />
-        <h3 className="text-lg font-medium mb-1">No memories yet</h3>
-        <p className="text-sm">
-          As you interact with agents, they&apos;ll remember things here.
-        </p>
+        <Brain className="mb-4 h-16 w-16 opacity-30" />
+        <h3 className="mb-1 text-lg font-medium">No memories yet</h3>
+        <p className="text-sm">As your agents interact, memories appear here.</p>
       </div>
     );
   }
-  return <MemoryGraph memories={filtered} onNodeClick={onSelect} />;
+  return (
+    <MemoryGalaxy
+      points={s.points}
+      colorBy={s.colorBy}
+      hidden={s.hidden}
+      filters={{ search: s.search }}
+      onDelete={s.onDelete}
+    />
+  );
 }
 
 export default function MemoriesPage() {
-  const { hasMemoryIdentity, memoryUserId } = useAuth();
+  // Workspace-scoped, operator/demo view. The Next.js → memory-api proxy
+  // authenticates service-to-service, so the browser user does NOT need a
+  // personal memory identity — anonymous sessions with a workspace can view it.
   const { currentWorkspace } = useWorkspace();
-  // "Visible to me": institutional + agent tiers plus the user's own,
-  // excluding other users' private memories (#1254). userId is still sent
-  // (hashed by the proxy) so the user's own rows are included; includeShared
-  // widens the query to the shared tiers. For anonymous users with a device
-  // ID, the device ID is the userId.
-  const { data, isLoading, error } = useMemories({
-    userId: memoryUserId,
-    includeShared: true,
-    limit: 500,
-    enabled: hasMemoryIdentity,
-  });
-  const [selectedMemory, setSelectedMemory] = useState<MemoryEntity | null>(
-    null
-  );
-  const [categoryFilter, setCategoryFilter] = useState("all");
+  const hasWorkspace = !!currentWorkspace;
+  const { data, isLoading, error } = useMemoryProjection();
+
   const [searchQuery, setSearchQuery] = useState("");
+  const [colorBy, setColorBy] = usePersistedViewMode<"tier" | "category">(
+    "omnia-memory-galaxy-color-by",
+    "tier",
+  );
+  const [hiddenTiersCsv, setHiddenTiersCsv] = usePersistedViewMode<string>(
+    "omnia-memory-galaxy-hidden-tiers",
+    "",
+  );
+  const [hiddenCatsCsv, setHiddenCatsCsv] = usePersistedViewMode<string>(
+    "omnia-memory-galaxy-hidden-categories",
+    "",
+  );
+
+  const points = useMemo(() => data?.points ?? [], [data?.points]);
+  // The active filter dimension follows the color dropdown.
+  const hiddenCsv = colorBy === "tier" ? hiddenTiersCsv : hiddenCatsCsv;
+  const setHiddenCsv = colorBy === "tier" ? setHiddenTiersCsv : setHiddenCatsCsv;
+  const hidden = useMemo(() => parseHiddenTiers(hiddenCsv), [hiddenCsv]);
+  const facets = useMemo(() => buildFacets(points, colorBy), [points, colorBy]);
+
+  const toggleFacet = (key: string) => {
+    const next = new Set(hidden);
+    if (next.has(key)) next.delete(key);
+    else next.add(key);
+    setHiddenCsv([...next].sort((a, b) => a.localeCompare(b)).join(","));
+  };
 
   const deleteMemory = useDeleteMemory();
-  const deleteAll = useDeleteAllMemories();
-  const exportMemories = useExportMemories();
+  const handleDelete = (id: string) => deleteMemory.mutate(id);
 
-  const filtered = useMemo(() => {
-    let memories = data?.memories ?? [];
-    if (categoryFilter !== "all") {
-      memories = memories.filter(
-        (m) => (m.metadata?.consent_category as string) === categoryFilter
-      );
-    }
-    if (searchQuery) {
-      const q = searchQuery.toLowerCase();
-      memories = memories.filter((m) => m.content.toLowerCase().includes(q));
-    }
-    return memories;
-  }, [data?.memories, categoryFilter, searchQuery]);
-
-  const handleDelete = (memoryId: string) => {
-    deleteMemory.mutate(memoryId);
-    setSelectedMemory(null);
-  };
-
-  const handleForgetAll = () => {
-    deleteAll.mutate();
-    setSelectedMemory(null);
-  };
+  const clusterKind = data?.projectionInput === "tfidf" ? "lexical" : "semantic";
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex h-full flex-col">
       <Header
-        title="My Memories"
-        description="What the agent remembers about you"
+        title="Memory Galaxy"
+        description="A semantic map of everything your agents remember, across all four tiers."
       />
 
-      <div className="flex-1 overflow-auto p-6 space-y-4">
-        <ConsentBanner />
+      <div className="flex-1 space-y-4 overflow-auto p-6">
+        {hasWorkspace && (
+          <div className="flex flex-wrap items-center gap-3" data-testid="memories-toolbar">
+            <div className="relative min-w-[200px] max-w-sm flex-1">
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                placeholder="Search memories..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-9"
+                data-testid="memory-search"
+              />
+            </div>
 
-        {hasMemoryIdentity && (
-        <div
-          className="flex items-center gap-3 flex-wrap"
-          data-testid="memories-toolbar"
-        >
-          <div className="relative flex-1 min-w-[200px] max-w-sm">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input
-              placeholder="Search memories..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-9"
-              data-testid="memory-search"
-            />
-          </div>
+            <Select value={colorBy} onValueChange={(v) => setColorBy(v as "tier" | "category")}>
+              <SelectTrigger className="w-[160px]" data-testid="color-by">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="tier">Color: tier</SelectItem>
+                <SelectItem value="category">Color: category</SelectItem>
+              </SelectContent>
+            </Select>
 
-          <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-            <SelectTrigger className="w-[180px]" data-testid="category-filter">
-              <SelectValue placeholder="Category" />
-            </SelectTrigger>
-            <SelectContent>
-              {CATEGORIES.map((cat) => (
-                <SelectItem key={cat.value} value={cat.value}>
-                  {cat.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+            <div className="flex-1" />
 
-          <div className="flex-1" />
-
-          {currentWorkspace && (
-            <Button asChild variant="outline" size="sm" data-testid="workspace-knowledge-link">
-              <Link href={`/workspaces/${encodeURIComponent(currentWorkspace.name)}/knowledge`}>
-                <Library className="h-4 w-4 mr-2" />
-                Workspace knowledge
-              </Link>
-            </Button>
-          )}
-
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => exportMemories.mutate()}
-            disabled={exportMemories.isPending}
-          >
-            <Download className="h-4 w-4 mr-2" />
-            Export
-          </Button>
-
-          <AlertDialog>
-            <AlertDialogTrigger asChild>
-              <Button
-                variant="destructive"
-                size="sm"
-                data-testid="forget-all-button"
-              >
-                <Trash2 className="h-4 w-4 mr-2" />
-                Forget Everything
+            {currentWorkspace && (
+              <Button asChild variant="outline" size="sm" data-testid="workspace-knowledge-link">
+                <Link href={`/workspaces/${encodeURIComponent(currentWorkspace.name)}/knowledge`}>
+                  <Library className="mr-2 h-4 w-4" />
+                  Workspace knowledge
+                </Link>
               </Button>
-            </AlertDialogTrigger>
-            <AlertDialogContent>
-              <AlertDialogHeader>
-                <AlertDialogTitle>Forget everything?</AlertDialogTitle>
-                <AlertDialogDescription>
-                  This will permanently delete all your memories across all
-                  agents. This cannot be undone.
-                </AlertDialogDescription>
-              </AlertDialogHeader>
-              <AlertDialogFooter>
-                <AlertDialogCancel>Cancel</AlertDialogCancel>
-                <AlertDialogAction
-                  onClick={handleForgetAll}
-                  data-testid="confirm-forget-all"
-                >
-                  Forget Everything
-                </AlertDialogAction>
-              </AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
-        </div>
+            )}
+          </div>
         )}
 
-        {renderMemoriesBody({
-          hasMemoryIdentity,
+        {hasWorkspace && <FacetRail facets={facets} hidden={hidden} onToggle={toggleFacet} />}
+
+        {renderGalaxyBody({
+          hasWorkspace,
           error,
           isLoading,
-          filtered,
-          onSelect: setSelectedMemory,
+          points,
+          colorBy,
+          hidden,
+          search: searchQuery,
+          onDelete: handleDelete,
         })}
 
         {!isLoading && (data?.total ?? 0) > 0 && (
-          <p className="text-xs text-muted-foreground text-center">
-            Showing {filtered.length} of {data?.total} memories
+          <p className="text-center text-xs text-muted-foreground">
+            {data?.total} memories · {clusterKind} clustering
+            {data?.capped ? " (showing a capped subset)" : ""}
           </p>
         )}
       </div>
-
-      <MemoryDetailPanel
-        memory={selectedMemory}
-        onClose={() => setSelectedMemory(null)}
-        onDelete={handleDelete}
-      />
     </div>
   );
 }

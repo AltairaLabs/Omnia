@@ -1,0 +1,73 @@
+import type { GalaxyPoint, GalaxyResponse } from "./types";
+import type { Tier } from "@/lib/memory-analytics/types";
+
+const TIERS: Tier[] = ["institutional", "agent", "user", "user_for_agent"];
+const CATEGORIES = [
+  "memory:identity", "memory:context", "memory:health",
+  "memory:location", "memory:preferences", "memory:history",
+];
+const TOPICS = [
+  "refunds and returns", "scheduling preferences", "billing questions",
+  "product specs", "user identity", "support tone", "shipping policy", "account settings",
+];
+const KINDS = ["preference", "fact", "person", "event", "setting", "note"];
+
+function rng(seed: number): () => number {
+  let a = seed >>> 0;
+  return () => {
+    a |= 0;
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function clamp(n: number): number {
+  return Math.max(-1, Math.min(1, n));
+}
+
+const DAY_MS = 86_400_000;
+// Fixed reference epoch so dates stay deterministic; spread points across a
+// window before/after it so the age-fade shows a gradient near "now".
+const REF_MS = Date.parse("2026-06-14T00:00:00Z");
+
+export function generateMockProjection({ seed, count }: { seed: number; count: number }): GalaxyResponse {
+  const r = rng(seed);
+  const clusters = TOPICS.map((topic) => ({
+    topic,
+    cx: r() * 1.6 - 0.8,
+    cy: r() * 1.6 - 0.8,
+    category: CATEGORIES[Math.floor(r() * CATEGORIES.length)],
+  }));
+  const points: GalaxyPoint[] = [];
+  for (let i = 0; i < count; i++) {
+    const c = clusters[Math.floor(r() * clusters.length)];
+    const tier = TIERS[Math.floor(r() * TIERS.length)];
+    const jitter = () => (r() + r() + r() - 1.5) * 0.18;
+    // Bell-ish confidence (sum of uniforms ≈ normal), centred ~0.65.
+    const confidence = 0.3 + ((r() + r() + r() + r()) / 4) * 0.7;
+    // Created up to ~70 days before the reference, with a 10–100 day TTL, so
+    // some points sit near or past expiry (fully faded) and others are fresh.
+    const createdMs = REF_MS - Math.floor(r() * 70) * DAY_MS;
+    const expiresMs = createdMs + (10 + Math.floor(r() * 90)) * DAY_MS;
+    points.push({
+      id: `mock-${seed}-${i}`,
+      x: clamp(c.cx + jitter()),
+      y: clamp(c.cy + jitter()),
+      tier,
+      category: c.category,
+      type: KINDS[Math.floor(r() * KINDS.length)],
+      confidence,
+      title: `${c.topic} #${i}`,
+      preview: `A remembered detail about ${c.topic}.`,
+      userRef: `user-${1 + Math.floor(r() * 12)}`,
+      observedAt: new Date(createdMs).toISOString(),
+      expiresAt: new Date(expiresMs).toISOString(),
+    });
+  }
+  return {
+    model: "tsne", projectionInput: "embedding", embeddingModel: "mock", embeddingDim: 0,
+    total: count, capped: false, computedAt: "2026-06-14T00:00:00Z", points,
+  };
+}
