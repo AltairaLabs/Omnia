@@ -164,6 +164,11 @@ func main() {
 			"Each consolidation axis fires per its MemoryPolicy cron schedule; this controls how often "+
 			"schedules are checked (e.g. \"1m\"). Empty disables the worker. Production deployments opt "+
 			"in per-environment.")
+	var memoryProjectionInterval string
+	flag.StringVar(&memoryProjectionInterval, "memory-projection-interval", "",
+		"Poll interval forwarded to memory-api as --projection-interval for the Memory Galaxy "+
+			"pre-render worker (e.g. \"30s\"). Empty disables the worker. Production deployments opt "+
+			"in per-environment.")
 	var sessionRedisURL string
 	flag.StringVar(&sessionRedisURL, "session-redis-url", "",
 		"Operator-wide Redis URL forwarded to every per-workspace session-api as --redis-url for "+
@@ -412,6 +417,7 @@ func main() {
 			},
 			MemoryCacheTTL:              memoryCacheTTL,
 			MemoryConsolidationInterval: memoryConsolidationInterval,
+			MemoryProjectionInterval:    memoryProjectionInterval,
 			SessionRedisURL:             sessionRedisURL,
 			SessionRedisURLSecret: controller.SecretKeyRef{
 				Name: sessionRedisURLSecretName,

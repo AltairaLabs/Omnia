@@ -133,6 +133,9 @@ spec:
             {{- with .Values.workspaceServices.memoryApi.consolidation.interval }}
             - --memory-consolidation-interval={{ . }}
             {{- end }}
+            {{- with .Values.workspaceServices.memoryApi.projection.interval }}
+            - --memory-projection-interval={{ . }}
+            {{- end }}
             {{- /*
               Session-api hot-cache Redis. Routes through dashboard.
               session.redis (the same consumer block the dashboard
