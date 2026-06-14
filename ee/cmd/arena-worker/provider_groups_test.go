@@ -2369,7 +2369,7 @@ func TestBuildFleetTokenSource(t *testing.T) {
 	})
 
 	t.Run("fetcher when URL set", func(t *testing.T) {
-		ts, err := buildFleetTokenSource(testLog(), "http://omnia-dashboard:3000/api/auth/service-token")
+		ts, err := buildFleetTokenSource(testLog(), "https://omnia-dashboard:3000/api/auth/service-token")
 		require.NoError(t, err)
 		assert.NotNil(t, ts)
 	})
