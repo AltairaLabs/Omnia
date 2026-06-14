@@ -18,9 +18,6 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
-	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/trace"
 
 	"github.com/altairalabs/omnia/ee/pkg/arena/queue"
 )
@@ -229,48 +226,16 @@ func (p *VUPool) handleVUPopError(
 
 // executeAndReport runs a single work item and reports the result.
 func (p *VUPool) executeAndReport(ctx context.Context, log logr.Logger, item *queue.WorkItem) {
-	// Each work item gets its own trace (not a child of a job-level root).
-	// This keeps traces small and queryable via arena.job attribute.
-	traceID := workItemToTraceID(p.jobID, item.ID)
-	spanID := workItemToSpanID(item.ID)
-	remoteCtx := trace.NewSpanContext(trace.SpanContextConfig{
-		TraceID:    traceID,
-		SpanID:     spanID,
-		TraceFlags: trace.FlagsSampled,
-	})
-	// Per-item trace root — NOT a child of the pool context. Same pattern as
-	// worker.go's processItem. Bounded by maxItemTimeout on the next line.
-	itemCtx := trace.ContextWithRemoteSpanContext(context.Background(), remoteCtx)
-	itemCtx, itemCancel := context.WithTimeout(itemCtx, maxItemTimeout)
-	itemCtx, span := otel.Tracer("omnia-arena-worker").Start(itemCtx, "arena.work-item",
-		trace.WithAttributes(
-			attribute.String("arena.job", p.jobID),
-			attribute.String("arena.item.id", item.ID),
-			attribute.String("arena.scenario", item.ScenarioID),
-			attribute.String("arena.provider", item.ProviderID),
-		),
+	runWorkItemWithTracing(
+		ctx,
+		p.jobID,
+		item,
+		p.metrics,
+		p.execute,
+		func(reportCtx context.Context, workItem *queue.WorkItem, result *ExecutionResult, execErr error) {
+			p.reportResult(reportCtx, log, workItem, result, execErr)
+		},
 	)
-	itemStart := time.Now()
-	result, execErr := p.execute(itemCtx, item)
-	if execErr != nil {
-		span.RecordError(execErr)
-	}
-	itemCancel()
-	if itemCtx.Err() == context.DeadlineExceeded {
-		execErr = fmt.Errorf("work item timed out after %v", maxItemTimeout)
-	}
-
-	ackCtx := trace.ContextWithSpan(ctx, span)
-	p.reportResult(ackCtx, log, item, result, execErr)
-	span.End()
-
-	itemDuration := time.Since(itemStart).Seconds()
-	status := statusPass
-	if execErr != nil || (result != nil && result.Status == statusFail) {
-		status = statusFail
-	}
-	p.metrics.RecordWorkItem(p.jobID, status, itemDuration)
-	recordDetailedMetrics(p.metrics, p.jobID, item, result, execErr, itemDuration)
 }
 
 // reportResult reports the work item result via CompleteItem or Nack.
@@ -287,20 +252,5 @@ func (p *VUPool) reportResult(
 		defer cancel()
 	}
 
-	if execErr != nil {
-		log.Error(execErr, "work item failed", "itemID", item.ID)
-		if err := p.queue.Nack(reportCtx, p.jobID, item.ID, execErr); err != nil {
-			log.Error(err, "failed to nack item", "itemID", item.ID)
-		}
-		return
-	}
-
-	log.Info("work item completed",
-		"itemID", item.ID,
-		"status", result.Status,
-		"durationMs", result.DurationMs,
-	)
-	if err := p.queue.CompleteItem(reportCtx, p.jobID, item.ID, toItemResult(result)); err != nil {
-		log.Error(err, "failed to complete item", "itemID", item.ID)
-	}
+	reportWorkItemResultWithOptions(reportCtx, log, p.queue, p.jobID, item, result, execErr, false)
 }
