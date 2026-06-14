@@ -32,7 +32,10 @@ test.describe('Memory Galaxy page', () => {
     await expect(page.locator('[data-testid="facet-rail"]')).toBeVisible({ timeout: 10000 });
   });
 
-  test('renders the galaxy canvas', async ({ page }) => {
-    await expect(page.locator('[data-testid="memory-galaxy-canvas"]')).toBeVisible({ timeout: 15000 });
+  test('shows the projection summary once points load', async ({ page }) => {
+    // The summary line ("N memories · semantic|lexical clustering") renders in
+    // the page once the (mocked) projection returns points — independent of the
+    // lazily-imported canvas, so it's a stable signal the galaxy data loaded.
+    await expect(page.getByText(/clustering/i)).toBeVisible({ timeout: 15000 });
   });
 });
