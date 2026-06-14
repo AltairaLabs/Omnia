@@ -139,7 +139,7 @@ func (r *WorkspaceReconciler) reconcileManagedServiceGroup(
 	// tokens via the TokenReview API, which requires its ServiceAccount to be
 	// able to create TokenReviews (cluster-scoped). Bind the session-api SA to
 	// the install-wide tokenreview ClusterRole (provisioned by the chart).
-	if err := r.reconcileSessionAPITokenReviewBinding(ctx, workspace, namespace, sessionDepName); err != nil {
+	if err := r.reconcileSessionAPITokenReviewBinding(ctx, namespace, sessionDepName); err != nil {
 		return omniav1alpha1.ServiceGroupStatus{}, fmt.Errorf("session tokenreview binding: %w", err)
 	}
 
@@ -339,7 +339,6 @@ func (r *WorkspaceReconciler) reconcileServicePodSA(
 // is disabled or the ClusterRole name is unset.
 func (r *WorkspaceReconciler) reconcileSessionAPITokenReviewBinding(
 	ctx context.Context,
-	workspace *omniav1alpha1.Workspace,
 	namespace, sessionSAName string,
 ) error {
 	if r.ServiceBuilder == nil || !r.ServiceBuilder.ServiceAuth.Enabled {

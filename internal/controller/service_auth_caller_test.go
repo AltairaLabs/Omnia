@@ -72,7 +72,7 @@ func TestEvalWorkerDeployment_CallerToken_Enabled(t *testing.T) {
 func TestApplyCallerToken_FacadePodShape(t *testing.T) {
 	auth := ServiceAuthConfig{Enabled: true, Audience: testAudience, TokenExpirationSeconds: 3600}
 	spec := &corev1.PodSpec{
-		Containers: []corev1.Container{{Name: "facade"}, {Name: "runtime"}},
+		Containers: []corev1.Container{{Name: FacadeContainerName}, {Name: "runtime"}},
 	}
 	auth.applyCallerToken(spec)
 

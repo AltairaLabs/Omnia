@@ -8,6 +8,12 @@ package serviceauth
 
 import "context"
 
+// Shared test fixtures for the serviceauth package.
+const (
+	testNS      = "ws-ns"    // a trusted workspace namespace
+	testBearerX = "Bearer x" // a non-empty bearer header whose token value is irrelevant
+)
+
 // fakeReviewer is a configurable TokenReviewer for tests (no real k8s).
 type fakeReviewer struct {
 	authenticated bool

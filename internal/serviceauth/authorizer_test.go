@@ -15,7 +15,7 @@ func TestParseServiceAccount(t *testing.T) {
 		wantName string
 		wantOK   bool
 	}{
-		{"system:serviceaccount:ws-ns:foo-facade", "ws-ns", "foo-facade", true},
+		{"system:serviceaccount:ws-ns:foo-facade", testNS, "foo-facade", true},
 		{"system:serviceaccount:omnia-system:omnia-session-api", "omnia-system", "omnia-session-api", true},
 		// Missing name segment — must reject (this is the substring-attack case:
 		// a bare namespace must NOT parse as a valid SA).
@@ -44,7 +44,7 @@ func TestParseServiceAccount(t *testing.T) {
 
 func TestAuthorizerAllowed(t *testing.T) {
 	const exactSub = "system:serviceaccount:omnia-system:omnia-dashboard"
-	a := newAuthorizer([]string{exactSub}, []string{"ws-ns"})
+	a := newAuthorizer([]string{exactSub}, []string{testNS})
 
 	cases := map[string]struct {
 		subject string

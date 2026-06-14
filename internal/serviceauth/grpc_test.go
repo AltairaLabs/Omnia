@@ -61,27 +61,27 @@ func TestUnaryServerInterceptor(t *testing.T) {
 
 	t.Run("reviewer error -> Unauthenticated", func(t *testing.T) {
 		ic := UnaryServerInterceptor(fakeReviewer{err: errors.New("boom")}, []string{grpcSubject}, nil)
-		_, err := ic(ctxWithAuth("Bearer x"), nil, info, handler)
+		_, err := ic(ctxWithAuth(testBearerX), nil, info, handler)
 		wantCode(t, err, codes.Unauthenticated)
 	})
 
 	t.Run("unauthenticated -> Unauthenticated", func(t *testing.T) {
 		ic := UnaryServerInterceptor(fakeReviewer{authenticated: false}, []string{grpcSubject}, nil)
-		_, err := ic(ctxWithAuth("Bearer x"), nil, info, handler)
+		_, err := ic(ctxWithAuth(testBearerX), nil, info, handler)
 		wantCode(t, err, codes.Unauthenticated)
 	})
 
 	t.Run("wrong subject -> PermissionDenied", func(t *testing.T) {
 		ic := UnaryServerInterceptor(fakeReviewer{authenticated: true, username: "system:serviceaccount:other:thing"}, []string{grpcSubject}, nil)
-		_, err := ic(ctxWithAuth("Bearer x"), nil, info, handler)
+		_, err := ic(ctxWithAuth(testBearerX), nil, info, handler)
 		wantCode(t, err, codes.PermissionDenied)
 	})
 
 	t.Run("namespace-allowed subject not in subjects -> handler", func(t *testing.T) {
 		gotSubject = ""
 		facade := "system:serviceaccount:ws-ns:foo-facade"
-		ic := UnaryServerInterceptor(fakeReviewer{authenticated: true, username: facade}, nil, []string{"ws-ns"})
-		resp, err := ic(ctxWithAuth("Bearer x"), nil, info, handler)
+		ic := UnaryServerInterceptor(fakeReviewer{authenticated: true, username: facade}, nil, []string{testNS})
+		resp, err := ic(ctxWithAuth(testBearerX), nil, info, handler)
 		if err != nil || resp != "ok" {
 			t.Fatalf("got resp=%v err=%v", resp, err)
 		}
@@ -93,8 +93,8 @@ func TestUnaryServerInterceptor(t *testing.T) {
 	t.Run("subject in non-allowed namespace -> PermissionDenied", func(t *testing.T) {
 		ic := UnaryServerInterceptor(
 			fakeReviewer{authenticated: true, username: "system:serviceaccount:other-ns:foo-facade"},
-			nil, []string{"ws-ns"})
-		_, err := ic(ctxWithAuth("Bearer x"), nil, info, handler)
+			nil, []string{testNS})
+		_, err := ic(ctxWithAuth(testBearerX), nil, info, handler)
 		wantCode(t, err, codes.PermissionDenied)
 	})
 
@@ -143,7 +143,7 @@ func TestStreamServerInterceptor(t *testing.T) {
 
 	t.Run("wrong subject -> PermissionDenied", func(t *testing.T) {
 		ic := StreamServerInterceptor(fakeReviewer{authenticated: true, username: "system:serviceaccount:other:thing"}, []string{grpcSubject}, nil)
-		ss := &fakeServerStream{ctx: ctxWithAuth("Bearer x")}
+		ss := &fakeServerStream{ctx: ctxWithAuth(testBearerX)}
 		wantCode(t, ic(nil, ss, info, handler), codes.PermissionDenied)
 	})
 

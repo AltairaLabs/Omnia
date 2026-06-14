@@ -156,7 +156,7 @@ func (c ServiceAuthConfig) applySessionAPIServerAuthEnv(dep *appsv1.Deployment, 
 		return
 	}
 	env := []corev1.EnvVar{
-		{Name: envSessionAPIAuthEnabled, Value: "true"},
+		{Name: envSessionAPIAuthEnabled, Value: labelValueTrue},
 		{Name: envSessionAPIAuthAllowedSubjects, Value: strings.Join(c.allowedSubjectsFor(workspaceName, groupName, namespace), ",")},
 		{Name: envSessionAPIAuthAllowedNamespaces, Value: strings.Join(c.allowedNamespacesFor(namespace), ",")},
 	}

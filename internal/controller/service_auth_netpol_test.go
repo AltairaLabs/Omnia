@@ -44,10 +44,10 @@ func authTestScheme() *k8sruntime.Scheme {
 	return s
 }
 
-func newAuthReconciler(t *testing.T, auth ServiceAuthConfig, objs ...k8sruntime.Object) *WorkspaceReconciler {
+func newAuthReconciler(t *testing.T, auth ServiceAuthConfig) *WorkspaceReconciler {
 	t.Helper()
 	scheme := authTestScheme()
-	cl := fake.NewClientBuilder().WithScheme(scheme).WithRuntimeObjects(objs...).Build()
+	cl := fake.NewClientBuilder().WithScheme(scheme).Build()
 	sb := &ServiceBuilder{
 		SessionImage:           "ghcr.io/altairalabs/omnia-session-api:test",
 		SessionImagePullPolicy: corev1.PullIfNotPresent,
@@ -59,7 +59,7 @@ func newAuthReconciler(t *testing.T, auth ServiceAuthConfig, objs ...k8sruntime.
 		Client:                           cl,
 		Scheme:                           scheme,
 		ServiceBuilder:                   sb,
-		AgentWorkspaceReaderClusterRole:  "omnia-agent-workspace-reader",
+		AgentWorkspaceReaderClusterRole:  testAgentWorkspaceReaderRole,
 		OperatorNamespace:                "omnia-system",
 		SessionAPITokenReviewClusterRole: "omnia-session-api-tokenreview",
 	}
@@ -68,25 +68,25 @@ func newAuthReconciler(t *testing.T, auth ServiceAuthConfig, objs ...k8sruntime.
 func TestNetworkHardening_DisabledIsNoop(t *testing.T) {
 	g := NewWithT(t)
 	r := newAuthReconciler(t, ServiceAuthConfig{Enabled: false})
-	ws := newTestWorkspace("acme", "acme-ns", nil)
+	ws := newTestWorkspace("acme", testAuthNS, nil)
 
-	g.Expect(r.reconcileServiceAuthNetworkHardening(context.Background(), ws, "acme-ns")).To(Succeed())
+	g.Expect(r.reconcileServiceAuthNetworkHardening(context.Background(), ws, testAuthNS)).To(Succeed())
 
 	np := &networkingv1.NetworkPolicy{}
-	err := r.Get(context.Background(), types.NamespacedName{Name: "service-auth-acme", Namespace: "acme-ns"}, np)
+	err := r.Get(context.Background(), types.NamespacedName{Name: testServiceAuthNetpolName, Namespace: testAuthNS}, np)
 	g.Expect(apierrors.IsNotFound(err)).To(BeTrue())
 }
 
 func TestNetworkHardening_CreatesDefaultDenyNetworkPolicy(t *testing.T) {
 	g := NewWithT(t)
 	r := newAuthReconciler(t, ServiceAuthConfig{Enabled: true, Audience: testAudience})
-	ws := newTestWorkspace("acme", "acme-ns", nil)
+	ws := newTestWorkspace("acme", testAuthNS, nil)
 	ctx := context.Background()
 
-	g.Expect(r.reconcileServiceAuthNetworkHardening(ctx, ws, "acme-ns")).To(Succeed())
+	g.Expect(r.reconcileServiceAuthNetworkHardening(ctx, ws, testAuthNS)).To(Succeed())
 
 	np := &networkingv1.NetworkPolicy{}
-	g.Expect(r.Get(ctx, types.NamespacedName{Name: "service-auth-acme", Namespace: "acme-ns"}, np)).To(Succeed())
+	g.Expect(r.Get(ctx, types.NamespacedName{Name: testServiceAuthNetpolName, Namespace: testAuthNS}, np)).To(Succeed())
 	g.Expect(np.Spec.PolicyTypes).To(ContainElement(networkingv1.PolicyTypeIngress))
 	g.Expect(np.Spec.PodSelector.MatchLabels).To(HaveKeyWithValue(labelWorkspace, "acme"))
 	g.Expect(np.Spec.Ingress).To(HaveLen(1))
@@ -96,60 +96,59 @@ func TestNetworkHardening_CreatesDefaultDenyNetworkPolicy(t *testing.T) {
 	// No PeerAuthentication when Istio mTLS is off.
 	pa := &unstructured.Unstructured{}
 	pa.SetGroupVersionKind(peerAuthenticationGVK)
-	err := r.Get(ctx, types.NamespacedName{Name: "service-auth-acme", Namespace: "acme-ns"}, pa)
+	err := r.Get(ctx, types.NamespacedName{Name: testServiceAuthNetpolName, Namespace: testAuthNS}, pa)
 	g.Expect(apierrors.IsNotFound(err)).To(BeTrue())
 }
 
 func TestNetworkHardening_IdempotentUpdate(t *testing.T) {
 	g := NewWithT(t)
 	r := newAuthReconciler(t, ServiceAuthConfig{Enabled: true, Audience: testAudience})
-	ws := newTestWorkspace("acme", "acme-ns", nil)
+	ws := newTestWorkspace("acme", testAuthNS, nil)
 	ctx := context.Background()
 
-	g.Expect(r.reconcileServiceAuthNetworkHardening(ctx, ws, "acme-ns")).To(Succeed())
+	g.Expect(r.reconcileServiceAuthNetworkHardening(ctx, ws, testAuthNS)).To(Succeed())
 	// Second pass hits the update branch and must not error.
-	g.Expect(r.reconcileServiceAuthNetworkHardening(ctx, ws, "acme-ns")).To(Succeed())
+	g.Expect(r.reconcileServiceAuthNetworkHardening(ctx, ws, testAuthNS)).To(Succeed())
 }
 
 func TestNetworkHardening_NoOperatorNamespace(t *testing.T) {
 	g := NewWithT(t)
 	r := newAuthReconciler(t, ServiceAuthConfig{Enabled: true})
 	r.OperatorNamespace = ""
-	ws := newTestWorkspace("acme", "acme-ns", nil)
+	ws := newTestWorkspace("acme", testAuthNS, nil)
 	ctx := context.Background()
 
-	g.Expect(r.reconcileServiceAuthNetworkHardening(ctx, ws, "acme-ns")).To(Succeed())
+	g.Expect(r.reconcileServiceAuthNetworkHardening(ctx, ws, testAuthNS)).To(Succeed())
 	np := &networkingv1.NetworkPolicy{}
-	g.Expect(r.Get(ctx, types.NamespacedName{Name: "service-auth-acme", Namespace: "acme-ns"}, np)).To(Succeed())
+	g.Expect(r.Get(ctx, types.NamespacedName{Name: testServiceAuthNetpolName, Namespace: testAuthNS}, np)).To(Succeed())
 	g.Expect(np.Spec.Ingress[0].From).To(HaveLen(1))
 }
 
 func TestNetworkHardening_IstioPeerAuthentication(t *testing.T) {
 	g := NewWithT(t)
 	r := newAuthReconciler(t, ServiceAuthConfig{Enabled: true, IstioMTLS: true})
-	ws := newTestWorkspace("acme", "acme-ns", nil)
+	ws := newTestWorkspace("acme", testAuthNS, nil)
 	ctx := context.Background()
 
-	g.Expect(r.reconcileServiceAuthNetworkHardening(ctx, ws, "acme-ns")).To(Succeed())
+	g.Expect(r.reconcileServiceAuthNetworkHardening(ctx, ws, testAuthNS)).To(Succeed())
 
 	pa := &unstructured.Unstructured{}
 	pa.SetGroupVersionKind(peerAuthenticationGVK)
-	g.Expect(r.Get(ctx, types.NamespacedName{Name: "service-auth-acme", Namespace: "acme-ns"}, pa)).To(Succeed())
+	g.Expect(r.Get(ctx, types.NamespacedName{Name: testServiceAuthNetpolName, Namespace: testAuthNS}, pa)).To(Succeed())
 	mode, found, err := unstructured.NestedString(pa.Object, "spec", "mtls", "mode")
 	g.Expect(err).NotTo(HaveOccurred())
 	g.Expect(found).To(BeTrue())
 	g.Expect(mode).To(Equal("STRICT"))
 
 	// Idempotent second pass (update branch).
-	g.Expect(r.reconcileServiceAuthNetworkHardening(ctx, ws, "acme-ns")).To(Succeed())
+	g.Expect(r.reconcileServiceAuthNetworkHardening(ctx, ws, testAuthNS)).To(Succeed())
 }
 
 func TestTokenReviewBinding_DisabledIsNoop(t *testing.T) {
 	g := NewWithT(t)
 	r := newAuthReconciler(t, ServiceAuthConfig{Enabled: false})
-	ws := newTestWorkspace("acme", "acme-ns", nil)
 
-	g.Expect(r.reconcileSessionAPITokenReviewBinding(context.Background(), ws, "acme-ns", "session-acme-default")).To(Succeed())
+	g.Expect(r.reconcileSessionAPITokenReviewBinding(context.Background(), testAuthNS, testSessionSAName)).To(Succeed())
 	assertNoTokenReviewBinding(t, r.Client)
 }
 
@@ -157,29 +156,27 @@ func TestTokenReviewBinding_NoClusterRoleNameIsNoop(t *testing.T) {
 	g := NewWithT(t)
 	r := newAuthReconciler(t, ServiceAuthConfig{Enabled: true})
 	r.SessionAPITokenReviewClusterRole = ""
-	ws := newTestWorkspace("acme", "acme-ns", nil)
 
-	g.Expect(r.reconcileSessionAPITokenReviewBinding(context.Background(), ws, "acme-ns", "session-acme-default")).To(Succeed())
+	g.Expect(r.reconcileSessionAPITokenReviewBinding(context.Background(), testAuthNS, testSessionSAName)).To(Succeed())
 	assertNoTokenReviewBinding(t, r.Client)
 }
 
 func TestTokenReviewBinding_CreatesClusterRoleBinding(t *testing.T) {
 	g := NewWithT(t)
 	r := newAuthReconciler(t, ServiceAuthConfig{Enabled: true})
-	ws := newTestWorkspace("acme", "acme-ns", nil)
 	ctx := context.Background()
 
-	g.Expect(r.reconcileSessionAPITokenReviewBinding(ctx, ws, "acme-ns", "session-acme-default")).To(Succeed())
+	g.Expect(r.reconcileSessionAPITokenReviewBinding(ctx, testAuthNS, testSessionSAName)).To(Succeed())
 
 	crb := &rbacv1.ClusterRoleBinding{}
 	g.Expect(r.Get(ctx, types.NamespacedName{Name: "session-tokenreview-acme-ns-session-acme-default"}, crb)).To(Succeed())
 	g.Expect(crb.RoleRef.Name).To(Equal("omnia-session-api-tokenreview"))
 	g.Expect(crb.Subjects).To(HaveLen(1))
-	g.Expect(crb.Subjects[0].Name).To(Equal("session-acme-default"))
-	g.Expect(crb.Subjects[0].Namespace).To(Equal("acme-ns"))
+	g.Expect(crb.Subjects[0].Name).To(Equal(testSessionSAName))
+	g.Expect(crb.Subjects[0].Namespace).To(Equal(testAuthNS))
 
 	// Idempotent: second call must not error (binding already exists).
-	g.Expect(r.reconcileSessionAPITokenReviewBinding(ctx, ws, "acme-ns", "session-acme-default")).To(Succeed())
+	g.Expect(r.reconcileSessionAPITokenReviewBinding(ctx, testAuthNS, testSessionSAName)).To(Succeed())
 }
 
 func assertNoTokenReviewBinding(t *testing.T, cl client.Client) {

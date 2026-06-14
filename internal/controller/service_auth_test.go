@@ -26,8 +26,11 @@ import (
 )
 
 const (
-	testAudience = "omnia-session-api"
-	testAuthNS   = "acme-ns"
+	testAudience                 = "omnia-session-api"
+	testAuthNS                   = "acme-ns"
+	testAgentWorkspaceReaderRole = "omnia-agent-workspace-reader"
+	testServiceAuthNetpolName    = "service-auth-acme"    // NetworkPolicy/PeerAuthentication name for workspace "acme"
+	testSessionSAName            = "session-acme-default" // session-api ServiceAccount in the "acme" workspace
 )
 
 func enabledAuth() ServiceAuthConfig {
