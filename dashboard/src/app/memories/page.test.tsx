@@ -1,20 +1,16 @@
+import React from "react";
 import { render, screen, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const {
-  mockUseAuth,
-  mockUseMemories,
-  mockDeleteMutate,
-  mockDeleteAllMutate,
-  mockExportMutate,
-} = vi.hoisted(() => ({
-  mockUseAuth: vi.fn(),
-  mockUseMemories: vi.fn(),
-  mockDeleteMutate: vi.fn(),
-  mockDeleteAllMutate: vi.fn(),
-  mockExportMutate: vi.fn(),
-}));
+const { mockUseAuth, mockUseMemoryProjection, mockDeleteMutate, mockGetItem, mockSetItem } =
+  vi.hoisted(() => ({
+    mockUseAuth: vi.fn(),
+    mockUseMemoryProjection: vi.fn(),
+    mockDeleteMutate: vi.fn(),
+    mockGetItem: vi.fn((_key: string) => null as string | null),
+    mockSetItem: vi.fn(),
+  }));
 
 // Mock layout components that pull in complex infrastructure (WorkspaceSwitcher, UserMenu)
 vi.mock("@/components/layout", () => ({
@@ -44,36 +40,86 @@ vi.mock("@/contexts/workspace-context", () => ({
     error: null,
   }),
 }));
-vi.mock("@/hooks/use-memories", () => ({
-  useMemories: mockUseMemories,
+vi.mock("@/hooks/use-memory-projection", () => ({
+  useMemoryProjection: mockUseMemoryProjection,
 }));
 vi.mock("@/hooks/use-memory-mutations", () => ({
   useDeleteMemory: () => ({ mutate: mockDeleteMutate }),
-  useDeleteAllMemories: () => ({ mutate: mockDeleteAllMutate }),
-  useExportMemories: () => ({ mutate: mockExportMutate, isPending: false }),
 }));
-vi.mock("@/components/memories/memory-graph", () => ({
-  MemoryGraph: ({
-    memories,
-    onNodeClick,
+
+// usePersistedViewMode reads/writes localStorage; stub it out
+vi.mock("@/hooks/use-persisted-view-mode", () => ({
+  usePersistedViewMode: (key: string, defaultValue: string) => {
+    const value = mockGetItem(key) ?? defaultValue;
+    return [value, mockSetItem];
+  },
+}));
+
+// next/dynamic with ssr:false skips rendering in vitest (jsdom has no browser renderer).
+// Override it to render the MemoryGalaxy stub synchronously.
+vi.mock("next/dynamic", () => ({
+  default: (_importFn: unknown, _opts: unknown) => {
+    // Inline stub: identical shape to the vi.mock below for memory-galaxy
+    const Stub = ({
+      points,
+      onSelect,
+    }: {
+      points: Array<{ id: string; title?: string; preview?: string }>;
+      onSelect: (p: { id: string; title?: string; preview?: string }) => void;
+    }) => (
+      <div data-testid="memory-galaxy">
+        {points.map((p) => (
+          <button
+            key={p.id}
+            type="button"
+            data-testid={`galaxy-point-${p.id}`}
+            onClick={() => onSelect(p)}
+          >
+            {p.title ?? p.preview}
+          </button>
+        ))}
+      </div>
+    );
+    Stub.displayName = "DynamicMemoryGalaxy";
+    return Stub;
+  },
+}));
+
+// MemoryGalaxy is a canvas component — render a stub
+vi.mock("@/components/memories/memory-galaxy", () => ({
+  MemoryGalaxy: ({
+    points,
+    onSelect,
   }: {
-    memories: Array<{ id: string; content: string }>;
-    onNodeClick: (m: { id: string; content: string }) => void;
+    points: Array<{ id: string; title?: string; preview?: string }>;
+    onSelect: (p: { id: string; title?: string; preview?: string }) => void;
   }) => (
-    <div data-testid="memory-graph">
-      {memories.map((m) => (
+    <div data-testid="memory-galaxy">
+      {points.map((p) => (
         <button
-          key={m.id}
+          key={p.id}
           type="button"
-          data-testid={`memory-${m.id}`}
-          onClick={() => onNodeClick(m)}
+          data-testid={`galaxy-point-${p.id}`}
+          onClick={() => onSelect(p)}
         >
-          {m.content}
+          {p.title ?? p.preview}
         </button>
       ))}
     </div>
   ),
 }));
+
+// TierRail stub
+vi.mock("@/components/memories/tier-rail", () => ({
+  TierRail: ({ onToggle }: { onToggle: (tier: string) => void }) => (
+    <div data-testid="tier-rail">
+      <button type="button" data-testid="tier-toggle-user" onClick={() => onToggle("user")}>
+        user
+      </button>
+    </div>
+  ),
+}));
+
 vi.mock("@/components/memories/memory-detail-panel", () => ({
   MemoryDetailPanel: ({
     memory,
@@ -94,33 +140,38 @@ vi.mock("@/components/memories/memory-detail-panel", () => ({
       </div>
     ) : null,
 }));
-vi.mock("@/hooks/use-consent", () => ({
-  useConsent: () => ({
-    data: { grants: [], defaults: [], denied: [] },
-    isLoading: false,
-  }),
-  useUpdateConsent: () => ({ mutate: vi.fn(), isPending: false }),
-}));
 
 import MemoriesPage from "./page";
 
-function makeMemory(
+function makePoint(
   id: string,
-  content: string,
-  category = "memory:identity"
-) {
+  title = "test point",
+  category = "memory:identity",
+): {
+  id: string;
+  x: number;
+  y: number;
+  tier: "user";
+  category: string;
+  confidence: number;
+  title: string;
+  preview: string;
+  observedAt: string;
+} {
   return {
     id,
-    type: "fact",
-    content,
+    x: 0,
+    y: 0,
+    tier: "user",
+    category,
     confidence: 0.9,
-    scope: { workspace: "ws-1" },
-    createdAt: new Date().toISOString(),
-    metadata: { consent_category: category },
+    title,
+    preview: `${title} preview`,
+    observedAt: new Date().toISOString(),
   };
 }
 
-describe("MemoriesPage", () => {
+describe("MemoriesPage (galaxy)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockUseAuth.mockReturnValue({
@@ -129,116 +180,89 @@ describe("MemoriesPage", () => {
       hasMemoryIdentity: true,
       memoryUserId: "test-user",
     });
-    mockUseMemories.mockReturnValue({
-      data: { memories: [], total: 0 },
+    mockUseMemoryProjection.mockReturnValue({
+      data: { points: [], total: 0, capped: false, model: "tsne", embeddingModel: "text-embedding-3-small", embeddingDim: 1536, computedAt: new Date().toISOString() },
       isLoading: false,
       error: null,
     });
   });
 
-  it("renders empty state when no memories", () => {
+  it("renders empty state when no points", () => {
     render(<MemoriesPage />);
     expect(screen.getByTestId("empty-state")).toBeTruthy();
   });
 
-  it("renders toolbar", () => {
+  it("renders toolbar when authenticated", () => {
     render(<MemoriesPage />);
     expect(screen.getByTestId("memories-toolbar")).toBeTruthy();
   });
 
-  it("renders consent banner", () => {
-    render(<MemoriesPage />);
-    expect(screen.getByTestId("consent-banner")).toBeTruthy();
-  });
-
-  it("renders the graph when memories exist", () => {
-    const memories = [
-      makeMemory("m1", "likes dark mode", "memory:preferences"),
-      makeMemory("m2", "based in Denver", "memory:location"),
-    ];
-    mockUseMemories.mockReturnValue({
-      data: { memories, total: 2 },
-      isLoading: false,
-      error: null,
-    });
-    render(<MemoriesPage />);
-    expect(screen.getByTestId("memory-graph")).toBeTruthy();
-    expect(screen.getByText("Showing 2 of 2 memories")).toBeTruthy();
-  });
-
-  it("renders a skeleton while loading", () => {
-    mockUseMemories.mockReturnValue({
-      data: undefined,
-      isLoading: true,
-      error: null,
-    });
-    const { container } = render(<MemoriesPage />);
-    expect(container.querySelector(".rounded-lg")).toBeTruthy();
-  });
-
-  it("shows an error alert when the query fails", () => {
-    mockUseMemories.mockReturnValue({
-      data: undefined,
-      isLoading: false,
-      error: new Error("boom"),
-    });
-    render(<MemoriesPage />);
-    expect(screen.getByTestId("memory-error")).toBeTruthy();
-    expect(screen.getByText(/boom/)).toBeTruthy();
-  });
-
-  it("filters memories by search query", () => {
-    mockUseMemories.mockReturnValue({
+  it("renders the galaxy and tier rail when points exist", () => {
+    mockUseMemoryProjection.mockReturnValue({
       data: {
-        memories: [
-          makeMemory("m1", "likes dark mode"),
-          makeMemory("m2", "based in Denver"),
-        ],
+        points: [makePoint("p1", "dark mode"), makePoint("p2", "Denver", "memory:location")],
         total: 2,
+        capped: false,
+        model: "tsne",
+        embeddingModel: "text-embedding-3-small",
+        embeddingDim: 1536,
+        computedAt: new Date().toISOString(),
       },
       isLoading: false,
       error: null,
     });
     render(<MemoriesPage />);
-    fireEvent.change(screen.getByTestId("memory-search"), {
-      target: { value: "denver" },
+    expect(screen.getByTestId("memory-galaxy")).toBeTruthy();
+    expect(screen.getByTestId("tier-rail")).toBeTruthy();
+    expect(screen.getByText(/2 memories/)).toBeTruthy();
+  });
+
+  it("shows a loading skeleton while fetching", () => {
+    mockUseMemoryProjection.mockReturnValue({
+      data: undefined,
+      isLoading: true,
+      error: null,
     });
-    expect(screen.queryByText("likes dark mode")).toBeNull();
-    expect(screen.getByText("based in Denver")).toBeTruthy();
-  });
-
-  it("invokes the export mutation when Export is clicked", async () => {
-    const user = userEvent.setup();
     render(<MemoriesPage />);
-    await user.click(screen.getByRole("button", { name: /export/i }));
-    expect(mockExportMutate).toHaveBeenCalled();
+    expect(screen.getByTestId("galaxy-loading")).toBeTruthy();
   });
 
-  it("invokes deleteAll when Forget Everything is confirmed", async () => {
-    const user = userEvent.setup();
+  it("shows an error alert when the query fails", () => {
+    mockUseMemoryProjection.mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      error: new Error("projection failed"),
+    });
     render(<MemoriesPage />);
-    await user.click(screen.getByTestId("forget-all-button"));
-    await user.click(screen.getByTestId("confirm-forget-all"));
-    expect(mockDeleteAllMutate).toHaveBeenCalled();
+    expect(screen.getByTestId("memory-error")).toBeTruthy();
+    expect(screen.getByText(/projection failed/)).toBeTruthy();
   });
 
-  it("invokes deleteMemory when a memory is deleted from the detail panel", async () => {
+  it("invokes deleteMemory when a point is selected and deleted", async () => {
     const user = userEvent.setup();
-    mockUseMemories.mockReturnValue({
-      data: { memories: [makeMemory("m1", "content")], total: 1 },
+    mockUseMemoryProjection.mockReturnValue({
+      data: {
+        points: [makePoint("p1", "remembers stuff")],
+        total: 1,
+        capped: false,
+        model: "tsne",
+        embeddingModel: "text-embedding-3-small",
+        embeddingDim: 1536,
+        computedAt: new Date().toISOString(),
+      },
       isLoading: false,
       error: null,
     });
     render(<MemoriesPage />);
-    await user.click(screen.getByTestId("memory-m1"));
+    await user.click(screen.getByTestId("galaxy-point-p1"));
     await user.click(screen.getByTestId("detail-delete"));
-    expect(mockDeleteMutate).toHaveBeenCalledWith("m1");
+    expect(mockDeleteMutate).toHaveBeenCalledWith("p1");
   });
 
-  describe("anonymous user without device ID", () => {
+  describe("anonymous user without identity", () => {
     beforeEach(() => {
       mockUseAuth.mockReturnValue({
-        user: { id: "anon", provider: "anonymous" },
+        user: null,
         isAuthenticated: false,
         hasMemoryIdentity: false,
         memoryUserId: undefined,
@@ -251,14 +275,78 @@ describe("MemoriesPage", () => {
       expect(screen.queryByTestId("empty-state")).toBeNull();
     });
 
-    it("hides the toolbar", () => {
+    it("hides the toolbar and tier rail", () => {
       render(<MemoriesPage />);
       expect(screen.queryByTestId("memories-toolbar")).toBeNull();
+      expect(screen.queryByTestId("tier-rail")).toBeNull();
     });
 
     it("mentions signing in", () => {
       render(<MemoriesPage />);
       expect(screen.getByText(/sign in/i)).toBeTruthy();
     });
+  });
+
+  it("shows semantic clustering hint by default", () => {
+    mockUseMemoryProjection.mockReturnValue({
+      data: {
+        points: [makePoint("p1")],
+        total: 1,
+        capped: false,
+        model: "tsne",
+        projectionInput: "embedding",
+        embeddingModel: "text-embedding-3-small",
+        embeddingDim: 1536,
+        computedAt: new Date().toISOString(),
+      },
+      isLoading: false,
+      error: null,
+    });
+    render(<MemoriesPage />);
+    expect(screen.getByText(/semantic clustering/)).toBeTruthy();
+  });
+
+  it("shows lexical clustering hint when projectionInput is tfidf", () => {
+    mockUseMemoryProjection.mockReturnValue({
+      data: {
+        points: [makePoint("p1")],
+        total: 1,
+        capped: false,
+        model: "tsne",
+        projectionInput: "tfidf",
+        embeddingModel: "bm25",
+        embeddingDim: 0,
+        computedAt: new Date().toISOString(),
+      },
+      isLoading: false,
+      error: null,
+    });
+    render(<MemoriesPage />);
+    expect(screen.getByText(/lexical clustering/)).toBeTruthy();
+  });
+
+  it("shows capped notice when response is capped", () => {
+    mockUseMemoryProjection.mockReturnValue({
+      data: {
+        points: [makePoint("p1")],
+        total: 1000,
+        capped: true,
+        model: "tsne",
+        embeddingModel: "text-embedding-3-small",
+        embeddingDim: 1536,
+        computedAt: new Date().toISOString(),
+      },
+      isLoading: false,
+      error: null,
+    });
+    render(<MemoriesPage />);
+    expect(screen.getByText(/showing a capped subset/)).toBeTruthy();
+  });
+
+  it("filters the search input is rendered and interactive", () => {
+    render(<MemoriesPage />);
+    const input = screen.getByTestId("memory-search");
+    fireEvent.change(input, { target: { value: "test" } });
+    expect((input as HTMLInputElement).value).toBe("test");
   });
 });
