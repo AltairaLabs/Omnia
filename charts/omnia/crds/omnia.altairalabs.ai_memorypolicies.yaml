@@ -351,6 +351,31 @@ spec:
                     - agent
                     type: string
                 type: object
+              projection:
+                description: |-
+                  projection configures the Memory Galaxy pre-render worker that
+                  renders the workspace-wide 2D layout into memory_projections so the
+                  projection endpoint serves it instantly.
+                properties:
+                  changeThreshold:
+                    description: |-
+                      ChangeThreshold re-renders a scope once at least this many entities have
+                      changed (live entity count vs the count at last render) since the last
+                      render. 0 / omitted = re-render on any change.
+                    format: int32
+                    type: integer
+                  enabled:
+                    description: |-
+                      Enabled turns on background pre-rendering of the workspace-wide galaxy
+                      layout for workspaces bound to this policy.
+                    type: boolean
+                  schedule:
+                    description: |-
+                      Schedule is an optional cron expression bounding how often a scope is
+                      re-rendered (evaluated against the last render's computed_at). Omit to
+                      re-render whenever the change trigger fires.
+                    type: string
+                type: object
               recall:
                 description: |-
                   recall tunes the read path (half-life per tier, large-memory

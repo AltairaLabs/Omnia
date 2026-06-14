@@ -533,6 +533,27 @@ type MemoryConsolidationTimeouts struct {
 	PassWallClock *metav1.Duration `json:"passWallClock,omitempty"`
 }
 
+// MemoryProjectionConfig configures the Memory Galaxy pre-render worker for
+// this policy's workspaces.
+type MemoryProjectionConfig struct {
+	// Enabled turns on background pre-rendering of the workspace-wide galaxy
+	// layout for workspaces bound to this policy.
+	// +optional
+	Enabled bool `json:"enabled,omitempty"`
+
+	// Schedule is an optional cron expression bounding how often a scope is
+	// re-rendered (evaluated against the last render's computed_at). Omit to
+	// re-render whenever the change trigger fires.
+	// +optional
+	Schedule string `json:"schedule,omitempty"`
+
+	// ChangeThreshold re-renders a scope once at least this many entities have
+	// changed (live entity count vs the count at last render) since the last
+	// render. 0 / omitted = re-render on any change.
+	// +optional
+	ChangeThreshold *int32 `json:"changeThreshold,omitempty"`
+}
+
 // MemoryPolicySpec is the top-level spec. Workspaces opt in to a
 // MemoryPolicy via Workspace.spec.services[].memory.policyRef — many
 // workspaces may reference one policy, and a workspace with no
@@ -586,6 +607,12 @@ type MemoryPolicySpec struct {
 	// docs/local-backlog/2026-05-22-memory-consolidation-design.md.
 	// +optional
 	Consolidation *MemoryConsolidationConfig `json:"consolidation,omitempty"`
+
+	// projection configures the Memory Galaxy pre-render worker that
+	// renders the workspace-wide 2D layout into memory_projections so the
+	// projection endpoint serves it instantly.
+	// +optional
+	Projection *MemoryProjectionConfig `json:"projection,omitempty"`
 
 	// ingestion configures how source documents become index items at
 	// /institutional/ingest. Read live by memory-api via the PolicyLoader
