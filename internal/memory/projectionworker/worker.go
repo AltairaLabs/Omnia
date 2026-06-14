@@ -101,34 +101,43 @@ func (w *Worker) runPolicy(ctx context.Context, p memoryv1.MemoryPolicy) {
 
 func (w *Worker) runWorkspace(ctx context.Context, p memoryv1.MemoryPolicy, ws consolidation.Workspace) {
 	scope := map[string]string{memory.ScopeWorkspaceID: ws.UID}
-	key := memory.ProjectionScopeKey(scope)
-
-	live, err := w.opts.Store.ProjectionFingerprint(ctx, scope)
-	if err != nil {
-		w.opts.Log.Error(err, "fingerprint", "workspace", ws.UID)
-		return
-	}
-	if live == "" {
-		return // no memories
-	}
-	stored, err := w.opts.Store.LoadProjection(ctx, key)
-	if err != nil {
-		w.opts.Log.Error(err, "load projection", "workspace", ws.UID)
-		return
-	}
-	render, err := shouldRender(stored, live, *p.Spec.Projection, w.opts.Now())
-	if err != nil {
-		w.opts.Log.Error(err, "shouldRender", "workspace", ws.UID, "policy", p.Name)
-		return
-	}
-	if !render {
+	// Cheap pre-filter (no lock) so a steady-state poll over many workspaces
+	// doesn't contend on the advisory lock when nothing has changed.
+	if !w.needsRender(ctx, p, ws, scope) {
 		return
 	}
 	w.renderLocked(ctx, p, ws, scope)
 }
 
+// needsRender reports whether scope requires a (re)render right now, reading
+// the live fingerprint + stored layout and applying shouldRender. Logs and
+// returns false on any store/parse error (the next tick retries).
+func (w *Worker) needsRender(ctx context.Context, p memoryv1.MemoryPolicy, ws consolidation.Workspace, scope map[string]string) bool {
+	live, err := w.opts.Store.ProjectionFingerprint(ctx, scope)
+	if err != nil {
+		w.opts.Log.Error(err, "fingerprint", "workspace", ws.UID)
+		return false
+	}
+	if live == "" {
+		return false // no memories
+	}
+	stored, err := w.opts.Store.LoadProjection(ctx, memory.ProjectionScopeKey(scope))
+	if err != nil {
+		w.opts.Log.Error(err, "load projection", "workspace", ws.UID)
+		return false
+	}
+	render, err := shouldRender(stored, live, *p.Spec.Projection, w.opts.Now())
+	if err != nil {
+		w.opts.Log.Error(err, "shouldRender", "workspace", ws.UID, "policy", p.Name)
+		return false
+	}
+	return render
+}
+
 // renderLocked acquires the per-workspace advisory lock and renders, recording
-// metrics. Split out of runWorkspace to keep cognitive complexity in check.
+// metrics. It re-checks needsRender INSIDE the lock: a peer replica may have
+// rendered between our pre-filter and acquiring the lock, so without this
+// re-check two replicas could both render the same change (a wasted t-SNE pass).
 func (w *Worker) renderLocked(ctx context.Context, p memoryv1.MemoryPolicy, ws consolidation.Workspace, scope map[string]string) {
 	acquired, release, err := w.opts.Lock.TryLock(ctx, ws.UID, "projection")
 	if err != nil {
@@ -140,6 +149,13 @@ func (w *Worker) renderLocked(ctx context.Context, p memoryv1.MemoryPolicy, ws c
 		return
 	}
 	defer release()
+
+	// Authoritative re-check under the lock — guarantees exactly one replica
+	// renders each change.
+	if !w.needsRender(ctx, p, ws, scope) {
+		w.opts.Log.V(1).Info("projection skipped", "reason", "already_rendered", "workspace", ws.UID)
+		return
+	}
 
 	start := w.opts.Now()
 	if _, _, err := memory.Render(ctx, w.opts.Store, scope); err != nil {

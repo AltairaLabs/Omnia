@@ -8,6 +8,7 @@ package memory
 
 import (
 	"context"
+	"errors"
 	"testing"
 )
 
@@ -16,7 +17,7 @@ func TestRender_ComputesAndPersists(t *testing.T) {
 	ctx := context.Background()
 	// seed a few institutional memories in testWorkspace1
 	for i := 0; i < 5; i++ {
-		must(t, store.SaveInstitutional(ctx, &Memory{Type: "policy",
+		must(t, store.SaveInstitutional(ctx, &Memory{Type: projTypePolicy,
 			Content: "policy fact number " + string(rune('a'+i)), Confidence: 0.9,
 			Scope: map[string]string{ScopeWorkspaceID: testWorkspace1}}))
 	}
@@ -39,5 +40,45 @@ func TestRender_ComputesAndPersists(t *testing.T) {
 	}
 	if len(sp.Layout) != 5 {
 		t.Errorf("stored layout = %d points, want 5", len(sp.Layout))
+	}
+}
+
+// fakeProjectionStore is a ProjectionStore whose calls fail on demand, so
+// Render's error branches can be exercised without a database.
+type fakeProjectionStore struct {
+	fpErr, inputsErr, loadErr, saveErr error
+}
+
+func (f fakeProjectionStore) ProjectionFingerprint(context.Context, map[string]string) (string, error) {
+	return "1:1", f.fpErr
+}
+
+func (f fakeProjectionStore) LoadProjectionInputs(context.Context, map[string]string) ([]ProjectionInput, error) {
+	return []ProjectionInput{{EntityID: "e1", Content: "x", Tier: string(TierInstitutional)}}, f.inputsErr
+}
+
+func (f fakeProjectionStore) LoadProjection(context.Context, string) (*StoredProjection, error) {
+	return nil, f.loadErr
+}
+
+func (f fakeProjectionStore) SaveProjection(context.Context, string, string, string, string, string, []ProjectionPoint) error {
+	return f.saveErr
+}
+
+func TestRender_PropagatesStoreErrors(t *testing.T) {
+	boom := errors.New("boom")
+	cases := map[string]fakeProjectionStore{
+		"fingerprint": {fpErr: boom},
+		"inputs":      {inputsErr: boom},
+		"load":        {loadErr: boom},
+		"save":        {saveErr: boom},
+	}
+	scope := map[string]string{ScopeWorkspaceID: testWorkspace1}
+	for name, store := range cases {
+		t.Run(name, func(t *testing.T) {
+			if _, _, err := Render(context.Background(), store, scope); err == nil {
+				t.Errorf("Render: expected error from %s stage", name)
+			}
+		})
 	}
 }
