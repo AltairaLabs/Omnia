@@ -109,31 +109,38 @@ function isVisible(p: GalaxyPoint, hidden: Set<string>, colorBy: Dimension): boo
 
 interface BubblePos {
   p: GalaxyPoint;
-  x: number;
-  y: number;
+  left: number; // viewport x of the node
+  top: number; // viewport y of the node
   placement: "above" | "below";
+  tailOffset: number;
 }
 
-// Live screen anchors for the open bubbles, recomputed from the view each
-// render so they follow their points on pan/zoom. Off-screen ones drop out.
+// Live viewport anchors for the open bubbles, recomputed from the view each
+// render so they follow their points on pan/zoom. Only points currently on the
+// canvas get a bubble.
 function computeBubbles(
   points: GalaxyPoint[],
   openIds: Set<string>,
   view: View,
   size: { w: number; h: number },
+  rect: { left: number; top: number } | null,
 ): BubblePos[] {
   const out: BubblePos[] = [];
-  if (openIds.size === 0 || size.w === 0) return out;
+  if (openIds.size === 0 || size.w === 0 || !rect) return out;
   const fit = fitTransform(points, size.w, size.h);
+  const vw = window.innerWidth;
   for (const p of points) {
     if (!openIds.has(p.id)) continue;
     const s = project(p, fit, view);
-    if (s.x < -40 || s.x > size.w + 40 || s.y < -40 || s.y > size.h + 40) continue;
+    if (s.x < 0 || s.x > size.w || s.y < 0 || s.y > size.h) continue;
+    const nodeX = rect.left + s.x;
+    const cardLeft = Math.max(150, Math.min(vw - 150, nodeX));
     out.push({
       p,
-      x: Math.max(150, Math.min(size.w - 150, s.x)),
-      y: s.y,
+      left: cardLeft,
+      top: rect.top + s.y,
       placement: s.y > size.h / 2 ? "above" : "below",
+      tailOffset: Math.max(-120, Math.min(120, nodeX - cardLeft)),
     });
   }
   return out;
@@ -253,7 +260,7 @@ export function MemoryGalaxy({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [hovered, setHovered] = useState<GalaxyPoint | null>(null);
   const [openIds, setOpenIds] = useState<Set<string>>(new Set());
-  const [size, setSize] = useState({ w: 0, h: 0 });
+  const [size, setSize] = useState({ w: 0, h: 0, left: 0, top: 0 });
   const [view, setView] = useState<View>(DEFAULT_VIEW);
   const [labelsPref, setLabelsPref] = usePersistedViewMode<"on" | "off">(
     "omnia-memory-galaxy-labels",
@@ -273,6 +280,21 @@ export function MemoryGalaxy({
   const { resolvedTheme } = useTheme();
   const isDark = resolvedTheme !== "light";
   const drag = useRef({ active: false, moved: false, startX: 0, startY: 0, panX: 0, panY: 0 });
+  const prevZoom = useRef(view.zoom);
+  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Auto-close open bubbles when zooming out, debounced so small adjustments
+  // don't dismiss them.
+  useEffect(() => {
+    const zoomedOut = view.zoom < prevZoom.current - 0.001;
+    prevZoom.current = view.zoom;
+    if (!zoomedOut || openIds.size === 0) return;
+    if (closeTimer.current) clearTimeout(closeTimer.current);
+    closeTimer.current = setTimeout(() => setOpenIds(new Set()), 450);
+    return () => {
+      if (closeTimer.current) clearTimeout(closeTimer.current);
+    };
+  }, [view.zoom, openIds.size]);
 
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
@@ -296,13 +318,19 @@ export function MemoryGalaxy({
       const rect = canvas.getBoundingClientRect();
       canvas.width = rect.width;
       canvas.height = rect.height;
-      setSize({ w: rect.width, h: rect.height });
+      setSize({ w: rect.width, h: rect.height, left: rect.left, top: rect.top });
       draw();
     };
     resize();
     const ro = new ResizeObserver(resize);
     ro.observe(canvas);
-    return () => ro.disconnect();
+    window.addEventListener("scroll", resize, true);
+    window.addEventListener("resize", resize);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener("scroll", resize, true);
+      window.removeEventListener("resize", resize);
+    };
   }, [draw]);
 
   useEffect(() => {
@@ -406,7 +434,13 @@ export function MemoryGalaxy({
     });
   };
 
-  const openBubbles = computeBubbles(points, openIds, view, size);
+  const openBubbles = computeBubbles(
+    points,
+    openIds,
+    view,
+    size,
+    openIds.size > 0 ? { left: size.left, top: size.top } : null,
+  );
 
   return (
     <div className="relative h-[70vh] min-h-[360px] w-full overflow-hidden rounded-lg border bg-slate-50 dark:bg-[#0b1020]">
@@ -488,9 +522,10 @@ export function MemoryGalaxy({
         <MemoryGalaxyBubble
           key={b.p.id}
           point={b.p}
-          x={b.x}
-          y={b.y}
+          left={b.left}
+          top={b.top}
           placement={b.placement}
+          tailOffset={b.tailOffset}
           onClose={() => toggleOpen(b.p.id)}
           onDelete={(id) => {
             onDelete(id);

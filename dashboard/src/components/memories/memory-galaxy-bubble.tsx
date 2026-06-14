@@ -1,5 +1,6 @@
 "use client";
 
+import { createPortal } from "react-dom";
 import type { ReactNode } from "react";
 import { X, Trash2 } from "lucide-react";
 import type { GalaxyPoint } from "@/lib/memory-galaxy/types";
@@ -9,9 +10,10 @@ import { cn } from "@/lib/utils";
 
 interface MemoryGalaxyBubbleProps {
   point: GalaxyPoint;
-  x: number; // anchor screen x within the galaxy container
-  y: number; // anchor screen y within the galaxy container
+  left: number; // viewport x of the node (tail target)
+  top: number; // viewport y of the node (tail target)
   placement: "above" | "below";
+  tailOffset: number; // px from the card centre to the tail, so it points at the node when clamped
   onClose: () => void;
   onDelete: (id: string) => void;
 }
@@ -29,26 +31,34 @@ function Row({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
-// A speech-bubble popup anchored at a point's screen position, growing out of
-// the point. Positioned by the galaxy (which knows the live view transform).
+// A speech-bubble popup, portalled to <body> (so it's never clipped by the
+// galaxy's overflow and is always clickable), anchored at a node's viewport
+// position with a tail pointing back at the node.
 export function MemoryGalaxyBubble({
   point,
-  x,
-  y,
+  left,
+  top,
   placement,
+  tailOffset,
   onClose,
   onDelete,
 }: Readonly<MemoryGalaxyBubbleProps>) {
+  if (typeof document === "undefined") return null;
   const above = placement === "above";
-  return (
-    <div className="pointer-events-none absolute z-30" style={{ left: x, top: y }}>
+  const tailLeft = `calc(50% + ${tailOffset}px)`;
+
+  return createPortal(
+    <div className="pointer-events-none fixed z-[60]" style={{ left, top }}>
       <div
         className={cn(
-          "pointer-events-auto w-72 -translate-x-1/2 rounded-lg border bg-popover text-popover-foreground shadow-xl",
+          "pointer-events-auto relative w-72 -translate-x-1/2 rounded-xl border bg-popover text-popover-foreground shadow-xl",
           "animate-in fade-in-0 zoom-in-95 duration-150",
-          above ? "-translate-y-full origin-bottom" : "origin-top",
+          above && "-translate-y-full",
         )}
-        style={{ marginTop: above ? -10 : 10 }}
+        style={{
+          marginTop: above ? -12 : 12,
+          transformOrigin: `${tailLeft} ${above ? "bottom" : "top"}`,
+        }}
       >
         <div className="flex items-start gap-2 border-b p-3">
           <div className="min-w-0 flex-1">
@@ -92,13 +102,16 @@ export function MemoryGalaxyBubble({
           </button>
         </div>
 
+        {/* Tail: a rotated square half-out of the edge nearest the node. */}
         <div
           className={cn(
-            "absolute left-1/2 h-2.5 w-2.5 -translate-x-1/2 rotate-45 border bg-popover",
+            "absolute h-3 w-3 -ml-1.5 rotate-45 border bg-popover",
             above ? "bottom-[-6px] border-l-0 border-t-0" : "top-[-6px] border-b-0 border-r-0",
           )}
+          style={{ left: tailLeft }}
         />
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
