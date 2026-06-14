@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   fitTransform, worldToScreen, hitTest, colorForPoint,
   isTierVisible, matchesFilters, legendCounts,
-  parseHiddenTiers, serializeHiddenTiers,
+  parseHiddenTiers, serializeHiddenTiers, pointFacet, facetCounts,
 } from "./galaxy-math";
 import type { GalaxyPoint } from "./types";
 
@@ -69,5 +69,21 @@ describe("hidden-tier serialization", () => {
   });
   it("parses empty string to an empty set", () => {
     expect(parseHiddenTiers("")).toEqual(new Set());
+  });
+});
+describe("pointFacet / facetCounts", () => {
+  it("returns the tier or category for the active dimension", () => {
+    expect(pointFacet(pt({ tier: "agent" }), "tier")).toBe("agent");
+    expect(pointFacet(pt({ category: "memory:health" }), "category")).toBe("memory:health");
+    expect(pointFacet(pt({ category: undefined }), "category")).toBe("unknown");
+  });
+  it("counts points per facet for the active dimension", () => {
+    const pts = [
+      pt({ tier: "user", category: "memory:identity" }),
+      pt({ tier: "user", category: "memory:health" }),
+      pt({ tier: "agent", category: "memory:identity" }),
+    ];
+    expect(facetCounts(pts, "tier")).toEqual({ user: 2, agent: 1 });
+    expect(facetCounts(pts, "category")).toEqual({ "memory:identity": 2, "memory:health": 1 });
   });
 });

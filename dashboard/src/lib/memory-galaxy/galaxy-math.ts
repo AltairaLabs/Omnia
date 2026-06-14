@@ -67,6 +67,21 @@ export function legendCounts(points: GalaxyPoint[]): Record<Tier, number> {
   return counts;
 }
 
+// Which facet a point belongs to for the active color/filter dimension.
+export function pointFacet(p: GalaxyPoint, dim: "tier" | "category"): string {
+  return dim === "tier" ? p.tier : (p.category ?? "unknown");
+}
+
+// Count points per facet value for the active dimension.
+export function facetCounts(points: GalaxyPoint[], dim: "tier" | "category"): Record<string, number> {
+  const counts: Record<string, number> = {};
+  for (const p of points) {
+    const k = pointFacet(p, dim);
+    counts[k] = (counts[k] ?? 0) + 1;
+  }
+  return counts;
+}
+
 export function parseHiddenTiers(csv: string): Set<string> {
   return new Set(csv.split(",").map((s) => s.trim()).filter(Boolean));
 }

@@ -7,11 +7,15 @@ import {
   fitTransform,
   worldToScreen,
   colorForPoint,
-  isTierVisible,
   matchesFilters,
+  pointFacet,
   type Transform,
 } from "@/lib/memory-galaxy/galaxy-math";
+import { TIER_LABELS } from "@/lib/memory-analytics/colors";
+import type { Tier } from "@/lib/memory-analytics/types";
 import { Button } from "@/components/ui/button";
+
+type Dimension = "tier" | "category";
 
 interface View {
   zoom: number;
@@ -39,17 +43,21 @@ const DEFAULT_VIEW: View = { zoom: 1, panX: 0, panY: 0 };
 const MIN_ZOOM = 0.5;
 const MAX_ZOOM = 16;
 const DRAG_THRESHOLD = 3;
-const LABEL_MIN_ZOOM = 2; // start showing titles
-const DETAIL_ZOOM = 5; // also show a category line
+const LABEL_MIN_ZOOM = 2;
 const MAX_LABELS = 160;
-const POOL_BALL_MIN_RADIUS = 9; // show the confidence number once a bubble is this big
+const POOL_BALL_MIN_RADIUS = 9;
 const HIT_TOLERANCE = 4;
+// Confidence → radius: non-linear so a bell-curved distribution still spreads
+// visibly (the busy mid/high band gets most of the size range).
+const MIN_RADIUS = 2;
+const CONF_SPREAD = 9;
+const CONF_GAMMA = 1.8;
 
 interface MemoryGalaxyProps {
   points: GalaxyPoint[];
-  colorBy: "tier" | "category";
-  hiddenTiers: Set<string>;
-  filters: { category: string; search: string };
+  colorBy: Dimension;
+  hidden: Set<string>;
+  filters: { search: string };
   onSelect: (point: GalaxyPoint) => void;
 }
 
@@ -58,13 +66,13 @@ function project(p: GalaxyPoint, fit: Transform, view: View): ScreenPos {
   return { x: b.x * view.zoom + view.panX, y: b.y * view.zoom + view.panY };
 }
 
-// Logarithmic, so points grow with zoom without ballooning linearly.
+// Logarithmic zoom growth, on top of a strong non-linear confidence term.
 function sizeFactor(zoom: number): number {
   return Math.max(0.7, 1 + Math.log2(zoom) * 0.6);
 }
 
 function pointRadius(p: GalaxyPoint, sf: number): number {
-  return (2.5 + p.confidence * 3) * sf;
+  return (MIN_RADIUS + Math.pow(p.confidence, CONF_GAMMA) * CONF_SPREAD) * sf;
 }
 
 function overlaps(a: Box, b: Box): boolean {
@@ -81,7 +89,15 @@ function categoryLabel(cat?: string): string {
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
-// Pool-ball style: a white disc with the confidence (0–100) centred in the bubble.
+// The label heading is the dimension NOT used for color.
+function headingFor(p: GalaxyPoint, colorBy: Dimension): string {
+  return colorBy === "tier" ? categoryLabel(p.category) : TIER_LABELS[p.tier as Tier];
+}
+
+function isVisible(p: GalaxyPoint, hidden: Set<string>, colorBy: Dimension): boolean {
+  return !hidden.has(pointFacet(p, colorBy));
+}
+
 function drawPoolBall(ctx: CanvasRenderingContext2D, s: ScreenPos, r: number, confidence: number): void {
   const inner = r * 0.62;
   ctx.beginPath();
@@ -98,17 +114,17 @@ function drawPoolBall(ctx: CanvasRenderingContext2D, s: ScreenPos, r: number, co
 function drawPoints(
   ctx: CanvasRenderingContext2D,
   points: GalaxyPoint[],
-  colorBy: "tier" | "category",
-  hiddenTiers: Set<string>,
-  filters: { category: string; search: string },
+  colorBy: Dimension,
+  hidden: Set<string>,
+  filters: { search: string },
   scene: Scene,
 ): void {
   const sf = sizeFactor(scene.view.zoom);
   for (const p of points) {
-    if (!isTierVisible(p, hiddenTiers)) continue;
+    if (!isVisible(p, hidden, colorBy)) continue;
     const s = project(p, scene.fit, scene.view);
     if (!onScreen(s, scene.w, scene.h)) continue;
-    const dim = !matchesFilters(p, filters);
+    const dim = !matchesFilters(p, { category: "all", search: filters.search });
     const r = pointRadius(p, sf);
     ctx.globalAlpha = dim ? 0.1 : 0.9;
     ctx.fillStyle = colorForPoint(p, colorBy);
@@ -122,13 +138,15 @@ function drawPoints(
 
 function labelCandidates(
   points: GalaxyPoint[],
-  hiddenTiers: Set<string>,
-  filters: { category: string; search: string },
+  colorBy: Dimension,
+  hidden: Set<string>,
+  filters: { search: string },
   scene: Scene,
 ): Array<{ p: GalaxyPoint; s: ScreenPos }> {
   const out: Array<{ p: GalaxyPoint; s: ScreenPos }> = [];
   for (const p of points) {
-    if (!p.title || !isTierVisible(p, hiddenTiers) || !matchesFilters(p, filters)) continue;
+    if (!isVisible(p, hidden, colorBy)) continue;
+    if (!matchesFilters(p, { category: "all", search: filters.search })) continue;
     const s = project(p, scene.fit, scene.view);
     if (onScreen(s, scene.w, scene.h)) out.push({ p, s });
   }
@@ -136,12 +154,11 @@ function labelCandidates(
   return out;
 }
 
-// Semantic zoom: title past LABEL_MIN_ZOOM, + category past DETAIL_ZOOM, with
-// collision-avoidance so labels declutter themselves as points spread on zoom.
+// Heading = the non-color dimension; type underneath.
 function drawLabels(
   ctx: CanvasRenderingContext2D,
   candidates: Array<{ p: GalaxyPoint; s: ScreenPos }>,
-  detail: boolean,
+  colorBy: Dimension,
   width: number,
 ): void {
   const placed: Box[] = [];
@@ -150,26 +167,24 @@ function drawLabels(
   for (const { p, s } of candidates) {
     if (placed.length >= MAX_LABELS) break;
     ctx.font = "11px sans-serif";
-    const title = p.title ?? "";
-    const box: Box = { x: s.x + 10, y: s.y - 7, w: ctx.measureText(title).width + 6, h: detail ? 24 : 14 };
+    const heading = headingFor(p, colorBy);
+    const box: Box = { x: s.x + 10, y: s.y - 8, w: ctx.measureText(heading).width + 8, h: 26 };
     if (box.x + box.w > width || placed.some((q) => overlaps(box, q))) continue;
     placed.push(box);
     ctx.fillStyle = "rgba(11,16,32,0.72)";
     ctx.fillRect(box.x - 3, box.y, box.w, box.h);
     ctx.fillStyle = "rgba(226,232,240,0.95)";
-    ctx.fillText(title, box.x, s.y);
-    if (detail) {
-      ctx.font = "9px sans-serif";
-      ctx.fillStyle = "rgba(148,163,184,0.9)";
-      ctx.fillText(categoryLabel(p.category), box.x, s.y + 11);
-    }
+    ctx.fillText(heading, box.x, s.y - 1);
+    ctx.font = "9px sans-serif";
+    ctx.fillStyle = "rgba(148,163,184,0.9)";
+    ctx.fillText(p.type ?? "—", box.x, s.y + 11);
   }
 }
 
 export function MemoryGalaxy({
   points,
   colorBy,
-  hiddenTiers,
+  hidden,
   filters,
   onSelect,
 }: Readonly<MemoryGalaxyProps>) {
@@ -187,12 +202,11 @@ export function MemoryGalaxy({
     ctx.clearRect(0, 0, width, height);
     const fit = fitTransform(points, width, height);
     const scene: Scene = { fit, view, w: width, h: height };
-    drawPoints(ctx, points, colorBy, hiddenTiers, filters, scene);
+    drawPoints(ctx, points, colorBy, hidden, filters, scene);
     if (view.zoom >= LABEL_MIN_ZOOM) {
-      const candidates = labelCandidates(points, hiddenTiers, filters, scene);
-      drawLabels(ctx, candidates, view.zoom >= DETAIL_ZOOM, width);
+      drawLabels(ctx, labelCandidates(points, colorBy, hidden, filters, scene), colorBy, width);
     }
-  }, [points, colorBy, hiddenTiers, filters, view]);
+  }, [points, colorBy, hidden, filters, view]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -232,10 +246,8 @@ export function MemoryGalaxy({
     return () => canvas.removeEventListener("wheel", onWheel);
   }, []);
 
-  const visiblePoints = points.filter((p) => isTierVisible(p, hiddenTiers));
+  const visiblePoints = points.filter((p) => isVisible(p, hidden, colorBy));
 
-  // Screen-space hit-test against the ACTUAL drawn bubble size, so a click
-  // lands at any zoom level.
   const pickAt = (clientX: number, clientY: number): GalaxyPoint | null => {
     const canvas = canvasRef.current;
     if (!canvas) return null;
@@ -333,7 +345,10 @@ export function MemoryGalaxy({
       {hovered && (
         <div className="pointer-events-none absolute left-3 top-3 max-w-xs rounded-md bg-background/95 p-2 text-xs shadow">
           <div className="font-medium">{hovered.title}</div>
-          <div className="text-muted-foreground">{categoryLabel(hovered.category)}</div>
+          <div className="text-muted-foreground">
+            {categoryLabel(hovered.category)}
+            {hovered.type ? ` · ${hovered.type}` : ""}
+          </div>
         </div>
       )}
     </div>

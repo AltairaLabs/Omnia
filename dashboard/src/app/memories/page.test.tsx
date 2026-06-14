@@ -100,11 +100,11 @@ vi.mock("@/components/memories/memory-galaxy", () => ({
   ),
 }));
 
-// TierRail stub
-vi.mock("@/components/memories/tier-rail", () => ({
-  TierRail: ({ onToggle }: { onToggle: (tier: string) => void }) => (
-    <div data-testid="tier-rail">
-      <button type="button" data-testid="tier-toggle-user" onClick={() => onToggle("user")}>
+// FacetRail stub
+vi.mock("@/components/memories/facet-rail", () => ({
+  FacetRail: ({ onToggle }: { onToggle: (key: string) => void }) => (
+    <div data-testid="facet-rail">
+      <button type="button" data-testid="facet-toggle-user" onClick={() => onToggle("user")}>
         user
       </button>
     </div>
@@ -199,7 +199,7 @@ describe("MemoriesPage (galaxy)", () => {
     });
     render(<MemoriesPage />);
     expect(screen.getByTestId("memory-galaxy")).toBeTruthy();
-    expect(screen.getByTestId("tier-rail")).toBeTruthy();
+    expect(screen.getByTestId("facet-rail")).toBeTruthy();
     expect(screen.getByText(/2 memories/)).toBeTruthy();
   });
 
@@ -259,7 +259,7 @@ describe("MemoriesPage (galaxy)", () => {
     it("hides the toolbar and tier rail", () => {
       render(<MemoriesPage />);
       expect(screen.queryByTestId("memories-toolbar")).toBeNull();
-      expect(screen.queryByTestId("tier-rail")).toBeNull();
+      expect(screen.queryByTestId("facet-rail")).toBeNull();
     });
   });
 

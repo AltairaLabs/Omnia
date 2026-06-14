@@ -10,6 +10,7 @@ const TOPICS = [
   "refunds and returns", "scheduling preferences", "billing questions",
   "product specs", "user identity", "support tone", "shipping policy", "account settings",
 ];
+const KINDS = ["preference", "fact", "person", "event", "setting", "note"];
 
 function rng(seed: number): () => number {
   let a = seed >>> 0;
@@ -39,15 +40,19 @@ export function generateMockProjection({ seed, count }: { seed: number; count: n
     const c = clusters[Math.floor(r() * clusters.length)];
     const tier = TIERS[Math.floor(r() * TIERS.length)];
     const jitter = () => (r() + r() + r() - 1.5) * 0.18;
+    // Bell-ish confidence (sum of uniforms ≈ normal), centred ~0.65.
+    const confidence = 0.3 + ((r() + r() + r() + r()) / 4) * 0.7;
     points.push({
       id: `mock-${seed}-${i}`,
       x: clamp(c.cx + jitter()),
       y: clamp(c.cy + jitter()),
       tier,
       category: c.category,
-      confidence: 0.4 + r() * 0.6,
+      type: KINDS[Math.floor(r() * KINDS.length)],
+      confidence,
       title: `${c.topic} #${i}`,
       preview: `A remembered detail about ${c.topic}.`,
+      userRef: `user-${1 + Math.floor(r() * 12)}`,
       observedAt: "2026-06-10T00:00:00Z",
     });
   }

@@ -20,12 +20,14 @@ import { Brain, Search, AlertCircle, Library } from "lucide-react";
 import { useMemoryProjection } from "@/hooks/use-memory-projection";
 import { usePersistedViewMode } from "@/hooks/use-persisted-view-mode";
 import { MemoryDetailPanel } from "@/components/memories/memory-detail-panel";
-import { TierRail } from "@/components/memories/tier-rail";
+import { FacetRail, type Facet } from "@/components/memories/facet-rail";
+import { facetCounts, parseHiddenTiers } from "@/lib/memory-galaxy/galaxy-math";
 import {
-  legendCounts,
-  parseHiddenTiers,
-  serializeHiddenTiers,
-} from "@/lib/memory-galaxy/galaxy-math";
+  TIER_COLORS,
+  TIER_LABELS,
+  TIER_DESCRIPTIONS,
+  CATEGORY_COLORS,
+} from "@/lib/memory-analytics/colors";
 import type { GalaxyPoint } from "@/lib/memory-galaxy/types";
 import type { Tier } from "@/lib/memory-analytics/types";
 import type { MemoryEntity } from "@/lib/data/types";
@@ -36,27 +38,53 @@ const MemoryGalaxy = dynamic(
   { ssr: false },
 );
 
-const CATEGORIES = [
-  { value: "all", label: "All Categories" },
-  { value: "memory:identity", label: "Identity" },
-  { value: "memory:context", label: "Context" },
-  { value: "memory:health", label: "Health" },
-  { value: "memory:location", label: "Location" },
-  { value: "memory:preferences", label: "Preferences" },
-  { value: "memory:history", label: "History" },
+const TIER_KEYS: Tier[] = ["institutional", "agent", "user", "user_for_agent"];
+const CATEGORY_KEYS = [
+  "memory:identity",
+  "memory:context",
+  "memory:health",
+  "memory:location",
+  "memory:preferences",
+  "memory:history",
 ];
 
+function categoryLabel(cat: string): string {
+  const s = cat.replace(/^memory:/, "");
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+// Galaxy points carry only a pseudonymous user ref; the full content is a
+// future fetch (#1418). type + user surface as detail-panel metadata rows.
 function pointToMemory(p: GalaxyPoint): MemoryEntity {
   return {
     id: p.id,
-    type: "observation",
+    type: p.type ?? "observation",
     content: p.preview ?? p.title ?? "",
     confidence: p.confidence,
     scope: {},
-    metadata: { consent_category: p.category },
+    metadata: { consent_category: p.category, kind: p.type, user: p.userRef },
     createdAt: p.observedAt ?? "",
     tier: p.tier,
   };
+}
+
+function buildFacets(points: GalaxyPoint[], colorBy: "tier" | "category"): Facet[] {
+  const counts = facetCounts(points, colorBy);
+  if (colorBy === "tier") {
+    return TIER_KEYS.map((t) => ({
+      key: t,
+      label: TIER_LABELS[t],
+      color: TIER_COLORS[t],
+      count: counts[t] ?? 0,
+      description: TIER_DESCRIPTIONS[t],
+    }));
+  }
+  return CATEGORY_KEYS.map((c) => ({
+    key: c,
+    label: categoryLabel(c),
+    color: CATEGORY_COLORS[c] ?? CATEGORY_COLORS.unknown,
+    count: counts[c] ?? 0,
+  }));
 }
 
 interface GalaxyBodyState {
@@ -66,7 +94,7 @@ interface GalaxyBodyState {
   points: GalaxyPoint[];
   colorBy: "tier" | "category";
   hidden: Set<string>;
-  filters: { category: string; search: string };
+  search: string;
   onSelect: (p: GalaxyPoint) => void;
 }
 
@@ -76,9 +104,7 @@ function renderGalaxyBody(s: GalaxyBodyState): ReactNode {
       <Alert data-testid="no-workspace-notice">
         <AlertCircle className="h-4 w-4" />
         <AlertTitle>No workspace selected</AlertTitle>
-        <AlertDescription>
-          Select a workspace to view its memory galaxy.
-        </AlertDescription>
+        <AlertDescription>Select a workspace to view its memory galaxy.</AlertDescription>
       </Alert>
     );
   }
@@ -112,8 +138,8 @@ function renderGalaxyBody(s: GalaxyBodyState): ReactNode {
     <MemoryGalaxy
       points={s.points}
       colorBy={s.colorBy}
-      hiddenTiers={s.hidden}
-      filters={s.filters}
+      hidden={s.hidden}
+      filters={{ search: s.search }}
       onSelect={s.onSelect}
     />
   );
@@ -128,26 +154,32 @@ export default function MemoriesPage() {
   const { data, isLoading, error } = useMemoryProjection();
 
   const [selected, setSelected] = useState<GalaxyPoint | null>(null);
-  const [categoryFilter, setCategoryFilter] = useState("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [colorBy, setColorBy] = usePersistedViewMode<"tier" | "category">(
     "omnia-memory-galaxy-color-by",
     "tier",
   );
-  const [hiddenCsv, setHiddenCsv] = usePersistedViewMode<string>(
+  const [hiddenTiersCsv, setHiddenTiersCsv] = usePersistedViewMode<string>(
     "omnia-memory-galaxy-hidden-tiers",
+    "",
+  );
+  const [hiddenCatsCsv, setHiddenCatsCsv] = usePersistedViewMode<string>(
+    "omnia-memory-galaxy-hidden-categories",
     "",
   );
 
   const points = useMemo(() => data?.points ?? [], [data?.points]);
+  // The active filter dimension follows the color dropdown.
+  const hiddenCsv = colorBy === "tier" ? hiddenTiersCsv : hiddenCatsCsv;
+  const setHiddenCsv = colorBy === "tier" ? setHiddenTiersCsv : setHiddenCatsCsv;
   const hidden = useMemo(() => parseHiddenTiers(hiddenCsv), [hiddenCsv]);
-  const counts = useMemo(() => legendCounts(points), [points]);
+  const facets = useMemo(() => buildFacets(points, colorBy), [points, colorBy]);
 
-  const toggleTier = (tier: Tier) => {
+  const toggleFacet = (key: string) => {
     const next = new Set(hidden);
-    if (next.has(tier)) next.delete(tier);
-    else next.add(tier);
-    setHiddenCsv(serializeHiddenTiers(next));
+    if (next.has(key)) next.delete(key);
+    else next.add(key);
+    setHiddenCsv([...next].sort((a, b) => a.localeCompare(b)).join(","));
   };
 
   const deleteMemory = useDeleteMemory();
@@ -179,21 +211,8 @@ export default function MemoriesPage() {
               />
             </div>
 
-            <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-              <SelectTrigger className="w-[180px]" data-testid="category-filter">
-                <SelectValue placeholder="Category" />
-              </SelectTrigger>
-              <SelectContent>
-                {CATEGORIES.map((cat) => (
-                  <SelectItem key={cat.value} value={cat.value}>
-                    {cat.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-
             <Select value={colorBy} onValueChange={(v) => setColorBy(v as "tier" | "category")}>
-              <SelectTrigger className="w-[150px]" data-testid="color-by">
+              <SelectTrigger className="w-[160px]" data-testid="color-by">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -215,7 +234,7 @@ export default function MemoriesPage() {
           </div>
         )}
 
-        {hasWorkspace && <TierRail counts={counts} hidden={hidden} onToggle={toggleTier} />}
+        {hasWorkspace && <FacetRail facets={facets} hidden={hidden} onToggle={toggleFacet} />}
 
         {renderGalaxyBody({
           hasWorkspace,
@@ -224,7 +243,7 @@ export default function MemoriesPage() {
           points,
           colorBy,
           hidden,
-          filters: { category: categoryFilter, search: searchQuery },
+          search: searchQuery,
           onSelect: setSelected,
         })}
 

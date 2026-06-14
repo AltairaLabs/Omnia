@@ -6,9 +6,11 @@ export interface GalaxyPoint {
   y: number; // normalized ~[-1, 1]
   tier: Tier;
   category?: string; // e.g. "memory:identity"
+  type?: string; // memory kind, e.g. "preference" | "fact" | "person"
   confidence: number; // 0..1
   title?: string;
   preview?: string;
+  userRef?: string; // pseudonymous owner, shown in the click popup only
   observedAt?: string;
 }
 
