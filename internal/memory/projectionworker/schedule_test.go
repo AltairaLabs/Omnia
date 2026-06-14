@@ -14,6 +14,9 @@ import (
 	"github.com/altairalabs/omnia/internal/memory"
 )
 
+// baseFP is the baseline "<count>:<nanos>" fingerprint reused across cases.
+const baseFP = "100:1"
+
 func ptr(i int32) *int32 { return &i }
 
 func TestShouldRender(t *testing.T) {
@@ -25,13 +28,13 @@ func TestShouldRender(t *testing.T) {
 		cfg    memoryv1.MemoryProjectionConfig
 		want   bool
 	}{
-		{"cold-never-rendered", nil, "100:1", memoryv1.MemoryProjectionConfig{}, true},
-		{"unchanged-fingerprint", &memory.StoredProjection{Fingerprint: "100:1", ComputedAt: now.Add(-time.Hour)}, "100:1", memoryv1.MemoryProjectionConfig{}, false},
-		{"changed-no-gates", &memory.StoredProjection{Fingerprint: "100:1", ComputedAt: now.Add(-time.Hour)}, "101:2", memoryv1.MemoryProjectionConfig{}, true},
-		{"changed-below-threshold", &memory.StoredProjection{Fingerprint: "100:1", ComputedAt: now.Add(-time.Hour)}, "150:2", memoryv1.MemoryProjectionConfig{ChangeThreshold: ptr(100)}, false},
-		{"changed-above-threshold", &memory.StoredProjection{Fingerprint: "100:1", ComputedAt: now.Add(-time.Hour)}, "250:2", memoryv1.MemoryProjectionConfig{ChangeThreshold: ptr(100)}, true},
-		{"changed-cron-not-due", &memory.StoredProjection{Fingerprint: "100:1", ComputedAt: now.Add(-time.Minute)}, "101:2", memoryv1.MemoryProjectionConfig{Schedule: "0 * * * *"}, false},
-		{"changed-cron-due", &memory.StoredProjection{Fingerprint: "100:1", ComputedAt: now.Add(-2 * time.Hour)}, "101:2", memoryv1.MemoryProjectionConfig{Schedule: "0 * * * *"}, true},
+		{"cold-never-rendered", nil, baseFP, memoryv1.MemoryProjectionConfig{}, true},
+		{"unchanged-fingerprint", &memory.StoredProjection{Fingerprint: baseFP, ComputedAt: now.Add(-time.Hour)}, baseFP, memoryv1.MemoryProjectionConfig{}, false},
+		{"changed-no-gates", &memory.StoredProjection{Fingerprint: baseFP, ComputedAt: now.Add(-time.Hour)}, "101:2", memoryv1.MemoryProjectionConfig{}, true},
+		{"changed-below-threshold", &memory.StoredProjection{Fingerprint: baseFP, ComputedAt: now.Add(-time.Hour)}, "150:2", memoryv1.MemoryProjectionConfig{ChangeThreshold: ptr(100)}, false},
+		{"changed-above-threshold", &memory.StoredProjection{Fingerprint: baseFP, ComputedAt: now.Add(-time.Hour)}, "250:2", memoryv1.MemoryProjectionConfig{ChangeThreshold: ptr(100)}, true},
+		{"changed-cron-not-due", &memory.StoredProjection{Fingerprint: baseFP, ComputedAt: now.Add(-time.Minute)}, "101:2", memoryv1.MemoryProjectionConfig{Schedule: "0 * * * *"}, false},
+		{"changed-cron-due", &memory.StoredProjection{Fingerprint: baseFP, ComputedAt: now.Add(-2 * time.Hour)}, "101:2", memoryv1.MemoryProjectionConfig{Schedule: "0 * * * *"}, true},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
