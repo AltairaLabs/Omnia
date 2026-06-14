@@ -34,7 +34,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
+	"strings"
 	"sync"
 	"time"
 )
@@ -78,7 +80,7 @@ type cachedFetchedToken struct {
 // FetcherOptions configures the fetcher.
 type FetcherOptions struct {
 	// Endpoint is the dashboard's service-token URL, e.g.
-	// http://omnia-dashboard.omnia-system.svc.cluster.local:3000/api/auth/service-token.
+	// https://omnia-dashboard.omnia-system.svc.cluster.local/api/auth/service-token.
 	// Required.
 	Endpoint string
 	// ServiceAccountTokenPath overrides the default kubelet mount path.
@@ -86,6 +88,9 @@ type FetcherOptions struct {
 	ServiceAccountTokenPath string
 	// HTTPClient overrides the default 5-second-timeout client.
 	HTTPClient *http.Client
+	// AllowInsecureHTTP allows http:// endpoints (for local/dev/test only).
+	// Production should keep this false so SA tokens are never sent over plaintext.
+	AllowInsecureHTTP bool
 }
 
 // DefaultServiceAccountTokenPath is the kubelet-projected path inside every pod
@@ -116,6 +121,20 @@ const defaultMgmtPlaneTTL = 5 * time.Minute
 func NewTokenFetcher(opts FetcherOptions) (*TokenFetcher, error) {
 	if opts.Endpoint == "" {
 		return nil, errors.New("mgmt-plane fetcher: Endpoint required")
+	}
+	parsed, err := url.Parse(opts.Endpoint)
+	if err != nil {
+		return nil, fmt.Errorf("mgmt-plane fetcher: invalid Endpoint %q: %w", opts.Endpoint, err)
+	}
+	scheme := strings.ToLower(parsed.Scheme)
+	if scheme != "https" {
+		if !(scheme == "http" && opts.AllowInsecureHTTP) {
+			return nil, fmt.Errorf(
+				"mgmt-plane fetcher: insecure Endpoint scheme %q for %q; use https:// (or set AllowInsecureHTTP for local/dev)",
+				parsed.Scheme,
+				opts.Endpoint,
+			)
+		}
 	}
 	saTokenPath := opts.ServiceAccountTokenPath
 	if saTokenPath == "" {
