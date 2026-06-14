@@ -1,4 +1,5 @@
 "use client";
+// Memory Galaxy — workspace-scoped operator view of the memory projection.
 
 import { useMemo, useState, type ReactNode } from "react";
 import Link from "next/link";
