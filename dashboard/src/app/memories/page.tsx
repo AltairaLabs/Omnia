@@ -120,12 +120,12 @@ function renderGalaxyBody(s: GalaxyBodyState): ReactNode {
     );
   }
   if (s.isLoading) {
-    return <Skeleton className="h-full min-h-[360px] w-full rounded-lg" data-testid="galaxy-loading" />;
+    return <Skeleton className="h-[70vh] min-h-[360px] w-full rounded-lg" data-testid="galaxy-loading" />;
   }
   if (s.points.length === 0) {
     return (
       <div
-        className="flex h-full min-h-[360px] flex-col items-center justify-center text-muted-foreground"
+        className="flex h-[70vh] min-h-[360px] flex-col items-center justify-center text-muted-foreground"
         data-testid="empty-state"
       >
         <Brain className="mb-4 h-16 w-16 opacity-30" />
@@ -197,7 +197,7 @@ export default function MemoriesPage() {
         description="A semantic map of everything your agents remember, across all four tiers."
       />
 
-      <div className="flex min-h-0 flex-1 flex-col gap-4 p-6">
+      <div className="flex-1 space-y-4 overflow-auto p-6">
         {hasWorkspace && (
           <div className="flex flex-wrap items-center gap-3" data-testid="memories-toolbar">
             <div className="relative min-w-[200px] max-w-sm flex-1">
@@ -236,18 +236,16 @@ export default function MemoriesPage() {
 
         {hasWorkspace && <FacetRail facets={facets} hidden={hidden} onToggle={toggleFacet} />}
 
-        <div className="min-h-0 flex-1">
-          {renderGalaxyBody({
-            hasWorkspace,
-            error,
-            isLoading,
-            points,
-            colorBy,
-            hidden,
-            search: searchQuery,
-            onSelect: setSelected,
-          })}
-        </div>
+        {renderGalaxyBody({
+          hasWorkspace,
+          error,
+          isLoading,
+          points,
+          colorBy,
+          hidden,
+          search: searchQuery,
+          onSelect: setSelected,
+        })}
 
         {!isLoading && (data?.total ?? 0) > 0 && (
           <p className="text-center text-xs text-muted-foreground">

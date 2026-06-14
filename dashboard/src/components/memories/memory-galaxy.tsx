@@ -14,7 +14,7 @@ import {
 } from "@/lib/memory-galaxy/galaxy-math";
 import { TIER_LABELS } from "@/lib/memory-analytics/colors";
 import type { Tier } from "@/lib/memory-analytics/types";
-import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 
 type Dimension = "tier" | "category";
 
@@ -53,6 +53,12 @@ const HIT_TOLERANCE = 4;
 const MIN_RADIUS = 2;
 const CONF_SPREAD = 9;
 const CONF_GAMMA = 1.8;
+// Explicit white-on-dark control styling (theme variants render dark-on-dark
+// against the galaxy background, so don't rely on them here).
+const TOGGLE_BTN = "flex h-8 w-8 items-center justify-center rounded-md transition-colors";
+const TOGGLE_ON = "bg-white/20 text-white hover:bg-white/25";
+const TOGGLE_OFF = "text-white/45 hover:bg-white/10 hover:text-white/80";
+const TOGGLE_PLAIN = "text-white/85 hover:bg-white/15 hover:text-white";
 
 interface MemoryGalaxyProps {
   points: GalaxyPoint[];
@@ -349,7 +355,7 @@ export function MemoryGalaxy({
   };
 
   return (
-    <div className="relative h-full min-h-[360px] w-full overflow-hidden rounded-lg border bg-[#0b1020]">
+    <div className="relative h-[70vh] min-h-[360px] w-full overflow-hidden rounded-lg border bg-[#0b1020]">
       <canvas
         ref={canvasRef}
         data-testid="memory-galaxy-canvas"
@@ -363,50 +369,50 @@ export function MemoryGalaxy({
         }}
       />
 
-      <div className="absolute bottom-3 right-3 flex flex-col gap-1 rounded-lg border bg-background/85 p-1 shadow-lg backdrop-blur">
-        <Button
-          size="icon"
-          variant={labelsOn ? "secondary" : "ghost"}
+      <div className="absolute bottom-3 right-3 z-10 flex flex-col gap-0.5 rounded-lg bg-slate-900/90 p-1 shadow-lg ring-1 ring-white/15 backdrop-blur">
+        <button
+          type="button"
           aria-label={labelsOn ? "Hide labels" : "Show labels"}
           aria-pressed={labelsOn}
           title="Toggle labels"
           data-testid="toggle-labels"
           onClick={() => setLabelsPref(labelsOn ? "off" : "on")}
+          className={cn(TOGGLE_BTN, labelsOn ? TOGGLE_ON : TOGGLE_OFF)}
         >
           <Tag className="h-4 w-4" />
-        </Button>
-        <Button
-          size="icon"
-          variant={showConfidence ? "secondary" : "ghost"}
+        </button>
+        <button
+          type="button"
           aria-label={showConfidence ? "Hide confidence" : "Show confidence"}
           aria-pressed={showConfidence}
           title="Toggle confidence scores"
           data-testid="toggle-confidence"
           onClick={() => setConfPref(showConfidence ? "off" : "on")}
+          className={cn(TOGGLE_BTN, showConfidence ? TOGGLE_ON : TOGGLE_OFF)}
         >
           <Gauge className="h-4 w-4" />
-        </Button>
-        <Button
-          size="icon"
-          variant={ageFade ? "secondary" : "ghost"}
+        </button>
+        <button
+          type="button"
           aria-label={ageFade ? "Disable age fade" : "Enable age fade"}
           aria-pressed={ageFade}
           title="Toggle age fade"
           data-testid="toggle-age-fade"
           onClick={() => setAgePref(ageFade ? "off" : "on")}
+          className={cn(TOGGLE_BTN, ageFade ? TOGGLE_ON : TOGGLE_OFF)}
         >
           <Clock className="h-4 w-4" />
-        </Button>
-        <div className="my-0.5 h-px bg-border" />
-        <Button size="icon" variant="ghost" aria-label="Zoom in" title="Zoom in" onClick={() => zoomByButton(1.3)}>
+        </button>
+        <div className="my-0.5 h-px bg-white/15" />
+        <button type="button" aria-label="Zoom in" title="Zoom in" onClick={() => zoomByButton(1.3)} className={cn(TOGGLE_BTN, TOGGLE_PLAIN)}>
           <Plus className="h-4 w-4" />
-        </Button>
-        <Button size="icon" variant="ghost" aria-label="Zoom out" title="Zoom out" onClick={() => zoomByButton(1 / 1.3)}>
+        </button>
+        <button type="button" aria-label="Zoom out" title="Zoom out" onClick={() => zoomByButton(1 / 1.3)} className={cn(TOGGLE_BTN, TOGGLE_PLAIN)}>
           <Minus className="h-4 w-4" />
-        </Button>
-        <Button size="icon" variant="ghost" aria-label="Reset view" title="Reset view" onClick={() => setView(DEFAULT_VIEW)}>
+        </button>
+        <button type="button" aria-label="Reset view" title="Reset view" onClick={() => setView(DEFAULT_VIEW)} className={cn(TOGGLE_BTN, TOGGLE_PLAIN)}>
           <Maximize className="h-4 w-4" />
-        </Button>
+        </button>
       </div>
 
       {hovered && (
