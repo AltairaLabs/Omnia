@@ -56,7 +56,7 @@ const otlpAllowedSubject = "system:serviceaccount:ns:allowed"
 func TestOTLPGRPC_AuthInterceptorWired(t *testing.T) {
 	reviewer := fakeReviewer{authenticated: true, username: otlpAllowedSubject}
 
-	srv := grpc.NewServer(otlpGRPCServerOptions(reviewer, []string{otlpAllowedSubject})...)
+	srv := grpc.NewServer(otlpGRPCServerOptions(reviewer, []string{otlpAllowedSubject}, nil)...)
 	receiver := otlp.NewReceiver(otlp.NewTransformer(noopWriter{}, logr.Discard()), logr.Discard())
 	coltracepb.RegisterTraceServiceServer(srv, receiver)
 
@@ -99,7 +99,7 @@ func TestOTLPGRPC_AuthInterceptorWired(t *testing.T) {
 func TestOTLPGRPC_NonAllowlistedSubjectIsPermissionDenied(t *testing.T) {
 	reviewer := fakeReviewer{authenticated: true, username: "system:serviceaccount:ns:other"}
 
-	srv := grpc.NewServer(otlpGRPCServerOptions(reviewer, []string{otlpAllowedSubject})...)
+	srv := grpc.NewServer(otlpGRPCServerOptions(reviewer, []string{otlpAllowedSubject}, nil)...)
 	receiver := otlp.NewReceiver(otlp.NewTransformer(noopWriter{}, logr.Discard()), logr.Discard())
 	coltracepb.RegisterTraceServiceServer(srv, receiver)
 
@@ -131,7 +131,7 @@ func TestOTLPGRPC_NonAllowlistedSubjectIsPermissionDenied(t *testing.T) {
 // disabled), the OTLP gRPC server does not gate Export — a request with no token
 // succeeds.
 func TestOTLPGRPC_NilReviewerNoAuth(t *testing.T) {
-	srv := grpc.NewServer(otlpGRPCServerOptions(nil, nil)...)
+	srv := grpc.NewServer(otlpGRPCServerOptions(nil, nil, nil)...)
 	receiver := otlp.NewReceiver(otlp.NewTransformer(noopWriter{}, logr.Discard()), logr.Discard())
 	coltracepb.RegisterTraceServiceServer(srv, receiver)
 
@@ -164,7 +164,7 @@ func TestBuildOTLPHTTPHandler_AuthWired(t *testing.T) {
 	reviewer := fakeReviewer{authenticated: true, username: otlpAllowedSubject}
 	h := buildOTLPHTTPHandler(
 		otlp.NewTransformer(noopWriter{}, logr.Discard()),
-		logr.Discard(), reviewer, []string{otlpAllowedSubject},
+		logr.Discard(), reviewer, []string{otlpAllowedSubject}, nil,
 	)
 
 	t.Run("no token is 401", func(t *testing.T) {
@@ -195,7 +195,7 @@ func TestBuildOTLPHTTPHandler_NonAllowlistedIs403(t *testing.T) {
 	reviewer := fakeReviewer{authenticated: true, username: "system:serviceaccount:ns:other"}
 	h := buildOTLPHTTPHandler(
 		otlp.NewTransformer(noopWriter{}, logr.Discard()),
-		logr.Discard(), reviewer, []string{otlpAllowedSubject},
+		logr.Discard(), reviewer, []string{otlpAllowedSubject}, nil,
 	)
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/traces", nil)
@@ -213,7 +213,7 @@ func TestBuildOTLPHTTPHandler_NonAllowlistedIs403(t *testing.T) {
 func TestBuildOTLPHTTPHandler_NilReviewerNoAuth(t *testing.T) {
 	h := buildOTLPHTTPHandler(
 		otlp.NewTransformer(noopWriter{}, logr.Discard()),
-		logr.Discard(), nil, nil,
+		logr.Discard(), nil, nil, nil,
 	)
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/traces", nil)

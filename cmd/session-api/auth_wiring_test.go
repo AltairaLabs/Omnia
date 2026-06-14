@@ -60,7 +60,7 @@ func TestBuildAPIMux_AuthMiddlewareWired(t *testing.T) {
 	reviewer := fakeReviewer{authenticated: true, username: allowedSubject}
 	handler, _, cleanup := buildAPIMux(
 		pool, registry, f, logr.Discard(),
-		reviewer, []string{allowedSubject},
+		reviewer, []string{allowedSubject}, nil,
 	)
 	defer cleanup()
 
@@ -119,7 +119,7 @@ func TestBuildAPIMux_NonAllowlistedSubjectIs403(t *testing.T) {
 	otherReviewer := fakeReviewer{authenticated: true, username: "system:serviceaccount:ns:other"}
 	handler, _, cleanup := buildAPIMux(
 		pool, registry, f, logr.Discard(),
-		otherReviewer, []string{allowedSubject},
+		otherReviewer, []string{allowedSubject}, nil,
 	)
 	defer cleanup()
 
@@ -132,6 +132,40 @@ func TestBuildAPIMux_NonAllowlistedSubjectIs403(t *testing.T) {
 	}
 }
 
+// TestBuildAPIMux_NamespaceAllowedFacadeReachesHandler verifies the fix for the
+// SEC-1 functional hole: a per-AgentRuntime facade SA
+// (system:serviceaccount:<ws-ns>:<name>-facade) that is NOT in the exact-subject
+// allowlist still passes auth when its namespace is in allowed-namespaces. This
+// is the case that previously 403'd facades and silently stopped session
+// recording.
+func TestBuildAPIMux_NamespaceAllowedFacadeReachesHandler(t *testing.T) {
+	freshPromRegistry(t)
+	pool := newBogusPool(t)
+	registry := providers.NewRegistry()
+	f := &flags{apiAddr: ":0", healthAddr: ":0", metricsAddr: ":0"}
+
+	// Facade subject in the workspace namespace; not in allowedSubjects.
+	facade := fakeReviewer{authenticated: true, username: "system:serviceaccount:ws-ns:foo-facade"}
+	handler, _, cleanup := buildAPIMux(
+		pool, registry, f, logr.Discard(),
+		facade, []string{allowedSubject}, []string{"ws-ns"},
+	)
+	defer cleanup()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/sessions", nil).WithContext(ctx)
+	req.Header.Set("Authorization", "Bearer good-token")
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	if rr.Code == http.StatusUnauthorized || rr.Code == http.StatusForbidden {
+		t.Errorf("facade SA in allowed namespace should pass auth; got %d body=%q", rr.Code, rr.Body.String())
+	}
+	if rr.Code == http.StatusNotFound {
+		t.Errorf("session route not reached (404) — auth or wiring broke the chain")
+	}
+}
+
 // TestBuildAPIMux_NilReviewer_NoAuth verifies that when the reviewer is nil
 // (auth disabled), buildAPIMux does not gate requests — the chain passes
 // through to the handler with no Authorization header.
@@ -141,7 +175,7 @@ func TestBuildAPIMux_NilReviewer_NoAuth(t *testing.T) {
 	registry := providers.NewRegistry()
 	f := &flags{apiAddr: ":0", healthAddr: ":0", metricsAddr: ":0"}
 
-	handler, _, cleanup := buildAPIMux(pool, registry, f, logr.Discard(), nil, nil)
+	handler, _, cleanup := buildAPIMux(pool, registry, f, logr.Discard(), nil, nil, nil)
 	defer cleanup()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)

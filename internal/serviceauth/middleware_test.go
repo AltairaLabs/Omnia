@@ -40,80 +40,124 @@ func serve(mw func(http.Handler) http.Handler, next http.Handler, authHeader, pa
 }
 
 func TestRequireServiceAccount(t *testing.T) {
-	t.Run("allowlisted subject -> next, subject in context", func(t *testing.T) {
-		h := &recordingHandler{}
-		mw := RequireServiceAccount(fakeReviewer{authenticated: true, username: mwSubject}, []string{mwSubject})
-		rec := serve(mw, h, "Bearer good", "")
-		if rec.Code != http.StatusOK {
-			t.Fatalf("got %d, want 200", rec.Code)
-		}
-		if !h.called {
-			t.Fatal("next not called")
-		}
-		if h.subject != mwSubject {
-			t.Fatalf("subject in context = %q, want %q", h.subject, mwSubject)
-		}
-	})
+	const (
+		facade  = "system:serviceaccount:ws-ns:foo-facade"
+		wrongNS = "system:serviceaccount:other-ns:foo-facade"
+	)
+	tests := []struct {
+		name        string
+		reviewer    TokenReviewer
+		subjects    []string
+		namespaces  []string
+		exempt      []string
+		authHeader  string
+		path        string
+		wantCode    int
+		wantCalled  bool
+		wantSubject string // asserted only when non-empty
+	}{
+		{
+			name:        "allowlisted subject -> next, subject in context",
+			reviewer:    fakeReviewer{authenticated: true, username: mwSubject},
+			subjects:    []string{mwSubject},
+			authHeader:  "Bearer good",
+			wantCode:    http.StatusOK,
+			wantCalled:  true,
+			wantSubject: mwSubject,
+		},
+		{
+			name:       "missing token -> 401",
+			reviewer:   fakeReviewer{},
+			subjects:   []string{mwSubject},
+			wantCode:   http.StatusUnauthorized,
+			wantCalled: false,
+		},
+		{
+			name:       "reviewer error -> 401",
+			reviewer:   fakeReviewer{err: errors.New("boom")},
+			subjects:   []string{mwSubject},
+			authHeader: "Bearer x",
+			wantCode:   http.StatusUnauthorized,
+			wantCalled: false,
+		},
+		{
+			name:       "unauthenticated -> 401",
+			reviewer:   fakeReviewer{authenticated: false},
+			subjects:   []string{mwSubject},
+			authHeader: "Bearer x",
+			wantCode:   http.StatusUnauthorized,
+			wantCalled: false,
+		},
+		{
+			name:       "authenticated but wrong subject -> 403",
+			reviewer:   fakeReviewer{authenticated: true, username: "system:serviceaccount:other:thing"},
+			subjects:   []string{mwSubject},
+			authHeader: "Bearer x",
+			wantCode:   http.StatusForbidden,
+			wantCalled: false,
+		},
+		{
+			// A facade-shaped SA in the trusted workspace namespace is accepted
+			// even though it is not in allowedSubjects.
+			name:        "namespace-allowed subject not in subjects -> next",
+			reviewer:    fakeReviewer{authenticated: true, username: facade},
+			namespaces:  []string{"ws-ns"},
+			authHeader:  "Bearer x",
+			wantCode:    http.StatusOK,
+			wantCalled:  true,
+			wantSubject: facade,
+		},
+		{
+			name:       "subject in non-allowed namespace and not in subjects -> 403",
+			reviewer:   fakeReviewer{authenticated: true, username: wrongNS},
+			namespaces: []string{"ws-ns"},
+			authHeader: "Bearer x",
+			wantCode:   http.StatusForbidden,
+			wantCalled: false,
+		},
+		{
+			// Not a valid 4-part SA subject; ParseServiceAccount must reject it so
+			// the namespace allow never matches on a substring.
+			name:       "malformed subject with allowed-looking ns substring -> 403",
+			reviewer:   fakeReviewer{authenticated: true, username: "system:serviceaccount:ws-ns"},
+			namespaces: []string{"ws-ns"},
+			authHeader: "Bearer x",
+			wantCode:   http.StatusForbidden,
+			wantCalled: false,
+		},
+		{
+			name:       "exempt path with no token -> passes",
+			reviewer:   fakeReviewer{},
+			subjects:   []string{mwSubject},
+			exempt:     []string{"/healthz"},
+			path:       "/healthz",
+			wantCode:   http.StatusOK,
+			wantCalled: true,
+		},
+		{
+			name:       "nil reviewer -> passes through",
+			reviewer:   nil,
+			wantCode:   http.StatusOK,
+			wantCalled: true,
+		},
+	}
 
-	t.Run("missing token -> 401", func(t *testing.T) {
-		h := &recordingHandler{}
-		mw := RequireServiceAccount(fakeReviewer{}, []string{mwSubject})
-		rec := serve(mw, h, "", "")
-		if rec.Code != http.StatusUnauthorized {
-			t.Fatalf("got %d, want 401", rec.Code)
-		}
-		if h.called {
-			t.Fatal("next should not be called")
-		}
-	})
-
-	t.Run("reviewer error -> 401", func(t *testing.T) {
-		h := &recordingHandler{}
-		mw := RequireServiceAccount(fakeReviewer{err: errors.New("boom")}, []string{mwSubject})
-		rec := serve(mw, h, "Bearer x", "")
-		if rec.Code != http.StatusUnauthorized {
-			t.Fatalf("got %d, want 401", rec.Code)
-		}
-	})
-
-	t.Run("unauthenticated -> 401", func(t *testing.T) {
-		h := &recordingHandler{}
-		mw := RequireServiceAccount(fakeReviewer{authenticated: false}, []string{mwSubject})
-		rec := serve(mw, h, "Bearer x", "")
-		if rec.Code != http.StatusUnauthorized {
-			t.Fatalf("got %d, want 401", rec.Code)
-		}
-	})
-
-	t.Run("authenticated but wrong subject -> 403", func(t *testing.T) {
-		h := &recordingHandler{}
-		mw := RequireServiceAccount(fakeReviewer{authenticated: true, username: "system:serviceaccount:other:thing"}, []string{mwSubject})
-		rec := serve(mw, h, "Bearer x", "")
-		if rec.Code != http.StatusForbidden {
-			t.Fatalf("got %d, want 403", rec.Code)
-		}
-		if h.called {
-			t.Fatal("next should not be called")
-		}
-	})
-
-	t.Run("exempt path with no token -> passes", func(t *testing.T) {
-		h := &recordingHandler{}
-		mw := RequireServiceAccount(fakeReviewer{}, []string{mwSubject}, "/healthz")
-		rec := serve(mw, h, "", "/healthz")
-		if rec.Code != http.StatusOK || !h.called {
-			t.Fatalf("got %d called=%v, want 200 + called", rec.Code, h.called)
-		}
-	})
-
-	t.Run("nil reviewer -> passes through", func(t *testing.T) {
-		h := &recordingHandler{}
-		mw := RequireServiceAccount(nil, nil)
-		rec := serve(mw, h, "", "")
-		if rec.Code != http.StatusOK || !h.called {
-			t.Fatalf("got %d called=%v, want 200 + called", rec.Code, h.called)
-		}
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := &recordingHandler{}
+			mw := RequireServiceAccount(tt.reviewer, tt.subjects, tt.namespaces, tt.exempt...)
+			rec := serve(mw, h, tt.authHeader, tt.path)
+			if rec.Code != tt.wantCode {
+				t.Fatalf("got %d, want %d", rec.Code, tt.wantCode)
+			}
+			if h.called != tt.wantCalled {
+				t.Fatalf("called = %v, want %v", h.called, tt.wantCalled)
+			}
+			if tt.wantSubject != "" && h.subject != tt.wantSubject {
+				t.Fatalf("subject in context = %q, want %q", h.subject, tt.wantSubject)
+			}
+		})
+	}
 }
 
 func TestSubjectContextRoundTrip(t *testing.T) {

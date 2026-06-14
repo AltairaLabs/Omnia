@@ -44,17 +44,21 @@ func writeError(w http.ResponseWriter, status int, msg string) {
 }
 
 // RequireServiceAccount returns middleware that requires a Bearer token whose
-// TokenReview subject is in allowedSubjects. Paths in exempt are passed through
-// (e.g. "/healthz"). A nil reviewer disables auth (pass-through) — callers
-// should log a startup warning in that mode.
+// TokenReview subject is authorized. A subject is authorized iff it is an exact
+// match in allowedSubjects OR it parses as a ServiceAccount whose namespace is
+// in allowedNamespaces (so in-workspace callers — facade, memory-api,
+// eval-worker — are trusted by namespace, while cross-namespace callers stay on
+// the exact-subject allowlist). Paths in exempt are passed through (e.g.
+// "/healthz"). A nil reviewer disables auth (pass-through) — callers should log
+// a startup warning in that mode.
 //
 // Responses are deliberately generic: 401 {"error":"unauthorized"} for any
 // authentication failure (no detail on why, to avoid leaking token state) and
-// 403 {"error":"forbidden"} when the caller authenticates but is not on the
-// allowlist. On success the verified subject is placed in the request context
-// via WithSubject.
-func RequireServiceAccount(reviewer TokenReviewer, allowedSubjects []string, exempt ...string) func(http.Handler) http.Handler {
-	allow := subjectSet(allowedSubjects)
+// 403 {"error":"forbidden"} when the caller authenticates but is not authorized.
+// On success the verified subject is placed in the request context via
+// WithSubject.
+func RequireServiceAccount(reviewer TokenReviewer, allowedSubjects, allowedNamespaces []string, exempt ...string) func(http.Handler) http.Handler {
+	authz := newAuthorizer(allowedSubjects, allowedNamespaces)
 	exemptSet := subjectSet(exempt)
 
 	return func(next http.Handler) http.Handler {
@@ -72,7 +76,7 @@ func RequireServiceAccount(reviewer TokenReviewer, allowedSubjects []string, exe
 			if !ok {
 				return
 			}
-			if _, allowed := allow[subject]; !allowed {
+			if !authz.allowed(subject) {
 				ctrllog.FromContext(r.Context()).Info("serviceauth: subject not allowed", "subject", subject)
 				writeError(w, http.StatusForbidden, "forbidden")
 				return

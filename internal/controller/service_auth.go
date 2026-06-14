@@ -34,8 +34,14 @@ import (
 const (
 	// envSessionAPIAuthEnabled toggles auth on the session-api binary.
 	envSessionAPIAuthEnabled = "SESSION_API_AUTH_ENABLED"
-	// envSessionAPIAuthAllowedSubjects is the comma-separated caller allowlist.
+	// envSessionAPIAuthAllowedSubjects is the comma-separated exact-match caller
+	// allowlist (cross-namespace callers, e.g. the dashboard).
 	envSessionAPIAuthAllowedSubjects = "SESSION_API_AUTH_ALLOWED_SUBJECTS"
+	// envSessionAPIAuthAllowedNamespaces is the comma-separated trusted-namespace
+	// allowlist. Any ServiceAccount in one of these namespaces is accepted; this
+	// is how the per-AgentRuntime facade SAs (which come and go independently of
+	// the Workspace) are trusted without enumerating each one.
+	envSessionAPIAuthAllowedNamespaces = "SESSION_API_AUTH_ALLOWED_NAMESPACES"
 	// envSessionAPIAuthAudiences is the comma-separated accepted audiences.
 	envSessionAPIAuthAudiences = "SESSION_API_AUTH_AUDIENCES"
 	// envSessionAPITokenPath tells a caller where its projected token lives.
@@ -90,18 +96,19 @@ func subjectFor(namespace, name string) string {
 	return fmt.Sprintf("system:serviceaccount:%s:%s", namespace, name)
 }
 
-// allowedSubjectsFor computes the session-api allowlist for a workspace's
-// service group: the per-workspace facade-agent caller SAs are namespace-wide
-// (the operator creates per-AgentRuntime facade SAs), so the allowlist is built
-// from the well-known caller SA names plus any chart-supplied extras. The
-// memory-api and eval-worker SAs follow the operator's deterministic naming.
+// allowedSubjectsFor computes the session-api EXACT-match subject allowlist for
+// a workspace's service group. This carries cross-namespace callers only — the
+// chart-supplied extras (e.g. the dashboard SA, which lives in the operator /
+// release namespace, not the workspace namespace).
 //
-// We cannot enumerate every facade SA at session-api Deployment build time
-// (facades come and go independently of the Workspace), so the allowlist is
-// scoped to the deterministic per-group caller SAs (memory-api, eval-worker)
-// plus the chart-supplied extras (dashboard). Facade pods authenticate with the
-// same audience-bound projected token; their subjects must be added via
-// ExtraSubjects or a namespace-wide policy. See SERVICE.md for the trust model.
+// In-workspace callers (the per-AgentRuntime facade SAs, memory-api,
+// eval-worker) are NOT listed here: they are authorized by namespace via
+// allowedNamespacesFor. The per-AgentRuntime facade SAs in particular cannot be
+// enumerated at session-api Deployment build time (facades come and go
+// independently of the Workspace), which is exactly why the namespace allow
+// exists. The deterministic memory-api / eval-worker subjects are still added
+// for defence in depth (they're in the workspace namespace too, so the
+// namespace allow would already cover them). See SERVICE.md for the trust model.
 func (c ServiceAuthConfig) allowedSubjectsFor(workspaceName, groupName, namespace string) []string {
 	subjects := make([]string, 0, 4+len(c.ExtraSubjects))
 	// Co-located memory-api caller (emits provider_usage to session-api).
@@ -110,6 +117,16 @@ func (c ServiceAuthConfig) allowedSubjectsFor(workspaceName, groupName, namespac
 	subjects = append(subjects, subjectFor(namespace, evalWorkerName(groupName)))
 	subjects = append(subjects, c.ExtraSubjects...)
 	return dedupeNonEmpty(subjects)
+}
+
+// allowedNamespacesFor computes the session-api trusted-namespace allowlist for
+// a workspace's service group: the workspace namespace, where the facade,
+// memory-api and eval-worker pods run. Any ServiceAccount in this namespace is
+// accepted by session-api, so the per-AgentRuntime facade SAs (which are created
+// and destroyed as AgentRuntimes scale) pass auth without the operator having to
+// enumerate each one in the subject allowlist.
+func (c ServiceAuthConfig) allowedNamespacesFor(namespace string) []string {
+	return dedupeNonEmpty([]string{namespace})
 }
 
 // dedupeNonEmpty returns the input with empty strings and duplicates removed,
@@ -141,6 +158,7 @@ func (c ServiceAuthConfig) applySessionAPIServerAuthEnv(dep *appsv1.Deployment, 
 	env := []corev1.EnvVar{
 		{Name: envSessionAPIAuthEnabled, Value: "true"},
 		{Name: envSessionAPIAuthAllowedSubjects, Value: strings.Join(c.allowedSubjectsFor(workspaceName, groupName, namespace), ",")},
+		{Name: envSessionAPIAuthAllowedNamespaces, Value: strings.Join(c.allowedNamespacesFor(namespace), ",")},
 	}
 	if c.Audience != "" {
 		env = append(env, corev1.EnvVar{Name: envSessionAPIAuthAudiences, Value: c.Audience})

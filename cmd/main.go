@@ -207,9 +207,10 @@ func main() {
 			"each workspace namespace (defence-in-depth mTLS on top of SA-token auth). Requires "+
 			"Istio. Only used when --session-api-auth-enabled is set.")
 	flag.StringVar(&sessionAPIAuthExtraSubjects, "session-api-auth-extra-subjects", "",
-		"Comma-separated extra ServiceAccount subjects added to the session-api allowlist beyond "+
-			"the per-workspace caller SAs the operator creates (e.g. the chart-owned dashboard SA: "+
-			"system:serviceaccount:omnia-system:omnia-dashboard).")
+		"Comma-separated exact-match ServiceAccount subjects added to the session-api allowlist, "+
+			"for CROSS-NAMESPACE callers (e.g. the chart-owned dashboard SA in the release namespace: "+
+			"system:serviceaccount:omnia-system:omnia-dashboard). In-workspace callers (facade, "+
+			"memory-api, eval-worker) are authorized by namespace instead and need NOT be listed here.")
 	flag.StringVar(&sessionAPITokenReviewClusterRole, "session-api-tokenreview-clusterrole", "",
 		"Name of the install-wide ClusterRole granting authentication.k8s.io/tokenreviews:create. "+
 			"When --session-api-auth-enabled is set, the operator binds each per-workspace session-api "+

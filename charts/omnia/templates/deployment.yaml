@@ -162,10 +162,13 @@ spec:
               SESSION_API_AUTH_* env onto each session-api Deployment, grants
               its SA RBAC to create TokenReviews, and mounts an audience-bound
               projected token onto every caller pod it manages (facade,
-              memory-api, eval-worker). The operator computes the per-workspace
-              caller subjects itself; the chart passes the audience and any
-              additional (chart-owned) caller subjects — the dashboard SA,
-              which is the only caller the operator does not create.
+              memory-api, eval-worker). The operator authorizes those
+              in-workspace callers by NAMESPACE (it sets
+              SESSION_API_AUTH_ALLOWED_NAMESPACES to the workspace namespace), so
+              the per-AgentRuntime facade SAs pass without being enumerated. The
+              chart only passes the audience and the cross-namespace dashboard SA
+              as an exact-match extra subject (the dashboard runs in the release
+              namespace, not the workspace namespace).
             */}}
             - --session-api-auth-enabled
             - --session-api-auth-audience={{ .Values.internalServiceAuth.audience }}

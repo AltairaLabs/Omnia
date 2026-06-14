@@ -57,24 +57,41 @@
 Opt-in, off by default; gated by the chart value `internalServiceAuth.enabled`
 (closes SEC-1 unauthenticated JSON API, SEC-5 unauthenticated OTLP listeners).
 When enabled, **every** caller must present a Kubernetes ServiceAccount bearer
-token, validated server-side via the **TokenReview API** against an allowlist of
-caller subjects. `/healthz` is exempt.
+token, validated server-side via the **TokenReview API**. A caller is authorized
+iff its TokenReview subject is an **exact match** in the allowed-subjects list
+**OR** its ServiceAccount **namespace** is in the allowed-namespaces list.
+`/healthz` is exempt.
+
+The namespace allow is what lets the per-AgentRuntime facade SAs
+(`<agentRuntime.Name>-facade`) pass: facade SAs are created and destroyed as
+AgentRuntimes scale, so they can't be enumerated in the subject list up front.
+The operator sets the workspace namespace as a trusted namespace, so every
+in-workspace caller (facade, memory-api, eval-worker — all in the workspace
+namespace) is authorized by namespace. Cross-namespace callers (the dashboard,
+which lives in the release namespace) stay on the exact-subject list.
 
 Flags / env (read by `cmd/session-api`):
 - `--auth-enabled` / `SESSION_API_AUTH_ENABLED` — require auth (fails closed: if
-  the allowlist is empty when enabled, the binary refuses to start).
+  BOTH the subject and namespace allowlists are empty when enabled, the binary
+  refuses to start).
 - `--auth-allowed-subjects` / `SESSION_API_AUTH_ALLOWED_SUBJECTS` — comma-
-  separated `system:serviceaccount:<ns>:<name>` allowlist.
+  separated `system:serviceaccount:<ns>:<name>` exact-match allowlist (for
+  cross-namespace callers, e.g. the dashboard).
+- `--auth-allowed-namespaces` / `SESSION_API_AUTH_ALLOWED_NAMESPACES` — comma-
+  separated trusted namespaces; any ServiceAccount in one of them is allowed
+  (covers the facade, memory-api, eval-worker in the workspace namespace).
 - `--auth-audiences` / `SESSION_API_AUTH_AUDIENCES` — comma-separated accepted
   token audiences (the projected token's audience must match).
 
 The session-api ServiceAccount needs RBAC `authentication.k8s.io/tokenreviews:
 create` (cluster-scoped → ClusterRole + ClusterRoleBinding). The Helm chart
 provisions the ClusterRole; the operator binds each per-workspace session-api
-ServiceAccount to it and renders the `SESSION_API_AUTH_*` env. Callers (facade,
-dashboard, memory-api, eval-worker) mount an audience-bound projected SA token
-at `/var/run/secrets/omnia/session-api/token` and set `SESSION_API_TOKEN_PATH`
-to it; the HTTP client / dashboard proxy send it as `Authorization: Bearer`.
+ServiceAccount to it and renders the `SESSION_API_AUTH_*` env (including
+`SESSION_API_AUTH_ALLOWED_NAMESPACES` = the workspace namespace). Callers
+(facade, dashboard, memory-api, eval-worker) mount an audience-bound projected
+SA token at `/var/run/secrets/omnia/session-api/token` and set
+`SESSION_API_TOKEN_PATH` to it; the HTTP client / dashboard proxy send it as
+`Authorization: Bearer`.
 
 **OTLP listeners** (`--otlp-enabled`) are gated by the same auth when enabled:
 any OTLP sender targeting session-api must present an SA token. NOTE: the default

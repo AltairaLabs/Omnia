@@ -64,6 +64,15 @@ func TestServiceAuth_AllowedSubjectsFor(t *testing.T) {
 	assert.Contains(t, got, "system:serviceaccount:omnia-system:omnia-dashboard")
 }
 
+func TestServiceAuth_AllowedNamespacesFor(t *testing.T) {
+	c := enabledAuth()
+	got := c.allowedNamespacesFor(testAuthNS)
+
+	// The workspace namespace is trusted, so facade / memory-api / eval-worker
+	// SAs there are authorized without being enumerated as subjects.
+	assert.Equal(t, []string{testAuthNS}, got)
+}
+
 func TestServiceAuth_ApplyServerEnv_Disabled(t *testing.T) {
 	sb := newTestServiceBuilder()
 	sg := newTestServiceGroup("default")
@@ -91,6 +100,11 @@ func TestServiceAuth_ApplyServerEnv_Enabled(t *testing.T) {
 	subs := strings.Split(env[envSessionAPIAuthAllowedSubjects], ",")
 	assert.Contains(t, subs, "system:serviceaccount:acme-ns:memory-acme-default")
 	assert.Contains(t, subs, "system:serviceaccount:omnia-system:omnia-dashboard")
+
+	// The workspace namespace is set as a trusted namespace so facade SAs pass.
+	require.Contains(t, env, envSessionAPIAuthAllowedNamespaces)
+	nss := strings.Split(env[envSessionAPIAuthAllowedNamespaces], ",")
+	assert.Contains(t, nss, testAuthNS)
 }
 
 func TestServiceAuth_ApplyServerEnv_NoAudienceOmitsEnv(t *testing.T) {

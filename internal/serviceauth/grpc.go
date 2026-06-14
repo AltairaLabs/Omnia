@@ -38,10 +38,10 @@ func bearerFromMetadata(ctx context.Context) string {
 }
 
 // authenticateGRPC validates the bearer token in ctx's incoming metadata
-// against reviewer and allow. On success it returns a context carrying the
+// against reviewer and authz. On success it returns a context carrying the
 // verified subject. Failures map to gRPC status errors: Unauthenticated for a
-// missing/invalid token, PermissionDenied for a non-allowlisted subject.
-func authenticateGRPC(ctx context.Context, reviewer TokenReviewer, allow map[string]struct{}) (context.Context, error) {
+// missing/invalid token, PermissionDenied for an unauthorized subject.
+func authenticateGRPC(ctx context.Context, reviewer TokenReviewer, authz authorizer) (context.Context, error) {
 	token := bearerFromMetadata(ctx)
 	if token == "" {
 		return nil, status.Error(codes.Unauthenticated, "unauthenticated")
@@ -54,7 +54,7 @@ func authenticateGRPC(ctx context.Context, reviewer TokenReviewer, allow map[str
 	if !authenticated {
 		return nil, status.Error(codes.Unauthenticated, "unauthenticated")
 	}
-	if _, ok := allow[subject]; !ok {
+	if !authz.allowed(subject) {
 		ctrllog.FromContext(ctx).Info("serviceauth: subject not allowed", "subject", subject)
 		return nil, status.Error(codes.PermissionDenied, "permission denied")
 	}
@@ -62,16 +62,17 @@ func authenticateGRPC(ctx context.Context, reviewer TokenReviewer, allow map[str
 }
 
 // UnaryServerInterceptor returns a gRPC unary interceptor that requires a Bearer
-// token whose TokenReview subject is in allowedSubjects. A nil reviewer disables
-// auth (pass-through). On success the verified subject is injected into the
-// handler context via WithSubject.
-func UnaryServerInterceptor(reviewer TokenReviewer, allowedSubjects []string) grpc.UnaryServerInterceptor {
-	allow := subjectSet(allowedSubjects)
+// token whose TokenReview subject is authorized: an exact match in
+// allowedSubjects OR a ServiceAccount whose namespace is in allowedNamespaces. A
+// nil reviewer disables auth (pass-through). On success the verified subject is
+// injected into the handler context via WithSubject.
+func UnaryServerInterceptor(reviewer TokenReviewer, allowedSubjects, allowedNamespaces []string) grpc.UnaryServerInterceptor {
+	authz := newAuthorizer(allowedSubjects, allowedNamespaces)
 	return func(ctx context.Context, req any, _ *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
 		if reviewer == nil {
 			return handler(ctx, req)
 		}
-		authCtx, err := authenticateGRPC(ctx, reviewer, allow)
+		authCtx, err := authenticateGRPC(ctx, reviewer, authz)
 		if err != nil {
 			return nil, err
 		}
@@ -80,16 +81,17 @@ func UnaryServerInterceptor(reviewer TokenReviewer, allowedSubjects []string) gr
 }
 
 // StreamServerInterceptor returns a gRPC stream interceptor that requires a
-// Bearer token whose TokenReview subject is in allowedSubjects. A nil reviewer
-// disables auth (pass-through). On success the verified subject is injected into
-// the stream context via WithSubject.
-func StreamServerInterceptor(reviewer TokenReviewer, allowedSubjects []string) grpc.StreamServerInterceptor {
-	allow := subjectSet(allowedSubjects)
+// Bearer token whose TokenReview subject is authorized: an exact match in
+// allowedSubjects OR a ServiceAccount whose namespace is in allowedNamespaces. A
+// nil reviewer disables auth (pass-through). On success the verified subject is
+// injected into the stream context via WithSubject.
+func StreamServerInterceptor(reviewer TokenReviewer, allowedSubjects, allowedNamespaces []string) grpc.StreamServerInterceptor {
+	authz := newAuthorizer(allowedSubjects, allowedNamespaces)
 	return func(srv any, ss grpc.ServerStream, _ *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
 		if reviewer == nil {
 			return handler(srv, ss)
 		}
-		authCtx, err := authenticateGRPC(ss.Context(), reviewer, allow)
+		authCtx, err := authenticateGRPC(ss.Context(), reviewer, authz)
 		if err != nil {
 			return err
 		}
