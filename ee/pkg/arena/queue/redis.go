@@ -230,21 +230,21 @@ func (q *RedisQueue) Pop(ctx context.Context, jobID string) (*WorkItem, error) {
 	item.Attempt++
 
 	// Save updated item
-	if err := q.saveItem(ctx, item); err != nil {
-		return nil, fmt.Errorf("failed to update item: %w", err)
-	}
-
-	// Track processing start time with visibility timeout
+	// Batch write-side bookkeeping into one pipeline to reduce round trips.
 	processingZKey := q.processingZSetKey(jobID)
 	score := float64(now.Add(q.opts.VisibilityTimeout).UnixNano())
-	q.client.ZAdd(ctx, processingZKey, redis.Z{
+	pipe := q.client.Pipeline()
+	q.saveItemPipe(ctx, pipe, item)
+	pipe.ZAdd(ctx, processingZKey, redis.Z{
 		Score:  score,
 		Member: itemID,
 	})
-	q.client.Expire(ctx, processingZKey, q.itemTTL)
-
-	// Update job start time if this is the first item
-	q.client.HSetNX(ctx, q.metaKey(jobID), "startedAt", now.UnixNano())
+	pipe.Expire(ctx, processingZKey, q.itemTTL)
+	// Update job start time if this is the first item.
+	pipe.HSetNX(ctx, q.metaKey(jobID), "startedAt", now.UnixNano())
+	if _, err := pipe.Exec(ctx); err != nil {
+		return nil, fmt.Errorf("failed to update item: %w", err)
+	}
 
 	return item, nil
 }

@@ -63,6 +63,30 @@ type mockStore struct {
 	// /memories/conflicts handler test can assert end-to-end shape
 	// without a real DB.
 	conflicts []memory.ConflictedEntity
+
+	// Memory Galaxy projection canned responses (memory.ProjectionStore).
+	projInputs      []memory.ProjectionInput
+	projFingerprint string
+	projStored      *memory.StoredProjection
+	projErr         error
+	projSavedPoints []memory.ProjectionPoint
+}
+
+func (m *mockStore) LoadProjectionInputs(_ context.Context, _ map[string]string) ([]memory.ProjectionInput, error) {
+	return m.projInputs, m.projErr
+}
+
+func (m *mockStore) ProjectionFingerprint(_ context.Context, _ map[string]string) (string, error) {
+	return m.projFingerprint, m.projErr
+}
+
+func (m *mockStore) LoadProjection(_ context.Context, _ string) (*memory.StoredProjection, error) {
+	return m.projStored, m.projErr
+}
+
+func (m *mockStore) SaveProjection(_ context.Context, _, _, _, _, _ string, points []memory.ProjectionPoint) error {
+	m.projSavedPoints = points
+	return m.projErr
 }
 
 func (m *mockStore) Save(_ context.Context, mem *memory.Memory) error {

@@ -707,6 +707,105 @@ func TestHandleMessage_SuccessfulProcess(t *testing.T) {
 	assert.NotEmpty(t, writer.written)
 }
 
+func TestReclaimPending_ReprocessesStaleMessages(t *testing.T) {
+	mr, err := miniredis.Run()
+	require.NoError(t, err)
+	defer mr.Close()
+
+	client := goredis.NewClient(&goredis.Options{Addr: mr.Addr()})
+	defer func() { _ = client.Close() }()
+
+	streamKey := "omnia:session-events:ns"
+	consumerGroup := "omnia-eval-workers-ns"
+	consumerName := "test-consumer"
+	ctx := context.Background()
+	client.XGroupCreateMkStream(ctx, streamKey, consumerGroup, "0")
+
+	event := api.SessionEvent{
+		EventType:   eventTypeMessage,
+		SessionID:   "s1",
+		AgentName:   "test-agent",
+		Namespace:   "ns",
+		MessageID:   "m1",
+		MessageRole: "assistant",
+		Timestamp:   time.Now().Format(time.RFC3339),
+	}
+	payload, err := json.Marshal(event)
+	require.NoError(t, err)
+
+	client.XAdd(ctx, &goredis.XAddArgs{
+		Stream: streamKey,
+		Values: map[string]any{streamPayloadField: string(payload)},
+	})
+
+	streams, err := client.XReadGroup(ctx, &goredis.XReadGroupArgs{
+		Group:    consumerGroup,
+		Consumer: consumerName,
+		Streams:  []string{streamKey, ">"},
+		Count:    1,
+		Block:    time.Second,
+	}).Result()
+	require.NoError(t, err)
+	require.Len(t, streams, 1)
+	require.Len(t, streams[0].Messages, 1)
+
+	mr.FastForward(3 * time.Minute)
+
+	w := &EvalWorker{
+		redisClient:   client,
+		consumerGroup: consumerGroup,
+		consumerName:  consumerName,
+		streamKeys:    []string{streamKey},
+		logger:        testLogger(),
+	}
+
+	w.reclaimPending(ctx)
+	assert.False(t, w.lastPendingReclaim.IsZero())
+}
+
+func TestReclaimPending_ThrottlesRepeatedRuns(t *testing.T) {
+	mr, err := miniredis.Run()
+	require.NoError(t, err)
+	defer mr.Close()
+
+	client := goredis.NewClient(&goredis.Options{Addr: mr.Addr()})
+	defer func() { _ = client.Close() }()
+
+	w := &EvalWorker{
+		redisClient:        client,
+		consumerGroup:      "omnia-eval-workers-ns",
+		consumerName:       "test-consumer",
+		streamKeys:         []string{"omnia:session-events:ns"},
+		logger:             testLogger(),
+		lastPendingReclaim: time.Now(),
+	}
+
+	before := w.lastPendingReclaim
+	w.reclaimPending(context.Background())
+	assert.Equal(t, before, w.lastPendingReclaim)
+}
+
+func TestReclaimPending_LogsClaimErrors(t *testing.T) {
+	mr, err := miniredis.Run()
+	require.NoError(t, err)
+
+	client := goredis.NewClient(&goredis.Options{Addr: mr.Addr()})
+	defer func() { _ = client.Close() }()
+
+	mr.Close()
+
+	w := &EvalWorker{
+		redisClient:   client,
+		consumerGroup: "omnia-eval-workers-ns",
+		consumerName:  "test-consumer",
+		streamKeys:    []string{"omnia:session-events:ns"},
+		logger:        testLogger(),
+	}
+
+	w.reclaimPending(context.Background())
+	assert.False(t, w.lastPendingReclaim.IsZero())
+}
+
 func TestAckMessage(t *testing.T) {
 	mr, err := miniredis.Run()
 	require.NoError(t, err)

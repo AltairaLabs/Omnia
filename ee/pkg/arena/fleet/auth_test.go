@@ -10,6 +10,7 @@ package fleet
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"testing"
@@ -31,6 +32,34 @@ type stubTokenSource struct {
 	gotWS    string
 }
 
+type fakeDialer struct {
+	gotURL     string
+	gotHeaders http.Header
+}
+
+func (d *fakeDialer) DialContext(_ context.Context, urlStr string, headers http.Header) (Conn, error) {
+	d.gotURL = urlStr
+	d.gotHeaders = headers.Clone()
+	return &fakeConn{}, nil
+}
+
+type fakeConn struct{}
+
+func (c *fakeConn) ReadMessage() (int, []byte, error) {
+	msg := facade.ServerMessage{Type: facade.MessageTypeConnected, SessionID: "sess-fake", Timestamp: time.Now()}
+	data, err := json.Marshal(msg)
+	if err != nil {
+		return 0, nil, err
+	}
+	return websocket.TextMessage, data, nil
+}
+
+func (c *fakeConn) WriteMessage(_ int, _ []byte) error { return nil }
+
+func (c *fakeConn) SetReadDeadline(_ time.Time) error { return nil }
+
+func (c *fakeConn) Close() error { return nil }
+
 func (s *stubTokenSource) Token(agent, workspace string) (string, error) {
 	s.gotAgent = agent
 	s.gotWS = workspace
@@ -51,17 +80,14 @@ func connectedServer(t *testing.T, captured *http.Header) string {
 }
 
 func TestSetAuth_AttachesBearerOnDial(t *testing.T) {
-	var captured http.Header
-	wsURL := connectedServer(t, &captured)
-
+	dialer := &fakeDialer{}
 	ts := &stubTokenSource{token: "test-jwt"}
-	p := NewProvider("agent-rag-hero", wsURL, nil)
+	p := NewProvider("agent-rag-hero", "wss://agent.example/ws?agent=rag-hero&namespace=demo", dialer)
 	p.SetAuth(ts, "rag-hero", "demo")
 
 	require.NoError(t, p.Connect(context.Background()))
-	defer func() { _ = p.Close() }()
 
-	assert.Equal(t, "Bearer test-jwt", captured.Get("Authorization"),
+	assert.Equal(t, "Bearer test-jwt", dialer.gotHeaders.Get("Authorization"),
 		"dial should attach the mgmt-plane Bearer token")
 	assert.Equal(t, "rag-hero", ts.gotAgent, "token requested for the agent")
 	assert.Equal(t, "demo", ts.gotWS, "token requested for the workspace")
@@ -82,15 +108,43 @@ func TestSetAuth_NilSourceLeavesDialUnauthenticated(t *testing.T) {
 		"no token source should mean no Authorization header")
 }
 
-func TestSetAuth_TokenErrorFailsDial(t *testing.T) {
-	var captured http.Header
-	wsURL := connectedServer(t, &captured)
+func TestSetAuth_RequiresWSSForBearerToken(t *testing.T) {
+	dialer := &fakeDialer{}
+	ts := &stubTokenSource{token: "test-jwt"}
+	p := NewProvider("agent-x", "ws://agent.example/ws?agent=x&namespace=demo", dialer)
+	p.SetAuth(ts, "x", "demo")
 
+	err := p.Connect(context.Background())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "use wss://")
+	assert.Empty(t, ts.gotAgent)
+	assert.Empty(t, ts.gotWS)
+	assert.Empty(t, dialer.gotURL)
+	assert.Empty(t, dialer.gotHeaders.Get("Authorization"))
+}
+
+func TestSetAuth_AllowsWSSAndAttachesBearerToken(t *testing.T) {
+	dialer := &fakeDialer{}
+	ts := &stubTokenSource{token: "test-jwt"}
+	p := NewProvider("agent-rag-hero", "wss://agent.example/ws?agent=rag-hero&namespace=demo", dialer)
+	p.SetAuth(ts, "rag-hero", "demo")
+
+	require.NoError(t, p.Connect(context.Background()))
+
+	assert.Equal(t, "wss://agent.example/ws?agent=rag-hero&namespace=demo", dialer.gotURL)
+	assert.Equal(t, "Bearer test-jwt", dialer.gotHeaders.Get("Authorization"))
+	assert.Equal(t, "rag-hero", ts.gotAgent)
+	assert.Equal(t, "demo", ts.gotWS)
+}
+
+func TestSetAuth_TokenErrorFailsDial(t *testing.T) {
+	dialer := &fakeDialer{}
 	ts := &stubTokenSource{err: errors.New("dashboard 403: not allowlisted")}
-	p := NewProvider("agent-y", wsURL, nil)
+	p := NewProvider("agent-y", "wss://agent.example/ws?agent=y&namespace=ws", dialer)
 	p.SetAuth(ts, "y", "ws")
 
 	err := p.Connect(context.Background())
 	require.Error(t, err, "dial must fail when the token cannot be obtained")
 	assert.Contains(t, err.Error(), "mgmt-plane token")
+	assert.Empty(t, dialer.gotURL)
 }

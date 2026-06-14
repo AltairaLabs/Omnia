@@ -29,9 +29,14 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	v1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
+	eev1alpha1 "github.com/altairalabs/omnia/ee/api/v1alpha1"
 	"github.com/altairalabs/omnia/ee/pkg/arena/fleet"
 	"github.com/altairalabs/omnia/pkg/k8s"
 )
+
+type arenaJobSpec = eev1alpha1.ArenaJobSpec
+type arenaProviderGroup = eev1alpha1.ArenaProviderGroup
+type arenaProviderEntry = eev1alpha1.ArenaProviderEntry
 
 // testRC builds a resolveContext for test call sites. Centralising this keeps
 // the test payload short when the production signature changed from long
@@ -171,7 +176,7 @@ func TestParseAgentWSURLs(t *testing.T) {
 		assert.Equal(t, "ws://agent-a.default.svc:8080/ws", result["agent-a"])
 	})
 
-	t.Run("parses multiple entries", func(t *testing.T) {
+	t.Run("parses multiple Entries", func(t *testing.T) {
 		raw := `{"agent-a":"ws://a:8080/ws","agent-b":"ws://b:8080/ws"}`
 		t.Setenv("ARENA_AGENT_WS_URLS", raw)
 		result := parseAgentWSURLs()
@@ -485,8 +490,8 @@ func TestGetArenaJob(t *testing.T) {
 		require.NotNil(t, got)
 		assert.Contains(t, got.Providers, "default")
 		defaultGroup := got.Providers["default"]
-		assert.Len(t, defaultGroup.entries, 1)
-		assert.Equal(t, "my-provider", defaultGroup.entries[0].ProviderRef.Name)
+		assert.Len(t, defaultGroup.Entries, 1)
+		assert.Equal(t, "my-provider", defaultGroup.Entries[0].ProviderRef.Name)
 	})
 
 	t.Run("returns spec with toolRegistries", func(t *testing.T) {
@@ -522,6 +527,59 @@ func TestGetArenaJob(t *testing.T) {
 		assert.Empty(t, got.Providers)
 		assert.Empty(t, got.ToolRegistries)
 	})
+
+	t.Run("returns error when ArenaJob object cannot be marshaled", func(t *testing.T) {
+		// Inject a channel into the unstructured object; json.Marshal cannot
+		// serialize channels and will return an error.
+		c := &injectObjectClient{
+			inject: map[string]interface{}{
+				"apiVersion": "omnia.altairalabs.ai/v1alpha1",
+				"kind":       "ArenaJob",
+				"metadata":   map[string]interface{}{"name": "bad-job", "namespace": "default"},
+				"badField":   make(chan struct{}),
+			},
+		}
+		_, err := getArenaJob(ctx, c, "bad-job", "default")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "marshal ArenaJob")
+	})
+
+	t.Run("returns error when ArenaJob spec cannot be unmarshaled", func(t *testing.T) {
+		// Inject spec as a JSON array instead of an object; json.Unmarshal into
+		// a struct fails when the top-level value is an array.
+		c := &injectObjectClient{
+			inject: map[string]interface{}{
+				"apiVersion": "omnia.altairalabs.ai/v1alpha1",
+				"kind":       "ArenaJob",
+				"metadata":   map[string]interface{}{"name": "bad-spec-job", "namespace": "default"},
+				"spec":       []interface{}{1, 2, 3},
+			},
+		}
+		_, err := getArenaJob(ctx, c, "bad-spec-job", "default")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "unmarshal ArenaJob spec")
+	})
+}
+
+// injectObjectClient is a fake client.Client that populates the Get target with
+// a caller-supplied raw object map, bypassing the real fake store.
+type injectObjectClient struct {
+	client.Client
+	inject map[string]interface{}
+}
+
+func (c *injectObjectClient) Get(
+	_ context.Context,
+	_ client.ObjectKey,
+	obj client.Object,
+	_ ...client.GetOption,
+) error {
+	u, ok := obj.(*unstructured.Unstructured)
+	if !ok {
+		return nil
+	}
+	u.Object = c.inject
+	return nil
 }
 
 // ---------------------------------------------------------------------------
@@ -1238,7 +1296,7 @@ func TestResolveProvidersFromCRD(t *testing.T) {
 		assert.Contains(t, arenaCfg.LoadedProviders, "crd-provider")
 	})
 
-	t.Run("resolves providerRef entries from CRD", func(t *testing.T) {
+	t.Run("resolves providerRef Entries from CRD", func(t *testing.T) {
 		// Create Provider CRD
 		provider := &v1alpha1.Provider{
 			Spec: v1alpha1.ProviderSpec{
@@ -1304,7 +1362,7 @@ func TestResolveProvidersFromCRD(t *testing.T) {
 		assert.Contains(t, err.Error(), "nonexistent-provider")
 	})
 
-	t.Run("resolves agentRef entries and returns fleet providers", func(t *testing.T) {
+	t.Run("resolves agentRef Entries and returns fleet providers", func(t *testing.T) {
 		t.Setenv("ARENA_AGENT_WS_URLS", `{"my-agent":"ws://my-agent.default.svc:8080/ws"}`)
 
 		spec := map[string]interface{}{
@@ -1994,17 +2052,17 @@ func TestExtractProviderIDRefs(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestArenaJobSpecJSONRoundTrip(t *testing.T) {
-	t.Run("providers with mixed entries round-trips correctly", func(t *testing.T) {
+	t.Run("providers with mixed Entries round-trips correctly", func(t *testing.T) {
 		nsPtr := ptr.To("other-ns")
 		original := arenaJobSpec{
 			Providers: map[string]arenaProviderGroup{
 				"default": {
-					entries: []arenaProviderEntry{
+					Entries: []arenaProviderEntry{
 						{ProviderRef: &v1alpha1.ProviderRef{Name: "my-provider", Namespace: nsPtr}},
 					},
 				},
 				"fleet": {
-					entries: []arenaProviderEntry{
+					Entries: []arenaProviderEntry{
 						{AgentRef: &v1alpha1.LocalObjectReference{Name: "my-agent"}},
 					},
 				},
@@ -2022,10 +2080,10 @@ func TestArenaJobSpecJSONRoundTrip(t *testing.T) {
 		require.NoError(t, err)
 
 		defaultGroup := got.Providers["default"]
-		assert.Equal(t, "my-provider", defaultGroup.entries[0].ProviderRef.Name)
-		assert.Equal(t, "other-ns", *defaultGroup.entries[0].ProviderRef.Namespace)
+		assert.Equal(t, "my-provider", defaultGroup.Entries[0].ProviderRef.Name)
+		assert.Equal(t, "other-ns", *defaultGroup.Entries[0].ProviderRef.Namespace)
 		fleetGroup := got.Providers["fleet"]
-		assert.Equal(t, "my-agent", fleetGroup.entries[0].AgentRef.Name)
+		assert.Equal(t, "my-agent", fleetGroup.Entries[0].AgentRef.Name)
 		assert.Equal(t, "registry-a", got.ToolRegistries[0].Name)
 	})
 }
@@ -2035,46 +2093,46 @@ func TestArenaJobSpecJSONRoundTrip(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestArenaProviderGroupUnmarshalJSON(t *testing.T) {
-	t.Run("array JSON populates entries", func(t *testing.T) {
+	t.Run("array JSON populates Entries", func(t *testing.T) {
 		raw := `[{"providerRef":{"name":"p1"}},{"agentRef":{"name":"a1"}}]`
 		var pg arenaProviderGroup
 		err := json.Unmarshal([]byte(raw), &pg)
 		require.NoError(t, err)
 
-		assert.False(t, pg.isMapMode())
-		require.Len(t, pg.entries, 2)
-		assert.Equal(t, "p1", pg.entries[0].ProviderRef.Name)
-		assert.Equal(t, "a1", pg.entries[1].AgentRef.Name)
-		assert.Nil(t, pg.mapping)
+		assert.False(t, pg.IsMapMode())
+		require.Len(t, pg.Entries, 2)
+		assert.Equal(t, "p1", pg.Entries[0].ProviderRef.Name)
+		assert.Equal(t, "a1", pg.Entries[1].AgentRef.Name)
+		assert.Nil(t, pg.Mapping)
 	})
 
-	t.Run("object JSON populates mapping", func(t *testing.T) {
+	t.Run("object JSON populates Mapping", func(t *testing.T) {
 		raw := `{"my-config-id":{"providerRef":{"name":"p1"}},"other-id":{"agentRef":{"name":"a1"}}}`
 		var pg arenaProviderGroup
 		err := json.Unmarshal([]byte(raw), &pg)
 		require.NoError(t, err)
 
-		assert.True(t, pg.isMapMode())
-		require.Len(t, pg.mapping, 2)
-		assert.Equal(t, "p1", pg.mapping["my-config-id"].ProviderRef.Name)
-		assert.Equal(t, "a1", pg.mapping["other-id"].AgentRef.Name)
-		assert.Nil(t, pg.entries)
+		assert.True(t, pg.IsMapMode())
+		require.Len(t, pg.Mapping, 2)
+		assert.Equal(t, "p1", pg.Mapping["my-config-id"].ProviderRef.Name)
+		assert.Equal(t, "a1", pg.Mapping["other-id"].AgentRef.Name)
+		assert.Nil(t, pg.Entries)
 	})
 
 	t.Run("empty data returns no error", func(t *testing.T) {
 		var pg arenaProviderGroup
 		err := pg.UnmarshalJSON([]byte(""))
 		require.NoError(t, err)
-		assert.Nil(t, pg.entries)
-		assert.Nil(t, pg.mapping)
+		assert.Nil(t, pg.Entries)
+		assert.Nil(t, pg.Mapping)
 	})
 
 	t.Run("whitespace-only data returns no error", func(t *testing.T) {
 		var pg arenaProviderGroup
 		err := pg.UnmarshalJSON([]byte("  \t\n"))
 		require.NoError(t, err)
-		assert.Nil(t, pg.entries)
-		assert.Nil(t, pg.mapping)
+		assert.Nil(t, pg.Entries)
+		assert.Nil(t, pg.Mapping)
 	})
 
 	t.Run("non-array non-object falls through to default unmarshal", func(t *testing.T) {
@@ -2092,7 +2150,7 @@ func TestArenaProviderGroupUnmarshalJSON(t *testing.T) {
 func TestArenaProviderGroupMarshalJSON(t *testing.T) {
 	t.Run("array mode marshals to JSON array", func(t *testing.T) {
 		pg := arenaProviderGroup{
-			entries: []arenaProviderEntry{
+			Entries: []arenaProviderEntry{
 				{ProviderRef: &v1alpha1.ProviderRef{Name: "p1"}},
 			},
 		}
@@ -2106,14 +2164,14 @@ func TestArenaProviderGroupMarshalJSON(t *testing.T) {
 		// Round-trip
 		var got arenaProviderGroup
 		require.NoError(t, json.Unmarshal(data, &got))
-		assert.False(t, got.isMapMode())
-		require.Len(t, got.entries, 1)
-		assert.Equal(t, "p1", got.entries[0].ProviderRef.Name)
+		assert.False(t, got.IsMapMode())
+		require.Len(t, got.Entries, 1)
+		assert.Equal(t, "p1", got.Entries[0].ProviderRef.Name)
 	})
 
 	t.Run("map mode marshals to JSON object", func(t *testing.T) {
 		pg := arenaProviderGroup{
-			mapping: map[string]arenaProviderEntry{
+			Mapping: map[string]arenaProviderEntry{
 				"my-id": {ProviderRef: &v1alpha1.ProviderRef{Name: "p1"}},
 			},
 		}
@@ -2127,8 +2185,8 @@ func TestArenaProviderGroupMarshalJSON(t *testing.T) {
 		// Round-trip
 		var got arenaProviderGroup
 		require.NoError(t, json.Unmarshal(data, &got))
-		assert.True(t, got.isMapMode())
-		assert.Equal(t, "p1", got.mapping["my-id"].ProviderRef.Name)
+		assert.True(t, got.IsMapMode())
+		assert.Equal(t, "p1", got.Mapping["my-id"].ProviderRef.Name)
 	})
 }
 
@@ -2311,7 +2369,7 @@ func TestBuildFleetTokenSource(t *testing.T) {
 	})
 
 	t.Run("fetcher when URL set", func(t *testing.T) {
-		ts, err := buildFleetTokenSource(testLog(), "http://omnia-dashboard:3000/api/auth/service-token")
+		ts, err := buildFleetTokenSource(testLog(), "https://omnia-dashboard:3000/api/auth/service-token")
 		require.NoError(t, err)
 		assert.NotNil(t, ts)
 	})

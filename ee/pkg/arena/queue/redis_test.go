@@ -124,6 +124,15 @@ func TestRedisQueue_Pop(t *testing.T) {
 	assert.Equal(t, 1, item.Attempt)
 	assert.NotNil(t, item.StartedAt)
 
+	// Verify processing bookkeeping writes happened.
+	processingScore, err := client.ZScore(ctx, q.processingZSetKey(jobID), item.ID).Result()
+	require.NoError(t, err)
+	assert.NotZero(t, processingScore)
+
+	startedAt, err := client.HGet(ctx, q.metaKey(jobID), "startedAt").Result()
+	require.NoError(t, err)
+	assert.NotEmpty(t, startedAt)
+
 	// Pop second item
 	item, err = q.Pop(ctx, jobID)
 	require.NoError(t, err)

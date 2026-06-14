@@ -36,6 +36,11 @@ export interface ConsentStats {
   grantsByCategory: Record<string, number>;
 }
 
+export interface EnforcementStats {
+  piiBlocked: number;
+  redactions: number;
+}
+
 export function isTier(key: string): key is Tier {
   return TIERS.includes(key as Tier);
 }

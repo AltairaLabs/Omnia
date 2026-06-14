@@ -96,6 +96,56 @@ func (c *CachedStore) FindSimilarObservations(ctx context.Context, scope map[str
 	return c.inner.FindSimilarObservations(ctx, scope, queryEmbedding, k, minSimilarity)
 }
 
+// Compile-time check: CachedStore forwards the Galaxy capability to its inner.
+var _ ProjectionStore = (*CachedStore)(nil)
+
+var errNoProjectionStore = errors.New("memory: inner store does not support projection")
+
+func (c *CachedStore) projectionInner() (ProjectionStore, error) {
+	ps, ok := c.inner.(ProjectionStore)
+	if !ok {
+		return nil, errNoProjectionStore
+	}
+	return ps, nil
+}
+
+// LoadProjectionInputs forwards to the inner store (projection has its own
+// table-level cache, so no Redis layer here).
+func (c *CachedStore) LoadProjectionInputs(ctx context.Context, scope map[string]string) ([]ProjectionInput, error) {
+	ps, err := c.projectionInner()
+	if err != nil {
+		return nil, err
+	}
+	return ps.LoadProjectionInputs(ctx, scope)
+}
+
+// ProjectionFingerprint forwards to the inner store.
+func (c *CachedStore) ProjectionFingerprint(ctx context.Context, scope map[string]string) (string, error) {
+	ps, err := c.projectionInner()
+	if err != nil {
+		return "", err
+	}
+	return ps.ProjectionFingerprint(ctx, scope)
+}
+
+// LoadProjection forwards to the inner store.
+func (c *CachedStore) LoadProjection(ctx context.Context, scopeKey string) (*StoredProjection, error) {
+	ps, err := c.projectionInner()
+	if err != nil {
+		return nil, err
+	}
+	return ps.LoadProjection(ctx, scopeKey)
+}
+
+// SaveProjection forwards to the inner store.
+func (c *CachedStore) SaveProjection(ctx context.Context, scopeKey, workspaceID, fingerprint, model, basis string, points []ProjectionPoint) error {
+	ps, err := c.projectionInner()
+	if err != nil {
+		return err
+	}
+	return ps.SaveProjection(ctx, scopeKey, workspaceID, fingerprint, model, basis, points)
+}
+
 // GetMemory passes through to the inner store. Not cached: the
 // memory__open path is infrequent and needs live data so post-
 // supersede reads reflect the new observation.

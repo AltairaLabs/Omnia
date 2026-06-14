@@ -144,11 +144,21 @@ describe("getAuthConfig env-var overrides", () => {
     expect(getAuthConfig().oauth.clientSecret).toBe("");
   });
 
-  it("logs warning in production when session secret is missing", () => {
+  it("logs warning in production when session secret is missing in a session-using mode", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("OMNIA_AUTH_MODE", "oauth");
     getAuthConfig();
     expect(warn).toHaveBeenCalledWith(expect.stringContaining("OMNIA_SESSION_SECRET"));
+    warn.mockRestore();
+  });
+
+  it("does not warn about the session secret in anonymous mode", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("OMNIA_AUTH_MODE", "anonymous");
+    getAuthConfig();
+    expect(warn).not.toHaveBeenCalledWith(expect.stringContaining("OMNIA_SESSION_SECRET"));
     warn.mockRestore();
   });
 

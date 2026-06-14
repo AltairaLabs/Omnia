@@ -100,6 +100,12 @@ beforeEach(() => {
         }),
       };
     }
+    if (url.includes("/privacy/enforcement-stats")) {
+      return {
+        ok: true,
+        json: async () => ({ piiBlocked: 3, redactions: 8 }),
+      };
+    }
     throw new Error(`unexpected url: ${url}`);
   });
   vi.stubGlobal("fetch", fetchMock);

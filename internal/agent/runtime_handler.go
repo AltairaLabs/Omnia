@@ -272,16 +272,14 @@ func (h *RuntimeHandler) handleClientToolCall(
 	writer facade.ResponseWriter,
 	resp *runtimev1.ServerMessage,
 ) error {
-	// Forward the tool call to the WebSocket client with execution=client
-	if err := h.forwardResponse(resp, writer); err != nil {
-		return fmt.Errorf("error forwarding client tool call: %w", err)
-	}
-
 	callID := extractToolCallID(resp)
 	if callID == "" {
 		return fmt.Errorf("client tool call missing id")
 	}
 
+	// Register the result and ACK channels BEFORE forwarding the tool call to the
+	// client. Otherwise a fast client (or test) can send the result back before the
+	// channels exist, and SendToolResult/AckToolCall would find nothing to route to.
 	toolResultCh := make(chan *facade.ClientToolResultInfo, 1)
 	h.toolResultChannels.Store(callID, toolResultCh)
 	defer h.toolResultChannels.Delete(callID)
@@ -289,6 +287,11 @@ func (h *RuntimeHandler) handleClientToolCall(
 	ackCh := make(chan string, 1)
 	h.toolAckChannels.Store(callID, ackCh)
 	defer h.toolAckChannels.Delete(callID)
+
+	// Forward the tool call to the WebSocket client with execution=client
+	if err := h.forwardResponse(resp, writer); err != nil {
+		return fmt.Errorf("error forwarding client tool call: %w", err)
+	}
 
 	// Phase 1: Wait briefly for ACK or immediate result/rejection
 	ackTimer := time.NewTimer(h.toolCallAckTimeout)

@@ -48,6 +48,25 @@ func TestNewTokenFetcher_RequiresEndpoint(t *testing.T) {
 	}
 }
 
+func TestNewTokenFetcher_RejectsInsecureHTTPByDefault(t *testing.T) {
+	if _, err := NewTokenFetcher(FetcherOptions{Endpoint: "http://dashboard.example/api/auth/service-token"}); err == nil {
+		t.Fatal("expected error for insecure http endpoint")
+	}
+}
+
+func TestNewTokenFetcher_AllowsInsecureHTTPWhenExplicitlyEnabled(t *testing.T) {
+	f, err := NewTokenFetcher(FetcherOptions{
+		Endpoint:          "http://dashboard.example/api/auth/service-token",
+		AllowInsecureHTTP: true,
+	})
+	if err != nil {
+		t.Fatalf("expected constructor to allow insecure endpoint when explicitly enabled, got: %v", err)
+	}
+	if f == nil {
+		t.Fatal("expected fetcher")
+	}
+}
+
 func TestToken_RoundtripsWithDashboard(t *testing.T) {
 	saTokenPath := writeSAToken(t, "fake-sa-token")
 	var seenAuth, seenBody string
@@ -69,6 +88,7 @@ func TestToken_RoundtripsWithDashboard(t *testing.T) {
 	f, err := NewTokenFetcher(FetcherOptions{
 		Endpoint:                server.URL,
 		ServiceAccountTokenPath: saTokenPath,
+		AllowInsecureHTTP:       true,
 	})
 	if err != nil {
 		t.Fatalf("init: %v", err)
@@ -100,6 +120,7 @@ func TestToken_TrimsSATokenWhitespace(t *testing.T) {
 	f, _ := NewTokenFetcher(FetcherOptions{
 		Endpoint:                server.URL,
 		ServiceAccountTokenPath: saTokenPath,
+		AllowInsecureHTTP:       true,
 	})
 	if _, err := f.Token("a", "w"); err != nil {
 		t.Fatalf("token: %v", err)
@@ -125,6 +146,7 @@ func TestToken_CachedWhenSameAgentWorkspace(t *testing.T) {
 	f, _ := NewTokenFetcher(FetcherOptions{
 		Endpoint:                server.URL,
 		ServiceAccountTokenPath: saTokenPath,
+		AllowInsecureHTTP:       true,
 	})
 	t1, _ := f.Token("a", "w")
 	t2, _ := f.Token("a", "w")
@@ -149,6 +171,7 @@ func TestToken_FreshWhenAgentChanges(t *testing.T) {
 	f, _ := NewTokenFetcher(FetcherOptions{
 		Endpoint:                server.URL,
 		ServiceAccountTokenPath: saTokenPath,
+		AllowInsecureHTTP:       true,
 	})
 	t1, _ := f.Token("a", "w")
 	t2, _ := f.Token("b", "w")
@@ -171,6 +194,7 @@ func TestToken_FreshWhenCacheExpired(t *testing.T) {
 	f, _ := NewTokenFetcher(FetcherOptions{
 		Endpoint:                server.URL,
 		ServiceAccountTokenPath: saTokenPath,
+		AllowInsecureHTTP:       true,
 	})
 	now := time.Now()
 	f.now = func() time.Time { return now }
@@ -193,6 +217,7 @@ func TestToken_SurfacesDashboardError(t *testing.T) {
 	f, _ := NewTokenFetcher(FetcherOptions{
 		Endpoint:                server.URL,
 		ServiceAccountTokenPath: saTokenPath,
+		AllowInsecureHTTP:       true,
 	})
 	_, err := f.Token("a", "w")
 	if err == nil {
@@ -213,6 +238,7 @@ func TestToken_RejectsEmptyTokenInResponse(t *testing.T) {
 	f, _ := NewTokenFetcher(FetcherOptions{
 		Endpoint:                server.URL,
 		ServiceAccountTokenPath: saTokenPath,
+		AllowInsecureHTTP:       true,
 	})
 	if _, err := f.Token("a", "w"); err == nil {
 		t.Fatal("expected error for empty token")
@@ -235,6 +261,7 @@ func TestToken_MissingSATokenFile(t *testing.T) {
 	f, _ := NewTokenFetcher(FetcherOptions{
 		Endpoint:                server.URL,
 		ServiceAccountTokenPath: "/tmp/this-path-does-not-exist-for-sure",
+		AllowInsecureHTTP:       true,
 	})
 	if _, err := f.Token("a", "w"); err == nil {
 		t.Fatal("expected error when SA token file missing")

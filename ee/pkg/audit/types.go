@@ -18,6 +18,7 @@ const (
 	EventSessionExported     = "session_exported"
 	EventSessionDeleted      = "session_deleted"
 	EventPIIRedacted         = "pii_redacted"
+	EventMemoryWriteBlocked  = "memory_write_blocked"
 	EventDecryptionRequested = "decryption_requested"
 	EventMemoryCreated       = "memory_created"
 	EventMemoryAccessed      = "memory_accessed"

@@ -409,6 +409,7 @@ func TestWrapPrivacyMiddleware_NoEmbeddingProvider_StillBuildsValidator(t *testi
 		next,
 		nil, // pool — function tolerates nil because it skips when no kubeconfig
 		nil, // embeddingSvc nil → regex-only
+		nil, // auditLogger nil → enforcement audit disabled
 		logr.Discard(),
 	)
 	if handler == nil {
@@ -443,7 +444,7 @@ func TestWrapPrivacyMiddleware_DoesNotPanicWithNilEmbeddingSvc(t *testing.T) {
 			t.Fatalf("wrapPrivacyMiddleware panicked: %v", r)
 		}
 	}()
-	_ = wrapPrivacyMiddleware(context.Background(), next, nil, nil, logr.Discard())
+	_ = wrapPrivacyMiddleware(context.Background(), next, nil, nil, nil, logr.Discard())
 }
 
 // TestMemoryAnalyticsOptInMetrics_Registered verifies that the

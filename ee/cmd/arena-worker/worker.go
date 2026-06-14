@@ -352,6 +352,33 @@ func executeAndReport(
 	wm *WorkerMetrics,
 ) {
 	ctx, log, cfg, q, jobID := wlc.ctx, wlc.log, wlc.cfg, wlc.queue, wlc.jobID
+	runWorkItemWithTracing(
+		ctx,
+		jobID,
+		item,
+		wm,
+		func(itemCtx context.Context, workItem *queue.WorkItem) (*ExecutionResult, error) {
+			return executeWorkItem(itemCtx, log, cfg, workItem, bundlePath)
+		},
+		func(reportCtx context.Context, workItem *queue.WorkItem, result *ExecutionResult, execErr error) {
+			reportWorkItemResult(reportCtx, log, q, jobID, workItem, result, execErr)
+		},
+	)
+}
+
+type workItemExecutor func(context.Context, *queue.WorkItem) (*ExecutionResult, error)
+type workItemReporter func(context.Context, *queue.WorkItem, *ExecutionResult, error)
+
+// runWorkItemWithTracing executes one item with standard per-item tracing,
+// timeout handling, result reporting, and metrics recording.
+func runWorkItemWithTracing(
+	parentCtx context.Context,
+	jobID string,
+	item *queue.WorkItem,
+	wm *WorkerMetrics,
+	execute workItemExecutor,
+	report workItemReporter,
+) {
 	// Each work item gets its own trace (not a child of a job-level root).
 	traceID := workItemToTraceID(jobID, item.ID)
 	spanID := workItemToSpanID(item.ID)
@@ -374,7 +401,7 @@ func executeAndReport(
 		),
 	)
 	itemStart := time.Now()
-	result, execErr := executeWorkItem(itemCtx, log, cfg, item, bundlePath)
+	result, execErr := execute(itemCtx, item)
 	if execErr != nil {
 		span.RecordError(execErr)
 	}
@@ -382,8 +409,8 @@ func executeAndReport(
 	if itemCtx.Err() == context.DeadlineExceeded {
 		execErr = fmt.Errorf("work item timed out after %v", maxItemTimeout)
 	}
-	ackCtx := trace.ContextWithSpan(ctx, span)
-	reportWorkItemResult(ackCtx, log, q, jobID, item, result, execErr)
+	reportCtx := trace.ContextWithSpan(parentCtx, span)
+	report(reportCtx, item, result, execErr)
 	span.End()
 
 	itemDuration := time.Since(itemStart).Seconds()
@@ -472,6 +499,19 @@ func reportWorkItemResult(
 	ctx context.Context, log logr.Logger, q queue.WorkQueue, jobID string,
 	item *queue.WorkItem, result *ExecutionResult, execErr error,
 ) {
+	reportWorkItemResultWithOptions(ctx, log, q, jobID, item, result, execErr, true)
+}
+
+func reportWorkItemResultWithOptions(
+	ctx context.Context,
+	log logr.Logger,
+	q queue.WorkQueue,
+	jobID string,
+	item *queue.WorkItem,
+	result *ExecutionResult,
+	execErr error,
+	logFailedResultError bool,
+) {
 	if execErr != nil {
 		log.Error(execErr, "work item failed", "itemID", item.ID)
 		if err := q.Nack(ctx, jobID, item.ID, execErr); err != nil {
@@ -485,7 +525,7 @@ func reportWorkItemResult(
 		"status", result.Status,
 		"durationMs", result.DurationMs,
 	)
-	if result.Status == statusFail && result.Error != "" {
+	if logFailedResultError && result.Status == statusFail && result.Error != "" {
 		log.Info("work item result error",
 			"itemID", item.ID,
 			"error", result.Error,

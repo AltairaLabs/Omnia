@@ -374,6 +374,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/memories/export", h.handleExportMemories)
 	mux.HandleFunc("POST /api/v1/memories", h.handleSaveMemory)
 	mux.HandleFunc("GET /api/v1/memories/aggregate", h.handleMemoryAggregate)
+	mux.HandleFunc("GET /api/v1/memories/projection", h.handleProjection)
 	mux.HandleFunc("GET /api/v1/memories/{id}", h.handleOpenMemory)
 	mux.HandleFunc("PATCH /api/v1/memories/{id}", h.handleUpdateMemory)
 	mux.HandleFunc("POST /api/v1/memories/supersede", h.handleSupersedeMemories)
