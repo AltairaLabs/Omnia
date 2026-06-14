@@ -134,6 +134,31 @@ func TestRedisQueue_Pop(t *testing.T) {
 	assert.Equal(t, ErrQueueEmpty, err)
 }
 
+func TestRedisQueue_Pop_ItemNotFound(t *testing.T) {
+	client := getTestRedisClient(t)
+	defer cleanupRedisKeys(t, client)
+	defer func() { _ = client.Close() }()
+
+	q := NewRedisQueueFromClient(client, DefaultOptions())
+	defer func() { _ = q.Close() }()
+
+	ctx := context.Background()
+	jobID := "test-job-pop-item-not-found"
+	items := []WorkItem{{ID: "item-1", ScenarioID: "scenario-1", ProviderID: "provider-1"}}
+	require.NoError(t, q.Push(ctx, jobID, items))
+	require.NoError(t, client.Del(ctx, q.itemKey("item-1")).Err())
+
+	_, err := q.Pop(ctx, jobID)
+	assert.Equal(t, ErrItemNotFound, err)
+
+	processingLen, err := client.LLen(ctx, q.processingKey(jobID)).Result()
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), processingLen)
+
+	_, err = q.Pop(ctx, jobID)
+	assert.Equal(t, ErrQueueEmpty, err)
+}
+
 func TestRedisQueue_Ack(t *testing.T) {
 	client := getTestRedisClient(t)
 	defer cleanupRedisKeys(t, client)

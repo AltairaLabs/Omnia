@@ -207,7 +207,7 @@ func (p *VUPool) atConcurrencyLimit(ctx context.Context) (bool, error) {
 func (p *VUPool) handleVUPopError(
 	ctx context.Context, log logr.Logger, err error, emptyCount, maxEmptyPolls int,
 ) (bool, int, error) {
-	if !errors.Is(err, queue.ErrQueueEmpty) {
+	if !isRecoverablePopError(err) {
 		return false, emptyCount, fmt.Errorf("failed to pop work item: %w", err)
 	}
 
