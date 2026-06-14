@@ -52,9 +52,9 @@ function project(p: GalaxyPoint, fit: Transform, view: View): ScreenPos {
   return { x: b.x * view.zoom + view.panX, y: b.y * view.zoom + view.panY };
 }
 
-// Logarithmic, so points grow gently with zoom instead of ballooning linearly.
+// Logarithmic, so points grow with zoom without ballooning linearly.
 function sizeFactor(zoom: number): number {
-  return Math.max(0.7, 1 + Math.log2(zoom) * 0.35);
+  return Math.max(0.7, 1 + Math.log2(zoom) * 0.6);
 }
 
 function overlaps(a: Box, b: Box): boolean {
