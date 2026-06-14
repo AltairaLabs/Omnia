@@ -19,6 +19,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+const projTierUser = "user"
+
 func denseProjInputs(n int) []memory.ProjectionInput {
 	out := make([]memory.ProjectionInput, n)
 	for i := 0; i < n; i++ {
@@ -26,7 +28,7 @@ func denseProjInputs(n int) []memory.ProjectionInput {
 			EntityID:   fmt.Sprintf("e%04d", i),
 			Content:    "some memory content here",
 			Embedding:  []float32{float32(i % 5), float32((i * 3) % 7), 1, 0, float32(i % 2)},
-			Tier:       "user",
+			Tier:       projTierUser,
 			User:       "u1",
 			Confidence: 0.5,
 			ObservedAt: time.Unix(int64(i), 0).UTC(),

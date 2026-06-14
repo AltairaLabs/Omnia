@@ -11,7 +11,10 @@ import (
 	"testing"
 )
 
-const projTestUser = "17b0187b2d95fca1" // a pseudonymized user id
+const (
+	projTestUser   = "17b0187b2d95fca1" // a pseudonymized user id
+	projTypePolicy = "policy"
+)
 
 func abs64(f float64) float64 {
 	if f < 0 {
@@ -24,7 +27,7 @@ func seedProjectionScope(t *testing.T, store *PostgresMemoryStore) (instID, agen
 	t.Helper()
 	ctx := context.Background()
 
-	inst := &Memory{Type: "policy", Content: "refund policy: 30 days", Confidence: 0.9,
+	inst := &Memory{Type: projTypePolicy, Content: "refund policy: 30 days", Confidence: 0.9,
 		Scope: map[string]string{ScopeWorkspaceID: testWorkspace1}}
 	must(t, store.SaveInstitutional(ctx, inst))
 
