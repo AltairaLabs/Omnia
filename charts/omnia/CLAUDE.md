@@ -66,11 +66,13 @@ The chart intentionally has no default for `dashboard.auth.mode` (prevents accid
 
 Resolution: schema allows `""` in the enum; `_helpers.tpl` `omnia.validateAuth` fails render-time only when `dashboard.enabled=true` AND mode is empty. Don't add `required: ["mode"]` to the schema — it breaks dashboard-disabled installs.
 
-### 5. Visible default changes need a Chart.yaml version bump
+### 5. Don't bump `Chart.yaml` version in feature/fix PRs — only at release
 
-If a values default changes in a way that affects `helm template` output for an existing installation, bump `Chart.yaml` `version:` (semver minor for additive/default-flip changes). Recent example: `enterprise.communityTemplates.enabled: true → false` shipped as 0.9.0-beta.6 → 0.9.0-beta.7.
+`version` and `appVersion` are owned by the release workflow. After a tagged release, `release.yml` opens a `chore/bump-chart-<version>` PR that syncs both fields to the just-published version. Do NOT hand-bump them in a feature or fix PR, even when the change alters `helm template` output for an existing installation — a manual bump drifts `version` ahead of `appVersion` and the last release, producing skipped versions and a `main`-at-rest that templates the wrong image tags.
 
-Document the change in the commit + PR body so the CHANGELOG generator picks it up.
+This is **enforced in CI**: `.github/workflows/chart-version-guard.yml` fails any PR that changes `version`/`appVersion` except the release bot's bump PR.
+
+Instead, document any rendered-output change in the commit + PR body so the CHANGELOG generator picks it up at release time.
 
 ### 6. CRDs are too big for client-side `kubectl apply`
 
@@ -109,10 +111,9 @@ CI gates enforce these (`test-helm-e2e.yml`). E2E workflows **do NOT** fire on `
 
 ## When to bump `Chart.yaml`
 
-- Add a new `.Values.*` key → no bump needed (additive).
-- Change a default in a way that alters rendered output → minor bump.
-- Remove or rename a `.Values.*` key → major bump + migration note in `NOTES.txt`.
-- Chart appVersion tracks app releases; bump both together when cutting a release.
+**Only at release time.** `version` and `appVersion` track the last git-tagged release; bump both together in the release commit, before tagging. Feature/fix PRs must NOT bump the chart version — regardless of whether they add values, change defaults, or alter rendered output. Document those changes in the PR body so the CHANGELOG generator picks them up at release.
+
+A rename/removal of a `.Values.*` key still needs a migration note in `NOTES.txt` in the same PR — just not a version bump.
 
 ## See also
 

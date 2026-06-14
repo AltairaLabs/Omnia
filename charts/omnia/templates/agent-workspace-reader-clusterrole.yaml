@@ -1,6 +1,11 @@
 {{- if .Values.rbac.create -}}
-# ClusterRole granting agent pods (facade/runtime) read access to Workspace CRDs.
-# Agents need this to resolve per-workspace service URLs from Workspace.status.services.
+# ClusterRole granting service pods (facade/runtime/session-api/memory-api)
+# read access to cluster-scoped CRDs they resolve at runtime:
+#   - workspaces: agents resolve per-workspace service URLs from
+#     Workspace.status.services; the memory-api consolidation worker lists
+#     Workspaces cluster-wide to find those opted into each MemoryPolicy.
+#   - memorypolicies: the memory-api consolidation worker lists MemoryPolicy
+#     CRs cluster-wide each pass to decide which workspaces to consolidate.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -12,6 +17,7 @@ rules:
       - omnia.altairalabs.ai
     resources:
       - workspaces
+      - memorypolicies
     verbs:
       - get
       - list
