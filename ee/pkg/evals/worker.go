@@ -36,15 +36,18 @@ import (
 
 // Constants for Redis consumer group and stream configuration.
 const (
-	consumerGroupPrefix   = "omnia-eval-workers-"
-	blockTimeout          = 5 * time.Second
-	evalSource            = "worker"
-	eventTypeMessage      = "message.assistant"
-	eventTypeSessionDone  = "session.completed"
-	eventTypeEvaluate     = "session.evaluate"
-	streamPayloadField    = "payload"
-	streamReadBatchSize   = 10
-	periodicCheckInterval = 30 * time.Second
+	consumerGroupPrefix     = "omnia-eval-workers-"
+	blockTimeout            = 5 * time.Second
+	evalSource              = "worker"
+	eventTypeMessage        = "message.assistant"
+	eventTypeSessionDone    = "session.completed"
+	eventTypeEvaluate       = "session.evaluate"
+	streamPayloadField      = "payload"
+	streamReadBatchSize     = 10
+	periodicCheckInterval   = 30 * time.Second
+	pendingReclaimInterval  = 30 * time.Second
+	pendingMinIdle          = 2 * time.Minute
+	pendingReclaimBatchSize = 25
 )
 
 // MessageStore provides read access to session data from the Redis hot tier.
@@ -120,6 +123,7 @@ type EvalWorker struct {
 	// bypassing both the resolver and the default. Test-only.
 	workerGroupsOverride []string
 	metrics              WorkerMetricsRecorder
+	lastPendingReclaim   time.Time
 }
 
 // NewEvalWorker creates a new eval worker for the given namespace(s).
@@ -306,6 +310,37 @@ func (w *EvalWorker) consumeLoop(ctx context.Context) error {
 
 		w.processStreams(ctx, streams)
 		w.reportStreamLag(ctx)
+		w.reclaimPending(ctx)
+	}
+}
+
+// reclaimPending periodically reclaims stale pending entries from other consumers
+// and re-processes them via the normal message handling path.
+func (w *EvalWorker) reclaimPending(ctx context.Context) {
+	if !w.lastPendingReclaim.IsZero() && time.Since(w.lastPendingReclaim) < pendingReclaimInterval {
+		return
+	}
+	w.lastPendingReclaim = time.Now()
+
+	for _, key := range w.streamKeys {
+		msgs, _, err := w.redisClient.XAutoClaim(ctx, &goredis.XAutoClaimArgs{
+			Stream:   key,
+			Group:    w.consumerGroup,
+			Consumer: w.consumerName,
+			MinIdle:  pendingMinIdle,
+			Start:    "0-0",
+			Count:    pendingReclaimBatchSize,
+		}).Result()
+		if err != nil {
+			if !errors.Is(err, goredis.Nil) {
+				w.logger.Debug("XAUTOCLAIM failed", "stream", key, "error", err)
+			}
+			continue
+		}
+
+		for _, msg := range msgs {
+			w.handleMessage(ctx, key, msg)
+		}
 	}
 }
 
