@@ -67,13 +67,19 @@ func linkSample(ctx context.Context, c *Client, instIDs, userIDs []string) error
 func main() {
 	base := flag.String("memory-api", "http://localhost:8080", "memory-api base URL")
 	wsUID := flag.String("workspace-uid", "", "workspace metadata.uid (required)")
+	agentUID := flag.String("agent-uid", "", "AgentRuntime metadata.uid to scope agent-tier memories to (required)")
 	seed := flag.Int64("seed", 1, "rng seed for deterministic output")
 	flag.Parse()
 	if *wsUID == "" {
 		log.Fatal("--workspace-uid is required " +
 			"(kubectl get workspace dev-agents -n dev-agents -o jsonpath='{.metadata.uid}')")
 	}
+	if *agentUID == "" {
+		log.Fatal("--agent-uid is required " +
+			"(kubectl get agentruntime demo-agent -n dev-agents -o jsonpath='{.metadata.uid}')")
+	}
 	s := DefaultScenario(*wsUID)
+	s.AgentUID = *agentUID
 	s.Seed = *seed
 	g := Generate(s, rand.New(rand.NewSource(s.Seed)))
 	c := NewClient(*base, *wsUID)

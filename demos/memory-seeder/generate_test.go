@@ -6,6 +6,17 @@ import (
 	"testing"
 )
 
+func TestAgentMemoriesUseAgentUID(t *testing.T) {
+	s := DefaultScenario("ws")
+	s.AgentUID = "11111111-2222-3333-4444-555555555555"
+	out := Generate(s, rand.New(rand.NewSource(s.Seed)))
+	for _, m := range out.AgentMemories {
+		if m.AgentID != s.AgentUID {
+			t.Fatalf("AgentID = %q, want %q", m.AgentID, s.AgentUID)
+		}
+	}
+}
+
 func TestGenerateIsDeterministic(t *testing.T) {
 	s := DefaultScenario("ws")
 	a := Generate(s, rand.New(rand.NewSource(s.Seed)))

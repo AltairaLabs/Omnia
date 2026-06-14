@@ -119,6 +119,13 @@ func TestSaveObservationRepeatsAboutKey(t *testing.T) {
 	if meta["provenance"] != "system_generated" {
 		t.Errorf("provenance = %v, want system_generated", meta["provenance"])
 	}
+	// /api/v1/memories requires a user_id in scope; observations are owned by
+	// a synthetic ops user so the write is accepted.
+	scope, _ := gotBody["scope"].(map[string]any)
+	wantOwner := identity.PseudonymizeID(observationOwnerUser)
+	if scope[fieldUserID] != wantOwner {
+		t.Errorf("scope user_id = %v, want %q", scope[fieldUserID], wantOwner)
+	}
 }
 
 func TestSaveInstitutionalPostsFact(t *testing.T) {

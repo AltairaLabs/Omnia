@@ -3,6 +3,7 @@ package main
 // Scenario holds the configurable knobs for the "Hawkridge Cloud" seed.
 type Scenario struct {
 	WorkspaceUID      string
+	AgentUID          string
 	InstitutionalDocs int
 	AgentMemories     int
 	Users             int

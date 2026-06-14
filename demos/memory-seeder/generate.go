@@ -57,11 +57,16 @@ func Generate(s Scenario, r *rand.Rand) Generated {
 	}
 }
 
+// paragraphsPerDoc makes each generated doc ~1200 words so the chunk strategy
+// (200-word windows) fans it into ~8 institutional chunks — ~300 docs → ~2000+
+// institutional memories.
+const paragraphsPerDoc = 24
+
 func genDocs(s Scenario, r *rand.Rand) []Doc {
 	docs := make([]Doc, s.InstitutionalDocs)
 	for i := range docs {
 		topic := docTopics[r.Intn(len(docTopics))]
-		text := strings.Repeat(fmt.Sprintf("%s (%s). ", paragraph, topic), 6)
+		text := strings.Repeat(fmt.Sprintf("%s (%s). ", paragraph, topic), paragraphsPerDoc)
 		docs[i] = Doc{
 			Title: fmt.Sprintf("KB-%04d: %s", i, topic),
 			URL:   fmt.Sprintf("kb://hawkridge/%04d", i),
@@ -77,7 +82,7 @@ func genAgentMemories(s Scenario, r *rand.Rand) []AgentMemory {
 	for i := range out {
 		topic := docTopics[r.Intn(len(docTopics))]
 		out[i] = AgentMemory{
-			AgentID:    "support-agent",
+			AgentID:    s.AgentUID,
 			Type:       "resolution_pattern",
 			Content:    fmt.Sprintf("Customers hitting %s are usually resolved by step %d of the runbook.", topic, 1+r.Intn(5)),
 			Confidence: 0.5 + r.Float64()*0.5,

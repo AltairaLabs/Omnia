@@ -9,6 +9,7 @@ import (
 	"net/url"
 
 	"github.com/altairalabs/omnia/pkg/identity"
+	"golang.org/x/time/rate"
 )
 
 // JSON field-name and value constants shared across request bodies. These are
@@ -18,7 +19,20 @@ const (
 	fieldConfidence       = "confidence"
 	fieldType             = "type"
 	fieldContent          = "content"
+	fieldUserID           = "user_id"
 	aboutKindSupportTopic = "support_topic"
+
+	// observationOwnerUser owns the compaction-fodder observation clusters.
+	// /api/v1/memories requires a user_id in scope, so the shared-entity
+	// observations are attributed to one synthetic ops user.
+	observationOwnerUser = "hawkridge-ops"
+)
+
+// seedRPS/seedBurst keep the seeder under memory-api's per-IP rate limit
+// (default 100 rps / 200 burst, see internal/session/api/ratelimit.go).
+const (
+	seedRPS   = 60
+	seedBurst = 30
 )
 
 // Client posts seed data to a memory-api instance for one workspace.
@@ -26,10 +40,16 @@ type Client struct {
 	base         string
 	workspaceUID string
 	http         *http.Client
+	limiter      *rate.Limiter
 }
 
 func NewClient(base, workspaceUID string) *Client {
-	return &Client{base: base, workspaceUID: workspaceUID, http: &http.Client{}}
+	return &Client{
+		base:         base,
+		workspaceUID: workspaceUID,
+		http:         &http.Client{},
+		limiter:      rate.NewLimiter(seedRPS, seedBurst),
+	}
 }
 
 type saveResp struct {
@@ -41,6 +61,9 @@ type saveResp struct {
 func (c *Client) postJSON(
 	ctx context.Context, path string, query url.Values, body any, wantStatus int,
 ) ([]byte, error) {
+	if err := c.limiter.Wait(ctx); err != nil {
+		return nil, err
+	}
 	buf, err := json.Marshal(body)
 	if err != nil {
 		return nil, err
@@ -97,23 +120,26 @@ func (c *Client) SaveAgentMemory(ctx context.Context, m AgentMemory) (string, er
 // SaveUserMemory saves a user-tier memory scoped to PseudonymizeID(RawUserID).
 func (c *Client) SaveUserMemory(ctx context.Context, m UserMemory) (string, error) {
 	hashed := identity.PseudonymizeID(m.RawUserID)
-	q := url.Values{"workspace": {c.workspaceUID}, "user_id": {hashed}}
+	q := url.Values{"workspace": {c.workspaceUID}, fieldUserID: {hashed}}
 	body := map[string]any{
 		fieldType: m.Type, fieldContent: m.Content, fieldConfidence: m.Confidence,
 		"category": m.Category,
-		"scope":    map[string]string{fieldWorkspaceID: c.workspaceUID, "user_id": hashed},
+		"scope":    map[string]string{fieldWorkspaceID: c.workspaceUID, fieldUserID: hashed},
 		"metadata": map[string]any{"provenance": "user_requested"},
 	}
 	return c.saveID(ctx, "/api/v1/memories", q, body)
 }
 
 // SaveObservation appends an observation to a shared entity (compaction fodder).
+// /api/v1/memories requires a user_id in scope, so observations are owned by a
+// fixed synthetic ops user while still clustering on a shared about key.
 func (c *Client) SaveObservation(ctx context.Context, o HotObservation) (string, error) {
-	q := url.Values{"workspace": {c.workspaceUID}}
+	hashed := identity.PseudonymizeID(observationOwnerUser)
+	q := url.Values{"workspace": {c.workspaceUID}, fieldUserID: {hashed}}
 	body := map[string]any{
 		fieldType: aboutKindSupportTopic, fieldContent: o.Content, fieldConfidence: 0.5,
 		"about":    map[string]string{"kind": o.AboutKind, "key": o.AboutKey},
-		"scope":    map[string]string{fieldWorkspaceID: c.workspaceUID},
+		"scope":    map[string]string{fieldWorkspaceID: c.workspaceUID, fieldUserID: hashed},
 		"metadata": map[string]any{"provenance": "system_generated"},
 	}
 	return c.saveID(ctx, "/api/v1/memories", q, body)
