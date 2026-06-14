@@ -18,20 +18,23 @@ import (
 	"github.com/go-logr/logr"
 )
 
+const testReloadMetadataKey = "reload"
+
 func TestResolveReloadPath_AllowsRelativeUnderBase(t *testing.T) {
-	h := &PromptKitHandler{reloadBasePath: "/workspace-content"}
+	basePath := defaultReloadBasePath
+	h := &PromptKitHandler{reloadBasePath: basePath}
 	resolved, err := h.resolveReloadPath("configs/agent.yaml")
 	if err != nil {
 		t.Fatalf("resolveReloadPath returned error: %v", err)
 	}
-	want := filepath.Clean("/workspace-content/configs/agent.yaml")
+	want := filepath.Clean(filepath.Join(basePath, "configs/agent.yaml"))
 	if resolved != want {
 		t.Fatalf("resolved path = %q, want %q", resolved, want)
 	}
 }
 
 func TestResolveReloadPath_RejectsPathOutsideBase(t *testing.T) {
-	h := &PromptKitHandler{reloadBasePath: "/workspace-content"}
+	h := &PromptKitHandler{reloadBasePath: defaultReloadBasePath}
 	if _, err := h.resolveReloadPath("../../etc/passwd"); err == nil {
 		t.Fatal("expected traversal path to be rejected")
 	}
@@ -42,13 +45,13 @@ func TestHandleReload_PathModeReturnsReloadError(t *testing.T) {
 		log:            logr.Discard(),
 		sessions:       make(map[string]*SessionState),
 		nsRegistries:   make(map[string]*providers.Registry),
-		reloadBasePath: "/workspace-content",
+		reloadBasePath: defaultReloadBasePath,
 	}
 	writer := &MockResponseWriter{}
 	msg := &facade.ClientMessage{
 		Content: "configs/missing.yaml",
 		Metadata: map[string]string{
-			"reload": "true",
+			testReloadMetadataKey: "true",
 		},
 	}
 

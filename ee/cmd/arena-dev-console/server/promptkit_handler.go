@@ -32,6 +32,8 @@ import (
 // mediaSubdir is the subdirectory name for media files within the output directory.
 const mediaSubdir = "/media"
 
+const defaultReloadBasePath = "/workspace-content"
+
 // PromptKitHandler implements facade.MessageHandler using a local PromptKit engine.
 // It supports dynamic reload of the configuration without dropping the WebSocket connection.
 type PromptKitHandler struct {
@@ -64,7 +66,7 @@ func NewPromptKitHandler(cfg *config.Config, log logr.Logger) (*PromptKitHandler
 		log:            log.WithName("promptkit-handler"),
 		sessions:       make(map[string]*SessionState),
 		nsRegistries:   make(map[string]*providers.Registry),
-		reloadBasePath: "/workspace-content",
+		reloadBasePath: defaultReloadBasePath,
 	}
 
 	// Try to initialize K8s provider loader (will fail if not in cluster, which is ok)
@@ -451,7 +453,7 @@ func (h *PromptKitHandler) resolveReloadPath(configPath string) (string, error) 
 	basePath := h.reloadBasePath
 	h.mu.RUnlock()
 	if strings.TrimSpace(basePath) == "" {
-		basePath = "/workspace-content"
+		basePath = defaultReloadBasePath
 	}
 
 	cleanBase := filepath.Clean(basePath)

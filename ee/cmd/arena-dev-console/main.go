@@ -282,13 +282,13 @@ func buildFacadeMux(
 
 	providersHandler := auth.Middleware(
 		authChain,
-		http.HandlerFunc(handleListProviders(handler)),
+		handleListProviders(handler),
 		auth.WithMiddlewareLogger(log),
 		auth.WithMiddlewareAllowUnauthenticated(allowUnauthenticated),
 	)
 	reloadHandler := auth.Middleware(
 		authChain,
-		http.HandlerFunc(handleReload(handler, log)),
+		handleReload(handler, log),
 		auth.WithMiddlewareLogger(log),
 		auth.WithMiddlewareAllowUnauthenticated(allowUnauthenticated),
 	)
