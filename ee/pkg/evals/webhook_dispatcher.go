@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"sync"
 	"time"
 
@@ -200,6 +201,10 @@ func (d *WebhookDispatcher) sendWebhook(
 	cfg *WebhookConfig,
 	payload WebhookPayload,
 ) error {
+	if err := validateWebhookURL(cfg.URL); err != nil {
+		return fmt.Errorf("invalid webhook URL: %w", err)
+	}
+
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return fmt.Errorf("marshal webhook payload: %w", err)
@@ -229,6 +234,27 @@ func (d *WebhookDispatcher) sendWebhook(
 	}
 
 	return fmt.Errorf("webhook failed after %d attempts: %w", maxRetries, lastErr)
+}
+
+func validateWebhookURL(rawURL string) error {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return fmt.Errorf("parse URL: %w", err)
+	}
+
+	if !parsed.IsAbs() {
+		return fmt.Errorf("URL must be absolute")
+	}
+
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return fmt.Errorf("unsupported scheme %q", parsed.Scheme)
+	}
+
+	if parsed.Hostname() == "" {
+		return fmt.Errorf("URL must include hostname")
+	}
+
+	return nil
 }
 
 // doPost performs a single HTTP POST to the webhook URL.

@@ -345,6 +345,72 @@ func TestCheckAndFire_TimeoutHandling(t *testing.T) {
 	}
 }
 
+func TestCheckAndFire_InvalidWebhookURLScheme(t *testing.T) {
+	configs := []WebhookConfig{{
+		URL:        "file:///tmp/webhook.json",
+		Threshold:  0.9,
+		WindowSize: 5,
+	}}
+
+	d := NewWebhookDispatcher(configs, &http.Client{Timeout: 100 * time.Millisecond}, newTestLogger())
+	results := makeResults("eval-1", []bool{false, false, false, false, false})
+
+	err := d.CheckAndFire(context.Background(), "eval-1", "agent", "ns", results)
+	if err != nil {
+		t.Fatalf("CheckAndFire should not propagate errors, got: %v", err)
+	}
+
+	if _, exists := d.lastFired[rateLimitKey("eval-1", "file:///tmp/webhook.json")]; exists {
+		t.Fatalf("expected lastFired to remain unset for invalid webhook URL")
+	}
+}
+
+func TestCheckAndFire_MalformedWebhookURL(t *testing.T) {
+	configs := []WebhookConfig{{
+		URL:        "://bad url",
+		Threshold:  0.9,
+		WindowSize: 5,
+	}}
+
+	d := NewWebhookDispatcher(configs, &http.Client{Timeout: 100 * time.Millisecond}, newTestLogger())
+	results := makeResults("eval-1", []bool{false, false, false, false, false})
+
+	err := d.CheckAndFire(context.Background(), "eval-1", "agent", "ns", results)
+	if err != nil {
+		t.Fatalf("CheckAndFire should not propagate errors, got: %v", err)
+	}
+
+	if _, exists := d.lastFired[rateLimitKey("eval-1", "://bad url")]; exists {
+		t.Fatalf("expected lastFired to remain unset for malformed webhook URL")
+	}
+}
+
+func TestValidateWebhookURL(t *testing.T) {
+	tests := []struct {
+		name    string
+		rawURL  string
+		wantErr bool
+	}{
+		{name: "valid https URL", rawURL: "https://example.com/webhook", wantErr: false},
+		{name: "relative URL rejected", rawURL: "/webhook", wantErr: true},
+		{name: "unsupported scheme rejected", rawURL: "file:///tmp/webhook.json", wantErr: true},
+		{name: "missing hostname rejected", rawURL: "https://", wantErr: true},
+		{name: "parse error rejected", rawURL: "://bad url", wantErr: true},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validateWebhookURL(tc.rawURL)
+			if tc.wantErr && err == nil {
+				t.Fatalf("expected error for %q", tc.rawURL)
+			}
+			if !tc.wantErr && err != nil {
+				t.Fatalf("unexpected error for %q: %v", tc.rawURL, err)
+			}
+		})
+	}
+}
+
 func TestCheckAndFire_EmptyResults(t *testing.T) {
 	var received atomic.Int32
 
