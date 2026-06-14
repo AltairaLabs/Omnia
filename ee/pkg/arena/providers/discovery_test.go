@@ -12,6 +12,7 @@ package providers
 
 import (
 	"context"
+	"errors"
 	"os"
 	"testing"
 
@@ -21,7 +22,9 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 )
 
 func TestGetAPIKeyEnvVars(t *testing.T) {
@@ -205,6 +208,34 @@ func TestDiscoverAvailableProviders(t *testing.T) {
 	assert.NotContains(t, available, "gemini-pro")
 }
 
+func TestDiscoverAvailableProviders_TreatsClientErrorsAsUnavailable(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = corev1.AddToScheme(scheme)
+
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithInterceptorFuncs(interceptor.Funcs{
+			Get: func(ctx context.Context, cl client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+				return errors.New("simulated API outage")
+			},
+		}).
+		Build()
+
+	discovery := NewDiscovery(fakeClient, "test-ns")
+	cfg := &config.Config{
+		LoadedProviders: map[string]*config.Provider{
+			"gpt-4": {
+				ID:   "gpt-4",
+				Type: "openai",
+			},
+		},
+	}
+
+	available, err := discovery.DiscoverAvailableProviders(context.Background(), cfg)
+	require.NoError(t, err)
+	assert.NotContains(t, available, "gpt-4")
+}
+
 func TestGetMissingCredentials(t *testing.T) {
 	scheme := runtime.NewScheme()
 	_ = corev1.AddToScheme(scheme)
@@ -243,6 +274,34 @@ func TestGetMissingCredentials(t *testing.T) {
 	assert.NotContains(t, missing, "gpt-4")
 	assert.Contains(t, missing, "claude-3")
 	assert.Equal(t, []string{"ANTHROPIC_API_KEY"}, missing["claude-3"])
+}
+
+func TestGetMissingCredentials_TreatsClientErrorsAsMissing(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = corev1.AddToScheme(scheme)
+
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithInterceptorFuncs(interceptor.Funcs{
+			Get: func(ctx context.Context, cl client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+				return errors.New("simulated API outage")
+			},
+		}).
+		Build()
+
+	discovery := NewDiscovery(fakeClient, "test-ns")
+	cfg := &config.Config{
+		LoadedProviders: map[string]*config.Provider{
+			"gpt-4": {
+				ID:   "gpt-4",
+				Type: "openai",
+			},
+		},
+	}
+
+	missing, err := discovery.GetMissingCredentials(context.Background(), cfg)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"OPENAI_API_KEY"}, missing["gpt-4"])
 }
 
 func TestValidateProviderCredentials(t *testing.T) {
