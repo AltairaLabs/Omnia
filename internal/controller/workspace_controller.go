@@ -109,6 +109,13 @@ type WorkspaceReconciler struct {
 	// POD_NAMESPACE at operator startup; empty string disables the auto-
 	// allow (useful in tests).
 	OperatorNamespace string
+
+	// SessionAPITokenReviewClusterRole is the install-wide ClusterRole the
+	// chart provisions to grant `authentication.k8s.io/tokenreviews: create`.
+	// When internal service auth is enabled, the reconciler binds each
+	// per-workspace session-api ServiceAccount to it so session-api can
+	// validate caller tokens. Empty disables the binding.
+	SessionAPITokenReviewClusterRole string
 }
 
 // +kubebuilder:rbac:groups=omnia.altairalabs.ai,resources=workspaces,verbs=get;list;watch;create;update;patch;delete
@@ -120,6 +127,7 @@ type WorkspaceReconciler struct {
 // +kubebuilder:rbac:groups=core,resources=persistentvolumeclaims,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=rolebindings,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=networking.k8s.io,resources=networkpolicies,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=security.istio.io,resources=peerauthentications,verbs=get;list;watch;create;update;patch;delete
 // These permissions are required for workspace RoleBinding creation (RBAC escalation prevention)
 // The controller must have all permissions it grants via workspace ClusterRoles
 // +kubebuilder:rbac:groups=core,resources=events,verbs=get;list;watch;create;patch

@@ -77,7 +77,7 @@ func TestBuildAPIMux_EnterpriseConsentRoutesWired(t *testing.T) {
 		metricsAddr: ":0",
 	}
 
-	handler, _, cleanup := buildAPIMux(pool, registry, f, logr.Discard())
+	handler, _, cleanup := buildAPIMux(pool, registry, f, logr.Discard(), nil, nil, nil)
 	defer cleanup()
 
 	// Short deadline so the request can't hang on the unreachable DB.
@@ -112,7 +112,7 @@ func TestBuildAPIMux_NoEnterprise_ConsentRoutesNotWired(t *testing.T) {
 		metricsAddr: ":0",
 	}
 
-	handler, _, cleanup := buildAPIMux(pool, registry, f, logr.Discard())
+	handler, _, cleanup := buildAPIMux(pool, registry, f, logr.Discard(), nil, nil, nil)
 	defer cleanup()
 
 	req := httptest.NewRequest(
@@ -148,7 +148,7 @@ func TestBuildAPIMux_PrivacyPolicyRouteWired(t *testing.T) {
 		metricsAddr: ":0",
 	}
 
-	handler, _, cleanup := buildAPIMux(pool, registry, f, logr.Discard())
+	handler, _, cleanup := buildAPIMux(pool, registry, f, logr.Discard(), nil, nil, nil)
 	defer cleanup()
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/privacy-policy?namespace=default&agent=x", nil)
@@ -182,7 +182,7 @@ func TestBuildAPIMux_EnterpriseAuditRoutesWired(t *testing.T) {
 		metricsAddr: ":0",
 	}
 
-	handler, _, cleanup := buildAPIMux(pool, registry, f, logr.Discard())
+	handler, _, cleanup := buildAPIMux(pool, registry, f, logr.Discard(), nil, nil, nil)
 	defer cleanup()
 
 	// Invalid 'to' parameter forces handleQuery to short-circuit with 400
@@ -212,7 +212,7 @@ func TestBuildAPIMux_NonEnterprise_AuditRoutesAbsent(t *testing.T) {
 		metricsAddr: ":0",
 	}
 
-	handler, _, cleanup := buildAPIMux(pool, registry, f, logr.Discard())
+	handler, _, cleanup := buildAPIMux(pool, registry, f, logr.Discard(), nil, nil, nil)
 	defer cleanup()
 
 	req := httptest.NewRequest(http.MethodGet,
@@ -241,7 +241,7 @@ func TestBuildAPIMux_NonEnterprise_PrivacyPolicyReturns204(t *testing.T) {
 		metricsAddr: ":0",
 	}
 
-	handler, _, cleanup := buildAPIMux(pool, registry, f, logr.Discard())
+	handler, _, cleanup := buildAPIMux(pool, registry, f, logr.Discard(), nil, nil, nil)
 	defer cleanup()
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/privacy-policy?namespace=default&agent=x", nil)
@@ -272,7 +272,7 @@ func TestBuildAPIMux_SessionRoutesWiredRegardlessOfEnterprise(t *testing.T) {
 		metricsAddr: ":0",
 	}
 
-	handler, _, cleanup := buildAPIMux(pool, registry, f, logr.Discard())
+	handler, _, cleanup := buildAPIMux(pool, registry, f, logr.Discard(), nil, nil, nil)
 	defer cleanup()
 
 	// GET /api/v1/sessions should be registered (part of the core API handler).

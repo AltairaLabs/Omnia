@@ -1101,6 +1101,62 @@ workspaceServices:
       pullPolicy: IfNotPresent
 
 # ============================================================================
+# Internal service-to-service authentication (session-api / memory-api)
+# ============================================================================
+#
+# When enabled, the operator-managed per-workspace session-api requires every
+# caller (facade/agent, dashboard, memory-api, eval-worker) to present a
+# Kubernetes ServiceAccount bearer token, validated server-side via the
+# TokenReview API against an allowlist of caller ServiceAccount subjects. This
+# closes SEC-1 (unauthenticated session-api JSON API) and SEC-5 (unauthenticated
+# OTLP listeners). Callers read their token from a projected SA-token volume
+# (audience-bound) and send it as `Authorization: Bearer <token>`.
+#
+# Default is `false` for an opt-in rollout — turning it on flips behaviour for
+# an existing install (session-api starts rejecting tokenless calls), so it
+# rolls out deliberately. PRODUCTION DEPLOYMENTS SHOULD SET THIS TO `true`.
+#
+# How the pieces are provisioned when enabled:
+#   - The chart passes --session-api-auth-* flags to the operator, which
+#     renders SESSION_API_AUTH_* env onto each per-workspace session-api
+#     Deployment and grants its ServiceAccount RBAC to create TokenReviews.
+#   - The operator mounts an audience-bound projected SA token onto every
+#     caller pod it manages (facade/agent, memory-api, eval-worker) and sets
+#     SESSION_API_TOKEN_PATH to it.
+#   - The chart-owned dashboard Deployment gets the same projected token +
+#     SESSION_API_TOKEN_PATH (see templates/dashboard/deployment.yaml).
+#   - The allowlist of caller subjects is computed from the release:
+#     system:serviceaccount:<release-namespace>:<dashboard-sa>, plus the
+#     per-workspace facade / memory-api / eval-worker ServiceAccounts the
+#     operator creates (operator side; see internal/controller).
+#
+# NOTE (OTLP senders): session-api's OTLP listeners (--otlp-enabled) are also
+# gated by this auth when enabled. The default chart trace path is
+# agents → alloy → Tempo ONLY (see templates/alloy-config.yaml — alloy has a
+# single OTLP exporter pointing at Tempo, NOT session-api). There is no
+# alloy→session-api OTLP exporter in the default chart, so no bearer_token_file
+# is wired on alloy. If you add an OTLP exporter that targets session-api while
+# auth is enabled, that sender MUST present an SA token (bearer_token_file
+# pointing at its own projected token). See cmd/session-api/SERVICE.md.
+internalServiceAuth:
+  # -- Require ServiceAccount auth on session-api (TokenReview + allowlist).
+  # Default false (opt-in). Set true in production to close SEC-1/SEC-5.
+  enabled: false
+  # -- Audience bound into caller projected SA tokens and enforced by
+  # session-api (--auth-audiences). Must match on both sides. The audience
+  # scopes the token so it is only valid for session-api, not arbitrary
+  # in-cluster API access.
+  audience: omnia-session-api
+  # -- Expiration (seconds) for the projected SA token. The kubelet rotates
+  # the file before expiry; callers re-read it. 3600 = 1h.
+  tokenExpirationSeconds: 3600
+  istio:
+    # -- Additionally enforce STRICT mTLS for session-api / memory-api via an
+    # Istio PeerAuthentication (defence-in-depth on top of SA-token auth).
+    # Requires Istio installed. Independent of `istio.enabled` (Telemetry).
+    enabled: false
+
+# ============================================================================
 # Dev Postgres
 # ============================================================================
 #

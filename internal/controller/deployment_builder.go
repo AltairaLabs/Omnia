@@ -345,6 +345,12 @@ func (r *AgentRuntimeReconciler) buildDeploymentSpec(
 		podSpec.Containers[i].SecurityContext = hardenedContainerSecurityContext()
 	}
 
+	// Internal service auth (SEC-1/SEC-5): the facade writes sessions to
+	// session-api via httpclient, which reads its bearer token from
+	// SESSION_API_TOKEN_PATH. When enabled, mount an audience-bound projected
+	// SA token and point the path env at it. No-op when disabled.
+	r.ServiceAuth.applyCallerToken(&podSpec)
+
 	// Termination grace period: 45s allows the 30s shutdown timeout to complete
 	// plus headroom for the pre-stop hook and connection draining.
 	podSpec.TerminationGracePeriodSeconds = ptr.To(int64(45))

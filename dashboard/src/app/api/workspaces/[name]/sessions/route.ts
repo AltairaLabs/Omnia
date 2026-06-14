@@ -18,6 +18,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { withWorkspaceAccess, type WorkspaceRouteContext } from "@/lib/auth/workspace-guard";
 import { getWorkspace } from "@/lib/k8s/workspace-route-helpers";
 import { resolveServiceURLs } from "@/lib/k8s/service-url-resolver";
+import { serviceApiHeaders } from "@/lib/auth/session-api-token";
 import type { WorkspaceAccess } from "@/types/workspace";
 import type { User } from "@/lib/auth/types";
 
@@ -70,7 +71,7 @@ export const GET = withWorkspaceAccess(
 
     try {
       const response = await fetch(targetUrl, {
-        headers: { Accept: "application/json" },
+        headers: serviceApiHeaders({ Accept: "application/json" }),
       });
 
       const data = await response.json();
@@ -131,7 +132,7 @@ export const DELETE = withWorkspaceAccess(
     try {
       const response = await fetch(targetUrl, {
         method: "DELETE",
-        headers: { Accept: "application/json" },
+        headers: serviceApiHeaders({ Accept: "application/json" }),
       });
 
       const data = await response.json();

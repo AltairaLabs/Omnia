@@ -10,6 +10,26 @@ or `api/proto/`, add an entry below with the date, affected API, and reason.
 
 ## Unreleased
 
+### Added (session-api: internal ServiceAccount auth — SEC-1/SEC-5)
+
+- **All `GET`/`POST`/`PATCH`/`DELETE /api/v1/*` endpoints** now optionally
+  require a Kubernetes **ServiceAccount bearer token** (`Authorization: Bearer
+  <token>`), validated server-side via the TokenReview API against an allowlist.
+  Opt-in via the chart value `internalServiceAuth.enabled` (off by default;
+  closes SEC-1). `/healthz` is exempt. When disabled, behaviour is unchanged
+  (no auth). Allowed-caller subjects are `system:serviceaccount:<ns>:<name>`
+  set via `--auth-allowed-subjects` / `SESSION_API_AUTH_ALLOWED_SUBJECTS`;
+  token audiences via `--auth-audiences` / `SESSION_API_AUTH_AUDIENCES`.
+- **OTLP listeners** (gRPC `:4317` / HTTP `:4318`, `--otlp-enabled`) are gated
+  by the same auth when enabled (SEC-5). OTLP senders must present an SA token;
+  the default chart trace path (agents → alloy → Tempo) does **not** target
+  session-api, so no token is wired there by default.
+- Callers (facade, dashboard, memory-api, eval-worker) read their token from
+  `SESSION_API_TOKEN_PATH` (default `/var/run/secrets/kubernetes.io/
+  serviceaccount/token`; the chart/operator mount an audience-bound projected
+  token at `/var/run/secrets/omnia/session-api/token`). Requests without a
+  token while auth is enabled return `401`.
+
 ### Changed (session-api: review quick-wins)
 
 - **`GET /api/v1/sessions/{id}`** (`handleGetSession`): now **decrypts** message

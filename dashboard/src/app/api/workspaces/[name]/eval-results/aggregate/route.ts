@@ -19,6 +19,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { withWorkspaceAccess, type WorkspaceRouteContext } from "@/lib/auth/workspace-guard";
 import { resolveServiceURLs } from "@/lib/k8s/service-url-resolver";
+import { serviceApiHeaders } from "@/lib/auth/session-api-token";
 import type { WorkspaceAccess } from "@/types/workspace";
 import type { User } from "@/lib/auth/types";
 
@@ -55,7 +56,7 @@ export const GET = withWorkspaceAccess<Params>(
 
     try {
       const response = await fetch(targetUrl, {
-        headers: { Accept: "application/json" },
+        headers: serviceApiHeaders({ Accept: "application/json" }),
       });
       const data = await response.json();
       return NextResponse.json(data, { status: response.status });

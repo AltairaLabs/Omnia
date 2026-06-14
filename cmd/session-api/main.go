@@ -25,6 +25,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -52,6 +53,7 @@ import (
 	"github.com/altairalabs/omnia/ee/pkg/metrics"
 	"github.com/altairalabs/omnia/ee/pkg/privacy"
 	"github.com/altairalabs/omnia/ee/pkg/redaction"
+	"github.com/altairalabs/omnia/internal/serviceauth"
 	"github.com/altairalabs/omnia/internal/session/api"
 	"github.com/altairalabs/omnia/internal/session/otlp"
 	sessionpg "github.com/altairalabs/omnia/internal/session/postgres"
@@ -95,6 +97,15 @@ type flags struct {
 	tracingInsecure bool
 	workspace       string
 	serviceGroup    string
+
+	// ServiceAccount auth (opt-in). When authEnabled is true, the JSON API
+	// requires a Kubernetes ServiceAccount bearer token whose TokenReview
+	// subject is either in authAllowedSubjects (exact match) or whose
+	// ServiceAccount namespace is in authAllowedNamespaces.
+	authEnabled           bool
+	authAllowedSubjects   string // comma-separated SA subjects
+	authAllowedNamespaces string // comma-separated trusted namespaces
+	authAudiences         string // comma-separated, optional
 }
 
 func parseFlags() *flags {
@@ -114,6 +125,18 @@ func parseFlags() *flags {
 	flag.StringVar(&f.otlpHTTPAddr, "otlp-http-addr", ":4318", "OTLP HTTP listen address")
 	flag.StringVar(&f.workspace, "workspace", "", "Workspace name (K8s CRD resolution mode)")
 	flag.StringVar(&f.serviceGroup, "service-group", "", "Service group name within workspace")
+	flag.BoolVar(&f.authEnabled, "auth-enabled", false,
+		"Require Kubernetes ServiceAccount bearer-token auth on the JSON API (opt-in)")
+	flag.StringVar(&f.authAllowedSubjects, "auth-allowed-subjects", "",
+		"Comma-separated allowed ServiceAccount subjects, exact-matched "+
+			"(e.g. system:serviceaccount:omnia-system:omnia-dashboard). "+
+			"Use for cross-namespace callers")
+	flag.StringVar(&f.authAllowedNamespaces, "auth-allowed-namespaces", "",
+		"Comma-separated trusted namespaces: any ServiceAccount in one of these "+
+			"namespaces is allowed (covers per-AgentRuntime facade SAs, memory-api, "+
+			"eval-worker — the in-workspace callers)")
+	flag.StringVar(&f.authAudiences, "auth-audiences", "",
+		"Comma-separated audiences for audience-bound projected tokens (optional; empty = default)")
 	flag.Parse()
 
 	f.applyEnvFallbacks()
@@ -136,6 +159,11 @@ func (f *flags) applyEnvFallbacks() {
 
 	envBoolFallback(&f.enterprise, "ENTERPRISE_ENABLED")
 	envBoolFallback(&f.otlpEnabled, "OTLP_ENABLED")
+
+	envBoolFallback(&f.authEnabled, "SESSION_API_AUTH_ENABLED")
+	envFallback(&f.authAllowedSubjects, "", "SESSION_API_AUTH_ALLOWED_SUBJECTS")
+	envFallback(&f.authAllowedNamespaces, "", "SESSION_API_AUTH_ALLOWED_NAMESPACES")
+	envFallback(&f.authAudiences, "", "SESSION_API_AUTH_AUDIENCES")
 
 	envBoolFallback(&f.tracingEnabled, "TRACING_ENABLED")
 	envBoolFallback(&f.tracingInsecure, "TRACING_INSECURE")
@@ -163,6 +191,18 @@ func envBoolFallback(dst *bool, envKey string) {
 	if !*dst && os.Getenv(envKey) == "true" {
 		*dst = true
 	}
+}
+
+// splitAndTrim splits a comma-separated string, trims whitespace from each
+// element, and drops empty elements. Returns nil for an empty/whitespace input.
+func splitAndTrim(s string) []string {
+	var out []string
+	for _, part := range strings.Split(s, ",") {
+		if trimmed := strings.TrimSpace(part); trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+	return out
 }
 
 func main() {
@@ -252,8 +292,14 @@ func run() error {
 		}
 	}
 
+	// --- ServiceAccount auth (opt-in) ---
+	reviewer, allowedSubjects, allowedNamespaces, err := buildServiceAuth(f, log)
+	if err != nil {
+		return err
+	}
+
 	// --- Build API mux ---
-	apiMux, sessionService, auditCleanup := buildAPIMux(pool, registry, f, log)
+	apiMux, sessionService, auditCleanup := buildAPIMux(pool, registry, f, log, reviewer, allowedSubjects, allowedNamespaces)
 	defer auditCleanup()
 
 	// --- Servers ---
@@ -272,10 +318,18 @@ func run() error {
 	startHTTPServer(log, "session API", f.apiAddr, apiSrv)
 
 	// --- OTLP servers (optional) ---
+	// OTLP ingest is a write path: the transformer CREATES sessions and appends
+	// messages. The same ServiceAccount auth wired onto the JSON API gates both
+	// OTLP listeners. When reviewer is nil (auth disabled) these are pass-through.
+	//
+	// NOTE: when auth is enabled, OTLP senders (the facade/runtime OTel exporters
+	// and any alloy/collector forwarding to :4317/:4318) MUST present their
+	// ServiceAccount bearer token. Wiring those clients + the Helm chart RBAC is a
+	// later task; without it, exporters will be rejected (401/Unauthenticated).
 	var grpcSrv *grpc.Server
 	var otlpHTTPSrv *http.Server
 	if f.otlpEnabled {
-		grpcSrv, otlpHTTPSrv = startOTLPServers(f, sessionService, log)
+		grpcSrv, otlpHTTPSrv = startOTLPServers(f, sessionService, log, reviewer, allowedSubjects, allowedNamespaces)
 	}
 
 	log.Info("session-api ready",
@@ -454,10 +508,69 @@ func detectNamespace() string {
 	return string(data)
 }
 
+// buildServiceAuth constructs the ServiceAccount TokenReviewer and parses the
+// allowlists when --auth-enabled is set. It returns (nil, nil, nil, nil) when
+// auth is disabled (after logging a clear startup WARNING that the API is
+// unauthenticated). It returns an error when auth is enabled but misconfigured
+// (both the subject and namespace allowlists empty) or the TokenReviewer cannot
+// be built.
+//
+// A caller is authorized when its TokenReview subject is an exact match in
+// allowedSubjects OR its ServiceAccount namespace is in allowedNamespaces. The
+// namespace allow is what lets in-workspace callers (per-AgentRuntime facade
+// SAs, memory-api, eval-worker) pass without enumerating every facade SA up
+// front; cross-namespace callers (dashboard) stay on the exact-subject list.
+//
+// The session-api ServiceAccount must have RBAC to create TokenReviews
+// (`authentication.k8s.io/tokenreviews: create`). The Role/RoleBinding is wired
+// in the Helm chart (a later task); without it the reviewer's TokenReview calls
+// fail closed (401).
+func buildServiceAuth(f *flags, log logr.Logger) (serviceauth.TokenReviewer, []string, []string, error) {
+	if !f.authEnabled {
+		log.Info("WARNING: session-api JSON API is UNAUTHENTICATED " +
+			"(auth-enabled=false); set --auth-enabled to require ServiceAccount tokens")
+		return nil, nil, nil, nil
+	}
+
+	allowedSubjects := splitAndTrim(f.authAllowedSubjects)
+	allowedNamespaces := splitAndTrim(f.authAllowedNamespaces)
+	if len(allowedSubjects) == 0 && len(allowedNamespaces) == 0 {
+		return nil, nil, nil, fmt.Errorf(
+			"--auth-enabled is set but both --auth-allowed-subjects and " +
+				"--auth-allowed-namespaces are empty; refusing to start " +
+				"(would reject every caller — misconfiguration)")
+	}
+
+	// In-cluster rest config — same source the privacy middleware uses.
+	cfg, err := rest.InClusterConfig()
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("auth-enabled requires in-cluster config: %w", err)
+	}
+
+	audiences := splitAndTrim(f.authAudiences)
+	reviewer, err := serviceauth.NewK8sTokenReviewer(cfg, audiences)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("building token reviewer: %w", err)
+	}
+
+	log.Info("ServiceAccount auth enabled",
+		"allowedSubjects", allowedSubjects,
+		"allowedNamespaces", allowedNamespaces,
+		"audiences", audiences)
+	return reviewer, allowedSubjects, allowedNamespaces, nil
+}
+
 // buildAPIMux assembles the HTTP handler with all API routes, wrapped with
 // Prometheus metrics middleware. Returns the handler and a cleanup function
 // for the audit logger (no-op when enterprise is disabled).
-func buildAPIMux(pool *pgxpool.Pool, registry *providers.Registry, f *flags, log logr.Logger) (http.Handler, *api.SessionService, func()) {
+//
+// reviewer, allowedSubjects and allowedNamespaces wire ServiceAccount auth: when
+// reviewer is non-nil the JSON API requires a ServiceAccount bearer token whose
+// subject is in allowedSubjects OR whose namespace is in allowedNamespaces
+// (/healthz exempt). A nil reviewer leaves the API unauthenticated. These are
+// parameters (rather than read from f) so wiring tests can inject a fake
+// reviewer.
+func buildAPIMux(pool *pgxpool.Pool, registry *providers.Registry, f *flags, log logr.Logger, reviewer serviceauth.TokenReviewer, allowedSubjects, allowedNamespaces []string) (http.Handler, *api.SessionService, func()) {
 	svcCfg := api.ServiceConfig{}
 	// Default cleanup is a no-op; only the enterprise audit-logger path below
 	// replaces it with a real Close() call. Keeping cleanup non-nil lets the
@@ -538,7 +651,12 @@ func buildAPIMux(pool *pgxpool.Pool, registry *providers.Registry, f *flags, log
 			return r.URL.Path != "/healthz"
 		}),
 	)
-	return rlMiddleware(api.MetricsMiddleware(httpMetrics, traced)), sessionService, cleanup
+
+	// ServiceAccount auth runs after rate-limiting but around the
+	// metrics/trace/handler chain. /healthz is exempt so liveness probes are
+	// never gated. A nil reviewer makes this a pass-through (unauthenticated).
+	authMW := serviceauth.RequireServiceAccount(reviewer, allowedSubjects, allowedNamespaces, "/healthz")
+	return rlMiddleware(authMW(api.MetricsMiddleware(httpMetrics, traced))), sessionService, cleanup
 }
 
 // registerEnterpriseRoutes adds audit, GDPR deletion, and opt-out routes when
@@ -689,11 +807,20 @@ func initEventPublisher(registry *providers.Registry, log logr.Logger, httpMetri
 
 // startOTLPServers creates and starts the OTLP gRPC and HTTP servers.
 // Returns the servers for graceful shutdown.
-func startOTLPServers(f *flags, svc *api.SessionService, log logr.Logger) (*grpc.Server, *http.Server) {
+//
+// reviewer, allowedSubjects and allowedNamespaces gate both listeners with
+// ServiceAccount auth (the same as the JSON API): the gRPC server installs the
+// serviceauth interceptors and the HTTP handler is wrapped with
+// serviceauth.RequireServiceAccount. A nil reviewer makes both pass-through
+// (auth disabled), leaving OTLP behavior unchanged. These are parameters (rather
+// than read from f) so wiring tests can inject a fake reviewer.
+func startOTLPServers(f *flags, svc *api.SessionService, log logr.Logger, reviewer serviceauth.TokenReviewer, allowedSubjects, allowedNamespaces []string) (*grpc.Server, *http.Server) {
 	transformer := otlp.NewTransformer(svc, log)
 
-	// gRPC server.
-	grpcSrv := grpc.NewServer()
+	// gRPC server. The OTLP TraceService only registers the unary Export RPC, so
+	// the unary interceptor is what gates ingest; the stream interceptor is added
+	// defensively (harmless when no streaming RPC is registered).
+	grpcSrv := grpc.NewServer(otlpGRPCServerOptions(reviewer, allowedSubjects, allowedNamespaces)...)
 	receiver := otlp.NewReceiver(transformer, log)
 	coltracepb.RegisterTraceServiceServer(grpcSrv, receiver)
 
@@ -710,11 +837,10 @@ func startOTLPServers(f *flags, svc *api.SessionService, log logr.Logger) (*grpc
 	}()
 
 	// HTTP server.
-	handler := otlp.NewHandler(transformer, log)
-	otlpMux := http.NewServeMux()
-	handler.RegisterRoutes(otlpMux)
-
-	httpSrv := &http.Server{Addr: f.otlpHTTPAddr, Handler: otlpMux}
+	httpSrv := &http.Server{
+		Addr:    f.otlpHTTPAddr,
+		Handler: buildOTLPHTTPHandler(transformer, log, reviewer, allowedSubjects, allowedNamespaces),
+	}
 	go func() {
 		log.Info("starting OTLP HTTP server", "addr", f.otlpHTTPAddr)
 		if err := httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
@@ -723,6 +849,30 @@ func startOTLPServers(f *flags, svc *api.SessionService, log logr.Logger) (*grpc
 	}()
 
 	return grpcSrv, httpSrv
+}
+
+// otlpGRPCServerOptions builds the grpc.ServerOptions for the OTLP gRPC server,
+// installing the ServiceAccount auth interceptors. A nil reviewer leaves the
+// interceptors as pass-through (the serviceauth package handles nil). Extracted
+// so wiring tests can assert the server is constructed with auth.
+func otlpGRPCServerOptions(reviewer serviceauth.TokenReviewer, allowedSubjects, allowedNamespaces []string) []grpc.ServerOption {
+	return []grpc.ServerOption{
+		grpc.UnaryInterceptor(serviceauth.UnaryServerInterceptor(reviewer, allowedSubjects, allowedNamespaces)),
+		grpc.StreamInterceptor(serviceauth.StreamServerInterceptor(reviewer, allowedSubjects, allowedNamespaces)),
+	}
+}
+
+// buildOTLPHTTPHandler assembles the OTLP/HTTP handler wrapped with
+// ServiceAccount auth. The OTLP HTTP listener only serves the export endpoint
+// (no /healthz), so there are no exempt paths. A nil reviewer makes the wrapper
+// pass-through. Extracted so the build path is testable.
+func buildOTLPHTTPHandler(transformer *otlp.Transformer, log logr.Logger, reviewer serviceauth.TokenReviewer, allowedSubjects, allowedNamespaces []string) http.Handler {
+	handler := otlp.NewHandler(transformer, log)
+	otlpMux := http.NewServeMux()
+	handler.RegisterRoutes(otlpMux)
+
+	authMW := serviceauth.RequireServiceAccount(reviewer, allowedSubjects, allowedNamespaces)
+	return authMW(otlpMux)
 }
 
 // buildMediaDeleter returns a MediaDeleter based on the configured cold storage

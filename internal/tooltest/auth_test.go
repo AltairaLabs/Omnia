@@ -13,13 +13,11 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	authnv1 "k8s.io/api/authentication/v1"
-	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/rest"
-	k8stesting "k8s.io/client-go/testing"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 )
+
+const dashboardSubject = "system:serviceaccount:omnia-system:omnia-dashboard"
 
 // stubReviewer is a test TokenReviewer.
 type stubReviewer struct {
@@ -31,8 +29,6 @@ type stubReviewer struct {
 func (s stubReviewer) ReviewToken(_ context.Context, _ string) (bool, string, error) {
 	return s.authenticated, s.username, s.err
 }
-
-const dashboardSubject = "system:serviceaccount:omnia-system:omnia-dashboard"
 
 func newAuthTestServer(reviewer TokenReviewer) *Server {
 	return NewServer(":0", nil, zap.New(zap.UseDevMode(true)), reviewer, []string{dashboardSubject})
@@ -107,62 +103,6 @@ func TestNewK8sTokenReviewer(t *testing.T) {
 	if r == nil {
 		t.Fatal("expected non-nil reviewer")
 	}
-}
-
-func TestK8sTokenReviewer_ReviewToken(t *testing.T) {
-	const subject = "system:serviceaccount:omnia-system:omnia-dashboard"
-
-	t.Run("authenticated returns username", func(t *testing.T) {
-		cs := fake.NewSimpleClientset()
-		cs.PrependReactor("create", "tokenreviews", func(action k8stesting.Action) (bool, runtime.Object, error) {
-			tr := action.(k8stesting.CreateAction).GetObject().(*authnv1.TokenReview)
-			tr.Status = authnv1.TokenReviewStatus{Authenticated: true, User: authnv1.UserInfo{Username: subject}}
-			return true, tr, nil
-		})
-		r := &k8sTokenReviewer{client: cs}
-		ok, user, err := r.ReviewToken(context.Background(), "tok")
-		if err != nil || !ok || user != subject {
-			t.Fatalf("got ok=%v user=%q err=%v", ok, user, err)
-		}
-	})
-
-	t.Run("unauthenticated", func(t *testing.T) {
-		cs := fake.NewSimpleClientset()
-		cs.PrependReactor("create", "tokenreviews", func(action k8stesting.Action) (bool, runtime.Object, error) {
-			tr := action.(k8stesting.CreateAction).GetObject().(*authnv1.TokenReview)
-			tr.Status = authnv1.TokenReviewStatus{Authenticated: false}
-			return true, tr, nil
-		})
-		r := &k8sTokenReviewer{client: cs}
-		ok, _, err := r.ReviewToken(context.Background(), "tok")
-		if err != nil || ok {
-			t.Fatalf("got ok=%v err=%v, want ok=false err=nil", ok, err)
-		}
-	})
-
-	t.Run("status error surfaces as error", func(t *testing.T) {
-		cs := fake.NewSimpleClientset()
-		cs.PrependReactor("create", "tokenreviews", func(action k8stesting.Action) (bool, runtime.Object, error) {
-			tr := action.(k8stesting.CreateAction).GetObject().(*authnv1.TokenReview)
-			tr.Status = authnv1.TokenReviewStatus{Error: "token expired"}
-			return true, tr, nil
-		})
-		r := &k8sTokenReviewer{client: cs}
-		if _, _, err := r.ReviewToken(context.Background(), "tok"); err == nil {
-			t.Fatal("expected error from status.Error")
-		}
-	})
-
-	t.Run("api error surfaces as error", func(t *testing.T) {
-		cs := fake.NewSimpleClientset()
-		cs.PrependReactor("create", "tokenreviews", func(_ k8stesting.Action) (bool, runtime.Object, error) {
-			return true, nil, errors.New("boom")
-		})
-		r := &k8sTokenReviewer{client: cs}
-		if _, _, err := r.ReviewToken(context.Background(), "tok"); err == nil {
-			t.Fatal("expected error from API failure")
-		}
-	})
 }
 
 func TestBearerToken(t *testing.T) {

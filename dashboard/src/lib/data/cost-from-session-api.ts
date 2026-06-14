@@ -11,6 +11,7 @@
  */
 
 import { buildCostData, emptyCostData, type CostAggregateInput } from "./cost-aggregation";
+import { serviceApiHeaders } from "@/lib/auth/session-api-token";
 import type { CostData } from "./types";
 import type { ProviderCallAggregateRow } from "./provider-calls-service";
 
@@ -47,7 +48,7 @@ async function fetchRows(
     limit: AGGREGATE_LIMIT,
   });
   const url = `${trimSlash(source.sessionURL)}/api/v1/provider-calls/aggregate?${qs}`;
-  const resp = await fetchImpl(url, { headers: { Accept: "application/json" } });
+  const resp = await fetchImpl(url, { headers: serviceApiHeaders({ Accept: "application/json" }) });
   if (!resp.ok) {
     throw new Error(`provider-calls aggregate: ${resp.status} ${resp.statusText}`);
   }
