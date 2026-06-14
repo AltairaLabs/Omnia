@@ -74,6 +74,9 @@ func TestLoadProjectionInputs_OneRowPerEntityWithTiers(t *testing.T) {
 	if u.Content != "prefers email contact" {
 		t.Errorf("user content = %q", u.Content)
 	}
+	if u.Kind == "" {
+		t.Errorf("user kind not loaded from entity.kind")
+	}
 	// No embeddings were written, so all must be nil.
 	for _, in := range got {
 		if in.Embedding != nil {

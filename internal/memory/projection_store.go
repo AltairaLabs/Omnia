@@ -24,6 +24,7 @@ func (s *PostgresMemoryStore) LoadProjectionInputs(ctx context.Context, scope ma
 	rows, err := s.pool.Query(ctx, `
 		SELECT DISTINCT ON (e.id)
 		    e.id, e.virtual_user_id, e.agent_id, e.consent_category, e.title,
+		    e.kind, e.expires_at,
 		    o.content, o.confidence, o.observed_at, o.embedding
 		FROM memory_entities e
 		JOIN memory_observations o ON o.entity_id = e.id
@@ -67,6 +68,7 @@ func scanProjectionInput(rows rowScanner) (ProjectionInput, error) {
 		emb      *pgvector.Vector
 	)
 	if err := rows.Scan(&in.EntityID, &userID, &agentID, &category, &title,
+		&in.Kind, &in.ExpiresAt,
 		&in.Content, &in.Confidence, &in.ObservedAt, &emb); err != nil {
 		return ProjectionInput{}, fmt.Errorf("memory: projection scan: %w", err)
 	}

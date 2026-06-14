@@ -29,6 +29,7 @@ func denseProjInputs(n int) []memory.ProjectionInput {
 			Content:    "some memory content here",
 			Embedding:  []float32{float32(i % 5), float32((i * 3) % 7), 1, 0, float32(i % 2)},
 			Tier:       projTierUser,
+			Kind:       "profile",
 			User:       "u1",
 			Confidence: 0.5,
 			ObservedAt: time.Unix(int64(i), 0).UTC(),
@@ -73,8 +74,11 @@ func TestHandleProjection_HappyPathDense(t *testing.T) {
 	var resp ProjectionResult
 	require.NoError(t, json.NewDecoder(rr.Body).Decode(&resp))
 	assert.Equal(t, "dense", resp.Basis)
+	assert.Equal(t, "embedding", resp.ProjectionInput)
 	assert.Equal(t, 40, resp.Total)
 	assert.Len(t, resp.Points, 40)
+	assert.Equal(t, "profile", resp.Points[0].Type)
+	assert.Equal(t, "u1", resp.Points[0].UserRef)
 	for _, p := range resp.Points {
 		assert.GreaterOrEqual(t, p.X, -1.0001)
 		assert.LessOrEqual(t, p.X, 1.0001)

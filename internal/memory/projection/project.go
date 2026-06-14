@@ -189,9 +189,10 @@ func assemble(used []Input, coords *mat.Dense, previewChars int) []Point {
 	for i, in := range used {
 		pts[i] = Point{
 			ID: in.EntityID, X: coords.At(i, 0), Y: coords.At(i, 1),
-			Tier: in.Tier, User: in.User, Category: in.Category,
-			Confidence: in.Confidence, Title: in.Title,
-			Preview: truncateRunes(in.Content, previewChars), ObservedAt: in.ObservedAt,
+			Tier: in.Tier, Type: in.Kind, User: in.User, UserRef: in.User,
+			Category: in.Category, Confidence: in.Confidence, Title: in.Title,
+			Preview:    truncateRunes(in.Content, previewChars),
+			ObservedAt: in.ObservedAt, ExpiresAt: in.ExpiresAt,
 		}
 	}
 	return pts
@@ -217,9 +218,11 @@ func FromStored(inputs []Input, stored map[string][2]float64, opts Options) Resu
 			continue
 		}
 		res.Points = append(res.Points, Point{
-			ID: in.EntityID, X: xy[0], Y: xy[1], Tier: in.Tier, User: in.User,
-			Category: in.Category, Confidence: in.Confidence, Title: in.Title,
-			Preview: truncateRunes(in.Content, opts.PreviewChars), ObservedAt: in.ObservedAt,
+			ID: in.EntityID, X: xy[0], Y: xy[1], Tier: in.Tier, Type: in.Kind,
+			User: in.User, UserRef: in.User, Category: in.Category,
+			Confidence: in.Confidence, Title: in.Title,
+			Preview:    truncateRunes(in.Content, opts.PreviewChars),
+			ObservedAt: in.ObservedAt, ExpiresAt: in.ExpiresAt,
 		})
 	}
 	res.Total = len(res.Points)

@@ -187,10 +187,12 @@ type ProjectionInput struct {
 	Embedding  []float32 // nil if none
 	Tier       string
 	User       string // virtual_user_id pseudonym, "" if null
+	Kind       string // entity.kind (the memory type)
 	Category   string
 	Title      string
 	Confidence float64
 	ObservedAt time.Time
+	ExpiresAt  *time.Time // entity.expires_at, nil if no TTL
 }
 
 // ProjectionPoint is one persisted 2D coordinate.

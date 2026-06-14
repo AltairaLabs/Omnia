@@ -13,7 +13,7 @@ func denseInputs(n int) []Input {
 		emb := []float32{float32(i % 5), float32((i * 3) % 7), 1, 0, float32(i % 2)}
 		out[i] = Input{
 			EntityID:  fmt.Sprintf("e%04d", i),
-			Embedding: emb, Tier: "user", User: "u1",
+			Embedding: emb, Tier: "user", User: "u1", Kind: "profile",
 			Content: strings.Repeat("word ", 40), Confidence: 0.5,
 			ObservedAt: time.Unix(int64(i), 0).UTC(),
 		}
@@ -40,6 +40,13 @@ func TestProject_DenseBasisAndBounds(t *testing.T) {
 		if p.X < -1.0001 || p.X > 1.0001 || p.Y < -1.0001 || p.Y > 1.0001 {
 			t.Errorf("point out of [-1,1]: (%f,%f)", p.X, p.Y)
 		}
+	}
+	// New contract fields: type (kind) + userRef (== user) carry through.
+	if res.Points[0].Type != "profile" {
+		t.Errorf("point Type = %q, want profile", res.Points[0].Type)
+	}
+	if res.Points[0].UserRef != "u1" {
+		t.Errorf("point UserRef = %q, want u1", res.Points[0].UserRef)
 	}
 }
 

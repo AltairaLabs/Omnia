@@ -19,9 +19,12 @@ import (
 // embedding metadata and the compute timestamp.
 type ProjectionResult struct {
 	projection.Result
-	EmbeddingModel string    `json:"embeddingModel,omitempty"`
-	EmbeddingDim   int       `json:"embeddingDim,omitempty"`
-	ComputedAt     time.Time `json:"computedAt"`
+	// ProjectionInput names the representation projected: "embedding" (dense) or
+	// "tfidf" (lexical) — the semantic-vs-lexical hint for the UI.
+	ProjectionInput string    `json:"projectionInput,omitempty"`
+	EmbeddingModel  string    `json:"embeddingModel,omitempty"`
+	EmbeddingDim    int       `json:"embeddingDim,omitempty"`
+	ComputedAt      time.Time `json:"computedAt"`
 }
 
 func scopeKey(scope map[string]string) string {
@@ -88,15 +91,17 @@ func (s *MemoryService) computeOrServe(
 	return res, time.Now().UTC(), nil
 }
 
-// enrichEmbeddingMeta sets the embeddingModel/dim per basis.
+// enrichEmbeddingMeta sets the representation hint + embedding model/dim per basis.
 func (s *MemoryService) enrichEmbeddingMeta(out *ProjectionResult) {
 	switch out.Basis {
 	case projection.BasisDense:
+		out.ProjectionInput = "embedding"
 		if s.embeddingSvc != nil {
 			out.EmbeddingModel = s.embeddingSvc.ModelName()
 			out.EmbeddingDim = s.embeddingSvc.Provider().Dimensions()
 		}
 	case projection.BasisLexical:
+		out.ProjectionInput = "tfidf"
 		out.EmbeddingModel = "tfidf+lsa"
 	}
 }
@@ -106,8 +111,8 @@ func toProjectionInputs(in []memory.ProjectionInput) []projection.Input {
 	for i, x := range in {
 		out[i] = projection.Input{
 			EntityID: x.EntityID, Content: x.Content, Embedding: x.Embedding,
-			Tier: x.Tier, User: x.User, Category: x.Category, Title: x.Title,
-			Confidence: x.Confidence, ObservedAt: x.ObservedAt,
+			Tier: x.Tier, User: x.User, Kind: x.Kind, Category: x.Category, Title: x.Title,
+			Confidence: x.Confidence, ObservedAt: x.ObservedAt, ExpiresAt: x.ExpiresAt,
 		}
 	}
 	return out
