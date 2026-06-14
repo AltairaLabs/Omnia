@@ -23,6 +23,7 @@ package memory
 
 import (
 	"context"
+	"time"
 
 	pkmemory "github.com/AltairaLabs/PromptKit/runtime/memory"
 )
@@ -178,6 +179,55 @@ type SaveResult struct {
 // (workspace, agent) rows (user_id IS NULL, agent_id = X) — see
 // agent_scoped.go. They power operator-curated agent policies and training
 // that should be visible to every user of a given agent.
+// ProjectionInput is one memory entity (most-recent observation) for the
+// Memory Galaxy projection.
+type ProjectionInput struct {
+	EntityID   string
+	Content    string
+	Embedding  []float32 // nil if none
+	Tier       string
+	User       string // virtual_user_id pseudonym, "" if null
+	Kind       string // entity.kind (the memory type)
+	Category   string
+	Title      string
+	Confidence float64
+	ObservedAt time.Time
+	ExpiresAt  *time.Time // entity.expires_at, nil if no TTL
+}
+
+// ProjectionPoint is one persisted 2D coordinate.
+type ProjectionPoint struct {
+	EntityID string
+	X, Y     float64
+}
+
+// StoredProjection is a persisted layout plus the metadata needed to serve it
+// from cache without recomputing.
+type StoredProjection struct {
+	Layout      map[string][2]float64
+	Fingerprint string
+	Model       string
+	Basis       string
+	ComputedAt  time.Time
+}
+
+// ProjectionStore is the Memory Galaxy capability, kept off the core Store
+// interface so the many Store mocks need not implement it. The concrete
+// PostgresMemoryStore and CachedStore satisfy it; the service type-asserts.
+type ProjectionStore interface {
+	// LoadProjectionInputs returns one row per entity in scope (most-recent
+	// observation). embedding is nil when the observation has none.
+	LoadProjectionInputs(ctx context.Context, scope map[string]string) ([]ProjectionInput, error)
+	// ProjectionFingerprint returns the live fingerprint (count + max
+	// observed_at) for a scope, "" when the scope has no memories.
+	ProjectionFingerprint(ctx context.Context, scope map[string]string) (string, error)
+	// LoadProjection returns the stored layout + metadata for scopeKey, or
+	// (nil, nil) when none is stored.
+	LoadProjection(ctx context.Context, scopeKey string) (*StoredProjection, error)
+	// SaveProjection replaces the stored layout for scopeKey.
+	SaveProjection(ctx context.Context, scopeKey, workspaceID, fingerprint, model, basis string, points []ProjectionPoint) error
+}
+
 type Store interface {
 	pkmemory.Store
 	// SaveWithResult is the rich Omnia write API. The agent's
