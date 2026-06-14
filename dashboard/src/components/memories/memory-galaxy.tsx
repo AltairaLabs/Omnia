@@ -6,13 +6,11 @@ import type { GalaxyPoint } from "@/lib/memory-galaxy/types";
 import {
   fitTransform,
   worldToScreen,
-  hitTest,
   colorForPoint,
   isTierVisible,
   matchesFilters,
   type Transform,
 } from "@/lib/memory-galaxy/galaxy-math";
-import { TIER_LABELS } from "@/lib/memory-analytics/colors";
 import { Button } from "@/components/ui/button";
 
 interface View {
@@ -30,14 +28,22 @@ interface Box {
   w: number;
   h: number;
 }
+interface Scene {
+  fit: Transform;
+  view: View;
+  w: number;
+  h: number;
+}
 
 const DEFAULT_VIEW: View = { zoom: 1, panX: 0, panY: 0 };
 const MIN_ZOOM = 0.5;
 const MAX_ZOOM = 16;
 const DRAG_THRESHOLD = 3;
 const LABEL_MIN_ZOOM = 2; // start showing titles
-const DETAIL_ZOOM = 5; // also show a metadata line
+const DETAIL_ZOOM = 5; // also show a category line
 const MAX_LABELS = 160;
+const POOL_BALL_MIN_RADIUS = 9; // show the confidence number once a bubble is this big
+const HIT_TOLERANCE = 4;
 
 interface MemoryGalaxyProps {
   points: GalaxyPoint[];
@@ -57,6 +63,10 @@ function sizeFactor(zoom: number): number {
   return Math.max(0.7, 1 + Math.log2(zoom) * 0.6);
 }
 
+function pointRadius(p: GalaxyPoint, sf: number): number {
+  return (2.5 + p.confidence * 3) * sf;
+}
+
 function overlaps(a: Box, b: Box): boolean {
   return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
 }
@@ -65,52 +75,69 @@ function onScreen(s: ScreenPos, w: number, h: number): boolean {
   return s.x > -60 && s.x < w + 60 && s.y > -20 && s.y < h + 20;
 }
 
+function categoryLabel(cat?: string): string {
+  if (!cat) return "Uncategorized";
+  const s = cat.replace(/^memory:/, "");
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+// Pool-ball style: a white disc with the confidence (0–100) centred in the bubble.
+function drawPoolBall(ctx: CanvasRenderingContext2D, s: ScreenPos, r: number, confidence: number): void {
+  const inner = r * 0.62;
+  ctx.beginPath();
+  ctx.arc(s.x, s.y, inner, 0, Math.PI * 2);
+  ctx.fillStyle = "rgba(255,255,255,0.92)";
+  ctx.fill();
+  ctx.fillStyle = "#0b1020";
+  ctx.font = `${Math.round(inner * 1.1)}px sans-serif`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(String(Math.round(confidence * 100)), s.x, s.y + 0.5);
+}
+
 function drawPoints(
   ctx: CanvasRenderingContext2D,
   points: GalaxyPoint[],
   colorBy: "tier" | "category",
   hiddenTiers: Set<string>,
   filters: { category: string; search: string },
-  fit: Transform,
-  view: View,
+  scene: Scene,
 ): void {
-  const sf = sizeFactor(view.zoom);
+  const sf = sizeFactor(scene.view.zoom);
   for (const p of points) {
     if (!isTierVisible(p, hiddenTiers)) continue;
+    const s = project(p, scene.fit, scene.view);
+    if (!onScreen(s, scene.w, scene.h)) continue;
     const dim = !matchesFilters(p, filters);
-    const s = project(p, fit, view);
+    const r = pointRadius(p, sf);
     ctx.globalAlpha = dim ? 0.1 : 0.9;
     ctx.fillStyle = colorForPoint(p, colorBy);
     ctx.beginPath();
-    ctx.arc(s.x, s.y, (2.5 + p.confidence * 3) * sf, 0, Math.PI * 2);
+    ctx.arc(s.x, s.y, r, 0, Math.PI * 2);
     ctx.fill();
+    if (!dim && r >= POOL_BALL_MIN_RADIUS) drawPoolBall(ctx, s, r, p.confidence);
   }
   ctx.globalAlpha = 1;
 }
 
-// Visible, on-screen, non-dimmed points with a title, highest-confidence first
-// (so important labels win collisions).
 function labelCandidates(
   points: GalaxyPoint[],
   hiddenTiers: Set<string>,
   filters: { category: string; search: string },
-  fit: Transform,
-  view: View,
-  w: number,
-  h: number,
+  scene: Scene,
 ): Array<{ p: GalaxyPoint; s: ScreenPos }> {
   const out: Array<{ p: GalaxyPoint; s: ScreenPos }> = [];
   for (const p of points) {
     if (!p.title || !isTierVisible(p, hiddenTiers) || !matchesFilters(p, filters)) continue;
-    const s = project(p, fit, view);
-    if (onScreen(s, w, h)) out.push({ p, s });
+    const s = project(p, scene.fit, scene.view);
+    if (onScreen(s, scene.w, scene.h)) out.push({ p, s });
   }
   out.sort((a, b) => b.p.confidence - a.p.confidence);
   return out;
 }
 
-// Semantic zoom: progressively label points once zoomed in, skipping any label
-// that would collide with one already placed.
+// Semantic zoom: title past LABEL_MIN_ZOOM, + category past DETAIL_ZOOM, with
+// collision-avoidance so labels declutter themselves as points spread on zoom.
 function drawLabels(
   ctx: CanvasRenderingContext2D,
   candidates: Array<{ p: GalaxyPoint; s: ScreenPos }>,
@@ -118,12 +145,13 @@ function drawLabels(
   width: number,
 ): void {
   const placed: Box[] = [];
+  ctx.textAlign = "left";
   ctx.textBaseline = "middle";
   for (const { p, s } of candidates) {
     if (placed.length >= MAX_LABELS) break;
     ctx.font = "11px sans-serif";
     const title = p.title ?? "";
-    const box: Box = { x: s.x + 8, y: s.y - 7, w: ctx.measureText(title).width + 6, h: detail ? 24 : 14 };
+    const box: Box = { x: s.x + 10, y: s.y - 7, w: ctx.measureText(title).width + 6, h: detail ? 24 : 14 };
     if (box.x + box.w > width || placed.some((q) => overlaps(box, q))) continue;
     placed.push(box);
     ctx.fillStyle = "rgba(11,16,32,0.72)";
@@ -133,7 +161,7 @@ function drawLabels(
     if (detail) {
       ctx.font = "9px sans-serif";
       ctx.fillStyle = "rgba(148,163,184,0.9)";
-      ctx.fillText(`${TIER_LABELS[p.tier]} · ${Math.round(p.confidence * 100)}%`, box.x, s.y + 11);
+      ctx.fillText(categoryLabel(p.category), box.x, s.y + 11);
     }
   }
 }
@@ -158,9 +186,10 @@ export function MemoryGalaxy({
     const { width, height } = canvas;
     ctx.clearRect(0, 0, width, height);
     const fit = fitTransform(points, width, height);
-    drawPoints(ctx, points, colorBy, hiddenTiers, filters, fit, view);
+    const scene: Scene = { fit, view, w: width, h: height };
+    drawPoints(ctx, points, colorBy, hiddenTiers, filters, scene);
     if (view.zoom >= LABEL_MIN_ZOOM) {
-      const candidates = labelCandidates(points, hiddenTiers, filters, fit, view, width, height);
+      const candidates = labelCandidates(points, hiddenTiers, filters, scene);
       drawLabels(ctx, candidates, view.zoom >= DETAIL_ZOOM, width);
     }
   }, [points, colorBy, hiddenTiers, filters, view]);
@@ -205,17 +234,30 @@ export function MemoryGalaxy({
 
   const visiblePoints = points.filter((p) => isTierVisible(p, hiddenTiers));
 
+  // Screen-space hit-test against the ACTUAL drawn bubble size, so a click
+  // lands at any zoom level.
   const pickAt = (clientX: number, clientY: number): GalaxyPoint | null => {
     const canvas = canvasRef.current;
     if (!canvas) return null;
     const rect = canvas.getBoundingClientRect();
+    const mx = clientX - rect.left;
+    const my = clientY - rect.top;
     const fit = fitTransform(points, canvas.width, canvas.height);
-    const base = {
-      x: (clientX - rect.left - view.panX) / view.zoom,
-      y: (clientY - rect.top - view.panY) / view.zoom,
-    };
-    const id = hitTest(visiblePoints, base, fit, 8 / view.zoom);
-    return id ? (visiblePoints.find((p) => p.id === id) ?? null) : null;
+    const sf = sizeFactor(view.zoom);
+    let best: GalaxyPoint | null = null;
+    let bestD = Infinity;
+    for (const p of visiblePoints) {
+      const s = project(p, fit, view);
+      const r = pointRadius(p, sf) + HIT_TOLERANCE;
+      const dx = s.x - mx;
+      const dy = s.y - my;
+      const d = dx * dx + dy * dy;
+      if (d <= r * r && d < bestD) {
+        bestD = d;
+        best = p;
+      }
+    }
+    return best;
   };
 
   const onMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -291,7 +333,7 @@ export function MemoryGalaxy({
       {hovered && (
         <div className="pointer-events-none absolute left-3 top-3 max-w-xs rounded-md bg-background/95 p-2 text-xs shadow">
           <div className="font-medium">{hovered.title}</div>
-          <div className="text-muted-foreground">{hovered.preview}</div>
+          <div className="text-muted-foreground">{categoryLabel(hovered.category)}</div>
         </div>
       )}
     </div>
