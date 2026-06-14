@@ -349,7 +349,7 @@ export function MemoryGalaxy({
   };
 
   return (
-    <div className="relative h-[600px] w-full overflow-hidden rounded-lg border bg-[#0b1020]">
+    <div className="relative h-full min-h-[360px] w-full overflow-hidden rounded-lg border bg-[#0b1020]">
       <canvas
         ref={canvasRef}
         data-testid="memory-galaxy-canvas"
