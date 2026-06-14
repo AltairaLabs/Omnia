@@ -1,6 +1,6 @@
 # Omnia
 
-[![CI](https://github.com/AltairaLabs/Omnia/workflows/CI/badge.svg)](https://github.com/AltairaLabs/Omnia/actions/workflows/ci.yml)
+[![CI](https://github.com/AltairaLabs/Omnia/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/AltairaLabs/Omnia/actions/workflows/ci.yml)
 [![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=AltairaLabs_Omnia&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=AltairaLabs_Omnia)
 [![Coverage](https://sonarcloud.io/api/project_badges/measure?project=AltairaLabs_Omnia&metric=coverage)](https://sonarcloud.io/summary/new_code?id=AltairaLabs_Omnia)
 [![Go Report Card](https://goreportcard.com/badge/github.com/AltairaLabs/Omnia)](https://goreportcard.com/report/github.com/AltairaLabs/Omnia)
