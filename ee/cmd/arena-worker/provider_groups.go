@@ -26,6 +26,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	v1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
+	eev1alpha1 "github.com/altairalabs/omnia/ee/api/v1alpha1"
 	"github.com/altairalabs/omnia/ee/pkg/arena/fleet"
 	"github.com/altairalabs/omnia/ee/pkg/arena/providers"
 	"github.com/altairalabs/omnia/internal/mgmtplane"
@@ -96,7 +97,7 @@ func resolveProvidersForArenaJob(
 	c client.Client,
 	cfg *Config,
 	arenaCfg *config.Config,
-	arenaJob *arenaJobSpec,
+	arenaJob *eev1alpha1.ArenaJobSpec,
 ) ([]*resolvedFleetProvider, map[string]*providerPricing, error) {
 	jobNamespace := cfg.JobNamespace
 
@@ -147,19 +148,19 @@ func resolveProvidersForArenaJob(
 func resolveProviderGroup(
 	rc *resolveContext,
 	groupName string,
-	pg *arenaProviderGroup,
+	pg *eev1alpha1.ArenaProviderGroup,
 ) ([]*resolvedFleetProvider, map[string]*providerPricing, error) {
-	if pg.isMapMode() {
-		return resolveMapModeGroup(rc, groupName, pg.mapping)
+	if pg.IsMapMode() {
+		return resolveMapModeGroup(rc, groupName, pg.Mapping)
 	}
-	return resolveArrayModeGroup(rc, groupName, pg.entries)
+	return resolveArrayModeGroup(rc, groupName, pg.Entries)
 }
 
 // resolveMapModeGroup resolves providers in map mode (configID -> entry).
 func resolveMapModeGroup(
 	rc *resolveContext,
 	groupName string,
-	mapping map[string]arenaProviderEntry,
+	mapping map[string]eev1alpha1.ArenaProviderEntry,
 ) ([]*resolvedFleetProvider, map[string]*providerPricing, error) {
 	var fps []*resolvedFleetProvider
 	pricing := make(map[string]*providerPricing)
@@ -183,7 +184,7 @@ func resolveMapModeGroup(
 func resolveArrayModeGroup(
 	rc *resolveContext,
 	groupName string,
-	entries []arenaProviderEntry,
+	entries []eev1alpha1.ArenaProviderEntry,
 ) ([]*resolvedFleetProvider, map[string]*providerPricing, error) {
 	var fps []*resolvedFleetProvider
 	pricing := make(map[string]*providerPricing)
@@ -208,7 +209,7 @@ func resolveArrayModeGroup(
 func resolveEntry(
 	rc *resolveContext,
 	groupName, configID string,
-	entry *arenaProviderEntry,
+	entry *eev1alpha1.ArenaProviderEntry,
 ) (*resolvedFleetProvider, *providerPricing, error) {
 	if entry.ProviderRef != nil {
 		if configID != "" {
@@ -470,7 +471,7 @@ func resolveToolsFromCRD(
 	return resolveToolsForArenaJob(ctx, log, c, cfg, arenaJob)
 }
 
-func cacheArenaJobForTools(jobName, jobNamespace string, arenaJob *arenaJobSpec) {
+func cacheArenaJobForTools(jobName, jobNamespace string, arenaJob *eev1alpha1.ArenaJobSpec) {
 	key := arenaJobCacheKey{name: jobName, namespace: jobNamespace}
 	if len(arenaJob.ToolRegistries) == 0 {
 		arenaJobToolCache.Delete(key)
@@ -479,13 +480,13 @@ func cacheArenaJobForTools(jobName, jobNamespace string, arenaJob *arenaJobSpec)
 	arenaJobToolCache.Store(key, arenaJob)
 }
 
-func takeCachedArenaJobForTools(jobName, jobNamespace string) (*arenaJobSpec, bool) {
+func takeCachedArenaJobForTools(jobName, jobNamespace string) (*eev1alpha1.ArenaJobSpec, bool) {
 	key := arenaJobCacheKey{name: jobName, namespace: jobNamespace}
 	value, ok := arenaJobToolCache.LoadAndDelete(key)
 	if !ok {
 		return nil, false
 	}
-	arenaJob, ok := value.(*arenaJobSpec)
+	arenaJob, ok := value.(*eev1alpha1.ArenaJobSpec)
 	if !ok {
 		return nil, false
 	}
@@ -497,7 +498,7 @@ func resolveToolsForArenaJob(
 	log logr.Logger,
 	c client.Client,
 	cfg *Config,
-	arenaJob *arenaJobSpec,
+	arenaJob *eev1alpha1.ArenaJobSpec,
 ) error {
 	jobNamespace := cfg.JobNamespace
 
@@ -795,79 +796,12 @@ func sanitizeID(name string) string {
 	return strings.ToLower(nonAlphaNum.ReplaceAllString(name, "-"))
 }
 
-// getArenaJob fetches an ArenaJob CRD. Since the core k8s package doesn't register
-// EE types, we use an unstructured get and unmarshal the spec.Providers field.
+// getArenaJob fetches an ArenaJob CRD and decodes the typed enterprise spec.
+// The core k8s package doesn't register EE types, so we read unstructured then
+// unmarshal spec into eev1alpha1.ArenaJobSpec.
 func getArenaJob(
 	ctx context.Context, c client.Client, name, namespace string,
-) (*arenaJobSpec, error) {
-	// Use unstructured client since ArenaJob is an EE type not in the core scheme
-	u := &unstructuredArenaJob{}
-	if err := getUnstructuredArenaJob(ctx, c, name, namespace, u); err != nil {
-		return nil, err
-	}
-	return &u.Spec, nil
-}
-
-// arenaJobSpec is a minimal representation of ArenaJob.spec for the worker.
-// We only need the providers and toolRegistries fields.
-type arenaJobSpec struct {
-	Providers      map[string]arenaProviderGroup   `json:"providers,omitempty"`
-	ToolRegistries []v1alpha1.LocalObjectReference `json:"toolRegistries,omitempty"`
-}
-
-// arenaProviderEntry mirrors ee/api/v1alpha1.ArenaProviderEntry for worker-side parsing.
-type arenaProviderEntry struct {
-	ProviderRef *v1alpha1.ProviderRef          `json:"providerRef,omitempty"`
-	AgentRef    *v1alpha1.LocalObjectReference `json:"agentRef,omitempty"`
-}
-
-// arenaProviderGroup is a polymorphic provider group value (worker-side mirror).
-// Array mode: []arenaProviderEntry (test provider pools).
-// Map mode: map[string]arenaProviderEntry (1:1 config-provider-ID → CRD mappings).
-type arenaProviderGroup struct {
-	entries []arenaProviderEntry
-	mapping map[string]arenaProviderEntry
-}
-
-// UnmarshalJSON detects array vs object and populates the correct field.
-func (g *arenaProviderGroup) UnmarshalJSON(data []byte) error {
-	for _, b := range data {
-		switch b {
-		case ' ', '\t', '\n', '\r':
-			continue
-		case '[':
-			return json.Unmarshal(data, &g.entries)
-		case '{':
-			return json.Unmarshal(data, &g.mapping)
-		default:
-			return json.Unmarshal(data, &g.entries)
-		}
-	}
-	return nil
-}
-
-// MarshalJSON serialises as object (map mode) or array (entries mode).
-func (g arenaProviderGroup) MarshalJSON() ([]byte, error) {
-	if g.mapping != nil {
-		return json.Marshal(g.mapping)
-	}
-	return json.Marshal(g.entries)
-}
-
-// isMapMode returns true when the group uses 1:1 config-provider-ID mapping.
-func (g *arenaProviderGroup) isMapMode() bool {
-	return g.mapping != nil
-}
-
-// unstructuredArenaJob is a minimal ArenaJob for unstructured deserialization.
-type unstructuredArenaJob struct {
-	Spec arenaJobSpec `json:"spec"`
-}
-
-// getUnstructuredArenaJob fetches an ArenaJob using the unstructured client.
-func getUnstructuredArenaJob(
-	ctx context.Context, c client.Client, name, namespace string, out *unstructuredArenaJob,
-) error {
+) (*eev1alpha1.ArenaJobSpec, error) {
 	// Read the ArenaJob as unstructured and extract spec
 	u := &unstructured.Unstructured{}
 	u.SetGroupVersionKind(schema.GroupVersionKind{
@@ -876,22 +810,21 @@ func getUnstructuredArenaJob(
 		Kind:    "ArenaJob",
 	})
 	if err := c.Get(ctx, client.ObjectKey{Name: name, Namespace: namespace}, u); err != nil {
-		return fmt.Errorf("get ArenaJob %s/%s: %w", namespace, name, err)
+		return nil, fmt.Errorf("get ArenaJob %s/%s: %w", namespace, name, err)
 	}
 
 	// Marshal to JSON and unmarshal into our typed struct
 	data, err := json.Marshal(u.Object)
 	if err != nil {
-		return fmt.Errorf("marshal ArenaJob: %w", err)
+		return nil, fmt.Errorf("marshal ArenaJob: %w", err)
 	}
 
 	var wrapper struct {
-		Spec arenaJobSpec `json:"spec"`
+		Spec eev1alpha1.ArenaJobSpec `json:"spec"`
 	}
 	if err := json.Unmarshal(data, &wrapper); err != nil {
-		return fmt.Errorf("unmarshal ArenaJob spec: %w", err)
+		return nil, fmt.Errorf("unmarshal ArenaJob spec: %w", err)
 	}
 
-	out.Spec = wrapper.Spec
-	return nil
+	return &wrapper.Spec, nil
 }
