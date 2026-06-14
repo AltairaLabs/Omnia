@@ -859,18 +859,6 @@ func (g *arenaProviderGroup) isMapMode() bool {
 	return g.mapping != nil
 }
 
-// allEntries returns every arenaProviderEntry regardless of mode.
-func (g *arenaProviderGroup) allEntries() []arenaProviderEntry {
-	if g.mapping != nil {
-		entries := make([]arenaProviderEntry, 0, len(g.mapping))
-		for _, e := range g.mapping {
-			entries = append(entries, e)
-		}
-		return entries
-	}
-	return g.entries
-}
-
 // unstructuredArenaJob is a minimal ArenaJob for unstructured deserialization.
 type unstructuredArenaJob struct {
 	Spec arenaJobSpec `json:"spec"`

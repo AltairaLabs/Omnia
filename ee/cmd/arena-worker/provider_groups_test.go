@@ -485,7 +485,7 @@ func TestGetArenaJob(t *testing.T) {
 		require.NotNil(t, got)
 		assert.Contains(t, got.Providers, "default")
 		defaultGroup := got.Providers["default"]
-		assert.Len(t, defaultGroup.allEntries(), 1)
+		assert.Len(t, defaultGroup.entries, 1)
 		assert.Equal(t, "my-provider", defaultGroup.entries[0].ProviderRef.Name)
 	})
 
@@ -2129,40 +2129,6 @@ func TestArenaProviderGroupMarshalJSON(t *testing.T) {
 		require.NoError(t, json.Unmarshal(data, &got))
 		assert.True(t, got.isMapMode())
 		assert.Equal(t, "p1", got.mapping["my-id"].ProviderRef.Name)
-	})
-}
-
-// ---------------------------------------------------------------------------
-// allEntries
-// ---------------------------------------------------------------------------
-
-func TestArenaProviderGroupAllEntries(t *testing.T) {
-	t.Run("returns entries in array mode", func(t *testing.T) {
-		pg := &arenaProviderGroup{
-			entries: []arenaProviderEntry{
-				{ProviderRef: &v1alpha1.ProviderRef{Name: "p1"}},
-				{AgentRef: &v1alpha1.LocalObjectReference{Name: "a1"}},
-			},
-		}
-		all := pg.allEntries()
-		assert.Len(t, all, 2)
-	})
-
-	t.Run("returns mapping values in map mode", func(t *testing.T) {
-		pg := &arenaProviderGroup{
-			mapping: map[string]arenaProviderEntry{
-				"id1": {ProviderRef: &v1alpha1.ProviderRef{Name: "p1"}},
-			},
-		}
-		all := pg.allEntries()
-		assert.Len(t, all, 1)
-		assert.Equal(t, "p1", all[0].ProviderRef.Name)
-	})
-
-	t.Run("returns nil for empty group", func(t *testing.T) {
-		pg := &arenaProviderGroup{}
-		all := pg.allEntries()
-		assert.Nil(t, all)
 	})
 }
 
