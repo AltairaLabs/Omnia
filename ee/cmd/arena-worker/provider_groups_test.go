@@ -527,6 +527,59 @@ func TestGetArenaJob(t *testing.T) {
 		assert.Empty(t, got.Providers)
 		assert.Empty(t, got.ToolRegistries)
 	})
+
+	t.Run("returns error when ArenaJob object cannot be marshaled", func(t *testing.T) {
+		// Inject a channel into the unstructured object; json.Marshal cannot
+		// serialize channels and will return an error.
+		c := &injectObjectClient{
+			inject: map[string]interface{}{
+				"apiVersion": "omnia.altairalabs.ai/v1alpha1",
+				"kind":       "ArenaJob",
+				"metadata":   map[string]interface{}{"name": "bad-job", "namespace": "default"},
+				"badField":   make(chan struct{}),
+			},
+		}
+		_, err := getArenaJob(ctx, c, "bad-job", "default")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "marshal ArenaJob")
+	})
+
+	t.Run("returns error when ArenaJob spec cannot be unmarshaled", func(t *testing.T) {
+		// Inject spec as a JSON array instead of an object; json.Unmarshal into
+		// a struct fails when the top-level value is an array.
+		c := &injectObjectClient{
+			inject: map[string]interface{}{
+				"apiVersion": "omnia.altairalabs.ai/v1alpha1",
+				"kind":       "ArenaJob",
+				"metadata":   map[string]interface{}{"name": "bad-spec-job", "namespace": "default"},
+				"spec":       []interface{}{1, 2, 3},
+			},
+		}
+		_, err := getArenaJob(ctx, c, "bad-spec-job", "default")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "unmarshal ArenaJob spec")
+	})
+}
+
+// injectObjectClient is a fake client.Client that populates the Get target with
+// a caller-supplied raw object map, bypassing the real fake store.
+type injectObjectClient struct {
+	client.Client
+	inject map[string]interface{}
+}
+
+func (c *injectObjectClient) Get(
+	_ context.Context,
+	_ client.ObjectKey,
+	obj client.Object,
+	_ ...client.GetOption,
+) error {
+	u, ok := obj.(*unstructured.Unstructured)
+	if !ok {
+		return nil
+	}
+	u.Object = c.inject
+	return nil
 }
 
 // ---------------------------------------------------------------------------
