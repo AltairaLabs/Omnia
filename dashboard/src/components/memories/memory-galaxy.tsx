@@ -69,7 +69,7 @@ function project(p: GalaxyPoint, fit: Transform, view: View): ScreenPos {
 
 // Logarithmic zoom growth, on top of a strong non-linear confidence term.
 function sizeFactor(zoom: number): number {
-  return Math.max(0.7, 1 + Math.log2(zoom) * 0.6);
+  return Math.max(0.7, 1 + Math.log2(zoom) * 1.2);
 }
 
 function pointRadius(p: GalaxyPoint, sf: number): number {
