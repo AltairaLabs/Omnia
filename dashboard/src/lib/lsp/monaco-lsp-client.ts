@@ -75,8 +75,16 @@ export async function ensureServicesInitialized(): Promise<void> {
       });
       servicesInitialized = true;
     } catch (error) {
-      console.error("Failed to initialize monaco-languageclient services:", error);
-      throw error;
+      // The vscode services are a process-wide singleton. They can be set up by
+      // a concurrent editor mount or a React double-invoke before we get here;
+      // initServices then throws "Services are already initialized". That's a
+      // success for our purposes — the services exist, so proceed.
+      if (error instanceof Error && /already initialized/i.test(error.message)) {
+        servicesInitialized = true;
+      } else {
+        console.error("Failed to initialize monaco-languageclient services:", error);
+        throw error;
+      }
     } finally {
       servicesInitializing = null;
     }
@@ -101,10 +109,11 @@ export function createLanguageClient(webSocket: WebSocket): InstanceType<typeof 
   return new MonacoLanguageClient({
     name: "PromptKit LSP Client",
     clientOptions: {
-      documentSelector: [
-        { scheme: "file", language: "yaml" },
-        { scheme: "inmemory", language: "yaml" },
-      ],
+      // Match by language only (any URI scheme). @monaco-editor/react + the
+      // @codingame Monaco create the model under a scheme that isn't
+      // file/inmemory, and a scheme-pinned selector silently never matches, so
+      // the client never sends textDocument/didOpen and no features appear.
+      documentSelector: [{ language: "yaml" }],
       errorHandler: {
         error: () => ({ action: ErrorAction.Continue }),
         closed: () => ({ action: CloseAction.Restart }),

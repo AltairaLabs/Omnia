@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils";
 import { Loader2, AlertTriangle, CheckCircle, Circle } from "lucide-react";
 import type { FileType } from "@/types/arena-project";
 import { getRuntimeConfig } from "@/lib/config";
+import { yamlMonarchLanguage } from "@/lib/lsp/yaml-monarch";
 
 // Note: MonacoLanguageClient is dynamically imported via @/lib/lsp/monaco-lsp-client
 // to avoid SSR issues with Node.js-specific modules in the vscode package
@@ -138,6 +139,7 @@ export function LspYamlEditor({
   const [diagnostics, setDiagnostics] = useState<DiagnosticInfo | null>(null);
   const [reconnectTrigger, setReconnectTrigger] = useState(0);
   const [monacoReady, setMonacoReady] = useState(false);
+  const [servicesReady, setServicesReady] = useState(false);
 
   const monacoLanguage = language || getLanguage(fileType);
   const isYaml = monacoLanguage === "yaml";
@@ -145,6 +147,32 @@ export function LspYamlEditor({
   // Extract values for use in async functions where TypeScript narrowing doesn't persist
   const wsWorkspace = workspace ?? "";
   const wsProjectId = projectId ?? "";
+
+  // Initialize the vscode services BEFORE the editor is created. The @codingame
+  // editor boots a minimal service set on creation; if that wins the race, our
+  // full initServices (which wires localExtensionHost) is skipped and the
+  // language client fails with "Default api is not ready". Gating the editor on
+  // this makes our services the first to touch the singleton.
+  useEffect(() => {
+    if (!canUseLsp) {
+      setServicesReady(true);
+      return;
+    }
+    let cancelled = false;
+    import("@/lib/lsp/monaco-lsp-client")
+      .then(({ ensureServicesInitialized }) => ensureServicesInitialized())
+      .then(() => {
+        if (!cancelled) setServicesReady(true);
+      })
+      .catch(() => {
+        // Services failed to init — still show the editor (it degrades to a
+        // plain editor without LSP rather than never rendering).
+        if (!cancelled) setServicesReady(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [canUseLsp]);
 
   // Initialize and manage LSP connection
   useEffect(() => {
@@ -337,6 +365,23 @@ export function LspYamlEditor({
 
       // Configure YAML-specific settings
       if (isYaml) {
+        // The @codingame editor-api (monaco-editor alias) ships a stripped
+        // editor without the basic languages, so "yaml" isn't registered the
+        // way it is in vanilla monaco-editor. Register it before configuring it,
+        // otherwise setLanguageConfiguration throws "unknown language yaml".
+        const yamlRegistered = monaco.languages
+          .getLanguages()
+          .some((lang) => lang.id === "yaml");
+        if (!yamlRegistered) {
+          monaco.languages.register({
+            id: "yaml",
+            extensions: [".yaml", ".yml"],
+            aliases: ["YAML", "yaml"],
+          });
+          // Provide a tokenizer for syntax colouring (the @codingame editor
+          // ships no YAML grammar of its own).
+          monaco.languages.setMonarchTokensProvider("yaml", yamlMonarchLanguage);
+        }
         monaco.languages.setLanguageConfiguration("yaml", {
           comments: { lineComment: "#" },
           brackets: [
@@ -416,11 +461,11 @@ export function LspYamlEditor({
     );
   }, [diagnostics]);
 
-  if (loading) {
+  if (loading || !servicesReady) {
     return (
       <div className={cn("flex items-center justify-center h-full", className)}>
         <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-        <span className="ml-2 text-sm text-muted-foreground">Loading file...</span>
+        <span className="ml-2 text-sm text-muted-foreground">Loading editor…</span>
       </div>
     );
   }

@@ -12,18 +12,16 @@ WORKDIR /app
 RUN apk add --no-cache python3 make g++
 
 # Install dependencies first (for better caching)
-COPY package.json package-lock.json ./
+COPY package.json package-lock.json .npmrc ./
 RUN --mount=type=cache,target=/root/.npm \
     npm ci
 
-# Copy source and build. `npm run build` runs the `prebuild` hook first, which
-# copies the self-hosted Monaco assets into public/monaco/ (served at runtime).
+# Copy source and build. Monaco is bundled by webpack from the
+# @codingame/monaco-vscode-editor-api package (aliased as monaco-editor), so
+# there's no self-hosted AMD asset copy step anymore.
 COPY . .
 RUN --mount=type=cache,target=/app/.next/cache \
     npm run build
-# Fail the build loudly if the self-hosted Monaco assets are missing, rather
-# than shipping a dashboard whose editor silently never loads.
-RUN test -f public/monaco/vs/loader.js
 
 # Production stage
 FROM node:20-alpine AS runner
@@ -48,6 +46,9 @@ RUN addgroup --system --gid 1001 nodejs && \
 # place without triggering a native rebuild.
 COPY --from=builder /app/package.json ./
 COPY --from=builder /app/package-lock.json ./
+# .npmrc carries legacy-peer-deps=true; `npm prune` re-resolves the tree and
+# needs it to accept the monaco-editor alias, same as `npm ci` in the builder.
+COPY --from=builder /app/.npmrc ./
 COPY --from=builder /app/node_modules ./node_modules
 RUN npm prune --omit=dev && \
     # Remove the bundled npm CLI once /app/node_modules is pruned.

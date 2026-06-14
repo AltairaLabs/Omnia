@@ -81,6 +81,12 @@ data:
 
   # Authentication mode
   OMNIA_AUTH_MODE: {{ .Values.dashboard.auth.mode | quote }}
+  {{- if .Values.dashboard.auth.allowAnonymous }}
+  # Acknowledge that mode=anonymous disables auth. Required by the server's
+  # auth boot guard when NODE_ENV=production (the helm-time check in
+  # _helpers.tpl alone doesn't reach the running container).
+  OMNIA_ALLOW_ANONYMOUS: "true"
+  {{- end }}
   OMNIA_SESSION_COOKIE_NAME: {{ .Values.dashboard.auth.cookieName | quote }}
   OMNIA_SESSION_TTL: {{ .Values.dashboard.auth.ttl | quote }}
   OMNIA_AUTH_ANONYMOUS_ROLE: {{ .Values.dashboard.auth.anonymousRole | quote }}
