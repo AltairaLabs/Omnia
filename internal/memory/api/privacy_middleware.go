@@ -36,6 +36,35 @@ const consentGrantsHeader = "X-Consent-Grants"
 const consentLayerHeader = "X-Consent-Layer"
 const consentDecisionHeader = "X-Consent-Decision"
 
+// Audit event types emitted by the privacy middleware. These mirror the
+// canonical constants in ee/pkg/audit (EventMemoryWriteBlocked,
+// EventPIIRedacted) — duplicated as string literals here to keep this
+// package free of an EE import (ee/pkg/audit imports this package, so an
+// import back would create a cycle).
+const (
+	eventMemoryWriteBlocked = "memory_write_blocked"
+	eventPIIRedacted        = "pii_redacted"
+)
+
+// auditReasonKey is the Metadata key under which the privacy middleware
+// records why a write was blocked or redacted. The MemoryAuditEntry has no
+// dedicated Reason field, so enforcement reasons ride in Metadata.
+const auditReasonKey = "reason"
+
+// redactionDefaultReason is the audit reason recorded for a PII redaction hit
+// when the write carried no consent category to attribute it to.
+const redactionDefaultReason = "pii"
+
+// redactionReason picks the audit reason for a redaction hit: the write's
+// consent category when present (so the reader can break down redactions by
+// the kind of data), else a generic "pii" marker.
+func redactionReason(category string) string {
+	if category != "" {
+		return category
+	}
+	return redactionDefaultReason
+}
+
 // OptOutChecker returns false when the user has opted out of memory storage,
 // indicating the write should be silently dropped.
 // category is the consent category from the request body (may be empty string
@@ -89,7 +118,31 @@ type MemoryPrivacyMiddleware struct {
 	redact      ContentRedactor
 	validator   CategoryValidator   // optional, nil when not configured
 	metrics     *SuppressionMetrics // optional, nil when not configured
+	auditLogger MemoryAuditLogger   // optional, nil disables enforcement audit rows
 	log         logr.Logger
+}
+
+// SetAuditLogger wires an audit logger so the middleware emits an audit_log
+// row when a write is blocked by opt-out or mutated by PII redaction. May be
+// called at most once before the middleware begins handling requests. nil
+// (the default) disables enforcement audit emission — the enforcement still
+// happens, it's just not recorded.
+func (m *MemoryPrivacyMiddleware) SetAuditLogger(l MemoryAuditLogger) {
+	m.auditLogger = l
+}
+
+// emitEnforcementAudit records a privacy-enforcement event (opt-out block or
+// PII redaction). Best-effort: a nil logger is a no-op, and the LogEvent
+// contract is non-blocking, so this never blocks or fails the request.
+func (m *MemoryPrivacyMiddleware) emitEnforcementAudit(ctx context.Context, eventType, workspace, reason string) {
+	if m.auditLogger == nil {
+		return
+	}
+	m.auditLogger.LogEvent(ctx, &MemoryAuditEntry{
+		EventType:   eventType,
+		WorkspaceID: workspace,
+		Metadata:    map[string]string{auditReasonKey: reason},
+	})
 }
 
 // NewMemoryPrivacyMiddleware creates a MemoryPrivacyMiddleware.
@@ -275,6 +328,7 @@ func (m *MemoryPrivacyMiddleware) Wrap(next http.Handler) http.Handler {
 			if m.metrics != nil {
 				m.metrics.RecordSuppression(layer, req.Category, "opt-out")
 			}
+			m.emitEnforcementAudit(r.Context(), eventMemoryWriteBlocked, workspace, "opt-out")
 			w.Header().Set(consentDecisionHeader, formatConsentDecision(req.Category, layer))
 			w.WriteHeader(http.StatusNoContent)
 			return
@@ -292,6 +346,7 @@ func (m *MemoryPrivacyMiddleware) Wrap(next http.Handler) http.Handler {
 			if redacted != req.Content {
 				req.Content = redacted
 				bodyDirty = true
+				m.emitEnforcementAudit(r.Context(), eventPIIRedacted, workspace, redactionReason(req.Category))
 			}
 		}
 

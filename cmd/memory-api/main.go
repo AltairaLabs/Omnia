@@ -821,7 +821,7 @@ func buildAPIMux(
 
 	// Enterprise privacy middleware (opt-out + PII redaction + classifier).
 	if enterprise {
-		apiHandler = wrapPrivacyMiddleware(ctx, apiHandler, pool, embeddingSvc, log)
+		apiHandler = wrapPrivacyMiddleware(ctx, apiHandler, pool, embeddingSvc, auditLogger, log)
 	}
 
 	// Rate limiting middleware (per-client-IP token bucket).
@@ -845,7 +845,7 @@ func buildAPIMux(
 // wrapPrivacyMiddleware creates and wires the enterprise privacy middleware.
 // When the K8s API is unreachable (e.g., in tests), the middleware is skipped
 // and the original handler is returned unchanged.
-func wrapPrivacyMiddleware(ctx context.Context, next http.Handler, pool *pgxpool.Pool, embeddingSvc *memory.EmbeddingService, log logr.Logger) http.Handler {
+func wrapPrivacyMiddleware(ctx context.Context, next http.Handler, pool *pgxpool.Pool, embeddingSvc *memory.EmbeddingService, auditLogger *eeaudit.Logger, log logr.Logger) http.Handler {
 	kubeConfig, err := rest.InClusterConfig()
 	if err != nil {
 		log.Info("memory privacy middleware skipped", "reason", reasonNoInClusterKubeconfig)
@@ -901,6 +901,12 @@ func wrapPrivacyMiddleware(ctx context.Context, next http.Handler, pool *pgxpool
 		log.Error(err, "memory suppression metrics registration failed")
 	}
 	mw := memoryapi.NewMemoryPrivacyMiddlewareWithMetrics(checkOptOut, contentRedactor, validator, suppressMetrics, log)
+	// Make enforcement observable: emit an audit_log row when a write is
+	// blocked by opt-out or mutated by PII redaction. Reuses the same
+	// adapter the memory-CRUD audit path uses so both land in audit_log.
+	if auditLogger != nil {
+		mw.SetAuditLogger(&auditLoggerAdapter{inner: auditLogger})
+	}
 	log.Info("memory privacy middleware enabled")
 	return mw.Wrap(next)
 }

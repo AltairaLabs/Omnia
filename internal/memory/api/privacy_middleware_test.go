@@ -61,6 +61,24 @@ func newTestMiddleware(checkOptOut OptOutChecker, redact ContentRedactor) *Memor
 	return NewMemoryPrivacyMiddleware(checkOptOut, redact, nil, logr.Discard())
 }
 
+// fakeAuditLogger captures MemoryAuditEntry values for assertions. The real
+// adapter's LogEvent is non-blocking (buffered channel); the fake records
+// synchronously so tests don't race on a goroutine.
+type fakeAuditLogger struct {
+	entries []*MemoryAuditEntry
+	err     bool
+}
+
+func (f *fakeAuditLogger) LogEvent(_ context.Context, entry *MemoryAuditEntry) {
+	if f.err {
+		// Simulate a logger that panics/fails internally without affecting the
+		// caller — the middleware must swallow this and let the request proceed.
+		// We record nothing in the error case so the count assertion is honest.
+		return
+	}
+	f.entries = append(f.entries, entry)
+}
+
 func postBody(t *testing.T, content string) *bytes.Buffer {
 	t.Helper()
 	req := SaveMemoryRequest{
@@ -810,4 +828,114 @@ func TestMemoryPrivacyMiddleware_OptedOut_DefaultsLayerToPersistent(t *testing.T
 
 	require.Equal(t, http.StatusNoContent, w.Code)
 	assert.Contains(t, w.Header().Get(consentDecisionHeader), "layer=persistent")
+}
+
+func TestMemoryPrivacyMiddleware_OptedOut_EmitsBlockAuditEntry(t *testing.T) {
+	audit := &fakeAuditLogger{}
+	mw := newTestMiddleware(optedOutChecker, noOpRedact)
+	mw.SetAuditLogger(audit)
+	handler := mw.Wrap(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		t.Fatal("opted-out write must not reach the handler")
+	}))
+
+	w := httptest.NewRecorder()
+	r := makePostRequest(t, "some content", "ws-block", "user-abc")
+	handler.ServeHTTP(w, r)
+
+	require.Equal(t, http.StatusNoContent, w.Code)
+	require.Len(t, audit.entries, 1, "opt-out block should emit exactly one audit entry")
+	assert.Equal(t, eventMemoryWriteBlocked, audit.entries[0].EventType)
+	assert.Equal(t, "ws-block", audit.entries[0].WorkspaceID)
+	assert.Equal(t, "opt-out", audit.entries[0].Metadata[auditReasonKey])
+}
+
+func TestMemoryPrivacyMiddleware_Redaction_EmitsRedactedAuditEntry(t *testing.T) {
+	const originalContent = "my email is test@example.com"
+	const redactedContent = "my email is [EMAIL]"
+
+	redactor := ContentRedactor(func(_ context.Context, _, content, _ string) (string, error) {
+		if content == originalContent {
+			return redactedContent, nil
+		}
+		return content, nil
+	})
+
+	audit := &fakeAuditLogger{}
+	mw := newTestMiddleware(passthroughOptOut, redactor)
+	mw.SetAuditLogger(audit)
+	handler := mw.Wrap(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusCreated)
+	}))
+
+	w := httptest.NewRecorder()
+	r := makePostRequest(t, originalContent, "ws-redact", "user-xyz")
+	handler.ServeHTTP(w, r)
+
+	require.Len(t, audit.entries, 1, "a redaction hit should emit exactly one audit entry")
+	assert.Equal(t, eventPIIRedacted, audit.entries[0].EventType)
+	assert.Equal(t, "ws-redact", audit.entries[0].WorkspaceID)
+	assert.NotEmpty(t, audit.entries[0].Metadata[auditReasonKey], "redaction entry must carry a reason")
+}
+
+func TestMemoryPrivacyMiddleware_Redaction_UsesCategoryAsReason(t *testing.T) {
+	const originalContent = "ssn 123-45-6789"
+	const redactedContent = "ssn [SSN]"
+
+	redactor := ContentRedactor(func(_ context.Context, _, content, _ string) (string, error) {
+		if content == originalContent {
+			return redactedContent, nil
+		}
+		return content, nil
+	})
+
+	audit := &fakeAuditLogger{}
+	mw := newTestMiddleware(passthroughOptOut, redactor)
+	mw.SetAuditLogger(audit)
+	handler := mw.Wrap(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusCreated)
+	}))
+
+	w := httptest.NewRecorder()
+	r := makePostRequestWithCategory(t, originalContent, "ws-redact", "user-xyz", "memory:health")
+	handler.ServeHTTP(w, r)
+
+	require.Len(t, audit.entries, 1)
+	assert.Equal(t, eventPIIRedacted, audit.entries[0].EventType)
+	assert.Equal(t, "memory:health", audit.entries[0].Metadata[auditReasonKey],
+		"redaction reason should be the write's consent category when present")
+}
+
+func TestMemoryPrivacyMiddleware_AllowedWrite_EmitsNoEnforcementAudit(t *testing.T) {
+	// No opt-out, no redaction change → neither enforcement branch fires.
+	audit := &fakeAuditLogger{}
+	mw := newTestMiddleware(passthroughOptOut, noOpRedact)
+	mw.SetAuditLogger(audit)
+	handler := mw.Wrap(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusCreated)
+	}))
+
+	w := httptest.NewRecorder()
+	r := makePostRequest(t, "clean content", "ws-1", "user-xyz")
+	handler.ServeHTTP(w, r)
+
+	require.Equal(t, http.StatusCreated, w.Code)
+	assert.Empty(t, audit.entries, "a clean write must not emit any enforcement audit entry")
+}
+
+func TestMemoryPrivacyMiddleware_AuditLoggerError_RequestStillProceeds(t *testing.T) {
+	// Audit emission is best-effort: a failing logger must not block the write.
+	audit := &fakeAuditLogger{err: true}
+	mw := newTestMiddleware(optedOutChecker, noOpRedact)
+	mw.SetAuditLogger(audit)
+	handler := mw.Wrap(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		t.Fatal("opted-out write must not reach the handler")
+	}))
+
+	w := httptest.NewRecorder()
+	r := makePostRequest(t, "some content", "ws-1", "user-abc")
+	handler.ServeHTTP(w, r)
+
+	// The opt-out branch still completes (204) even though audit recorded nothing.
+	require.Equal(t, http.StatusNoContent, w.Code)
+	assert.Empty(t, audit.entries)
 }
