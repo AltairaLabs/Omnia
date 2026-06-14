@@ -25,6 +25,12 @@ vi.mock("@/components/workspace-switcher", () => ({
   WorkspaceSwitcher: () => <div data-testid="workspace-switcher">WorkspaceSwitcher</div>,
 }));
 
+// Mock next/navigation's usePathname (drives the Console active state)
+const mockUsePathname = vi.fn(() => "/");
+vi.mock("next/navigation", () => ({
+  usePathname: () => mockUsePathname(),
+}));
+
 // Mock react-query so Header's useQueryClient/useIsFetching work without a provider.
 const mockInvalidateQueries = vi.fn();
 vi.mock("@tanstack/react-query", () => ({
@@ -35,6 +41,7 @@ vi.mock("@tanstack/react-query", () => ({
 describe("Header", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockUsePathname.mockReturnValue("/");
   });
 
   it("renders title", () => {
@@ -102,6 +109,25 @@ describe("Header", () => {
     render(<Header title="Title" />);
     fireEvent.click(screen.getByRole("button", { name: "Refresh data" }));
     expect(mockInvalidateQueries).toHaveBeenCalled();
+  });
+
+  it("renders a Console link pointing at /console", () => {
+    render(<Header title="Title" />);
+    const link = screen.getByTestId("console-link");
+    expect(link).toHaveAttribute("href", "/console");
+    expect(link).toHaveAccessibleName("Open Console");
+  });
+
+  it("does not highlight the Console link off the console route", () => {
+    mockUsePathname.mockReturnValue("/agents");
+    render(<Header title="Title" />);
+    expect(screen.getByTestId("console-link")).toHaveAttribute("data-active", "false");
+  });
+
+  it("highlights the Console link on the console route", () => {
+    mockUsePathname.mockReturnValue("/console");
+    render(<Header title="Title" />);
+    expect(screen.getByTestId("console-link")).toHaveAttribute("data-active", "true");
   });
 
   it("accepts ReactNode as title", () => {
