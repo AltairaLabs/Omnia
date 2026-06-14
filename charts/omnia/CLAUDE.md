@@ -68,7 +68,9 @@ Resolution: schema allows `""` in the enum; `_helpers.tpl` `omnia.validateAuth` 
 
 ### 5. Don't bump `Chart.yaml` version in feature/fix PRs — only at release
 
-`version` and `appVersion` track the last git-tagged release. They are bumped **once, when cutting a release** (the release workflow also rewrites them at package-time as a safety net). Do NOT bump `version:` in a feature or fix PR, even when the change alters `helm template` output for an existing installation.
+`version` and `appVersion` are owned by the release workflow. After a tagged release, `release.yml` opens a `chore/bump-chart-<version>` PR that syncs both fields to the just-published version. Do NOT hand-bump them in a feature or fix PR, even when the change alters `helm template` output for an existing installation — a manual bump drifts `version` ahead of `appVersion` and the last release, producing skipped versions and a `main`-at-rest that templates the wrong image tags.
+
+This is **enforced in CI**: `.github/workflows/chart-version-guard.yml` fails any PR that changes `version`/`appVersion` except the release bot's bump PR.
 
 Instead, document any rendered-output change in the commit + PR body so the CHANGELOG generator picks it up at release time.
 
