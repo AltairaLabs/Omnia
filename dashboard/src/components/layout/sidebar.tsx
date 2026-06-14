@@ -1,11 +1,7 @@
 "use client";
 
-import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
-import { cn } from "@/lib/utils";
-import { useShowEnterpriseNav } from "@/components/license/license-gate";
-import { useEnterpriseConfig } from "@/hooks/core";
 import {
   LayoutDashboard,
   Bot,
@@ -18,18 +14,27 @@ import {
   Terminal,
   Cpu,
   Target,
-  Sparkles,
   ShieldCheck,
   Brain,
   BookOpen,
   BarChart3,
   Zap,
+  PanelLeftClose,
+  PanelLeftOpen,
+  type LucideIcon,
 } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { useShowEnterpriseNav } from "@/components/license/license-gate";
+import { useEnterpriseConfig } from "@/hooks/core";
+import { TooltipProvider } from "@/components/ui/tooltip";
+import { useSidebarStore } from "@/stores/sidebar-store";
+import { useIsNarrow } from "@/hooks/use-is-narrow";
+import { SidebarNavItem } from "./sidebar-nav-item";
 
 interface NavItem {
   name: string;
   href: string;
-  icon: typeof LayoutDashboard;
+  icon: LucideIcon;
   enterprise?: boolean;
 }
 
@@ -51,84 +56,92 @@ const navigation: NavItem[] = [
   { name: "Arena", href: "/arena", icon: Target, enterprise: true },
 ];
 
-const secondaryNavigation = [
+const secondaryNavigation: NavItem[] = [
   { name: "Settings", href: "/settings", icon: Settings },
 ];
+
+function isItemActive(pathname: string, href: string): boolean {
+  if (href === "/") return pathname === href;
+  return pathname === href || pathname.startsWith(href + "/");
+}
 
 export function Sidebar() {
   const pathname = usePathname();
   const { showEnterpriseNav } = useShowEnterpriseNav();
   const { enterpriseEnabled } = useEnterpriseConfig();
+  const collapsedPref = useSidebarStore((s) => s.collapsed);
+  const toggle = useSidebarStore((s) => s.toggle);
+  const isNarrow = useIsNarrow();
 
-  // Filter navigation items based on enterprise visibility
+  const collapsed = collapsedPref || isNarrow;
+
   const visibleNavigation = navigation.filter(
-    (item) => !item.enterprise || showEnterpriseNav
+    (item) => !item.enterprise || showEnterpriseNav,
+  );
+
+  const renderItem = (item: NavItem) => (
+    <SidebarNavItem
+      key={item.name}
+      name={item.name}
+      href={item.href}
+      icon={item.icon}
+      isActive={isItemActive(pathname, item.href)}
+      collapsed={collapsed}
+      showEnterpriseBadge={Boolean(item.enterprise) && !enterpriseEnabled}
+    />
   );
 
   return (
-    <div className="flex h-full w-64 flex-col border-r border-white/10 bg-[#0F172A] text-[#E2E8F0]" data-testid="sidebar">
-      {/* Logo — always show light-on-dark variant since sidebar is Deep Space blue */}
-      <div className="flex h-16 items-center gap-3 border-b border-white/10 px-6">
-        <Image
-          src="/logo-dark.svg"
-          alt="Omnia"
-          width={28}
-          height={28}
-        />
-        <span className="text-lg font-semibold text-white">Omnia</span>
+    <TooltipProvider>
+      <div
+        className={cn(
+          "flex h-full flex-col border-r border-white/10 bg-[#0F172A] text-[#E2E8F0] transition-[width] duration-200",
+          collapsed ? "w-16" : "w-64",
+        )}
+        data-testid="sidebar"
+      >
+        {/* Logo header + collapse toggle */}
+        <div
+          className={cn(
+            "flex border-b border-white/10",
+            collapsed
+              ? "flex-col items-center gap-2 px-2 py-3"
+              : "h-16 items-center gap-3 px-6",
+          )}
+        >
+          <Image src="/logo-dark.svg" alt="Omnia" width={28} height={28} />
+          {!collapsed && (
+            <span className="flex-1 text-lg font-semibold text-white">Omnia</span>
+          )}
+          <button
+            type="button"
+            onClick={toggle}
+            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+            className="rounded-md p-1.5 text-[#E2E8F0]/70 transition-colors hover:bg-[#1E293B] hover:text-white"
+          >
+            {collapsed ? (
+              <PanelLeftOpen className="h-4 w-4" />
+            ) : (
+              <PanelLeftClose className="h-4 w-4" />
+            )}
+          </button>
+        </div>
+
+        {/* Primary Navigation */}
+        <nav className={cn("flex-1 space-y-1 py-4", collapsed ? "px-2" : "px-3")}>
+          {visibleNavigation.map(renderItem)}
+        </nav>
+
+        {/* Secondary Navigation */}
+        <div
+          className={cn(
+            "border-t border-white/10 py-4",
+            collapsed ? "px-2" : "px-3",
+          )}
+        >
+          {secondaryNavigation.map(renderItem)}
+        </div>
       </div>
-
-      {/* Primary Navigation */}
-      <nav className="flex-1 space-y-1 px-3 py-4">
-        {visibleNavigation.map((item) => {
-          const isActive = item.href === "/"
-            ? pathname === item.href
-            : pathname === item.href || pathname.startsWith(item.href + "/");
-
-          const showEnterpriseBadge = item.enterprise && !enterpriseEnabled;
-
-          return (
-            <Link
-              key={item.name}
-              href={item.href}
-              className={cn(
-                "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors",
-                isActive
-                  ? "bg-primary text-white"
-                  : "text-[#E2E8F0]/70 hover:bg-[#1E293B] hover:text-white"
-              )}
-            >
-              <item.icon className="h-4 w-4" />
-              <span className="flex-1">{item.name}</span>
-              {showEnterpriseBadge && (
-                <Sparkles className="h-3 w-3 text-amber-500" />
-              )}
-            </Link>
-          );
-        })}
-      </nav>
-
-      {/* Secondary Navigation */}
-      <div className="border-t border-white/10 px-3 py-4">
-        {secondaryNavigation.map((item) => {
-          const isActive = pathname === item.href;
-          return (
-            <Link
-              key={item.name}
-              href={item.href}
-              className={cn(
-                "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors",
-                isActive
-                  ? "bg-primary text-white"
-                  : "text-[#E2E8F0]/70 hover:bg-[#1E293B] hover:text-white"
-              )}
-            >
-              <item.icon className="h-4 w-4" />
-              {item.name}
-            </Link>
-          );
-        })}
-      </div>
-    </div>
+    </TooltipProvider>
   );
 }
