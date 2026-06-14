@@ -21,6 +21,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/kms v1.50.5
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.103.2
 	github.com/cyphar/filepath-securejoin v0.6.1
+	github.com/danaugrs/go-tsne/tsne v0.0.0-20220306155740-2250969e057f
 	github.com/go-git/go-git/v5 v5.19.1
 	github.com/go-logr/logr v1.4.3
 	github.com/go-logr/zapr v1.3.0
