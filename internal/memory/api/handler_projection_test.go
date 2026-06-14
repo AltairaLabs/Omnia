@@ -87,4 +87,36 @@ func TestHandleProjection_HappyPathDense(t *testing.T) {
 	}
 	// Computed path persisted the layout.
 	assert.Len(t, store.projSavedPoints, 40)
+	assert.Equal(t, "ready", resp.Status)
+}
+
+func TestHandleProjection_LargeScopePending(t *testing.T) {
+	// fingerprint count > onDemandProjectionThreshold, no stored layout.
+	store := &mockStore{projFingerprint: "5000:123", projInputs: denseProjInputs(40)}
+	h := newTestHandler(store)
+	mux := setupMux(h)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/memories/projection?workspace=ws1", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusOK, rr.Code)
+	var resp ProjectionResult
+	require.NoError(t, json.NewDecoder(rr.Body).Decode(&resp))
+	assert.Equal(t, "pending", resp.Status)
+	assert.Equal(t, 5000, resp.Total)
+	assert.Empty(t, resp.Points)
+	assert.Nil(t, store.projSavedPoints) // pending must NOT compute/persist
+}
+
+func TestHandleProjection_SmallScopeReady(t *testing.T) {
+	store := &mockStore{projFingerprint: "40:123", projInputs: denseProjInputs(40)}
+	h := newTestHandler(store)
+	mux := setupMux(h)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/memories/projection?workspace=ws1", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	var resp ProjectionResult
+	require.NoError(t, json.NewDecoder(rr.Body).Decode(&resp))
+	assert.Equal(t, "ready", resp.Status)
+	assert.Equal(t, 40, resp.Total)
+	assert.Len(t, store.projSavedPoints, 40) // small scope computed+persisted
 }
