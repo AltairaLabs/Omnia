@@ -19,7 +19,6 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Brain, Search, AlertCircle, Library } from "lucide-react";
 import { useMemoryProjection } from "@/hooks/use-memory-projection";
 import { usePersistedViewMode } from "@/hooks/use-persisted-view-mode";
-import { MemoryDetailPanel } from "@/components/memories/memory-detail-panel";
 import { FacetRail, type Facet } from "@/components/memories/facet-rail";
 import { facetCounts, parseHiddenTiers } from "@/lib/memory-galaxy/galaxy-math";
 import {
@@ -30,7 +29,6 @@ import {
 } from "@/lib/memory-analytics/colors";
 import type { GalaxyPoint } from "@/lib/memory-galaxy/types";
 import type { Tier } from "@/lib/memory-analytics/types";
-import type { MemoryEntity } from "@/lib/data/types";
 import { useDeleteMemory } from "@/hooks/use-memory-mutations";
 
 const MemoryGalaxy = dynamic(
@@ -51,21 +49,6 @@ const CATEGORY_KEYS = [
 function categoryLabel(cat: string): string {
   const s = cat.replace(/^memory:/, "");
   return s.charAt(0).toUpperCase() + s.slice(1);
-}
-
-// Galaxy points carry only a pseudonymous user ref; the full content is a
-// future fetch (#1418). type + user surface as detail-panel metadata rows.
-function pointToMemory(p: GalaxyPoint): MemoryEntity {
-  return {
-    id: p.id,
-    type: p.type ?? "observation",
-    content: p.preview ?? p.title ?? "",
-    confidence: p.confidence,
-    scope: {},
-    metadata: { consent_category: p.category, kind: p.type, user: p.userRef },
-    createdAt: p.observedAt ?? "",
-    tier: p.tier,
-  };
 }
 
 function buildFacets(points: GalaxyPoint[], colorBy: "tier" | "category"): Facet[] {
@@ -95,7 +78,7 @@ interface GalaxyBodyState {
   colorBy: "tier" | "category";
   hidden: Set<string>;
   search: string;
-  onSelect: (p: GalaxyPoint) => void;
+  onDelete: (id: string) => void;
 }
 
 function renderGalaxyBody(s: GalaxyBodyState): ReactNode {
@@ -140,7 +123,7 @@ function renderGalaxyBody(s: GalaxyBodyState): ReactNode {
       colorBy={s.colorBy}
       hidden={s.hidden}
       filters={{ search: s.search }}
-      onSelect={s.onSelect}
+      onDelete={s.onDelete}
     />
   );
 }
@@ -153,7 +136,6 @@ export default function MemoriesPage() {
   const hasWorkspace = !!currentWorkspace;
   const { data, isLoading, error } = useMemoryProjection();
 
-  const [selected, setSelected] = useState<GalaxyPoint | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [colorBy, setColorBy] = usePersistedViewMode<"tier" | "category">(
     "omnia-memory-galaxy-color-by",
@@ -183,10 +165,7 @@ export default function MemoriesPage() {
   };
 
   const deleteMemory = useDeleteMemory();
-  const handleDelete = (id: string) => {
-    deleteMemory.mutate(id);
-    setSelected(null);
-  };
+  const handleDelete = (id: string) => deleteMemory.mutate(id);
 
   const clusterKind = data?.projectionInput === "tfidf" ? "lexical" : "semantic";
 
@@ -244,7 +223,7 @@ export default function MemoriesPage() {
           colorBy,
           hidden,
           search: searchQuery,
-          onSelect: setSelected,
+          onDelete: handleDelete,
         })}
 
         {!isLoading && (data?.total ?? 0) > 0 && (
@@ -254,12 +233,6 @@ export default function MemoriesPage() {
           </p>
         )}
       </div>
-
-      <MemoryDetailPanel
-        memory={selected ? pointToMemory(selected) : null}
-        onClose={() => setSelected(null)}
-        onDelete={handleDelete}
-      />
     </div>
   );
 }

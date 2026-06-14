@@ -53,10 +53,10 @@ vi.mock("next/dynamic", () => ({
     // Inline stub: identical shape to the vi.mock below for memory-galaxy
     const Stub = ({
       points,
-      onSelect,
+      onDelete,
     }: {
       points: Array<{ id: string; title?: string; preview?: string }>;
-      onSelect: (p: { id: string; title?: string; preview?: string }) => void;
+      onDelete: (id: string) => void;
     }) => (
       <div data-testid="memory-galaxy">
         {points.map((p) => (
@@ -64,7 +64,7 @@ vi.mock("next/dynamic", () => ({
             key={p.id}
             type="button"
             data-testid={`galaxy-point-${p.id}`}
-            onClick={() => onSelect(p)}
+            onClick={() => onDelete(p.id)}
           >
             {p.title ?? p.preview}
           </button>
@@ -80,10 +80,10 @@ vi.mock("next/dynamic", () => ({
 vi.mock("@/components/memories/memory-galaxy", () => ({
   MemoryGalaxy: ({
     points,
-    onSelect,
+    onDelete,
   }: {
     points: Array<{ id: string; title?: string; preview?: string }>;
-    onSelect: (p: { id: string; title?: string; preview?: string }) => void;
+    onDelete: (id: string) => void;
   }) => (
     <div data-testid="memory-galaxy">
       {points.map((p) => (
@@ -91,7 +91,7 @@ vi.mock("@/components/memories/memory-galaxy", () => ({
           key={p.id}
           type="button"
           data-testid={`galaxy-point-${p.id}`}
-          onClick={() => onSelect(p)}
+          onClick={() => onDelete(p.id)}
         >
           {p.title ?? p.preview}
         </button>
@@ -109,27 +109,6 @@ vi.mock("@/components/memories/facet-rail", () => ({
       </button>
     </div>
   ),
-}));
-
-vi.mock("@/components/memories/memory-detail-panel", () => ({
-  MemoryDetailPanel: ({
-    memory,
-    onDelete,
-  }: {
-    memory: { id: string } | null;
-    onDelete: (id: string) => void;
-  }) =>
-    memory ? (
-      <div data-testid="detail-panel">
-        <button
-          type="button"
-          data-testid="detail-delete"
-          onClick={() => onDelete(memory.id)}
-        >
-          delete
-        </button>
-      </div>
-    ) : null,
 }));
 
 import MemoriesPage from "./page";
@@ -224,7 +203,7 @@ describe("MemoriesPage (galaxy)", () => {
     expect(screen.getByText(/projection failed/)).toBeTruthy();
   });
 
-  it("invokes deleteMemory when a point is selected and deleted", async () => {
+  it("invokes deleteMemory when the galaxy requests a delete", async () => {
     const user = userEvent.setup();
     mockUseMemoryProjection.mockReturnValue({
       data: {
@@ -241,7 +220,6 @@ describe("MemoriesPage (galaxy)", () => {
     });
     render(<MemoriesPage />);
     await user.click(screen.getByTestId("galaxy-point-p1"));
-    await user.click(screen.getByTestId("detail-delete"));
     expect(mockDeleteMutate).toHaveBeenCalledWith("p1");
   });
 

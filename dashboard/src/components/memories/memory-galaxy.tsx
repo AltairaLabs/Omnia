@@ -2,8 +2,9 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTheme } from "next-themes";
-import { Plus, Minus, Maximize, Tag, Gauge, Clock } from "lucide-react";
+import { Plus, Minus, Maximize, Tag, Gauge, Clock, X } from "lucide-react";
 import { usePersistedViewMode } from "@/hooks/use-persisted-view-mode";
+import { MemoryGalaxyBubble } from "./memory-galaxy-bubble";
 import type { GalaxyPoint } from "@/lib/memory-galaxy/types";
 import {
   fitTransform,
@@ -66,7 +67,7 @@ interface MemoryGalaxyProps {
   colorBy: Dimension;
   hidden: Set<string>;
   filters: { search: string };
-  onSelect: (point: GalaxyPoint) => void;
+  onDelete: (id: string) => void;
 }
 
 function project(p: GalaxyPoint, fit: Transform, view: View): ScreenPos {
@@ -104,6 +105,38 @@ function headingFor(p: GalaxyPoint, colorBy: Dimension): string {
 
 function isVisible(p: GalaxyPoint, hidden: Set<string>, colorBy: Dimension): boolean {
   return !hidden.has(pointFacet(p, colorBy));
+}
+
+interface BubblePos {
+  p: GalaxyPoint;
+  x: number;
+  y: number;
+  placement: "above" | "below";
+}
+
+// Live screen anchors for the open bubbles, recomputed from the view each
+// render so they follow their points on pan/zoom. Off-screen ones drop out.
+function computeBubbles(
+  points: GalaxyPoint[],
+  openIds: Set<string>,
+  view: View,
+  size: { w: number; h: number },
+): BubblePos[] {
+  const out: BubblePos[] = [];
+  if (openIds.size === 0 || size.w === 0) return out;
+  const fit = fitTransform(points, size.w, size.h);
+  for (const p of points) {
+    if (!openIds.has(p.id)) continue;
+    const s = project(p, fit, view);
+    if (s.x < -40 || s.x > size.w + 40 || s.y < -40 || s.y > size.h + 40) continue;
+    out.push({
+      p,
+      x: Math.max(150, Math.min(size.w - 150, s.x)),
+      y: s.y,
+      placement: s.y > size.h / 2 ? "above" : "below",
+    });
+  }
+  return out;
 }
 
 function drawPoolBall(ctx: CanvasRenderingContext2D, s: ScreenPos, r: number, confidence: number): void {
@@ -215,10 +248,12 @@ export function MemoryGalaxy({
   colorBy,
   hidden,
   filters,
-  onSelect,
+  onDelete,
 }: Readonly<MemoryGalaxyProps>) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [hovered, setHovered] = useState<GalaxyPoint | null>(null);
+  const [openIds, setOpenIds] = useState<Set<string>>(new Set());
+  const [size, setSize] = useState({ w: 0, h: 0 });
   const [view, setView] = useState<View>(DEFAULT_VIEW);
   const [labelsPref, setLabelsPref] = usePersistedViewMode<"on" | "off">(
     "omnia-memory-galaxy-labels",
@@ -261,6 +296,7 @@ export function MemoryGalaxy({
       const rect = canvas.getBoundingClientRect();
       canvas.width = rect.width;
       canvas.height = rect.height;
+      setSize({ w: rect.width, h: rect.height });
       draw();
     };
     resize();
@@ -341,11 +377,20 @@ export function MemoryGalaxy({
     setHovered(pickAt(e.clientX, e.clientY));
   };
 
+  const toggleOpen = (id: string) => {
+    setOpenIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
   const onMouseUp = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const d = drag.current;
     if (d.active && !d.moved) {
       const p = pickAt(e.clientX, e.clientY);
-      if (p) onSelect(p);
+      if (p) toggleOpen(p.id);
     }
     d.active = false;
   };
@@ -360,6 +405,8 @@ export function MemoryGalaxy({
       return { zoom, panX: cx - (cx - v.panX) * k, panY: cy - (cy - v.panY) * k };
     });
   };
+
+  const openBubbles = computeBubbles(points, openIds, view, size);
 
   return (
     <div className="relative h-[70vh] min-h-[360px] w-full overflow-hidden rounded-lg border bg-slate-50 dark:bg-[#0b1020]">
@@ -377,6 +424,21 @@ export function MemoryGalaxy({
       />
 
       <div className="absolute bottom-3 right-3 z-10 flex flex-col gap-0.5 rounded-lg bg-slate-900/90 p-1 shadow-lg ring-1 ring-white/15 backdrop-blur">
+        {openIds.size > 0 && (
+          <>
+            <button
+              type="button"
+              aria-label="Close all popups"
+              title="Close all popups"
+              data-testid="close-all"
+              onClick={() => setOpenIds(new Set())}
+              className={cn(TOGGLE_BTN, TOGGLE_PLAIN)}
+            >
+              <X className="h-4 w-4" />
+            </button>
+            <div className="my-0.5 h-px bg-white/15" />
+          </>
+        )}
         <button
           type="button"
           aria-label={labelsOn ? "Hide labels" : "Show labels"}
@@ -421,6 +483,21 @@ export function MemoryGalaxy({
           <Maximize className="h-4 w-4" />
         </button>
       </div>
+
+      {openBubbles.map((b) => (
+        <MemoryGalaxyBubble
+          key={b.p.id}
+          point={b.p}
+          x={b.x}
+          y={b.y}
+          placement={b.placement}
+          onClose={() => toggleOpen(b.p.id)}
+          onDelete={(id) => {
+            onDelete(id);
+            toggleOpen(id);
+          }}
+        />
+      ))}
 
       {hovered && (
         <div className="pointer-events-none absolute left-3 top-3 max-w-xs rounded-md bg-background/95 p-2 text-xs shadow">
