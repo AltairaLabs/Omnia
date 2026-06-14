@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useTheme } from "next-themes";
 import { Plus, Minus, Maximize, Tag, Gauge, Clock } from "lucide-react";
 import { usePersistedViewMode } from "@/hooks/use-persisted-view-mode";
 import type { GalaxyPoint } from "@/lib/memory-galaxy/types";
@@ -184,7 +185,11 @@ function drawLabels(
   candidates: Array<{ p: GalaxyPoint; s: ScreenPos }>,
   colorBy: Dimension,
   width: number,
+  isDark: boolean,
 ): void {
+  const labelBg = isDark ? "rgba(11,16,32,0.72)" : "rgba(248,250,252,0.82)";
+  const labelText = isDark ? "rgba(226,232,240,0.95)" : "rgba(15,23,42,0.95)";
+  const subText = isDark ? "rgba(148,163,184,0.9)" : "rgba(71,85,105,0.9)";
   const placed: Box[] = [];
   ctx.textAlign = "left";
   ctx.textBaseline = "middle";
@@ -195,12 +200,12 @@ function drawLabels(
     const box: Box = { x: s.x + 10, y: s.y - 8, w: ctx.measureText(heading).width + 8, h: 26 };
     if (box.x + box.w > width || placed.some((q) => overlaps(box, q))) continue;
     placed.push(box);
-    ctx.fillStyle = "rgba(11,16,32,0.72)";
+    ctx.fillStyle = labelBg;
     ctx.fillRect(box.x - 3, box.y, box.w, box.h);
-    ctx.fillStyle = "rgba(226,232,240,0.95)";
+    ctx.fillStyle = labelText;
     ctx.fillText(heading, box.x, s.y - 1);
     ctx.font = "9px sans-serif";
-    ctx.fillStyle = "rgba(148,163,184,0.9)";
+    ctx.fillStyle = subText;
     ctx.fillText(p.type ?? "—", box.x, s.y + 11);
   }
 }
@@ -230,6 +235,8 @@ export function MemoryGalaxy({
   const labelsOn = labelsPref === "on";
   const showConfidence = confPref === "on";
   const ageFade = agePref === "on";
+  const { resolvedTheme } = useTheme();
+  const isDark = resolvedTheme !== "light";
   const drag = useRef({ active: false, moved: false, startX: 0, startY: 0, panX: 0, panY: 0 });
 
   const draw = useCallback(() => {
@@ -243,9 +250,9 @@ export function MemoryGalaxy({
     const scene: Scene = { fit, view, w: width, h: height };
     drawPoints(ctx, points, colorBy, hidden, filters, scene, { showConfidence, ageFade, now: Date.now() });
     if (labelsOn && view.zoom >= LABEL_MIN_ZOOM) {
-      drawLabels(ctx, labelCandidates(points, colorBy, hidden, filters, scene), colorBy, width);
+      drawLabels(ctx, labelCandidates(points, colorBy, hidden, filters, scene), colorBy, width, isDark);
     }
-  }, [points, colorBy, hidden, filters, view, labelsOn, showConfidence, ageFade]);
+  }, [points, colorBy, hidden, filters, view, labelsOn, showConfidence, ageFade, isDark]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -355,7 +362,7 @@ export function MemoryGalaxy({
   };
 
   return (
-    <div className="relative h-[70vh] min-h-[360px] w-full overflow-hidden rounded-lg border bg-[#0b1020]">
+    <div className="relative h-[70vh] min-h-[360px] w-full overflow-hidden rounded-lg border bg-slate-50 dark:bg-[#0b1020]">
       <canvas
         ref={canvasRef}
         data-testid="memory-galaxy-canvas"
