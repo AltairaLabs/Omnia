@@ -96,7 +96,7 @@ func ensureManagerDeployed() error {
 		{"patching images and args", exec.Command("kubectl", "patch", "deployment",
 			"omnia-controller-manager", "-n", namespace, "--type=strategic",
 			"-p", fmt.Sprintf(`{"spec":{"template":{"spec":{"containers":[{"name":"manager","args":["--metrics-bind-address=:8443","--leader-elect","--health-probe-bind-address=:8081","--facade-image=%s","--framework-image=%s","--session-api-image=%s","--memory-api-image=%s","--agent-workspace-reader-clusterrole=omnia-agent-workspace-reader"]}]}}}}`,
-				facadeImageRef, runtimeImageRef, sessionApiImage, sessionApiImage))},
+				facadeImageRef, runtimeImageRef, sessionApiImage, memoryApiImage))},
 		{"patched rollout", exec.Command("kubectl", "rollout", "status",
 			"deployment/omnia-controller-manager", "-n", namespace, "--timeout=120s")},
 	}
