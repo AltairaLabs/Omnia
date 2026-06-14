@@ -415,7 +415,7 @@ func handlePopError(
 	emptyCount, maxEmptyPolls int,
 ) (bool, int, error) {
 	ctx, log, cfg, q, jobID := wlc.ctx, wlc.log, wlc.cfg, wlc.queue, wlc.jobID
-	if !errors.Is(err, queue.ErrQueueEmpty) {
+	if !isRecoverablePopError(err) {
 		return false, emptyCount, fmt.Errorf("failed to pop work item: %w", err)
 	}
 
@@ -433,6 +433,10 @@ func handlePopError(
 
 	time.Sleep(cfg.PollInterval)
 	return false, emptyCount, nil
+}
+
+func isRecoverablePopError(err error) bool {
+	return errors.Is(err, queue.ErrQueueEmpty) || errors.Is(err, queue.ErrItemNotFound)
 }
 
 // checkJobCompletion checks if the job is complete and returns (done, error).

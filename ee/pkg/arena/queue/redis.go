@@ -13,6 +13,7 @@ package queue
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 	"sync"
@@ -216,6 +217,9 @@ func (q *RedisQueue) Pop(ctx context.Context, jobID string) (*WorkItem, error) {
 	if err != nil {
 		// Item data missing, remove from processing and return error
 		q.client.LRem(ctx, processingKey, 1, itemID)
+		if errors.Is(err, ErrItemNotFound) {
+			return nil, ErrItemNotFound
+		}
 		return nil, fmt.Errorf("failed to get item data: %w", err)
 	}
 

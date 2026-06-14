@@ -401,6 +401,27 @@ func TestHandlePopError(t *testing.T) {
 		}
 	})
 
+	t.Run("treats missing item payload as recoverable", func(t *testing.T) {
+		cfg := &Config{PollInterval: 1 * time.Millisecond}
+		q := queue.NewMemoryQueueWithDefaults()
+
+		wlc := &workerLoopContext{
+			ctx: context.Background(), log: testLog(),
+			cfg: cfg, queue: q, jobID: "test-job",
+		}
+		done, newCount, err := handlePopError(wlc, queue.ErrItemNotFound, 2, 10)
+
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		if done {
+			t.Error("should not be done yet")
+		}
+		if newCount != 3 {
+			t.Errorf("expected count 3, got %d", newCount)
+		}
+	})
+
 	t.Run("checks completion at max empty polls", func(t *testing.T) {
 		cfg := &Config{
 			PollInterval: 1 * time.Millisecond,

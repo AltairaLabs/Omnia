@@ -258,3 +258,26 @@ func TestVUPool_EmptyQueue(t *testing.T) {
 	err := pool.Run(context.Background())
 	require.NoError(t, err)
 }
+
+func TestVUPool_HandleVUPopError_ItemNotFound(t *testing.T) {
+	q := queue.NewMemoryQueueWithDefaults()
+	defer func() { require.NoError(t, q.Close()) }()
+
+	pool := NewVUPool(VUPoolConfig{
+		Size:         1,
+		Concurrency:  0,
+		Queue:        q,
+		JobID:        testJobID,
+		Log:          testr.New(t),
+		Metrics:      newTestMetrics(),
+		PollInterval: time.Millisecond,
+		Execute: func(_ context.Context, _ *queue.WorkItem) (*ExecutionResult, error) {
+			return &ExecutionResult{Status: statusPass, DurationMs: 1}, nil
+		},
+	})
+
+	done, newCount, err := pool.handleVUPopError(context.Background(), testr.New(t), queue.ErrItemNotFound, 2, 10)
+	require.NoError(t, err)
+	assert.False(t, done)
+	assert.Equal(t, 3, newCount)
+}
