@@ -102,6 +102,7 @@ type setupOptions struct {
 	TracingEnabled           bool
 	TracingEndpoint          string
 	MgmtPlaneTokenURL        string
+	MgmtPlaneJWKSURL         string
 	PrivacyPolicyMetrics     *metrics.PrivacyPolicyMetrics
 	ReEncryptionStore        func() (encryption.ReEncryptionStore, error)
 }
@@ -185,6 +186,7 @@ func buildReconcilers(opts setupOptions) []namedReconciler {
 					DevConsoleImage:          opts.DevConsoleImage,
 					DevConsoleServiceAccount: opts.DevConsoleServiceAccount,
 					DevConsolePodLabels:      opts.DevConsolePodLabels,
+					MgmtPlaneJWKSURL:         opts.MgmtPlaneJWKSURL,
 				}).SetupWithManager(mgr)
 			},
 		},

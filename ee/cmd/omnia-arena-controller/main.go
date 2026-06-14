@@ -81,6 +81,7 @@ func main() {
 	var workspaceStorageClass string
 	var workspaceContentScoped bool
 	var mgmtPlaneTokenURL string
+	var mgmtPlaneJWKSURL string
 	var nfsServer string
 	var nfsPath string
 	var sessionPostgresConn string
@@ -124,6 +125,10 @@ func main() {
 			"mgmt-plane JWTs to authenticate fleet-mode WS dials to agent "+
 			"facades. Typically http://omnia-dashboard.<ns>.svc.cluster.local:"+
 			"3000/api/auth/service-token. Empty leaves fleet dials unauthenticated.")
+	flag.StringVar(&mgmtPlaneJWKSURL, "mgmt-plane-jwks-url", "",
+		"URL of the dashboard's JWKS endpoint, injected onto arena-dev-console "+
+			"pods as OMNIA_MGMT_PLANE_JWKS_URL so they can validate dashboard-minted "+
+			"mgmt-plane JWTs on WS and HTTP routes. Empty keeps dev-console auth chain empty.")
 	flag.StringVar(&nfsServer, "nfs-server", "",
 		"NFS server address for workspace content.")
 	flag.StringVar(&nfsPath, "nfs-path", "",
@@ -298,6 +303,7 @@ func main() {
 			TracingEnabled:           tracingEnabled,
 			TracingEndpoint:          tracingEndpoint,
 			MgmtPlaneTokenURL:        mgmtPlaneTokenURL,
+			MgmtPlaneJWKSURL:         mgmtPlaneJWKSURL,
 			PrivacyPolicyMetrics:     newPrivacyPolicyMetrics(),
 			ReEncryptionStore:        buildReEncryptionStoreFactory(sessionPostgresConn, setupLog),
 		},

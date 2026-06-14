@@ -29,7 +29,7 @@ func TestBuildFacadeMux_RoutesRegistered(t *testing.T) {
 	wsStub := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusSwitchingProtocols)
 	})
-	mux := buildFacadeMux(wsStub, nil, logr.Discard())
+	mux := buildFacadeMux(wsStub, nil, logr.Discard(), nil, true)
 
 	tests := []struct {
 		name   string
