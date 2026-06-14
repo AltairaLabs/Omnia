@@ -76,7 +76,7 @@ func buildTFIDF(tokens [][]string, idx, df map[string]int, vocabSize int) *mat.D
 
 func tokenize(s string) []string {
 	fields := strings.FieldsFunc(strings.ToLower(s), func(r rune) bool {
-		return !(r >= 'a' && r <= 'z') && !(r >= '0' && r <= '9')
+		return (r < 'a' || r > 'z') && (r < '0' || r > '9')
 	})
 	out := fields[:0]
 	for _, f := range fields {
