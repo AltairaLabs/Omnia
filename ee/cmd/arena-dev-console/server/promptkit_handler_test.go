@@ -745,7 +745,7 @@ func TestHandleReloadInvalidJSON(t *testing.T) {
 
 	writer := &MockResponseWriter{}
 	msg := &facade.ClientMessage{
-		Content: "not valid json",
+		Content: "{not valid json",
 		Metadata: map[string]string{
 			"reload": "true",
 		},
@@ -956,7 +956,7 @@ func TestReloadFromPathInvalid(t *testing.T) {
 
 	err := handler.ReloadFromPath("/non/existent/path/config.yaml")
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "failed to load config")
+	assert.Contains(t, err.Error(), "outside trusted root")
 }
 
 // TestGetRegistryAndConfigNoK8sLoader tests getRegistryAndConfig without K8s loader.

@@ -128,6 +128,9 @@ spec:
             # authenticate WS dials to agent facades. The dashboard is the sole
             # signing-key holder; only set when the dashboard ships.
             - --mgmt-plane-token-url={{ .Values.dashboard.serviceTokenUrl | default (printf "http://%s.%s.svc.cluster.local:%d/api/auth/service-token" (include "omnia.dashboard.fullname" .) .Release.Namespace (int .Values.dashboard.service.port)) }}
+            # Injected onto dev-console pods as OMNIA_MGMT_PLANE_JWKS_URL so
+            # they validate dashboard-minted JWTs on WS/API admin routes.
+            - --mgmt-plane-jwks-url={{ .Values.dashboard.jwksUrl | default (printf "http://%s.%s.svc.cluster.local:%d/api/auth/jwks" (include "omnia.dashboard.fullname" .) .Release.Namespace (int .Values.dashboard.service.port)) }}
             {{- end }}
             {{- if .Values.devMode }}
             - --dev-mode

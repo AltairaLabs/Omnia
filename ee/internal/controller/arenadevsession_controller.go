@@ -33,6 +33,7 @@ import (
 	corev1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 	omniav1alpha1 "github.com/altairalabs/omnia/ee/api/v1alpha1"
 	"github.com/altairalabs/omnia/ee/pkg/arena/providers"
+	corecontroller "github.com/altairalabs/omnia/internal/controller"
 	"github.com/altairalabs/omnia/internal/podoverrides"
 )
 
@@ -71,6 +72,11 @@ type ArenaDevSessionReconciler struct {
 	// template. Used to opt the pod into a cloud identity webhook, e.g.
 	// {"azure.workload.identity/use": "true"}.
 	DevConsolePodLabels map[string]string
+
+	// MgmtPlaneJWKSURL is injected onto dev-console pods as
+	// OMNIA_MGMT_PLANE_JWKS_URL so they can validate dashboard-minted
+	// mgmt-plane JWTs.
+	MgmtPlaneJWKSURL string
 }
 
 // podServiceAccountName returns the ServiceAccount the dev-console pod runs as:
@@ -577,6 +583,12 @@ func (r *ArenaDevSessionReconciler) reconcileDeployment(ctx context.Context, ses
 	}
 
 	envVars = append(envVars, providerEnvVars...)
+	if r.MgmtPlaneJWKSURL != "" {
+		envVars = append(envVars, corev1.EnvVar{
+			Name:  corecontroller.EnvMgmtPlaneJWKSURL,
+			Value: r.MgmtPlaneJWKSURL,
+		})
+	}
 
 	replicas := int32(1)
 	deployment := &appsv1.Deployment{

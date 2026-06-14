@@ -39,6 +39,7 @@ type PromptKitHandler struct {
 	config           *config.Config
 	providerRegistry *providers.Registry
 	log              logr.Logger
+	reloadBasePath   string
 
 	// Session state for conversations
 	sessions map[string]*SessionState
@@ -59,10 +60,11 @@ type SessionState struct {
 // NewPromptKitHandler creates a new handler with the given configuration.
 func NewPromptKitHandler(cfg *config.Config, log logr.Logger) (*PromptKitHandler, error) {
 	h := &PromptKitHandler{
-		config:       cfg,
-		log:          log.WithName("promptkit-handler"),
-		sessions:     make(map[string]*SessionState),
-		nsRegistries: make(map[string]*providers.Registry),
+		config:         cfg,
+		log:            log.WithName("promptkit-handler"),
+		sessions:       make(map[string]*SessionState),
+		nsRegistries:   make(map[string]*providers.Registry),
+		reloadBasePath: "/workspace-content",
 	}
 
 	// Try to initialize K8s provider loader (will fail if not in cluster, which is ok)
@@ -82,6 +84,13 @@ func NewPromptKitHandler(cfg *config.Config, log logr.Logger) (*PromptKitHandler
 	}
 
 	return h, nil
+}
+
+// SetReloadBasePath updates the trusted root used by ReloadFromPath.
+func (h *PromptKitHandler) SetReloadBasePath(basePath string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.reloadBasePath = basePath
 }
 
 // Name returns the handler name for metrics labeling.
@@ -374,23 +383,39 @@ func (h *PromptKitHandler) handleReload(
 	msg *facade.ClientMessage,
 	writer facade.ResponseWriter,
 ) error {
-	// Parse new configuration from message content
-	var newConfig config.Config
-	if err := json.Unmarshal([]byte(msg.Content), &newConfig); err != nil {
-		return writer.WriteError("INVALID_CONFIG", fmt.Sprintf("failed to parse config: %v", err))
+	content := strings.TrimSpace(msg.Content)
+	if content == "" {
+		return writer.WriteError("INVALID_CONFIG", "reload content cannot be empty")
 	}
 
-	h.mu.Lock()
-	h.config = &newConfig
-	h.mu.Unlock()
+	// Dashboard/dev-console UIs send a filesystem path in message content.
+	// Keep JSON reload support for backward compatibility.
+	if strings.HasPrefix(content, "{") {
+		var newConfig config.Config
+		if err := json.Unmarshal([]byte(content), &newConfig); err != nil {
+			return writer.WriteError("INVALID_CONFIG", fmt.Sprintf("failed to parse config: %v", err))
+		}
 
-	// Rebuild components
-	if err := h.buildComponents(); err != nil {
-		return writer.WriteError("RELOAD_ERROR", fmt.Sprintf("failed to rebuild components: %v", err))
+		h.mu.Lock()
+		h.config = &newConfig
+		h.mu.Unlock()
+
+		if err := h.buildComponents(); err != nil {
+			return writer.WriteError("RELOAD_ERROR", fmt.Sprintf("failed to rebuild components: %v", err))
+		}
+
+		h.log.Info("configuration reloaded successfully")
+		return writer.WriteDone("Configuration reloaded successfully")
 	}
 
-	h.log.Info("configuration reloaded successfully")
+	if err := h.ReloadFromPath(content); err != nil {
+		return writer.WriteError("RELOAD_ERROR", fmt.Sprintf("failed to reload from path: %v", err))
+	}
+
+	h.log.Info("configuration reloaded successfully", "path", content)
 	return writer.WriteDone("Configuration reloaded successfully")
+
+	// Parse new configuration from message content
 }
 
 // Reload updates the configuration and rebuilds components.
@@ -405,11 +430,60 @@ func (h *PromptKitHandler) Reload(cfg *config.Config) error {
 
 // ReloadFromPath loads configuration from a file path and reloads.
 func (h *PromptKitHandler) ReloadFromPath(configPath string) error {
-	cfg, err := config.LoadConfig(configPath)
+	safePath, err := h.resolveReloadPath(configPath)
+	if err != nil {
+		return err
+	}
+	cfg, err := config.LoadConfig(safePath)
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
 	return h.Reload(cfg)
+}
+
+func (h *PromptKitHandler) resolveReloadPath(configPath string) (string, error) {
+	trimmed := strings.TrimSpace(configPath)
+	if trimmed == "" {
+		return "", fmt.Errorf("config path cannot be empty")
+	}
+
+	h.mu.RLock()
+	basePath := h.reloadBasePath
+	h.mu.RUnlock()
+	if strings.TrimSpace(basePath) == "" {
+		basePath = "/workspace-content"
+	}
+
+	cleanBase := filepath.Clean(basePath)
+	cleanInput := filepath.Clean(trimmed)
+
+	var resolved string
+	if filepath.IsAbs(cleanInput) {
+		resolved = cleanInput
+	} else {
+		resolved = filepath.Join(cleanBase, cleanInput)
+	}
+
+	if !pathWithinBase(cleanBase, resolved) {
+		return "", fmt.Errorf("config path %q is outside trusted root %q", configPath, cleanBase)
+	}
+
+	return resolved, nil
+}
+
+func pathWithinBase(basePath, targetPath string) bool {
+	rel, err := filepath.Rel(basePath, targetPath)
+	if err != nil {
+		return false
+	}
+	if rel == "." {
+		return true
+	}
+	sep := string(filepath.Separator)
+	if rel == ".." || strings.HasPrefix(rel, ".."+sep) {
+		return false
+	}
+	return true
 }
 
 // getRegistryAndConfig returns the provider registry and config.

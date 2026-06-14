@@ -29,12 +29,14 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
 	"github.com/AltairaLabs/PromptKit/pkg/config"
 	"github.com/altairalabs/omnia/ee/cmd/arena-dev-console/server"
 	"github.com/altairalabs/omnia/internal/facade"
+	"github.com/altairalabs/omnia/internal/facade/auth"
 	"github.com/altairalabs/omnia/internal/session/httpclient"
 	"github.com/altairalabs/omnia/pkg/k8s"
 	"github.com/altairalabs/omnia/pkg/servicediscovery"
@@ -48,6 +50,9 @@ const (
 	readTimeout     = 10 * time.Second
 	writeTimeout    = 10 * time.Second
 	idleTimeout     = 120 * time.Second
+
+	envMgmtPlaneJWKSURL           = "OMNIA_MGMT_PLANE_JWKS_URL"
+	envFacadeAllowUnauthenticated = "OMNIA_FACADE_ALLOW_UNAUTHENTICATED"
 )
 
 var (
@@ -140,13 +145,31 @@ func main() {
 	if cleanup != nil {
 		defer cleanup()
 	}
+	handler.SetReloadBasePath(*workspacePath)
+
+	mgmtPlaneValidator, err := loadMgmtPlaneValidator(log)
+	if err != nil {
+		log.Error(err, "failed to initialize mgmt-plane validator")
+		os.Exit(1)
+	}
+	authChain := auth.Chain{}
+	if mgmtPlaneValidator != nil {
+		authChain = append(authChain, mgmtPlaneValidator)
+	}
+	allowUnauthenticated := allowUnauthenticatedFallback(log)
 
 	// Create WebSocket server using the facade pattern
 	wsConfig := facade.DefaultServerConfig()
 	wsConfig.SessionTTL = *sessionTTL
-	wsServer := facade.NewServer(wsConfig, store, handler, log)
+	serverOpts := []facade.ServerOption{
+		facade.WithAllowUnauthenticated(allowUnauthenticated),
+	}
+	if len(authChain) > 0 {
+		serverOpts = append(serverOpts, facade.WithAuthChain(authChain))
+	}
+	wsServer := facade.NewServer(wsConfig, store, handler, log, serverOpts...)
 
-	mux := buildFacadeMux(wsServer, handler, log)
+	mux := buildFacadeMux(wsServer, handler, log, authChain, allowUnauthenticated)
 
 	// Create facade HTTP server
 	facadeServer := &http.Server{
@@ -247,12 +270,67 @@ func createHandler(log logr.Logger, configFile string) (*server.PromptKitHandler
 //
 // Extracted so a wiring test can assert all three routes are registered
 // without spinning up a real listener or PromptKit handler.
-func buildFacadeMux(wsServer http.Handler, handler *server.PromptKitHandler, log logr.Logger) *http.ServeMux {
+func buildFacadeMux(
+	wsServer http.Handler,
+	handler *server.PromptKitHandler,
+	log logr.Logger,
+	authChain auth.Chain,
+	allowUnauthenticated bool,
+) *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.Handle("/ws", wsServer)
-	mux.HandleFunc("/api/providers", handleListProviders(handler))
-	mux.HandleFunc("/api/reload", handleReload(handler, log))
+
+	providersHandler := auth.Middleware(
+		authChain,
+		http.HandlerFunc(handleListProviders(handler)),
+		auth.WithMiddlewareLogger(log),
+		auth.WithMiddlewareAllowUnauthenticated(allowUnauthenticated),
+	)
+	reloadHandler := auth.Middleware(
+		authChain,
+		http.HandlerFunc(handleReload(handler, log)),
+		auth.WithMiddlewareLogger(log),
+		auth.WithMiddlewareAllowUnauthenticated(allowUnauthenticated),
+	)
+	mux.Handle("/api/providers", providersHandler)
+	mux.Handle("/api/reload", reloadHandler)
 	return mux
+}
+
+func loadMgmtPlaneValidator(log logr.Logger) (auth.Validator, error) {
+	url := os.Getenv(envMgmtPlaneJWKSURL)
+	if url == "" {
+		log.V(1).Info("mgmt-plane validator skipped", "reason", "env var unset", "envVar", envMgmtPlaneJWKSURL)
+		return nil, nil
+	}
+	v, err := auth.NewMgmtPlaneValidator(url)
+	if err != nil {
+		return nil, err
+	}
+	log.Info("mgmt-plane validator enabled", "jwksURL", url)
+	return v, nil
+}
+
+func allowUnauthenticatedFallback(log logr.Logger) bool {
+	raw := os.Getenv(envFacadeAllowUnauthenticated)
+	if raw == "" {
+		return false
+	}
+	allow, err := strconv.ParseBool(raw)
+	if err != nil {
+		log.Error(err, "strict auth fallback",
+			"reason", "invalid env value",
+			"var", envFacadeAllowUnauthenticated,
+			"value", raw)
+		return false
+	}
+	if allow {
+		log.Info("strict auth disabled",
+			"var", envFacadeAllowUnauthenticated,
+			"reason", "dev/test escape hatch",
+			"impact", "unauthenticated requests admitted when auth chain is empty")
+	}
+	return allow
 }
 
 // handleListProviders returns the list of available providers.
