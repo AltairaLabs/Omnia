@@ -428,6 +428,25 @@ func makeArenaJobUnstructured(name, namespace string, spec map[string]interface{
 	return u
 }
 
+type countingClient struct {
+	client.Client
+	arenaJobGets int
+	targetName   string
+}
+
+func (c *countingClient) Get(
+	ctx context.Context,
+	key client.ObjectKey,
+	obj client.Object,
+	opts ...client.GetOption,
+) error {
+	gvk := obj.GetObjectKind().GroupVersionKind()
+	if key.Name == c.targetName && key.Namespace == testNamespace && gvk.Kind == "ArenaJob" {
+		c.arenaJobGets++
+	}
+	return c.Client.Get(ctx, key, obj, opts...)
+}
+
 // ---------------------------------------------------------------------------
 // getArenaJob
 // ---------------------------------------------------------------------------
@@ -1527,6 +1546,61 @@ func TestResolveToolsFromCRD(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotNil(t, cfg.ToolOverrides)
 		assert.Contains(t, cfg.ToolOverrides, "my_tool")
+	})
+}
+
+func TestResolveArenaJobToolCache(t *testing.T) {
+	ctx := context.Background()
+	log := testLog()
+
+	t.Run("resolveToolsFromCRD reuses the ArenaJob fetched by resolveProvidersFromCRD", func(t *testing.T) {
+		provider := &v1alpha1.Provider{}
+		provider.Name = "shared-provider"
+		provider.Namespace = testNamespace
+		provider.Spec = v1alpha1.ProviderSpec{Type: "openai", Model: "gpt-4o"}
+
+		tr := &v1alpha1.ToolRegistry{}
+		tr.Name = "shared-tools"
+		tr.Namespace = testNamespace
+		tr.Status.DiscoveredTools = []v1alpha1.DiscoveredTool{{
+			Name:        "lookup",
+			HandlerName: "lookup-handler",
+			Endpoint:    "https://tools.example.com/lookup",
+			Status:      v1alpha1.ToolStatusAvailable,
+		}}
+
+		spec := map[string]interface{}{
+			"providers": map[string]interface{}{
+				"default": []interface{}{
+					map[string]interface{}{
+						"providerRef": map[string]interface{}{"name": "shared-provider"},
+					},
+				},
+			},
+			"toolRegistries": []interface{}{
+				map[string]interface{}{"name": "shared-tools"},
+			},
+		}
+		job := makeArenaJobUnstructured("shared-job", testNamespace, spec)
+
+		baseClient := fake.NewClientBuilder().
+			WithScheme(k8s.Scheme()).
+			WithObjects(provider, tr, job).
+			WithStatusSubresource(tr).
+			Build()
+
+		c := &countingClient{Client: baseClient, targetName: "shared-job"}
+		cfg := &Config{JobName: "shared-job", JobNamespace: testNamespace}
+		arenaCfg := &config.Config{}
+
+		_, _, err := resolveProvidersFromCRD(ctx, log, c, cfg, arenaCfg)
+		require.NoError(t, err)
+
+		err = resolveToolsFromCRD(ctx, log, c, cfg)
+		require.NoError(t, err)
+		assert.Equal(t, 1, c.arenaJobGets)
+		require.Contains(t, arenaCfg.LoadedProviders, "shared-provider")
+		require.Contains(t, cfg.ToolOverrides, "lookup")
 	})
 }
 

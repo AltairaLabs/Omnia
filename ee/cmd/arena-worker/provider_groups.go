@@ -15,6 +15,7 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"sync"
 
 	"github.com/AltairaLabs/PromptKit/pkg/config"
 	pkproviders "github.com/AltairaLabs/PromptKit/runtime/providers"
@@ -31,6 +32,15 @@ import (
 	"github.com/altairalabs/omnia/pkg/k8s"
 	omniaprovider "github.com/altairalabs/omnia/pkg/provider"
 )
+
+const errReadArenaJobFmt = "failed to read ArenaJob %s/%s: %w"
+
+var arenaJobToolCache sync.Map
+
+type arenaJobCacheKey struct {
+	name      string
+	namespace string
+}
 
 // resolvedFleetProvider tracks a fleet provider that needs post-build connection.
 // The provider is created by BuildEngineComponents via the fleet factory; we just
@@ -68,17 +78,30 @@ func resolveProvidersFromCRD(
 	cfg *Config,
 	arenaCfg *config.Config,
 ) ([]*resolvedFleetProvider, map[string]*providerPricing, error) {
-	// Read the ArenaJob CRD to get spec.Providers
 	jobName := cfg.JobName
 	jobNamespace := cfg.JobNamespace
 
 	arenaJob, err := getArenaJob(ctx, c, jobName, jobNamespace)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to read ArenaJob %s/%s: %w", jobNamespace, jobName, err)
+		return nil, nil, fmt.Errorf(errReadArenaJobFmt, jobNamespace, jobName, err)
 	}
+	cacheArenaJobForTools(jobName, jobNamespace, arenaJob)
+
+	return resolveProvidersForArenaJob(ctx, log, c, cfg, arenaCfg, arenaJob)
+}
+
+func resolveProvidersForArenaJob(
+	ctx context.Context,
+	log logr.Logger,
+	c client.Client,
+	cfg *Config,
+	arenaCfg *config.Config,
+	arenaJob *arenaJobSpec,
+) ([]*resolvedFleetProvider, map[string]*providerPricing, error) {
+	jobNamespace := cfg.JobNamespace
 
 	if len(arenaJob.Providers) == 0 {
-		return nil, nil, fmt.Errorf("ArenaJob %s/%s has no providers", jobNamespace, jobName)
+		return nil, nil, fmt.Errorf("ArenaJob %s/%s has no providers", jobNamespace, cfg.JobName)
 	}
 
 	// Clear providers loaded from arena config file references.
@@ -435,11 +458,48 @@ func resolveToolsFromCRD(
 ) error {
 	jobName := cfg.JobName
 	jobNamespace := cfg.JobNamespace
+	if cachedArenaJob, ok := takeCachedArenaJobForTools(jobName, jobNamespace); ok {
+		return resolveToolsForArenaJob(ctx, log, c, cfg, cachedArenaJob)
+	}
 
 	arenaJob, err := getArenaJob(ctx, c, jobName, jobNamespace)
 	if err != nil {
-		return fmt.Errorf("failed to read ArenaJob %s/%s: %w", jobNamespace, jobName, err)
+		return fmt.Errorf(errReadArenaJobFmt, jobNamespace, jobName, err)
 	}
+
+	return resolveToolsForArenaJob(ctx, log, c, cfg, arenaJob)
+}
+
+func cacheArenaJobForTools(jobName, jobNamespace string, arenaJob *arenaJobSpec) {
+	key := arenaJobCacheKey{name: jobName, namespace: jobNamespace}
+	if len(arenaJob.ToolRegistries) == 0 {
+		arenaJobToolCache.Delete(key)
+		return
+	}
+	arenaJobToolCache.Store(key, arenaJob)
+}
+
+func takeCachedArenaJobForTools(jobName, jobNamespace string) (*arenaJobSpec, bool) {
+	key := arenaJobCacheKey{name: jobName, namespace: jobNamespace}
+	value, ok := arenaJobToolCache.LoadAndDelete(key)
+	if !ok {
+		return nil, false
+	}
+	arenaJob, ok := value.(*arenaJobSpec)
+	if !ok {
+		return nil, false
+	}
+	return arenaJob, true
+}
+
+func resolveToolsForArenaJob(
+	ctx context.Context,
+	log logr.Logger,
+	c client.Client,
+	cfg *Config,
+	arenaJob *arenaJobSpec,
+) error {
+	jobNamespace := cfg.JobNamespace
 
 	if len(arenaJob.ToolRegistries) == 0 {
 		return nil
