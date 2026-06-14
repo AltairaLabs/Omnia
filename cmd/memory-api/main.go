@@ -68,6 +68,7 @@ import (
 	"github.com/altairalabs/omnia/internal/memory/consolidation"
 	"github.com/altairalabs/omnia/internal/memory/ingestion"
 	memorypg "github.com/altairalabs/omnia/internal/memory/postgres"
+	"github.com/altairalabs/omnia/internal/memory/projectionworker"
 	sessionapi "github.com/altairalabs/omnia/internal/session/api"
 	"github.com/altairalabs/omnia/internal/tracing"
 	omniak8s "github.com/altairalabs/omnia/pkg/k8s"
@@ -148,6 +149,9 @@ type flags struct {
 	// --- Consolidation v1 ---
 	consolidationInterval string // env: CONSOLIDATION_INTERVAL, e.g. "6h". Empty disables the worker.
 
+	// --- Memory Galaxy v2 pre-render ---
+	projectionInterval string // env: PROJECTION_INTERVAL, e.g. "30s". Empty disables the worker.
+
 	// --- Ingestion ---
 	ingestStrategy     string // env: INGEST_STRATEGY; chunk (default) | summary | summaryThenChunk
 	ingestSummarizer   string // env: INGEST_SUMMARIZER; extractive (default) | agent
@@ -186,6 +190,7 @@ func parseFlags() *flags {
 	flag.StringVar(&f.workspace, "workspace", "", "Workspace name (K8s CRD resolution mode)")
 	flag.StringVar(&f.serviceGroup, "service-group", "", "Service group name within workspace")
 	flag.StringVar(&f.consolidationInterval, "consolidation-interval", "", "Schedule-evaluation (poll) interval for the consolidation worker, e.g. 1m. Each axis fires per its MemoryPolicy cron schedule; this controls how often schedules are checked. Empty disables the worker.")
+	flag.StringVar(&f.projectionInterval, "projection-interval", "", "Poll interval for the Memory Galaxy pre-render worker, e.g. 30s. Empty disables the worker.")
 	flag.StringVar(&f.ingestStrategy, "ingest-strategy", ingestion.StrategyChunk, "Ingestion strategy: chunk | summary | summaryThenChunk (INGEST_STRATEGY).")
 	flag.StringVar(&f.ingestSummarizer, "ingest-summarizer", ingestion.SummarizerExtractive, "Summarizer backend for summary strategies: extractive | agent (INGEST_SUMMARIZER).")
 	flag.IntVar(&f.ingestChunkSize, "ingest-chunk-size", 200, "Word-window size for RAG chunking (INGEST_CHUNK_SIZE).")
@@ -243,6 +248,7 @@ func (f *flags) applyEnvFallbacks() {
 		}
 	}
 	envFallback(&f.consolidationInterval, "", "CONSOLIDATION_INTERVAL")
+	envFallback(&f.projectionInterval, "", "PROJECTION_INTERVAL")
 	envFallback(&f.ingestStrategy, ingestion.StrategyChunk, "INGEST_STRATEGY")
 	envFallback(&f.ingestSummarizer, ingestion.SummarizerExtractive, "INGEST_SUMMARIZER")
 	envFallback(&f.ingestQueueDir, "", "INGEST_QUEUE_DIR")
@@ -635,6 +641,15 @@ func run() error {
 			"interval", f.consolidationInterval,
 			"audit", auditLogger != nil,
 		)
+	}
+
+	// --- Projection pre-render worker (Memory Galaxy v2) ---
+	// Pre-renders the workspace-wide galaxy layout into memory_projections so
+	// the projection endpoint serves it instantly. Disabled by default — set
+	// --projection-interval to enable.
+	if pw := buildProjectionWorker(f, pgStore, prometheus.DefaultRegisterer, log); pw != nil {
+		go pw.Run(ctx)
+		log.Info("projection worker started", "interval", f.projectionInterval)
 	}
 
 	// --- Servers ---
@@ -1105,6 +1120,44 @@ func buildConsolidationWorker(_ context.Context, f *flags, pgStore *memory.Postg
 		return nil
 	}
 	return newConsolidationWorker(interval, c, pgStore, auditLogger, log)
+}
+
+// buildProjectionWorker constructs the Memory Galaxy pre-render worker when the
+// operator has set PROJECTION_INTERVAL. Returns nil (disabled) when the interval
+// is unset/unparseable or in-cluster k8s config is unavailable (the worker lists
+// MemoryPolicy + Workspace CRs cluster-wide, reusing the consolidation client).
+// Caller invokes go pw.Run(ctx).
+func buildProjectionWorker(f *flags, pgStore *memory.PostgresMemoryStore, reg prometheus.Registerer, log logr.Logger) *projectionworker.Worker {
+	interval, err := time.ParseDuration(f.projectionInterval)
+	if f.projectionInterval == "" || err != nil {
+		if f.projectionInterval != "" {
+			log.Error(err, "invalid --projection-interval; worker disabled", "value", f.projectionInterval)
+		}
+		return nil
+	}
+	c, ok := newConsolidationK8sClient(log) // reuse: in-cluster client + scheme
+	if !ok {
+		return nil
+	}
+	return newProjectionWorker(interval, c, pgStore, reg, log)
+}
+
+// newProjectionWorker composes the worker from already-acquired deps. Pure
+// function — wiring tests pass a fake client.Client + a fresh registry and
+// assert every field is populated without in-cluster kubeconfig or Postgres.
+func newProjectionWorker(interval time.Duration, c client.Client, pgStore *memory.PostgresMemoryStore, reg prometheus.Registerer, log logr.Logger) *projectionworker.Worker {
+	pool := pgStore.Pool()
+	metrics := projectionworker.NewMetrics()
+	metrics.MustRegister(reg)
+	return projectionworker.NewWorker(projectionworker.WorkerOptions{
+		Store:      pgStore,
+		Policies:   consolidation.NewK8sPolicyLister(c),
+		Workspaces: consolidation.NewK8sWorkspaceLister(c),
+		Lock:       memorypg.NewAdvisoryLockStore(pool),
+		Interval:   interval,
+		Metrics:    metrics,
+		Log:        log.WithName("projection"),
+	})
 }
 
 // parseConsolidationInterval validates the CONSOLIDATION_INTERVAL flag.

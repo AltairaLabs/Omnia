@@ -15,10 +15,18 @@ import (
 	"github.com/altairalabs/omnia/internal/memory/projection"
 )
 
+// onDemandProjectionThreshold is the entity-count gate above which the endpoint
+// does NOT compute synchronously: large cold scopes return status:"pending" and
+// the pre-render worker renders them in the background.
+const onDemandProjectionThreshold = 500
+
 // ProjectionResult is the service-level result: the pure projection.Result plus
-// embedding metadata and the compute timestamp.
+// embedding metadata, render status, and the compute timestamp.
 type ProjectionResult struct {
 	projection.Result
+	// Status is "ready" (layout served) or "pending" (large cold scope not
+	// pre-rendered yet; the worker is on it — poll until ready).
+	Status string `json:"status"`
 	// ProjectionInput names the representation projected: "embedding" (dense) or
 	// "tfidf" (lexical) — the semantic-vs-lexical hint for the UI.
 	ProjectionInput string    `json:"projectionInput,omitempty"`
@@ -27,23 +35,16 @@ type ProjectionResult struct {
 	ComputedAt      time.Time `json:"computedAt"`
 }
 
-func scopeKey(scope map[string]string) string {
-	return fmt.Sprintf("%s|%s|%s",
-		scope[memory.ScopeWorkspaceID], scope[memory.ScopeUserID], scope[memory.ScopeAgentID])
-}
-
-// Project builds (or serves a cached) 2D Memory Galaxy layout for the scope.
+// Project serves the stored 2D Memory Galaxy layout, computes small scopes
+// on-demand, or returns status:"pending" for large cold scopes (the pre-render
+// worker renders those in the background).
 func (s *MemoryService) Project(ctx context.Context, scope map[string]string) (ProjectionResult, error) {
 	ps, ok := s.store.(memory.ProjectionStore)
 	if !ok {
 		return ProjectionResult{}, fmt.Errorf("memory: store does not support projection")
 	}
-	key := scopeKey(scope)
+	key := memory.ProjectionScopeKey(scope)
 	live, err := ps.ProjectionFingerprint(ctx, scope)
-	if err != nil {
-		return ProjectionResult{}, err
-	}
-	inputs, err := ps.LoadProjectionInputs(ctx, scope)
 	if err != nil {
 		return ProjectionResult{}, err
 	}
@@ -51,44 +52,47 @@ func (s *MemoryService) Project(ctx context.Context, scope map[string]string) (P
 	if err != nil {
 		return ProjectionResult{}, err
 	}
-
-	res, computedAt, err := s.computeOrServe(ctx, ps, key, scope, live, inputs, stored)
+	// Fresh stored layout → serve it.
+	if stored != nil && stored.Fingerprint == live {
+		return s.serveStored(ctx, ps, scope, stored)
+	}
+	// Cold/stale: small → compute now; large → pending (worker will render).
+	if projectionCount(live) > onDemandProjectionThreshold {
+		return ProjectionResult{Status: "pending", Result: projection.Result{
+			Total: projectionCount(live), Points: []projection.Point{}}}, nil
+	}
+	res, computedAt, err := memory.Render(ctx, ps, scope)
 	if err != nil {
 		return ProjectionResult{}, err
 	}
-	out := ProjectionResult{Result: res, ComputedAt: computedAt}
+	out := ProjectionResult{Result: res, Status: "ready", ComputedAt: computedAt}
 	s.enrichEmbeddingMeta(&out)
 	return out, nil
 }
 
-// computeOrServe returns the stored layout when the fingerprint still matches,
-// otherwise recomputes (Procrustes-aligned to the stored layout) and persists.
-func (s *MemoryService) computeOrServe(
-	ctx context.Context, ps memory.ProjectionStore, key string, scope map[string]string,
-	live string, inputs []memory.ProjectionInput, stored *memory.StoredProjection,
-) (projection.Result, time.Time, error) {
-	pInputs := toProjectionInputs(inputs)
-	var prev map[string][2]float64
-	if stored != nil {
-		prev = stored.Layout
-	}
-	if stored != nil && stored.Fingerprint == live {
-		res := projection.FromStored(pInputs, stored.Layout, projection.Options{})
-		res.Model, res.Basis = stored.Model, stored.Basis
-		return res, stored.ComputedAt, nil
-	}
-	res, err := projection.Project(pInputs, prev, projection.Options{})
+// serveStored returns the cached layout refreshed with current metadata.
+func (s *MemoryService) serveStored(ctx context.Context, ps memory.ProjectionStore,
+	scope map[string]string, stored *memory.StoredProjection) (ProjectionResult, error) {
+	inputs, err := ps.LoadProjectionInputs(ctx, scope)
 	if err != nil {
-		return projection.Result{}, time.Time{}, err
+		return ProjectionResult{}, err
 	}
-	points := make([]memory.ProjectionPoint, len(res.Points))
-	for i, p := range res.Points {
-		points[i] = memory.ProjectionPoint{EntityID: p.ID, X: p.X, Y: p.Y}
+	res := projection.FromStored(toProjectionInputs(inputs), stored.Layout, projection.Options{})
+	res.Model, res.Basis = stored.Model, stored.Basis
+	out := ProjectionResult{Result: res, Status: "ready", ComputedAt: stored.ComputedAt}
+	s.enrichEmbeddingMeta(&out)
+	return out, nil
+}
+
+// projectionCount parses the entity count from a "<count>:<nanos>" fingerprint;
+// "" (no memories) → 0.
+func projectionCount(fingerprint string) int {
+	if fingerprint == "" {
+		return 0
 	}
-	if err := ps.SaveProjection(ctx, key, scope[memory.ScopeWorkspaceID], live, res.Model, res.Basis, points); err != nil {
-		return projection.Result{}, time.Time{}, err
-	}
-	return res, time.Now().UTC(), nil
+	var count int
+	_, _ = fmt.Sscanf(fingerprint, "%d:", &count)
+	return count
 }
 
 // enrichEmbeddingMeta sets the representation hint + embedding model/dim per basis.

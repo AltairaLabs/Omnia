@@ -487,6 +487,42 @@ func TestBuildMemoryDeployment_ConsolidationIntervalAbsentByDefault(t *testing.T
 	}
 }
 
+// TestBuildMemoryDeployment_ProjectionIntervalThreaded proves the
+// operator-level projection interval flows through to every per-workspace
+// memory-api pod as --projection-interval. Same wiring boundary as the
+// consolidation interval: memory-api leaves the Memory Galaxy pre-render
+// worker OFF when the flag is absent, so a configured interval the operator
+// drops silently disables the worker (the Tiltfile sets
+// workspaceServices.memoryApi.projection.interval=30s, which must reach the pod).
+func TestBuildMemoryDeployment_ProjectionIntervalThreaded(t *testing.T) {
+	sb := newTestServiceBuilder()
+	sb.MemoryProjectionInterval = "30s"
+	sg := newTestServiceGroup("default")
+
+	dep := sb.BuildMemoryDeployment("acme", "acme-ns", sg)
+	require.Len(t, dep.Spec.Template.Spec.Containers, 1)
+	container := dep.Spec.Template.Spec.Containers[0]
+	assert.Contains(t, container.Args, "--projection-interval=30s")
+}
+
+// TestBuildMemoryDeployment_ProjectionIntervalAbsentByDefault proves the
+// operator does NOT pass --projection-interval when the interval is empty.
+// Memory-api then leaves the pre-render worker disabled (the correct default);
+// an empty flag (--projection-interval=) would fail duration parsing at startup.
+func TestBuildMemoryDeployment_ProjectionIntervalAbsentByDefault(t *testing.T) {
+	sb := newTestServiceBuilder()
+	sg := newTestServiceGroup("default")
+
+	dep := sb.BuildMemoryDeployment("acme", "acme-ns", sg)
+	require.Len(t, dep.Spec.Template.Spec.Containers, 1)
+	container := dep.Spec.Template.Spec.Containers[0]
+	for _, a := range container.Args {
+		if strings.HasPrefix(a, "--projection-interval=") {
+			t.Errorf("expected no --projection-interval flag when MemoryProjectionInterval is empty, got %q", a)
+		}
+	}
+}
+
 // TestBuildMemoryDeployment_RedisURLFromSecretMountsEnv proves the
 // secret-backed URL path: when ServiceBuilder is configured with the
 // $(REDIS_URL) placeholder + a Secret reference, every per-workspace

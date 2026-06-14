@@ -95,6 +95,11 @@ type ServiceBuilder struct {
 	// consolidation worker (the default; operators opt in per env).
 	MemoryConsolidationInterval string
 
+	// MemoryProjectionInterval is forwarded to memory-api as
+	// --projection-interval. Empty disables the Memory Galaxy pre-render
+	// worker (the default; operators opt in per env).
+	MemoryProjectionInterval string
+
 	// SessionRedisURL is the operator-wide Redis target threaded into
 	// every per-workspace session-api Deployment as --redis-url for
 	// the hot-cache layer (warm-tier sessions live in Postgres; the
@@ -319,7 +324,7 @@ func (sb *ServiceBuilder) BuildMemoryDeployment(workspaceName, namespace string,
 	// operator-wide default. Any tier may be empty (memory-api then runs
 	// without Redis, cache + event publisher disabled) — that's valid.
 	redisURL, redisSecret := resolveMemoryRedis(sg, namespace, sb.MemoryRedisURL, sb.MemoryRedisURLSecret)
-	args := buildMemoryAPIArgs(workspaceName, namespace, sg, redisURL, sb.MemoryCacheTTL, sb.MemoryConsolidationInterval)
+	args := buildMemoryAPIArgs(workspaceName, namespace, sg, redisURL, sb.MemoryCacheTTL, sb.MemoryConsolidationInterval, sb.MemoryProjectionInterval)
 	var overrides *omniav1alpha1.PodOverrides
 	if sg.Memory != nil {
 		overrides = sg.Memory.PodOverrides
@@ -397,7 +402,7 @@ func addMemoryRedisURLEnv(dep *appsv1.Deployment, ref SecretKeyRef) {
 // the literal placeholder "$(REDIS_URL)" — Kubernetes env expansion at
 // the memory-api pod fills it from the REDIS_URL Secret env that
 // addMemoryRedisURLEnv mounts.
-func buildMemoryAPIArgs(workspaceName, namespace string, sg omniav1alpha1.WorkspaceServiceGroup, redisURL, cacheTTL, consolidationInterval string) []string {
+func buildMemoryAPIArgs(workspaceName, namespace string, sg omniav1alpha1.WorkspaceServiceGroup, redisURL, cacheTTL, consolidationInterval, projectionInterval string) []string {
 	args := []string{
 		fmt.Sprintf("--workspace=%s", workspaceName),
 		fmt.Sprintf("--service-group=%s", sg.Name),
@@ -419,6 +424,9 @@ func buildMemoryAPIArgs(workspaceName, namespace string, sg omniav1alpha1.Worksp
 	}
 	if consolidationInterval != "" {
 		args = append(args, fmt.Sprintf("--consolidation-interval=%s", consolidationInterval))
+	}
+	if projectionInterval != "" {
+		args = append(args, fmt.Sprintf("--projection-interval=%s", projectionInterval))
 	}
 	return args
 }

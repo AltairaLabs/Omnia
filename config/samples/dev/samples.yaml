@@ -42,6 +42,24 @@ spec:
         database:
           secretRef:
             name: omnia-postgres-memory
+        # Bind this workspace's memory to dev-memory-policy so the
+        # projection pre-render worker renders its galaxy layout.
+        policyRef:
+          name: dev-memory-policy
+---
+# Cluster-scoped MemoryPolicy enabling Memory Galaxy pre-rendering for
+# workspaces that reference it. The projection worker (memory-api,
+# --projection-interval) renders the workspace-wide layout into
+# memory_projections so the dashboard galaxy loads instantly.
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: MemoryPolicy
+metadata:
+  name: dev-memory-policy
+spec:
+  tiers: {}
+  projection:
+    enabled: true
+    schedule: "*/1 * * * *"   # re-render at most once a minute
 ---
 # PostgreSQL connection secrets for per-workspace services.
 # Session-api and memory-api use separate databases on the same server.

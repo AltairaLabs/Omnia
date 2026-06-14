@@ -1066,6 +1066,16 @@ workspaceServices:
       # worker — the default. Operators opt in per environment (e.g. "1m").
       # See docs/local-backlog/2026-05-22-memory-consolidation-design.md.
       interval: ""
+    projection:
+      # -- Poll interval for the Memory Galaxy pre-render worker, forwarded
+      # to memory-api as --projection-interval. The worker pre-renders the
+      # workspace-wide galaxy layout into memory_projections so the
+      # projection endpoint serves it instantly. Renders are gated per
+      # MemoryPolicy spec.projection (enabled / schedule / changeThreshold);
+      # this value only controls how often those gates are checked. Empty
+      # disables the worker — the default. Operators opt in per environment
+      # (e.g. "30s").
+      interval: ""
     cache:
       # -- TTL for cached Retrieve/List results. Empty or "0" disables
       # the cache even when Redis resolves (operators sometimes enable

@@ -467,6 +467,15 @@
                 }
               }
             },
+            "projection": {
+              "type": "object",
+              "properties": {
+                "interval": {
+                  "type": "string",
+                  "description": "Poll interval for the Memory Galaxy pre-render worker (e.g. \"30s\"). Empty disables the worker."
+                }
+              }
+            },
             "cache": {
               "type": "object",
               "properties": {

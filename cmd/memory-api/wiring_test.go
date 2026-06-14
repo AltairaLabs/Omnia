@@ -942,3 +942,48 @@ func TestBuildIngestOptions_QueueEnabledWhenDirSet(t *testing.T) {
 		t.Error("non-empty --ingest-queue-dir should construct a queue")
 	}
 }
+
+// TestBuildProjectionWorker_DisabledFastPaths covers the disabled branches of
+// buildProjectionWorker — empty interval, unparseable interval, and no
+// in-cluster kubeconfig (true in any unit-test environment). Each returns nil
+// before composing the worker; the happy path requires an actual cluster and
+// is exercised by the projection E2E.
+func TestBuildProjectionWorker_DisabledFastPaths(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	t.Run("empty interval disables", func(t *testing.T) {
+		if w := buildProjectionWorker(&flags{}, nil, reg, logr.Discard()); w != nil {
+			t.Errorf("expected nil worker when PROJECTION_INTERVAL unset, got %v", w)
+		}
+	})
+	t.Run("invalid interval disables", func(t *testing.T) {
+		if w := buildProjectionWorker(&flags{projectionInterval: "not-a-duration"}, nil, reg, logr.Discard()); w != nil {
+			t.Errorf("expected nil worker on unparseable interval, got %v", w)
+		}
+	})
+	t.Run("no in-cluster config disables", func(t *testing.T) {
+		// Valid interval, but rest.InClusterConfig() fails in unit tests —
+		// exercises the kubeconfig-error branch.
+		if w := buildProjectionWorker(&flags{projectionInterval: "30s"}, nil, reg, logr.Discard()); w != nil {
+			t.Errorf("expected nil worker when no in-cluster config, got %v", w)
+		}
+	})
+}
+
+// TestNewProjectionWorker_ReturnsWorker covers the composition lifted out of
+// buildProjectionWorker. The fake client + nil-pool store + fresh registry
+// prove every field wires without in-cluster kubeconfig or Postgres.
+func TestNewProjectionWorker_ReturnsWorker(t *testing.T) {
+	scheme := k8sruntime.NewScheme()
+	if err := omniav1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatalf("add omnia scheme: %v", err)
+	}
+	fakeClient, err := client.New(&rest.Config{Host: "127.0.0.1:1"}, client.Options{Scheme: scheme})
+	if err != nil {
+		t.Fatalf("build fake client: %v", err)
+	}
+	w := newProjectionWorker(30*time.Second, fakeClient,
+		memory.NewPostgresMemoryStore(nil), prometheus.NewRegistry(), logr.Discard())
+	if w == nil {
+		t.Fatal("expected non-nil worker from newProjectionWorker")
+	}
+}

@@ -615,6 +615,10 @@ helm_set = [
     # enough that any local seed of stale observations gets processed
     # within a development feedback cycle. Production runs at 6h.
     'workspaceServices.memoryApi.consolidation.interval=30s',
+    # Pre-render the Memory Galaxy galaxy layout locally — 30s tick keeps
+    # the workspace-wide projection warm so the dashboard galaxy loads
+    # instantly during development. Production opts in per environment.
+    'workspaceServices.memoryApi.projection.interval=30s',
     # Dev Postgres for workspace services
     'postgres.dev.enabled=true',
     # Doctor
