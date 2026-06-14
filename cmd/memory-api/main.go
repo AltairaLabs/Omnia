@@ -813,6 +813,11 @@ func buildAPIMux(
 		// (Phases B/C) are EE features; OSS counts would always be 0.
 		consentStatsHandler := privacy.NewConsentStatsHandler(privacy.NewPreferencesStore(pool), log)
 		consentStatsHandler.RegisterRoutes(mux)
+		// Enforcement stats endpoint for the operator dashboard (Task 7b).
+		// EE-only: PII redaction + opt-out blocking are EE enforcement, so
+		// OSS counts would always be 0.
+		enforcementStatsHandler := privacy.NewEnforcementStatsHandler(privacy.NewPreferencesStore(pool), log)
+		enforcementStatsHandler.RegisterRoutes(mux)
 	}
 
 	// AuditMiddleware always applied — populates request context with IP/UA.
