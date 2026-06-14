@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Header } from "@/components/layout";
 import { useArenaSources, useArenaSourceMutations } from "@/hooks/arena";
+import { usePersistedViewMode } from "@/hooks/use-persisted-view-mode";
 import { useWorkspace } from "@/contexts/workspace-context";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -275,7 +276,10 @@ export default function ArenaSourcesPage() {
   const { currentWorkspace } = useWorkspace();
   const canEdit = currentWorkspace?.permissions?.write ?? false;
 
-  const [viewMode, setViewMode] = useState<"table" | "grid">("grid");
+  const [viewMode, setViewMode] = usePersistedViewMode<"table" | "grid">(
+    "omnia-arena-sources-view-mode",
+    "grid",
+  );
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingSource, setEditingSource] = useState<ArenaSource | null>(null);
   const [syncing, setSyncing] = useState<string | null>(null);

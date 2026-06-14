@@ -2,6 +2,7 @@
 
 import { useState, useMemo, useCallback } from "react";
 import { LayoutGrid, List, Plus } from "lucide-react";
+import { usePersistedViewMode } from "@/hooks/use-persisted-view-mode";
 import { Header } from "@/components/layout";
 import { AgentCard, AgentTable, DeployWizard } from "@/components/agents";
 import { NamespaceFilter } from "@/components/filters";
@@ -33,7 +34,10 @@ function renderLoadingSkeleton(viewMode: ViewMode) {
 }
 
 export default function AgentsPage() {
-  const [viewMode, setViewMode] = useState<ViewMode>("cards");
+  const [viewMode, setViewMode] = usePersistedViewMode<ViewMode>(
+    "omnia-agents-view-mode",
+    "cards",
+  );
   const [filterPhase, setFilterPhase] = useState<FilterPhase>("all");
   const [selectedNamespaces, setSelectedNamespaces] = useState<string[]>([]);
   const [wizardOpen, setWizardOpen] = useState(false);
