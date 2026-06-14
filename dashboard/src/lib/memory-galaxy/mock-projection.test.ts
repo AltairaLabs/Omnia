@@ -24,4 +24,7 @@ describe("generateMockProjection", () => {
       expect(p.y).toBeLessThanOrEqual(1);
     }
   });
+  it("reports the projection input representation", () => {
+    expect(generateMockProjection({ seed: 1, count: 10 }).projectionInput).toBe("embedding");
+  });
 });

@@ -14,6 +14,11 @@ export interface GalaxyPoint {
 
 export interface GalaxyResponse {
   model: "tsne" | "pca";
+  // Which representation the coordinates were derived from: dense embeddings
+  // (clusters by meaning) or TF-IDF/BM25 term vectors from content (clusters by
+  // shared words) for FTS-only deployments. Drives the "semantic vs lexical"
+  // hint in the UI. Optional for forward-compat.
+  projectionInput?: "embedding" | "tfidf";
   embeddingModel: string;
   embeddingDim: number;
   total: number;

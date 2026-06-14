@@ -52,7 +52,7 @@ export function generateMockProjection({ seed, count }: { seed: number; count: n
     });
   }
   return {
-    model: "tsne", embeddingModel: "mock", embeddingDim: 0,
+    model: "tsne", projectionInput: "embedding", embeddingModel: "mock", embeddingDim: 0,
     total: count, capped: false, computedAt: "2026-06-14T00:00:00Z", points,
   };
 }
