@@ -201,6 +201,29 @@ function drawPoints(
   ctx.globalAlpha = 1;
 }
 
+// Highlight ring around points that currently have an open bubble, so it's
+// obvious which node a bubble belongs to.
+function drawRings(
+  ctx: CanvasRenderingContext2D,
+  points: GalaxyPoint[],
+  openIds: Set<string>,
+  fit: Transform,
+  view: View,
+  isDark: boolean,
+): void {
+  if (openIds.size === 0) return;
+  const sf = sizeFactor(view.zoom);
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = isDark ? "rgba(255,255,255,0.95)" : "rgba(15,23,42,0.95)";
+  for (const p of points) {
+    if (!openIds.has(p.id)) continue;
+    const s = project(p, fit, view);
+    ctx.beginPath();
+    ctx.arc(s.x, s.y, pointRadius(p, sf) + 4, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+}
+
 function labelCandidates(
   points: GalaxyPoint[],
   colorBy: Dimension,
@@ -306,10 +329,11 @@ export function MemoryGalaxy({
     const fit = fitTransform(points, width, height);
     const scene: Scene = { fit, view, w: width, h: height };
     drawPoints(ctx, points, colorBy, hidden, filters, scene, { showConfidence, ageFade, now: Date.now() });
+    drawRings(ctx, points, openIds, fit, view, isDark);
     if (labelsOn && view.zoom >= LABEL_MIN_ZOOM) {
       drawLabels(ctx, labelCandidates(points, colorBy, hidden, filters, scene), colorBy, width, isDark);
     }
-  }, [points, colorBy, hidden, filters, view, labelsOn, showConfidence, ageFade, isDark]);
+  }, [points, colorBy, hidden, filters, view, labelsOn, showConfidence, ageFade, isDark, openIds]);
 
   useEffect(() => {
     const canvas = canvasRef.current;

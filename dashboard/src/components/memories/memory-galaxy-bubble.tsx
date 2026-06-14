@@ -56,7 +56,7 @@ export function MemoryGalaxyBubble({
           above && "-translate-y-full",
         )}
         style={{
-          marginTop: above ? -12 : 12,
+          marginTop: above ? -10 : 10,
           transformOrigin: `${tailLeft} ${above ? "bottom" : "top"}`,
         }}
       >
@@ -102,11 +102,14 @@ export function MemoryGalaxyBubble({
           </button>
         </div>
 
-        {/* Tail: a rotated square half-out of the edge nearest the node. */}
+        {/* Tail: a triangle on the edge nearest the node that bridges the gap
+            and points right at it. */}
         <div
           className={cn(
-            "absolute h-3 w-3 -ml-1.5 rotate-45 border bg-popover",
-            above ? "bottom-[-6px] border-l-0 border-t-0" : "top-[-6px] border-b-0 border-r-0",
+            "absolute h-0 w-0 -translate-x-1/2 border-x-8 border-x-transparent",
+            above
+              ? "top-full border-t-[10px] border-t-popover"
+              : "bottom-full border-b-[10px] border-b-popover",
           )}
           style={{ left: tailLeft }}
         />
