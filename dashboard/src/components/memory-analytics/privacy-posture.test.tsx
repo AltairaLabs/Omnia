@@ -11,6 +11,7 @@ describe("PrivacyPosture", () => {
           optedOutAll: 5,
           grantsByCategory: { "memory:context": 90, "memory:identity": 30 },
         }}
+        redactions={42}
       />,
     );
     expect(screen.getByText(/Privacy posture/i)).toBeInTheDocument();
@@ -25,18 +26,21 @@ describe("PrivacyPosture", () => {
     render(
       <PrivacyPosture
         stats={{ totalUsers: 0, optedOutAll: 0, grantsByCategory: {} }}
+        redactions={0}
       />,
     );
     expect(screen.getByText("0.0%")).toBeInTheDocument();
     expect(screen.getByText(/No consent data yet/i)).toBeInTheDocument();
   });
 
-  it("flags the redaction panel as pending", () => {
+  it("renders the redaction count from enforcement stats", () => {
     render(
       <PrivacyPosture
         stats={{ totalUsers: 1, optedOutAll: 0, grantsByCategory: {} }}
+        redactions={1234}
       />,
     );
-    expect(screen.getByText(/Audit integration pending/i)).toBeInTheDocument();
+    expect(screen.getByText(/PII fields redacted before storage/i)).toBeInTheDocument();
+    expect(screen.getByText("1,234")).toBeInTheDocument();
   });
 });

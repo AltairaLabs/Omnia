@@ -14,6 +14,7 @@ import { CATEGORY_COLORS } from "@/lib/memory-analytics/colors";
 
 interface PrivacyPostureProps {
   stats: ConsentStats;
+  redactions: number;
 }
 
 function optOutPercent(stats: ConsentStats): number {
@@ -31,7 +32,10 @@ function grantRows(stats: ConsentStats) {
     .sort((a, b) => b.value - a.value);
 }
 
-export function PrivacyPosture({ stats }: Readonly<PrivacyPostureProps>) {
+export function PrivacyPosture({
+  stats,
+  redactions,
+}: Readonly<PrivacyPostureProps>) {
   const optOut = optOutPercent(stats);
   const grants = grantRows(stats);
 
@@ -72,9 +76,11 @@ export function PrivacyPosture({ stats }: Readonly<PrivacyPostureProps>) {
         </div>
         <div>
           <p className="text-sm font-medium mb-2">Redaction activity</p>
-          <div className="text-3xl font-bold">0</div>
+          <div className="text-3xl font-bold">
+            {redactions.toLocaleString()}
+          </div>
           <p className="text-xs text-muted-foreground">
-            Audit integration pending
+            PII fields redacted before storage
           </p>
         </div>
       </CardContent>

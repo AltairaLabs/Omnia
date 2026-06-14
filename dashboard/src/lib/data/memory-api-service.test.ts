@@ -415,6 +415,56 @@ describe("MemoryApiService", () => {
     });
   });
 
+  describe("getEnforcementStats", () => {
+    it("calls /privacy/enforcement-stats and returns the body", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            piiBlocked: 7,
+            redactions: 12,
+          }),
+      });
+
+      const stats = await service.getEnforcementStats("default");
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        "/api/workspaces/default/privacy/enforcement-stats",
+      );
+      expect(stats.piiBlocked).toBe(7);
+      expect(stats.redactions).toBe(12);
+    });
+
+    it("defaults missing fields to zero", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({}),
+      });
+
+      const stats = await service.getEnforcementStats("default");
+      expect(stats).toEqual({ piiBlocked: 0, redactions: 0 });
+    });
+
+    it("returns zeroed stats on 401 / 403 / 404", async () => {
+      for (const status of [401, 403, 404]) {
+        mockFetch.mockResolvedValueOnce({ ok: false, status });
+        const stats = await service.getEnforcementStats("default");
+        expect(stats).toEqual({ piiBlocked: 0, redactions: 0 });
+      }
+    });
+
+    it("throws on other server errors", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 500,
+        statusText: "Server Error",
+      });
+      await expect(service.getEnforcementStats("default")).rejects.toThrow(
+        "Failed to fetch enforcement stats",
+      );
+    });
+  });
+
   describe("getAgentMemories", () => {
     it("calls /agent-memories with workspace + agent", async () => {
       mockFetch.mockResolvedValueOnce({

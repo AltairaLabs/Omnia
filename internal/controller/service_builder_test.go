@@ -449,6 +449,44 @@ func TestBuildMemoryDeployment_RedisURLLiteralThreaded(t *testing.T) {
 	}
 }
 
+// TestBuildMemoryDeployment_ConsolidationIntervalThreaded proves the
+// operator-level consolidation interval flows through to every
+// per-workspace memory-api pod as --consolidation-interval. That flag is
+// a wiring boundary: memory-api leaves the LLM-driven consolidation worker
+// OFF when the flag is absent, so a configured interval that the operator
+// drops silently disables the worker (the bug this guards against — the
+// Tiltfile sets workspaceServices.memoryApi.consolidation.interval=30s,
+// which must reach the pod).
+func TestBuildMemoryDeployment_ConsolidationIntervalThreaded(t *testing.T) {
+	sb := newTestServiceBuilder()
+	sb.MemoryConsolidationInterval = "30s"
+	sg := newTestServiceGroup("default")
+
+	dep := sb.BuildMemoryDeployment("acme", "acme-ns", sg)
+	require.Len(t, dep.Spec.Template.Spec.Containers, 1)
+	container := dep.Spec.Template.Spec.Containers[0]
+	assert.Contains(t, container.Args, "--consolidation-interval=30s")
+}
+
+// TestBuildMemoryDeployment_ConsolidationIntervalAbsentByDefault proves
+// the operator does NOT pass --consolidation-interval when the interval is
+// empty. Memory-api then leaves the consolidation worker disabled, which is
+// the correct default. Passing an empty flag (--consolidation-interval=)
+// would make memory-api fail to parse the duration at startup.
+func TestBuildMemoryDeployment_ConsolidationIntervalAbsentByDefault(t *testing.T) {
+	sb := newTestServiceBuilder()
+	sg := newTestServiceGroup("default")
+
+	dep := sb.BuildMemoryDeployment("acme", "acme-ns", sg)
+	require.Len(t, dep.Spec.Template.Spec.Containers, 1)
+	container := dep.Spec.Template.Spec.Containers[0]
+	for _, a := range container.Args {
+		if strings.HasPrefix(a, "--consolidation-interval=") {
+			t.Errorf("expected no --consolidation-interval flag when MemoryConsolidationInterval is empty, got %q", a)
+		}
+	}
+}
+
 // TestBuildMemoryDeployment_RedisURLFromSecretMountsEnv proves the
 // secret-backed URL path: when ServiceBuilder is configured with the
 // $(REDIS_URL) placeholder + a Secret reference, every per-workspace
