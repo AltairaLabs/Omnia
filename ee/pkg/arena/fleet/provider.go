@@ -127,6 +127,9 @@ func (p *Provider) Connect(ctx context.Context) error {
 func (p *Provider) dial(ctx context.Context) (*connEntry, error) {
 	headers := traceHeaders(ctx)
 	if ts, agent, workspace := p.authConfig(); ts != nil {
+		if !strings.HasPrefix(strings.ToLower(p.wsURL), "wss://") {
+			return nil, fmt.Errorf("refusing to attach mgmt-plane token to insecure websocket URL %q; use wss://", p.wsURL)
+		}
 		token, err := ts.Token(agent, workspace)
 		if err != nil {
 			return nil, fmt.Errorf("failed to obtain mgmt-plane token for agent %q: %w", agent, err)
