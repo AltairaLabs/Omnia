@@ -102,7 +102,7 @@ export function getAuthConfig(): AuthConfig {
     },
     session: {
       cookieName: process.env.OMNIA_SESSION_COOKIE_NAME || "omnia_session",
-      secret: process.env.OMNIA_SESSION_SECRET || generateDevSecret(),
+      secret: process.env.OMNIA_SESSION_SECRET || generateDevSecret(mode),
       ttl: Number.parseInt(process.env.OMNIA_SESSION_TTL || "86400", 10), // 24 hours
       storeBackend: (process.env.OMNIA_SESSION_STORE === "redis" ? "redis" : "memory"),
       pkceTtl: Number.parseInt(process.env.OMNIA_SESSION_PKCE_TTL || "300", 10), // 5 min
@@ -155,10 +155,12 @@ function getOAuthClientSecret(): string {
 
 /**
  * Generate a development-only secret.
- * In production, OMNIA_SESSION_SECRET must be set.
+ * In production, OMNIA_SESSION_SECRET must be set — but only modes that
+ * actually use the session cookie need it. Anonymous mode never reads the
+ * session secret, so warning there is pure noise.
  */
-function generateDevSecret(): string {
-  if (process.env.NODE_ENV === "production") {
+function generateDevSecret(mode: AuthMode): string {
+  if (process.env.NODE_ENV === "production" && mode !== "anonymous") {
     console.warn(
       "WARNING: OMNIA_SESSION_SECRET is not set. Sessions will not persist across restarts."
     );
