@@ -11,7 +11,8 @@ export interface GalaxyPoint {
   title?: string;
   preview?: string;
   userRef?: string; // pseudonymous owner, shown in the click popup only
-  observedAt?: string;
+  observedAt?: string; // created-at, ISO
+  expiresAt?: string; // created + TTL, ISO; drives age fade. Omit for no TTL.
 }
 
 export interface GalaxyResponse {

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Plus, Minus, Maximize, Tag } from "lucide-react";
+import { Plus, Minus, Maximize, Tag, Gauge, Clock } from "lucide-react";
 import { usePersistedViewMode } from "@/hooks/use-persisted-view-mode";
 import type { GalaxyPoint } from "@/lib/memory-galaxy/types";
 import {
@@ -112,6 +112,21 @@ function drawPoolBall(ctx: CanvasRenderingContext2D, s: ScreenPos, r: number, co
   ctx.fillText(String(Math.round(confidence * 100)), s.x, s.y + 0.5);
 }
 
+interface DrawOpts {
+  showConfidence: boolean;
+  ageFade: boolean;
+  now: number;
+}
+
+// 0 = fresh, 1 = at/past expiry (created + TTL). 0 when there is no TTL.
+function lifeFraction(p: GalaxyPoint, now: number): number {
+  if (!p.observedAt || !p.expiresAt) return 0;
+  const created = Date.parse(p.observedAt);
+  const expires = Date.parse(p.expiresAt);
+  if (expires <= created) return 0;
+  return Math.max(0, Math.min(1, (now - created) / (expires - created)));
+}
+
 function drawPoints(
   ctx: CanvasRenderingContext2D,
   points: GalaxyPoint[],
@@ -119,6 +134,7 @@ function drawPoints(
   hidden: Set<string>,
   filters: { search: string },
   scene: Scene,
+  opts: DrawOpts,
 ): void {
   const sf = sizeFactor(scene.view.zoom);
   for (const p of points) {
@@ -127,12 +143,13 @@ function drawPoints(
     if (!onScreen(s, scene.w, scene.h)) continue;
     const dim = !matchesFilters(p, { category: "all", search: filters.search });
     const r = pointRadius(p, sf);
-    ctx.globalAlpha = dim ? 0.1 : 0.9;
+    const age = opts.ageFade ? Math.max(0.12, 1 - lifeFraction(p, opts.now) * 0.85) : 1;
+    ctx.globalAlpha = (dim ? 0.1 : 0.9) * age;
     ctx.fillStyle = colorForPoint(p, colorBy);
     ctx.beginPath();
     ctx.arc(s.x, s.y, r, 0, Math.PI * 2);
     ctx.fill();
-    if (!dim && r >= POOL_BALL_MIN_RADIUS) drawPoolBall(ctx, s, r, p.confidence);
+    if (opts.showConfidence && !dim && r >= POOL_BALL_MIN_RADIUS) drawPoolBall(ctx, s, r, p.confidence);
   }
   ctx.globalAlpha = 1;
 }
@@ -196,7 +213,17 @@ export function MemoryGalaxy({
     "omnia-memory-galaxy-labels",
     "on",
   );
+  const [confPref, setConfPref] = usePersistedViewMode<"on" | "off">(
+    "omnia-memory-galaxy-confidence",
+    "on",
+  );
+  const [agePref, setAgePref] = usePersistedViewMode<"on" | "off">(
+    "omnia-memory-galaxy-agefade",
+    "on",
+  );
   const labelsOn = labelsPref === "on";
+  const showConfidence = confPref === "on";
+  const ageFade = agePref === "on";
   const drag = useRef({ active: false, moved: false, startX: 0, startY: 0, panX: 0, panY: 0 });
 
   const draw = useCallback(() => {
@@ -208,11 +235,11 @@ export function MemoryGalaxy({
     ctx.clearRect(0, 0, width, height);
     const fit = fitTransform(points, width, height);
     const scene: Scene = { fit, view, w: width, h: height };
-    drawPoints(ctx, points, colorBy, hidden, filters, scene);
+    drawPoints(ctx, points, colorBy, hidden, filters, scene, { showConfidence, ageFade, now: Date.now() });
     if (labelsOn && view.zoom >= LABEL_MIN_ZOOM) {
       drawLabels(ctx, labelCandidates(points, colorBy, hidden, filters, scene), colorBy, width);
     }
-  }, [points, colorBy, hidden, filters, view, labelsOn]);
+  }, [points, colorBy, hidden, filters, view, labelsOn, showConfidence, ageFade]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -346,6 +373,26 @@ export function MemoryGalaxy({
           onClick={() => setLabelsPref(labelsOn ? "off" : "on")}
         >
           <Tag className="h-4 w-4" />
+        </Button>
+        <Button
+          size="icon"
+          variant={showConfidence ? "secondary" : "outline"}
+          aria-label={showConfidence ? "Hide confidence" : "Show confidence"}
+          aria-pressed={showConfidence}
+          data-testid="toggle-confidence"
+          onClick={() => setConfPref(showConfidence ? "off" : "on")}
+        >
+          <Gauge className="h-4 w-4" />
+        </Button>
+        <Button
+          size="icon"
+          variant={ageFade ? "secondary" : "outline"}
+          aria-label={ageFade ? "Disable age fade" : "Enable age fade"}
+          aria-pressed={ageFade}
+          data-testid="toggle-age-fade"
+          onClick={() => setAgePref(ageFade ? "off" : "on")}
+        >
+          <Clock className="h-4 w-4" />
         </Button>
         <Button size="icon" variant="secondary" aria-label="Zoom in" onClick={() => zoomByButton(1.3)}>
           <Plus className="h-4 w-4" />

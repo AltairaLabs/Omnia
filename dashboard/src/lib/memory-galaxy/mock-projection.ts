@@ -27,6 +27,11 @@ function clamp(n: number): number {
   return Math.max(-1, Math.min(1, n));
 }
 
+const DAY_MS = 86_400_000;
+// Fixed reference epoch so dates stay deterministic; spread points across a
+// window before/after it so the age-fade shows a gradient near "now".
+const REF_MS = Date.parse("2026-06-14T00:00:00Z");
+
 export function generateMockProjection({ seed, count }: { seed: number; count: number }): GalaxyResponse {
   const r = rng(seed);
   const clusters = TOPICS.map((topic) => ({
@@ -42,6 +47,10 @@ export function generateMockProjection({ seed, count }: { seed: number; count: n
     const jitter = () => (r() + r() + r() - 1.5) * 0.18;
     // Bell-ish confidence (sum of uniforms ≈ normal), centred ~0.65.
     const confidence = 0.3 + ((r() + r() + r() + r()) / 4) * 0.7;
+    // Created up to ~70 days before the reference, with a 10–100 day TTL, so
+    // some points sit near or past expiry (fully faded) and others are fresh.
+    const createdMs = REF_MS - Math.floor(r() * 70) * DAY_MS;
+    const expiresMs = createdMs + (10 + Math.floor(r() * 90)) * DAY_MS;
     points.push({
       id: `mock-${seed}-${i}`,
       x: clamp(c.cx + jitter()),
@@ -53,7 +62,8 @@ export function generateMockProjection({ seed, count }: { seed: number; count: n
       title: `${c.topic} #${i}`,
       preview: `A remembered detail about ${c.topic}.`,
       userRef: `user-${1 + Math.floor(r() * 12)}`,
-      observedAt: "2026-06-10T00:00:00Z",
+      observedAt: new Date(createdMs).toISOString(),
+      expiresAt: new Date(expiresMs).toISOString(),
     });
   }
   return {
