@@ -433,7 +433,7 @@ func evalLabelsFor(agentName, namespace, packName, variant string, groups []stri
 func (w *EvalWorker) processAssistantMessage(ctx context.Context, event api.SessionEvent) error {
 	packEvals := w.loadPackEvals(ctx, event)
 	if packEvals == nil {
-		w.logger.Debug("no per_turn evals to run (no pack)", "sessionID", event.SessionID)
+		w.logNoPackSkip("per_turn", event.SessionID, event.PromptPackName, event.PromptPackVersion)
 		return nil
 	}
 
@@ -455,6 +455,7 @@ func (w *EvalWorker) processAssistantMessage(ctx context.Context, event api.Sess
 		sess.Variant, w.resolveWorkerGroups(ctx, event))
 	items := w.getSDKRunner().RunTurnEvals(ctx, packEvals.PackData, messages,
 		event.SessionID, turnIndex, providerSpecs, labels)
+	w.logWorkerGroupFilteredSkip(event.SessionID, runtimeevals.TriggerEveryTurn, packEvals, labels.Groups, items)
 	results := w.convertToEvalResults(items, enrichedEvent, sess.AgentName)
 	return w.writeResults(ctx, results, event.SessionID)
 }
@@ -478,7 +479,7 @@ func (w *EvalWorker) onSessionComplete(ctx context.Context, sessionID string) er
 
 	packEvals := w.loadPackEvals(ctx, event)
 	if packEvals == nil {
-		w.logger.Debug("no on_session_complete evals to run (no pack)", "sessionID", sessionID)
+		w.logNoPackSkip("on_session_complete", sessionID, event.PromptPackName, event.PromptPackVersion)
 		return nil
 	}
 
@@ -495,6 +496,7 @@ func (w *EvalWorker) onSessionComplete(ctx context.Context, sessionID string) er
 		sess.Variant, w.resolveWorkerGroups(ctx, event))
 	items := w.getSDKRunner().RunSessionEvals(ctx, packEvals.PackData, messages,
 		sessionID, turnIndex, providerSpecs, labels)
+	w.logWorkerGroupFilteredSkip(sessionID, runtimeevals.TriggerOnSessionComplete, packEvals, labels.Groups, items)
 	results := w.convertToEvalResults(items, enrichedEvent, sess.AgentName)
 	return w.writeResults(ctx, results, sessionID)
 }
@@ -705,6 +707,88 @@ func enrichEvent(event api.SessionEvent, packEvals *CachedPack) api.SessionEvent
 	event.PromptPackName = packEvals.PackName
 	event.PromptPackVersion = packEvals.PackVersion
 	return event
+}
+
+func (w *EvalWorker) logNoPackSkip(trigger, sessionID, packName, packVersion string) {
+	reason := "PromptPack evals unavailable"
+	switch {
+	case w.packLoader == nil:
+		reason = "pack loader disabled"
+	case packName == "":
+		reason = "session has no PromptPack"
+	}
+
+	w.logger.Info("no evals to run",
+		"sessionID", sessionID,
+		"trigger", trigger,
+		"packName", packName,
+		"packVersion", packVersion,
+		"reason", reason,
+	)
+}
+
+func (w *EvalWorker) logWorkerGroupFilteredSkip(
+	sessionID string,
+	trigger runtimeevals.EvalTrigger,
+	packEvals *CachedPack,
+	groups []string,
+	items []api.EvaluateResultItem,
+) {
+	if len(groups) == 0 || len(items) > 0 {
+		return
+	}
+
+	totalForTrigger, matchedForGroups, err := countRunnableEvals(packEvals.PackData, trigger, groups)
+	if err != nil || totalForTrigger == 0 || matchedForGroups > 0 {
+		return
+	}
+
+	w.logger.Info("worker eval group filter matched no evals",
+		"sessionID", sessionID,
+		"trigger", string(trigger),
+		"packName", packEvals.PackName,
+		"packVersion", packEvals.PackVersion,
+		"groups", groups,
+		"eligibleEvalCount", totalForTrigger,
+	)
+}
+
+type packEvalDefs struct {
+	Evals []runtimeevals.EvalDef `json:"evals"`
+}
+
+func countRunnableEvals(
+	packData []byte,
+	trigger runtimeevals.EvalTrigger,
+	groups []string,
+) (totalForTrigger, matchedForGroups int, err error) {
+	var pack packEvalDefs
+	if err = json.Unmarshal(packData, &pack); err != nil {
+		return 0, 0, err
+	}
+
+	for _, def := range pack.Evals {
+		if def.Trigger != trigger || !def.IsEnabled() {
+			continue
+		}
+		totalForTrigger++
+		if hasGroupOverlap(def.GetGroups(), groups) {
+			matchedForGroups++
+		}
+	}
+
+	return totalForTrigger, matchedForGroups, nil
+}
+
+func hasGroupOverlap(evalGroups, selectedGroups []string) bool {
+	for _, evalGroup := range evalGroups {
+		for _, selectedGroup := range selectedGroups {
+			if evalGroup == selectedGroup {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // isAssistantMessageEvent returns true if the event is for an assistant message.

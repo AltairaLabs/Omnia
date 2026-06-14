@@ -9,11 +9,13 @@ Functional Source License. See ee/LICENSE for details.
 package evals
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -40,6 +42,12 @@ const testStreamKey = "test-stream"
 // testLogger returns a silent logger for tests.
 func testLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+}
+
+func testCaptureLogger() (*slog.Logger, *bytes.Buffer) {
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	return logger, &buf
 }
 
 // mockResultWriter implements EvalResultWriter for testing.
@@ -138,13 +146,15 @@ func toMessagePtrs(msgs []session.Message) []*session.Message {
 }
 
 func TestProcessEvent_AssistantMessage_NoPackSkips(t *testing.T) {
+	logger, logBuf := testCaptureLogger()
 	w := &EvalWorker{
 		messageStore: &mockMessageStore{
 			sess: &session.Session{ID: "s1", AgentName: "test-agent", Namespace: "ns"},
 		},
-		resultWriter: &mockResultWriter{},
-		namespaces:   []string{"ns"},
-		logger:       testLogger(),
+		resultWriter:      &mockResultWriter{},
+		namespaces:        []string{"ns"},
+		logger:            logger,
+		completionTracker: NewCompletionTracker(DefaultInactivityTimeout, nil, logger),
 	}
 
 	event := api.SessionEvent{
@@ -159,6 +169,36 @@ func TestProcessEvent_AssistantMessage_NoPackSkips(t *testing.T) {
 
 	err := w.processEvent(context.Background(), event)
 	require.NoError(t, err)
+	assert.Contains(t, logBuf.String(), "msg=\"no evals to run\"")
+	assert.Contains(t, logBuf.String(), "trigger=per_turn")
+	assert.Contains(t, logBuf.String(), "reason=\"pack loader disabled\"")
+}
+
+func TestProcessEvent_SessionComplete_NoPackLogsInfo(t *testing.T) {
+	logger, logBuf := testCaptureLogger()
+	w := &EvalWorker{
+		messageStore: &mockMessageStore{
+			sess: &session.Session{
+				ID:                "s1",
+				AgentName:         "test-agent",
+				Namespace:         "ns",
+				PromptPackName:    "pack-for-complete",
+				PromptPackVersion: "v1",
+			},
+			messages: toMessagePtrs([]session.Message{{ID: "m1", Role: session.RoleAssistant, Content: "assistant-output"}}),
+		},
+		resultWriter:      &mockResultWriter{},
+		namespaces:        []string{"ns"},
+		logger:            logger,
+		completionTracker: NewCompletionTracker(DefaultInactivityTimeout, nil, logger),
+	}
+
+	err := w.onSessionComplete(context.Background(), "s1")
+	require.NoError(t, err)
+	assert.Contains(t, logBuf.String(), "msg=\"no evals to run\"")
+	assert.Contains(t, logBuf.String(), "trigger=on_session_complete")
+	assert.Contains(t, logBuf.String(), "packName=pack-for-complete")
+	assert.Contains(t, logBuf.String(), "reason=\"pack loader disabled\"")
 }
 
 func TestProcessEvent_NonAssistantMessage_Skipped(t *testing.T) {
@@ -1819,6 +1859,82 @@ func TestProcessAssistantMessage_FiltersByWorkerGroups(t *testing.T) {
 		// matches; "fast" does not.
 		assert.ElementsMatch(t, []string{"slow"}, run(DefaultWorkerEvalGroups))
 	})
+}
+
+func TestProcessAssistantMessage_LogsWhenWorkerGroupFilterMatchesNoEvals(t *testing.T) {
+	packLoader := newTestPackLoader([]runtimeevals.EvalDef{
+		containsEvalDef("fast", runtimeevals.TriggerEveryTurn, "hello"),
+	})
+	logger, logBuf := testCaptureLogger()
+	writer := &mockResultWriter{}
+	store := &mockMessageStore{
+		sess: &session.Session{ID: "s1", AgentName: "test-agent", Namespace: "ns"},
+		messages: toMessagePtrs([]session.Message{
+			{ID: "m1", Role: session.RoleUser, Content: "say hello"},
+			{ID: "m2", Role: session.RoleAssistant, Content: "hello world"},
+		}),
+	}
+	w := &EvalWorker{
+		resultWriter:         writer,
+		messageStore:         store,
+		namespaces:           []string{"ns"},
+		logger:               logger,
+		packLoader:           packLoader,
+		workerGroupsOverride: []string{runtimeevals.GroupLongRunning},
+	}
+
+	event := api.SessionEvent{
+		EventType:         eventTypeMessage,
+		SessionID:         "s1",
+		AgentName:         "test-agent",
+		Namespace:         "ns",
+		MessageID:         "m2",
+		MessageRole:       "assistant",
+		PromptPackName:    "test-pack",
+		PromptPackVersion: "v1",
+	}
+
+	require.NoError(t, w.processEvent(context.Background(), event))
+	assert.Empty(t, writer.written)
+	assert.Contains(t, logBuf.String(), "worker eval group filter matched no evals")
+	assert.Contains(t, logBuf.String(), "trigger=every_turn")
+	assert.Contains(t, logBuf.String(), "eligibleEvalCount=1")
+	assert.Contains(t, logBuf.String(), "groups=[long-running]")
+}
+
+func TestProcessAssistantMessage_DoesNotLogGroupFilterWhenTriggerHasNoEvals(t *testing.T) {
+	packLoader := newTestPackLoader([]runtimeevals.EvalDef{
+		containsEvalDef("slow", runtimeevals.TriggerOnSessionComplete, "hello"),
+	})
+	logger, logBuf := testCaptureLogger()
+	w := &EvalWorker{
+		resultWriter: &mockResultWriter{},
+		messageStore: &mockMessageStore{
+			sess: &session.Session{ID: "s1", AgentName: "test-agent", Namespace: "ns"},
+			messages: toMessagePtrs([]session.Message{
+				{ID: "m1", Role: session.RoleUser, Content: "say hello"},
+				{ID: "m2", Role: session.RoleAssistant, Content: "hello world"},
+			}),
+		},
+		namespaces:           []string{"ns"},
+		logger:               logger,
+		packLoader:           packLoader,
+		workerGroupsOverride: []string{runtimeevals.GroupLongRunning},
+	}
+
+	event := api.SessionEvent{
+		EventType:         eventTypeMessage,
+		SessionID:         "s1",
+		AgentName:         "test-agent",
+		Namespace:         "ns",
+		MessageID:         "m2",
+		MessageRole:       "assistant",
+		PromptPackName:    "test-pack",
+		PromptPackVersion: "v1",
+	}
+
+	require.NoError(t, w.processEvent(context.Background(), event))
+	assert.False(t, strings.Contains(logBuf.String(), "worker eval group filter matched no evals"))
 }
 
 // Ensure unused import suppressors compile.
