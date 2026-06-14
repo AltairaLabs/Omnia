@@ -28,8 +28,18 @@ import (
 )
 
 const (
-	certmanagerVersion = "v1.19.1"
-	certmanagerURLTmpl = "https://github.com/cert-manager/cert-manager/releases/download/%s/cert-manager.yaml"
+	certmanagerVersion   = "v1.19.1"
+	certmanagerURLTmpl   = "https://github.com/cert-manager/cert-manager/releases/download/%s/cert-manager.yaml"
+	certmanagerNamespace = "cert-manager"
+
+	// certmanagerWaitAttempts and certmanagerWaitTimeout bound how long we wait for the
+	// cert-manager webhook Deployment to become Available. The wait is retried because, on
+	// a busy CI runner that has just loaded many Omnia images into kind, the webhook pod
+	// can miss a single timeout window while its upstream image is still being pulled. A
+	// healthy webhook satisfies the condition in seconds regardless of the timeout, so the
+	// extra attempts only cost wall-clock when the install is genuinely struggling.
+	certmanagerWaitAttempts = 3
+	certmanagerWaitTimeout  = "3m"
 
 	defaultKindBinary  = "kind"
 	defaultKindCluster = "kind"
@@ -88,16 +98,47 @@ func InstallCertManager() error {
 	if _, err := Run(cmd); err != nil {
 		return err
 	}
-	// Wait for cert-manager-webhook to be ready, which can take time if cert-manager
-	// was re-installed after uninstalling on a cluster.
-	cmd = exec.Command("kubectl", "wait", "deployment.apps/cert-manager-webhook",
-		"--for", "condition=Available",
-		"--namespace", "cert-manager",
-		"--timeout", "5m",
-	)
+	// Wait for cert-manager-webhook to be ready. This can take time if cert-manager
+	// was re-installed after uninstalling on a cluster, or if image pulls are slow on a
+	// contended CI runner. The wait is retried so a single missed window does not abort
+	// the whole suite; on final failure we dump pod state to surface the real cause.
+	return waitForCertManagerWebhook()
+}
 
-	_, err := Run(cmd)
+// waitForCertManagerWebhook blocks until the cert-manager webhook Deployment reports
+// Available, retrying the wait a bounded number of times. It returns the last error and
+// dumps cert-manager pod diagnostics when every attempt is exhausted.
+func waitForCertManagerWebhook() error {
+	var err error
+	for attempt := 1; attempt <= certmanagerWaitAttempts; attempt++ {
+		cmd := exec.Command("kubectl", "wait", "deployment.apps/cert-manager-webhook",
+			"--for", "condition=Available",
+			"--namespace", certmanagerNamespace,
+			"--timeout", certmanagerWaitTimeout,
+		)
+		if _, err = Run(cmd); err == nil {
+			return nil
+		}
+		_, _ = fmt.Fprintf(GinkgoWriter,
+			"cert-manager webhook not ready (attempt %d/%d): %v\n",
+			attempt, certmanagerWaitAttempts, err)
+	}
+
+	dumpCertManagerDiagnostics()
 	return err
+}
+
+// dumpCertManagerDiagnostics prints cert-manager pod state to the test log so a failed
+// install shows the underlying reason (image pull, scheduling, crash) instead of only a
+// bare "timed out waiting for the condition".
+func dumpCertManagerDiagnostics() {
+	for _, args := range [][]string{
+		{"get", "pods", "-n", certmanagerNamespace, "-o", "wide"},
+		{"describe", "pods", "-n", certmanagerNamespace},
+	} {
+		out, _ := Run(exec.Command("kubectl", args...))
+		_, _ = fmt.Fprintf(GinkgoWriter, "=== kubectl %s ===\n%s\n", strings.Join(args, " "), out)
+	}
 }
 
 // IsCertManagerCRDsInstalled checks if any Cert Manager CRDs are installed
