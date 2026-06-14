@@ -1,46 +1,38 @@
 import { test, expect } from '../fixtures/coverage';
 
 /**
- * E2E tests for the Memories page.
+ * E2E tests for the Memory Galaxy page (the redesigned /memories).
  *
- * The E2E suite runs with OMNIA_AUTH_ANONYMOUS_ROLE=editor, so the session is
- * anonymous. With the device ID feature, anonymous users get a per-browser
- * identity stored in localStorage, which enables memory scoping. The page
- * shows the normal memory UI (toolbar, empty state or graph) rather than a
- * sign-in notice.
- *
- * If localStorage is unavailable (SSR, incognito), the anonymous notice would
- * still appear — but in a real browser E2E environment, localStorage is always
- * available, so hasMemoryIdentity is true.
+ * The E2E suite runs anonymous (editor role) with a device ID, and the
+ * workspace context auto-selects the first workspace, so `hasWorkspace` is true
+ * and the galaxy renders. The 2D-projection endpoint is mocked in the Next.js
+ * proxy route (pending the backend in #1418), so points are always present —
+ * there is no empty state, sign-in notice, or consent banner on this page
+ * anymore (it's a workspace-scoped operator view).
  */
-test.describe('Memories Page (anonymous with device ID)', () => {
+test.describe('Memory Galaxy page', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/memories');
-    // Wait for the page to render (auth context resolves, memory query fires)
     await page.waitForLoadState('networkidle');
   });
 
-  test('should not show the sign-in notice', async ({ page }) => {
-    const notice = page.locator('[data-testid="memory-anonymous-notice"]');
-    await expect(notice).not.toBeVisible({ timeout: 5000 });
+  test('does not show an error alert', async ({ page }) => {
+    await expect(page.locator('[data-testid="memory-error"]')).not.toBeVisible({ timeout: 5000 });
   });
 
-  test('should not show an error alert', async ({ page }) => {
-    const errorAlert = page.locator('[data-testid="memory-error"]');
-    await expect(errorAlert).not.toBeVisible({ timeout: 5000 });
+  test('does not show the no-workspace notice', async ({ page }) => {
+    await expect(page.locator('[data-testid="no-workspace-notice"]')).not.toBeVisible({ timeout: 5000 });
   });
 
-  test('should show the toolbar for anonymous users with device ID', async ({ page }) => {
+  test('shows the toolbar', async ({ page }) => {
     await expect(page.locator('[data-testid="memories-toolbar"]')).toBeVisible({ timeout: 10000 });
   });
 
-  test('should show the empty state when no memories exist', async ({ page }) => {
-    // With device ID, the memory fetch fires but returns empty results
-    await expect(page.locator('[data-testid="empty-state"]')).toBeVisible({ timeout: 10000 });
+  test('shows the tier/category filter rail', async ({ page }) => {
+    await expect(page.locator('[data-testid="facet-rail"]')).toBeVisible({ timeout: 10000 });
   });
 
-  test('should still show the consent banner', async ({ page }) => {
-    const banner = page.locator('[data-testid="consent-banner"]');
-    await expect(banner).toBeVisible({ timeout: 5000 });
+  test('renders the galaxy canvas', async ({ page }) => {
+    await expect(page.locator('[data-testid="memory-galaxy-canvas"]')).toBeVisible({ timeout: 15000 });
   });
 });
