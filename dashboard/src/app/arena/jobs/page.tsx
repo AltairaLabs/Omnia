@@ -4,6 +4,7 @@ import { useState, useMemo } from "react";
 import { useSearchParams } from "next/navigation";
 import { Header } from "@/components/layout";
 import { useArenaJobs, useArenaJobMutations, useArenaSources } from "@/hooks/arena";
+import { usePersistedViewMode } from "@/hooks/use-persisted-view-mode";
 import { useWorkspace } from "@/contexts/workspace-context";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -435,7 +436,10 @@ export default function ArenaJobsPage() {
   const { currentWorkspace } = useWorkspace();
   const canEdit = currentWorkspace?.permissions?.write ?? false;
 
-  const [viewMode, setViewMode] = useState<"table" | "grid">("grid");
+  const [viewMode, setViewMode] = usePersistedViewMode<"table" | "grid">(
+    "omnia-arena-jobs-view-mode",
+    "grid",
+  );
   const [dialogOpen, setDialogOpen] = useState(!!initialSourceRef);
   const [preselectedSource] = useState<string | undefined>(initialSourceRef);
   const [cloneJob, setCloneJob] = useState<ArenaJob | null>(null);

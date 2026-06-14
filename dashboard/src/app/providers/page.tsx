@@ -2,6 +2,7 @@
 
 import { useState, useMemo, useCallback } from "react";
 import { LayoutGrid, List, Plus } from "lucide-react";
+import { usePersistedViewMode } from "@/hooks/use-persisted-view-mode";
 import Link from "next/link";
 import { Header } from "@/components/layout";
 import { NamespaceFilter } from "@/components/filters";
@@ -229,7 +230,10 @@ function renderLoadingSkeleton(viewMode: ViewMode) {
 }
 
 export default function ProvidersPage() {
-  const [viewMode, setViewMode] = useState<ViewMode>("cards");
+  const [viewMode, setViewMode] = usePersistedViewMode<ViewMode>(
+    "omnia-providers-view-mode",
+    "cards",
+  );
   const [filterPhase, setFilterPhase] = useState<FilterPhase>("all");
   const [filterRole, setFilterRole] = useState<FilterRole>("all");
   const [selectedNamespaces, setSelectedNamespaces] = useState<string[]>([]);

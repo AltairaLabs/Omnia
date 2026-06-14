@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useMemo } from "react";
+import { usePersistedViewMode } from "@/hooks/use-persisted-view-mode";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -56,7 +57,10 @@ export function TemplateBrowser({
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedCategory, setSelectedCategory] = useState<string>("all");
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
-  const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
+  const [viewMode, setViewMode] = usePersistedViewMode<"grid" | "list">(
+    "omnia-arena-template-browser-view-mode",
+    "grid",
+  );
 
   // Get unique categories and tags
   const categories = useMemo(
