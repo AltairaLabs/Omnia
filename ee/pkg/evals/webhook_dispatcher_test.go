@@ -345,6 +345,46 @@ func TestCheckAndFire_TimeoutHandling(t *testing.T) {
 	}
 }
 
+func TestCheckAndFire_InvalidWebhookURLScheme(t *testing.T) {
+	configs := []WebhookConfig{{
+		URL:        "file:///tmp/webhook.json",
+		Threshold:  0.9,
+		WindowSize: 5,
+	}}
+
+	d := NewWebhookDispatcher(configs, &http.Client{Timeout: 100 * time.Millisecond}, newTestLogger())
+	results := makeResults("eval-1", []bool{false, false, false, false, false})
+
+	err := d.CheckAndFire(context.Background(), "eval-1", "agent", "ns", results)
+	if err != nil {
+		t.Fatalf("CheckAndFire should not propagate errors, got: %v", err)
+	}
+
+	if _, exists := d.lastFired[rateLimitKey("eval-1", "file:///tmp/webhook.json")]; exists {
+		t.Fatalf("expected lastFired to remain unset for invalid webhook URL")
+	}
+}
+
+func TestCheckAndFire_MalformedWebhookURL(t *testing.T) {
+	configs := []WebhookConfig{{
+		URL:        "://bad url",
+		Threshold:  0.9,
+		WindowSize: 5,
+	}}
+
+	d := NewWebhookDispatcher(configs, &http.Client{Timeout: 100 * time.Millisecond}, newTestLogger())
+	results := makeResults("eval-1", []bool{false, false, false, false, false})
+
+	err := d.CheckAndFire(context.Background(), "eval-1", "agent", "ns", results)
+	if err != nil {
+		t.Fatalf("CheckAndFire should not propagate errors, got: %v", err)
+	}
+
+	if _, exists := d.lastFired[rateLimitKey("eval-1", "://bad url")]; exists {
+		t.Fatalf("expected lastFired to remain unset for malformed webhook URL")
+	}
+}
+
 func TestCheckAndFire_EmptyResults(t *testing.T) {
 	var received atomic.Int32
 
