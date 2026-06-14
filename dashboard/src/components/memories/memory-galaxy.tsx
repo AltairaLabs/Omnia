@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Plus, Minus, Maximize } from "lucide-react";
+import { Plus, Minus, Maximize, Tag } from "lucide-react";
+import { usePersistedViewMode } from "@/hooks/use-persisted-view-mode";
 import type { GalaxyPoint } from "@/lib/memory-galaxy/types";
 import {
   fitTransform,
@@ -191,6 +192,11 @@ export function MemoryGalaxy({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [hovered, setHovered] = useState<GalaxyPoint | null>(null);
   const [view, setView] = useState<View>(DEFAULT_VIEW);
+  const [labelsPref, setLabelsPref] = usePersistedViewMode<"on" | "off">(
+    "omnia-memory-galaxy-labels",
+    "on",
+  );
+  const labelsOn = labelsPref === "on";
   const drag = useRef({ active: false, moved: false, startX: 0, startY: 0, panX: 0, panY: 0 });
 
   const draw = useCallback(() => {
@@ -203,10 +209,10 @@ export function MemoryGalaxy({
     const fit = fitTransform(points, width, height);
     const scene: Scene = { fit, view, w: width, h: height };
     drawPoints(ctx, points, colorBy, hidden, filters, scene);
-    if (view.zoom >= LABEL_MIN_ZOOM) {
+    if (labelsOn && view.zoom >= LABEL_MIN_ZOOM) {
       drawLabels(ctx, labelCandidates(points, colorBy, hidden, filters, scene), colorBy, width);
     }
-  }, [points, colorBy, hidden, filters, view]);
+  }, [points, colorBy, hidden, filters, view, labelsOn]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -331,6 +337,16 @@ export function MemoryGalaxy({
       />
 
       <div className="absolute bottom-3 right-3 flex flex-col gap-1">
+        <Button
+          size="icon"
+          variant={labelsOn ? "secondary" : "outline"}
+          aria-label={labelsOn ? "Hide labels" : "Show labels"}
+          aria-pressed={labelsOn}
+          data-testid="toggle-labels"
+          onClick={() => setLabelsPref(labelsOn ? "off" : "on")}
+        >
+          <Tag className="h-4 w-4" />
+        </Button>
         <Button size="icon" variant="secondary" aria-label="Zoom in" onClick={() => zoomByButton(1.3)}>
           <Plus className="h-4 w-4" />
         </Button>
