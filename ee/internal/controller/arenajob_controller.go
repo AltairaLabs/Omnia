@@ -155,6 +155,32 @@ type ArenaJobReconciler struct {
 	// can mint mgmt-plane JWTs to authenticate fleet-mode WS dials to agent
 	// facades. Empty disables fleet dial auth.
 	MgmtPlaneTokenURL string
+
+	// WorkerServiceAccount, when set, is the ServiceAccount the worker pod
+	// runs as instead of the per-job arena-worker SA the controller creates.
+	// Point it at the workspace's runtime ServiceAccount so workers inherit
+	// the workspace cloud identity (Azure Workload Identity, AWS IRSA, GKE
+	// Workload Identity) — otherwise evaluations against keyless providers
+	// (auth.type: workloadIdentity) cannot mint a platform token. The worker
+	// Role is still created and bound to this SA so it keeps the namespace-
+	// scoped CRD-read permissions workers need. Empty preserves the default
+	// per-job arena-worker SA.
+	WorkerServiceAccount string
+
+	// WorkerPodLabels are extra labels stamped onto the worker pod template.
+	// Used to opt the pod into a cloud identity webhook, e.g.
+	// {"azure.workload.identity/use": "true"}.
+	WorkerPodLabels map[string]string
+}
+
+// workerServiceAccountName returns the ServiceAccount the worker pod runs as:
+// the configured workspace runtime SA when set, otherwise the per-job
+// arena-worker SA the controller creates.
+func (r *ArenaJobReconciler) workerServiceAccountName() string {
+	if r.WorkerServiceAccount != "" {
+		return r.WorkerServiceAccount
+	}
+	return arenaWorkerRBACName
 }
 
 // +kubebuilder:rbac:groups=omnia.altairalabs.ai,resources=arenajobs,verbs=get;list;watch;create;update;patch;delete
@@ -1094,8 +1120,18 @@ func (r *ArenaJobReconciler) createWorkerJob(ctx context.Context, arenaJob *omni
 		},
 	}
 
-	// Set ServiceAccountName for CRD reads (created by reconcileWorkerRBAC above)
+	// Set ServiceAccountName for CRD reads (created by reconcileWorkerRBAC above).
+	// This is the pod's identity SA: the configured workspace runtime SA when
+	// set (so the worker inherits the workspace cloud identity), otherwise the
+	// per-job arena-worker SA.
 	job.Spec.Template.Spec.ServiceAccountName = workerSAName
+
+	// Stamp configured worker pod labels (e.g. the cloud-identity webhook
+	// opt-in label) onto the pod template. Done before PodOverrides so an
+	// explicit per-job override still wins on conflict.
+	for k, v := range r.WorkerPodLabels {
+		job.Spec.Template.Labels[k] = v
+	}
 
 	// Apply user-supplied PodOverrides.
 	applyWorkerPodOverrides(job, arenaJob)

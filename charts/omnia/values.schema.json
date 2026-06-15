@@ -179,7 +179,9 @@
               "type": "object",
               "properties": {
                 "image":     { "$ref": "#/$defs/image" },
-                "resources": { "$ref": "#/$defs/resources" }
+                "resources": { "$ref": "#/$defs/resources" },
+                "serviceAccountName": { "type": "string" },
+                "podLabels": { "type": "object", "additionalProperties": { "type": "string" } }
               }
             },
             "devConsole": {

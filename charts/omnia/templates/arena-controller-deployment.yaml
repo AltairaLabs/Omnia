@@ -59,6 +59,20 @@ spec:
             - --health-probe-bind-address=:{{ .Values.probes.port }}
             - --arena-worker-image={{ .Values.enterprise.arena.worker.image.repository | default "ghcr.io/altairalabs/omnia-arena-worker" }}:{{ .Values.enterprise.arena.worker.image.tag | default .Chart.AppVersion }}
             - --arena-worker-image-pull-policy={{ .Values.enterprise.arena.worker.image.pullPolicy | default "IfNotPresent" }}
+            {{- /*
+              Run arena worker pods under the workspace runtime ServiceAccount
+              (with a cloud-identity opt-in label) so evaluations against
+              keyless providers (auth.type: workloadIdentity) inherit the
+              workspace cloud identity (Azure WI, AWS IRSA, GKE WI). Empty =
+              controller creates a per-job arena-worker SA with no cloud identity.
+            */}}
+            {{- with .Values.enterprise.arena.worker.serviceAccountName }}
+            - --worker-service-account={{ . }}
+            {{- end }}
+            {{- with .Values.enterprise.arena.worker.podLabels }}
+            {{- $labels := . }}
+            - --worker-pod-labels={{ range $i, $k := (keys $labels | sortAlpha) }}{{ if $i }},{{ end }}{{ $k }}={{ index $labels $k }}{{ end }}
+            {{- end }}
             - --arena-dev-console-image={{ .Values.enterprise.arena.devConsole.image.repository | default "ghcr.io/altairalabs/omnia-arena-dev-console" }}:{{ .Values.enterprise.arena.devConsole.image.tag | default .Chart.AppVersion }}
             {{- /*
               Run dev-console pods under the workspace runtime ServiceAccount

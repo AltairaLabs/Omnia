@@ -1,0 +1,51 @@
+suite: arena-controller worker cloud identity
+# Covers issue #1445 — the arena-controller must forward
+# --worker-service-account / --worker-pod-labels to its arena worker Jobs so
+# evaluations against keyless providers (auth.type: workloadIdentity) inherit
+# the workspace runtime ServiceAccount's cloud identity. Defaults emit neither
+# flag (backward compatible: per-job arena-worker SA with no cloud identity).
+values:
+  - ../values-chart-tests.yaml
+tests:
+  - it: emits worker SA + pod-labels flags when configured
+    template: templates/arena-controller-deployment.yaml
+    set:
+      enterprise.enabled: true
+      redis.enabled: true
+      enterprise.arena.worker.serviceAccountName: omnia-runtime-wi
+      enterprise.arena.worker.podLabels:
+        azure.workload.identity/use: "true"
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --worker-service-account=omnia-runtime-wi
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --worker-pod-labels=azure.workload.identity/use=true
+
+  - it: renders multiple pod labels sorted, comma-joined
+    template: templates/arena-controller-deployment.yaml
+    set:
+      enterprise.enabled: true
+      redis.enabled: true
+      enterprise.arena.worker.serviceAccountName: omnia-runtime-wi
+      enterprise.arena.worker.podLabels:
+        iam.gke.io/gcp-service-account: sa@project.iam.gserviceaccount.com
+        azure.workload.identity/use: "true"
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --worker-pod-labels=azure.workload.identity/use=true,iam.gke.io/gcp-service-account=sa@project.iam.gserviceaccount.com
+
+  - it: emits neither flag by default (backward compatible)
+    template: templates/arena-controller-deployment.yaml
+    set:
+      enterprise.enabled: true
+      redis.enabled: true
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].args
+          content: --worker-service-account=
+      - notContains:
+          path: spec.template.spec.containers[0].args
+          content: --worker-pod-labels=

@@ -13,6 +13,8 @@
 
 ## CLI Flags / Config
 - `--session-postgres-conn` — Postgres DSN for the session database. Required to enable batch re-encryption during key rotation. Optional; when unset, key rotation proceeds without re-encrypting existing records.
+- `--worker-service-account` — ServiceAccount the arena worker pod runs as. Set to the workspace runtime ServiceAccount so evaluations inherit its cloud identity (Azure Workload Identity, AWS IRSA, GKE Workload Identity) and can authenticate to keyless providers (`auth.type: workloadIdentity`). Optional; when unset, the controller creates a per-job `arena-worker` SA with no cloud identity. The worker Role is bound to whichever SA is used, preserving CRD-read permissions.
+- `--worker-pod-labels` — Comma-separated `key=value` labels added to the arena worker pod template (e.g. `azure.workload.identity/use=true`) to opt into a cloud-identity webhook. Optional.
 
 ## Inputs
 - **K8s API**: watch events for Arena CRDs
