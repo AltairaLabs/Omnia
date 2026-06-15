@@ -2,10 +2,8 @@
 // Memory Galaxy — workspace-scoped operator view of the memory projection.
 
 import { useMemo, useState, type ReactNode } from "react";
-import Link from "next/link";
 import dynamic from "next/dynamic";
 import { Header } from "@/components/layout";
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useWorkspace } from "@/contexts/workspace-context";
 import {
@@ -17,7 +15,7 @@ import {
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Brain, Search, AlertCircle, Library, Loader2 } from "lucide-react";
+import { Brain, Search, AlertCircle, Loader2 } from "lucide-react";
 import { useMemoryProjection } from "@/hooks/use-memory-projection";
 import { usePersistedViewMode } from "@/hooks/use-persisted-view-mode";
 import { FacetRail, type Facet } from "@/components/memories/facet-rail";
@@ -218,17 +216,6 @@ export default function MemoriesPage() {
                 <SelectItem value="category">Color: category</SelectItem>
               </SelectContent>
             </Select>
-
-            <div className="flex-1" />
-
-            {currentWorkspace && (
-              <Button asChild variant="outline" size="sm" data-testid="workspace-knowledge-link">
-                <Link href={`/workspaces/${encodeURIComponent(currentWorkspace.name)}/knowledge`}>
-                  <Library className="mr-2 h-4 w-4" />
-                  Workspace knowledge
-                </Link>
-              </Button>
-            )}
           </div>
         )}
 
