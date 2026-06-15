@@ -39,6 +39,19 @@ const (
 	trackStable   = "stable"
 	trackCanary   = "canary"
 
+	// variantHeader is the request header the facade reads to tag a session's
+	// rollout variant (internal/facade/server.go). It MUST equal
+	// pkg/policy.HeaderVariant — drift is guarded by a unit test. The owned
+	// VirtualService stamps it per weighted destination so candidate-routed
+	// requests are recorded variant=candidate (and stable ones variant=stable),
+	// the signal RolloutAnalysis gates and product metrics key on
+	// ({variant="candidate"}). The value is the rollout-semantic variant, not
+	// the subset name (the candidate subset is "canary" but the variant is
+	// "candidate").
+	variantHeader    = "x-omnia-variant"
+	variantStable    = "stable"
+	variantCandidate = "candidate"
+
 	// Istio resource spec field keys reused when building unstructured objects.
 	fieldName        = "name"
 	fieldHost        = "host"
@@ -47,7 +60,19 @@ const (
 	fieldRoute       = "route"
 	fieldDestination = "destination"
 	fieldWeight      = "weight"
+	fieldHeaders     = "headers"
 )
+
+// variantHeaderOp builds the Istio per-destination header operation that sets
+// the x-omnia-variant request header to value on requests routed to that
+// destination.
+func variantHeaderOp(value string) map[string]interface{} {
+	return map[string]interface{}{
+		"request": map[string]interface{}{
+			"set": map[string]interface{}{variantHeader: value},
+		},
+	}
+}
 
 // meshRoutingName is the shared name for the operator-owned VS + DR of an agent.
 func meshRoutingName(agentName string) string { return agentName + "-rollout" }
@@ -94,10 +119,12 @@ func buildOwnedVirtualService(agentName, namespace string, hosts []string, mesh 
 				map[string]interface{}{
 					fieldDestination: map[string]interface{}{fieldHost: host, fieldSubset: mesh.StableSubset},
 					fieldWeight:      int64(100 - candidateWeight),
+					fieldHeaders:     variantHeaderOp(variantStable),
 				},
 				map[string]interface{}{
 					fieldDestination: map[string]interface{}{fieldHost: host, fieldSubset: mesh.CandidateSubset},
 					fieldWeight:      int64(candidateWeight),
+					fieldHeaders:     variantHeaderOp(variantCandidate),
 				},
 			},
 		},

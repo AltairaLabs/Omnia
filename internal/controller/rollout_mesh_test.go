@@ -22,6 +22,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
+	"github.com/altairalabs/omnia/pkg/policy"
 )
 
 func meshCfg() *omniav1alpha1.MeshTrafficRouting {
@@ -60,5 +61,41 @@ func TestBuildOwnedVirtualService_Weights(t *testing.T) {
 	}
 	if weights[trackStable] != 70 || weights[trackCanary] != 30 {
 		t.Fatalf("want stable=70 canary=30, got %v", weights)
+	}
+}
+
+// TestBuildOwnedVirtualService_VariantHeader asserts each weighted destination
+// stamps the x-omnia-variant request header with its rollout-semantic variant
+// (stable/candidate). Without this, candidate-routed sessions reach the facade
+// with no variant header and are recorded variant="" — so RolloutAnalysis gates
+// keyed on {variant="candidate"} never match and the rollout can't be analysed.
+func TestBuildOwnedVirtualService_VariantHeader(t *testing.T) {
+	vs := buildOwnedVirtualService("agent1", "ns1", []string{"agent1.ns1.svc.cluster.local"}, meshCfg(), 30)
+	routes, _, _ := unstructured.NestedSlice(vs.Object, "spec", "http")
+	dests, _, _ := unstructured.NestedSlice(routes[0].(map[string]interface{}), "route")
+
+	got := map[string]string{}
+	for _, d := range dests {
+		dm := d.(map[string]interface{})
+		subset, _, _ := unstructured.NestedString(dm, "destination", "subset")
+		variant, found, _ := unstructured.NestedString(dm, "headers", "request", "set", variantHeader)
+		if !found {
+			t.Fatalf("subset %q destination missing %s request header", subset, variantHeader)
+		}
+		got[subset] = variant
+	}
+	if got[trackStable] != variantStable {
+		t.Fatalf("stable subset must set %s=%s, got %q", variantHeader, variantStable, got[trackStable])
+	}
+	if got[trackCanary] != variantCandidate {
+		t.Fatalf("candidate subset must set %s=%s, got %q", variantHeader, variantCandidate, got[trackCanary])
+	}
+}
+
+// TestVariantHeader_MatchesPolicy guards against drift between the header the
+// VirtualService stamps and the one the facade reads (pkg/policy.HeaderVariant).
+func TestVariantHeader_MatchesPolicy(t *testing.T) {
+	if variantHeader != policy.HeaderVariant {
+		t.Fatalf("variantHeader %q must equal policy.HeaderVariant %q", variantHeader, policy.HeaderVariant)
 	}
 }
