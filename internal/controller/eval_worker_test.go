@@ -175,6 +175,43 @@ var _ = Describe("Eval Worker Reconciliation", func() {
 			Expect(errors.IsNotFound(err)).To(BeTrue())
 		})
 
+		It("should create eval worker for PromptKit agent when its service group opts in", func() {
+			// The service group's WorkspaceServiceGroup opts into the worker.
+			ws := &omniav1alpha1.Workspace{
+				ObjectMeta: metav1.ObjectMeta{Name: "eval-test-ws"},
+				Spec: omniav1alpha1.WorkspaceSpec{
+					DisplayName: "Eval Test",
+					Namespace:   omniav1alpha1.NamespaceConfig{Name: namespace},
+					Services: []omniav1alpha1.WorkspaceServiceGroup{
+						{
+							Name:       defaultSvcGroupName,
+							Mode:       omniav1alpha1.ServiceModeExternal,
+							External:   &omniav1alpha1.ExternalEndpoints{SessionURL: "http://s", MemoryURL: "http://m"},
+							EvalWorker: &omniav1alpha1.ServiceGroupEvalWorker{Enabled: true},
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, ws)).To(Succeed())
+			DeferCleanup(func() { _ = k8sClient.Delete(ctx, ws) })
+
+			ar := newTestAgentRuntime(agentRuntimeKey, promptPackKey.Name)
+			// Default framework is PromptKit.
+			ar.Spec.Evals = &omniav1alpha1.EvalConfig{Enabled: true}
+			Expect(k8sClient.Create(ctx, ar)).To(Succeed())
+
+			_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: agentRuntimeKey})
+			Expect(err).NotTo(HaveOccurred())
+			_, err = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: agentRuntimeKey})
+			Expect(err).NotTo(HaveOccurred())
+
+			// Verify eval worker Deployment was created despite PromptKit framework.
+			dep := &appsv1.Deployment{}
+			key := types.NamespacedName{Name: evalWorkerName("default"), Namespace: namespace}
+			Expect(k8sClient.Get(ctx, key, dep)).To(Succeed())
+			Expect(dep.Spec.Template.Spec.Containers).To(HaveLen(1))
+		})
+
 		It("should NOT create eval worker when evals are not enabled", func() {
 			ar := newTestAgentRuntime(agentRuntimeKey, promptPackKey.Name)
 			ar.Spec.Framework = &omniav1alpha1.FrameworkConfig{

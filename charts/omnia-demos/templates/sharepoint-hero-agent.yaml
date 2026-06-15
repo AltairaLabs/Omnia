@@ -32,8 +32,15 @@ spec:
     port: 8080
     handler: runtime
   evals:
+    # rag-hero is a PromptKit agent, which self-evaluates lightweight evals
+    # inline and is excluded from the out-of-band eval-worker by default. The
+    # faithfulness gate is an llm_judge (long-running) eval that only runs in
+    # the worker — and only the worker tags omnia_eval_* with the `variant`
+    # label the rollout gate keys on. The worker is opted in at the service-
+    # group level on the demo Workspace (services[].evalWorker.enabled), so
+    # omnia_eval_faithfulness{variant="candidate"} exists for the gate. The
+    # default worker groups (long-running/external) run the llm_judge evals.
     enabled: true
-    worker: {}
   memory:
     enabled: true
     purpose: support_continuity

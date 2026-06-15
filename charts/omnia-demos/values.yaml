@@ -459,8 +459,14 @@ sharepointHero:
   # service group it is memory-demo-default (NOT the generic memory-api).
   memoryApiUrl: http://memory-demo-default.omnia-demo:8080
 
-  # In-cluster Prometheus query endpoint (kube-prometheus-stack).
-  prometheusUrl: http://prometheus-operated.monitoring:9090
+  # In-cluster Prometheus query endpoint. Defaults to the Omnia-bundled
+  # Prometheus (the `prometheus` community chart deployed as a subchart:
+  # Service omnia-prometheus-server in the omnia release namespace). That
+  # server runs with --web.route-prefix=/prometheus, so the address MUST
+  # include the /prometheus prefix — the RolloutAnalysis Prometheus client
+  # appends /api/v1/query to it. Override for a standalone kube-prometheus-stack
+  # (e.g. http://prometheus-operated.monitoring:9090).
+  prometheusUrl: http://omnia-prometheus-server.omnia/prometheus
 
   # Arena self-play loadtest: generates realistic multi-turn traffic against the
   # live rag-hero agent (fleet mode over WebSocket), driving candidate-variant

@@ -620,6 +620,28 @@ type WorkspaceServiceGroup struct {
 	// with their own spec.privacyPolicyRef.
 	// +optional
 	PrivacyPolicyRef *corev1.LocalObjectReference `json:"privacyPolicyRef,omitempty"`
+
+	// evalWorker opts this service group into the out-of-band eval-worker.
+	// +optional
+	EvalWorker *ServiceGroupEvalWorker `json:"evalWorker,omitempty"`
+}
+
+// ServiceGroupEvalWorker configures the per-service-group eval-worker.
+//
+// The operator runs at most one eval-worker per service group and creates it
+// automatically when the group has a non-PromptKit, eval-enabled AgentRuntime.
+// PromptKit agents self-evaluate lightweight evals inline and are excluded by
+// default, so their llm_judge (long-running / external) evals — the only path
+// that tags omnia_eval_* with the `variant` label rollout-analysis gates key
+// on — never run out-of-band.
+type ServiceGroupEvalWorker struct {
+	// enabled forces creation of the eval-worker for this service group even
+	// when all of its eval-enabled agents use the PromptKit framework. It has
+	// no effect when the group has no eval-enabled agent (there is nothing to
+	// evaluate). Non-PromptKit agents always get a worker when evals are
+	// enabled, regardless of this flag.
+	// +optional
+	Enabled bool `json:"enabled,omitempty"`
 }
 
 // MemoryServiceConfig defines the configuration for a managed memory-api instance.

@@ -42,6 +42,12 @@ spec:
   services:
     - name: default
       mode: managed
+      # Opt this service group into the out-of-band eval-worker. rag-hero is a
+      # PromptKit agent (excluded from the worker by default); the worker is the
+      # only path that runs its llm_judge faithfulness eval AND tags
+      # omnia_eval_* with the `variant` label the rollout gate keys on.
+      evalWorker:
+        enabled: true
       session:
         database:
           secretRef:
