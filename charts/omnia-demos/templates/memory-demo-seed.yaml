@@ -112,7 +112,9 @@ spec:
         # Resolve the workspace + agent UIDs and wait for the demo memory-api to
         # be available before the seeder POSTs to it.
         - name: resolve-and-wait
-          image: bitnami/kubectl:latest
+          # rancher/kubectl (alpine + kubectl + /bin/sh), maintained on Docker
+          # Hub — bitnami/kubectl was deprecated/relocated in 2025.
+          image: rancher/kubectl:v1.31.0
           command: ["/bin/sh", "-c"]
           args:
             - |
