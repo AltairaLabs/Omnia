@@ -74,6 +74,8 @@ func main() {
 	var enableHTTP2 bool
 	var arenaWorkerImage string
 	var arenaWorkerImagePullPolicy string
+	var arenaWorkerServiceAccount string
+	var arenaWorkerPodLabels string
 	var arenaDevConsoleImage string
 	var arenaDevConsoleServiceAccount string
 	var arenaDevConsolePodLabels string
@@ -101,6 +103,15 @@ func main() {
 		"The image to use for Arena worker containers.")
 	flag.StringVar(&arenaWorkerImagePullPolicy, "arena-worker-image-pull-policy", "",
 		"Image pull policy for Arena workers. Valid: Always, Never, IfNotPresent.")
+	flag.StringVar(&arenaWorkerServiceAccount, "worker-service-account", "",
+		"ServiceAccount the arena worker pod runs as. Set to the workspace runtime "+
+			"ServiceAccount so evaluations inherit its cloud identity (Azure Workload "+
+			"Identity, AWS IRSA, GKE Workload Identity) and can authenticate to keyless "+
+			"providers (auth.type: workloadIdentity). Empty = controller creates a "+
+			"per-job arena-worker SA with no cloud identity.")
+	flag.StringVar(&arenaWorkerPodLabels, "worker-pod-labels", "",
+		"Comma-separated key=value labels added to the arena worker pod template, "+
+			"e.g. 'azure.workload.identity/use=true' to opt into the WI webhook.")
 	flag.StringVar(&arenaDevConsoleImage, "arena-dev-console-image", "",
 		"The image to use for Arena dev console containers.")
 	flag.StringVar(&arenaDevConsoleServiceAccount, "dev-console-service-account", "",
@@ -287,6 +298,8 @@ func main() {
 		Controllers: setupOptions{
 			WorkerImage:              arenaWorkerImage,
 			WorkerImagePullPolicy:    corev1.PullPolicy(arenaWorkerImagePullPolicy),
+			WorkerServiceAccount:     arenaWorkerServiceAccount,
+			WorkerPodLabels:          parseKeyValueLabels(arenaWorkerPodLabels),
 			DevConsoleImage:          arenaDevConsoleImage,
 			DevConsoleServiceAccount: arenaDevConsoleServiceAccount,
 			DevConsolePodLabels:      parseKeyValueLabels(arenaDevConsolePodLabels),

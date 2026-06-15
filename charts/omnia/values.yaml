@@ -139,6 +139,18 @@ enterprise:
         # -- Worker image pull policy
         pullPolicy: IfNotPresent
 
+      # -- ServiceAccount the arena worker pod runs as. Set to the workspace
+      # runtime ServiceAccount so evaluations inherit its cloud identity (Azure
+      # Workload Identity, AWS IRSA, GKE Workload Identity) and can authenticate
+      # to keyless providers (auth.type: workloadIdentity). Empty = controller
+      # creates a per-job arena-worker SA with no cloud identity (keyless
+      # providers will fail). The worker Role is still bound to whichever SA is
+      # used, so CRD-read permissions are preserved either way.
+      serviceAccountName: ""
+      # -- Extra labels added to the arena worker pod template, e.g. to opt into
+      # a cloud-identity webhook: {azure.workload.identity/use: "true"}.
+      podLabels: {}
+
       # -- Default resource limits for worker pods
       resources:
         limits:

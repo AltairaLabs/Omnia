@@ -86,6 +86,8 @@ func lastOrEmpty(names []string) string {
 type setupOptions struct {
 	WorkerImage              string
 	WorkerImagePullPolicy    corev1.PullPolicy
+	WorkerServiceAccount     string
+	WorkerPodLabels          map[string]string
 	DevConsoleImage          string
 	DevConsoleServiceAccount string
 	DevConsolePodLabels      map[string]string
@@ -161,6 +163,8 @@ func buildReconcilers(opts setupOptions) []namedReconciler {
 					Recorder:               mgr.GetEventRecorderFor("arenajob-controller"),
 					WorkerImage:            opts.WorkerImage,
 					WorkerImagePullPolicy:  opts.WorkerImagePullPolicy,
+					WorkerServiceAccount:   opts.WorkerServiceAccount,
+					WorkerPodLabels:        opts.WorkerPodLabels,
 					LicenseValidator:       opts.LicenseValidator,
 					Aggregator:             opts.Aggregator,
 					RedisURL:               opts.RedisURL,

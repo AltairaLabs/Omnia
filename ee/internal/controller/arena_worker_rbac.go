@@ -23,26 +23,35 @@ import (
 
 const arenaWorkerRBACName = "arena-worker"
 
-// reconcileWorkerRBAC creates the ServiceAccount, Role, and RoleBinding for arena worker
-// CRD reads in the ArenaJob's namespace. Resources are owned by the ArenaJob and will be
-// garbage collected when the job is deleted.
+// reconcileWorkerRBAC creates the Role and RoleBinding for arena worker CRD
+// reads in the ArenaJob's namespace, and (unless an external ServiceAccount is
+// configured) the per-job arena-worker ServiceAccount. The RoleBinding always
+// targets the pod's ServiceAccount — the configured workspace runtime SA when
+// set, otherwise the per-job arena-worker SA — so the worker keeps its CRD-read
+// permissions regardless of which identity it runs as. Resources are owned by
+// the ArenaJob and garbage collected when the job is deleted. Returns the
+// ServiceAccount name the worker pod should run as.
 func (r *ArenaJobReconciler) reconcileWorkerRBAC(
 	ctx context.Context,
 	arenaJob *omniav1alpha1.ArenaJob,
 ) (string, error) {
-	saName := arenaWorkerRBACName
+	podSAName := r.workerServiceAccountName()
 
-	if err := r.reconcileWorkerServiceAccount(ctx, arenaJob, saName); err != nil {
-		return "", fmt.Errorf("reconcile worker ServiceAccount: %w", err)
+	// Only create the per-job SA when not reusing an externally-managed one
+	// (the workspace runtime SA is owned by the workspace IaC, not this job).
+	if r.WorkerServiceAccount == "" {
+		if err := r.reconcileWorkerServiceAccount(ctx, arenaJob, arenaWorkerRBACName); err != nil {
+			return "", fmt.Errorf("reconcile worker ServiceAccount: %w", err)
+		}
 	}
-	if err := r.reconcileWorkerRole(ctx, arenaJob, saName); err != nil {
+	if err := r.reconcileWorkerRole(ctx, arenaJob, arenaWorkerRBACName); err != nil {
 		return "", fmt.Errorf("reconcile worker Role: %w", err)
 	}
-	if err := r.reconcileWorkerRoleBinding(ctx, arenaJob, saName); err != nil {
+	if err := r.reconcileWorkerRoleBinding(ctx, arenaJob, arenaWorkerRBACName, podSAName); err != nil {
 		return "", fmt.Errorf("reconcile worker RoleBinding: %w", err)
 	}
 
-	return saName, nil
+	return podSAName, nil
 }
 
 // reconcileWorkerServiceAccount creates/updates the arena worker ServiceAccount.
@@ -120,11 +129,15 @@ func (r *ArenaJobReconciler) reconcileWorkerRole(
 	return nil
 }
 
-// reconcileWorkerRoleBinding creates/updates the RoleBinding for the worker ServiceAccount.
+// reconcileWorkerRoleBinding creates/updates the RoleBinding that grants the
+// worker Role to the pod's ServiceAccount. name is the RoleBinding/Role name;
+// subjectSAName is the ServiceAccount the binding targets (the configured
+// workspace runtime SA when reusing it, otherwise the per-job arena-worker SA).
 func (r *ArenaJobReconciler) reconcileWorkerRoleBinding(
 	ctx context.Context,
 	arenaJob *omniav1alpha1.ArenaJob,
 	name string,
+	subjectSAName string,
 ) error {
 	log := logf.FromContext(ctx)
 
@@ -152,7 +165,7 @@ func (r *ArenaJobReconciler) reconcileWorkerRoleBinding(
 		rb.Subjects = []rbacv1.Subject{
 			{
 				Kind:      "ServiceAccount",
-				Name:      name,
+				Name:      subjectSAName,
 				Namespace: arenaJob.Namespace,
 			},
 		}
