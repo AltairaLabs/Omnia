@@ -530,21 +530,26 @@ memoryDemo:
     # DEFAULTS to a hosted embedder: a local CPU ollama embed can take ~10s
     # under load and large batches time out, so the backlog never reaches the
     # 70% coverage the dense projection needs and the galaxy stays on the
-    # lexical fallback. Gemini text-embedding-004 is also 768-dim, so the
-    # memory schema is unchanged (no re-init). Set type=ollama to use the
+    # lexical fallback. Hosted embeds return in <1s. Set type=ollama to use the
     # in-cluster instance instead (baseURL is auto-set for ollama).
+    #
+    # NOTE: dimensions must match the memory DB's embedding columns. The schema
+    # is provisioned on first run; changing it later (e.g. 1536↔768) is a
+    # destructive re-init gated by a one-shot consent marker.
     provider:
       # type: ollama | gemini | openai | voyageai
-      type: gemini
-      model: text-embedding-004
-      dimensions: 768
+      type: openai
+      model: text-embedding-3-small
+      dimensions: 1536
       distance: cosine
-      # API-key Secret (key: api-key) for hosted types. NOT created by the
-      # chart — provision out-of-band so the key never lands in git:
-      #   kubectl create secret generic gemini-embeddings-credentials \
-      #     -n <ns> --from-literal=api-key=$GEMINI_API_KEY
+      # API-key Secret for hosted types. NOT created by the chart — provision
+      # out-of-band so the key never lands in git. The Secret KEY name is the
+      # provider's env-var name (memory-api derives it from the type):
+      #   openai → OPENAI_API_KEY, gemini → GEMINI_API_KEY.
+      #   kubectl create secret generic openai-embeddings-credentials \
+      #     -n <ns> --from-literal=OPENAI_API_KEY=$OPENAI_API_KEY
       # For type=ollama set this to the chart-created ollama-credentials.
-      credentialSecret: gemini-embeddings-credentials
+      credentialSecret: openai-embeddings-credentials
 
   # Post-install seed Job (Task 11). The seeder generates a fixed-scale
   # "Hawkridge Cloud" scenario (built-in DefaultScenario — counts are not
