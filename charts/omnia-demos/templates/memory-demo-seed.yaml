@@ -134,6 +134,17 @@ spec:
                 [ "${R:-0}" -ge 1 ] 2>/dev/null && break
                 sleep 5
               done
+              # Wait for the embed model too — ollama-memory-embed pulls
+              # nomic-embed-text in its own initContainer, so availableReplicas>=1
+              # means the model is pulled + serving. Seeding before it is ready
+              # would save memories without embeddings (the re-embed worker would
+              # only backfill them up to ~60m later, leaving the galaxy lexical).
+              echo "waiting for ollama-memory-embed (embedding model) to be ready..."
+              for i in $(seq 1 120); do
+                R=$(kubectl get deployment ollama-memory-embed -n {{ $ns }} -o jsonpath='{.status.availableReplicas}' 2>/dev/null || true)
+                [ "${R:-0}" -ge 1 ] 2>/dev/null && break
+                sleep 5
+              done
           volumeMounts:
             - name: shared
               mountPath: /shared

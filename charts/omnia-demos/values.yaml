@@ -506,11 +506,19 @@ memoryDemo:
   enabled: false
 
   # Postgres connection Secrets for the demo's managed memory-api + session-api.
-  # Each must be a pre-created Secret in the namespace with a POSTGRES_CONN key
-  # (reuse the core install's secrets, as the dev Workspace does).
   database:
+    # sessionSecret is a pre-created Secret in the namespace (POSTGRES_CONN key),
+    # reused from the core dev install — same assumption as sharepointHero.
     sessionSecret: omnia-postgres
-    memorySecret: omnia-postgres-memory
+    # The memory DB is DEDICATED (omnia_memory_demo) so the demo's 768-dim
+    # nomic-embed-text embeddings don't collide with another workspace's
+    # embedding column dimension in the shared omnia_memory DB.
+    memorySecret: omnia-postgres-memory-demo
+    # When true (dev/Tilt), the chart creates memorySecret pointing at
+    # devMemoryConn. For other clusters, set false and pre-create memorySecret
+    # with a POSTGRES_CONN to a dedicated memory database.
+    createDevSecret: true
+    devMemoryConn: "postgres://omnia:omnia@omnia-postgres.omnia-system.svc.cluster.local:5432/omnia_memory_demo?sslmode=disable"
 
   # Embedding model served by the demo's ollama memory-embed instance (Task 10).
   # The memory-demo-embeddings Provider points the workspace memory service here

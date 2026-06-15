@@ -47,9 +47,17 @@ helm upgrade --install omnia-demos charts/omnia-demos -n omnia-demo --create-nam
   --set memoryDemo.enabled=true --set toolsDemo.enabled=true
 ```
 
-The seed Job requires pre-created Postgres Secrets in `omnia-demo`
-(`omnia-postgres`, `omnia-postgres-memory`, each with a `POSTGRES_CONN` key) —
-the same ones the dev install uses.
+The **session** Secret (`omnia-postgres`) must already exist in `omnia-demo`
+(same assumption as sharepointHero). The **memory** DB is dedicated: the dev
+postgres creates an `omnia_memory_demo` database and the chart creates the
+`omnia-postgres-memory-demo` Secret pointing at it (so the demo's 768-dim
+`nomic-embed-text` embeddings don't collide with another workspace's embedding
+column dimension). For non-dev clusters, set
+`memoryDemo.database.createDevSecret=false` and pre-create that Secret.
+
+The seed Job waits for both the demo memory-api **and** the `ollama-memory-embed`
+model before seeding, so memories are embedded inline (the galaxy is semantic
+immediately, not lexical-until-backfill).
 
 ### UI-population checklist (viewed against the `omnia-demo` workspace)
 
