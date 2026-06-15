@@ -30,4 +30,24 @@ describe("useMemoryProjection", () => {
       expect.stringContaining("/api/workspaces/ws-1/memory/projection"),
     );
   });
+
+  it("polls while the projection is pending, then stops once ready", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ points: [], total: 5000, model: "tsne", status: "pending" }),
+      })
+      .mockResolvedValue({
+        ok: true,
+        json: async () => ({ points: [{ id: "a" }], total: 5000, model: "tsne", status: "ready" }),
+      });
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    const { result } = renderHook(() => useMemoryProjection(), { wrapper });
+    await waitFor(() => expect(result.current.data?.status).toBe("pending"));
+    // refetchInterval (2s) refetches → backend now returns "ready" and polling stops.
+    await waitFor(() => expect(result.current.data?.status).toBe("ready"), { timeout: 6000 });
+    expect(fetchMock.mock.calls.length).toBeGreaterThanOrEqual(2);
+  });
 });

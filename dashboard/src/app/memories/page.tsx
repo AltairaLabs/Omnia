@@ -2,10 +2,8 @@
 // Memory Galaxy — workspace-scoped operator view of the memory projection.
 
 import { useMemo, useState, type ReactNode } from "react";
-import Link from "next/link";
 import dynamic from "next/dynamic";
 import { Header } from "@/components/layout";
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useWorkspace } from "@/contexts/workspace-context";
 import {
@@ -17,7 +15,7 @@ import {
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Brain, Search, AlertCircle, Library } from "lucide-react";
+import { Brain, Search, AlertCircle, Loader2 } from "lucide-react";
 import { useMemoryProjection } from "@/hooks/use-memory-projection";
 import { usePersistedViewMode } from "@/hooks/use-persisted-view-mode";
 import { FacetRail, type Facet } from "@/components/memories/facet-rail";
@@ -75,6 +73,8 @@ interface GalaxyBodyState {
   hasWorkspace: boolean;
   error: unknown;
   isLoading: boolean;
+  status?: "ready" | "pending";
+  total: number;
   points: GalaxyPoint[];
   colorBy: "tier" | "category";
   hidden: Set<string>;
@@ -105,6 +105,22 @@ function renderGalaxyBody(s: GalaxyBodyState): ReactNode {
   }
   if (s.isLoading) {
     return <Skeleton className="h-[70vh] min-h-[360px] w-full rounded-lg" data-testid="galaxy-loading" />;
+  }
+  // Large workspace the pre-render worker hasn't finished yet — the hook polls
+  // until the layout is ready; show progress instead of a misleading "empty".
+  if (s.status === "pending") {
+    return (
+      <div
+        className="flex h-[70vh] min-h-[360px] flex-col items-center justify-center text-muted-foreground"
+        data-testid="galaxy-pending"
+      >
+        <Loader2 className="mb-4 h-12 w-12 animate-spin opacity-40" />
+        <h3 className="mb-1 text-lg font-medium">Building galaxy…</h3>
+        <p className="text-sm">
+          Rendering {s.total.toLocaleString()} memories. This updates automatically.
+        </p>
+      </div>
+    );
   }
   if (s.points.length === 0) {
     return (
@@ -200,17 +216,6 @@ export default function MemoriesPage() {
                 <SelectItem value="category">Color: category</SelectItem>
               </SelectContent>
             </Select>
-
-            <div className="flex-1" />
-
-            {currentWorkspace && (
-              <Button asChild variant="outline" size="sm" data-testid="workspace-knowledge-link">
-                <Link href={`/workspaces/${encodeURIComponent(currentWorkspace.name)}/knowledge`}>
-                  <Library className="mr-2 h-4 w-4" />
-                  Workspace knowledge
-                </Link>
-              </Button>
-            )}
           </div>
         )}
 
@@ -220,6 +225,8 @@ export default function MemoriesPage() {
           hasWorkspace,
           error,
           isLoading,
+          status: data?.status,
+          total: data?.total ?? 0,
           points,
           colorBy,
           hidden,
@@ -227,7 +234,7 @@ export default function MemoriesPage() {
           onDelete: handleDelete,
         })}
 
-        {!isLoading && (data?.total ?? 0) > 0 && (
+        {!isLoading && data?.status !== "pending" && (data?.total ?? 0) > 0 && (
           <p className="text-center text-xs text-muted-foreground">
             {data?.total} memories · {clusterKind} clustering
             {data?.capped ? " (showing a capped subset)" : ""}

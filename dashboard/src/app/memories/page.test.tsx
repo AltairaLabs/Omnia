@@ -157,6 +157,30 @@ describe("MemoriesPage (galaxy)", () => {
     expect(screen.getByTestId("empty-state")).toBeTruthy();
   });
 
+  it("renders the building-galaxy state while the projection is pending", () => {
+    mockUseMemoryProjection.mockReturnValue({
+      data: {
+        points: [],
+        total: 1240,
+        capped: false,
+        model: "tsne",
+        embeddingModel: "text-embedding-3-small",
+        embeddingDim: 1536,
+        computedAt: new Date().toISOString(),
+        status: "pending",
+      },
+      isLoading: false,
+      error: null,
+    });
+    render(<MemoriesPage />);
+    // Pending shows progress (with the live count), NOT the misleading "empty" state.
+    expect(screen.getByTestId("galaxy-pending")).toBeTruthy();
+    expect(screen.getByText(/Building galaxy/i)).toBeTruthy();
+    expect(screen.getByText(/1,240 memories/)).toBeTruthy();
+    expect(screen.queryByTestId("empty-state")).toBeNull();
+    expect(screen.queryByTestId("memory-galaxy")).toBeNull();
+  });
+
   it("renders toolbar when authenticated", () => {
     render(<MemoriesPage />);
     expect(screen.getByTestId("memories-toolbar")).toBeTruthy();

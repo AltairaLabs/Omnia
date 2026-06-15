@@ -28,4 +28,9 @@ export interface GalaxyResponse {
   capped: boolean;
   computedAt: string;
   points: GalaxyPoint[];
+  // "ready" — points are the layout. "pending" — the workspace is large and
+  // the pre-render worker hasn't produced a layout yet; points is empty and
+  // total is the live entity count. The client polls until "ready".
+  // Optional for forward-compat with older backends that omit it.
+  status?: "ready" | "pending";
 }

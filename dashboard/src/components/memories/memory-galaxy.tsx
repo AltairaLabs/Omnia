@@ -430,12 +430,9 @@ export function MemoryGalaxy({
   };
 
   const toggleOpen = (id: string) => {
-    setOpenIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
+    // Single popup at a time: clicking a new point replaces any open bubble;
+    // clicking the already-open point closes it.
+    setOpenIds((prev) => (prev.size === 1 && prev.has(id) ? new Set() : new Set([id])));
   };
 
   const onMouseUp = (e: React.MouseEvent<HTMLCanvasElement>) => {
