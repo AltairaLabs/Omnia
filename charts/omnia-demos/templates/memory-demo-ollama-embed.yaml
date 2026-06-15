@@ -164,8 +164,16 @@ metadata:
     app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
 spec:
   type: ollama
+  # role: embedding is REQUIRED — memory-api skips a provider with the default
+  # "llm" role for embeddings ("has role llm but embedding is required").
+  role: embedding
   model: {{ $model }}
   baseURL: http://ollama-memory-embed.{{ $ns }}:11434
+  # nomic-embed-text emits 768-dim vectors; pin it so the embedding columns are
+  # provisioned at 768 (the default fallback is 1536, which mismatches).
+  embedding:
+    dimensions: 768
+    distance: cosine
   credential:
     secretRef:
       name: ollama-credentials

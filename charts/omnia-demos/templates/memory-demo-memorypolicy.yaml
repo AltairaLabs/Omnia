@@ -28,6 +28,12 @@ spec:
       mode: Manual
   ingestion:
     strategy: chunk
+  projection:
+    # Pre-render the Memory Galaxy layout so the dashboard serves it instantly
+    # even when the seeded workspace exceeds the on-demand size gate. The demo
+    # memory-api runs the worker via --projection-interval=30s.
+    enabled: true
+    schedule: "*/1 * * * *"
   consolidation:
     # Every minute (cron granularity is 1 minute); the operator's short
     # --consolidation-interval poll checks this schedule frequently in dev.
