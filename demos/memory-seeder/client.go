@@ -84,6 +84,13 @@ func (c *Client) postJSON(
 	defer func() { _ = resp.Body.Close() }()
 	out := new(bytes.Buffer)
 	_, _ = out.ReadFrom(resp.Body)
+	// 204 No Content = the write was suppressed by the enterprise privacy
+	// middleware (consent enforcement). The seeder intentionally generates
+	// consent-violating writes, so this is expected, not a failure — return
+	// empty so the caller skips it and continues.
+	if resp.StatusCode == http.StatusNoContent {
+		return nil, nil
+	}
 	if resp.StatusCode != wantStatus {
 		return nil, fmt.Errorf("%s: status %d: %s", path, resp.StatusCode, out.String())
 	}
@@ -159,6 +166,10 @@ func (c *Client) saveID(ctx context.Context, path string, q url.Values, body any
 	raw, err := c.postJSON(ctx, path, q, body, http.StatusCreated)
 	if err != nil {
 		return "", err
+	}
+	// Suppressed write (204) — no body, no ID. Caller treats "" as "skip".
+	if len(raw) == 0 {
+		return "", nil
 	}
 	var sr saveResp
 	if err := json.Unmarshal(raw, &sr); err != nil {

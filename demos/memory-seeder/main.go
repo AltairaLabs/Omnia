@@ -21,22 +21,13 @@ func run(ctx context.Context, c *Client, g Generated) error {
 			return fmt.Errorf("agent memory: %w", err)
 		}
 	}
-	var instIDs []string
-	for i := range 20 {
-		id, err := c.SaveInstitutional(ctx, "policy",
-			fmt.Sprintf("Hawkridge policy fact %d", i), 0.9)
-		if err != nil {
-			return fmt.Errorf("institutional: %w", err)
-		}
-		instIDs = append(instIDs, id)
+	instIDs, err := seedInstitutionalFacts(ctx, c)
+	if err != nil {
+		return err
 	}
-	var userIDs []string
-	for _, m := range g.UserMemories {
-		id, err := c.SaveUserMemory(ctx, m)
-		if err != nil {
-			return fmt.Errorf("user memory: %w", err)
-		}
-		userIDs = append(userIDs, id)
+	userIDs, err := seedUserMemories(ctx, c, g.UserMemories)
+	if err != nil {
+		return err
 	}
 	for _, o := range g.HotObservations {
 		if _, err := c.SaveObservation(ctx, o); err != nil {
@@ -44,6 +35,39 @@ func run(ctx context.Context, c *Client, g Generated) error {
 		}
 	}
 	return linkSample(ctx, c, instIDs, userIDs)
+}
+
+// seedInstitutionalFacts writes the institutional policy facts, skipping any
+// consent-suppressed (204 → empty id) writes so they aren't linked.
+func seedInstitutionalFacts(ctx context.Context, c *Client) ([]string, error) {
+	var ids []string
+	for i := range 20 {
+		id, err := c.SaveInstitutional(ctx, "policy",
+			fmt.Sprintf("Hawkridge policy fact %d", i), 0.9)
+		if err != nil {
+			return nil, fmt.Errorf("institutional: %w", err)
+		}
+		if id != "" {
+			ids = append(ids, id)
+		}
+	}
+	return ids, nil
+}
+
+// seedUserMemories writes the user-tier memories, skipping consent-suppressed
+// (204 → empty id) writes so they aren't linked.
+func seedUserMemories(ctx context.Context, c *Client, mems []UserMemory) ([]string, error) {
+	var ids []string
+	for _, m := range mems {
+		id, err := c.SaveUserMemory(ctx, m)
+		if err != nil {
+			return nil, fmt.Errorf("user memory: %w", err)
+		}
+		if id != "" {
+			ids = append(ids, id)
+		}
+	}
+	return ids, nil
 }
 
 // linkSample wires a few hundred edges so the graph has structure.

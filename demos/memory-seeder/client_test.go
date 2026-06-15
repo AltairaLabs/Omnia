@@ -27,6 +27,27 @@ func decode(t *testing.T, r *http.Request) map[string]any {
 	return m
 }
 
+func TestSaveUserMemorySuppressed204IsNotAnError(t *testing.T) {
+	// The enterprise privacy middleware suppresses consent-violating writes
+	// with 204 No Content. The seeder must treat that as a skip, not a failure.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, testWSUID)
+	id, err := c.SaveUserMemory(context.Background(), UserMemory{
+		RawUserID: "customer-001", Category: "memory:health",
+		Type: "profile", Content: "suppressed", Confidence: 0.9,
+	})
+	if err != nil {
+		t.Fatalf("SaveUserMemory on 204: unexpected error %v", err)
+	}
+	if id != "" {
+		t.Errorf("id = %q, want \"\" (suppressed)", id)
+	}
+}
+
 func TestSaveUserMemoryHashesUserAndScopes(t *testing.T) {
 	var gotPath, gotWorkspace, gotUserParam string
 	var gotBody map[string]any
