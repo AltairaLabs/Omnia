@@ -142,6 +142,22 @@ func TestValidator_NoEmbedding(t *testing.T) {
 	}
 }
 
+// TestValidator_TypedNilEmbeddingClassifier proves the typed-nil interface
+// trap is handled: a nil *EmbeddingClassifier passed to NewValidator must
+// degrade to regex-only, not panic in Apply on every write (see #1443 — the
+// memory-api consent path crashed when no embedding service was configured).
+func TestValidator_TypedNilEmbeddingClassifier(t *testing.T) {
+	var nilClassifier *EmbeddingClassifier // typed nil, as buildConsentValidator builds it
+	v := NewValidator(stubRules{out: privacy.ConsentMemoryIdentity}, nilClassifier)
+	got := v.Apply(context.Background(), "", "x") // must not panic
+	if got.Category != privacy.ConsentMemoryIdentity {
+		t.Errorf("got %q, want %q", got.Category, privacy.ConsentMemoryIdentity)
+	}
+	if got.Source != SourceRegex {
+		t.Errorf("Source = %q, want %q", got.Source, SourceRegex)
+	}
+}
+
 func TestValidator_EmbeddingError_FallsThrough(t *testing.T) {
 	embed := &stubEmbedding{err: context.DeadlineExceeded}
 	v := NewValidator(stubRules{out: privacy.ConsentMemoryIdentity}, embed)
