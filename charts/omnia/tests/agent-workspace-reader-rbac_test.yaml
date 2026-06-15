@@ -14,7 +14,7 @@ tests:
   # workspace lister depend on, plus the enterprise memory-policy/privacy
   # watcher's cluster-wide SessionPrivacyPolicy list (#1444), so assert all
   # three resources stay in one grant.
-  - it: grants read on workspaces, memorypolicies and sessionprivacypolicies
+  - it: grants read on workspaces, memorypolicies, sessionprivacypolicies and agentruntimes
     asserts:
       - contains:
           path: rules
@@ -25,6 +25,7 @@ tests:
               - workspaces
               - memorypolicies
               - sessionprivacypolicies
+              - agentruntimes
             verbs:
               - get
               - list

@@ -10,6 +10,9 @@
 #     lists SessionPrivacyPolicy CRs cluster-wide at startup to load consent
 #     enforcement (without this the watcher fails forbidden and privacy
 #     enforcement is silently skipped).
+#   - agentruntimes: the same watcher resolves which agents/workspaces a policy
+#     applies to by listing AgentRuntimes cluster-wide; without it the watcher's
+#     initial load fails forbidden and the projection/policy pipeline stalls.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -23,6 +26,7 @@ rules:
       - workspaces
       - memorypolicies
       - sessionprivacypolicies
+      - agentruntimes
     verbs:
       - get
       - list
