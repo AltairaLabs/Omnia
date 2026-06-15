@@ -12,6 +12,15 @@ import (
 // and trigger a re-render when backfilled embeddings cross it.
 const DefaultDenseThreshold = 0.7
 
+// defaultRenderCap bounds how many points reach t-SNE. The t-SNE backend
+// (danaugrs/go-tsne) is EXACT, not Barnes-Hut: it materialises n×n pairwise
+// affinity matrices and runs O(n²) work per iteration, so cost and memory grow
+// quadratically. At 8000 points a single render took minutes and ~1GB of
+// matrices; 2000 keeps a background render to ~tens of seconds while still
+// showing a dense, representative galaxy (applyCap keeps the most-recent,
+// highest-confidence points). Raising this needs a Barnes-Hut/UMAP backend.
+const defaultRenderCap = 2000
+
 // Options tunes the pipeline.
 type Options struct {
 	Cap            int     // max points fed to t-SNE (default 8000)
@@ -24,7 +33,7 @@ type Options struct {
 
 func (o Options) withDefaults() Options {
 	if o.Cap == 0 {
-		o.Cap = 8000
+		o.Cap = defaultRenderCap
 	}
 	if o.DenseThreshold == 0 {
 		o.DenseThreshold = DefaultDenseThreshold

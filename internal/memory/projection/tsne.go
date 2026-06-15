@@ -10,8 +10,11 @@ const (
 	tsneMaxIter      = 1000
 )
 
-// TSNE2D projects rows of X to 2D via Barnes-Hut t-SNE. Perplexity is clamped
-// so it stays below the point count (t-SNE requires perplexity < n).
+// TSNE2D projects rows of X to 2D via EXACT t-SNE (danaugrs/go-tsne builds
+// full n×n pairwise affinity matrices — it is not Barnes-Hut), so cost and
+// memory are O(n²) per iteration. Callers MUST bound n via Options.Cap
+// (see defaultRenderCap) to keep renders tractable. Perplexity is clamped so
+// it stays below the point count (t-SNE requires perplexity < n).
 func TSNE2D(X *mat.Dense) *mat.Dense {
 	n, _ := X.Dims()
 	perplexity := 30.0
