@@ -518,8 +518,10 @@ memoryDemo:
   embedding:
     model: nomic-embed-text
 
-  # Seeder scenario knobs (counts) consumed by the seed Job (Task 11). Sized for
-  # a realistic-but-fast local seed.
+  # Post-install seed Job (Task 11). The seeder generates a fixed-scale
+  # "Hawkridge Cloud" scenario (built-in DefaultScenario — counts are not
+  # flag-configurable); only the rng seed is. image is the dev-only seeder
+  # image built by Tilt.
   seed:
-    users: 40
-    institutionalDocs: 30
+    image: omnia-memory-seeder-dev:latest
+    rngSeed: 1

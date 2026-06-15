@@ -1,0 +1,167 @@
+{{- if .Values.memoryDemo.enabled }}
+{{- $ns := .Values.namespace }}
+---
+# Seeder ServiceAccount — the init container reads the demo Workspace UID
+# (cluster-scoped) + the chat agent UID (namespaced) so the seeder can scope the
+# generated memories correctly.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: memory-demo-seed
+  namespace: {{ $ns }}
+  labels:
+    app.kubernetes.io/name: omnia-demos
+    app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
+---
+# Workspace is cluster-scoped → ClusterRole to read its UID.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $ns }}-memory-demo-seed
+  labels:
+    app.kubernetes.io/name: omnia-demos
+    app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
+rules:
+  - apiGroups: ["omnia.altairalabs.ai"]
+    resources: ["workspaces"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $ns }}-memory-demo-seed
+  labels:
+    app.kubernetes.io/name: omnia-demos
+    app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ $ns }}-memory-demo-seed
+subjects:
+  - kind: ServiceAccount
+    name: memory-demo-seed
+    namespace: {{ $ns }}
+---
+# AgentRuntime + the managed memory-api Deployment are namespaced → namespaced Role.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: memory-demo-seed
+  namespace: {{ $ns }}
+  labels:
+    app.kubernetes.io/name: omnia-demos
+    app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
+rules:
+  - apiGroups: ["omnia.altairalabs.ai"]
+    resources: ["agentruntimes"]
+    verbs: ["get"]
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: memory-demo-seed
+  namespace: {{ $ns }}
+  labels:
+    app.kubernetes.io/name: omnia-demos
+    app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: memory-demo-seed
+subjects:
+  - kind: ServiceAccount
+    name: memory-demo-seed
+    namespace: {{ $ns }}
+---
+# Post-install/upgrade seed Job. Runs after the chart's Workspace + AgentRuntime
+# exist (regular resources apply before post-install hooks); the init container
+# then waits for the operator to roll out the demo memory-api before seeding.
+# Requires toolsDemo.enabled too — the seeder scopes agent-tier memories to the
+# tools-demo AgentRuntime's UID.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: memory-demo-seed
+  namespace: {{ $ns }}
+  labels:
+    app.kubernetes.io/name: omnia-demos
+    app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "10"
+    "helm.sh/hook-delete-policy": before-hook-creation
+spec:
+  backoffLimit: 6
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: memory-demo-seed
+    spec:
+      serviceAccountName: memory-demo-seed
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        # Resolve the workspace + agent UIDs and wait for the demo memory-api to
+        # be available before the seeder POSTs to it.
+        - name: resolve-and-wait
+          image: bitnami/kubectl:latest
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -e
+              echo "waiting for demo workspace + tools-demo agent UIDs..."
+              for i in $(seq 1 60); do
+                WS=$(kubectl get workspace demo -o jsonpath='{.metadata.uid}' 2>/dev/null || true)
+                AG=$(kubectl get agentruntime {{ .Values.toolsDemo.agent.name }} -n {{ $ns }} -o jsonpath='{.metadata.uid}' 2>/dev/null || true)
+                [ -n "$WS" ] && [ -n "$AG" ] && break
+                sleep 5
+              done
+              [ -n "$WS" ] || { echo "workspace 'demo' UID not found"; exit 1; }
+              [ -n "$AG" ] || { echo "agent '{{ .Values.toolsDemo.agent.name }}' UID not found — enable toolsDemo"; exit 1; }
+              printf '%s' "$WS" > /shared/ws-uid
+              printf '%s' "$AG" > /shared/agent-uid
+              echo "waiting for memory-demo-default to be available..."
+              for i in $(seq 1 60); do
+                R=$(kubectl get deployment memory-demo-default -n {{ $ns }} -o jsonpath='{.status.availableReplicas}' 2>/dev/null || true)
+                [ "${R:-0}" -ge 1 ] 2>/dev/null && break
+                sleep 5
+              done
+          volumeMounts:
+            - name: shared
+              mountPath: /shared
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+      containers:
+        - name: seed
+          image: {{ .Values.memoryDemo.seed.image }}
+          # Inject the init-resolved UIDs as flags (the seeder is alpine-based so
+          # a small sh wrapper can do this; the UIDs aren't known at render time).
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              exec /usr/local/bin/memory-seeder \
+                --memory-api="http://memory-demo-default.{{ $ns }}:8080" \
+                --workspace-uid="$(cat /shared/ws-uid)" \
+                --agent-uid="$(cat /shared/agent-uid)" \
+                --seed={{ .Values.memoryDemo.seed.rngSeed }}
+          volumeMounts:
+            - name: shared
+              mountPath: /shared
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+      volumes:
+        - name: shared
+          emptyDir: {}
+{{- end }}
