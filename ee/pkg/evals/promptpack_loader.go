@@ -14,13 +14,10 @@ import (
 	"fmt"
 	"sync"
 
-	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-)
 
-// ConfigMap data key containing the pack definition.
-const packJSONKey = "pack.json"
+	"github.com/altairalabs/omnia/internal/promptpack"
+)
 
 // CachedPack holds the cached raw pack data.
 // PackData is passed directly to sdk.Evaluate() — the SDK handles all parsing.
@@ -37,18 +34,26 @@ type packIdentity struct {
 	Version string `json:"version"`
 }
 
-// PromptPackLoader loads and caches raw pack data from PromptPack ConfigMaps.
+// packResolver loads raw pack.json bytes for a PromptPack. Satisfied by
+// *promptpack.Resolver; an interface so tests can stub it.
+type packResolver interface {
+	Load(ctx context.Context, namespace, name string) ([]byte, error)
+}
+
+// PromptPackLoader loads and caches raw pack data. It resolves content through
+// the PromptPack CR via promptpack.Resolver — it never touches the backing
+// store (ConfigMap, etc.) directly.
 type PromptPackLoader struct {
-	client  client.Client
-	cache   map[string]*CachedPack
-	cacheMu sync.RWMutex
+	resolver packResolver
+	cache    map[string]*CachedPack
+	cacheMu  sync.RWMutex
 }
 
 // NewPromptPackLoader creates a new loader.
 func NewPromptPackLoader(c client.Client) *PromptPackLoader {
 	return &PromptPackLoader{
-		client: c,
-		cache:  make(map[string]*CachedPack),
+		resolver: promptpack.NewResolver(c),
+		cache:    make(map[string]*CachedPack),
 	}
 }
 
@@ -71,12 +76,12 @@ func (l *PromptPackLoader) LoadEvals(
 		return cached, nil
 	}
 
-	cm := &corev1.ConfigMap{}
-	if err := l.client.Get(ctx, types.NamespacedName{Name: packName, Namespace: namespace}, cm); err != nil {
-		return nil, fmt.Errorf("failed to get ConfigMap %s/%s: %w", namespace, packName, err)
+	raw, err := l.resolver.Load(ctx, namespace, packName)
+	if err != nil {
+		return nil, err
 	}
 
-	result, err := parsePackData(cm, packName, packVersion)
+	result, err := parsePackData(raw, packName, packVersion)
 	if err != nil {
 		return nil, err
 	}
@@ -88,16 +93,12 @@ func (l *PromptPackLoader) LoadEvals(
 	return result, nil
 }
 
-// parsePackData extracts raw pack bytes and identity from a ConfigMap.
-func parsePackData(cm *corev1.ConfigMap, packName, packVersion string) (*CachedPack, error) {
-	raw, ok := cm.Data[packJSONKey]
-	if !ok {
-		return nil, fmt.Errorf("ConfigMap %s/%s does not contain %q key", cm.Namespace, cm.Name, packJSONKey)
-	}
-
+// parsePackData extracts identity (name, version) from raw pack.json bytes,
+// falling back to the supplied pack name/version when the pack omits them.
+func parsePackData(raw []byte, packName, packVersion string) (*CachedPack, error) {
 	var identity packIdentity
-	if err := json.Unmarshal([]byte(raw), &identity); err != nil {
-		return nil, fmt.Errorf("failed to parse %s in ConfigMap %s/%s: %w", packJSONKey, cm.Namespace, cm.Name, err)
+	if err := json.Unmarshal(raw, &identity); err != nil {
+		return nil, fmt.Errorf("failed to parse pack.json for %s: %w", packName, err)
 	}
 
 	name := identity.ID
@@ -112,7 +113,7 @@ func parsePackData(cm *corev1.ConfigMap, packName, packVersion string) (*CachedP
 	return &CachedPack{
 		PackName:    name,
 		PackVersion: version,
-		PackData:    []byte(raw),
+		PackData:    raw,
 	}, nil
 }
 

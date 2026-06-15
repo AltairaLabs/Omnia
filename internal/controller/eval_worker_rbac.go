@@ -131,7 +131,7 @@ func (r *AgentRuntimeReconciler) ensureEvalWorkerRole(
 			},
 			{
 				APIGroups: []string{omniaAPIGroup},
-				Resources: []string{"agentruntimes", "providers"},
+				Resources: []string{"agentruntimes", "providers", "promptpacks"},
 				Verbs:     []string{verbGet, verbList},
 			},
 		}
