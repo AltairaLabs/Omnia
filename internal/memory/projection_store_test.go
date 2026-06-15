@@ -8,6 +8,7 @@ package memory
 
 import (
 	"context"
+	"strings"
 	"testing"
 )
 
@@ -142,6 +143,58 @@ func TestProjectionFingerprint_EmptyAndChanges(t *testing.T) {
 	}
 	if fp2 == fp1 {
 		t.Errorf("fingerprint did not change after adding a memory: %q", fp2)
+	}
+}
+
+// TestProjectionFingerprint_DenseEligibilityFlips is the regression test for
+// the stuck-lexical bug: backfilled embeddings change neither the entity count
+// nor max(observed_at), so the old count:nanos fingerprint never changed and
+// the galaxy stayed on its cached lexical layout. The fingerprint now carries a
+// dense-eligibility bit that flips when coverage crosses the dense threshold.
+func TestProjectionFingerprint_DenseEligibilityFlips(t *testing.T) {
+	store := newStore(t)
+	ctx := context.Background()
+	scope := map[string]string{ScopeWorkspaceID: testWorkspace1}
+
+	// 4 distinct entities, no embeddings yet → 0% coverage → lexical-eligible.
+	for i := range 4 {
+		m := &Memory{Type: "profile", Content: "fact " + string(rune('a'+i)), Confidence: 0.9,
+			Scope: map[string]string{ScopeWorkspaceID: testWorkspace1, ScopeUserID: "u-" + string(rune('a'+i))}}
+		must(t, store.Save(ctx, m))
+	}
+
+	fp0, err := store.ProjectionFingerprint(ctx, scope)
+	if err != nil {
+		t.Fatalf("fingerprint fp0: %v", err)
+	}
+	if !strings.HasSuffix(fp0, ":0") {
+		t.Fatalf("0/4 embedded must be lexical-eligible (suffix :0), got %q", fp0)
+	}
+
+	// Embed 3 of 4 latest observations → 75% ≥ 70% dense threshold.
+	missing, err := store.FindObservationsMissingEmbedding(ctx, "", 100)
+	if err != nil {
+		t.Fatalf("find missing: %v", err)
+	}
+	if len(missing) < 4 {
+		t.Fatalf("want >=4 embeddable observations, got %d", len(missing))
+	}
+	vec := oneHotFloat(0, 1536)
+	for i := range 3 {
+		must(t, store.UpdateObservationEmbedding(ctx, missing[i].ObservationID, vec, "test-embed"))
+	}
+
+	fp1, err := store.ProjectionFingerprint(ctx, scope)
+	if err != nil {
+		t.Fatalf("fingerprint fp1: %v", err)
+	}
+	if !strings.HasSuffix(fp1, ":1") {
+		t.Fatalf("3/4 embedded must be dense-eligible (suffix :1), got %q", fp1)
+	}
+	// Only the eligibility bit may have flipped — the entity-count component
+	// must be identical (that's exactly why the old fingerprint missed it).
+	if c0, c1 := strings.Split(fp0, ":")[0], strings.Split(fp1, ":")[0]; c0 != c1 {
+		t.Errorf("entity count changed (%s → %s); only the eligibility bit should flip", c0, c1)
 	}
 }
 

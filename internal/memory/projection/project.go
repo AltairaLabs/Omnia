@@ -6,6 +6,12 @@ import (
 	"gonum.org/v1/gonum/mat"
 )
 
+// DefaultDenseThreshold is the embedding-coverage fraction at or above which
+// the projector picks the dense (semantic) basis instead of lexical. Exported
+// so the projection fingerprint can encode the same lexical↔dense eligibility
+// and trigger a re-render when backfilled embeddings cross it.
+const DefaultDenseThreshold = 0.7
+
 // Options tunes the pipeline.
 type Options struct {
 	Cap            int     // max points fed to t-SNE (default 8000)
@@ -21,7 +27,7 @@ func (o Options) withDefaults() Options {
 		o.Cap = 8000
 	}
 	if o.DenseThreshold == 0 {
-		o.DenseThreshold = 0.7
+		o.DenseThreshold = DefaultDenseThreshold
 	}
 	if o.PCADims == 0 {
 		o.PCADims = 50
