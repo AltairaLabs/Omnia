@@ -6,6 +6,10 @@
 #     Workspaces cluster-wide to find those opted into each MemoryPolicy.
 #   - memorypolicies: the memory-api consolidation worker lists MemoryPolicy
 #     CRs cluster-wide each pass to decide which workspaces to consolidate.
+#   - sessionprivacypolicies: the enterprise memory-policy/privacy watcher
+#     lists SessionPrivacyPolicy CRs cluster-wide at startup to load consent
+#     enforcement (without this the watcher fails forbidden and privacy
+#     enforcement is silently skipped).
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -18,6 +22,7 @@ rules:
     resources:
       - workspaces
       - memorypolicies
+      - sessionprivacypolicies
     verbs:
       - get
       - list
