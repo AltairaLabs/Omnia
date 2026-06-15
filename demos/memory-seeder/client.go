@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"time"
 
 	"github.com/altairalabs/omnia/pkg/identity"
 	"golang.org/x/time/rate"
@@ -47,8 +48,11 @@ func NewClient(base, workspaceUID string) *Client {
 	return &Client{
 		base:         base,
 		workspaceUID: workspaceUID,
-		http:         &http.Client{},
-		limiter:      rate.NewLimiter(seedRPS, seedBurst),
+		// DisableKeepAlives: use a fresh connection per request. Reused
+		// keep-alive connections to the per-workspace memory-api were a source
+		// of intermittent, body-dropping failures during bulk seeding.
+		http:    &http.Client{Transport: &http.Transport{DisableKeepAlives: true}},
+		limiter: rate.NewLimiter(seedRPS, seedBurst),
 	}
 }
 
@@ -58,12 +62,15 @@ type saveResp struct {
 	} `json:"memory"`
 }
 
+// maxAttempts bounds how many times a single write is retried. The
+// per-workspace memory-api occasionally rejects an otherwise-valid write with
+// a transient 400 (a workspace-resolution miss / connection hiccup); retrying
+// with a short backoff rides over the blip instead of aborting the whole seed.
+const maxAttempts = 5
+
 func (c *Client) postJSON(
 	ctx context.Context, path string, query url.Values, body any, wantStatus int,
 ) ([]byte, error) {
-	if err := c.limiter.Wait(ctx); err != nil {
-		return nil, err
-	}
 	buf, err := json.Marshal(body)
 	if err != nil {
 		return nil, err
@@ -72,29 +79,53 @@ func (c *Client) postJSON(
 	if len(query) > 0 {
 		u += "?" + query.Encode()
 	}
+	var lastErr error
+	for attempt := range maxAttempts {
+		if err := c.limiter.Wait(ctx); err != nil {
+			return nil, err
+		}
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(time.Duration(attempt) * 200 * time.Millisecond):
+			}
+		}
+		out, status, err := c.doOnce(ctx, u, buf)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		// 204 No Content = the write was suppressed by the enterprise privacy
+		// middleware (consent enforcement). The seeder intentionally generates
+		// consent-violating writes, so this is expected, not a failure.
+		if status == http.StatusNoContent {
+			return nil, nil
+		}
+		if status == wantStatus {
+			return out, nil
+		}
+		lastErr = fmt.Errorf("%s: status %d: %s", path, status, string(out))
+	}
+	return nil, lastErr
+}
+
+// doOnce performs a single POST attempt and returns the body, status, and any
+// transport error.
+func (c *Client) doOnce(ctx context.Context, u string, buf []byte) ([]byte, int, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, bytes.NewReader(buf))
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer func() { _ = resp.Body.Close() }()
 	out := new(bytes.Buffer)
 	_, _ = out.ReadFrom(resp.Body)
-	// 204 No Content = the write was suppressed by the enterprise privacy
-	// middleware (consent enforcement). The seeder intentionally generates
-	// consent-violating writes, so this is expected, not a failure — return
-	// empty so the caller skips it and continues.
-	if resp.StatusCode == http.StatusNoContent {
-		return nil, nil
-	}
-	if resp.StatusCode != wantStatus {
-		return nil, fmt.Errorf("%s: status %d: %s", path, resp.StatusCode, out.String())
-	}
-	return out.Bytes(), nil
+	return out.Bytes(), resp.StatusCode, nil
 }
 
 // Ingest posts a document for chunk-strategy institutional ingestion (202).
