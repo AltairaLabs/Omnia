@@ -13,18 +13,20 @@ type Scenario struct {
 	Seed              int64
 }
 
-// DefaultScenario returns realistic-scale defaults: ~300 docs → thousands of
-// institutional chunks, ~300 agent memories, ~40 users × 12, ~20 hot entities
-// × 15 observations for compaction fodder.
+// DefaultScenario returns a galaxy-friendly scale: a few thousand DIVERSE
+// points spread across six semantic topics, dominated by categorised user
+// memories (so colour + clusters show) rather than duplicated boilerplate.
+// 36 distinct topical docs (≈6 per topic) chunk into a modest, varied
+// institutional set instead of one blob.
 func DefaultScenario(workspaceUID string) Scenario {
 	return Scenario{
 		WorkspaceUID:      workspaceUID,
-		InstitutionalDocs: 300,
-		AgentMemories:     300,
-		Users:             40,
-		MemoriesPerUser:   12,
-		HotEntities:       20,
-		ObsPerHotEntity:   15,
+		InstitutionalDocs: 36,
+		AgentMemories:     240,
+		Users:             60,
+		MemoriesPerUser:   18,
+		HotEntities:       12,
+		ObsPerHotEntity:   12,
 		Seed:              1,
 	}
 }

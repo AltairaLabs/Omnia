@@ -115,12 +115,10 @@ func (w *ReembedWorker) Run(ctx context.Context) {
 		"currentModel", w.opts.CurrentModel,
 	)
 
-	// First pass on startup so a freshly-deployed service catches
-	// any pre-existing NULL-embedding rows immediately rather than
-	// waiting one Interval.
-	if err := w.RunOnce(ctx); err != nil {
-		w.log.Error(err, "initial reembed pass failed")
-	}
+	// Drain the startup backlog so a freshly-deployed service (or freshly
+	// seeded / bulk-ingested data, which embeds lazily) becomes searchable
+	// promptly, instead of one batch per Interval (days for a large backlog).
+	w.drainBacklog(ctx)
 
 	for {
 		select {
@@ -135,20 +133,65 @@ func (w *ReembedWorker) Run(ctx context.Context) {
 	}
 }
 
-// RunOnce performs a single backfill pass. Returns the number of
-// observations re-embedded so callers (and tests) can chain passes
-// until 0 to drain the queue. Per-row failures are logged but do
-// not abort the pass — one bad row shouldn't stop the rest.
+// maxDrainConsecutiveErrors bounds how many no-progress error passes the
+// startup drain tolerates before giving up and leaving the rest to the
+// periodic ticker. Without it a persistent failure (expired key, provider
+// down) would spin forever; a single transient error must NOT abort the drain.
+const maxDrainConsecutiveErrors = 5
+
+// drainBacklog re-embeds the entire backlog in batches. It stops when a pass
+// makes no progress AND returns no error (queue drained), when ctx is
+// cancelled, or after maxDrainConsecutiveErrors successive no-progress errors.
+// A transient error that still made progress, or is followed by a successful
+// pass, does not abort the drain — the earlier behaviour (stop on the first
+// error, because n==0) left most of a backlog un-embedded after one blip.
+func (w *ReembedWorker) drainBacklog(ctx context.Context) {
+	consecutiveErrors := 0
+	for {
+		if ctx.Err() != nil {
+			return
+		}
+		n, err := w.processBatch(ctx)
+		if err != nil {
+			w.log.Error(err, "reembed backlog pass error")
+			if n == 0 {
+				consecutiveErrors++
+				if consecutiveErrors >= maxDrainConsecutiveErrors {
+					w.log.Info("reembed drain giving up; periodic ticker will retry",
+						"consecutiveErrors", consecutiveErrors)
+					return
+				}
+				continue // no progress, but retry — the error may be transient
+			}
+		}
+		if n == 0 {
+			return // backlog drained
+		}
+		consecutiveErrors = 0 // progress made this pass
+	}
+}
+
+// RunOnce performs a single backfill pass. Per-row failures are logged
+// but do not abort the pass — one bad row shouldn't stop the rest.
 func (w *ReembedWorker) RunOnce(ctx context.Context) error {
+	_, err := w.processBatch(ctx)
+	return err
+}
+
+// processBatch re-embeds up to one BatchSize of NULL-embedding observations
+// and returns how many were successfully updated, so the startup drain loop
+// can keep going while progress is made and stop when there is none (queue
+// drained, or rows the provider returns no vector for).
+func (w *ReembedWorker) processBatch(ctx context.Context) (int, error) {
 	if w.provider == nil {
-		return nil
+		return 0, nil
 	}
 	rows, err := w.store.FindObservationsMissingEmbedding(ctx, w.opts.CurrentModel, w.opts.BatchSize)
 	if err != nil {
-		return fmt.Errorf("find candidates: %w", err)
+		return 0, fmt.Errorf("find candidates: %w", err)
 	}
 	if len(rows) == 0 {
-		return nil
+		return 0, nil
 	}
 
 	texts := make([]string, len(rows))
@@ -158,13 +201,14 @@ func (w *ReembedWorker) RunOnce(ctx context.Context) error {
 
 	embeddings, err := w.provider.Embed(ctx, texts)
 	if err != nil {
-		return fmt.Errorf("embed batch: %w", err)
+		return 0, fmt.Errorf("embed batch: %w", err)
 	}
 	if len(embeddings) != len(rows) {
-		return fmt.Errorf("embed returned %d vectors for %d rows", len(embeddings), len(rows))
+		return 0, fmt.Errorf("embed returned %d vectors for %d rows", len(embeddings), len(rows))
 	}
 
 	var firstErr error
+	updated := 0
 	for i, r := range rows {
 		if len(embeddings[i]) == 0 {
 			w.log.V(1).Info("skip empty embedding",
@@ -179,11 +223,13 @@ func (w *ReembedWorker) RunOnce(ctx context.Context) error {
 			}
 			continue
 		}
+		updated++
 	}
 
 	w.log.V(1).Info("reembed pass complete",
 		"candidates", len(rows),
+		"updated", updated,
 		"model", w.opts.CurrentModel,
 	)
-	return firstErr
+	return updated, firstErr
 }

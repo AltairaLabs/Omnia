@@ -50,7 +50,17 @@ type Validator struct {
 }
 
 // NewValidator constructs a Validator. embedding may be nil.
+//
+// It also guards the typed-nil interface trap: a caller that builds its
+// classifier as a concrete `var ec *EmbeddingClassifier` and passes it while
+// nil yields a non-nil embeddingPass whose dynamic value is nil. Apply's
+// `v.embedding != nil` check would then pass and call Classify on a nil
+// receiver, panicking on every write. Normalising that case to a genuine nil
+// here lets the validator degrade to regex-only as intended.
 func NewValidator(rules RuleClassifier, embedding embeddingPass) *Validator {
+	if ec, ok := embedding.(*EmbeddingClassifier); ok && ec == nil {
+		embedding = nil
+	}
 	return &Validator{rules: rules, embedding: embedding}
 }
 

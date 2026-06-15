@@ -122,6 +122,19 @@ func TestProject_Caps(t *testing.T) {
 	}
 }
 
+// TestOptions_DefaultRenderCapIsBounded guards the cap that keeps the EXACT
+// O(n²) t-SNE backend tractable: a regression back to a large default (e.g.
+// 8000) reintroduces multi-minute, ~GB renders.
+func TestOptions_DefaultRenderCapIsBounded(t *testing.T) {
+	got := (Options{}).withDefaults().Cap
+	if got != defaultRenderCap {
+		t.Errorf("default Cap = %d, want %d", got, defaultRenderCap)
+	}
+	if got > 3000 {
+		t.Errorf("default Cap %d is too large for exact O(n^2) t-SNE", got)
+	}
+}
+
 func TestProject_EmptyInputs(t *testing.T) {
 	res, err := Project(nil, nil, defaultOpts())
 	if err != nil {

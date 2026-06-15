@@ -27,6 +27,27 @@ func decode(t *testing.T, r *http.Request) map[string]any {
 	return m
 }
 
+func TestSaveUserMemorySuppressed204IsNotAnError(t *testing.T) {
+	// The enterprise privacy middleware suppresses consent-violating writes
+	// with 204 No Content. The seeder must treat that as a skip, not a failure.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, testWSUID)
+	id, err := c.SaveUserMemory(context.Background(), UserMemory{
+		RawUserID: "customer-001", Category: "memory:health",
+		Type: "profile", Content: "suppressed", Confidence: 0.9,
+	})
+	if err != nil {
+		t.Fatalf("SaveUserMemory on 204: unexpected error %v", err)
+	}
+	if id != "" {
+		t.Errorf("id = %q, want \"\" (suppressed)", id)
+	}
+}
+
 func TestSaveUserMemoryHashesUserAndScopes(t *testing.T) {
 	var gotPath, gotWorkspace, gotUserParam string
 	var gotBody map[string]any
@@ -129,10 +150,11 @@ func TestSaveObservationRepeatsAboutKey(t *testing.T) {
 }
 
 func TestSaveInstitutionalPostsFact(t *testing.T) {
-	var gotPath string
+	var gotPath, gotWorkspace string
 	var gotBody map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
+		gotWorkspace = r.URL.Query().Get("workspace")
 		gotBody = decode(t, r)
 		w.WriteHeader(http.StatusCreated)
 		_ = json.NewEncoder(w).Encode(map[string]any{fieldMemory: map[string]any{"id": "inst-1"}})
@@ -150,6 +172,10 @@ func TestSaveInstitutionalPostsFact(t *testing.T) {
 	if gotPath != "/api/v1/institutional/memories" {
 		t.Errorf("path = %q", gotPath)
 	}
+	// The handler reads the workspace from the query param, not the body.
+	if gotWorkspace != testWSUID {
+		t.Errorf("workspace query = %q, want %q", gotWorkspace, testWSUID)
+	}
 	if gotBody[fieldWorkspaceID] != testWSUID {
 		t.Errorf("workspace_id = %v", gotBody[fieldWorkspaceID])
 	}
@@ -162,10 +188,11 @@ func TestSaveInstitutionalPostsFact(t *testing.T) {
 }
 
 func TestSaveAgentMemoryPostsFact(t *testing.T) {
-	var gotPath string
+	var gotPath, gotWorkspace string
 	var gotBody map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
+		gotWorkspace = r.URL.Query().Get("workspace")
 		gotBody = decode(t, r)
 		w.WriteHeader(http.StatusCreated)
 		_ = json.NewEncoder(w).Encode(map[string]any{fieldMemory: map[string]any{"id": "agent-1"}})
@@ -184,6 +211,10 @@ func TestSaveAgentMemoryPostsFact(t *testing.T) {
 	}
 	if gotPath != "/api/v1/agent-memories" {
 		t.Errorf("path = %q", gotPath)
+	}
+	// The handler reads the workspace from the query param, not the body.
+	if gotWorkspace != testWSUID {
+		t.Errorf("workspace query = %q, want %q", gotWorkspace, testWSUID)
 	}
 	if gotBody[fieldWorkspaceID] != testWSUID || gotBody["agent_id"] != "support-agent" {
 		t.Errorf("body = %v", gotBody)

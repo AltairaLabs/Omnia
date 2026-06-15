@@ -120,6 +120,10 @@ spec:
                   - |
                     until pg_isready -U omnia; do sleep 1; done
                     psql -U omnia -d omnia_sessions -c "CREATE DATABASE omnia_memory;" 2>/dev/null || true
+                    # Dedicated DB for the memory-API demo so its 768-dim
+                    # nomic-embed-text embeddings don't collide with another
+                    # workspace's embedding column dimension in omnia_memory.
+                    psql -U omnia -d omnia_sessions -c "CREATE DATABASE omnia_memory_demo;" 2>/dev/null || true
           ports:
             - containerPort: 5432
               protocol: TCP

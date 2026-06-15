@@ -5,6 +5,13 @@
 #     Workspaces cluster-wide to find those opted into each MemoryPolicy.
 #   - memorypolicies: the memory-api consolidation worker lists MemoryPolicy
 #     CRs cluster-wide each pass to decide which workspaces to consolidate.
+#
+# NOTE: the enterprise privacy watcher also needs sessionprivacypolicies +
+# agentruntimes, but they must NOT be added here — the core operator doesn't
+# hold sessionprivacypolicies (an EE CRD) and has no bind/escalate, so adding it
+# makes Kubernetes' RBAC escalation check block the operator from creating the
+# per-pod ClusterRoleBindings to this role. That EE grant belongs in a separate
+# enterprise-gated reader role (tracked in #1444).
 # The AgentRuntimeReconciler / WorkspaceReconciler create a ClusterRoleBinding
 # per pod that references this ClusterRole by the name passed to
 # --agent-workspace-reader-clusterrole (default: "omnia-agent-workspace-reader").

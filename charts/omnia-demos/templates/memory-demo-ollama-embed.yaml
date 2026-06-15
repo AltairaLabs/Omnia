@@ -1,0 +1,185 @@
+{{- if .Values.memoryDemo.enabled }}
+{{- $ns := .Values.namespace }}
+{{- $img := printf "%s:%s" .Values.ollama.image.repository .Values.ollama.image.tag }}
+{{- $model := .Values.memoryDemo.embedding.model }}
+---
+# Dedicated ollama instance serving the embedding model (nomic-embed-text) for
+# the memory demo's semantic retrieval (the Memory Galaxy's dense projection +
+# embedding-similarity dedup). Kept separate from the chat instances so the
+# embed model is only pulled when memoryDemo is enabled. Mirrors ollama.yaml.
+{{- if .Values.ollama.persistence.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ollama-memory-embed-models
+  namespace: {{ $ns }}
+  labels:
+    app.kubernetes.io/name: ollama-memory-embed
+    app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
+  annotations:
+    "helm.sh/resource-policy": keep
+spec:
+  accessModes: ["ReadWriteOnce"]
+  {{- with .Values.ollama.persistence.storageClass }}
+  storageClassName: {{ . }}
+  {{- end }}
+  resources:
+    requests:
+      storage: 4Gi
+{{- end }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ollama-memory-embed
+  namespace: {{ $ns }}
+  labels:
+    app.kubernetes.io/name: ollama-memory-embed
+    app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
+    ollama-instance: "true"
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: ollama-memory-embed
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: ollama-memory-embed
+        app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
+        ollama-instance: "true"
+    spec:
+      {{- with .Values.ollama.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.ollama.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      initContainers:
+        # Pull the embedding model into the cache volume before serving.
+        - name: pull-model
+          image: {{ $img }}
+          imagePullPolicy: {{ .Values.ollama.image.pullPolicy }}
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              ollama serve & PID=$!
+              for i in $(seq 1 30); do ollama list >/dev/null 2>&1 && break; sleep 1; done
+              MODEL="{{ $model }}"
+              PATTERN=$(echo "$MODEL" | sed 's/:/ /')
+              ollama list | grep -q "$PATTERN" || ollama pull "$MODEL"
+              kill $PID 2>/dev/null || true; wait $PID 2>/dev/null || true
+          volumeMounts:
+            - name: models
+              mountPath: /root/.ollama
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "512Mi"
+            limits:
+              cpu: "500m"
+              memory: "1Gi"
+      containers:
+        - name: ollama
+          image: {{ $img }}
+          imagePullPolicy: {{ .Values.ollama.image.pullPolicy }}
+          ports:
+            - containerPort: 11434
+              name: http
+          env:
+            - name: OLLAMA_KEEP_ALIVE
+              value: {{ .Values.ollama.keepAlive | quote }}
+            - name: OLLAMA_HOST
+              value: "0.0.0.0:11434"
+          # Embeddings are light vs chat — a small footprint is enough.
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "1Gi"
+            limits:
+              cpu: "1"
+              memory: "2Gi"
+          volumeMounts:
+            - name: models
+              mountPath: /root/.ollama
+          startupProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 60
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            periodSeconds: 30
+            failureThreshold: 3
+      volumes:
+        - name: models
+          {{- if .Values.ollama.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: ollama-memory-embed-models
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ollama-memory-embed
+  namespace: {{ $ns }}
+  labels:
+    app.kubernetes.io/name: ollama-memory-embed
+    app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
+spec:
+  selector:
+    app.kubernetes.io/name: ollama-memory-embed
+  ports:
+    - port: 11434
+      targetPort: http
+      name: http
+  type: ClusterIP
+---
+# Embedding Provider the demo Workspace's memory service binds via providerRef
+# (memory-demo-embeddings). Drives the Memory Galaxy's dense projection +
+# embedding-similarity dedup. Defaults to a hosted embedder (Gemini, 768-dim)
+# to avoid the local-CPU ollama bottleneck; type=ollama uses the in-cluster
+# instance above. See values.yaml memoryDemo.embedding.provider.
+{{- $emb := .Values.memoryDemo.embedding.provider }}
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: Provider
+metadata:
+  name: memory-demo-embeddings
+  namespace: {{ $ns }}
+  labels:
+    app.kubernetes.io/name: omnia-demos
+    app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
+spec:
+  type: {{ $emb.type }}
+  # role: embedding is REQUIRED — memory-api skips a provider with the default
+  # "llm" role for embeddings ("has role llm but embedding is required").
+  role: embedding
+  model: {{ $emb.model }}
+  {{- if eq $emb.type "ollama" }}
+  baseURL: http://ollama-memory-embed.{{ $ns }}:11434
+  {{- end }}
+  # Pin the dimensions so the embedding columns match (nomic-embed-text and
+  # gemini text-embedding-004 are both 768; the default fallback is 1536).
+  embedding:
+    dimensions: {{ $emb.dimensions }}
+    distance: {{ $emb.distance }}
+  credential:
+    secretRef:
+      name: {{ $emb.credentialSecret }}
+{{- end }}

@@ -490,3 +490,75 @@ sharepointHero:
       ollamaService: ollama-chat
       # Only used for non-ollama types (claude/openai); ignored for ollama.
       secretRef: anthropic-api-key
+
+# ---------------------------------------------------------------------------
+# Memory-API dev demo (memoryDemo)
+# ---------------------------------------------------------------------------
+# Self-contained toggle that fills every memory UI surface in the omnia-demo
+# workspace at realistic scale. Mirrors the sharepointHero pattern: it wires the
+# demo Workspace's memory service at an ollama embedding provider + a demo
+# MemoryPolicy, runs memory-api with enterprise enabled (privacy enforcement
+# stats), and a post-install seed Job loads templated "Hawkridge Cloud" data
+# across all tiers. Dev-only; never enable in production.
+# Enable with: --set memoryDemo.enabled=true. Mutually exclusive with
+# sharepointHero on the demo Workspace's memory service (sharepointHero wins).
+memoryDemo:
+  enabled: false
+
+  # Postgres connection Secrets for the demo's managed memory-api + session-api.
+  database:
+    # session-api's Postgres Secret (POSTGRES_CONN key). When createDevSecret is
+    # true the chart creates it (pointing at devSessionConn) — session-api
+    # crashloops without it, which blocks the whole service group from becoming
+    # ready (and the dashboard's memory proxy 503s). For non-dev clusters set
+    # createDevSecret=false and pre-create this Secret.
+    sessionSecret: omnia-postgres
+    # The memory DB is DEDICATED (omnia_memory_demo) so the demo's embeddings
+    # don't collide with another workspace's embedding column dimension in the
+    # shared omnia_memory DB.
+    memorySecret: omnia-postgres-memory-demo
+    # When true (dev/Tilt), the chart creates memorySecret + sessionSecret
+    # pointing at the dev connections below. For other clusters, set false and
+    # pre-create both Secrets with a POSTGRES_CONN.
+    createDevSecret: true
+    devMemoryConn: "postgres://omnia:omnia@omnia-postgres.omnia-system.svc.cluster.local:5432/omnia_memory_demo?sslmode=disable"
+    devSessionConn: "postgres://omnia:omnia@omnia-postgres.omnia-system.svc.cluster.local:5432/omnia_sessions?sslmode=disable"
+
+  # Embedding configuration for the Memory Galaxy's dense (semantic) projection.
+  embedding:
+    # Model the in-cluster ollama memory-embed instance pulls/serves (Task 10),
+    # used only when provider.type=ollama.
+    model: nomic-embed-text
+    # The memory-demo-embeddings Provider the workspace binds for embeddings.
+    #
+    # DEFAULTS to a hosted embedder: a local CPU ollama embed can take ~10s
+    # under load and large batches time out, so the backlog never reaches the
+    # 70% coverage the dense projection needs and the galaxy stays on the
+    # lexical fallback. Hosted embeds return in <1s. Set type=ollama to use the
+    # in-cluster instance instead (baseURL is auto-set for ollama).
+    #
+    # NOTE: dimensions must match the memory DB's embedding columns. The schema
+    # is provisioned on first run; changing it later (e.g. 1536↔768) is a
+    # destructive re-init gated by a one-shot consent marker.
+    provider:
+      # type: ollama | gemini | openai | voyageai
+      type: openai
+      model: text-embedding-3-small
+      dimensions: 1536
+      distance: cosine
+      # API-key Secret for hosted types. NOT created by the chart — provision
+      # out-of-band so the key never lands in git. The Secret KEY name is the
+      # provider's env-var name (memory-api derives it from the type):
+      #   openai → OPENAI_API_KEY, gemini → GEMINI_API_KEY.
+      #   kubectl create secret generic openai-embeddings-credentials \
+      #     -n <ns> --from-literal=OPENAI_API_KEY=$OPENAI_API_KEY
+      # For type=ollama set this to the chart-created ollama-credentials.
+      credentialSecret: openai-embeddings-credentials
+
+  # Post-install seed Job (Task 11). The seeder generates a fixed-scale
+  # "Hawkridge Cloud" scenario (built-in DefaultScenario — counts are not
+  # flag-configurable); only the rng seed is. image is the dev-only seeder
+  # image built by Tilt.
+  seed:
+    image: omnia-memory-seeder-dev:latest
+    rngSeed: 1

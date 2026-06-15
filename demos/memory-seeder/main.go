@@ -10,40 +10,75 @@ import (
 )
 
 // run executes the seed in dependency order and links a sample of entities.
+// Individual write failures are logged and tolerated (not fatal) — a demo seed
+// should land as much data as it can rather than abort on one flaky endpoint.
 func run(ctx context.Context, c *Client, g Generated) error {
+	fails := 0
+	logFail := func(what string, err error) {
+		fails++
+		if fails <= 8 { // cap the noise on a bad run
+			log.Printf("seed write failed (%s) — tolerating: %v", what, err)
+		}
+	}
 	for _, d := range g.Docs {
 		if err := c.Ingest(ctx, d); err != nil {
-			return fmt.Errorf("ingest: %w", err)
+			logFail("ingest", err)
 		}
 	}
 	for _, m := range g.AgentMemories {
 		if _, err := c.SaveAgentMemory(ctx, m); err != nil {
-			return fmt.Errorf("agent memory: %w", err)
+			logFail("agent memory", err)
 		}
 	}
-	var instIDs []string
+	instIDs := seedInstitutionalFacts(ctx, c, logFail)
+	userIDs := seedUserMemories(ctx, c, g.UserMemories, logFail)
+	for _, o := range g.HotObservations {
+		if _, err := c.SaveObservation(ctx, o); err != nil {
+			logFail("observation", err)
+		}
+	}
+	if err := linkSample(ctx, c, instIDs, userIDs); err != nil {
+		logFail("link", err)
+	}
+	if fails > 0 {
+		log.Printf("seed finished with %d tolerated write failures", fails)
+	}
+	return nil
+}
+
+// seedInstitutionalFacts writes the institutional policy facts, skipping any
+// consent-suppressed (204 → empty id) or failed writes so they aren't linked.
+func seedInstitutionalFacts(ctx context.Context, c *Client, logFail func(string, error)) []string {
+	var ids []string
 	for i := range 20 {
 		id, err := c.SaveInstitutional(ctx, "policy",
 			fmt.Sprintf("Hawkridge policy fact %d", i), 0.9)
 		if err != nil {
-			return fmt.Errorf("institutional: %w", err)
+			logFail("institutional", err)
+			continue
 		}
-		instIDs = append(instIDs, id)
+		if id != "" {
+			ids = append(ids, id)
+		}
 	}
-	var userIDs []string
-	for _, m := range g.UserMemories {
+	return ids
+}
+
+// seedUserMemories writes the user-tier memories, skipping consent-suppressed
+// (204 → empty id) or failed writes so they aren't linked.
+func seedUserMemories(ctx context.Context, c *Client, mems []UserMemory, logFail func(string, error)) []string {
+	var ids []string
+	for _, m := range mems {
 		id, err := c.SaveUserMemory(ctx, m)
 		if err != nil {
-			return fmt.Errorf("user memory: %w", err)
+			logFail("user memory", err)
+			continue
 		}
-		userIDs = append(userIDs, id)
-	}
-	for _, o := range g.HotObservations {
-		if _, err := c.SaveObservation(ctx, o); err != nil {
-			return fmt.Errorf("observation: %w", err)
+		if id != "" {
+			ids = append(ids, id)
 		}
 	}
-	return linkSample(ctx, c, instIDs, userIDs)
+	return ids
 }
 
 // linkSample wires a few hundred edges so the graph has structure.

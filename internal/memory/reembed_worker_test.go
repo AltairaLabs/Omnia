@@ -32,16 +32,17 @@ import (
 // fixedReembedProvider returns the same vector for every text and
 // records every batch it received so tests can assert on the calls.
 type fixedReembedProvider struct {
-	vec    []float32
-	calls  [][]string
-	err    error
-	failOn int // index of call that returns err (0 = first call)
+	vec     []float32
+	calls   [][]string
+	err     error
+	failOn  int  // index of call that returns err (0 = first call)
+	failAll bool // when true (with err set), every call returns err
 }
 
 func (p *fixedReembedProvider) Embed(_ context.Context, texts []string) ([][]float32, error) {
 	idx := len(p.calls)
 	p.calls = append(p.calls, append([]string{}, texts...))
-	if p.err != nil && idx == p.failOn {
+	if p.err != nil && (p.failAll || idx == p.failOn) {
 		return nil, p.err
 	}
 	out := make([][]float32, len(texts))
@@ -79,6 +80,90 @@ func TestReembedWorker_BackfillsNullEmbeddings(t *testing.T) {
 	// stamped with the current model name.
 	require.NoError(t, worker.RunOnce(ctx))
 	assert.Len(t, provider.calls, 1, "second pass must not re-embed already-stamped rows")
+}
+
+// TestReembedWorker_DrainBacklogEmbedsAllBatches proves the startup drain
+// loops batches until the backlog is empty, rather than one batch per tick —
+// so freshly bulk-ingested/seeded data becomes searchable promptly.
+func TestReembedWorker_DrainBacklogEmbedsAllBatches(t *testing.T) {
+	store := newStore(t)
+	ctx := context.Background()
+	scope := testScope(testWorkspace1)
+
+	const rows = 5
+	for i := range rows {
+		require.NoError(t, store.Save(ctx, &Memory{Type: "fact",
+			Content: "row " + string(rune('a'+i)), Confidence: 0.9, Scope: scope}))
+	}
+
+	provider := &fixedReembedProvider{vec: oneHotFloat(0, 1536)}
+	worker := NewReembedWorker(store, provider, ReembedWorkerOptions{
+		BatchSize: 2, CurrentModel: "test-embed-v1", // 5 rows / batch 2 → ≥3 passes
+	}, logr.Discard())
+
+	worker.drainBacklog(ctx)
+
+	embedded := 0
+	for _, c := range provider.calls {
+		embedded += len(c)
+	}
+	assert.GreaterOrEqual(t, len(provider.calls), 3, "drain should loop multiple batches")
+	assert.Equal(t, rows, embedded, "drain should embed the entire backlog")
+
+	// Backlog drained — another drain makes no further provider calls.
+	before := len(provider.calls)
+	worker.drainBacklog(ctx)
+	assert.Equal(t, before, len(provider.calls), "nothing left to embed")
+}
+
+// TestReembedWorker_DrainBacklogRecoversFromTransientError proves a single
+// transient embed error does NOT abort the drain: the next pass retries the
+// same rows and embeds them. The old code stopped on the first error (n==0),
+// leaving most of a backlog un-embedded after one blip.
+func TestReembedWorker_DrainBacklogRecoversFromTransientError(t *testing.T) {
+	store := newStore(t)
+	ctx := context.Background()
+	scope := testScope(testWorkspace1)
+
+	require.NoError(t, store.Save(ctx, &Memory{Type: "fact",
+		Content: "row", Confidence: 0.9, Scope: scope}))
+
+	// Only the FIRST embed call fails; the retry succeeds.
+	provider := &fixedReembedProvider{
+		vec: oneHotFloat(0, 1536), err: errors.New("transient blip"), failOn: 0,
+	}
+	worker := NewReembedWorker(store, provider, ReembedWorkerOptions{
+		BatchSize: 2, CurrentModel: "test-embed-v1",
+	}, logr.Discard())
+
+	worker.drainBacklog(ctx)
+
+	require.GreaterOrEqual(t, len(provider.calls), 2, "drain must retry after the transient error")
+	rows, err := store.FindObservationsMissingEmbedding(ctx, "test-embed-v1", 10)
+	require.NoError(t, err)
+	assert.Empty(t, rows, "the row must end up embedded despite the first-pass error")
+}
+
+// TestReembedWorker_DrainBacklogGivesUpOnPersistentError proves a persistent
+// error (e.g. an expired key) does not spin forever: the drain retries a
+// bounded number of times then returns, leaving the periodic ticker to retry.
+func TestReembedWorker_DrainBacklogGivesUpOnPersistentError(t *testing.T) {
+	store := newStore(t)
+	ctx := context.Background()
+	scope := testScope(testWorkspace1)
+
+	require.NoError(t, store.Save(ctx, &Memory{Type: "fact",
+		Content: "boom", Confidence: 0.9, Scope: scope}))
+
+	provider := &fixedReembedProvider{
+		vec: oneHotFloat(0, 1536), err: errors.New("embed unavailable"), failAll: true,
+	}
+	worker := NewReembedWorker(store, provider, ReembedWorkerOptions{
+		BatchSize: 2, CurrentModel: "test-embed-v1",
+	}, logr.Discard())
+
+	worker.drainBacklog(ctx) // must return, not hang
+	assert.Len(t, provider.calls, maxDrainConsecutiveErrors, "drain gives up after the bounded retry count")
 }
 
 // TestReembedWorker_HonoursEmbeddingServiceModel proves a row

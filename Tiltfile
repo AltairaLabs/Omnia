@@ -39,6 +39,14 @@ ENABLE_DEMO = os.getenv('ENABLE_DEMO', os.getenv('ENABLE_OLLAMA', '')).lower() i
 #   kubectl create secret generic gemini-credentials -n omnia-demo --from-literal=api-key=$GEMINI_API_KEY
 ENABLE_AUDIO_DEMO = os.getenv('ENABLE_AUDIO_DEMO', '').lower() in ('true', '1', 'yes') or False
 
+# Set to True to enable the memory-API dev demo: fills every memory UI surface
+# in the omnia-demo workspace at realistic scale (seeder Job across all tiers,
+# ollama nomic-embed-text embeddings, consolidation summarizer). Pulls in the
+# tools-demo agent too (the seeder scopes agent-tier memories to it, and it
+# provides the live remember/recall chat path).
+# Can be set via environment: ENABLE_MEMORY_DEMO=true tilt up
+ENABLE_MEMORY_DEMO = os.getenv('ENABLE_MEMORY_DEMO', '').lower() in ('true', '1', 'yes') or False
+
 # Set to True to enable LangChain runtime demos alongside PromptKit demos
 # Deploys vision-demo-langchain and tools-demo-langchain agents using the LangChain runtime
 # Can be set via environment: ENABLE_LANGCHAIN=true tilt up
@@ -92,8 +100,11 @@ _nfs_env = os.getenv('ENABLE_NFS', '')
 if _nfs_env:
     ENABLE_NFS = _nfs_env.lower() in ('true', '1', 'yes')
 else:
-    # Default: enabled when enterprise is enabled, disabled otherwise
-    ENABLE_NFS = ENABLE_ENTERPRISE
+    # Default: enabled when enterprise is enabled, OR when the memory demo is on
+    # (its Workspace requests ReadWriteMany content storage, which only the
+    # omnia-nfs class can provision — without NFS the workspace never goes Ready
+    # and the dashboard's memory proxy 503s). Disabled otherwise.
+    ENABLE_NFS = ENABLE_ENTERPRISE or ENABLE_MEMORY_DEMO
 
 # Allow deployment to local clusters only (safety check)
 allow_k8s_contexts(['kind-omnia-dev', 'docker-desktop', 'minikube', 'kind-kind', 'orbstack'])
@@ -762,7 +773,7 @@ else:
     ])
 
 # Demo mode namespace creation (demos are now in separate chart)
-if ENABLE_DEMO or ENABLE_AUDIO_DEMO:
+if ENABLE_DEMO or ENABLE_AUDIO_DEMO or ENABLE_MEMORY_DEMO:
     namespace_create('omnia-demo')
 
 if ENABLE_FULL_STACK:
@@ -854,7 +865,7 @@ k8s_resource(
 # Demo Charts (separate from main Omnia chart)
 # ============================================================================
 
-if ENABLE_DEMO or ENABLE_AUDIO_DEMO:
+if ENABLE_DEMO or ENABLE_AUDIO_DEMO or ENABLE_MEMORY_DEMO:
     # Build demo helm set values
     demo_helm_set = [
         'namespace=omnia-demo',
@@ -882,6 +893,28 @@ if ENABLE_DEMO or ENABLE_AUDIO_DEMO:
             'langchainDemo.image.repository=omnia-langchain-runtime-dev',
             'langchainDemo.image.tag=latest',
             'langchainDemo.image.pullPolicy=Never',
+        ])
+
+    if ENABLE_MEMORY_DEMO:
+        # Dev-only seeder image consumed by the memory-demo post-install Job.
+        # only=[...] keeps the build context to what `go build ./demos/memory-seeder`
+        # needs (it imports just pkg/identity beyond stdlib).
+        docker_build(
+            'omnia-memory-seeder-dev',
+            '.',
+            dockerfile='demos/memory-seeder/Dockerfile',
+            only=[
+                './demos/memory-seeder',
+                './pkg/identity',
+                './go.mod',
+                './go.sum',
+            ],
+        )
+        demo_helm_set.extend([
+            'memoryDemo.enabled=true',
+            # The seeder scopes agent-tier memories to the tools-demo agent, and
+            # tools-demo provides the live remember/recall chat path.
+            'toolsDemo.enabled=true',
         ])
 
     k8s_yaml(helm(

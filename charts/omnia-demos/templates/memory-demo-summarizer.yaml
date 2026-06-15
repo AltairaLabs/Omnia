@@ -1,0 +1,119 @@
+{{- if .Values.memoryDemo.enabled }}
+{{- $ns := .Values.namespace }}
+---
+# Chat Provider for the consolidation summarizer (ollama llama3.2:3b via the
+# shared ollama-chat instance). Declared here — rather than reusing toolsDemo's
+# provider — so the summarizer works whenever memoryDemo is enabled, independent
+# of toolsDemo. The ollama-chat Deployment/Service come from ollama.instances.
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: Provider
+metadata:
+  name: memory-demo-summarizer-llm
+  namespace: {{ $ns }}
+  labels:
+    app.kubernetes.io/name: omnia-demos
+    app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
+spec:
+  type: ollama
+  model: llama3.2:3b
+  baseURL: http://ollama-chat.{{ $ns }}:11434
+  credential:
+    secretRef:
+      name: ollama-credentials
+---
+# Summarizer pack — a demo-scoped, ollama-backed mirror of the bundled
+# safe-default consolidation pack (charts/omnia/templates/consolidation). The
+# demo MemoryPolicy fans the staleObservations axis here; for each bucket the
+# pack emits one create_summary + one supersede, which surface as real actions
+# in the dashboard Consolidation section.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: memory-demo-summarizer
+  namespace: {{ $ns }}
+  labels:
+    app.kubernetes.io/name: omnia-demos
+    app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
+    app.kubernetes.io/component: memory-consolidation
+data:
+  pack.json: |
+    {
+      "id": "memory-demo-summarizer",
+      "name": "memory-demo-summarizer",
+      "version": "1.0.0",
+      "template_engine": { "version": "v1", "syntax": "{{`{{variable}}`}}" },
+      "prompts": {
+        "default": {
+          "id": "default",
+          "name": "default",
+          "version": "1.0.0",
+          "system_template": "You are a memory consolidation worker. Input is a JSON object with axis=staleObservations and a buckets array of grouped observations sharing entity kind+name. For each bucket, emit exactly one create_summary action over the entries plus one supersede action marking them replaced. Output a JSON array of those typed actions and nothing else. Do not emit rescope, invalidate, merge_entities, discard, or rescore — those are out of scope for this pack."
+        }
+      }
+    }
+---
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: PromptPack
+metadata:
+  name: memory-demo-summarizer
+  namespace: {{ $ns }}
+  labels:
+    app.kubernetes.io/name: omnia-demos
+    app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
+    app.kubernetes.io/component: memory-consolidation
+spec:
+  source:
+    type: configmap
+    configMapRef:
+      name: memory-demo-summarizer
+  version: "1.0.0"
+---
+# Function-mode AgentRuntime invoked by the consolidation worker (per the demo
+# MemoryPolicy functionRefs). One-shot gRPC: FunctionInput in, typed actions out.
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: AgentRuntime
+metadata:
+  name: memory-demo-summarizer
+  namespace: {{ $ns }}
+  labels:
+    app.kubernetes.io/name: omnia-demos
+    app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
+    app.kubernetes.io/component: memory-consolidation
+spec:
+  mode: function
+  promptPackRef:
+    name: memory-demo-summarizer
+  facade:
+    type: grpc
+    port: 8080
+  inputSchema:
+    type: object
+    required:
+      - axis
+      - workspaceID
+      - buckets
+    properties:
+      axis:
+        type: string
+      workspaceID:
+        type: string
+      buckets:
+        type: array
+      gates:
+        type: object
+  outputSchema:
+    type: array
+    items:
+      type: object
+      required:
+        - action
+      properties:
+        action:
+          type: string
+  runtime:
+    replicas: 1
+  providers:
+    - name: default
+      providerRef:
+        name: memory-demo-summarizer-llm
+{{- end }}
