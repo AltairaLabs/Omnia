@@ -133,10 +133,20 @@ func (w *ReembedWorker) Run(ctx context.Context) {
 	}
 }
 
-// drainBacklog re-embeds the entire backlog in batches, stopping when a pass
-// makes no progress (queue drained, ctx cancelled, or rows the provider
-// returns no vector for — which would otherwise loop forever).
+// maxDrainConsecutiveErrors bounds how many no-progress error passes the
+// startup drain tolerates before giving up and leaving the rest to the
+// periodic ticker. Without it a persistent failure (expired key, provider
+// down) would spin forever; a single transient error must NOT abort the drain.
+const maxDrainConsecutiveErrors = 5
+
+// drainBacklog re-embeds the entire backlog in batches. It stops when a pass
+// makes no progress AND returns no error (queue drained), when ctx is
+// cancelled, or after maxDrainConsecutiveErrors successive no-progress errors.
+// A transient error that still made progress, or is followed by a successful
+// pass, does not abort the drain — the earlier behaviour (stop on the first
+// error, because n==0) left most of a backlog un-embedded after one blip.
 func (w *ReembedWorker) drainBacklog(ctx context.Context) {
+	consecutiveErrors := 0
 	for {
 		if ctx.Err() != nil {
 			return
@@ -144,10 +154,20 @@ func (w *ReembedWorker) drainBacklog(ctx context.Context) {
 		n, err := w.processBatch(ctx)
 		if err != nil {
 			w.log.Error(err, "reembed backlog pass error")
+			if n == 0 {
+				consecutiveErrors++
+				if consecutiveErrors >= maxDrainConsecutiveErrors {
+					w.log.Info("reembed drain giving up; periodic ticker will retry",
+						"consecutiveErrors", consecutiveErrors)
+					return
+				}
+				continue // no progress, but retry — the error may be transient
+			}
 		}
 		if n == 0 {
-			return
+			return // backlog drained
 		}
+		consecutiveErrors = 0 // progress made this pass
 	}
 }
 
