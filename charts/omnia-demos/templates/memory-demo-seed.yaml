@@ -147,6 +147,23 @@ spec:
                 [ "${R:-0}" -ge 1 ] 2>/dev/null && break
                 sleep 5
               done
+              # "Available" only means ollama is up, NOT that the model is loaded
+              # in memory. Warm it with a real embed request (and confirm it
+              # works) so the seed's inline embeds don't hit a cold-load timeout
+              # — otherwise every memory is written without an embedding and the
+              # galaxy falls back to lexical clustering.
+              echo "warming the embedding model (cold-load can be slow)..."
+              EMB_URL="http://ollama-memory-embed.{{ $ns }}:11434/api/embed"
+              for i in $(seq 1 60); do
+                if curl -sf -m 60 "$EMB_URL" \
+                     -H 'Content-Type: application/json' \
+                     -d '{"model":"{{ .Values.memoryDemo.embedding.model }}","input":"warmup"}' \
+                     | grep -q '"embeddings"'; then
+                  echo "embedding model warm"
+                  break
+                fi
+                sleep 5
+              done
           volumeMounts:
             - name: shared
               mountPath: /shared
