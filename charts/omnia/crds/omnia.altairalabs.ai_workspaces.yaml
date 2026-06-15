@@ -461,6 +461,19 @@ spec:
                     WorkspaceServiceGroup defines a named group of session-api and memory-api endpoints
                     for a workspace. Agents reference a group by name via spec.serviceGroup.
                   properties:
+                    evalWorker:
+                      description: evalWorker opts this service group into the out-of-band
+                        eval-worker.
+                      properties:
+                        enabled:
+                          description: |-
+                            enabled forces creation of the eval-worker for this service group even
+                            when all of its eval-enabled agents use the PromptKit framework. It has
+                            no effect when the group has no eval-enabled agent (there is nothing to
+                            evaluate). Non-PromptKit agents always get a worker when evals are
+                            enabled, regardless of this flag.
+                          type: boolean
+                      type: object
                     external:
                       description: |-
                         external specifies pre-existing endpoint URLs when mode is "external".

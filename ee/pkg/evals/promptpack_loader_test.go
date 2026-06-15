@@ -10,15 +10,35 @@ package evals
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
+
+// stubResolver is a packResolver test double returning canned bytes or an error.
+type stubResolver struct {
+	data map[string][]byte
+	err  error
+}
+
+func (s *stubResolver) Load(_ context.Context, namespace, name string) ([]byte, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
+	if b, ok := s.data[namespace+"/"+name]; ok {
+		return b, nil
+	}
+	return nil, errors.New("pack not found")
+}
+
+// newStubLoader builds a PromptPackLoader backed by a stub resolver.
+func newStubLoader(r packResolver) *PromptPackLoader {
+	return &PromptPackLoader{resolver: r, cache: make(map[string]*CachedPack)}
+}
 
 func TestCacheKey(t *testing.T) {
 	assert.Equal(t, "ns/pack", cacheKey("ns", "pack"))
@@ -26,128 +46,46 @@ func TestCacheKey(t *testing.T) {
 }
 
 func TestParsePackData_Success(t *testing.T) {
-	cm := &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "my-pack",
-			Namespace: "default",
-		},
-		Data: map[string]string{
-			packJSONKey: `{"id":"test-id","version":"v2"}`,
-		},
-	}
-
-	result, err := parsePackData(cm, "my-pack", "v1")
+	result, err := parsePackData([]byte(`{"id":"test-id","version":"v2"}`), "my-pack", "v1")
 	require.NoError(t, err)
 	assert.Equal(t, "test-id", result.PackName)
 	assert.Equal(t, "v2", result.PackVersion)
-	assert.JSONEq(t,
-		`{"id":"test-id","version":"v2"}`,
-		string(result.PackData))
+	assert.JSONEq(t, `{"id":"test-id","version":"v2"}`, string(result.PackData))
 }
 
 func TestParsePackData_FallbackNameVersion(t *testing.T) {
-	cm := &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "my-pack",
-			Namespace: "default",
-		},
-		Data: map[string]string{
-			packJSONKey: `{"evals":[]}`,
-		},
-	}
-
-	result, err := parsePackData(cm, "fallback-name", "v3")
+	result, err := parsePackData([]byte(`{"evals":[]}`), "fallback-name", "v3")
 	require.NoError(t, err)
 	assert.Equal(t, "fallback-name", result.PackName)
 	assert.Equal(t, "v3", result.PackVersion)
 }
 
-func TestParsePackData_MissingKey(t *testing.T) {
-	cm := &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "my-pack",
-			Namespace: "default",
-		},
-		Data: map[string]string{"other": "data"},
-	}
-
-	_, err := parsePackData(cm, "my-pack", "v1")
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "does not contain")
-}
-
 func TestParsePackData_InvalidJSON(t *testing.T) {
-	cm := &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "my-pack",
-			Namespace: "default",
-		},
-		Data: map[string]string{
-			packJSONKey: `{not valid json`,
-		},
-	}
-
-	_, err := parsePackData(cm, "my-pack", "v1")
+	_, err := parsePackData([]byte(`{not valid json`), "my-pack", "v1")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to parse")
 }
 
 func TestLoadEvals_CacheHit(t *testing.T) {
-	scheme := runtime.NewScheme()
-	require.NoError(t, corev1.AddToScheme(scheme))
+	loader := newStubLoader(&stubResolver{data: map[string][]byte{
+		"ns/pack1": []byte(`{"id":"p1","version":"v1"}`),
+	}})
 
-	cm := &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "pack1",
-			Namespace: "ns",
-		},
-		Data: map[string]string{
-			packJSONKey: `{"id":"p1","version":"v1"}`,
-		},
-	}
-
-	k8s := fake.NewClientBuilder().
-		WithScheme(scheme).
-		WithObjects(cm).
-		Build()
-
-	loader := NewPromptPackLoader(k8s)
-
-	// First load — fetches from K8s.
-	r1, err := loader.LoadEvals(
-		context.Background(), "ns", "pack1", "v1",
-	)
+	// First load — fetches via the resolver.
+	r1, err := loader.LoadEvals(context.Background(), "ns", "pack1", "v1")
 	require.NoError(t, err)
 	assert.Equal(t, "p1", r1.PackName)
 
 	// Second load — cache hit (same version).
-	r2, err := loader.LoadEvals(
-		context.Background(), "ns", "pack1", "v1",
-	)
+	r2, err := loader.LoadEvals(context.Background(), "ns", "pack1", "v1")
 	require.NoError(t, err)
 	assert.Same(t, r1, r2)
 }
 
 func TestLoadEvals_CacheMissOnVersionChange(t *testing.T) {
-	scheme := runtime.NewScheme()
-	require.NoError(t, corev1.AddToScheme(scheme))
-
-	cm := &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "pack1",
-			Namespace: "ns",
-		},
-		Data: map[string]string{
-			packJSONKey: `{"id":"p1","version":"v2"}`,
-		},
-	}
-
-	k8s := fake.NewClientBuilder().
-		WithScheme(scheme).
-		WithObjects(cm).
-		Build()
-
-	loader := NewPromptPackLoader(k8s)
+	loader := newStubLoader(&stubResolver{data: map[string][]byte{
+		"ns/pack1": []byte(`{"id":"p1","version":"v2"}`),
+	}})
 
 	// Pre-populate cache with v1.
 	loader.cache[cacheKey("ns", "pack1")] = &CachedPack{
@@ -157,43 +95,23 @@ func TestLoadEvals_CacheMissOnVersionChange(t *testing.T) {
 	}
 
 	// Load with v2 — should refetch.
-	result, err := loader.LoadEvals(
-		context.Background(), "ns", "pack1", "v2",
-	)
+	result, err := loader.LoadEvals(context.Background(), "ns", "pack1", "v2")
 	require.NoError(t, err)
 	assert.Equal(t, "v2", result.PackVersion)
 	assert.NotEqual(t, "old", string(result.PackData))
 }
 
-func TestLoadEvals_ConfigMapNotFound(t *testing.T) {
-	scheme := runtime.NewScheme()
-	require.NoError(t, corev1.AddToScheme(scheme))
+func TestLoadEvals_ResolverError(t *testing.T) {
+	loader := newStubLoader(&stubResolver{err: errors.New("get PromptPack ns/missing: not found")})
 
-	k8s := fake.NewClientBuilder().
-		WithScheme(scheme).
-		Build()
-
-	loader := NewPromptPackLoader(k8s)
-	_, err := loader.LoadEvals(
-		context.Background(), "ns", "missing", "v1",
-	)
+	_, err := loader.LoadEvals(context.Background(), "ns", "missing", "v1")
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "failed to get ConfigMap")
+	assert.Contains(t, err.Error(), "PromptPack")
 }
 
 func TestInvalidateCache(t *testing.T) {
-	scheme := runtime.NewScheme()
-	require.NoError(t, corev1.AddToScheme(scheme))
-
-	k8s := fake.NewClientBuilder().
-		WithScheme(scheme).
-		Build()
-
-	loader := NewPromptPackLoader(k8s)
-	loader.cache[cacheKey("ns", "pack1")] = &CachedPack{
-		PackName:    "p1",
-		PackVersion: "v1",
-	}
+	loader := NewPromptPackLoader(fake.NewClientBuilder().WithScheme(runtime.NewScheme()).Build())
+	loader.cache[cacheKey("ns", "pack1")] = &CachedPack{PackName: "p1", PackVersion: "v1"}
 
 	loader.InvalidateCache("ns", "pack1")
 	_, ok := loader.cache[cacheKey("ns", "pack1")]
@@ -201,14 +119,7 @@ func TestInvalidateCache(t *testing.T) {
 }
 
 func TestInvalidateCache_NoOp(t *testing.T) {
-	scheme := runtime.NewScheme()
-	require.NoError(t, corev1.AddToScheme(scheme))
-
-	k8s := fake.NewClientBuilder().
-		WithScheme(scheme).
-		Build()
-
-	loader := NewPromptPackLoader(k8s)
+	loader := NewPromptPackLoader(fake.NewClientBuilder().WithScheme(runtime.NewScheme()).Build())
 	// Invalidating a key that doesn't exist should not panic.
 	loader.InvalidateCache("ns", "nonexistent")
 }

@@ -87,12 +87,20 @@ func (r *AgentRuntimeReconciler) serviceGroupsNeedingEvalWorker(
 		if rt.DeletionTimestamp != nil {
 			continue
 		}
-		if !hasEvalsEnabled(&rt.Spec) || isPromptKit(&rt.Spec) {
+		if !hasEvalsEnabled(&rt.Spec) {
 			continue
 		}
 		group := rt.Spec.ServiceGroup
 		if group == "" {
 			group = defaultSvcGroupName
+		}
+		// PromptKit agents self-evaluate inline and are excluded from the
+		// eval-worker by default. Their group can opt in via the
+		// WorkspaceServiceGroup evalWorker.enabled flag to run llm_judge
+		// (long-running/external) evals out-of-band — the only path that
+		// emits worker-only labels like `variant`.
+		if isPromptKit(&rt.Spec) && !r.groupEvalWorkerEnabled(ctx, namespace, group) {
+			continue
 		}
 		if _, seen := needed[group]; !seen {
 			needed[group] = rt.Spec.Evals.PodOverrides
@@ -334,6 +342,19 @@ func (r *AgentRuntimeReconciler) resolveEvalWorkerRedis(ctx context.Context, nam
 		return resolveSessionRedis(sg, namespace, defaultURL, defaultSecret)
 	}
 	return defaultURL, defaultSecret
+}
+
+// groupEvalWorkerEnabled reports whether the given service group opts into the
+// eval-worker via its WorkspaceServiceGroup evalWorker.enabled flag. This lets
+// PromptKit agents — which self-evaluate inline and are otherwise excluded —
+// run their out-of-band (llm_judge) evals when the group operator opts in.
+// Returns false when no matching Workspace/group exists.
+func (r *AgentRuntimeReconciler) groupEvalWorkerEnabled(ctx context.Context, namespace, serviceGroup string) bool {
+	sg, ok := r.findServiceGroup(ctx, namespace, serviceGroup)
+	if !ok {
+		return false
+	}
+	return sg.EvalWorker != nil && sg.EvalWorker.Enabled
 }
 
 // findServiceGroup looks up the WorkspaceServiceGroup spec for the given

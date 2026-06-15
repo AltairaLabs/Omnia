@@ -167,6 +167,50 @@ func TestServiceGroupsNeedingEvalWorker(t *testing.T) {
 	require.ElementsMatch(t, []string{defaultSvcGroupName, "prod"}, keysOf(needed))
 }
 
+func TestServiceGroupsNeedingEvalWorker_PromptKitGroupOptIn(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = omniav1alpha1.AddToScheme(scheme)
+
+	// Two PromptKit agents in different service groups. Only "pk-optin"'s
+	// WorkspaceServiceGroup opts into the eval-worker; "pk-default"'s does not.
+	optIn := &omniav1alpha1.AgentRuntime{
+		ObjectMeta: metav1.ObjectMeta{Name: "optin", Namespace: "ns"},
+		Spec: omniav1alpha1.AgentRuntimeSpec{
+			ServiceGroup: "pk-optin",
+			Framework:    &omniav1alpha1.FrameworkConfig{Type: omniav1alpha1.FrameworkTypePromptKit},
+			Evals:        &omniav1alpha1.EvalConfig{Enabled: true},
+		},
+	}
+	noOptIn := &omniav1alpha1.AgentRuntime{
+		ObjectMeta: metav1.ObjectMeta{Name: "default-pk", Namespace: "ns"},
+		Spec: omniav1alpha1.AgentRuntimeSpec{
+			ServiceGroup: "pk-default",
+			Framework:    &omniav1alpha1.FrameworkConfig{Type: omniav1alpha1.FrameworkTypePromptKit},
+			Evals:        &omniav1alpha1.EvalConfig{Enabled: true},
+		},
+	}
+	ws := &omniav1alpha1.Workspace{
+		ObjectMeta: metav1.ObjectMeta{Name: "ws"},
+		Spec: omniav1alpha1.WorkspaceSpec{
+			Namespace: omniav1alpha1.NamespaceConfig{Name: "ns"},
+			Services: []omniav1alpha1.WorkspaceServiceGroup{
+				{Name: "pk-optin", EvalWorker: &omniav1alpha1.ServiceGroupEvalWorker{Enabled: true}},
+				{Name: "pk-default"},
+			},
+		},
+	}
+
+	r := &AgentRuntimeReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).
+			WithObjects(optIn, noOptIn, ws).Build(),
+		Scheme: scheme,
+	}
+
+	needed, err := r.serviceGroupsNeedingEvalWorker(context.Background(), "ns")
+	require.NoError(t, err)
+	require.ElementsMatch(t, []string{"pk-optin"}, keysOf(needed))
+}
+
 func envValue(env []corev1.EnvVar, name string) string {
 	for _, e := range env {
 		if e.Name == name {

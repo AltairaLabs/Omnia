@@ -28,7 +28,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel/trace/noop"
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
@@ -102,8 +101,8 @@ func containsEvalDef(
 	}
 }
 
-// newTestPackLoader creates a PromptPackLoader backed by a fake K8s client
-// with a ConfigMap containing the given eval definitions.
+// newTestPackLoader creates a PromptPackLoader backed by a stub resolver that
+// returns a pack containing the given eval definitions.
 func newTestPackLoader(evalDefs []runtimeevals.EvalDef) *PromptPackLoader {
 	const namespace = "ns"
 	const packName = "test-pack"
@@ -121,19 +120,9 @@ func newTestPackLoader(evalDefs []runtimeevals.EvalDef) *PromptPackLoader {
 		},
 	}
 	packData, _ := json.Marshal(pack)
-	cm := &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      packName,
-			Namespace: namespace,
-		},
-		Data: map[string]string{
-			packJSONKey: string(packData),
-		},
-	}
-	scheme := runtime.NewScheme()
-	_ = corev1.AddToScheme(scheme)
-	fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(cm).Build()
-	return NewPromptPackLoader(fakeClient)
+	return newStubLoader(&stubResolver{data: map[string][]byte{
+		namespace + "/" + packName: packData,
+	}})
 }
 
 // toMessagePtrs converts a value slice to a pointer slice.
