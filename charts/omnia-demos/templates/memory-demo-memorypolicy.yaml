@@ -32,11 +32,12 @@ spec:
     # Every minute (cron granularity is 1 minute); the operator's short
     # --consolidation-interval poll checks this schedule frequently in dev.
     schedule: "* * * * *"
-    # Both axes are handled by the one function-mode summarizer AgentRuntime
-    # (memory-demo-summarizer, namespace defaults to the workspace namespace).
+    # Only the staleObservations axis is wired: the summarizer AgentRuntime
+    # (memory-demo-summarizer, namespace defaults to the workspace namespace)
+    # mirrors the proven safe-default pack (create_summary + supersede). The
+    # entity-duplicate axis (merge_entities) is gated by safety thresholds and
+    # left out so the demo's consolidation beat stays reliable.
     functionRefs:
       staleObservations:
-        name: memory-demo-summarizer
-      entityDuplicateCandidates:
         name: memory-demo-summarizer
 {{- end }}
