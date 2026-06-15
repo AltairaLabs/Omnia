@@ -107,21 +107,25 @@ func (c *Client) Ingest(ctx context.Context, d Doc) error {
 	return err
 }
 
-// SaveInstitutional saves a single institutional fact directly (201).
+// SaveInstitutional saves a single institutional fact directly (201). The
+// handler reads the workspace from the ?workspace= query param, not the body.
 func (c *Client) SaveInstitutional(ctx context.Context, typ, content string, confidence float64) (string, error) {
+	q := url.Values{"workspace": {c.workspaceUID}}
 	body := map[string]any{
 		fieldWorkspaceID: c.workspaceUID, fieldType: typ, fieldContent: content, fieldConfidence: confidence,
 	}
-	return c.saveID(ctx, "/api/v1/institutional/memories", nil, body)
+	return c.saveID(ctx, "/api/v1/institutional/memories", q, body)
 }
 
-// SaveAgentMemory saves an agent-tier memory (201).
+// SaveAgentMemory saves an agent-tier memory (201). The handler reads the
+// workspace from the ?workspace= query param, not the body.
 func (c *Client) SaveAgentMemory(ctx context.Context, m AgentMemory) (string, error) {
+	q := url.Values{"workspace": {c.workspaceUID}}
 	body := map[string]any{
 		fieldWorkspaceID: c.workspaceUID, "agent_id": m.AgentID,
 		fieldType: m.Type, fieldContent: m.Content, fieldConfidence: m.Confidence,
 	}
-	return c.saveID(ctx, "/api/v1/agent-memories", nil, body)
+	return c.saveID(ctx, "/api/v1/agent-memories", q, body)
 }
 
 // SaveUserMemory saves a user-tier memory scoped to PseudonymizeID(RawUserID).

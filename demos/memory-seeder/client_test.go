@@ -150,10 +150,11 @@ func TestSaveObservationRepeatsAboutKey(t *testing.T) {
 }
 
 func TestSaveInstitutionalPostsFact(t *testing.T) {
-	var gotPath string
+	var gotPath, gotWorkspace string
 	var gotBody map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
+		gotWorkspace = r.URL.Query().Get("workspace")
 		gotBody = decode(t, r)
 		w.WriteHeader(http.StatusCreated)
 		_ = json.NewEncoder(w).Encode(map[string]any{fieldMemory: map[string]any{"id": "inst-1"}})
@@ -171,6 +172,10 @@ func TestSaveInstitutionalPostsFact(t *testing.T) {
 	if gotPath != "/api/v1/institutional/memories" {
 		t.Errorf("path = %q", gotPath)
 	}
+	// The handler reads the workspace from the query param, not the body.
+	if gotWorkspace != testWSUID {
+		t.Errorf("workspace query = %q, want %q", gotWorkspace, testWSUID)
+	}
 	if gotBody[fieldWorkspaceID] != testWSUID {
 		t.Errorf("workspace_id = %v", gotBody[fieldWorkspaceID])
 	}
@@ -183,10 +188,11 @@ func TestSaveInstitutionalPostsFact(t *testing.T) {
 }
 
 func TestSaveAgentMemoryPostsFact(t *testing.T) {
-	var gotPath string
+	var gotPath, gotWorkspace string
 	var gotBody map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
+		gotWorkspace = r.URL.Query().Get("workspace")
 		gotBody = decode(t, r)
 		w.WriteHeader(http.StatusCreated)
 		_ = json.NewEncoder(w).Encode(map[string]any{fieldMemory: map[string]any{"id": "agent-1"}})
@@ -205,6 +211,10 @@ func TestSaveAgentMemoryPostsFact(t *testing.T) {
 	}
 	if gotPath != "/api/v1/agent-memories" {
 		t.Errorf("path = %q", gotPath)
+	}
+	// The handler reads the workspace from the query param, not the body.
+	if gotWorkspace != testWSUID {
+		t.Errorf("workspace query = %q, want %q", gotWorkspace, testWSUID)
 	}
 	if gotBody[fieldWorkspaceID] != testWSUID || gotBody["agent_id"] != "support-agent" {
 		t.Errorf("body = %v", gotBody)
