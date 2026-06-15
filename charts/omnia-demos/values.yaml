@@ -507,18 +507,22 @@ memoryDemo:
 
   # Postgres connection Secrets for the demo's managed memory-api + session-api.
   database:
-    # sessionSecret is a pre-created Secret in the namespace (POSTGRES_CONN key),
-    # reused from the core dev install — same assumption as sharepointHero.
+    # session-api's Postgres Secret (POSTGRES_CONN key). When createDevSecret is
+    # true the chart creates it (pointing at devSessionConn) — session-api
+    # crashloops without it, which blocks the whole service group from becoming
+    # ready (and the dashboard's memory proxy 503s). For non-dev clusters set
+    # createDevSecret=false and pre-create this Secret.
     sessionSecret: omnia-postgres
-    # The memory DB is DEDICATED (omnia_memory_demo) so the demo's 768-dim
-    # nomic-embed-text embeddings don't collide with another workspace's
-    # embedding column dimension in the shared omnia_memory DB.
+    # The memory DB is DEDICATED (omnia_memory_demo) so the demo's embeddings
+    # don't collide with another workspace's embedding column dimension in the
+    # shared omnia_memory DB.
     memorySecret: omnia-postgres-memory-demo
-    # When true (dev/Tilt), the chart creates memorySecret pointing at
-    # devMemoryConn. For other clusters, set false and pre-create memorySecret
-    # with a POSTGRES_CONN to a dedicated memory database.
+    # When true (dev/Tilt), the chart creates memorySecret + sessionSecret
+    # pointing at the dev connections below. For other clusters, set false and
+    # pre-create both Secrets with a POSTGRES_CONN.
     createDevSecret: true
     devMemoryConn: "postgres://omnia:omnia@omnia-postgres.omnia-system.svc.cluster.local:5432/omnia_memory_demo?sslmode=disable"
+    devSessionConn: "postgres://omnia:omnia@omnia-postgres.omnia-system.svc.cluster.local:5432/omnia_sessions?sslmode=disable"
 
   # Embedding configuration for the Memory Galaxy's dense (semantic) projection.
   embedding:

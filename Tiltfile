@@ -100,8 +100,11 @@ _nfs_env = os.getenv('ENABLE_NFS', '')
 if _nfs_env:
     ENABLE_NFS = _nfs_env.lower() in ('true', '1', 'yes')
 else:
-    # Default: enabled when enterprise is enabled, disabled otherwise
-    ENABLE_NFS = ENABLE_ENTERPRISE
+    # Default: enabled when enterprise is enabled, OR when the memory demo is on
+    # (its Workspace requests ReadWriteMany content storage, which only the
+    # omnia-nfs class can provision — without NFS the workspace never goes Ready
+    # and the dashboard's memory proxy 503s). Disabled otherwise.
+    ENABLE_NFS = ENABLE_ENTERPRISE or ENABLE_MEMORY_DEMO
 
 # Allow deployment to local clusters only (safety check)
 allow_k8s_contexts(['kind-omnia-dev', 'docker-desktop', 'minikube', 'kind-kind', 'orbstack'])
