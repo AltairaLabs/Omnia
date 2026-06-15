@@ -112,9 +112,9 @@ spec:
         # Resolve the workspace + agent UIDs and wait for the demo memory-api to
         # be available before the seeder POSTs to it.
         - name: resolve-and-wait
-          # rancher/kubectl (alpine + kubectl + /bin/sh), maintained on Docker
-          # Hub — bitnami/kubectl was deprecated/relocated in 2025.
-          image: rancher/kubectl:v1.31.0
+          # alpine/k8s bundles kubectl on alpine (has /bin/sh for the wrapper).
+          # bitnami/kubectl was deprecated in 2025; rancher/kubectl is shell-less.
+          image: alpine/k8s:1.31.1
           command: ["/bin/sh", "-c"]
           args:
             - |
