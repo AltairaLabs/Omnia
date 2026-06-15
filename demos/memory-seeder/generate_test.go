@@ -56,6 +56,40 @@ func TestUserMemoriesCoverAllCategories(t *testing.T) {
 	}
 }
 
+// TestUserMemoriesAreDiverse guards the whole point of the rewrite: the old
+// templated generator produced a handful of repeated strings (the lexical
+// blob), which made dense and lexical projections look identical. The
+// combinatorial generator must produce mostly-unique content so embeddings
+// form real clusters.
+func TestUserMemoriesAreDiverse(t *testing.T) {
+	s := DefaultScenario("ws")
+	out := Generate(s, rand.New(rand.NewSource(s.Seed)))
+	seen := map[string]bool{}
+	for _, m := range out.UserMemories {
+		seen[m.Content] = true
+	}
+	ratio := float64(len(seen)) / float64(len(out.UserMemories))
+	if ratio < 0.5 {
+		t.Errorf("user memory content only %.0f%% unique (%d/%d); too templated for a semantic galaxy",
+			ratio*100, len(seen), len(out.UserMemories))
+	}
+}
+
+// TestTopicsMapDistinctCategories ensures the six topics cover the six consent
+// categories one-to-one, so galaxy colour (category) and position (topic) align.
+func TestTopicsMapDistinctCategories(t *testing.T) {
+	if len(topics) != len(Categories) {
+		t.Fatalf("topics=%d categories=%d; expected one topic per category", len(topics), len(Categories))
+	}
+	seen := map[string]bool{}
+	for _, tp := range topics {
+		if seen[tp.category] {
+			t.Errorf("category %q used by more than one topic", tp.category)
+		}
+		seen[tp.category] = true
+	}
+}
+
 func TestHotObservationsShareEntities(t *testing.T) {
 	s := DefaultScenario("ws")
 	out := Generate(s, rand.New(rand.NewSource(s.Seed)))
