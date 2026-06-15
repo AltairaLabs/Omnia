@@ -520,11 +520,31 @@ memoryDemo:
     createDevSecret: true
     devMemoryConn: "postgres://omnia:omnia@omnia-postgres.omnia-system.svc.cluster.local:5432/omnia_memory_demo?sslmode=disable"
 
-  # Embedding model served by the demo's ollama memory-embed instance (Task 10).
-  # The memory-demo-embeddings Provider points the workspace memory service here
-  # so semantic retrieval (the Memory Galaxy's dense projection) is configured.
+  # Embedding configuration for the Memory Galaxy's dense (semantic) projection.
   embedding:
+    # Model the in-cluster ollama memory-embed instance pulls/serves (Task 10),
+    # used only when provider.type=ollama.
     model: nomic-embed-text
+    # The memory-demo-embeddings Provider the workspace binds for embeddings.
+    #
+    # DEFAULTS to a hosted embedder: a local CPU ollama embed can take ~10s
+    # under load and large batches time out, so the backlog never reaches the
+    # 70% coverage the dense projection needs and the galaxy stays on the
+    # lexical fallback. Gemini text-embedding-004 is also 768-dim, so the
+    # memory schema is unchanged (no re-init). Set type=ollama to use the
+    # in-cluster instance instead (baseURL is auto-set for ollama).
+    provider:
+      # type: ollama | gemini | openai | voyageai
+      type: gemini
+      model: text-embedding-004
+      dimensions: 768
+      distance: cosine
+      # API-key Secret (key: api-key) for hosted types. NOT created by the
+      # chart — provision out-of-band so the key never lands in git:
+      #   kubectl create secret generic gemini-embeddings-credentials \
+      #     -n <ns> --from-literal=api-key=$GEMINI_API_KEY
+      # For type=ollama set this to the chart-created ollama-credentials.
+      credentialSecret: gemini-embeddings-credentials
 
   # Post-install seed Job (Task 11). The seeder generates a fixed-scale
   # "Hawkridge Cloud" scenario (built-in DefaultScenario — counts are not

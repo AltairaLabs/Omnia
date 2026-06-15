@@ -152,8 +152,11 @@ spec:
   type: ClusterIP
 ---
 # Embedding Provider the demo Workspace's memory service binds via providerRef
-# (memory-demo-embeddings). type=ollama + the embed model → memory-api drives
-# semantic retrieval through this instance's /api/embeddings.
+# (memory-demo-embeddings). Drives the Memory Galaxy's dense projection +
+# embedding-similarity dedup. Defaults to a hosted embedder (Gemini, 768-dim)
+# to avoid the local-CPU ollama bottleneck; type=ollama uses the in-cluster
+# instance above. See values.yaml memoryDemo.embedding.provider.
+{{- $emb := .Values.memoryDemo.embedding.provider }}
 apiVersion: omnia.altairalabs.ai/v1alpha1
 kind: Provider
 metadata:
@@ -163,18 +166,20 @@ metadata:
     app.kubernetes.io/name: omnia-demos
     app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
 spec:
-  type: ollama
+  type: {{ $emb.type }}
   # role: embedding is REQUIRED — memory-api skips a provider with the default
   # "llm" role for embeddings ("has role llm but embedding is required").
   role: embedding
-  model: {{ $model }}
+  model: {{ $emb.model }}
+  {{- if eq $emb.type "ollama" }}
   baseURL: http://ollama-memory-embed.{{ $ns }}:11434
-  # nomic-embed-text emits 768-dim vectors; pin it so the embedding columns are
-  # provisioned at 768 (the default fallback is 1536, which mismatches).
+  {{- end }}
+  # Pin the dimensions so the embedding columns match (nomic-embed-text and
+  # gemini text-embedding-004 are both 768; the default fallback is 1536).
   embedding:
-    dimensions: 768
-    distance: cosine
+    dimensions: {{ $emb.dimensions }}
+    distance: {{ $emb.distance }}
   credential:
     secretRef:
-      name: ollama-credentials
+      name: {{ $emb.credentialSecret }}
 {{- end }}
