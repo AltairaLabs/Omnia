@@ -490,3 +490,36 @@ sharepointHero:
       ollamaService: ollama-chat
       # Only used for non-ollama types (claude/openai); ignored for ollama.
       secretRef: anthropic-api-key
+
+# ---------------------------------------------------------------------------
+# Memory-API dev demo (memoryDemo)
+# ---------------------------------------------------------------------------
+# Self-contained toggle that fills every memory UI surface in the omnia-demo
+# workspace at realistic scale. Mirrors the sharepointHero pattern: it wires the
+# demo Workspace's memory service at an ollama embedding provider + a demo
+# MemoryPolicy, runs memory-api with enterprise enabled (privacy enforcement
+# stats), and a post-install seed Job loads templated "Hawkridge Cloud" data
+# across all tiers. Dev-only; never enable in production.
+# Enable with: --set memoryDemo.enabled=true. Mutually exclusive with
+# sharepointHero on the demo Workspace's memory service (sharepointHero wins).
+memoryDemo:
+  enabled: false
+
+  # Postgres connection Secrets for the demo's managed memory-api + session-api.
+  # Each must be a pre-created Secret in the namespace with a POSTGRES_CONN key
+  # (reuse the core install's secrets, as the dev Workspace does).
+  database:
+    sessionSecret: omnia-postgres
+    memorySecret: omnia-postgres-memory
+
+  # Embedding model served by the demo's ollama memory-embed instance (Task 10).
+  # The memory-demo-embeddings Provider points the workspace memory service here
+  # so semantic retrieval (the Memory Galaxy's dense projection) is configured.
+  embedding:
+    model: nomic-embed-text
+
+  # Seeder scenario knobs (counts) consumed by the seed Job (Task 11). Sized for
+  # a realistic-but-fast local seed.
+  seed:
+    users: 40
+    institutionalDocs: 30

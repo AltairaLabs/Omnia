@@ -65,6 +65,32 @@ spec:
           labels:
             azure.workload.identity/use: "true"
         {{- end }}
+  {{- else if .Values.memoryDemo.enabled }}
+  # Managed memory-api + session-api for the memory-API dev demo. The memory
+  # service binds the ollama embedding Provider (memory-demo-embeddings) for
+  # semantic retrieval and the demo MemoryPolicy (memory-demo-memory), and runs
+  # memory-api with ENTERPRISE_ENABLED so the privacy enforcement-stats endpoint
+  # is exposed (the PII-blocked / redaction surfaces). Mutually exclusive with
+  # sharepointHero above (one hero demo owns the demo Workspace's memory service).
+  services:
+    - name: default
+      mode: managed
+      session:
+        database:
+          secretRef:
+            name: {{ .Values.memoryDemo.database.sessionSecret }}
+      memory:
+        database:
+          secretRef:
+            name: {{ .Values.memoryDemo.database.memorySecret }}
+        providerRef:
+          name: memory-demo-embeddings
+        policyRef:
+          name: memory-demo-memory
+        podOverrides:
+          extraEnv:
+            - name: ENTERPRISE_ENABLED
+              value: "true"
   {{- end }}
 {{- if .Values.sharepointHero.enabled }}
 ---

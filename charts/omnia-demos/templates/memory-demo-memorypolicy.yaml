@@ -1,0 +1,42 @@
+{{- if .Values.memoryDemo.enabled }}
+---
+# Cluster-scoped MemoryPolicy for the memory-API dev demo. Bound to the demo
+# Workspace's memory service via policyRef (see workspace.yaml). Drives:
+#   - ingestion: chunk — institutional docs are RAG-chunked (exercises the chunk
+#     ingestion path the seeder POSTs to /institutional/ingest).
+#   - consolidation: the summarizer agent (memory-demo-summarizer) runs the
+#     stale-observations + entity-duplicate axes every minute. The operator's
+#     --consolidation-interval poll (30s in dev) evaluates this cron; the axes
+#     act on the seeder's back-dated (~45d) observations so the dashboard
+#     Consolidation section shows real passes/actions.
+# Retention tiers are Manual so the seeded demo data persists — consolidation
+# summarizes stale observations, it does not prune the corpus.
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: MemoryPolicy
+metadata:
+  name: memory-demo-memory
+  labels:
+    app.kubernetes.io/name: omnia-demos
+    app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
+spec:
+  tiers:
+    institutional:
+      mode: Manual
+    agent:
+      mode: Manual
+    user:
+      mode: Manual
+  ingestion:
+    strategy: chunk
+  consolidation:
+    # Every minute (cron granularity is 1 minute); the operator's short
+    # --consolidation-interval poll checks this schedule frequently in dev.
+    schedule: "* * * * *"
+    # Both axes are handled by the one function-mode summarizer AgentRuntime
+    # (memory-demo-summarizer, namespace defaults to the workspace namespace).
+    functionRefs:
+      staleObservations:
+        name: memory-demo-summarizer
+      entityDuplicateCandidates:
+        name: memory-demo-summarizer
+{{- end }}
