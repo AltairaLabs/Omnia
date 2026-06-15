@@ -5,6 +5,10 @@
 #     Workspaces cluster-wide to find those opted into each MemoryPolicy.
 #   - memorypolicies: the memory-api consolidation worker lists MemoryPolicy
 #     CRs cluster-wide each pass to decide which workspaces to consolidate.
+#   - sessionprivacypolicies + agentruntimes: the enterprise memory-policy/
+#     privacy watcher lists both cluster-wide at startup to load consent
+#     enforcement and resolve a policy's target agents/workspaces; without them
+#     the watcher fails forbidden and privacy/projection wiring stalls.
 # The AgentRuntimeReconciler / WorkspaceReconciler create a ClusterRoleBinding
 # per pod that references this ClusterRole by the name passed to
 # --agent-workspace-reader-clusterrole (default: "omnia-agent-workspace-reader").
@@ -30,6 +34,8 @@ rules:
     resources:
       - workspaces
       - memorypolicies
+      - sessionprivacypolicies
+      - agentruntimes
     verbs:
       - get
       - list

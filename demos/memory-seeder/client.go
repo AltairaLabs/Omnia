@@ -17,6 +17,7 @@ import (
 // wire-contract strings, extracted so repeated literals stay in one place.
 const (
 	fieldWorkspaceID      = "workspace_id"
+	paramWorkspace        = "workspace"
 	fieldConfidence       = "confidence"
 	fieldType             = "type"
 	fieldContent          = "content"
@@ -141,7 +142,7 @@ func (c *Client) Ingest(ctx context.Context, d Doc) error {
 // SaveInstitutional saves a single institutional fact directly (201). The
 // handler reads the workspace from the ?workspace= query param, not the body.
 func (c *Client) SaveInstitutional(ctx context.Context, typ, content string, confidence float64) (string, error) {
-	q := url.Values{"workspace": {c.workspaceUID}}
+	q := url.Values{paramWorkspace: {c.workspaceUID}}
 	body := map[string]any{
 		fieldWorkspaceID: c.workspaceUID, fieldType: typ, fieldContent: content, fieldConfidence: confidence,
 	}
@@ -151,7 +152,7 @@ func (c *Client) SaveInstitutional(ctx context.Context, typ, content string, con
 // SaveAgentMemory saves an agent-tier memory (201). The handler reads the
 // workspace from the ?workspace= query param, not the body.
 func (c *Client) SaveAgentMemory(ctx context.Context, m AgentMemory) (string, error) {
-	q := url.Values{"workspace": {c.workspaceUID}}
+	q := url.Values{paramWorkspace: {c.workspaceUID}}
 	body := map[string]any{
 		fieldWorkspaceID: c.workspaceUID, "agent_id": m.AgentID,
 		fieldType: m.Type, fieldContent: m.Content, fieldConfidence: m.Confidence,
@@ -162,7 +163,7 @@ func (c *Client) SaveAgentMemory(ctx context.Context, m AgentMemory) (string, er
 // SaveUserMemory saves a user-tier memory scoped to PseudonymizeID(RawUserID).
 func (c *Client) SaveUserMemory(ctx context.Context, m UserMemory) (string, error) {
 	hashed := identity.PseudonymizeID(m.RawUserID)
-	q := url.Values{"workspace": {c.workspaceUID}, fieldUserID: {hashed}}
+	q := url.Values{paramWorkspace: {c.workspaceUID}, fieldUserID: {hashed}}
 	body := map[string]any{
 		fieldType: m.Type, fieldContent: m.Content, fieldConfidence: m.Confidence,
 		"category": m.Category,
@@ -177,7 +178,7 @@ func (c *Client) SaveUserMemory(ctx context.Context, m UserMemory) (string, erro
 // fixed synthetic ops user while still clustering on a shared about key.
 func (c *Client) SaveObservation(ctx context.Context, o HotObservation) (string, error) {
 	hashed := identity.PseudonymizeID(observationOwnerUser)
-	q := url.Values{"workspace": {c.workspaceUID}, fieldUserID: {hashed}}
+	q := url.Values{paramWorkspace: {c.workspaceUID}, fieldUserID: {hashed}}
 	body := map[string]any{
 		fieldType: aboutKindSupportTopic, fieldContent: o.Content, fieldConfidence: 0.5,
 		"about":    map[string]string{"kind": o.AboutKind, "key": o.AboutKey},
