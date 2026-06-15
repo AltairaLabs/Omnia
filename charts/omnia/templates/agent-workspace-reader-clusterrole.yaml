@@ -6,13 +6,13 @@
 #     Workspaces cluster-wide to find those opted into each MemoryPolicy.
 #   - memorypolicies: the memory-api consolidation worker lists MemoryPolicy
 #     CRs cluster-wide each pass to decide which workspaces to consolidate.
-#   - sessionprivacypolicies: the enterprise memory-policy/privacy watcher
-#     lists SessionPrivacyPolicy CRs cluster-wide at startup to load consent
-#     enforcement (without this the watcher fails forbidden and privacy
-#     enforcement is silently skipped).
-#   - agentruntimes: the same watcher resolves which agents/workspaces a policy
-#     applies to by listing AgentRuntimes cluster-wide; without it the watcher's
-#     initial load fails forbidden and the projection/policy pipeline stalls.
+#
+# NOTE: the enterprise memory-policy/privacy watcher also needs cluster reads on
+# sessionprivacypolicies + agentruntimes, but those must NOT be added here — the
+# core operator doesn't hold sessionprivacypolicies (an EE CRD) and has no
+# bind/escalate, so adding it makes Kubernetes' escalation check block the
+# operator from creating service-pod ClusterRoleBindings to this role. That EE
+# grant belongs in a separate enterprise-gated reader role (tracked in #1444).
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -25,8 +25,6 @@ rules:
     resources:
       - workspaces
       - memorypolicies
-      - sessionprivacypolicies
-      - agentruntimes
     verbs:
       - get
       - list

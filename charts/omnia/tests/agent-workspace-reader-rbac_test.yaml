@@ -1,4 +1,4 @@
-suite: service pods can read Workspaces, MemoryPolicies and SessionPrivacyPolicies cluster-wide
+suite: service pods can read Workspaces and MemoryPolicies cluster-wide
 release:
   name: omnia
 values:
@@ -11,10 +11,13 @@ tests:
   # this grant the worker fails every tick with "memorypolicies ... is
   # forbidden ... at the cluster scope" and consolidation never runs. The
   # same ClusterRole also backs the Workspace reads agents and the worker's
-  # workspace lister depend on, plus the enterprise memory-policy/privacy
-  # watcher's cluster-wide SessionPrivacyPolicy list (#1444), so assert all
-  # three resources stay in one grant.
-  - it: grants read on workspaces, memorypolicies, sessionprivacypolicies and agentruntimes
+  # workspace lister depend on, so assert both resources stay in one grant.
+  #
+  # The enterprise privacy watcher's sessionprivacypolicies + agentruntimes
+  # reads are deliberately NOT here — adding an EE CRD the core operator
+  # doesn't hold trips Kubernetes' RBAC escalation check and blocks the
+  # per-pod ClusterRoleBindings (#1444). That grant needs its own EE role.
+  - it: grants read on workspaces and memorypolicies
     asserts:
       - contains:
           path: rules
@@ -24,8 +27,6 @@ tests:
             resources:
               - workspaces
               - memorypolicies
-              - sessionprivacypolicies
-              - agentruntimes
             verbs:
               - get
               - list
