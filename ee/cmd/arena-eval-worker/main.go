@@ -96,11 +96,18 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Create the eval-metrics registry up front and hand it to the metrics
+	// server so /metrics exposes omnia_eval_* once the worker registers them.
+	// The registry is shared by pointer: it is empty now but the
+	// EvalOnlyCollector below registers into this same object, and the
+	// promhttp gatherer reads it live at scrape time.
+	evalRegistry := prometheus.NewRegistry()
+
 	// Start the health/metrics server early so Kubernetes liveness probes
 	// pass while we wait for service discovery. Without this, the retry
 	// loop below blocks main() and the pod gets killed for failing the
 	// liveness check before resolution succeeds.
-	go startHTTPServer(cfg.MetricsAddr, logger, nil)
+	go startHTTPServer(cfg.MetricsAddr, logger, evalRegistry)
 
 	// Resolve the session-api URL with retry. Prefers SESSION_API_URL for
 	// back-compat, otherwise looks up Workspace.status.services via the
@@ -152,7 +159,6 @@ func main() {
 
 	msgStore := redisprovider.NewFromClient(redisClient, redisprovider.DefaultOptions())
 
-	evalRegistry := prometheus.NewRegistry()
 	evalCollector := sdkmetrics.NewEvalOnlyCollector(sdkmetrics.CollectorOpts{
 		Registerer:     evalRegistry,
 		Namespace:      "omnia",
@@ -317,7 +323,14 @@ func startHTTPServer(addr string, logger *slog.Logger, evalRegistry *prometheus.
 // routes are registered without spinning up a real listener.
 func buildMetricsHealthMux(evalRegistry *prometheus.Registry) *http.ServeMux {
 	mux := http.NewServeMux()
-	gatherers := prometheus.Gatherers{prometheus.DefaultGatherer, evalRegistry}
+	// Only add a non-nil eval registry to the gatherers: a nil *Registry
+	// passed to prometheus.Gatherers panics at scrape time (its Gather method
+	// dereferences a nil receiver), which closes the connection and shows up
+	// as an EOF / down target in Prometheus.
+	gatherers := prometheus.Gatherers{prometheus.DefaultGatherer}
+	if evalRegistry != nil {
+		gatherers = append(gatherers, evalRegistry)
+	}
 	mux.Handle("/metrics", promhttp.HandlerFor(gatherers, promhttp.HandlerOpts{}))
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)

@@ -165,6 +165,43 @@ func TestBuildMetricsHealthMux(t *testing.T) {
 	}
 }
 
+// TestBuildMetricsHealthMux_NilRegistry guards against the regression where the
+// metrics server was started with a nil *prometheus.Registry (startHTTPServer
+// was called with nil for early liveness). A nil registry in the gatherers set
+// panics at scrape time inside (*Registry).Gather, closing the connection so
+// Prometheus records an EOF / down target. /metrics must return 200, not panic.
+func TestBuildMetricsHealthMux_NilRegistry(t *testing.T) {
+	mux := buildMetricsHealthMux(nil)
+	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusOK, rr.Code, "/metrics must serve 200 with a nil eval registry")
+}
+
+// TestBuildMetricsHealthMux_ExposesEvalRegistry is the wiring contract that the
+// eval registry actually reaches /metrics. The original bug created the eval
+// registry separately from the one handed to the server, so omnia_eval_* were
+// registered but never exposed. A metric registered in the passed registry must
+// appear in the scrape output.
+func TestBuildMetricsHealthMux_ExposesEvalRegistry(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	c := prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "omnia_eval_test_total",
+		Help: "test metric for wiring assertion",
+	})
+	reg.MustRegister(c)
+	c.Inc()
+
+	mux := buildMetricsHealthMux(reg)
+	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	require.Equal(t, http.StatusOK, rr.Code)
+	assert.Contains(t, rr.Body.String(), "omnia_eval_test_total",
+		"metric registered in the eval registry must be exposed at /metrics")
+}
+
 func TestLoadConfig_NAMESPACES(t *testing.T) {
 	t.Setenv(envRedisURL, "redis://localhost:6379/0")
 	t.Setenv(envNamespaces, "ns1,ns2,ns3")
