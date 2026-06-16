@@ -62,6 +62,40 @@ func TestResolveTrafficMode(t *testing.T) {
 	}
 }
 
+func TestMeshWaypointForResolved(t *testing.T) {
+	meshAR := func(mode, waypoint string, hasMesh bool) *omniav1alpha1.AgentRuntime {
+		tr := &omniav1alpha1.TrafficRoutingConfig{Mode: mode}
+		if hasMesh {
+			tr.Mesh = &omniav1alpha1.MeshTrafficRouting{Waypoint: waypoint}
+		}
+		return &omniav1alpha1.AgentRuntime{
+			Spec: omniav1alpha1.AgentRuntimeSpec{
+				Rollout: &omniav1alpha1.RolloutConfig{TrafficRouting: tr},
+			},
+		}
+	}
+	cases := []struct {
+		name          string
+		ar            *omniav1alpha1.AgentRuntime
+		meshAvailable bool
+		want          string
+	}{
+		{"mesh+waypoint+available", meshAR(TrafficModeMesh, "wp", true), true, "wp"},
+		{"mesh+waypoint+unavailable-degrades", meshAR(TrafficModeMesh, "wp", true), false, ""},
+		{"mesh+no-waypoint", meshAR(TrafficModeMesh, "", true), true, ""},
+		{"replica+waypoint", meshAR(TrafficModeReplicaWeighted, "wp", true), true, ""},
+		{"mesh-mode-no-mesh-block", meshAR(TrafficModeMesh, "", false), true, ""},
+		{"no-rollout", &omniav1alpha1.AgentRuntime{}, true, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := meshWaypointForResolved(tc.ar, tc.meshAvailable); got != tc.want {
+				t.Fatalf("got %q want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 // activeTrafficAR builds an AgentRuntime with an active rollout (a candidate
 // that differs from the stable spec) and the given traffic-routing config.
 // tr=nil means no trafficRouting block.

@@ -91,5 +91,12 @@ spec:
     # Service DNS (the east-west self-play path used by the Arena loadtest).
     trafficRouting:
       mode: mesh
-      mesh: {}
+      mesh:
+        # When meshWaypoint is on, name the ambient waypoint so the operator
+        # stamps istio.io/use-waypoint on the agent Service — the piece that
+        # makes the operator-owned VirtualService's L7 split actually route
+        # (ztunnel alone is L4 and bypasses it). Same toggle as the waypoint
+        # Gateway (sharepoint-hero-rollout.yaml) + ambient enrollment
+        # (workspace.yaml). Empty leaves the Service unenrolled.
+        waypoint: {{ if .Values.sharepointHero.meshWaypoint }}omnia-demo-waypoint{{ else }}""{{ end }}
 {{- end }}

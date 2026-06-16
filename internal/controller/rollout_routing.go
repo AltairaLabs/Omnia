@@ -39,7 +39,38 @@ const (
 	// istioNetworkingGroup is the bare API group for Istio networking CRDs
 	// (distinct from istioNetworkingAPIVersion which carries the version).
 	istioNetworkingGroup = "networking.istio.io"
+
+	// labelIstioUseWaypoint enrolls a Service in an Istio ambient waypoint. The
+	// operator stamps it on the agent Service in mesh mode so the operator-owned
+	// VirtualService's L7 routing takes effect (ztunnel alone is L4-only).
+	labelIstioUseWaypoint = "istio.io/use-waypoint"
 )
+
+// meshWaypointFor returns the ambient waypoint name to enroll the agent Service
+// in, or "" when the agent does not resolve to mesh routing or no waypoint is
+// configured. Without this enrollment the operator-owned VirtualService is
+// silently bypassed (ambient ztunnel is L4-only), so the weighted stable/
+// candidate split — and the x-omnia-variant header injection it carries — never
+// applies.
+func (r *AgentRuntimeReconciler) meshWaypointFor(ctx context.Context, ar *omniav1alpha1.AgentRuntime) string {
+	return meshWaypointForResolved(ar, r.meshAvailable(ctx))
+}
+
+// meshWaypointForResolved is the pure resolution (testable without a client):
+// the configured waypoint name when the agent resolves to mesh routing, else "".
+func meshWaypointForResolved(ar *omniav1alpha1.AgentRuntime, meshAvailable bool) string {
+	if ar.Spec.Rollout == nil || ar.Spec.Rollout.TrafficRouting == nil || ar.Spec.Rollout.TrafficRouting.Mesh == nil {
+		return ""
+	}
+	waypoint := ar.Spec.Rollout.TrafficRouting.Mesh.Waypoint
+	if waypoint == "" {
+		return ""
+	}
+	if mode, _ := resolveTrafficModeFor(ar.Spec.Rollout.TrafficRouting, meshAvailable); mode != TrafficModeMesh {
+		return ""
+	}
+	return waypoint
+}
 
 // resolveTrafficModeFor is the pure resolution rule (testable without a client).
 // Returns the resolved mode and whether it degraded from an explicit request.

@@ -672,6 +672,14 @@ func (r *AgentRuntimeReconciler) reconcileService(ctx context.Context, agentRunt
 			labelOmniaComp:    "agent",
 		}
 
+		// In ambient mesh mode, enroll the Service in its waypoint so the
+		// operator-owned VirtualService's L7 stable/candidate split actually
+		// takes effect. Stamped here (not left to manual labelling) because the
+		// operator owns this Service and overwrites its labels every reconcile.
+		if wp := r.meshWaypointFor(ctx, agentRuntime); wp != "" {
+			labels[labelIstioUseWaypoint] = wp
+		}
+
 		// Prometheus scrape annotations on Service (not pod, as Istio overrides pod annotations)
 		annotations := map[string]string{
 			"prometheus.io/scrape": "true",

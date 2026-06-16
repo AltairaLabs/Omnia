@@ -205,6 +205,15 @@ type MeshTrafficRouting struct {
 	// +kubebuilder:default="canary"
 	// +optional
 	CandidateSubset string `json:"candidateSubset,omitempty"`
+
+	// waypoint is the name of the Istio ambient waypoint (a gateway-api Gateway
+	// of class istio-waypoint) that performs the L7 weighted split. When set, the
+	// operator stamps istio.io/use-waypoint=<waypoint> on the agent Service so its
+	// traffic is routed through the waypoint — without this, ambient ztunnel stays
+	// L4-only and the operator-owned VirtualService is silently bypassed. Empty
+	// leaves the Service unenrolled (no waypoint available).
+	// +optional
+	Waypoint string `json:"waypoint,omitempty"`
 }
 
 // IstioTrafficRouting configures Istio-based traffic splitting.
