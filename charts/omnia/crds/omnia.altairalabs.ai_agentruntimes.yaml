@@ -8293,11 +8293,28 @@ spec:
                       When nil, no rollout is active. Only fields that differ from the
                       stable version need to be set.
                     properties:
-                      promptPackVersion:
+                      promptPackRef:
                         description: |-
-                          promptPackVersion overrides the PromptPack version for the candidate.
-                          When set, the candidate runs a different prompt version than stable.
-                        type: string
+                          promptPackRef overrides the PromptPack for the candidate. When set, the
+                          candidate Deployment runs a different PromptPack than stable — the operator
+                          resolves this reference and mounts that pack's content into the candidate
+                          pods, so a new prompt can be shipped as the candidate.
+
+                          PromptPacks are resolved by name (each version is its own PromptPack
+                          resource), so to run different prompt content the candidate must reference
+                          a different PromptPack name, not merely a version.
+                        properties:
+                          name:
+                            description: name is the name of the PromptPack resource.
+                            minLength: 1
+                            type: string
+                          version:
+                            description: version specifies a specific version of the
+                              PromptPack to use.
+                            type: string
+                        required:
+                        - name
+                        type: object
                       providerRefs:
                         description: |-
                           providerRefs overrides the provider list for the candidate.

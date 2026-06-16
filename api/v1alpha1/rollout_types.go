@@ -51,10 +51,16 @@ type RolloutConfig struct {
 // An empty CandidateOverrides (all fields nil) is valid and means the
 // candidate is identical to stable — useful for testing the rollout pipeline itself.
 type CandidateOverrides struct {
-	// promptPackVersion overrides the PromptPack version for the candidate.
-	// When set, the candidate runs a different prompt version than stable.
+	// promptPackRef overrides the PromptPack for the candidate. When set, the
+	// candidate Deployment runs a different PromptPack than stable — the operator
+	// resolves this reference and mounts that pack's content into the candidate
+	// pods, so a new prompt can be shipped as the candidate.
+	//
+	// PromptPacks are resolved by name (each version is its own PromptPack
+	// resource), so to run different prompt content the candidate must reference
+	// a different PromptPack name, not merely a version.
 	// +optional
-	PromptPackVersion *string `json:"promptPackVersion,omitempty"`
+	PromptPackRef *PromptPackRef `json:"promptPackRef,omitempty"`
 
 	// providerRefs overrides the provider list for the candidate.
 	// Use this to test a different LLM model or provider configuration.

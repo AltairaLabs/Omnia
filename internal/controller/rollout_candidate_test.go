@@ -37,18 +37,18 @@ func TestCandidateDeploymentName(t *testing.T) {
 	assert.Equal(t, "my-agent-canary", candidateDeploymentName("my-agent"))
 }
 
-func TestApplyCandidateOverrides_PromptPackVersion(t *testing.T) {
+func TestApplyCandidateOverrides_PromptPackRef(t *testing.T) {
 	ar := newRolloutTestAR()
 	ar.Spec.Rollout = &omniav1alpha1.RolloutConfig{
 		Candidate: &omniav1alpha1.CandidateOverrides{
-			PromptPackVersion: ptr.To("v2"),
+			PromptPackRef: &omniav1alpha1.PromptPackRef{Name: testStablePackName, Version: ptr.To("v2")},
 		},
 		Steps: []omniav1alpha1.RolloutStep{{SetWeight: ptr.To[int32](10)}},
 	}
 
 	result := applyCandidateOverrides(ar)
 	assert.Equal(t, "v2", *result.PromptPackRef.Version)
-	assert.Equal(t, "support-pack", result.PromptPackRef.Name)
+	assert.Equal(t, testStablePackName, result.PromptPackRef.Name)
 	// Providers unchanged.
 	assert.Equal(t, "claude-provider", result.Providers[0].ProviderRef.Name)
 }
@@ -118,7 +118,7 @@ func TestReconcileCandidateDeployment_CreatesWithCanaryLabel(t *testing.T) {
 	ar.Spec.PromptPackRef.Name = "test-pack"
 	ar.Spec.Rollout = &omniav1alpha1.RolloutConfig{
 		Candidate: &omniav1alpha1.CandidateOverrides{
-			PromptPackVersion: ptr.To("v2"),
+			PromptPackRef: &omniav1alpha1.PromptPackRef{Name: "test-pack", Version: ptr.To("v2")},
 		},
 		Steps: []omniav1alpha1.RolloutStep{{SetWeight: ptr.To[int32](10)}},
 	}
@@ -140,6 +140,61 @@ func TestReconcileCandidateDeployment_CreatesWithCanaryLabel(t *testing.T) {
 
 	assert.Equal(t, "customer-support-canary", deploy.Name)
 	assert.Equal(t, "canary", deploy.Spec.Template.Labels[labelOmniaTrack])
+}
+
+// TestReconcileCandidateDeployment_MountsCandidatePromptPack is the regression
+// for the bug where a candidate overriding PromptPackRef to a DIFFERENT pack
+// still mounted the stable pack's ConfigMap — silently running stable prompts
+// under the candidate label, so the rollout could never test a new prompt. The
+// candidate Deployment must resolve and mount its OWN pack's ConfigMap.
+func TestReconcileCandidateDeployment_MountsCandidatePromptPack(t *testing.T) {
+	scheme := newTestScheme(t)
+	require.NoError(t, appsv1.AddToScheme(scheme))
+	require.NoError(t, corev1.AddToScheme(scheme))
+
+	ar := newRolloutTestAR()
+	ar.Spec.Facade.Type = omniav1alpha1.FacadeTypeWebSocket
+	ar.Spec.PromptPackRef.Name = "stable-pack"
+	ar.Spec.Rollout = &omniav1alpha1.RolloutConfig{
+		Candidate: &omniav1alpha1.CandidateOverrides{
+			PromptPackRef: &omniav1alpha1.PromptPackRef{Name: "candidate-pack"},
+		},
+		Steps: []omniav1alpha1.RolloutStep{{SetWeight: ptr.To[int32](10)}},
+	}
+
+	stablePack := &omniav1alpha1.PromptPack{}
+	stablePack.Name = "stable-pack"
+	stablePack.Namespace = ar.Namespace
+	stablePack.Spec.Source.Type = omniav1alpha1.PromptPackSourceTypeConfigMap
+	stablePack.Spec.Source.ConfigMapRef = &corev1.LocalObjectReference{Name: "stable-pack-config"}
+
+	candidatePack := &omniav1alpha1.PromptPack{}
+	candidatePack.Name = "candidate-pack"
+	candidatePack.Namespace = ar.Namespace
+	candidatePack.Spec.Source.Type = omniav1alpha1.PromptPackSourceTypeConfigMap
+	candidatePack.Spec.Source.ConfigMapRef = &corev1.LocalObjectReference{Name: "candidate-pack-config"}
+
+	// The operator resolves the candidate's pack by name from the cluster.
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(candidatePack).
+		Build()
+
+	r := &AgentRuntimeReconciler{Client: fakeClient, Scheme: scheme}
+
+	// Pass the stable pack as the reconciler would; the candidate must NOT use it.
+	deploy, err := r.reconcileCandidateDeployment(context.Background(), ar, stablePack, nil, nil)
+	require.NoError(t, err)
+	require.NotNil(t, deploy)
+
+	var mounted string
+	for _, v := range deploy.Spec.Template.Spec.Volumes {
+		if v.Name == promptpackConfigVolumeName && v.ConfigMap != nil {
+			mounted = v.ConfigMap.Name
+		}
+	}
+	assert.Equal(t, "candidate-pack-config", mounted,
+		"candidate must mount its own pack's ConfigMap, not the stable pack's")
 }
 
 func TestDeleteCandidateDeployment_NotFound(t *testing.T) {

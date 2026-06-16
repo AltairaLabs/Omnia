@@ -413,7 +413,7 @@ sharepointHero:
   #     creates (workloadIdentity.serviceAccountName), labelled for the AKS
   #     webhook to inject the federated token
   #   - chatModel is the Azure deployment name used for both baseline + candidate
-  #     (the rollout candidate differs by promptPackVersion, not model)
+  #     (the rollout candidate differs by promptPackRef — a different pack)
   # The ServiceAccount must be federated to the managed identity out-of-band —
   # see SHAREPOINT_HERO.md for the `az identity federated-credential create` step.
   azure:

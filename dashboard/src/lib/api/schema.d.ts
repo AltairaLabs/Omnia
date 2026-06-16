@@ -557,8 +557,11 @@ export interface components {
         };
         /** @description Sparse overrides for the candidate version during a rollout. */
         CandidateOverrides: {
-            /** @description Override PromptPack version for the candidate */
-            promptPackVersion?: string;
+            /** @description Override the PromptPack for the candidate. Packs are name-keyed (each version is its own resource), so reference a different name to run different prompt content. */
+            promptPackRef?: {
+                name: string;
+                version?: string;
+            };
             providerRefs?: components["schemas"]["NamedProviderRef"][];
             toolRegistryRef?: components["schemas"]["LocalObjectReference"];
         };

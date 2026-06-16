@@ -71,7 +71,7 @@ func activeTrafficAR(tr *omniav1alpha1.TrafficRoutingConfig) *omniav1alpha1.Agen
 			// stable version empty → candidate "v2" differs → rollout active.
 			PromptPackRef: omniav1alpha1.PromptPackRef{Name: "p"},
 			Rollout: &omniav1alpha1.RolloutConfig{
-				Candidate:      &omniav1alpha1.CandidateOverrides{PromptPackVersion: ptr.To("v2")},
+				Candidate:      &omniav1alpha1.CandidateOverrides{PromptPackRef: &omniav1alpha1.PromptPackRef{Name: "p", Version: ptr.To("v2")}},
 				Steps:          []omniav1alpha1.RolloutStep{{SetWeight: ptr.To[int32](50)}},
 				TrafficRouting: tr,
 			},
@@ -86,7 +86,7 @@ func tr(mode string) *omniav1alpha1.TrafficRoutingConfig {
 func TestIsReplicaWeightedActive(t *testing.T) {
 	// Inactive rollout: candidate matches stable (no diff) → not active.
 	inactive := activeTrafficAR(tr(TrafficModeReplicaWeighted))
-	inactive.Spec.Rollout.Candidate.PromptPackVersion = nil
+	inactive.Spec.Rollout.Candidate.PromptPackRef = &omniav1alpha1.PromptPackRef{Name: "p"}
 
 	// No rollout at all.
 	noRollout := &omniav1alpha1.AgentRuntime{}

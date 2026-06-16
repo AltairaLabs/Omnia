@@ -29,12 +29,15 @@ import (
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 )
 
+// testStablePackName is the stable PromptPack name used across rollout tests.
+const testStablePackName = "support-pack"
+
 func newRolloutTestAR() *omniav1alpha1.AgentRuntime {
 	ar := &omniav1alpha1.AgentRuntime{}
 	ar.Name = "customer-support"
 	ar.Namespace = "default"
 	ar.Spec.PromptPackRef = omniav1alpha1.PromptPackRef{
-		Name:    "support-pack",
+		Name:    testStablePackName,
 		Version: ptr.To("v1"),
 	}
 	ar.Spec.Facade.Type = omniav1alpha1.FacadeTypeWebSocket
@@ -78,7 +81,7 @@ func TestIsRolloutActive_CandidateMatchesSpec(t *testing.T) {
 	ar := newRolloutTestAR()
 	ar.Spec.Rollout = &omniav1alpha1.RolloutConfig{
 		Candidate: &omniav1alpha1.CandidateOverrides{
-			PromptPackVersion: ptr.To("v1"),
+			PromptPackRef: &omniav1alpha1.PromptPackRef{Name: testStablePackName, Version: ptr.To("v1")},
 			ProviderRefs: []omniav1alpha1.NamedProviderRef{
 				{
 					Name:        "default",
@@ -92,11 +95,11 @@ func TestIsRolloutActive_CandidateMatchesSpec(t *testing.T) {
 	assert.False(t, isRolloutActive(ar))
 }
 
-func TestIsRolloutActive_CandidateDiffersPromptPackVersion(t *testing.T) {
+func TestIsRolloutActive_CandidateDiffersPromptPackRef(t *testing.T) {
 	ar := newRolloutTestAR()
 	ar.Spec.Rollout = &omniav1alpha1.RolloutConfig{
 		Candidate: &omniav1alpha1.CandidateOverrides{
-			PromptPackVersion: ptr.To("v2"),
+			PromptPackRef: &omniav1alpha1.PromptPackRef{Name: testStablePackName, Version: ptr.To("v2")},
 		},
 		Steps: []omniav1alpha1.RolloutStep{{SetWeight: ptr.To[int32](10)}},
 	}
@@ -176,7 +179,7 @@ func TestReconcileRollout_FirstStep_SetWeight(t *testing.T) {
 	ar := newRolloutTestAR()
 	ar.Spec.Rollout = &omniav1alpha1.RolloutConfig{
 		Candidate: &omniav1alpha1.CandidateOverrides{
-			PromptPackVersion: ptr.To("v2"),
+			PromptPackRef: &omniav1alpha1.PromptPackRef{Name: testStablePackName, Version: ptr.To("v2")},
 		},
 		Steps: []omniav1alpha1.RolloutStep{
 			{SetWeight: ptr.To[int32](10)},
@@ -194,7 +197,7 @@ func TestReconcileRollout_FinalStep_Promote(t *testing.T) {
 	ar := newRolloutTestAR()
 	ar.Spec.Rollout = &omniav1alpha1.RolloutConfig{
 		Candidate: &omniav1alpha1.CandidateOverrides{
-			PromptPackVersion: ptr.To("v2"),
+			PromptPackRef: &omniav1alpha1.PromptPackRef{Name: testStablePackName, Version: ptr.To("v2")},
 		},
 		Steps: []omniav1alpha1.RolloutStep{
 			{SetWeight: ptr.To[int32](100)},
@@ -216,7 +219,7 @@ func TestReconcileRollout_Pause_Indefinite(t *testing.T) {
 	ar := newRolloutTestAR()
 	ar.Spec.Rollout = &omniav1alpha1.RolloutConfig{
 		Candidate: &omniav1alpha1.CandidateOverrides{
-			PromptPackVersion: ptr.To("v2"),
+			PromptPackRef: &omniav1alpha1.PromptPackRef{Name: testStablePackName, Version: ptr.To("v2")},
 		},
 		Steps: []omniav1alpha1.RolloutStep{
 			{Pause: &omniav1alpha1.RolloutPause{}},
@@ -233,7 +236,7 @@ func TestReconcileRollout_Pause_WithDuration(t *testing.T) {
 	ar := newRolloutTestAR()
 	ar.Spec.Rollout = &omniav1alpha1.RolloutConfig{
 		Candidate: &omniav1alpha1.CandidateOverrides{
-			PromptPackVersion: ptr.To("v2"),
+			PromptPackRef: &omniav1alpha1.PromptPackRef{Name: testStablePackName, Version: ptr.To("v2")},
 		},
 		Steps: []omniav1alpha1.RolloutStep{
 			{Pause: &omniav1alpha1.RolloutPause{Duration: ptr.To("5m")}},
@@ -252,7 +255,7 @@ func TestReconcileRollout_Analysis(t *testing.T) {
 	ar := newRolloutTestAR()
 	ar.Spec.Rollout = &omniav1alpha1.RolloutConfig{
 		Candidate: &omniav1alpha1.CandidateOverrides{
-			PromptPackVersion: ptr.To("v2"),
+			PromptPackRef: &omniav1alpha1.PromptPackRef{Name: testStablePackName, Version: ptr.To("v2")},
 		},
 		Steps: []omniav1alpha1.RolloutStep{
 			{Analysis: &omniav1alpha1.RolloutAnalysisStep{TemplateName: "latency-check"}},
@@ -269,7 +272,7 @@ func TestReconcileRollout_SecondStep(t *testing.T) {
 	ar := newRolloutTestAR()
 	ar.Spec.Rollout = &omniav1alpha1.RolloutConfig{
 		Candidate: &omniav1alpha1.CandidateOverrides{
-			PromptPackVersion: ptr.To("v2"),
+			PromptPackRef: &omniav1alpha1.PromptPackRef{Name: testStablePackName, Version: ptr.To("v2")},
 		},
 		Steps: []omniav1alpha1.RolloutStep{
 			{SetWeight: ptr.To[int32](10)},
@@ -295,7 +298,7 @@ func TestPromote_CopiesCandidateToSpec(t *testing.T) {
 	ar := newRolloutTestAR()
 	ar.Spec.Rollout = &omniav1alpha1.RolloutConfig{
 		Candidate: &omniav1alpha1.CandidateOverrides{
-			PromptPackVersion: ptr.To("v2"),
+			PromptPackRef: &omniav1alpha1.PromptPackRef{Name: testStablePackName, Version: ptr.To("v2")},
 			ProviderRefs: []omniav1alpha1.NamedProviderRef{
 				{
 					Name:        "default",
@@ -327,7 +330,7 @@ func TestPromote_PartialOverrides(t *testing.T) {
 	ar := newRolloutTestAR()
 	ar.Spec.Rollout = &omniav1alpha1.RolloutConfig{
 		Candidate: &omniav1alpha1.CandidateOverrides{
-			PromptPackVersion: ptr.To("v3"),
+			PromptPackRef: &omniav1alpha1.PromptPackRef{Name: testStablePackName, Version: ptr.To("v3")},
 			// No provider or tool registry overrides.
 		},
 		Steps: []omniav1alpha1.RolloutStep{{SetWeight: ptr.To[int32](100)}},
@@ -346,7 +349,7 @@ func TestRollback_RevertsCandidateToSpec(t *testing.T) {
 	ar := newRolloutTestAR()
 	ar.Spec.Rollout = &omniav1alpha1.RolloutConfig{
 		Candidate: &omniav1alpha1.CandidateOverrides{
-			PromptPackVersion: ptr.To("v2"),
+			PromptPackRef: &omniav1alpha1.PromptPackRef{Name: testStablePackName, Version: ptr.To("v2")},
 			ProviderRefs: []omniav1alpha1.NamedProviderRef{
 				{
 					Name:        "default",
@@ -361,7 +364,7 @@ func TestRollback_RevertsCandidateToSpec(t *testing.T) {
 	rollback(ar)
 
 	c := ar.Spec.Rollout.Candidate
-	assert.Equal(t, "v1", *c.PromptPackVersion)
+	assert.Equal(t, "v1", *c.PromptPackRef.Version)
 	assert.Equal(t, "claude-provider", c.ProviderRefs[0].ProviderRef.Name)
 	assert.Equal(t, "tools-v1", c.ToolRegistryRef.Name)
 	// After rollback, candidate matches spec so rollout is idle.
@@ -380,7 +383,7 @@ func newAutoRollbackAR() *omniav1alpha1.AgentRuntime {
 	ar := newRolloutTestAR()
 	ar.Spec.Rollout = &omniav1alpha1.RolloutConfig{
 		Candidate: &omniav1alpha1.CandidateOverrides{
-			PromptPackVersion: ptr.To("v2"),
+			PromptPackRef: &omniav1alpha1.PromptPackRef{Name: testStablePackName, Version: ptr.To("v2")},
 		},
 		Steps: []omniav1alpha1.RolloutStep{{SetWeight: ptr.To[int32](10)}},
 		Rollback: &omniav1alpha1.RollbackConfig{
@@ -460,14 +463,15 @@ func TestRollback_NilSpecVersion(t *testing.T) {
 	ar.Spec.PromptPackRef.Version = nil
 	ar.Spec.Rollout = &omniav1alpha1.RolloutConfig{
 		Candidate: &omniav1alpha1.CandidateOverrides{
-			PromptPackVersion: ptr.To("v2"),
+			PromptPackRef: &omniav1alpha1.PromptPackRef{Name: testStablePackName, Version: ptr.To("v2")},
 		},
 		Steps: []omniav1alpha1.RolloutStep{{SetWeight: ptr.To[int32](100)}},
 	}
 
 	rollback(ar)
 
-	assert.Nil(t, ar.Spec.Rollout.Candidate.PromptPackVersion)
+	assert.Equal(t, ar.Spec.PromptPackRef.Name, ar.Spec.Rollout.Candidate.PromptPackRef.Name)
+	assert.Nil(t, ar.Spec.Rollout.Candidate.PromptPackRef.Version)
 	assert.False(t, isRolloutActive(ar))
 }
 
@@ -477,7 +481,7 @@ func TestRollback_NilProviders(t *testing.T) {
 	ar.Spec.ToolRegistryRef = nil
 	ar.Spec.Rollout = &omniav1alpha1.RolloutConfig{
 		Candidate: &omniav1alpha1.CandidateOverrides{
-			PromptPackVersion: ptr.To("v2"),
+			PromptPackRef: &omniav1alpha1.PromptPackRef{Name: testStablePackName, Version: ptr.To("v2")},
 			ProviderRefs: []omniav1alpha1.NamedProviderRef{
 				{Name: "default", ProviderRef: omniav1alpha1.ProviderRef{Name: "openai"}},
 			},
@@ -509,7 +513,7 @@ func TestResolveRolloutCandidateVersion_FromCandidate(t *testing.T) {
 	ar := newRolloutTestAR()
 	ar.Spec.Rollout = &omniav1alpha1.RolloutConfig{
 		Candidate: &omniav1alpha1.CandidateOverrides{
-			PromptPackVersion: ptr.To("v3"),
+			PromptPackRef: &omniav1alpha1.PromptPackRef{Name: testStablePackName, Version: ptr.To("v3")},
 		},
 	}
 	assert.Equal(t, "v3", resolveRolloutCandidateVersion(ar))
@@ -686,17 +690,17 @@ func TestCandidateDiffers_ToolRegistryRef_SameName(t *testing.T) {
 	assert.False(t, candidateDiffers(ar))
 }
 
-func TestPromptPackVersionDiffers_NilSpecVersion(t *testing.T) {
+func TestPromptPackRefDiffers_NilSpecVersion(t *testing.T) {
 	ar := newRolloutTestAR()
 	ar.Spec.PromptPackRef.Version = nil
 	c := &omniav1alpha1.CandidateOverrides{
-		PromptPackVersion: ptr.To("v2"),
+		PromptPackRef: &omniav1alpha1.PromptPackRef{Name: testStablePackName, Version: ptr.To("v2")},
 	}
-	assert.True(t, promptPackVersionDiffers(c, ar))
+	assert.True(t, promptPackRefDiffers(c, ar))
 }
 
-func TestPromptPackVersionDiffers_NilCandidateVersion(t *testing.T) {
+func TestPromptPackRefDiffers_NilCandidateVersion(t *testing.T) {
 	ar := newRolloutTestAR()
 	c := &omniav1alpha1.CandidateOverrides{}
-	assert.False(t, promptPackVersionDiffers(c, ar))
+	assert.False(t, promptPackRefDiffers(c, ar))
 }

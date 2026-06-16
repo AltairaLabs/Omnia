@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"fmt"
 
 	appsv1 "k8s.io/api/apps/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -58,8 +59,8 @@ func applyCandidateOverrides(ar *omniav1alpha1.AgentRuntime) candidateOverrideRe
 	}
 	c := ar.Spec.Rollout.Candidate
 
-	if c.PromptPackVersion != nil {
-		result.PromptPackRef.Version = c.PromptPackVersion
+	if c.PromptPackRef != nil {
+		result.PromptPackRef = *c.PromptPackRef.DeepCopy()
 	}
 	if len(c.ProviderRefs) > 0 {
 		result.Providers = c.ProviderRefs
@@ -87,6 +88,21 @@ func (r *AgentRuntimeReconciler) reconcileCandidateDeployment(
 	configHash := r.getConfigHash(ctx, providers)
 	resolvedClients, _ := r.resolveA2AClients(ctx, log, ar)
 
+	overrides := applyCandidateOverrides(ar)
+
+	// Resolve the candidate's PromptPack content. When the candidate overrides
+	// the PromptPackRef to a different pack, the candidate pods must mount THAT
+	// pack's ConfigMap — reusing the stable promptPack would silently run the
+	// stable prompts under the candidate label, defeating the rollout.
+	candidatePromptPack := promptPack
+	if overrides.PromptPackRef.Name != ar.Spec.PromptPackRef.Name {
+		resolved, err := r.fetchPromptPackByName(ctx, ar.Namespace, overrides.PromptPackRef.Name)
+		if err != nil {
+			return nil, fmt.Errorf("resolve candidate PromptPack %q: %w", overrides.PromptPackRef.Name, err)
+		}
+		candidatePromptPack = resolved
+	}
+
 	deployment := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      deployName,
@@ -108,7 +124,6 @@ func (r *AgentRuntimeReconciler) reconcileCandidateDeployment(
 		// Build a modified copy of the AgentRuntime with candidate overrides
 		// so the candidate Deployment runs the overridden config, not stable.
 		candidateAR := ar.DeepCopy()
-		overrides := applyCandidateOverrides(ar)
 		candidateAR.Spec.PromptPackRef = overrides.PromptPackRef
 		if len(overrides.Providers) > 0 {
 			candidateAR.Spec.Providers = overrides.Providers
@@ -117,8 +132,9 @@ func (r *AgentRuntimeReconciler) reconcileCandidateDeployment(
 			candidateAR.Spec.ToolRegistryRef = overrides.ToolRegistryRef
 		}
 
-		// Build the standard deployment spec using candidate overrides.
-		r.buildDeploymentSpec(ctx, deployment, candidateAR, promptPack, toolRegistry, configHash, resolvedClients)
+		// Build the standard deployment spec using candidate overrides, mounting
+		// the candidate's resolved PromptPack content.
+		r.buildDeploymentSpec(ctx, deployment, candidateAR, candidatePromptPack, toolRegistry, configHash, resolvedClients)
 
 		// Override the track label to "canary" on both selector and pod template
 		// so candidate pods are disjoint from stable pods.
