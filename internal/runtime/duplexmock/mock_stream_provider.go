@@ -144,6 +144,14 @@ func (s *session) Done() <-chan struct{} { return s.done }
 // Error always returns nil for the mock.
 func (s *session) Error() error { return nil }
 
+// EndInput implements stage.EndInputter. It signals that no more audio will be
+// sent by closing the response channel. This lets the SDK's DuplexProviderStage
+// exit immediately instead of waiting up to 30 seconds for a finalResponseTimeout.
+// Buffered echo chunks already in resp are still readable after the channel closes.
+func (s *session) EndInput() {
+	_ = s.Close() // idempotent; closes resp so forwardResponseElements drains and exits
+}
+
 // Close ends the session and closes both internal channels. Safe to call multiple times.
 func (s *session) Close() error {
 	s.mu.Lock()

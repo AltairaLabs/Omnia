@@ -615,6 +615,18 @@ func (s *Server) Converse(stream runtimev1.RuntimeService_ConverseServer) error 
 
 		lastSessionID = msg.GetSessionId()
 
+		// Duplex audio sessions are handled as a self-contained sub-call:
+		// the stream is bridged to sdk.OpenDuplex for the duration of the session.
+		if msg.GetDuplexStart() != nil {
+			if duplexErr := s.handleDuplexSession(ctx, stream, msg); duplexErr != nil {
+				s.log.Error(duplexErr, "duplex session failed", "sessionID", msg.GetSessionId())
+				_ = stream.Send(&runtimev1.ServerMessage{Message: &runtimev1.ServerMessage_Error{Error: &runtimev1.Error{
+					Code: "DUPLEX_ERROR", Message: "duplex session failed",
+				}}})
+			}
+			return nil
+		}
+
 		// Process the message
 		if err := s.processMessage(ctx, stream, msg); err != nil {
 			s.log.Error(err, "failed to process message",
