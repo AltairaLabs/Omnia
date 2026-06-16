@@ -4585,9 +4585,20 @@ export interface AgentRuntimeSpec {
      * When nil, no rollout is active. Only fields that differ from the
      * stable version need to be set. */
     candidate?: {
-      /** promptPackVersion overrides the PromptPack version for the candidate.
-       * When set, the candidate runs a different prompt version than stable. */
-      promptPackVersion?: string;
+      /** promptPackRef overrides the PromptPack for the candidate. When set, the
+       * candidate Deployment runs a different PromptPack than stable — the operator
+       * resolves this reference and mounts that pack's content into the candidate
+       * pods, so a new prompt can be shipped as the candidate.
+       * 
+       * PromptPacks are resolved by name (each version is its own PromptPack
+       * resource), so to run different prompt content the candidate must reference
+       * a different PromptPack name, not merely a version. */
+      promptPackRef?: {
+        /** name is the name of the PromptPack resource. */
+        name: string;
+        /** version specifies a specific version of the PromptPack to use. */
+        version?: string;
+      };
       /** providerRefs overrides the provider list for the candidate.
        * Use this to test a different LLM model or provider configuration. */
       providerRefs?: {

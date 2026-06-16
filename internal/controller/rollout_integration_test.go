@@ -45,7 +45,7 @@ func TestReconcileRollout_Active_CreatesCandidateDeployment(t *testing.T) {
 	ar := newRolloutTestAR()
 	ar.Spec.Rollout = &omniav1alpha1.RolloutConfig{
 		Candidate: &omniav1alpha1.CandidateOverrides{
-			PromptPackVersion: ptr.To("v2"),
+			PromptPackRef: &omniav1alpha1.PromptPackRef{Name: testStablePackName, Version: ptr.To("v2")},
 		},
 		Steps: []omniav1alpha1.RolloutStep{
 			{SetWeight: ptr.To[int32](20)},
@@ -145,7 +145,7 @@ func TestReconcileRollout_Promotion(t *testing.T) {
 	ar := newRolloutTestAR()
 	ar.Spec.Rollout = &omniav1alpha1.RolloutConfig{
 		Candidate: &omniav1alpha1.CandidateOverrides{
-			PromptPackVersion: ptr.To("v2"),
+			PromptPackRef: &omniav1alpha1.PromptPackRef{Name: testStablePackName, Version: ptr.To("v2")},
 		},
 		Steps: []omniav1alpha1.RolloutStep{
 			{SetWeight: ptr.To[int32](50)},
@@ -208,7 +208,7 @@ func TestReconcileRollout_PauseStep_RequeuesAfterDuration(t *testing.T) {
 	ar := newRolloutTestAR()
 	ar.Spec.Rollout = &omniav1alpha1.RolloutConfig{
 		Candidate: &omniav1alpha1.CandidateOverrides{
-			PromptPackVersion: ptr.To("v2"),
+			PromptPackRef: &omniav1alpha1.PromptPackRef{Name: testStablePackName, Version: ptr.To("v2")},
 		},
 		Steps: []omniav1alpha1.RolloutStep{
 			{Pause: &omniav1alpha1.RolloutPause{Duration: ptr.To("30s")}},
@@ -265,7 +265,7 @@ func TestReconcileRollout_Promotion_PersistsSpec(t *testing.T) {
 	ar := newRolloutTestAR()
 	ar.Spec.Rollout = &omniav1alpha1.RolloutConfig{
 		Candidate: &omniav1alpha1.CandidateOverrides{
-			PromptPackVersion: ptr.To("v2"),
+			PromptPackRef: &omniav1alpha1.PromptPackRef{Name: testStablePackName, Version: ptr.To("v2")},
 		},
 		Steps: []omniav1alpha1.RolloutStep{
 			{SetWeight: ptr.To[int32](100)},
@@ -308,7 +308,7 @@ func TestReconcileRollout_SetWeightZero_Advances(t *testing.T) {
 	ar := newRolloutTestAR()
 	ar.Spec.Rollout = &omniav1alpha1.RolloutConfig{
 		Candidate: &omniav1alpha1.CandidateOverrides{
-			PromptPackVersion: ptr.To("v2"),
+			PromptPackRef: &omniav1alpha1.PromptPackRef{Name: testStablePackName, Version: ptr.To("v2")},
 		},
 		Steps: []omniav1alpha1.RolloutStep{
 			{SetWeight: ptr.To[int32](0)},
@@ -333,7 +333,7 @@ func TestCandidateDeployment_SelectorIncludesTrack(t *testing.T) {
 	ar := newRolloutTestAR()
 	ar.Spec.Rollout = &omniav1alpha1.RolloutConfig{
 		Candidate: &omniav1alpha1.CandidateOverrides{
-			PromptPackVersion: ptr.To("v2"),
+			PromptPackRef: &omniav1alpha1.PromptPackRef{Name: testStablePackName, Version: ptr.To("v2")},
 		},
 		Steps: []omniav1alpha1.RolloutStep{{SetWeight: ptr.To[int32](10)}},
 	}
@@ -367,7 +367,7 @@ func TestReconcileRollout_MetricsRecorded(t *testing.T) {
 	ar := newRolloutTestAR()
 	ar.Spec.Rollout = &omniav1alpha1.RolloutConfig{
 		Candidate: &omniav1alpha1.CandidateOverrides{
-			PromptPackVersion: ptr.To("v2"),
+			PromptPackRef: &omniav1alpha1.PromptPackRef{Name: testStablePackName, Version: ptr.To("v2")},
 		},
 		Steps: []omniav1alpha1.RolloutStep{
 			{SetWeight: ptr.To[int32](100)},
@@ -424,7 +424,7 @@ func TestReconcileRollout_AutoRollback_UnhealthyCandidate(t *testing.T) {
 	ar := newRolloutTestAR()
 	ar.Spec.Rollout = &omniav1alpha1.RolloutConfig{
 		Candidate: &omniav1alpha1.CandidateOverrides{
-			PromptPackVersion: ptr.To("v2"),
+			PromptPackRef: &omniav1alpha1.PromptPackRef{Name: testStablePackName, Version: ptr.To("v2")},
 		},
 		Steps: []omniav1alpha1.RolloutStep{
 			{SetWeight: ptr.To[int32](20)},
@@ -513,7 +513,7 @@ func TestReconcileRollout_AutoRollback_HealthyCandidate_Continues(t *testing.T) 
 	ar := newRolloutTestAR()
 	ar.Spec.Rollout = &omniav1alpha1.RolloutConfig{
 		Candidate: &omniav1alpha1.CandidateOverrides{
-			PromptPackVersion: ptr.To("v2"),
+			PromptPackRef: &omniav1alpha1.PromptPackRef{Name: testStablePackName, Version: ptr.To("v2")},
 		},
 		Steps: []omniav1alpha1.RolloutStep{
 			{SetWeight: ptr.To[int32](20)},
@@ -608,7 +608,7 @@ func TestReconcileRolloutUpdateStatus_NilActiveVersion(t *testing.T) {
 	ar := newRolloutTestAR()
 	ar.Spec.Rollout = &omniav1alpha1.RolloutConfig{
 		Candidate: &omniav1alpha1.CandidateOverrides{
-			PromptPackVersion: ptr.To("v2"),
+			PromptPackRef: &omniav1alpha1.PromptPackRef{Name: testStablePackName, Version: ptr.To("v2")},
 		},
 		Steps: []omniav1alpha1.RolloutStep{
 			{SetWeight: ptr.To[int32](20)},
@@ -654,7 +654,7 @@ func TestReconcileRollout_Active_WithIstioTrafficRouting(t *testing.T) {
 	ar := newRolloutTestAR()
 	ar.Spec.Rollout = &omniav1alpha1.RolloutConfig{
 		Candidate: &omniav1alpha1.CandidateOverrides{
-			PromptPackVersion: ptr.To("v2"),
+			PromptPackRef: &omniav1alpha1.PromptPackRef{Name: testStablePackName, Version: ptr.To("v2")},
 		},
 		Steps: []omniav1alpha1.RolloutStep{
 			{SetWeight: ptr.To[int32](30)},
@@ -812,7 +812,7 @@ func TestReconcileRollout_StickySession_PatchesDR(t *testing.T) {
 	ar := newRolloutTestAR()
 	ar.Spec.Rollout = &omniav1alpha1.RolloutConfig{
 		Candidate: &omniav1alpha1.CandidateOverrides{
-			PromptPackVersion: ptr.To("v2"),
+			PromptPackRef: &omniav1alpha1.PromptPackRef{Name: testStablePackName, Version: ptr.To("v2")},
 		},
 		Steps: []omniav1alpha1.RolloutStep{
 			{SetWeight: ptr.To[int32](30)},
@@ -888,7 +888,7 @@ func TestReconcileRollout_Promotion_RemovesDRConsistentHash(t *testing.T) {
 	ar := newRolloutTestAR()
 	ar.Spec.Rollout = &omniav1alpha1.RolloutConfig{
 		Candidate: &omniav1alpha1.CandidateOverrides{
-			PromptPackVersion: ptr.To("v2"),
+			PromptPackRef: &omniav1alpha1.PromptPackRef{Name: testStablePackName, Version: ptr.To("v2")},
 		},
 		Steps: []omniav1alpha1.RolloutStep{
 			{SetWeight: ptr.To[int32](100)},
@@ -993,7 +993,7 @@ func newAnalysisTestAR() *omniav1alpha1.AgentRuntime {
 	ar := newRolloutTestAR()
 	ar.Spec.Rollout = &omniav1alpha1.RolloutConfig{
 		Candidate: &omniav1alpha1.CandidateOverrides{
-			PromptPackVersion: ptr.To("v2"),
+			PromptPackRef: &omniav1alpha1.PromptPackRef{Name: testStablePackName, Version: ptr.To("v2")},
 		},
 		Steps: []omniav1alpha1.RolloutStep{
 			{SetWeight: ptr.To[int32](20)},

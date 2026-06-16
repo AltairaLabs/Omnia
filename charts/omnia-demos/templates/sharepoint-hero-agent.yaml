@@ -65,8 +65,12 @@ spec:
   rollout:
     {{- if .Values.sharepointHero.shipCandidate }}
     # The "ship the change" beat: verbose v2 prompt + pricier candidate model.
+    # promptPackRef points at a DIFFERENT PromptPack (rag-hero-pack-v2) so the
+    # candidate pods mount the v2 prompt content — packs are name-keyed, so a
+    # version string alone would not change what the candidate runs.
     candidate:
-      promptPackVersion: "2.0.0"
+      promptPackRef:
+        name: rag-hero-pack-v2
       providerRefs:
         - name: default
           providerRef:

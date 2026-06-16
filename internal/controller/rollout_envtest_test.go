@@ -59,7 +59,7 @@ var _ = Describe("AgentRuntime Rollout (envtest)", func() {
 			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
 			Spec: omniav1alpha1.AgentRuntimeSpec{
 				PromptPackRef: omniav1alpha1.PromptPackRef{
-					Name:    "support-pack",
+					Name:    testStablePackName,
 					Version: ptr.To("v1"),
 				},
 				Facade: omniav1alpha1.FacadeConfig{
@@ -162,7 +162,7 @@ var _ = Describe("AgentRuntime Rollout (envtest)", func() {
 			ar := baseAR(nextName("ar"))
 			ar.Spec.Rollout = &omniav1alpha1.RolloutConfig{
 				Candidate: &omniav1alpha1.CandidateOverrides{
-					PromptPackVersion: ptr.To("v2"),
+					PromptPackRef: &omniav1alpha1.PromptPackRef{Name: testStablePackName, Version: ptr.To("v2")},
 				},
 				Steps: []omniav1alpha1.RolloutStep{
 					{SetWeight: ptr.To[int32](20)},
@@ -202,7 +202,7 @@ var _ = Describe("AgentRuntime Rollout (envtest)", func() {
 			ar.Spec.PromptPackRef.Name = packName
 			ar.Spec.Rollout = &omniav1alpha1.RolloutConfig{
 				Candidate: &omniav1alpha1.CandidateOverrides{
-					PromptPackVersion: ptr.To("v2"),
+					PromptPackRef: &omniav1alpha1.PromptPackRef{Name: packName, Version: ptr.To("v2")},
 				},
 				Steps: []omniav1alpha1.RolloutStep{
 					{SetWeight: ptr.To[int32](25)},
@@ -241,7 +241,7 @@ var _ = Describe("AgentRuntime Rollout (envtest)", func() {
 			ar.Spec.PromptPackRef.Name = packName
 			ar.Spec.Rollout = &omniav1alpha1.RolloutConfig{
 				Candidate: &omniav1alpha1.CandidateOverrides{
-					PromptPackVersion: ptr.To("v2"),
+					PromptPackRef: &omniav1alpha1.PromptPackRef{Name: packName, Version: ptr.To("v2")},
 				},
 				Steps: []omniav1alpha1.RolloutStep{
 					{SetWeight: ptr.To[int32](25)},
@@ -272,7 +272,7 @@ var _ = Describe("AgentRuntime Rollout (envtest)", func() {
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: arName, Namespace: namespace}, afterPromote)).To(Succeed())
 			Expect(afterPromote.Spec.PromptPackRef.Version).NotTo(BeNil())
 			Expect(*afterPromote.Spec.PromptPackRef.Version).To(Equal("v2"),
-				"candidate PromptPackVersion should be promoted into stable spec")
+				"candidate PromptPackRef version should be promoted into stable spec")
 
 			// Candidate Deployment should have been deleted.
 			err = k8sClient.Get(ctx, types.NamespacedName{
@@ -299,7 +299,7 @@ var _ = Describe("AgentRuntime Rollout (envtest)", func() {
 			ar.Spec.Runtime = &omniav1alpha1.RuntimeConfig{Replicas: ptr.To[int32](4)}
 			ar.Spec.Rollout = &omniav1alpha1.RolloutConfig{
 				Candidate: &omniav1alpha1.CandidateOverrides{
-					PromptPackVersion: ptr.To("v2"),
+					PromptPackRef: &omniav1alpha1.PromptPackRef{Name: packName, Version: ptr.To("v2")},
 				},
 				// setWeight 50 then an indefinite pause — the canary spends ~all
 				// its life in the pause, which is exactly where the builder used

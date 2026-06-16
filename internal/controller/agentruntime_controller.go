@@ -195,10 +195,11 @@ func (r *AgentRuntimeReconciler) reconcileReferences(
 	// Gate readiness on the PromptPack's schema validity. A pack that failed
 	// schema validation makes every conversation fail at open-time, so refuse
 	// to bring the agent up and surface the reason clearly rather than serving
-	// a silently-broken agent (#1299). This gates the single referenced pack,
-	// which both the stable and canary tracks mount today; per-variant
-	// candidate-pack validation lands when the candidate.promptPackVersion
-	// override resolves a distinct pack (separate follow-up).
+	// a silently-broken agent (#1299). This gates the STABLE pack only; the
+	// candidate now resolves and mounts its own pack via
+	// rollout.candidate.promptPackRef (reconcileCandidateDeployment), so a bad
+	// candidate pack surfaces as candidate pods failing to roll out (the
+	// rollout's pod-health auto-rollback path) rather than here.
 	if reason := promptPackInvalidReason(promptPack); reason != "" {
 		SetCondition(&agentRuntime.Status.Conditions, agentRuntime.Generation, ConditionTypePromptPackReady, metav1.ConditionFalse,
 			"PromptPackInvalid", reason)
@@ -590,11 +591,15 @@ func promptPackInvalidReason(pp *omniav1alpha1.PromptPack) string {
 }
 
 func (r *AgentRuntimeReconciler) fetchPromptPack(ctx context.Context, agentRuntime *omniav1alpha1.AgentRuntime) (*omniav1alpha1.PromptPack, error) {
+	return r.fetchPromptPackByName(ctx, agentRuntime.Namespace, agentRuntime.Spec.PromptPackRef.Name)
+}
+
+// fetchPromptPackByName resolves a PromptPack by name. PromptPacks are
+// name-keyed (each version is its own resource), so the name alone identifies
+// the content to mount — used both for the stable ref and a candidate override.
+func (r *AgentRuntimeReconciler) fetchPromptPackByName(ctx context.Context, namespace, name string) (*omniav1alpha1.PromptPack, error) {
 	promptPack := &omniav1alpha1.PromptPack{}
-	key := types.NamespacedName{
-		Name:      agentRuntime.Spec.PromptPackRef.Name,
-		Namespace: agentRuntime.Namespace,
-	}
+	key := types.NamespacedName{Name: name, Namespace: namespace}
 	if err := r.Get(ctx, key, promptPack); err != nil {
 		return nil, fmt.Errorf("failed to get PromptPack %s: %w", key, err)
 	}

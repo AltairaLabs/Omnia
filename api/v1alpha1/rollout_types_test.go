@@ -103,8 +103,8 @@ func TestRolloutStepAnalysis(t *testing.T) {
 func TestCandidateOverridesEmpty(t *testing.T) {
 	c := CandidateOverrides{}
 
-	if c.PromptPackVersion != nil {
-		t.Error("PromptPackVersion should be nil for empty CandidateOverrides")
+	if c.PromptPackRef != nil {
+		t.Error("PromptPackRef should be nil for empty CandidateOverrides")
 	}
 	if c.ProviderRefs != nil {
 		t.Error("ProviderRefs should be nil for empty CandidateOverrides")
@@ -114,16 +114,16 @@ func TestCandidateOverridesEmpty(t *testing.T) {
 	}
 }
 
-func TestCandidateOverridesWithPromptPackVersion(t *testing.T) {
+func TestCandidateOverridesWithPromptPackRef(t *testing.T) {
 	c := CandidateOverrides{
-		PromptPackVersion: stringPtr("v2"),
+		PromptPackRef: &PromptPackRef{Name: "support-pack", Version: stringPtr("v2")},
 	}
 
-	if c.PromptPackVersion == nil {
-		t.Fatal("PromptPackVersion should not be nil")
+	if c.PromptPackRef == nil || c.PromptPackRef.Version == nil {
+		t.Fatal("PromptPackRef.Version should not be nil")
 	}
-	if *c.PromptPackVersion != "v2" {
-		t.Errorf("PromptPackVersion = %q, want %q", *c.PromptPackVersion, "v2")
+	if *c.PromptPackRef.Version != "v2" {
+		t.Errorf("PromptPackRef.Version = %q, want %q", *c.PromptPackRef.Version, "v2")
 	}
 }
 
@@ -200,7 +200,7 @@ func TestRolloutConfigIdleState(t *testing.T) {
 func TestRolloutConfigFullSpec(t *testing.T) {
 	cfg := RolloutConfig{
 		Candidate: &CandidateOverrides{
-			PromptPackVersion: stringPtr("v2"),
+			PromptPackRef: &PromptPackRef{Name: "support-pack", Version: stringPtr("v2")},
 		},
 		Steps: []RolloutStep{
 			{SetWeight: int32Ptr(10)},
@@ -231,8 +231,8 @@ func TestRolloutConfigFullSpec(t *testing.T) {
 	if cfg.Candidate == nil {
 		t.Fatal("Candidate should not be nil")
 	}
-	if *cfg.Candidate.PromptPackVersion != "v2" {
-		t.Errorf("Candidate.PromptPackVersion = %q, want %q", *cfg.Candidate.PromptPackVersion, "v2")
+	if *cfg.Candidate.PromptPackRef.Version != "v2" {
+		t.Errorf("Candidate.PromptPackRef.Version = %q, want %q", *cfg.Candidate.PromptPackRef.Version, "v2")
 	}
 	if len(cfg.Steps) != 4 {
 		t.Errorf("len(Steps) = %d, want 4", len(cfg.Steps))
@@ -257,7 +257,7 @@ func TestAgentRuntimeSpecRolloutField(t *testing.T) {
 
 	spec.Rollout = &RolloutConfig{
 		Candidate: &CandidateOverrides{
-			PromptPackVersion: stringPtr("v2"),
+			PromptPackRef: &PromptPackRef{Name: "support-pack", Version: stringPtr("v2")},
 		},
 		Steps: []RolloutStep{{SetWeight: int32Ptr(100)}},
 	}

@@ -58,7 +58,7 @@ var _ = Describe("AgentRuntime Rollout Analysis (envtest)", func() {
 			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
 			Spec: omniav1alpha1.AgentRuntimeSpec{
 				PromptPackRef: omniav1alpha1.PromptPackRef{
-					Name:    "support-pack",
+					Name:    testStablePackName,
 					Version: ptr.To("v1"),
 				},
 				Facade: omniav1alpha1.FacadeConfig{
@@ -158,7 +158,7 @@ var _ = Describe("AgentRuntime Rollout Analysis (envtest)", func() {
 			ar := baseAR(arName)
 			ar.Spec.Rollout = &omniav1alpha1.RolloutConfig{
 				Candidate: &omniav1alpha1.CandidateOverrides{
-					PromptPackVersion: ptr.To("v2"),
+					PromptPackRef: &omniav1alpha1.PromptPackRef{Name: testStablePackName, Version: ptr.To("v2")},
 				},
 				Steps: []omniav1alpha1.RolloutStep{
 					{Analysis: &omniav1alpha1.RolloutAnalysisStep{TemplateName: "missing-template"}},
@@ -195,7 +195,7 @@ var _ = Describe("AgentRuntime Rollout Analysis (envtest)", func() {
 			ar := baseAR(arName)
 			ar.Spec.Rollout = &omniav1alpha1.RolloutConfig{
 				Candidate: &omniav1alpha1.CandidateOverrides{
-					PromptPackVersion: ptr.To("v2"),
+					PromptPackRef: &omniav1alpha1.PromptPackRef{Name: testStablePackName, Version: ptr.To("v2")},
 				},
 				Steps: []omniav1alpha1.RolloutStep{
 					{Analysis: &omniav1alpha1.RolloutAnalysisStep{TemplateName: "some-template"}},
@@ -222,8 +222,9 @@ var _ = Describe("AgentRuntime Rollout Analysis (envtest)", func() {
 			// Spec must not have been rolled back.
 			Expect(after.Spec.Rollout).NotTo(BeNil())
 			Expect(after.Spec.Rollout.Candidate).NotTo(BeNil())
-			Expect(after.Spec.Rollout.Candidate.PromptPackVersion).NotTo(BeNil())
-			Expect(*after.Spec.Rollout.Candidate.PromptPackVersion).To(Equal("v2"))
+			Expect(after.Spec.Rollout.Candidate.PromptPackRef).NotTo(BeNil())
+			Expect(after.Spec.Rollout.Candidate.PromptPackRef.Version).NotTo(BeNil())
+			Expect(*after.Spec.Rollout.Candidate.PromptPackRef.Version).To(Equal("v2"))
 		})
 
 		It("handleAnalysisAutoRollback reverts candidate, deletes candidate Deployment, and marks rollout inactive", func() {
@@ -232,7 +233,7 @@ var _ = Describe("AgentRuntime Rollout Analysis (envtest)", func() {
 			ar.Spec.Rollout = &omniav1alpha1.RolloutConfig{
 				Candidate: &omniav1alpha1.CandidateOverrides{
 					// Candidate wants v2 — rollback should revert candidate to v1 (matching stable).
-					PromptPackVersion: ptr.To("v2"),
+					PromptPackRef: &omniav1alpha1.PromptPackRef{Name: testStablePackName, Version: ptr.To("v2")},
 				},
 				Steps: []omniav1alpha1.RolloutStep{
 					{Analysis: &omniav1alpha1.RolloutAnalysisStep{TemplateName: "some-template"}},
@@ -268,14 +269,15 @@ var _ = Describe("AgentRuntime Rollout Analysis (envtest)", func() {
 			_, err := r.handleAnalysisAutoRollback(ctx, live, "error-rate too high")
 			Expect(err).NotTo(HaveOccurred())
 
-			// Spec: candidate's PromptPackVersion should now match stable's (v1) —
+			// Spec: candidate's PromptPackRef should now match stable's (v1) —
 			// candidateDiffers() returns false so isRolloutActive() is false.
 			after := &omniav1alpha1.AgentRuntime{}
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: arName, Namespace: namespace}, after)).To(Succeed())
 			Expect(after.Spec.Rollout).NotTo(BeNil())
 			Expect(after.Spec.Rollout.Candidate).NotTo(BeNil())
-			Expect(after.Spec.Rollout.Candidate.PromptPackVersion).NotTo(BeNil())
-			Expect(*after.Spec.Rollout.Candidate.PromptPackVersion).To(Equal("v1"),
+			Expect(after.Spec.Rollout.Candidate.PromptPackRef).NotTo(BeNil())
+			Expect(after.Spec.Rollout.Candidate.PromptPackRef.Version).NotTo(BeNil())
+			Expect(*after.Spec.Rollout.Candidate.PromptPackRef.Version).To(Equal("v1"),
 				"candidate should be reverted to stable version after rollback")
 
 			// Candidate Deployment should have been deleted.

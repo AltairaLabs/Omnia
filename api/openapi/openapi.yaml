@@ -1298,9 +1298,19 @@ components:
       type: object
       description: Sparse overrides for the candidate version during a rollout.
       properties:
-        promptPackVersion:
-          type: string
-          description: Override PromptPack version for the candidate
+        promptPackRef:
+          type: object
+          description: >-
+            Override the PromptPack for the candidate. Packs are name-keyed
+            (each version is its own resource), so reference a different name to
+            run different prompt content.
+          required:
+            - name
+          properties:
+            name:
+              type: string
+            version:
+              type: string
         providerRefs:
           type: array
           items:

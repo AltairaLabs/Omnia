@@ -488,11 +488,17 @@ func (r *AgentRuntimeReconciler) handleAnalysisManualPause(
 	return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 }
 
-// resolveRolloutCandidateVersion returns the candidate prompt pack version,
-// falling back to the stable version when no override is set.
+// resolveRolloutCandidateVersion returns the candidate prompt pack version for
+// status reporting, derived from the candidate's PromptPack override when set
+// (its pinned version, or its name when no version is pinned) and otherwise
+// falling back to the stable version.
 func resolveRolloutCandidateVersion(ar *omniav1alpha1.AgentRuntime) string {
-	if ar.Spec.Rollout != nil && ar.Spec.Rollout.Candidate != nil && ar.Spec.Rollout.Candidate.PromptPackVersion != nil {
-		return *ar.Spec.Rollout.Candidate.PromptPackVersion
+	if ar.Spec.Rollout != nil && ar.Spec.Rollout.Candidate != nil && ar.Spec.Rollout.Candidate.PromptPackRef != nil {
+		ref := ar.Spec.Rollout.Candidate.PromptPackRef
+		if ref.Version != nil {
+			return *ref.Version
+		}
+		return ref.Name
 	}
 	if ar.Spec.PromptPackRef.Version != nil {
 		return *ar.Spec.PromptPackRef.Version
@@ -529,7 +535,7 @@ func isRolloutActive(ar *omniav1alpha1.AgentRuntime) bool {
 func candidateDiffers(ar *omniav1alpha1.AgentRuntime) bool {
 	c := ar.Spec.Rollout.Candidate
 
-	if promptPackVersionDiffers(c, ar) {
+	if promptPackRefDiffers(c, ar) {
 		return true
 	}
 	if providerRefsDiffer(c, ar) {
@@ -541,16 +547,24 @@ func candidateDiffers(ar *omniav1alpha1.AgentRuntime) bool {
 	return false
 }
 
-// promptPackVersionDiffers checks if the candidate overrides the prompt pack version.
-func promptPackVersionDiffers(c *omniav1alpha1.CandidateOverrides, ar *omniav1alpha1.AgentRuntime) bool {
-	if c.PromptPackVersion == nil {
+// promptPackRefDiffers checks if the candidate overrides the prompt pack to a
+// different name or version than stable.
+func promptPackRefDiffers(c *omniav1alpha1.CandidateOverrides, ar *omniav1alpha1.AgentRuntime) bool {
+	if c.PromptPackRef == nil {
 		return false
 	}
-	specVersion := ""
-	if ar.Spec.PromptPackRef.Version != nil {
-		specVersion = *ar.Spec.PromptPackRef.Version
+	if c.PromptPackRef.Name != ar.Spec.PromptPackRef.Name {
+		return true
 	}
-	return *c.PromptPackVersion != specVersion
+	return derefStr(c.PromptPackRef.Version) != derefStr(ar.Spec.PromptPackRef.Version)
+}
+
+// derefStr returns the pointed-to string, or "" for a nil pointer.
+func derefStr(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }
 
 // providerRefsDiffer checks if the candidate overrides the provider refs.
@@ -735,8 +749,8 @@ func promote(ar *omniav1alpha1.AgentRuntime) {
 	}
 	c := ar.Spec.Rollout.Candidate
 
-	if c.PromptPackVersion != nil {
-		ar.Spec.PromptPackRef.Version = c.PromptPackVersion
+	if c.PromptPackRef != nil {
+		ar.Spec.PromptPackRef = *c.PromptPackRef.DeepCopy()
 	}
 	if len(c.ProviderRefs) > 0 {
 		ar.Spec.Providers = c.ProviderRefs
@@ -789,13 +803,8 @@ func rollback(ar *omniav1alpha1.AgentRuntime) {
 	}
 	c := ar.Spec.Rollout.Candidate
 
-	// Revert prompt pack version to spec.
-	if ar.Spec.PromptPackRef.Version != nil {
-		v := *ar.Spec.PromptPackRef.Version
-		c.PromptPackVersion = &v
-	} else {
-		c.PromptPackVersion = nil
-	}
+	// Revert prompt pack ref to spec.
+	c.PromptPackRef = ar.Spec.PromptPackRef.DeepCopy()
 
 	// Revert provider refs to spec.
 	if len(ar.Spec.Providers) > 0 {

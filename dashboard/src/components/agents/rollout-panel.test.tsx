@@ -9,7 +9,7 @@ import {
 import type { RolloutConfig, RolloutStatus } from "@/types/agent-runtime";
 
 const meshSpec: RolloutConfig = {
-  candidate: { promptPackVersion: "v2" },
+  candidate: { promptPackRef: { name: "rag-hero-pack-v2" } },
   trafficRouting: { mode: "mesh" },
   steps: [{ setWeight: 25 }, { pause: {} }, { setWeight: 100 }],
 };

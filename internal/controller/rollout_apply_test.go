@@ -165,7 +165,7 @@ var _ = Describe("AgentRuntime applyTrafficRouting dispatch (envtest)", func() {
 				}},
 				Runtime: &omniav1alpha1.RuntimeConfig{Replicas: ptr.To(int32(4))},
 				Rollout: &omniav1alpha1.RolloutConfig{
-					Candidate: &omniav1alpha1.CandidateOverrides{PromptPackVersion: ptr.To("v2")},
+					Candidate: &omniav1alpha1.CandidateOverrides{PromptPackRef: &omniav1alpha1.PromptPackRef{Name: "p", Version: ptr.To("v2")}},
 					TrafficRouting: &omniav1alpha1.TrafficRoutingConfig{
 						Mode: TrafficModeReplicaWeighted,
 					},
