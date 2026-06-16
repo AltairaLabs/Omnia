@@ -25,6 +25,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
+
+	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 )
 
 // labelWorkspaceReaderFor scopes a Workspace-reader ClusterRoleBinding to the
@@ -55,6 +57,18 @@ func evalWorkerRBACLabels(serviceGroup string) map[string]string {
 	}
 }
 
+// evalWorkerServiceAccountName returns the ServiceAccount the eval-worker pod
+// runs as: the podOverrides override when set (e.g. a shared workload-identity
+// SA so the worker's llm_judge can mint a keyless cloud token), otherwise the
+// operator-managed default arena-eval-worker-<group>. RBAC subjects must target
+// this SA so an overridden (WI) SA still receives the worker's read grants.
+func evalWorkerServiceAccountName(serviceGroup string, po *omniav1alpha1.PodOverrides) string {
+	if po != nil && po.ServiceAccountName != "" {
+		return po.ServiceAccountName
+	}
+	return evalWorkerName(serviceGroup)
+}
+
 // ensureEvalWorkerRBAC creates or updates the per-service-group eval-worker
 // ServiceAccount, Role, RoleBinding, and (when a workspace-reader ClusterRole is
 // configured) a ClusterRoleBinding for cluster-scoped Workspace reads.
@@ -63,20 +77,29 @@ func evalWorkerRBACLabels(serviceGroup string) map[string]string {
 // AgentRuntime, so owning the RBAC by one agent would garbage-collect it
 // prematurely. The objects share the eval-worker label set and are cleaned up
 // explicitly in cleanupEvalWorkers, mirroring the Deployment lifecycle.
+//
+// When podOverrides points the worker at an external ServiceAccount, the
+// operator does not create/own that SA (it is user/chart-managed) but still
+// binds the Role + workspace-reader ClusterRole to it.
 func (r *AgentRuntimeReconciler) ensureEvalWorkerRBAC(
 	ctx context.Context,
 	namespace, serviceGroup string,
+	podOverrides *omniav1alpha1.PodOverrides,
 ) error {
-	if err := r.ensureEvalWorkerServiceAccount(ctx, namespace, serviceGroup); err != nil {
-		return fmt.Errorf("ensure eval worker ServiceAccount: %w", err)
+	saName := evalWorkerServiceAccountName(serviceGroup, podOverrides)
+	// Only manage the default SA; an overridden SA is owned elsewhere.
+	if saName == evalWorkerName(serviceGroup) {
+		if err := r.ensureEvalWorkerServiceAccount(ctx, namespace, serviceGroup); err != nil {
+			return fmt.Errorf("ensure eval worker ServiceAccount: %w", err)
+		}
 	}
 	if err := r.ensureEvalWorkerRole(ctx, namespace, serviceGroup); err != nil {
 		return fmt.Errorf("ensure eval worker Role: %w", err)
 	}
-	if err := r.ensureEvalWorkerRoleBinding(ctx, namespace, serviceGroup); err != nil {
+	if err := r.ensureEvalWorkerRoleBinding(ctx, namespace, serviceGroup, saName); err != nil {
 		return fmt.Errorf("ensure eval worker RoleBinding: %w", err)
 	}
-	if err := r.ensureEvalWorkerWorkspaceReaderBinding(ctx, namespace, serviceGroup); err != nil {
+	if err := r.ensureEvalWorkerWorkspaceReaderBinding(ctx, namespace, serviceGroup, saName); err != nil {
 		return fmt.Errorf("ensure eval worker workspace reader ClusterRoleBinding: %w", err)
 	}
 	return nil
@@ -150,7 +173,7 @@ func (r *AgentRuntimeReconciler) ensureEvalWorkerRole(
 // eval-worker ServiceAccount to its Role.
 func (r *AgentRuntimeReconciler) ensureEvalWorkerRoleBinding(
 	ctx context.Context,
-	namespace, serviceGroup string,
+	namespace, serviceGroup, saName string,
 ) error {
 	log := logf.FromContext(ctx)
 	name := evalWorkerName(serviceGroup)
@@ -169,7 +192,7 @@ func (r *AgentRuntimeReconciler) ensureEvalWorkerRoleBinding(
 		rb.Subjects = []rbacv1.Subject{
 			{
 				Kind:      kindServiceAccount,
-				Name:      name,
+				Name:      saName,
 				Namespace: namespace,
 			},
 		}
@@ -190,7 +213,7 @@ func (r *AgentRuntimeReconciler) ensureEvalWorkerRoleBinding(
 // ClusterRole is configured (e.g. local dev, tests), mirroring the facade.
 func (r *AgentRuntimeReconciler) ensureEvalWorkerWorkspaceReaderBinding(
 	ctx context.Context,
-	namespace, serviceGroup string,
+	namespace, serviceGroup, saName string,
 ) error {
 	if r.AgentWorkspaceReaderClusterRole == "" {
 		return nil
@@ -215,7 +238,7 @@ func (r *AgentRuntimeReconciler) ensureEvalWorkerWorkspaceReaderBinding(
 		crb.Subjects = []rbacv1.Subject{
 			{
 				Kind:      kindServiceAccount,
-				Name:      evalWorkerName(serviceGroup),
+				Name:      saName,
 				Namespace: namespace,
 			},
 		}

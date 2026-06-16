@@ -94,16 +94,17 @@ func (r *AgentRuntimeReconciler) serviceGroupsNeedingEvalWorker(
 		if group == "" {
 			group = defaultSvcGroupName
 		}
+		sg, sgFound := r.findServiceGroup(ctx, namespace, group)
 		// PromptKit agents self-evaluate inline and are excluded from the
 		// eval-worker by default. Their group can opt in via the
 		// WorkspaceServiceGroup evalWorker.enabled flag to run llm_judge
 		// (long-running/external) evals out-of-band — the only path that
 		// emits worker-only labels like `variant`.
-		if isPromptKit(&rt.Spec) && !r.groupEvalWorkerEnabled(ctx, namespace, group) {
+		if isPromptKit(&rt.Spec) && !groupEvalWorkerEnabled(sg, sgFound) {
 			continue
 		}
 		if _, seen := needed[group]; !seen {
-			needed[group] = rt.Spec.Evals.PodOverrides
+			needed[group] = evalWorkerPodOverrides(sg, sgFound, rt)
 		}
 	}
 
@@ -119,7 +120,7 @@ func (r *AgentRuntimeReconciler) ensureEvalWorkerDeployment(
 ) error {
 	log := logf.FromContext(ctx)
 
-	if err := r.ensureEvalWorkerRBAC(ctx, namespace, serviceGroup); err != nil {
+	if err := r.ensureEvalWorkerRBAC(ctx, namespace, serviceGroup, podOverrides); err != nil {
 		return fmt.Errorf("ensure eval worker RBAC %s/%s: %w", namespace, serviceGroup, err)
 	}
 
@@ -344,17 +345,25 @@ func (r *AgentRuntimeReconciler) resolveEvalWorkerRedis(ctx context.Context, nam
 	return defaultURL, defaultSecret
 }
 
-// groupEvalWorkerEnabled reports whether the given service group opts into the
+// groupEvalWorkerEnabled reports whether a resolved service group opts into the
 // eval-worker via its WorkspaceServiceGroup evalWorker.enabled flag. This lets
 // PromptKit agents — which self-evaluate inline and are otherwise excluded —
 // run their out-of-band (llm_judge) evals when the group operator opts in.
-// Returns false when no matching Workspace/group exists.
-func (r *AgentRuntimeReconciler) groupEvalWorkerEnabled(ctx context.Context, namespace, serviceGroup string) bool {
-	sg, ok := r.findServiceGroup(ctx, namespace, serviceGroup)
-	if !ok {
-		return false
+// Returns false when the group was not found.
+func groupEvalWorkerEnabled(sg omniav1alpha1.WorkspaceServiceGroup, found bool) bool {
+	return found && sg.EvalWorker != nil && sg.EvalWorker.Enabled
+}
+
+// evalWorkerPodOverrides returns the PodOverrides for the group's eval-worker:
+// the group-level WorkspaceServiceGroup.evalWorker.podOverrides when set (the
+// place a worker's cloud workload-identity belongs, since the worker is
+// per-group), otherwise the representative agent's spec.evals.podOverrides for
+// backward compatibility.
+func evalWorkerPodOverrides(sg omniav1alpha1.WorkspaceServiceGroup, found bool, rt *omniav1alpha1.AgentRuntime) *omniav1alpha1.PodOverrides {
+	if found && sg.EvalWorker != nil && sg.EvalWorker.PodOverrides != nil {
+		return sg.EvalWorker.PodOverrides
 	}
-	return sg.EvalWorker != nil && sg.EvalWorker.Enabled
+	return rt.Spec.Evals.PodOverrides
 }
 
 // findServiceGroup looks up the WorkspaceServiceGroup spec for the given

@@ -48,6 +48,16 @@ spec:
       # omnia_eval_* with the `variant` label the rollout gate keys on.
       evalWorker:
         enabled: true
+        {{- if .Values.sharepointHero.azure.enabled }}
+        # The faithfulness/answer_relevance llm_judges call the keyless Azure
+        # OpenAI judge provider, so the worker pod runs as the workload-identity
+        # SA (the operator binds the eval-worker RBAC to it). Without this the
+        # judge can't mint a token and every score is 0.
+        podOverrides:
+          serviceAccountName: {{ .Values.sharepointHero.azure.workloadIdentity.serviceAccountName }}
+          labels:
+            azure.workload.identity/use: "true"
+        {{- end }}
       session:
         database:
           secretRef:
