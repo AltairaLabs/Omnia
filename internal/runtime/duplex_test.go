@@ -215,6 +215,143 @@ func TestHandleDuplexSession_RecvError(t *testing.T) {
 	require.NoError(t, err) // EOF → clean exit
 }
 
+// TestHandleDuplexSession_HonorsDuplexStartParams verifies that the negotiated
+// codec, sample_rate, channels, and system_instruction from DuplexStart are
+// propagated to the provider's StreamingInputConfig and not hardcoded.
+//
+// system_instruction is injected as a template variable ("system_instruction")
+// so that packs using {{system_instruction}} in their system_template compile to
+// the per-session override.  The SDK pipeline always populates
+// StreamingInputConfig.SystemInstruction from the compiled TurnState.SystemPrompt,
+// so a pack with system_template "{{system_instruction}}" will cause the mock to
+// receive the override value verbatim.
+func TestHandleDuplexSession_HonorsDuplexStartParams(t *testing.T) {
+	mock := duplexmock.New()
+
+	// Use a pack template that references {{system_instruction}} so the compiled
+	// system prompt equals the per-session override injected via WithVariables.
+	packContent := `{
+		"id": "duplex-si-test",
+		"name": "duplex-si-test",
+		"version": "1.0.0",
+		"template_engine": {"version": "v1", "syntax": "{{variable}}"},
+		"prompts": {
+			"default": {
+				"id": "default",
+				"name": "default",
+				"version": "1.0.0",
+				"system_template": "{{system_instruction}}"
+			}
+		}
+	}`
+	packPath := t.TempDir() + "/duplex-si-test.promptpack"
+	if err := writeTestFile(t, packPath, packContent); err != nil {
+		t.Fatalf("writeTestFile: %v", err)
+	}
+	s := NewServer(
+		WithLogger(logr.Discard()),
+		WithPackPath(packPath),
+		WithPromptName("default"),
+		WithSDKOptions(
+			sdk.WithProvider(mock),
+			sdk.WithStreamingConfig(&providers.StreamingInputConfig{}),
+		),
+	)
+
+	fake := &fakeConverseServer{
+		ctx:  context.Background(),
+		recv: make(chan *runtimev1.ClientMessage, 2),
+		sent: make(chan *runtimev1.ServerMessage, 8),
+	}
+	start := &runtimev1.ClientMessage{
+		SessionId: "sess-cfg",
+		DuplexStart: &runtimev1.DuplexStart{
+			Codec: "pcm", SampleRate: 24000, Channels: 1,
+			SystemInstruction: "be terse",
+		},
+	}
+	go func() {
+		fake.recv <- &runtimev1.ClientMessage{SessionId: "sess-cfg", AudioInput: &runtimev1.AudioInputChunk{IsLast: true}}
+		close(fake.recv)
+	}()
+	if err := s.handleDuplexSession(fake.ctx, fake, start); err != nil {
+		t.Fatalf("handleDuplexSession: %v", err)
+	}
+	cfg := mock.LastConfig()
+	if cfg == nil {
+		t.Fatal("CreateStreamSession never received a config")
+	}
+	if cfg.Config.SampleRate != 24000 {
+		t.Fatalf("sample_rate not propagated: got %d, want 24000", cfg.Config.SampleRate)
+	}
+	if cfg.Config.Channels != 1 {
+		t.Fatalf("channels not propagated: got %d, want 1", cfg.Config.Channels)
+	}
+	if cfg.SystemInstruction != "be terse" {
+		t.Fatalf("system_instruction not propagated: got %q, want %q", cfg.SystemInstruction, "be terse")
+	}
+}
+
+// TestHandleDuplexSession_DefaultsWhenZeroParams verifies that zero-value DuplexStart
+// params fall back to sensible defaults (pcm / 16000 / 1) so existing sessions continue to work.
+func TestHandleDuplexSession_DefaultsWhenZeroParams(t *testing.T) {
+	mock := duplexmock.New()
+	s := newTestServerWithDuplexProvider(t, mock)
+	fake := &fakeConverseServer{
+		ctx:  context.Background(),
+		recv: make(chan *runtimev1.ClientMessage, 2),
+		sent: make(chan *runtimev1.ServerMessage, 8),
+	}
+	start := &runtimev1.ClientMessage{
+		SessionId:   "sess-defaults",
+		DuplexStart: &runtimev1.DuplexStart{}, // all zero
+	}
+	go func() {
+		fake.recv <- &runtimev1.ClientMessage{SessionId: "sess-defaults", AudioInput: &runtimev1.AudioInputChunk{IsLast: true}}
+		close(fake.recv)
+	}()
+	if err := s.handleDuplexSession(fake.ctx, fake, start); err != nil {
+		t.Fatalf("handleDuplexSession: %v", err)
+	}
+	cfg := mock.LastConfig()
+	if cfg == nil {
+		t.Fatal("CreateStreamSession never received a config")
+	}
+	if cfg.Config.SampleRate != 16000 {
+		t.Fatalf("default sample_rate: got %d, want 16000", cfg.Config.SampleRate)
+	}
+	if cfg.Config.Channels != 1 {
+		t.Fatalf("default channels: got %d, want 1", cfg.Config.Channels)
+	}
+	if cfg.Config.Encoding != "pcm" {
+		t.Fatalf("default encoding: got %q, want %q", cfg.Config.Encoding, "pcm")
+	}
+}
+
+// TestHandleDuplexSession_EchoesAudioWithNegotiatedMIME verifies that the MIME type
+// sent in the provider StreamChunk reflects the negotiated codec (not hardcoded "audio/pcm").
+func TestHandleDuplexSession_EchoesAudioWithNegotiatedMIME(t *testing.T) {
+	mock := duplexmock.New()
+	s := newTestServerWithDuplexProvider(t, mock)
+	fake := &fakeConverseServer{
+		ctx:  context.Background(),
+		recv: make(chan *runtimev1.ClientMessage, 4),
+		sent: make(chan *runtimev1.ServerMessage, 8),
+	}
+	start := &runtimev1.ClientMessage{
+		SessionId:   "sess-mime",
+		DuplexStart: &runtimev1.DuplexStart{Codec: "pcm", SampleRate: 24000, Channels: 2},
+	}
+	go func() {
+		fake.recv <- &runtimev1.ClientMessage{SessionId: "sess-mime", AudioInput: &runtimev1.AudioInputChunk{Data: []byte{1, 2, 3}}}
+		fake.recv <- &runtimev1.ClientMessage{SessionId: "sess-mime", AudioInput: &runtimev1.AudioInputChunk{IsLast: true}}
+		close(fake.recv)
+	}()
+	if err := s.handleDuplexSession(fake.ctx, fake, start); err != nil {
+		t.Fatalf("handleDuplexSession: %v", err)
+	}
+}
+
 // TestForwardDuplexChunk_EmptyChunk covers the nil-return branch (no media, no delta).
 func TestForwardDuplexChunk_EmptyChunk(t *testing.T) {
 	s := NewServer(WithLogger(logr.Discard()))

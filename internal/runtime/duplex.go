@@ -22,6 +22,7 @@ import (
 	"io"
 
 	"github.com/AltairaLabs/PromptKit/runtime/providers"
+	"github.com/AltairaLabs/PromptKit/runtime/types"
 	"github.com/AltairaLabs/PromptKit/sdk"
 	"github.com/altairalabs/omnia/pkg/logctx"
 	runtimev1 "github.com/altairalabs/omnia/pkg/runtime/v1"
@@ -34,6 +35,48 @@ import (
 // the 30-second finalResponseTimeout.
 var eosChunk = &providers.StreamChunk{
 	Metadata: map[string]any{"end_of_stream": true},
+}
+
+// duplexMediaParams holds the per-session audio parameters negotiated from DuplexStart.
+type duplexMediaParams struct {
+	mimeType   string
+	sampleRate int
+	channels   int
+}
+
+// buildStreamingConfig converts the DuplexStart proto message into a
+// providers.StreamingInputConfig.  Zero values in ds are replaced with
+// sensible defaults (pcm / 16 kHz / mono) so existing sessions that send no
+// params continue to work unchanged.
+func buildStreamingConfig(ds *runtimev1.DuplexStart) (providers.StreamingInputConfig, duplexMediaParams) {
+	codec := ds.GetCodec()
+	if codec == "" {
+		codec = "pcm"
+	}
+	sampleRate := int(ds.GetSampleRate())
+	if sampleRate == 0 {
+		sampleRate = 16000
+	}
+	channels := int(ds.GetChannels())
+	if channels == 0 {
+		channels = 1
+	}
+
+	cfg := providers.StreamingInputConfig{
+		Config: types.StreamingMediaConfig{
+			Type:       types.ContentTypeAudio,
+			Encoding:   codec,
+			SampleRate: sampleRate,
+			Channels:   channels,
+		},
+		SystemInstruction: ds.GetSystemInstruction(),
+	}
+	params := duplexMediaParams{
+		mimeType:   "audio/" + codec,
+		sampleRate: sampleRate,
+		channels:   channels,
+	}
+	return cfg, params
 }
 
 // handleDuplexSession bridges a Converse stream into a PromptKit duplex conversation.
@@ -55,6 +98,20 @@ func (s *Server) handleDuplexSession(ctx context.Context, stream runtimev1.Runti
 	opts, err := s.buildConversationOptions(ctx, sessionID)
 	if err != nil {
 		return err
+	}
+
+	// Override the static WithStreamingConfig added by sdkOptions with the
+	// per-session params negotiated in DuplexStart.
+	ds := start.GetDuplexStart()
+	streamCfg, mediaParams := buildStreamingConfig(ds)
+	opts = append(opts, sdk.WithStreamingConfig(&streamCfg))
+
+	// If a per-session system instruction was supplied, inject it as a template
+	// variable so packs using {{system_instruction}} compile it into the system
+	// prompt.  The SDK pipeline always populates StreamingInputConfig.SystemInstruction
+	// from the compiled TurnState.SystemPrompt, so the provider receives it correctly.
+	if si := ds.GetSystemInstruction(); si != "" {
+		opts = append(opts, sdk.WithVariables(map[string]string{"system_instruction": si}))
 	}
 
 	conv, err := sdk.OpenDuplex(s.packPath, s.promptName, opts...)
@@ -82,7 +139,7 @@ func (s *Server) handleDuplexSession(ctx context.Context, stream runtimev1.Runti
 	}()
 
 	// Pump inbound audio until is_last or stream EOF/error.
-	pumpErr := s.pumpDuplexInput(ctx, stream, conv)
+	pumpErr := s.pumpDuplexInput(ctx, stream, conv, mediaParams)
 
 	// Send end_of_stream to the pipeline. The DuplexProviderStage converts this
 	// to an EndOfStream element and calls EndInput() on the provider session, which
@@ -102,8 +159,9 @@ func (s *Server) handleDuplexSession(ctx context.Context, stream runtimev1.Runti
 
 // pumpDuplexInput reads AudioInputChunk messages from the stream and forwards
 // them to the conversation as provider.StreamChunk. Returns when it encounters
-// an is_last chunk, EOF, or a stream receive error.
-func (s *Server) pumpDuplexInput(ctx context.Context, stream runtimev1.RuntimeService_ConverseServer, conv *sdk.Conversation) error {
+// an is_last chunk, EOF, or a stream receive error. The media params are the
+// negotiated codec / sample rate / channels from the session's DuplexStart.
+func (s *Server) pumpDuplexInput(ctx context.Context, stream runtimev1.RuntimeService_ConverseServer, conv *sdk.Conversation, params duplexMediaParams) error {
 	for {
 		msg, err := stream.Recv()
 		if errors.Is(err, io.EOF) {
@@ -123,9 +181,9 @@ func (s *Server) pumpDuplexInput(ctx context.Context, stream runtimev1.RuntimeSe
 			chunk := &providers.StreamChunk{
 				MediaData: &providers.StreamMediaData{
 					Data:       ai.GetData(),
-					MIMEType:   "audio/pcm",
-					SampleRate: 16000,
-					Channels:   1,
+					MIMEType:   params.mimeType,
+					SampleRate: params.sampleRate,
+					Channels:   params.channels,
 				},
 			}
 			if sendErr := conv.SendChunk(ctx, chunk); sendErr != nil {

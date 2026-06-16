@@ -15,7 +15,10 @@ import (
 // Provider is a minimal in-memory StreamInputSupport that echoes audio chunks.
 // All base.Provider / providers.Provider methods are stubbed to safe no-ops
 // so that the struct satisfies the full interface without panicking on nil.
-type Provider struct{}
+type Provider struct {
+	mu         sync.Mutex
+	lastConfig *providers.StreamingInputConfig
+}
 
 // New returns a *Provider that implements providers.StreamInputSupport.
 func New() *Provider { return &Provider{} }
@@ -88,11 +91,23 @@ func (p *Provider) GetStreamingCapabilities() providers.StreamingCapabilities {
 }
 
 // CreateStreamSession returns a new in-memory session that echoes input.
-func (p *Provider) CreateStreamSession(_ context.Context, _ *providers.StreamingInputConfig) (providers.StreamInputSession, error) {
+// It records the config so tests can assert propagation via LastConfig.
+func (p *Provider) CreateStreamSession(_ context.Context, cfg *providers.StreamingInputConfig) (providers.StreamInputSession, error) {
+	p.mu.Lock()
+	p.lastConfig = cfg
+	p.mu.Unlock()
 	return &session{
 		resp: make(chan providers.StreamChunk, 16),
 		done: make(chan struct{}),
 	}, nil
+}
+
+// LastConfig returns the most recent StreamingInputConfig passed to CreateStreamSession.
+// Returns nil if CreateStreamSession has not been called.
+func (p *Provider) LastConfig() *providers.StreamingInputConfig {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.lastConfig
 }
 
 // session is an in-memory bidirectional streaming session.
