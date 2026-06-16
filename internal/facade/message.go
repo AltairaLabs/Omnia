@@ -235,44 +235,91 @@ func (s *Server) routeMediaChunk(ctx context.Context, c *Connection, frame *Bina
 		// ensureAudioSession already logged and/or sent an error — nothing more to do.
 		return
 	}
+	start := time.Now()
 	if err := as.handleInboundFrame(frame); err != nil {
 		log.Error(err, "audio session forward failed", "sessionID", c.sessionID)
 		s.sendError(c, c.sessionID, ErrorCodeInvalidMessage, "audio forward failed: "+err.Error())
+		return
 	}
+	s.metrics.AudioIngestLatency(time.Since(start).Seconds())
+}
+
+// maxAudioSessions returns the effective audio session cap, applying the
+// conservative default when the config field is zero.
+func (s *Server) maxAudioSessions() int {
+	if s.config.MaxAudioSessions <= 0 {
+		return 8
+	}
+	return s.config.MaxAudioSessions
+}
+
+// decrementAudioSessions decrements the active audio session counter and
+// records the AudioSessionEnded metric. Called by cleanupConnection after
+// an audio session is torn down. Exposed for testing.
+func (s *Server) decrementAudioSessions(m ServerMetrics) {
+	s.activeAudioSessions.Add(-1)
+	m.AudioSessionEnded()
 }
 
 // ensureAudioSession returns the connection's audio session, creating it
 // lazily on the first call using the server's duplexSinkFactory.
 //
-// Returns nil (without panicking) when no factory is configured — audio
-// streaming is not enabled for this server instance. In that case a graceful
-// error is sent to the client so the browser receives a clear diagnostic
-// rather than a silent drop.
+// Returns nil without panicking when:
+//   - The connection is already closed (late-frame-after-cleanup race guard).
+//   - No factory is configured — audio streaming is not enabled. In that case
+//     a graceful error is sent to the client so the browser receives a clear
+//     diagnostic rather than a silent drop.
+//   - The pod-level audio session cap is reached — shed with ErrorCodeRateLimited.
+//
+// The create-or-shed decision and the c.closed check are made under c.mu so
+// they are atomic with cleanupConnection setting c.closed = true.
 //
 // NOTE: codec/sample-rate/channels defaults (pcm/16000/1) are used for the
 // initial Start call. Future work (Task N) can parse BinaryMediaChunkMetadata
 // from the first frame and pass the negotiated parameters here instead.
 func (s *Server) ensureAudioSession(ctx context.Context, c *Connection, log logr.Logger) *audioSession {
+	// Fast path: session already exists.
 	c.mu.Lock()
 	if c.audioSession != nil {
 		as := c.audioSession
 		c.mu.Unlock()
 		return as
 	}
+	// Part C: if the connection is already closed, do not create a session.
+	if c.closed {
+		c.mu.Unlock()
+		return nil
+	}
 	c.mu.Unlock()
 
+	// Part D: no factory means audio is not enabled — send a clear error.
 	if s.duplexSinkFactory == nil {
-		log.V(1).Info("audio frame dropped",
+		log.V(1).Info("audio frame rejected",
 			"reason", "duplexSinkFactory not configured",
 			"sessionID", c.sessionID,
 		)
+		s.sendError(c, c.sessionID, ErrorCodeMediaNotEnabled, "audio not supported")
+		return nil
+	}
+
+	return s.tryStartAudioSession(ctx, c, log)
+}
+
+// tryStartAudioSession performs the cap check, sink creation, and the
+// double-checked install under c.mu. Extracted from ensureAudioSession to
+// keep cognitive complexity manageable.
+func (s *Server) tryStartAudioSession(ctx context.Context, c *Connection, log logr.Logger) *audioSession {
+	// Part A: check the pod-level cap.
+	cap := s.maxAudioSessions()
+	if int(s.activeAudioSessions.Load()) >= cap {
+		log.V(1).Info("audio session shed", "reason", "cap reached", "cap", cap, "sessionID", c.sessionID)
+		s.sendError(c, c.sessionID, ErrorCodeRateLimited, "audio session limit reached")
 		return nil
 	}
 
 	// Build the writer for relaying audio back to the client.
 	w := &connResponseWriter{conn: c, sessionID: c.sessionID, server: s}
 	sink := s.duplexSinkFactory(c.sessionID, w)
-
 	as := newAudioSession(c.sessionID, sink, w)
 
 	// Default audio parameters. TODO: parse from BinaryMediaChunkMetadata when
@@ -284,17 +331,26 @@ func (s *Server) ensureAudioSession(ctx context.Context, c *Connection, log logr
 		return nil
 	}
 
+	// Double-check under c.mu: also check c.closed (Part C) so a late frame
+	// arriving after cleanupConnection cannot install an orphaned sink.
 	c.mu.Lock()
-	// Double-check: another goroutine may have raced us.
-	if c.audioSession != nil {
+	if c.closed {
 		c.mu.Unlock()
-		// Discard the one we just created; close its sink.
+		_ = as.close()
+		return nil
+	}
+	if c.audioSession != nil {
+		// Another goroutine won the race — discard ours.
+		c.mu.Unlock()
 		_ = as.close()
 		return c.audioSession
 	}
+	// Install atomically with the cap increment so cap + install are inseparable.
+	s.activeAudioSessions.Add(1)
 	c.audioSession = as
 	c.mu.Unlock()
 
+	s.metrics.AudioSessionStarted()
 	log.V(1).Info("audio session started", "sessionID", c.sessionID)
 	return as
 }

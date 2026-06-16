@@ -56,6 +56,16 @@ type ServerMetrics interface {
 	DownloadFailed()
 	// MediaChunkSent records a media chunk sent to the client.
 	MediaChunkSent(isBinary bool, bytes int)
+
+	// Audio duplex metrics
+
+	// AudioSessionStarted records that a new duplex audio session was opened.
+	AudioSessionStarted()
+	// AudioSessionEnded records that a duplex audio session was torn down.
+	AudioSessionEnded()
+	// AudioIngestLatency records the facade-receive-to-sink-send latency for
+	// an inbound audio frame, in seconds.
+	AudioIngestLatency(seconds float64)
 }
 
 // NoOpMetrics is a no-op implementation of ServerMetrics for when metrics are disabled.
@@ -110,3 +120,12 @@ func (n *NoOpMetrics) DownloadFailed() { /* no-op: null object pattern */ }
 
 // MediaChunkSent is a no-op - metrics are disabled.
 func (n *NoOpMetrics) MediaChunkSent(bool, int) { /* no-op: null object pattern */ }
+
+// AudioSessionStarted is a no-op - metrics are disabled.
+func (n *NoOpMetrics) AudioSessionStarted() { /* no-op: null object pattern */ }
+
+// AudioSessionEnded is a no-op - metrics are disabled.
+func (n *NoOpMetrics) AudioSessionEnded() { /* no-op: null object pattern */ }
+
+// AudioIngestLatency is a no-op - metrics are disabled.
+func (n *NoOpMetrics) AudioIngestLatency(float64) { /* no-op: null object pattern */ }

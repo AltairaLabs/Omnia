@@ -24,6 +24,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -78,6 +79,10 @@ type ServerConfig struct {
 	MaxInFlightMessagesPerConnection int
 	// WorkspaceName is the workspace this agent belongs to (for session metadata).
 	WorkspaceName string
+	// MaxAudioSessions is the maximum number of concurrent audio sessions per pod.
+	// When a new session would exceed this cap the request is shed with
+	// ErrorCodeRateLimited. 0 applies the conservative default (8).
+	MaxAudioSessions int
 }
 
 // DefaultServerConfig returns a ServerConfig with default values.
@@ -96,6 +101,8 @@ func DefaultServerConfig() ServerConfig {
 		// Keep one in-flight request per connection to avoid unbounded runtime
 		// stream fan-out and chunk interleaving the client cannot correlate.
 		MaxInFlightMessagesPerConnection: 1,
+		// Conservative audio session cap. Overridden via ServerConfig.MaxAudioSessions.
+		MaxAudioSessions: 8,
 	}
 }
 
@@ -188,6 +195,11 @@ type Server struct {
 	// implementation lives in internal/agent and is injected via
 	// WithDuplexSinkFactory — the facade never imports internal/agent directly.
 	duplexSinkFactory func(sessionID string, w ResponseWriter) DuplexSink
+
+	// activeAudioSessions counts the number of live audio sessions on this pod.
+	// Manipulated via sync/atomic so ensureAudioSession can read/CAS without
+	// holding a broad lock.
+	activeAudioSessions atomic.Int64
 
 	mu           sync.RWMutex
 	connections  map[*websocket.Conn]*Connection

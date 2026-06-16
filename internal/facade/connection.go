@@ -172,6 +172,7 @@ func (s *Server) cleanupConnection(c *Connection, log logr.Logger) {
 		if err := as.close(); err != nil {
 			log.Error(err, "audio session close failed", "sessionID", c.sessionID)
 		}
+		s.decrementAudioSessions(s.metrics)
 	}
 
 	s.metrics.ConnectionClosed()
