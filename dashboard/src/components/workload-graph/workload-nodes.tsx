@@ -132,11 +132,36 @@ export const WorkloadSkillNode = memo(({ data }: Readonly<{ data: WorkloadNodeDa
 });
 WorkloadSkillNode.displayName = "WorkloadSkillNode";
 
+export const WorkloadToolNode = memo(({ data }: Readonly<{ data: WorkloadNodeData }>) => {
+  const { node, onClick } = data;
+  const count = node.detail.tools?.length ?? 0;
+  return (
+    <div className="relative">
+      <Handle type="target" position={Position.Top} className="!bg-amber-500" />
+      <button
+        type="button"
+        className={cn(base, "border-2 border-amber-500 border-dashed")}
+        onClick={() => onClick?.(node.id)}
+      >
+        <div className="flex items-center gap-2">
+          <Wrench className="h-4 w-4 text-amber-600" />
+          <span className="font-medium text-sm">{node.label}</span>
+        </div>
+        <div className="mt-1 text-xs text-muted-foreground">
+          {count} tool{count === 1 ? "" : "s"}
+        </div>
+      </button>
+    </div>
+  );
+});
+WorkloadToolNode.displayName = "WorkloadToolNode";
+
 export const workloadNodeTypes = {
   workloadAgent: WorkloadAgentNode,
   workloadState: WorkloadAgentNode,       // legacy alias; states now use workflowState
   workloadProvider: WorkloadProviderNode,
   workloadSkill: WorkloadSkillNode,
+  workloadTool: WorkloadToolNode,
   workflowState: WorkflowStateNode,
   workflowInitial: InitialNode,
   workflowFinal: FinalNode,

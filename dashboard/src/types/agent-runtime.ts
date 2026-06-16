@@ -40,6 +40,12 @@ export interface SessionConfig {
   ttl?: string;
 }
 
+export interface MemoryConfig {
+  /** Enabled controls whether cross-session memory is active.
+   * Memory is disabled by default. */
+  enabled?: boolean;
+}
+
 export interface KEDAConfig {
   pollingInterval?: number;
   cooldownPeriod?: number;
@@ -212,6 +218,8 @@ export interface AgentRuntimeSpec {
   facade: FacadeConfig;
   toolRegistryRef?: ToolRegistryRef;
   session?: SessionConfig;
+  /** memory configures cross-session memory for this agent. */
+  memory?: MemoryConfig;
   runtime?: RuntimeConfig;
   providers?: NamedProviderRef[];
   console?: ConsoleConfig;

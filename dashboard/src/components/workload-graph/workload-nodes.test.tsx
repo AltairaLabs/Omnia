@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { ReactFlowProvider } from "@xyflow/react";
-import { WorkloadAgentNode, WorkloadProviderNode, WorkloadSkillNode } from "./workload-nodes";
+import { WorkloadAgentNode, WorkloadProviderNode, WorkloadSkillNode, WorkloadToolNode } from "./workload-nodes";
 import type { WorkloadNode } from "./types";
 
 function wrap(ui: ReactNode) {
@@ -10,6 +10,22 @@ function wrap(ui: ReactNode) {
 }
 
 describe("workload nodes", () => {
+  it("renders a tool-registry node with its name and tool count, and fires onClick", () => {
+    const node: WorkloadNode = {
+      id: "toolregistry",
+      kind: "tool",
+      label: "demo-tools",
+      badges: [{ icon: "tool", label: "2" }],
+      detail: { tools: [{ name: "lookup" }, { name: "refund" }] },
+    };
+    const onClick = vi.fn();
+    wrap(<WorkloadToolNode data={{ node, onClick }} />);
+    expect(screen.getByText("demo-tools")).toBeInTheDocument();
+    expect(screen.getByText(/2 tools/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button"));
+    expect(onClick).toHaveBeenCalledWith("toolregistry");
+  });
+
   it("renders an agent node with entry badge and fires onClick", () => {
     const node: WorkloadNode = {
       id: "a", kind: "agent", label: "Triage", isEntry: true,

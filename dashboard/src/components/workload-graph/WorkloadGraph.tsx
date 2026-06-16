@@ -159,7 +159,7 @@ export function WorkloadGraph({
           fitView
           fitViewOptions={{ padding: 0.08 }}
           minZoom={0.2}
-          maxZoom={2}
+          maxZoom={1}
           defaultEdgeOptions={{
             markerEnd: { type: MarkerType.ArrowClosed, width: 18, height: 18 },
           }}
