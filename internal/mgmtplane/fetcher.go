@@ -33,13 +33,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/altairalabs/omnia/internal/netutil"
 )
 
 // TokenSource mints a fresh mgmt-plane JWT for the supplied agent + workspace
@@ -135,7 +136,7 @@ func NewTokenFetcher(opts FetcherOptions) (*TokenFetcher, error) {
 		// wire in plaintext across an untrusted network, so it stays refused
 		// unless the caller explicitly opts in (AllowInsecureHTTP).
 		httpAllowed := scheme == "http" &&
-			(opts.AllowInsecureHTTP || isClusterInternalHost(parsed.Hostname()))
+			(opts.AllowInsecureHTTP || netutil.IsClusterInternalHost(parsed.Hostname()))
 		if !httpAllowed {
 			return nil, fmt.Errorf(
 				"mgmt-plane fetcher: insecure Endpoint scheme %q for %q; use https:// for external endpoints "+
@@ -159,46 +160,6 @@ func NewTokenFetcher(opts FetcherOptions) (*TokenFetcher, error) {
 		httpClient:  httpClient,
 		now:         time.Now,
 	}, nil
-}
-
-// isClusterInternalHost reports whether host is reachable only inside the
-// cluster / local network, where plaintext http is acceptable for sending the
-// pod's ServiceAccount token. The dashboard is served over http on a ClusterIP
-// Service in every Omnia install, so requiring https for that endpoint would
-// break fleet auth everywhere; this scopes the http allowance to names/IPs that
-// never leave the cluster. External/public hosts return false so SA tokens are
-// never sent over plaintext across an untrusted network.
-//
-// Recognised as internal:
-//   - loopback ("localhost", 127.0.0.0/8, ::1) and link-local
-//   - RFC1918 / unique-local private IPs
-//   - bare single-label hostnames (e.g. "omnia-dashboard" — same-namespace svc)
-//   - the ".svc" suffix (e.g. "svc.ns.svc")
-//   - the ".local" suffix, which covers the conventional ".svc.cluster.local"
-//     Service FQDN and ".cluster.local" cluster domain
-//
-// Matching uses suffixes, NOT a ".svc." substring: a substring check would
-// treat an attacker-controlled "anything.svc.evil.com" as internal and leak the
-// SA token. Non-".local" custom cluster domains must opt in via AllowInsecureHTTP.
-func isClusterInternalHost(host string) bool {
-	if host == "" {
-		return false
-	}
-	h := strings.ToLower(strings.TrimSuffix(host, "."))
-	if h == "localhost" {
-		return true
-	}
-	if ip := net.ParseIP(h); ip != nil {
-		return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast()
-	}
-	// Bare single-label hostname → a same-namespace Service short name.
-	if !strings.Contains(h, ".") {
-		return true
-	}
-	if strings.HasSuffix(h, ".local") {
-		return true
-	}
-	return strings.HasSuffix(h, ".svc")
 }
 
 // Token implements TokenSource. Returns a cached token when the cache is bound

@@ -137,6 +137,53 @@ func TestSetAuth_AllowsWSSAndAttachesBearerToken(t *testing.T) {
 	assert.Equal(t, "demo", ts.gotWS)
 }
 
+// In-cluster agent facades are served as plaintext ws:// on ClusterIP Services,
+// so the Bearer token must still attach when the host is cluster-internal —
+// otherwise fleet auth can't work on any real deployment.
+func TestSetAuth_AllowsClusterInternalWSAndAttachesBearerToken(t *testing.T) {
+	dialer := &fakeDialer{}
+	ts := &stubTokenSource{token: "test-jwt"}
+	wsURL := "ws://rag-hero.omnia-demo.svc.cluster.local:8080/ws?agent=rag-hero&namespace=omnia-demo"
+	p := NewProvider("agent-rag-hero", wsURL, dialer)
+	p.SetAuth(ts, "rag-hero", "omnia-demo")
+
+	require.NoError(t, p.Connect(context.Background()))
+
+	assert.Equal(t, wsURL, dialer.gotURL)
+	assert.Equal(t, "Bearer test-jwt", dialer.gotHeaders.Get("Authorization"))
+	assert.Equal(t, "rag-hero", ts.gotAgent)
+	assert.Equal(t, "omnia-demo", ts.gotWS)
+}
+
+func TestEnsureSecureWSForToken(t *testing.T) {
+	allowed := []string{
+		"wss://agent.example/ws",                             // TLS always ok
+		"ws://rag-hero.omnia-demo.svc.cluster.local:8080/ws", // in-cluster FQDN
+		"ws://omnia-dashboard.omnia.svc/ws",                  // .svc suffix
+		"ws://omnia-dashboard/ws",                            // bare service name
+		"ws://127.0.0.1:8080/ws",                             // loopback
+		"ws://localhost/ws",                                  // loopback name
+	}
+	for _, u := range allowed {
+		if err := ensureSecureWSForToken(u); err != nil {
+			t.Errorf("expected %q to be allowed, got: %v", u, err)
+		}
+	}
+
+	refused := []string{
+		"ws://agent.example/ws",         // external plaintext — would leak the token
+		"ws://evil.com/ws",              // external plaintext
+		"ws://anything.svc.evil.com/ws", // ".svc." substring must not bypass
+		"http://agent.example/ws",       // non-ws scheme
+		"ws:///ws",                      // empty host
+	}
+	for _, u := range refused {
+		if err := ensureSecureWSForToken(u); err == nil {
+			t.Errorf("expected %q to be refused", u)
+		}
+	}
+}
+
 func TestSetAuth_TokenErrorFailsDial(t *testing.T) {
 	dialer := &fakeDialer{}
 	ts := &stubTokenSource{err: errors.New("dashboard 403: not allowlisted")}

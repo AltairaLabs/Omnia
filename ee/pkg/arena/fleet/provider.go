@@ -13,6 +13,7 @@ package fleet
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -22,6 +23,7 @@ import (
 	"github.com/AltairaLabs/PromptKit/runtime/types"
 
 	"github.com/altairalabs/omnia/internal/facade"
+	"github.com/altairalabs/omnia/internal/netutil"
 )
 
 const (
@@ -123,12 +125,38 @@ func (p *Provider) Connect(ctx context.Context) error {
 	return nil
 }
 
+// ensureSecureWSForToken guards against attaching a Bearer credential to a
+// plaintext WebSocket dial. wss:// is always allowed; ws:// is allowed only when
+// the target host is cluster-internal — the trusted in-cluster network on which
+// agent facades are served as plaintext ClusterIP Services in every Omnia
+// install. An external ws:// host is refused so the mgmt-plane token is never
+// sent over plaintext across an untrusted network.
+func ensureSecureWSForToken(wsURL string) error {
+	parsed, err := url.Parse(wsURL)
+	if err != nil {
+		return fmt.Errorf("invalid websocket URL %q: %w", wsURL, err)
+	}
+	switch strings.ToLower(parsed.Scheme) {
+	case "wss":
+		return nil
+	case "ws":
+		if netutil.IsClusterInternalHost(parsed.Hostname()) {
+			return nil
+		}
+	}
+	return fmt.Errorf(
+		"refusing to attach mgmt-plane token to insecure websocket URL %q; use wss:// for external "+
+			"endpoints (ws:// is allowed only for cluster-internal hosts)",
+		wsURL,
+	)
+}
+
 // dial opens a new WebSocket connection and returns a connEntry.
 func (p *Provider) dial(ctx context.Context) (*connEntry, error) {
 	headers := traceHeaders(ctx)
 	if ts, agent, workspace := p.authConfig(); ts != nil {
-		if !strings.HasPrefix(strings.ToLower(p.wsURL), "wss://") {
-			return nil, fmt.Errorf("refusing to attach mgmt-plane token to insecure websocket URL %q; use wss://", p.wsURL)
+		if err := ensureSecureWSForToken(p.wsURL); err != nil {
+			return nil, err
 		}
 		token, err := ts.Token(agent, workspace)
 		if err != nil {
