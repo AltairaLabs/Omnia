@@ -182,12 +182,12 @@ type Server struct {
 	allowUnauthenticated bool
 	log                  logr.Logger
 
-	// duplexSinkFactory is an optional factory that creates a duplexSink for
+	// duplexSinkFactory is an optional factory that creates a DuplexSink for
 	// a connection's persistent audio duplex stream. When nil, inbound audio
 	// frames are rejected gracefully (audio not enabled). The real
 	// implementation lives in internal/agent and is injected via
 	// WithDuplexSinkFactory — the facade never imports internal/agent directly.
-	duplexSinkFactory func(sessionID string, w ResponseWriter) duplexSink
+	duplexSinkFactory func(sessionID string, w ResponseWriter) DuplexSink
 
 	mu           sync.RWMutex
 	connections  map[*websocket.Conn]*Connection
@@ -281,18 +281,18 @@ func WithAuthChain(chain auth.Chain) ServerOption {
 	}
 }
 
-// WithDuplexSinkFactory sets the factory used to create a duplexSink for
+// WithDuplexSinkFactory sets the factory used to create a DuplexSink for
 // each connection's persistent audio duplex stream. When nil (default),
 // inbound BinaryMessageTypeMediaChunk frames are rejected with a graceful
 // error — audio is not enabled. The factory is called lazily on the first
 // inbound media chunk for a given connection.
 //
-// The factory signature deliberately references only facade-internal types
+// The factory signature deliberately references only facade-exported types
 // (sessionID string, ResponseWriter) so internal/facade stays decoupled from
 // internal/agent. The real sink implementation in internal/agent satisfies
-// the duplexSink interface and is injected here at binary wiring time in
+// the DuplexSink interface and is injected here at binary wiring time in
 // cmd/agent.
-func WithDuplexSinkFactory(f func(sessionID string, w ResponseWriter) duplexSink) ServerOption {
+func WithDuplexSinkFactory(f func(sessionID string, w ResponseWriter) DuplexSink) ServerOption {
 	return func(s *Server) {
 		s.duplexSinkFactory = f
 	}

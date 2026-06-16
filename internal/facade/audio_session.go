@@ -28,10 +28,13 @@ type AudioSessionStart struct {
 	Channels   int32
 }
 
-// duplexSink abstracts the runtime duplex stream so the facade stays decoupled
-// from internal/agent. The real implementation (next task) wraps the runtime
-// gRPC client; tests use a fake.
-type duplexSink interface {
+// DuplexSink abstracts the runtime duplex stream so the facade stays decoupled
+// from internal/agent. The real implementation lives in internal/agent and
+// wraps the runtime gRPC client; tests use a fake.
+// The interface is exported so external packages (internal/agent, cmd/agent)
+// can implement it and inject it via WithDuplexSinkFactory without the facade
+// importing those packages.
+type DuplexSink interface {
 	Start(ctx context.Context, s *AudioSessionStart) error
 	SendAudio(data []byte, seq uint32, isLast bool) error
 	Close() error
@@ -42,13 +45,13 @@ type duplexSink interface {
 // connection close.
 type audioSession struct {
 	sessionID string
-	sink      duplexSink
+	sink      DuplexSink
 	writer    ResponseWriter
 	mu        sync.Mutex
 	started   bool
 }
 
-func newAudioSession(sessionID string, sink duplexSink, writer ResponseWriter) *audioSession {
+func newAudioSession(sessionID string, sink DuplexSink, writer ResponseWriter) *audioSession {
 	return &audioSession{sessionID: sessionID, sink: sink, writer: writer}
 }
 

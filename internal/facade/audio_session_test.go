@@ -83,7 +83,7 @@ func (c *captureWriter) WriteBinaryMediaChunk(_ [MediaIDSize]byte, _ uint32, _ b
 }
 
 // TestAudioSession_ForwardsInboundAudio verifies that pushAudio delivers
-// audio bytes to the duplexSink.
+// audio bytes to the DuplexSink.
 func TestAudioSession_ForwardsInboundAudio(t *testing.T) {
 	fc := &fakeDuplexSink{audio: make(chan []byte, 4)}
 	w := &captureWriter{}
@@ -161,7 +161,7 @@ func TestAudioSession_HandleInboundFrame(t *testing.T) {
 
 // TestHandleBinaryMessage_RoutesMediaChunkToSink verifies that an inbound
 // OMNI BinaryMessageTypeMediaChunk frame arriving on a connection is routed
-// to the duplexSink via the server's duplexSinkFactory.
+// to the DuplexSink via the server's DuplexSinkFactory.
 func TestHandleBinaryMessage_RoutesMediaChunkToSink(t *testing.T) {
 	fc := &fakeDuplexSink{audio: make(chan []byte, 8)}
 
@@ -171,7 +171,7 @@ func TestHandleBinaryMessage_RoutesMediaChunkToSink(t *testing.T) {
 	cfg.PongTimeout = 200 * time.Millisecond
 
 	srv := NewServer(cfg, store, handler, testLogger(t),
-		WithDuplexSinkFactory(func(_ string, _ ResponseWriter) duplexSink { return fc }),
+		WithDuplexSinkFactory(func(_ string, _ ResponseWriter) DuplexSink { return fc }),
 	)
 
 	// Build a fake connection (no real WS needed — call handleBinaryMessage directly)
@@ -194,7 +194,7 @@ func TestHandleBinaryMessage_RoutesMediaChunkToSink(t *testing.T) {
 }
 
 // TestHandleBinaryMessage_NilFactory_SendsErrorFrame verifies that when no
-// duplexSinkFactory is configured, the server does not panic and instead
+// DuplexSinkFactory is configured, the server does not panic and instead
 // the error path is taken gracefully.
 func TestHandleBinaryMessage_NilFactory_DoesNotPanic(t *testing.T) {
 	store, handler := newTestStoreAndHandler(t)
@@ -238,7 +238,7 @@ func TestEnsureAudioSession_ReturnsExistingSession(t *testing.T) {
 	store, handler := newTestStoreAndHandler(t)
 	cfg := DefaultServerConfig()
 	srv := NewServer(cfg, store, handler, testLogger(t),
-		WithDuplexSinkFactory(func(_ string, _ ResponseWriter) duplexSink {
+		WithDuplexSinkFactory(func(_ string, _ ResponseWriter) DuplexSink {
 			callCount++
 			return fc
 		}),
@@ -274,7 +274,7 @@ func TestEnsureAudioSession_DoubleCheckRace(t *testing.T) {
 	// simulate a concurrent goroutine winning the double-check race.
 	var conn *Connection
 	srv := NewServer(cfg, store, handler, testLogger(t),
-		WithDuplexSinkFactory(func(sessionID string, w ResponseWriter) duplexSink {
+		WithDuplexSinkFactory(func(sessionID string, w ResponseWriter) DuplexSink {
 			callCount++
 			if callCount == 1 {
 				// Simulate the race: inject an already-started session so the
@@ -315,7 +315,7 @@ func TestHandleBinaryMessage_SinkStartError(t *testing.T) {
 	store, handler := newTestStoreAndHandler(t)
 	cfg := DefaultServerConfig()
 	srv := NewServer(cfg, store, handler, testLogger(t),
-		WithDuplexSinkFactory(func(_ string, _ ResponseWriter) duplexSink { return fc }),
+		WithDuplexSinkFactory(func(_ string, _ ResponseWriter) DuplexSink { return fc }),
 	)
 
 	conn := &Connection{sessionID: "test-start-err"}
@@ -342,7 +342,7 @@ func TestHandleBinaryMessage_SendAudioError(t *testing.T) {
 	store, handler := newTestStoreAndHandler(t)
 	cfg := DefaultServerConfig()
 	srv := NewServer(cfg, store, handler, testLogger(t),
-		WithDuplexSinkFactory(func(_ string, _ ResponseWriter) duplexSink { return fc }),
+		WithDuplexSinkFactory(func(_ string, _ ResponseWriter) DuplexSink { return fc }),
 	)
 
 	conn := &Connection{sessionID: "test-send-err"}
