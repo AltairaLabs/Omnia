@@ -26,6 +26,7 @@ const (
 	labelAppName      = "app.kubernetes.io/name"
 	labelAppInstance  = "app.kubernetes.io/instance"
 	labelAppManagedBy = "app.kubernetes.io/managed-by"
+	labelAppComponent = "app.kubernetes.io/component"
 	labelOmniaComp    = "omnia.altairalabs.ai/component"
 	labelOmniaTrack   = "omnia.altairalabs.ai/track"
 	// labelOmniaMode mirrors AgentRuntime.spec.mode on the pod for ops
