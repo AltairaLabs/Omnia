@@ -64,6 +64,26 @@ function providerNode(p: ResolvedProvider): WorkloadNode {
   };
 }
 
+// A single node for the agent's ToolRegistry, carrying the discovered tools in
+// its detail so the drawer lists them. Wired to the entry node so the graph
+// shows the registry is bound to the agent.
+function toolRegistryNode(name: string, discovered: DiscoveredTool[]): WorkloadNode {
+  const tools: WorkloadToolDetail[] = discovered.map((t) => ({
+    name: t.name,
+    description: t.description,
+    endpoint: t.endpoint,
+    handlerType: t.handlerName,
+    status: t.status === "Unavailable" ? "unavailable" : "resolved",
+  }));
+  return {
+    id: "toolregistry",
+    kind: "tool",
+    label: name,
+    badges: [{ icon: "tool", label: String(tools.length) }],
+    detail: { tools },
+  };
+}
+
 export function agentRuntimeToWorkload(inputs: AgentWorkloadInputs): WorkloadModel {
   const base = deriveWorkloadTier(inputs.content ?? {});
   const byName = new Map(inputs.discoveredTools.map((t) => [t.name, t]));
@@ -77,12 +97,35 @@ export function agentRuntimeToWorkload(inputs: AgentWorkloadInputs): WorkloadMod
     },
   }));
 
-  for (const p of inputs.providers) nodes.push(providerNode(p));
+  const edges = [...base.edges];
+  // The agent's entry node anchors the bindings (providers + tool registry) so
+  // the graph shows what the agent calls out to.
+  const entry = base.nodes.find((n) => n.isEntry) ?? base.nodes[0];
+  const wireToEntry = (targetId: string) => {
+    if (entry) {
+      edges.push({ id: `${entry.id}->${targetId}`, source: entry.id, target: targetId, style: "provides" });
+    }
+  };
+
+  // Providers wired to the entry so the graph shows which LLMs the agent uses.
+  for (const p of inputs.providers) {
+    const pn = providerNode(p);
+    nodes.push(pn);
+    wireToEntry(pn.id);
+  }
+
+  // A single ToolRegistry node wired to the agent's entry, when one is bound.
+  if (inputs.toolRegistryName) {
+    const registry = toolRegistryNode(inputs.toolRegistryName, inputs.discoveredTools);
+    nodes.push(registry);
+    wireToEntry(registry.id);
+  }
 
   const deployed: WorkloadModel = {
     ...base,
     altitude: "deployment",
     nodes,
+    edges,
     meta: {
       ...base.meta,
       binding: {

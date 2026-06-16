@@ -3,13 +3,12 @@
 import { use, useCallback } from "react";
 import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, FileText, MessageSquare, Activity, ShieldCheck, Brain, Workflow } from "lucide-react";
+import { ArrowLeft, FileText, MessageSquare, Activity, ShieldCheck, Workflow } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Header } from "@/components/layout";
-import { StatusBadge, ScaleControl, AgentMetricsPanel, EventsPanel, EvalConfigPanel, AgentQualityTab, RolloutPanel } from "@/components/agents";
+import { StatusBadge, ScaleControl, AgentMetricsPanel, EventsPanel, EvalConfigPanel, AgentQualityTab, RolloutPanel, AgentTopology, AgentConditions } from "@/components/agents";
 import { SystemPackBadge } from "@/components/agents/system-pack-badge";
 import { AgentWorkloadTab } from "@/components/workload-graph/agent-workload-tab";
-import { AgentMemoryPanel } from "@/components/memories/agent-memory-panel";
 import { AgentConsole } from "@/components/console";
 import { LogViewer } from "@/components/logs";
 import { useDataService } from "@/lib/data";
@@ -18,46 +17,13 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Separator } from "@/components/ui/separator";
 import { YamlBlock } from "@/components/ui/yaml-block";
 import { useAgent } from "@/hooks/agents";
-import { useProvider, usePromptPack } from "@/hooks/resources";
+import { usePromptPack } from "@/hooks/resources";
 import { useAgentRolloutStream } from "@/hooks/use-agent-rollout-stream";
-import type { NamedProviderRef } from "@/types/agent-runtime";
 
 interface AgentDetailPageProps {
   params: Promise<{ name: string }>;
-}
-
-/** Shows a single provider row with fetched details */
-function ProviderDetail({ namedRef, namespace }: Readonly<{ namedRef: NamedProviderRef; namespace: string }>) {
-  const { data: provider } = useProvider(namedRef.providerRef.name, namespace);
-  return (
-    <div className="space-y-2">
-      <div className="flex justify-between">
-        <span className="text-muted-foreground">Name</span>
-        <Link
-          href={`/providers/${namedRef.providerRef.name}?namespace=${namedRef.providerRef.namespace || namespace}`}
-          className="font-medium text-primary hover:underline"
-        >
-          {namedRef.providerRef.name}
-        </Link>
-      </div>
-      <div className="flex justify-between">
-        <span className="text-muted-foreground">Type</span>
-        <span className="font-medium capitalize">{provider?.spec?.type || "-"}</span>
-      </div>
-      <div className="flex justify-between">
-        <span className="text-muted-foreground">Model</span>
-        <span className="font-medium">{provider?.spec?.model || "-"}</span>
-      </div>
-    </div>
-  );
-}
-
-function formatDate(timestamp?: string): string {
-  if (!timestamp) return "-";
-  return new Date(timestamp).toLocaleString();
 }
 
 export default function AgentDetailPage({ params }: Readonly<AgentDetailPageProps>) {
@@ -142,7 +108,7 @@ export default function AgentDetailPage({ params }: Readonly<AgentDetailPageProp
         description={`${metadata.namespace} namespace`}
       />
 
-      <div className="flex-1 p-6 space-y-6">
+      <div className="flex-1 min-h-0 overflow-y-auto p-6 space-y-6">
         {/* Back link and actions */}
         <div className="flex items-center justify-between">
           <Link href="/agents">
@@ -184,10 +150,6 @@ export default function AgentDetailPage({ params }: Readonly<AgentDetailPageProp
               <ShieldCheck className="h-4 w-4" />
               Quality
             </TabsTrigger>
-            <TabsTrigger value="memory" className="gap-1.5">
-              <Brain className="h-4 w-4" />
-              Memory
-            </TabsTrigger>
             <TabsTrigger value="config">Configuration</TabsTrigger>
             <TabsTrigger value="events">Events</TabsTrigger>
           </TabsList>
@@ -197,206 +159,47 @@ export default function AgentDetailPage({ params }: Readonly<AgentDetailPageProp
           </TabsContent>
 
           <TabsContent value="overview" className="space-y-4 mt-4">
-            {/* Status Card */}
-            <Card>
-              <CardHeader>
-                <CardTitle>Status</CardTitle>
-                <CardDescription>Current state of the agent</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
-                  <div>
-                    <p className="text-sm text-muted-foreground">Phase</p>
-                    <StatusBadge phase={status?.phase} className="mt-1" />
-                  </div>
-                  <div>
-                    <ScaleControl
-                      currentReplicas={status?.replicas?.ready ?? 0}
-                      desiredReplicas={status?.replicas?.desired ?? spec.runtime?.replicas ?? 1}
-                      minReplicas={spec.runtime?.autoscaling?.minReplicas ?? 0}
-                      maxReplicas={spec.runtime?.autoscaling?.maxReplicas ?? 10}
-                      autoscalingEnabled={spec.runtime?.autoscaling?.enabled ?? false}
-                      autoscalingType={spec.runtime?.autoscaling?.type}
-                      onScale={handleScale}
-                      refetch={refetchAgent}
-                    />
-                  </div>
-                  <div>
-                    <p className="text-sm text-muted-foreground">Active Version</p>
-                    <p className="text-lg font-semibold">
-                      {status?.activeVersion || "-"}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-muted-foreground">Created</p>
-                    <p className="text-sm font-medium">
-                      {formatDate(metadata.creationTimestamp)}
-                    </p>
-                  </div>
-                </div>
-
-                {status?.conditions && status.conditions.length > 0 && (
-                  <>
-                    <Separator className="my-4" />
-                    <div>
-                      <p className="text-sm font-medium mb-2">Conditions</p>
-                      <table className="w-full text-sm">
-                        <thead>
-                          <tr className="text-left text-muted-foreground border-b">
-                            <th className="pb-2 font-medium">Type</th>
-                            <th className="pb-2 font-medium">Reason</th>
-                            <th className="pb-2 font-medium">Message</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {status.conditions.map((condition) => (
-                            <tr key={condition.type} className="border-b last:border-0">
-                              <td className="py-2 pr-4">
-                                <span
-                                  className={`px-2 py-0.5 rounded text-xs font-medium ${
-                                    condition.status === "True"
-                                      ? "bg-green-500/15 text-green-700 dark:text-green-400"
-                                      : "bg-red-500/15 text-red-700 dark:text-red-400"
-                                  }`}
-                                >
-                                  {condition.type}
-                                </span>
-                              </td>
-                              <td className="py-2 pr-4 font-medium">
-                                {condition.reason}
-                              </td>
-                              <td className="py-2 text-muted-foreground">
-                                {condition.message || "—"}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </>
-                )}
-              </CardContent>
-            </Card>
-
             {/* Rollout panel — only when a progressive-delivery rollout is
                 configured or in progress (live values from the SSE stream). */}
             {(rolloutSpec || rolloutStatus) && (
               <RolloutPanel spec={rolloutSpec ?? undefined} status={rolloutStatus ?? undefined} />
             )}
 
-            {/* Spec Summary Cards */}
-            <div className="grid md:grid-cols-2 gap-4">
-              <Card>
-                <CardHeader>
-                  <CardTitle>Framework</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Type</span>
-                    <span className="font-medium capitalize">{spec.framework?.type || "promptkit"}</span>
-                  </div>
-                  {spec.framework?.version && (
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Version</span>
-                      <span className="font-medium">{spec.framework.version}</span>
-                    </div>
-                  )}
-                  {spec.framework?.image && (
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Image</span>
-                      <span className="font-medium text-xs truncate max-w-[150px]" title={spec.framework.image}>
-                        {spec.framework.image}
-                      </span>
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
+            {/* Architecture diagram — facade(s) in front of the runtime, which
+                nests PromptPack, Session and Memory. PromptPack → Workload tab. */}
+            <AgentTopology
+              agentName={metadata.name}
+              facades={[{ type: spec.facade?.type ?? "websocket", port: spec.facade?.port }]}
+              framework={spec.framework}
+              promptPack={{
+                name: spec.promptPackRef?.name,
+                version: promptPack?.spec?.version || spec.promptPackRef?.version,
+              }}
+              session={spec.session}
+              memoryEnabled={spec.memory?.enabled}
+            />
 
-              <Card>
-                <CardHeader>
-                  <CardTitle>{spec.providers && spec.providers.length > 1 ? "Providers" : "Provider"}</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  {spec.providers && spec.providers.length > 0 ? (
-                    <div className="space-y-4">
-                      {spec.providers.map((namedRef, i) => (
-                        <div key={namedRef.name}>
-                          {spec.providers!.length > 1 && (
-                            <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">
-                              {namedRef.name}
-                            </p>
-                          )}
-                          <ProviderDetail namedRef={namedRef} namespace={metadata.namespace || "default"} />
-                          {spec.providers!.length > 1 && i < spec.providers!.length - 1 && <Separator className="mt-3" />}
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="text-sm text-muted-foreground">No providers configured</p>
-                  )}
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader>
-                  <CardTitle>Facade</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Type</span>
-                    <span className="font-medium capitalize">{spec.facade?.type || "websocket"}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Port</span>
-                    <span className="font-medium">{spec.facade?.port || 8080}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Handler</span>
-                    <span className="font-medium">{spec.facade?.handler || "runtime"}</span>
-                  </div>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader>
-                  <CardTitle>PromptPack</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Name</span>
-                    <Link
-                      href={`/promptpacks/${spec.promptPackRef?.name}?namespace=${metadata.namespace}`}
-                      className="font-medium text-primary hover:underline"
-                    >
-                      {spec.promptPackRef?.name || "-"}
-                    </Link>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Version</span>
-                    <span className="font-medium">{promptPack?.spec?.version || spec.promptPackRef?.version || "-"}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Phase</span>
-                    <span className="font-medium">{promptPack?.status?.phase || "-"}</span>
-                  </div>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader>
-                  <CardTitle>Session</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Type</span>
-                    <span className="font-medium capitalize">{spec.session?.type || "memory"}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">TTL</span>
-                    <span className="font-medium">{spec.session?.ttl || "1h"}</span>
-                  </div>
-                </CardContent>
-              </Card>
+            {/* Compact scale control (with autoscaling indicator) + thin metadata,
+                under the diagram — replaces the bulky Status card. */}
+            <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2">
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-medium text-muted-foreground">Replicas</span>
+                <ScaleControl
+                  compact
+                  currentReplicas={status?.replicas?.ready ?? 0}
+                  desiredReplicas={status?.replicas?.desired ?? spec.runtime?.replicas ?? 1}
+                  minReplicas={spec.runtime?.autoscaling?.minReplicas ?? 0}
+                  maxReplicas={spec.runtime?.autoscaling?.maxReplicas ?? 10}
+                  autoscalingEnabled={spec.runtime?.autoscaling?.enabled ?? false}
+                  autoscalingType={spec.runtime?.autoscaling?.type}
+                  onScale={handleScale}
+                  refetch={refetchAgent}
+                />
+              </div>
+              <p className="text-xs text-muted-foreground">
+                {status?.activeVersion ? `Active version ${status.activeVersion} · ` : ""}
+                Created {metadata.creationTimestamp ? new Date(metadata.creationTimestamp).toLocaleString() : "-"}
+              </p>
             </div>
 
             <EvalConfigPanel
@@ -408,6 +211,9 @@ export default function AgentDetailPage({ params }: Readonly<AgentDetailPageProp
               workerGroups={spec.evals?.worker?.groups}
               promptPackName={spec.promptPackRef?.name}
             />
+
+            {/* Conditions — full table, compact, at the bottom as reference. */}
+            <AgentConditions conditions={status?.conditions} />
           </TabsContent>
 
           <TabsContent value="console" className="mt-4">
@@ -434,10 +240,6 @@ export default function AgentDetailPage({ params }: Readonly<AgentDetailPageProp
 
           <TabsContent value="quality" className="mt-4">
             <AgentQualityTab agentName={metadata.name} />
-          </TabsContent>
-
-          <TabsContent value="memory" className="mt-4">
-            <AgentMemoryPanel agentId={metadata.uid} />
           </TabsContent>
 
           <TabsContent value="config" className="mt-4">

@@ -11,7 +11,7 @@ const KIND_TO_TYPE: Record<WorkloadNodeKind, string> = {
   agent: "workloadAgent",
   state: "workflowState",
   provider: "workloadProvider",
-  tool: "workloadAgent",
+  tool: "workloadTool",
   skill: "workloadSkill",
   scenario: "workflowScenario",
   judge: "workflowJudge",

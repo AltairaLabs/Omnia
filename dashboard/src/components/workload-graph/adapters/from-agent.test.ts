@@ -44,4 +44,39 @@ describe("agentRuntimeToWorkload", () => {
     const state = model.nodes.find((n) => n.kind === "state")!;
     expect(state.detail.tools?.every((t) => t.status === "unresolved")).toBe(true);
   });
+
+  it("adds one tool-registry node (named, with the discovered tools) wired to the entry", () => {
+    const model = agentRuntimeToWorkload({
+      content,
+      providers: [],
+      discoveredTools: [
+        { name: "lookup", handlerName: "http", endpoint: "https://x", status: "Available" },
+        { name: "refund", handlerName: "http", endpoint: "https://y", status: "Available" },
+      ],
+      toolRegistryName: "demo-tools",
+    });
+    const registry = model.nodes.find((n) => n.kind === "tool");
+    expect(registry).toBeDefined();
+    expect(registry!.label).toBe("demo-tools");
+    expect(registry!.detail.tools?.map((t) => t.name).sort()).toEqual(["lookup", "refund"]);
+    // wired from the entry node into the registry
+    const entry = model.nodes.find((n) => n.isEntry)!;
+    expect(model.edges.some((e) => e.source === entry.id && e.target === registry!.id)).toBe(true);
+  });
+
+  it("omits the tool-registry node when no registry is configured", () => {
+    const model = agentRuntimeToWorkload({ content, providers: [], discoveredTools: [] });
+    expect(model.nodes.find((n) => n.kind === "tool")).toBeUndefined();
+  });
+
+  it("wires each provider to the entry node with an edge", () => {
+    const model = agentRuntimeToWorkload({
+      content,
+      providers: [{ name: "default", type: "claude", model: "claude-opus-4-8", role: "llm" }],
+      discoveredTools: [],
+    });
+    const entry = model.nodes.find((n) => n.isEntry)!;
+    const provider = model.nodes.find((n) => n.kind === "provider")!;
+    expect(model.edges.some((e) => e.source === entry.id && e.target === provider.id)).toBe(true);
+  });
 });
