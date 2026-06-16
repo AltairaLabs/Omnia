@@ -309,6 +309,44 @@ var _ = Describe("Workspace Controller", func() {
 			_ = k8sClient.Delete(ctx, ciNS)
 		})
 
+		It("should apply spec.namespace.labels onto a pre-existing namespace (create=false)", func() {
+			By("pre-creating the namespace WITHOUT the target label")
+			existingNS := &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{Name: namespaceName},
+			}
+			Expect(k8sClient.Create(ctx, existingNS)).To(Succeed())
+
+			By("creating a create=false Workspace carrying a spec.namespace.labels entry")
+			workspace := &omniav1alpha1.Workspace{
+				ObjectMeta: metav1.ObjectMeta{Name: workspaceKey.Name},
+				Spec: omniav1alpha1.WorkspaceSpec{
+					DisplayName: "NS Labels Test",
+					Environment: omniav1alpha1.WorkspaceEnvironmentDevelopment,
+					Namespace: omniav1alpha1.NamespaceConfig{
+						Name:   namespaceName,
+						Create: false,
+						Labels: map[string]string{"istio.io/dataplane-mode": "ambient"},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, workspace)).To(Succeed())
+
+			By("reconciling (finalizer then resources)")
+			_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: workspaceKey})
+			Expect(err).NotTo(HaveOccurred())
+			_, err = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: workspaceKey})
+			Expect(err).NotTo(HaveOccurred())
+
+			By("verifying the spec label was reconciled onto the existing namespace")
+			Eventually(func() string {
+				ns := &corev1.Namespace{}
+				if err := k8sClient.Get(ctx, client.ObjectKey{Name: namespaceName}, ns); err != nil {
+					return ""
+				}
+				return ns.Labels["istio.io/dataplane-mode"]
+			}, timeout, interval).Should(Equal("ambient"))
+		})
+
 		It("should clean up resources when workspace is deleted", func() {
 			By("creating a Workspace with create=true")
 			workspace := &omniav1alpha1.Workspace{
