@@ -31,6 +31,7 @@ const (
 	testRedisSecretKey = "url"
 	testEvalAgentName  = "agent"
 	testStaleGroup     = "gone"
+	testWISA           = "omnia-runtime-wi"
 )
 
 func newEvalWorkerTestReconciler() *AgentRuntimeReconciler {
@@ -209,6 +210,29 @@ func TestServiceGroupsNeedingEvalWorker_PromptKitGroupOptIn(t *testing.T) {
 	needed, err := r.serviceGroupsNeedingEvalWorker(context.Background(), "ns")
 	require.NoError(t, err)
 	require.ElementsMatch(t, []string{"pk-optin"}, keysOf(needed))
+}
+
+func TestEvalWorkerPodOverrides_Precedence(t *testing.T) {
+	groupPO := &omniav1alpha1.PodOverrides{ServiceAccountName: "group-sa"}
+	agentPO := &omniav1alpha1.PodOverrides{ServiceAccountName: "agent-sa"}
+	rt := &omniav1alpha1.AgentRuntime{
+		Spec: omniav1alpha1.AgentRuntimeSpec{Evals: &omniav1alpha1.EvalConfig{PodOverrides: agentPO}},
+	}
+
+	// Group-level podOverrides wins when set.
+	sgWithPO := omniav1alpha1.WorkspaceServiceGroup{
+		EvalWorker: &omniav1alpha1.ServiceGroupEvalWorker{PodOverrides: groupPO},
+	}
+	require.Equal(t, groupPO, evalWorkerPodOverrides(sgWithPO, true, rt))
+
+	// Falls back to the agent's evals.podOverrides when the group sets none.
+	sgNoPO := omniav1alpha1.WorkspaceServiceGroup{
+		EvalWorker: &omniav1alpha1.ServiceGroupEvalWorker{Enabled: true},
+	}
+	require.Equal(t, agentPO, evalWorkerPodOverrides(sgNoPO, true, rt))
+
+	// Falls back to the agent's evals.podOverrides when the group is not found.
+	require.Equal(t, agentPO, evalWorkerPodOverrides(omniav1alpha1.WorkspaceServiceGroup{}, false, rt))
 }
 
 func envValue(env []corev1.EnvVar, name string) string {
@@ -428,7 +452,7 @@ func TestEnsureEvalWorkerRBAC_CreatesObjects(t *testing.T) {
 		AgentWorkspaceReaderClusterRole: testWorkspaceReaderClusterRole,
 	}
 
-	require.NoError(t, r.ensureEvalWorkerRBAC(context.Background(), "ns", defaultSvcGroupName))
+	require.NoError(t, r.ensureEvalWorkerRBAC(context.Background(), "ns", defaultSvcGroupName, nil))
 
 	name := evalWorkerName(defaultSvcGroupName)
 
@@ -456,6 +480,36 @@ func TestEnsureEvalWorkerRBAC_CreatesObjects(t *testing.T) {
 	require.Equal(t, "ns", crb.Labels[labelWorkspaceReaderFor])
 }
 
+func TestEnsureEvalWorkerRBAC_OverriddenServiceAccount(t *testing.T) {
+	scheme := evalWorkerTestScheme()
+	r := &AgentRuntimeReconciler{
+		Client:                          fake.NewClientBuilder().WithScheme(scheme).Build(),
+		Scheme:                          scheme,
+		AgentWorkspaceReaderClusterRole: testWorkspaceReaderClusterRole,
+	}
+
+	// Point the worker at an external (e.g. workload-identity) SA.
+	po := &omniav1alpha1.PodOverrides{ServiceAccountName: testWISA}
+	require.NoError(t, r.ensureEvalWorkerRBAC(context.Background(), "ns", defaultSvcGroupName, po))
+
+	name := evalWorkerName(defaultSvcGroupName)
+
+	// The operator must NOT create the externally-owned SA.
+	err := r.Get(context.Background(), types.NamespacedName{Name: name, Namespace: "ns"}, &corev1.ServiceAccount{})
+	require.True(t, apierrors.IsNotFound(err), "default SA must not be created when overridden")
+
+	// Role + RoleBinding keep the default name, but the subject is the override.
+	rb := &rbacv1.RoleBinding{}
+	require.NoError(t, r.Get(context.Background(), types.NamespacedName{Name: name, Namespace: "ns"}, rb))
+	require.Equal(t, name, rb.RoleRef.Name)
+	require.Equal(t, testWISA, rb.Subjects[0].Name)
+
+	crb := &rbacv1.ClusterRoleBinding{}
+	require.NoError(t, r.Get(context.Background(),
+		types.NamespacedName{Name: "ns-" + name + "-workspace-reader"}, crb))
+	require.Equal(t, testWISA, crb.Subjects[0].Name)
+}
+
 func TestEnsureEvalWorkerRBAC_SkipsCRBWhenNoClusterRole(t *testing.T) {
 	scheme := evalWorkerTestScheme()
 	r := &AgentRuntimeReconciler{
@@ -464,7 +518,7 @@ func TestEnsureEvalWorkerRBAC_SkipsCRBWhenNoClusterRole(t *testing.T) {
 		// AgentWorkspaceReaderClusterRole intentionally empty.
 	}
 
-	require.NoError(t, r.ensureEvalWorkerRBAC(context.Background(), "ns", defaultSvcGroupName))
+	require.NoError(t, r.ensureEvalWorkerRBAC(context.Background(), "ns", defaultSvcGroupName, nil))
 
 	name := evalWorkerName(defaultSvcGroupName)
 

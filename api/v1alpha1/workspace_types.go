@@ -642,6 +642,16 @@ type ServiceGroupEvalWorker struct {
 	// enabled, regardless of this flag.
 	// +optional
 	Enabled bool `json:"enabled,omitempty"`
+
+	// podOverrides customizes the per-service-group eval-worker Pod — most
+	// commonly a ServiceAccount plus an `azure.workload.identity/use: "true"`
+	// label so the worker's llm_judge can mint a federated token for a keyless
+	// cloud judge provider (auth.type: workloadIdentity). Mirrors the
+	// memory/session podOverrides on this service group. When set it takes
+	// precedence over the legacy per-agent spec.evals.podOverrides for this
+	// group's worker.
+	// +optional
+	PodOverrides *PodOverrides `json:"podOverrides,omitempty"`
 }
 
 // MemoryServiceConfig defines the configuration for a managed memory-api instance.
