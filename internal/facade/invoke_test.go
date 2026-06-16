@@ -25,6 +25,7 @@ import (
 	"github.com/go-logr/logr/testr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc"
 
 	"github.com/altairalabs/omnia/internal/session"
 	"github.com/altairalabs/omnia/pkg/identity"
@@ -43,7 +44,7 @@ type invokerStub struct {
 	lastReq *runtimev1.InvocationRequest
 }
 
-func (s *invokerStub) Invoke(_ context.Context, req *runtimev1.InvocationRequest) (*runtimev1.InvocationResponse, error) {
+func (s *invokerStub) Invoke(_ context.Context, req *runtimev1.InvocationRequest, _ ...grpc.CallOption) (*runtimev1.InvocationResponse, error) {
 	s.lastReq = req
 	return s.resp, s.err
 }

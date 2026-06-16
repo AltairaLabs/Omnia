@@ -24,6 +24,8 @@ import (
 
 	"github.com/go-logr/logr"
 	"github.com/google/uuid"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/encoding/gzip"
 
 	"github.com/altairalabs/omnia/internal/session"
 	"github.com/altairalabs/omnia/pkg/logctx"
@@ -148,7 +150,7 @@ func (i *FunctionInvoker) Invoke(ctx context.Context, name string, input json.Ra
 	resp, err := i.cfg.Invoker.Invoke(ctx, &runtimev1.InvocationRequest{
 		InputJson:    string(input),
 		InvocationId: invocationID,
-	})
+	}, grpc.UseCompressor(gzip.Name))
 	if err != nil {
 		log.Error(err, "runtime invoke failed")
 		finalStatus = session.SessionStatusError

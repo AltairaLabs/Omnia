@@ -25,6 +25,9 @@ import (
 	"sync"
 	"time"
 
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/encoding/gzip"
+
 	"github.com/altairalabs/omnia/internal/facade"
 	runtimev1 "github.com/altairalabs/omnia/pkg/runtime/v1"
 )
@@ -126,8 +129,10 @@ func (h *RuntimeHandler) HandleMessage(
 	streamCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	// Open bidirectional stream to runtime
-	stream, err := h.client.Converse(streamCtx)
+	// Open bidirectional stream to runtime with gzip compression.
+	// Text conversation paths use gzip to reduce bandwidth; the future
+	// audio duplex path will omit this option to avoid recompressing PCM.
+	stream, err := h.client.Converse(streamCtx, grpc.UseCompressor(gzip.Name))
 	if err != nil {
 		return fmt.Errorf("failed to open stream to runtime: %w", err)
 	}

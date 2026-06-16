@@ -26,7 +26,6 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
-	"google.golang.org/grpc/encoding/gzip" // Register gzip compressor and provide gzip.Name
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/stats"
 
@@ -73,7 +72,6 @@ func NewRuntimeClient(cfg RuntimeClientConfig) (*RuntimeClient, error) {
 		grpc.WithDefaultCallOptions(
 			grpc.MaxCallRecvMsgSize(maxMsgSize),
 			grpc.MaxCallSendMsgSize(maxMsgSize),
-			grpc.UseCompressor(gzip.Name),
 		),
 		grpc.WithUnaryInterceptor(policyUnaryClientInterceptor()),
 		grpc.WithStreamInterceptor(policyStreamClientInterceptor()),
@@ -117,15 +115,20 @@ func NewRuntimeClient(cfg RuntimeClientConfig) (*RuntimeClient, error) {
 }
 
 // Converse opens a bidirectional streaming RPC for conversation.
-func (c *RuntimeClient) Converse(ctx context.Context) (runtimev1.RuntimeService_ConverseClient, error) {
-	return c.client.Converse(ctx)
+// Callers supply per-call options (e.g. grpc.UseCompressor) to control
+// compression; text/function paths should pass grpc.UseCompressor(gzip.Name)
+// while audio duplex callers omit it to avoid PCM recompression overhead.
+func (c *RuntimeClient) Converse(ctx context.Context, opts ...grpc.CallOption) (runtimev1.RuntimeService_ConverseClient, error) {
+	return c.client.Converse(ctx, opts...)
 }
 
 // Invoke runs a one-shot Function call through the runtime. The facade's
 // FunctionsHandler is the sole consumer; agent-mode flows continue to
 // use Converse.
-func (c *RuntimeClient) Invoke(ctx context.Context, req *runtimev1.InvocationRequest) (*runtimev1.InvocationResponse, error) {
-	return c.client.Invoke(ctx, req)
+// Callers supply per-call options (e.g. grpc.UseCompressor) to control
+// compression; function invocation paths should pass grpc.UseCompressor(gzip.Name).
+func (c *RuntimeClient) Invoke(ctx context.Context, req *runtimev1.InvocationRequest, opts ...grpc.CallOption) (*runtimev1.InvocationResponse, error) {
+	return c.client.Invoke(ctx, req, opts...)
 }
 
 // Health checks the runtime's health status.
