@@ -324,7 +324,7 @@ func (s *Server) tryStartAudioSession(ctx context.Context, c *Connection, log lo
 
 	// Default audio parameters. TODO: parse from BinaryMediaChunkMetadata when
 	// the client negotiation protocol is defined (future task).
-	startParams := &AudioSessionStart{Codec: "pcm", SampleRate: 16000, Channels: 1}
+	startParams := &AudioSessionStart{Codec: defaultAudioCodec, SampleRate: 16000, Channels: 1}
 	if err := as.start(ctx, startParams); err != nil {
 		log.Error(err, "audio session start failed", "sessionID", c.sessionID)
 		s.sendError(c, c.sessionID, ErrorCodeInvalidMessage, "audio session start failed: "+err.Error())

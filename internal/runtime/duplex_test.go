@@ -107,7 +107,7 @@ func TestHandleDuplexSession_EchoesAudio(t *testing.T) {
 	}
 	start := &runtimev1.ClientMessage{
 		SessionId:   "sess-1",
-		DuplexStart: &runtimev1.DuplexStart{Codec: "pcm", SampleRate: 16000, Channels: 1},
+		DuplexStart: &runtimev1.DuplexStart{Codec: defaultAudioCodec, SampleRate: 16000, Channels: 1},
 	}
 	go func() {
 		fake.recv <- &runtimev1.ClientMessage{SessionId: "sess-1", AudioInput: &runtimev1.AudioInputChunk{Data: []byte{9, 8, 7}, Sequence: 0}}
@@ -139,7 +139,7 @@ func TestHandleDuplexSession_ForwardTextDelta(t *testing.T) {
 	}
 	start := &runtimev1.ClientMessage{
 		SessionId:   "sess-2",
-		DuplexStart: &runtimev1.DuplexStart{Codec: "pcm", SampleRate: 16000, Channels: 1},
+		DuplexStart: &runtimev1.DuplexStart{Codec: defaultAudioCodec, SampleRate: 16000, Channels: 1},
 	}
 	go func() {
 		// Non-audio message is skipped; is_last closes the input side.
@@ -160,7 +160,7 @@ func TestHandleDuplexSession_SkipsNilAudioInput(t *testing.T) {
 	}
 	start := &runtimev1.ClientMessage{
 		SessionId:   "sess-3",
-		DuplexStart: &runtimev1.DuplexStart{Codec: "pcm", SampleRate: 16000, Channels: 1},
+		DuplexStart: &runtimev1.DuplexStart{Codec: defaultAudioCodec, SampleRate: 16000, Channels: 1},
 	}
 	go func() {
 		// A message with no AudioInput (nil) should be skipped, not panic.
@@ -206,7 +206,7 @@ func TestHandleDuplexSession_RecvError(t *testing.T) {
 	}
 	start := &runtimev1.ClientMessage{
 		SessionId:   "sess-recv-err",
-		DuplexStart: &runtimev1.DuplexStart{Codec: "pcm", SampleRate: 16000, Channels: 1},
+		DuplexStart: &runtimev1.DuplexStart{Codec: defaultAudioCodec, SampleRate: 16000, Channels: 1},
 	}
 	// Close the recv channel immediately (simulates stream termination with EOF).
 	// pumpDuplexInput treats io.EOF as clean exit (no error).
@@ -266,7 +266,7 @@ func TestHandleDuplexSession_HonorsDuplexStartParams(t *testing.T) {
 	start := &runtimev1.ClientMessage{
 		SessionId: "sess-cfg",
 		DuplexStart: &runtimev1.DuplexStart{
-			Codec: "pcm", SampleRate: 24000, Channels: 1,
+			Codec: defaultAudioCodec, SampleRate: 24000, Channels: 1,
 			SystemInstruction: "be terse",
 		},
 	}
@@ -323,8 +323,8 @@ func TestHandleDuplexSession_DefaultsWhenZeroParams(t *testing.T) {
 	if cfg.Config.Channels != 1 {
 		t.Fatalf("default channels: got %d, want 1", cfg.Config.Channels)
 	}
-	if cfg.Config.Encoding != "pcm" {
-		t.Fatalf("default encoding: got %q, want %q", cfg.Config.Encoding, "pcm")
+	if cfg.Config.Encoding != defaultAudioCodec {
+		t.Fatalf("default encoding: got %q, want %q", cfg.Config.Encoding, defaultAudioCodec)
 	}
 }
 
@@ -340,7 +340,7 @@ func TestHandleDuplexSession_EchoesAudioWithNegotiatedMIME(t *testing.T) {
 	}
 	start := &runtimev1.ClientMessage{
 		SessionId:   "sess-mime",
-		DuplexStart: &runtimev1.DuplexStart{Codec: "pcm", SampleRate: 24000, Channels: 2},
+		DuplexStart: &runtimev1.DuplexStart{Codec: defaultAudioCodec, SampleRate: 24000, Channels: 2},
 	}
 	go func() {
 		fake.recv <- &runtimev1.ClientMessage{SessionId: "sess-mime", AudioInput: &runtimev1.AudioInputChunk{Data: []byte{1, 2, 3}}}
@@ -366,6 +366,9 @@ func TestForwardDuplexChunk_EmptyChunk(t *testing.T) {
 	require.Empty(t, fake.sent)
 }
 
+// testDelta is the text delta asserted across forwardDuplexChunk tests.
+const testDelta = "hello"
+
 // TestForwardDuplexChunk_TextDelta covers the Delta branch.
 func TestForwardDuplexChunk_TextDelta(t *testing.T) {
 	s := NewServer(WithLogger(logr.Discard()))
@@ -374,10 +377,10 @@ func TestForwardDuplexChunk_TextDelta(t *testing.T) {
 		recv: make(chan *runtimev1.ClientMessage, 1),
 		sent: make(chan *runtimev1.ServerMessage, 4),
 	}
-	err := s.forwardDuplexChunk(fake, providers.StreamChunk{Delta: "hello"})
+	err := s.forwardDuplexChunk(fake, providers.StreamChunk{Delta: testDelta})
 	require.NoError(t, err)
 	require.Len(t, fake.sent, 1)
 	chunk, ok := (<-fake.sent).Message.(*runtimev1.ServerMessage_Chunk)
 	require.True(t, ok)
-	require.Equal(t, "hello", chunk.Chunk.Content)
+	require.Equal(t, testDelta, chunk.Chunk.Content)
 }

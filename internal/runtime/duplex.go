@@ -44,6 +44,9 @@ type duplexMediaParams struct {
 	channels   int
 }
 
+// defaultAudioCodec is the fallback codec when DuplexStart omits one.
+const defaultAudioCodec = "pcm"
+
 // buildStreamingConfig converts the DuplexStart proto message into a
 // providers.StreamingInputConfig.  Zero values in ds are replaced with
 // sensible defaults (pcm / 16 kHz / mono) so existing sessions that send no
@@ -51,7 +54,7 @@ type duplexMediaParams struct {
 func buildStreamingConfig(ds *runtimev1.DuplexStart) (providers.StreamingInputConfig, duplexMediaParams) {
 	codec := ds.GetCodec()
 	if codec == "" {
-		codec = "pcm"
+		codec = defaultAudioCodec
 	}
 	sampleRate := int(ds.GetSampleRate())
 	if sampleRate == 0 {

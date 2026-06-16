@@ -21,6 +21,9 @@ import (
 	"sync"
 )
 
+// defaultAudioCodec is the fallback audio codec for duplex sessions.
+const defaultAudioCodec = "pcm"
+
 // AudioSessionStart holds negotiated audio parameters for a duplex session.
 //
 // TODO: DuplexStart.system_instruction is honored by the runtime (injected as a

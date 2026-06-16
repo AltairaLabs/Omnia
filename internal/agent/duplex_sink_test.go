@@ -124,10 +124,13 @@ func writeFile(path, content string) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	_, err = f.WriteString(content)
 	return err
 }
+
+// testAudioCodec is the codec used across duplex sink tests.
+const testAudioCodec = "pcm"
 
 // TestDuplexSink_EchoesAudioOverGRPC exercises the full grpcDuplexSink path:
 // Start (sends DuplexStart) → SendAudio (sends AudioInputChunk) → relayOut
@@ -151,7 +154,7 @@ func TestDuplexSink_EchoesAudioOverGRPC(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	if err := sink.Start(ctx, &facade.AudioSessionStart{Codec: "pcm", SampleRate: 16000, Channels: 1}); err != nil {
+	if err := sink.Start(ctx, &facade.AudioSessionStart{Codec: testAudioCodec, SampleRate: 16000, Channels: 1}); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 	defer func() { _ = sink.Close() }()
@@ -193,7 +196,7 @@ func TestDuplexSink_StartError(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
 
-	err = sink.Start(ctx, &facade.AudioSessionStart{Codec: "pcm", SampleRate: 16000, Channels: 1})
+	err = sink.Start(ctx, &facade.AudioSessionStart{Codec: testAudioCodec, SampleRate: 16000, Channels: 1})
 	if err == nil {
 		t.Fatal("Start should have failed with an unreachable runtime")
 	}
@@ -251,7 +254,7 @@ func TestDuplexSink_StartConverseError(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	err = sink.Start(ctx, &facade.AudioSessionStart{Codec: "pcm", SampleRate: 16000, Channels: 1})
+	err = sink.Start(ctx, &facade.AudioSessionStart{Codec: testAudioCodec, SampleRate: 16000, Channels: 1})
 	// gRPC client-side may open the stream lazily; if Converse somehow
 	// succeeds with the cancelled context, the subsequent Send will fail.
 	// Either outcome exercises an error-return branch in Start.
@@ -283,7 +286,7 @@ func TestDuplexSink_StartSendError(t *testing.T) {
 	ctx := context.Background()
 	// The server closes the stream immediately; Start may succeed or may get
 	// an error from Send depending on gRPC buffering. Either path is valid.
-	err = sink.Start(ctx, &facade.AudioSessionStart{Codec: "pcm", SampleRate: 16000, Channels: 1})
+	err = sink.Start(ctx, &facade.AudioSessionStart{Codec: testAudioCodec, SampleRate: 16000, Channels: 1})
 	_ = sink.Close()
 	_ = err // both outcomes (error or nil) are acceptable
 }

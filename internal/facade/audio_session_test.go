@@ -88,7 +88,7 @@ func TestAudioSession_ForwardsInboundAudio(t *testing.T) {
 	fc := &fakeDuplexSink{audio: make(chan []byte, 4)}
 	w := &captureWriter{}
 	as := newAudioSession("sess-1", fc, w)
-	if err := as.start(context.Background(), &AudioSessionStart{Codec: "pcm", SampleRate: 16000, Channels: 1}); err != nil {
+	if err := as.start(context.Background(), &AudioSessionStart{Codec: defaultAudioCodec, SampleRate: 16000, Channels: 1}); err != nil {
 		t.Fatalf("start: %v", err)
 	}
 	if err := as.pushAudio([]byte{1, 2, 3}, 0, false); err != nil {
@@ -111,8 +111,8 @@ func TestAudioSession_StartIdempotent(t *testing.T) {
 	w := &captureWriter{}
 	as := newAudioSession("sess-1", fc, w)
 
-	require.NoError(t, as.start(context.Background(), &AudioSessionStart{Codec: "pcm", SampleRate: 16000, Channels: 1}))
-	require.NoError(t, as.start(context.Background(), &AudioSessionStart{Codec: "pcm", SampleRate: 16000, Channels: 1}))
+	require.NoError(t, as.start(context.Background(), &AudioSessionStart{Codec: defaultAudioCodec, SampleRate: 16000, Channels: 1}))
+	require.NoError(t, as.start(context.Background(), &AudioSessionStart{Codec: defaultAudioCodec, SampleRate: 16000, Channels: 1}))
 
 	assert.Equal(t, 1, fc.startCalls, "Start should only be called once")
 }
@@ -123,7 +123,7 @@ func TestAudioSession_StartError(t *testing.T) {
 	w := &captureWriter{}
 	as := newAudioSession("sess-err", fc, w)
 
-	err := as.start(context.Background(), &AudioSessionStart{Codec: "pcm", SampleRate: 16000, Channels: 1})
+	err := as.start(context.Background(), &AudioSessionStart{Codec: defaultAudioCodec, SampleRate: 16000, Channels: 1})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "dial failed")
 }
@@ -143,7 +143,7 @@ func TestAudioSession_HandleInboundFrame(t *testing.T) {
 	fc := &fakeDuplexSink{audio: make(chan []byte, 4)}
 	w := &captureWriter{}
 	as := newAudioSession("sess-1", fc, w)
-	require.NoError(t, as.start(context.Background(), &AudioSessionStart{Codec: "pcm", SampleRate: 16000, Channels: 1}))
+	require.NoError(t, as.start(context.Background(), &AudioSessionStart{Codec: defaultAudioCodec, SampleRate: 16000, Channels: 1}))
 
 	mediaID := testMediaIDFromString("audio-00")
 	frame, err := NewMediaChunkFrame("sess-1", mediaID, 7, true, "audio/pcm", []byte{0xAA, 0xBB})
@@ -280,7 +280,7 @@ func TestEnsureAudioSession_DoubleCheckRace(t *testing.T) {
 				// Simulate the race: inject an already-started session so the
 				// double-check branch finds audioSession != nil.
 				existing := newAudioSession(sessionID, fc1, w)
-				_ = existing.start(context.Background(), &AudioSessionStart{Codec: "pcm", SampleRate: 16000, Channels: 1})
+				_ = existing.start(context.Background(), &AudioSessionStart{Codec: defaultAudioCodec, SampleRate: 16000, Channels: 1})
 				conn.mu.Lock()
 				conn.audioSession = existing
 				conn.mu.Unlock()
