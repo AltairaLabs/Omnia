@@ -200,7 +200,7 @@ func (s *Server) processAndRecordMessage(ctx context.Context, c *Connection, msg
 }
 
 // handleBinaryMessage decodes and processes a binary WebSocket frame.
-func (s *Server) handleBinaryMessage(_ context.Context, c *Connection, data []byte, log logr.Logger) {
+func (s *Server) handleBinaryMessage(ctx context.Context, c *Connection, data []byte, log logr.Logger) {
 	frame, err := DecodeBinaryFrame(data)
 	if err != nil {
 		log.Error(err, "failed to decode binary frame")
@@ -215,6 +215,8 @@ func (s *Server) handleBinaryMessage(_ context.Context, c *Connection, data []by
 	)
 
 	switch frame.Header.MessageType {
+	case BinaryMessageTypeMediaChunk:
+		s.routeMediaChunk(ctx, c, frame, log)
 	case BinaryMessageTypeUpload:
 		// Binary upload handling could be added here in the future
 		log.Info("binary upload not yet implemented")
@@ -225,13 +227,85 @@ func (s *Server) handleBinaryMessage(_ context.Context, c *Connection, data []by
 	}
 }
 
+// routeMediaChunk routes an inbound BinaryMessageTypeMediaChunk frame to the
+// connection's persistent audio session, creating it lazily on the first frame.
+func (s *Server) routeMediaChunk(ctx context.Context, c *Connection, frame *BinaryFrame, log logr.Logger) {
+	as := s.ensureAudioSession(ctx, c, log)
+	if as == nil {
+		// ensureAudioSession already logged and/or sent an error — nothing more to do.
+		return
+	}
+	if err := as.handleInboundFrame(frame); err != nil {
+		log.Error(err, "audio session forward failed", "sessionID", c.sessionID)
+		s.sendError(c, c.sessionID, ErrorCodeInvalidMessage, "audio forward failed: "+err.Error())
+	}
+}
+
+// ensureAudioSession returns the connection's audio session, creating it
+// lazily on the first call using the server's duplexSinkFactory.
+//
+// Returns nil (without panicking) when no factory is configured — audio
+// streaming is not enabled for this server instance. In that case a graceful
+// error is sent to the client so the browser receives a clear diagnostic
+// rather than a silent drop.
+//
+// NOTE: codec/sample-rate/channels defaults (pcm/16000/1) are used for the
+// initial Start call. Future work (Task N) can parse BinaryMediaChunkMetadata
+// from the first frame and pass the negotiated parameters here instead.
+func (s *Server) ensureAudioSession(ctx context.Context, c *Connection, log logr.Logger) *audioSession {
+	c.mu.Lock()
+	if c.audioSession != nil {
+		as := c.audioSession
+		c.mu.Unlock()
+		return as
+	}
+	c.mu.Unlock()
+
+	if s.duplexSinkFactory == nil {
+		log.V(1).Info("audio frame dropped",
+			"reason", "duplexSinkFactory not configured",
+			"sessionID", c.sessionID,
+		)
+		return nil
+	}
+
+	// Build the writer for relaying audio back to the client.
+	w := &connResponseWriter{conn: c, sessionID: c.sessionID, server: s}
+	sink := s.duplexSinkFactory(c.sessionID, w)
+
+	as := newAudioSession(c.sessionID, sink, w)
+
+	// Default audio parameters. TODO: parse from BinaryMediaChunkMetadata when
+	// the client negotiation protocol is defined (future task).
+	startParams := &AudioSessionStart{Codec: "pcm", SampleRate: 16000, Channels: 1}
+	if err := as.start(ctx, startParams); err != nil {
+		log.Error(err, "audio session start failed", "sessionID", c.sessionID)
+		s.sendError(c, c.sessionID, ErrorCodeInvalidMessage, "audio session start failed: "+err.Error())
+		return nil
+	}
+
+	c.mu.Lock()
+	// Double-check: another goroutine may have raced us.
+	if c.audioSession != nil {
+		c.mu.Unlock()
+		// Discard the one we just created; close its sink.
+		_ = as.close()
+		return c.audioSession
+	}
+	c.audioSession = as
+	c.mu.Unlock()
+
+	log.V(1).Info("audio session started", "sessionID", c.sessionID)
+	return as
+}
+
 // sendBinaryFrame sends a binary WebSocket frame to the connection.
 // Uses a pooled buffer for encoding to reduce GC pressure on the streaming path.
 func (s *Server) sendBinaryFrame(c *Connection, frame *BinaryFrame) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	if c.closed {
+	if c.closed || c.conn == nil {
 		return nil
 	}
 

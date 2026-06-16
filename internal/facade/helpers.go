@@ -25,7 +25,7 @@ func (s *Server) sendMessage(c *Connection, msg *ServerMessage) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	if c.closed {
+	if c.closed || c.conn == nil {
 		return nil
 	}
 
