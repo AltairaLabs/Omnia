@@ -68,6 +68,15 @@ const (
 	DefaultMCPPort = 9998
 	// portNameMCP is the container/service port name for the MCP endpoint.
 	portNameMCP = "mcp"
+
+	// appProtocolHTTP / appProtocolGRPC are Istio Service-port appProtocol values.
+	// Setting appProtocol is what lets an Istio waypoint (or sidecar) do L7 on a
+	// port — required for mode=mesh weighted routing AND for the facade's
+	// WebSocket upgrade to traverse the waypoint. Without it Istio treats the
+	// port as opaque TCP and the waypoint silently bypasses/breaks L7. WebSocket
+	// and A2A (JSON-RPC) are HTTP/1.1; a gRPC facade is HTTP/2.
+	appProtocolHTTP = "http"
+	appProtocolGRPC = "grpc"
 	// DefaultFacadeHealthPort is the health port for the facade container.
 	DefaultFacadeHealthPort = 8081
 	// DefaultRuntimeGRPCPort is the gRPC port for the runtime container.
