@@ -67,6 +67,59 @@ func TestNewTokenFetcher_AllowsInsecureHTTPWhenExplicitlyEnabled(t *testing.T) {
 	}
 }
 
+func TestNewTokenFetcher_AllowsClusterInternalHTTP(t *testing.T) {
+	// The dashboard is served over http on a ClusterIP Service in every Omnia
+	// install, so the constructor must accept the in-cluster http URL WITHOUT
+	// AllowInsecureHTTP — otherwise fleet auth is broken on every deployment.
+	f, err := NewTokenFetcher(FetcherOptions{
+		Endpoint: "http://omnia-dashboard.omnia.svc.cluster.local:3000/api/auth/service-token",
+	})
+	if err != nil {
+		t.Fatalf("expected cluster-internal http endpoint to be allowed without AllowInsecureHTTP, got: %v", err)
+	}
+	if f == nil {
+		t.Fatal("expected fetcher")
+	}
+}
+
+func TestIsClusterInternalHost(t *testing.T) {
+	internal := []string{
+		"localhost",
+		"127.0.0.1",
+		"::1",
+		"10.0.1.5",
+		"172.16.4.4",
+		"192.168.1.10",
+		"omnia-dashboard",           // same-namespace short name
+		"omnia-dashboard.omnia.svc", // .svc suffix
+		"omnia-dashboard.omnia.svc.cluster.local",  // full svc DNS
+		"omnia-dashboard.omnia.svc.cluster.local.", // trailing dot
+		"some-host.cluster.local",                  // cluster domain
+		"printer.local",                            // mDNS/local
+	}
+	for _, h := range internal {
+		if !isClusterInternalHost(h) {
+			t.Errorf("expected %q to be cluster-internal", h)
+		}
+	}
+
+	external := []string{
+		"",
+		"dashboard.example",
+		"dashboard.example.com",
+		"omnia-dashboard.omnia.example.com",
+		"omnia-dashboard.omnia", // two-label <svc>.<ns> is ambiguous vs a public domain; not auto-trusted
+		"anything.svc.evil.com", // ".svc." substring must NOT match — token-exfil bypass
+		"8.8.8.8",
+		"203.0.113.10",
+	}
+	for _, h := range external {
+		if isClusterInternalHost(h) {
+			t.Errorf("expected %q to NOT be cluster-internal", h)
+		}
+	}
+}
+
 func TestToken_RoundtripsWithDashboard(t *testing.T) {
 	saTokenPath := writeSAToken(t, "fake-sa-token")
 	var seenAuth, seenBody string
