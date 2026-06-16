@@ -69,6 +69,13 @@ type Connection struct {
 	// policyCache caches the effective recording policy for this connection.
 	// Nil when no PolicyFetcher is configured (memory store, test mode).
 	policyCache *RecordingPolicyCache
+
+	// audioSession is the persistent duplex audio stream for this connection.
+	// Created lazily on the first inbound BinaryMessageTypeMediaChunk frame
+	// via Server.ensureAudioSession. Nil until the first media chunk arrives
+	// or when no duplexSinkFactory is configured on the Server.
+	// Protected by c.mu.
+	audioSession *audioSession
 }
 
 func (c *Connection) tryAcquireInFlightMessage() bool {
@@ -157,7 +164,16 @@ func (s *Server) cleanupConnection(c *Connection, log logr.Logger) {
 
 	c.mu.Lock()
 	c.closed = true
+	as := c.audioSession
 	c.mu.Unlock()
+
+	// Tear down the duplex audio stream before the connection is removed.
+	if as != nil {
+		if err := as.close(); err != nil {
+			log.Error(err, "audio session close failed", "sessionID", c.sessionID)
+		}
+		s.decrementAudioSessions(s.metrics)
+	}
 
 	s.metrics.ConnectionClosed()
 

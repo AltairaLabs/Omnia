@@ -54,6 +54,13 @@ message ClientMessage {
   // consent_grants carries per-message consent category grants from the client.
   // When present, these override stored consent for this request.
   repeated string consent_grants = 6;
+
+  // duplex_start, when set on the first message of a Converse stream, switches
+  // the stream into bidirectional audio mode (OSS duplex transport).
+  DuplexStart duplex_start = 7;
+
+  // audio_input carries one inbound audio frame during a duplex session.
+  AudioInputChunk audio_input = 8;
 }
 
 // ClientToolResult carries the client's response to a client-side tool call.
@@ -277,4 +284,26 @@ message HealthResponse {
 
   // status provides additional status information.
   string status = 2;
+}
+
+// DuplexStart opens a bidirectional audio session on a Converse stream.
+message DuplexStart {
+  // codec is the audio encoding, e.g. "pcm".
+  string codec = 1;
+  // sample_rate in Hz, e.g. 16000.
+  int32 sample_rate = 2;
+  // channels, e.g. 1 for mono.
+  int32 channels = 3;
+  // system_instruction is the optional system prompt for the session.
+  string system_instruction = 4;
+}
+
+// AudioInputChunk is one inbound audio frame during a duplex session.
+message AudioInputChunk {
+  // data is raw audio bytes (never base64 on the gRPC path).
+  bytes data = 1;
+  // sequence is the 0-indexed frame number.
+  uint32 sequence = 2;
+  // is_last marks the final frame (client hangup / stream end).
+  bool is_last = 3;
 }

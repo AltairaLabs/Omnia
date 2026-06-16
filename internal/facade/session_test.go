@@ -523,6 +523,9 @@ func (m *ensureSessionMetricsSpy) RecordingDropped() {}
 func (m *ensureSessionMetricsSpy) SessionCreated() {
 	m.sessionCreated++
 }
+func (m *ensureSessionMetricsSpy) AudioSessionStarted()       {}
+func (m *ensureSessionMetricsSpy) AudioSessionEnded()         {}
+func (m *ensureSessionMetricsSpy) AudioIngestLatency(float64) {}
 
 func (s *ensureSessionStore) GetSession(ctx context.Context, sessionID string) (*session.Session, error) {
 	if s.getErr != nil {

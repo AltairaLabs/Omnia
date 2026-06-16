@@ -152,6 +152,21 @@ func newMetricsWithRegistry(agentName, namespace string, reg prometheus.Register
 	})
 	reg.MustRegister(mediaChunkBytesTotal)
 
+	audioSessionsActive := prometheus.NewGauge(prometheus.GaugeOpts{
+		Name:        "omnia_facade_audio_sessions_active",
+		Help:        "Current number of live duplex audio sessions",
+		ConstLabels: labels,
+	})
+	reg.MustRegister(audioSessionsActive)
+
+	audioIngestDuration := prometheus.NewHistogram(prometheus.HistogramOpts{
+		Name:        "omnia_facade_audio_ingest_duration_seconds",
+		Help:        "Facade-receive to sink-send latency per inbound audio frame, in seconds",
+		ConstLabels: labels,
+		Buckets:     []float64{0.0001, 0.0005, 0.001, 0.005, 0.01, 0.025, 0.05, 0.1},
+	})
+	reg.MustRegister(audioIngestDuration)
+
 	return &Metrics{
 		ConnectionsActive:     connectionsActive,
 		ConnectionsTotal:      connectionsTotal,
@@ -169,6 +184,8 @@ func newMetricsWithRegistry(agentName, namespace string, reg prometheus.Register
 		DownloadBytesTotal:    downloadBytesTotal,
 		MediaChunksTotal:      mediaChunksTotal,
 		MediaChunkBytesTotal:  mediaChunkBytesTotal,
+		AudioSessionsActive:   audioSessionsActive,
+		AudioIngestDuration:   audioIngestDuration,
 	}
 }
 
@@ -194,6 +211,9 @@ func TestNewMetrics(t *testing.T) {
 	assert.NotNil(t, m.DownloadBytesTotal)
 	assert.NotNil(t, m.MediaChunksTotal)
 	assert.NotNil(t, m.MediaChunkBytesTotal)
+	// Audio duplex metrics
+	assert.NotNil(t, m.AudioSessionsActive)
+	assert.NotNil(t, m.AudioIngestDuration)
 }
 
 func TestMetricsConnectionTracking(t *testing.T) {
@@ -427,6 +447,41 @@ func TestMetricsDownloadTracking(t *testing.T) {
 	}
 	assert.Equal(t, 2.0, successCount)
 	assert.Equal(t, 1.0, failedCount)
+}
+
+func TestMetricsAudioDuplex(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	m := newMetricsWithRegistry("test-agent", "test-namespace", reg)
+
+	// AudioSessionStarted increments the gauge.
+	m.AudioSessionStarted()
+	assert.Equal(t, float64(1), getGaugeValue(t, m.AudioSessionsActive))
+
+	m.AudioSessionStarted()
+	assert.Equal(t, float64(2), getGaugeValue(t, m.AudioSessionsActive))
+
+	// AudioSessionEnded decrements the gauge.
+	m.AudioSessionEnded()
+	assert.Equal(t, float64(1), getGaugeValue(t, m.AudioSessionsActive))
+
+	// AudioIngestLatency observes without panicking.
+	m.AudioIngestLatency(0.001)
+	m.AudioIngestLatency(0.0005)
+
+	// Verify at least one observation was recorded via histogram sum.
+	ch := make(chan prometheus.Metric, 10)
+	m.AudioIngestDuration.Collect(ch)
+	close(ch)
+
+	var count uint64
+	for metric := range ch {
+		d := &dto.Metric{}
+		require.NoError(t, metric.Write(d))
+		if h := d.GetHistogram(); h != nil {
+			count = h.GetSampleCount()
+		}
+	}
+	assert.Equal(t, uint64(2), count)
 }
 
 func TestMetricsMediaChunkTracking(t *testing.T) {

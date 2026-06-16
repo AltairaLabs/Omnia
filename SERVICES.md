@@ -89,7 +89,7 @@ This document maps every deployable service, how they communicate, and where to 
 | Dashboard | Operator | HTTP | CRUD for K8s resources |
 | Dashboard | LSP | WebSocket | Code intelligence for Arena |
 | Dashboard | Dev Console | WebSocket | Interactive agent testing |
-| Facade | Runtime | gRPC (bidirectional) | LLM conversation stream |
+| Facade | Runtime | gRPC (bidirectional) | LLM conversation stream; duplex audio transport (persistent `Converse` stream opened per audio session, carrying `AudioInputChunk` inbound and `MediaChunk` outbound) |
 | Facade | Session API | HTTP | Session recording |
 | Runtime | Session API | HTTP | Event recording |
 | Operator | K8s API | K8s client | CRD reconciliation |

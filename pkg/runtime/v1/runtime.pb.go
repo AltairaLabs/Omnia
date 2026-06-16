@@ -92,6 +92,11 @@ type ClientMessage struct {
 	// consent_grants carries per-message consent category grants from the client.
 	// When present, these override stored consent for this request.
 	ConsentGrants []string `protobuf:"bytes,6,rep,name=consent_grants,json=consentGrants,proto3" json:"consent_grants,omitempty"`
+	// duplex_start, when set on the first message of a Converse stream, switches
+	// the stream into bidirectional audio mode (OSS duplex transport).
+	DuplexStart *DuplexStart `protobuf:"bytes,7,opt,name=duplex_start,json=duplexStart,proto3" json:"duplex_start,omitempty"`
+	// audio_input carries one inbound audio frame during a duplex session.
+	AudioInput    *AudioInputChunk `protobuf:"bytes,8,opt,name=audio_input,json=audioInput,proto3" json:"audio_input,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -164,6 +169,20 @@ func (x *ClientMessage) GetClientToolResult() *ClientToolResult {
 func (x *ClientMessage) GetConsentGrants() []string {
 	if x != nil {
 		return x.ConsentGrants
+	}
+	return nil
+}
+
+func (x *ClientMessage) GetDuplexStart() *DuplexStart {
+	if x != nil {
+		return x.DuplexStart
+	}
+	return nil
+}
+
+func (x *ClientMessage) GetAudioInput() *AudioInputChunk {
+	if x != nil {
+		return x.AudioInput
 	}
 	return nil
 }
@@ -1221,11 +1240,148 @@ func (x *HealthResponse) GetStatus() string {
 	return ""
 }
 
+// DuplexStart opens a bidirectional audio session on a Converse stream.
+type DuplexStart struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// codec is the audio encoding, e.g. "pcm".
+	Codec string `protobuf:"bytes,1,opt,name=codec,proto3" json:"codec,omitempty"`
+	// sample_rate in Hz, e.g. 16000.
+	SampleRate int32 `protobuf:"varint,2,opt,name=sample_rate,json=sampleRate,proto3" json:"sample_rate,omitempty"`
+	// channels, e.g. 1 for mono.
+	Channels int32 `protobuf:"varint,3,opt,name=channels,proto3" json:"channels,omitempty"`
+	// system_instruction is the optional system prompt for the session.
+	SystemInstruction string `protobuf:"bytes,4,opt,name=system_instruction,json=systemInstruction,proto3" json:"system_instruction,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
+}
+
+func (x *DuplexStart) Reset() {
+	*x = DuplexStart{}
+	mi := &file_api_proto_runtime_v1_runtime_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DuplexStart) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DuplexStart) ProtoMessage() {}
+
+func (x *DuplexStart) ProtoReflect() protoreflect.Message {
+	mi := &file_api_proto_runtime_v1_runtime_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DuplexStart.ProtoReflect.Descriptor instead.
+func (*DuplexStart) Descriptor() ([]byte, []int) {
+	return file_api_proto_runtime_v1_runtime_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *DuplexStart) GetCodec() string {
+	if x != nil {
+		return x.Codec
+	}
+	return ""
+}
+
+func (x *DuplexStart) GetSampleRate() int32 {
+	if x != nil {
+		return x.SampleRate
+	}
+	return 0
+}
+
+func (x *DuplexStart) GetChannels() int32 {
+	if x != nil {
+		return x.Channels
+	}
+	return 0
+}
+
+func (x *DuplexStart) GetSystemInstruction() string {
+	if x != nil {
+		return x.SystemInstruction
+	}
+	return ""
+}
+
+// AudioInputChunk is one inbound audio frame during a duplex session.
+type AudioInputChunk struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// data is raw audio bytes (never base64 on the gRPC path).
+	Data []byte `protobuf:"bytes,1,opt,name=data,proto3" json:"data,omitempty"`
+	// sequence is the 0-indexed frame number.
+	Sequence uint32 `protobuf:"varint,2,opt,name=sequence,proto3" json:"sequence,omitempty"`
+	// is_last marks the final frame (client hangup / stream end).
+	IsLast        bool `protobuf:"varint,3,opt,name=is_last,json=isLast,proto3" json:"is_last,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AudioInputChunk) Reset() {
+	*x = AudioInputChunk{}
+	mi := &file_api_proto_runtime_v1_runtime_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AudioInputChunk) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AudioInputChunk) ProtoMessage() {}
+
+func (x *AudioInputChunk) ProtoReflect() protoreflect.Message {
+	mi := &file_api_proto_runtime_v1_runtime_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AudioInputChunk.ProtoReflect.Descriptor instead.
+func (*AudioInputChunk) Descriptor() ([]byte, []int) {
+	return file_api_proto_runtime_v1_runtime_proto_rawDescGZIP(), []int{17}
+}
+
+func (x *AudioInputChunk) GetData() []byte {
+	if x != nil {
+		return x.Data
+	}
+	return nil
+}
+
+func (x *AudioInputChunk) GetSequence() uint32 {
+	if x != nil {
+		return x.Sequence
+	}
+	return 0
+}
+
+func (x *AudioInputChunk) GetIsLast() bool {
+	if x != nil {
+		return x.IsLast
+	}
+	return false
+}
+
 var File_api_proto_runtime_v1_runtime_proto protoreflect.FileDescriptor
 
 const file_api_proto_runtime_v1_runtime_proto_rawDesc = "" +
 	"\n" +
-	"\"api/proto/runtime/v1/runtime.proto\x12\x10omnia.runtime.v1\"\xfe\x02\n" +
+	"\"api/proto/runtime/v1/runtime.proto\x12\x10omnia.runtime.v1\"\x84\x04\n" +
 	"\rClientMessage\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x18\n" +
@@ -1233,7 +1389,10 @@ const file_api_proto_runtime_v1_runtime_proto_rawDesc = "" +
 	"\bmetadata\x18\x03 \x03(\v2-.omnia.runtime.v1.ClientMessage.MetadataEntryR\bmetadata\x123\n" +
 	"\x05parts\x18\x04 \x03(\v2\x1d.omnia.runtime.v1.ContentPartR\x05parts\x12P\n" +
 	"\x12client_tool_result\x18\x05 \x01(\v2\".omnia.runtime.v1.ClientToolResultR\x10clientToolResult\x12%\n" +
-	"\x0econsent_grants\x18\x06 \x03(\tR\rconsentGrants\x1a;\n" +
+	"\x0econsent_grants\x18\x06 \x03(\tR\rconsentGrants\x12@\n" +
+	"\fduplex_start\x18\a \x01(\v2\x1d.omnia.runtime.v1.DuplexStartR\vduplexStart\x12B\n" +
+	"\vaudio_input\x18\b \x01(\v2!.omnia.runtime.v1.AudioInputChunkR\n" +
+	"audioInput\x1a;\n" +
 	"\rMetadataEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x98\x01\n" +
@@ -1313,7 +1472,17 @@ const file_api_proto_runtime_v1_runtime_proto_rawDesc = "" +
 	"\rHealthRequest\"B\n" +
 	"\x0eHealthResponse\x12\x18\n" +
 	"\ahealthy\x18\x01 \x01(\bR\ahealthy\x12\x16\n" +
-	"\x06status\x18\x02 \x01(\tR\x06status*E\n" +
+	"\x06status\x18\x02 \x01(\tR\x06status\"\x8f\x01\n" +
+	"\vDuplexStart\x12\x14\n" +
+	"\x05codec\x18\x01 \x01(\tR\x05codec\x12\x1f\n" +
+	"\vsample_rate\x18\x02 \x01(\x05R\n" +
+	"sampleRate\x12\x1a\n" +
+	"\bchannels\x18\x03 \x01(\x05R\bchannels\x12-\n" +
+	"\x12system_instruction\x18\x04 \x01(\tR\x11systemInstruction\"Z\n" +
+	"\x0fAudioInputChunk\x12\x12\n" +
+	"\x04data\x18\x01 \x01(\fR\x04data\x12\x1a\n" +
+	"\bsequence\x18\x02 \x01(\rR\bsequence\x12\x17\n" +
+	"\ais_last\x18\x03 \x01(\bR\x06isLast*E\n" +
 	"\rToolExecution\x12\x19\n" +
 	"\x15TOOL_EXECUTION_SERVER\x10\x00\x12\x19\n" +
 	"\x15TOOL_EXECUTION_CLIENT\x10\x012\x84\x02\n" +
@@ -1335,7 +1504,7 @@ func file_api_proto_runtime_v1_runtime_proto_rawDescGZIP() []byte {
 }
 
 var file_api_proto_runtime_v1_runtime_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_api_proto_runtime_v1_runtime_proto_msgTypes = make([]protoimpl.MessageInfo, 18)
+var file_api_proto_runtime_v1_runtime_proto_msgTypes = make([]protoimpl.MessageInfo, 20)
 var file_api_proto_runtime_v1_runtime_proto_goTypes = []any{
 	(ToolExecution)(0),         // 0: omnia.runtime.v1.ToolExecution
 	(*ClientMessage)(nil),      // 1: omnia.runtime.v1.ClientMessage
@@ -1354,35 +1523,39 @@ var file_api_proto_runtime_v1_runtime_proto_goTypes = []any{
 	(*InvocationResponse)(nil), // 14: omnia.runtime.v1.InvocationResponse
 	(*HealthRequest)(nil),      // 15: omnia.runtime.v1.HealthRequest
 	(*HealthResponse)(nil),     // 16: omnia.runtime.v1.HealthResponse
-	nil,                        // 17: omnia.runtime.v1.ClientMessage.MetadataEntry
-	nil,                        // 18: omnia.runtime.v1.InvocationRequest.MetadataEntry
+	(*DuplexStart)(nil),        // 17: omnia.runtime.v1.DuplexStart
+	(*AudioInputChunk)(nil),    // 18: omnia.runtime.v1.AudioInputChunk
+	nil,                        // 19: omnia.runtime.v1.ClientMessage.MetadataEntry
+	nil,                        // 20: omnia.runtime.v1.InvocationRequest.MetadataEntry
 }
 var file_api_proto_runtime_v1_runtime_proto_depIdxs = []int32{
-	17, // 0: omnia.runtime.v1.ClientMessage.metadata:type_name -> omnia.runtime.v1.ClientMessage.MetadataEntry
+	19, // 0: omnia.runtime.v1.ClientMessage.metadata:type_name -> omnia.runtime.v1.ClientMessage.MetadataEntry
 	8,  // 1: omnia.runtime.v1.ClientMessage.parts:type_name -> omnia.runtime.v1.ContentPart
 	2,  // 2: omnia.runtime.v1.ClientMessage.client_tool_result:type_name -> omnia.runtime.v1.ClientToolResult
-	4,  // 3: omnia.runtime.v1.ServerMessage.chunk:type_name -> omnia.runtime.v1.Chunk
-	5,  // 4: omnia.runtime.v1.ServerMessage.tool_call:type_name -> omnia.runtime.v1.ToolCall
-	7,  // 5: omnia.runtime.v1.ServerMessage.done:type_name -> omnia.runtime.v1.Done
-	11, // 6: omnia.runtime.v1.ServerMessage.error:type_name -> omnia.runtime.v1.Error
-	12, // 7: omnia.runtime.v1.ServerMessage.media_chunk:type_name -> omnia.runtime.v1.MediaChunk
-	0,  // 8: omnia.runtime.v1.ToolCall.execution:type_name -> omnia.runtime.v1.ToolExecution
-	10, // 9: omnia.runtime.v1.Done.usage:type_name -> omnia.runtime.v1.Usage
-	8,  // 10: omnia.runtime.v1.Done.parts:type_name -> omnia.runtime.v1.ContentPart
-	9,  // 11: omnia.runtime.v1.ContentPart.media:type_name -> omnia.runtime.v1.MediaContent
-	18, // 12: omnia.runtime.v1.InvocationRequest.metadata:type_name -> omnia.runtime.v1.InvocationRequest.MetadataEntry
-	10, // 13: omnia.runtime.v1.InvocationResponse.usage:type_name -> omnia.runtime.v1.Usage
-	1,  // 14: omnia.runtime.v1.RuntimeService.Converse:input_type -> omnia.runtime.v1.ClientMessage
-	13, // 15: omnia.runtime.v1.RuntimeService.Invoke:input_type -> omnia.runtime.v1.InvocationRequest
-	15, // 16: omnia.runtime.v1.RuntimeService.Health:input_type -> omnia.runtime.v1.HealthRequest
-	3,  // 17: omnia.runtime.v1.RuntimeService.Converse:output_type -> omnia.runtime.v1.ServerMessage
-	14, // 18: omnia.runtime.v1.RuntimeService.Invoke:output_type -> omnia.runtime.v1.InvocationResponse
-	16, // 19: omnia.runtime.v1.RuntimeService.Health:output_type -> omnia.runtime.v1.HealthResponse
-	17, // [17:20] is the sub-list for method output_type
-	14, // [14:17] is the sub-list for method input_type
-	14, // [14:14] is the sub-list for extension type_name
-	14, // [14:14] is the sub-list for extension extendee
-	0,  // [0:14] is the sub-list for field type_name
+	17, // 3: omnia.runtime.v1.ClientMessage.duplex_start:type_name -> omnia.runtime.v1.DuplexStart
+	18, // 4: omnia.runtime.v1.ClientMessage.audio_input:type_name -> omnia.runtime.v1.AudioInputChunk
+	4,  // 5: omnia.runtime.v1.ServerMessage.chunk:type_name -> omnia.runtime.v1.Chunk
+	5,  // 6: omnia.runtime.v1.ServerMessage.tool_call:type_name -> omnia.runtime.v1.ToolCall
+	7,  // 7: omnia.runtime.v1.ServerMessage.done:type_name -> omnia.runtime.v1.Done
+	11, // 8: omnia.runtime.v1.ServerMessage.error:type_name -> omnia.runtime.v1.Error
+	12, // 9: omnia.runtime.v1.ServerMessage.media_chunk:type_name -> omnia.runtime.v1.MediaChunk
+	0,  // 10: omnia.runtime.v1.ToolCall.execution:type_name -> omnia.runtime.v1.ToolExecution
+	10, // 11: omnia.runtime.v1.Done.usage:type_name -> omnia.runtime.v1.Usage
+	8,  // 12: omnia.runtime.v1.Done.parts:type_name -> omnia.runtime.v1.ContentPart
+	9,  // 13: omnia.runtime.v1.ContentPart.media:type_name -> omnia.runtime.v1.MediaContent
+	20, // 14: omnia.runtime.v1.InvocationRequest.metadata:type_name -> omnia.runtime.v1.InvocationRequest.MetadataEntry
+	10, // 15: omnia.runtime.v1.InvocationResponse.usage:type_name -> omnia.runtime.v1.Usage
+	1,  // 16: omnia.runtime.v1.RuntimeService.Converse:input_type -> omnia.runtime.v1.ClientMessage
+	13, // 17: omnia.runtime.v1.RuntimeService.Invoke:input_type -> omnia.runtime.v1.InvocationRequest
+	15, // 18: omnia.runtime.v1.RuntimeService.Health:input_type -> omnia.runtime.v1.HealthRequest
+	3,  // 19: omnia.runtime.v1.RuntimeService.Converse:output_type -> omnia.runtime.v1.ServerMessage
+	14, // 20: omnia.runtime.v1.RuntimeService.Invoke:output_type -> omnia.runtime.v1.InvocationResponse
+	16, // 21: omnia.runtime.v1.RuntimeService.Health:output_type -> omnia.runtime.v1.HealthResponse
+	19, // [19:22] is the sub-list for method output_type
+	16, // [16:19] is the sub-list for method input_type
+	16, // [16:16] is the sub-list for extension type_name
+	16, // [16:16] is the sub-list for extension extendee
+	0,  // [0:16] is the sub-list for field type_name
 }
 
 func init() { file_api_proto_runtime_v1_runtime_proto_init() }
@@ -1403,7 +1576,7 @@ func file_api_proto_runtime_v1_runtime_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_api_proto_runtime_v1_runtime_proto_rawDesc), len(file_api_proto_runtime_v1_runtime_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   18,
+			NumMessages:   20,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

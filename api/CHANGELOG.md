@@ -10,6 +10,20 @@ or `api/proto/`, add an entry below with the date, affected API, and reason.
 
 ## Unreleased
 
+### Added (runtime/facade: duplex audio transport)
+
+New OSS low-latency bidirectional audio transport between the Facade WebSocket and the Runtime gRPC layer.
+
+**gRPC (`api/proto/runtime/v1/runtime.proto`)**
+
+- `ClientMessage.duplex_start` (`DuplexStart`) — sent as the first message of a `Converse` stream to switch it into duplex audio mode. Fields: `codec` (string, default `"pcm"`), `sample_rate` (int32, default `16000`), `channels` (int32, default `1`), `system_instruction` (string, optional).
+- `ClientMessage.audio_input` (`AudioInputChunk`) — subsequent frames carry raw audio bytes (`data bytes`), `sequence uint32`, and `is_last bool`. `is_last` marks the **final frame of the call** and tears down the entire duplex session; producers MUST set it only on the true final frame.
+- Audio output from the runtime reuses the **existing** `ServerMessage.media_chunk` (`MediaChunk`) message type — no new server-side message added.
+
+**WebSocket (inbound binary)**
+
+`BinaryMessageTypeMediaChunk` binary frames received from the browser during an active duplex session are routed to a per-connection `audioSession` (created lazily), which forwards them to a `facade.DuplexSink` backed by the runtime gRPC stream. See `api/websocket/asyncapi.yaml` for the binary frame contract and `is_last` semantics.
+
 ### Added (session-api: internal ServiceAccount auth — SEC-1/SEC-5)
 
 - **All `GET`/`POST`/`PATCH`/`DELETE /api/v1/*` endpoints** now optionally

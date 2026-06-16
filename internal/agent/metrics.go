@@ -83,6 +83,15 @@ type Metrics struct {
 
 	// MediaChunkBytesTotal is the total bytes sent as media chunks.
 	MediaChunkBytesTotal prometheus.Counter
+
+	// Audio duplex metrics
+
+	// AudioSessionsActive is the current number of live duplex audio sessions.
+	AudioSessionsActive prometheus.Gauge
+
+	// AudioIngestDuration is the histogram of facade-receive→sink-send latency
+	// per inbound audio frame, in seconds.
+	AudioIngestDuration prometheus.Histogram
 }
 
 // NewMetrics creates and registers all Prometheus metrics.
@@ -196,6 +205,21 @@ func NewMetrics(agentName, namespace string) *Metrics {
 			Name:        "omnia_facade_media_chunk_bytes_total",
 			Help:        "Total bytes sent as media chunks",
 			ConstLabels: labels,
+		}),
+
+		// Audio duplex metrics
+		AudioSessionsActive: promauto.NewGauge(prometheus.GaugeOpts{
+			Name:        "omnia_facade_audio_sessions_active",
+			Help:        "Current number of live duplex audio sessions",
+			ConstLabels: labels,
+		}),
+
+		AudioIngestDuration: promauto.NewHistogram(prometheus.HistogramOpts{
+			Name:        "omnia_facade_audio_ingest_duration_seconds",
+			Help:        "Facade-receive to sink-send latency per inbound audio frame, in seconds",
+			ConstLabels: labels,
+			// Sub-millisecond buckets for audio (10ms frame budgets are typical).
+			Buckets: []float64{0.0001, 0.0005, 0.001, 0.005, 0.01, 0.025, 0.05, 0.1},
 		}),
 	}
 }
@@ -348,4 +372,20 @@ func (m *Metrics) MediaChunkSent(isBinary bool, bytes int) {
 	}
 	m.MediaChunksTotal.WithLabelValues(chunkType).Inc()
 	m.MediaChunkBytesTotal.Add(float64(bytes))
+}
+
+// AudioSessionStarted records that a new duplex audio session was opened.
+func (m *Metrics) AudioSessionStarted() {
+	m.AudioSessionsActive.Inc()
+}
+
+// AudioSessionEnded records that a duplex audio session was torn down.
+func (m *Metrics) AudioSessionEnded() {
+	m.AudioSessionsActive.Dec()
+}
+
+// AudioIngestLatency records the facade-receive-to-sink-send latency for
+// an inbound audio frame, in seconds.
+func (m *Metrics) AudioIngestLatency(seconds float64) {
+	m.AudioIngestDuration.Observe(seconds)
 }

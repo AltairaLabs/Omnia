@@ -24,6 +24,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -78,6 +79,10 @@ type ServerConfig struct {
 	MaxInFlightMessagesPerConnection int
 	// WorkspaceName is the workspace this agent belongs to (for session metadata).
 	WorkspaceName string
+	// MaxAudioSessions is the maximum number of concurrent audio sessions per pod.
+	// When a new session would exceed this cap the request is shed with
+	// ErrorCodeRateLimited. 0 applies the conservative default (8).
+	MaxAudioSessions int
 }
 
 // DefaultServerConfig returns a ServerConfig with default values.
@@ -96,6 +101,8 @@ func DefaultServerConfig() ServerConfig {
 		// Keep one in-flight request per connection to avoid unbounded runtime
 		// stream fan-out and chunk interleaving the client cannot correlate.
 		MaxInFlightMessagesPerConnection: 1,
+		// Conservative audio session cap. Overridden via ServerConfig.MaxAudioSessions.
+		MaxAudioSessions: 8,
 	}
 }
 
@@ -181,6 +188,18 @@ type Server struct {
 	// no-op in deployed setups.
 	allowUnauthenticated bool
 	log                  logr.Logger
+
+	// duplexSinkFactory is an optional factory that creates a DuplexSink for
+	// a connection's persistent audio duplex stream. When nil, inbound audio
+	// frames are rejected gracefully (audio not enabled). The real
+	// implementation lives in internal/agent and is injected via
+	// WithDuplexSinkFactory — the facade never imports internal/agent directly.
+	duplexSinkFactory func(sessionID string, w ResponseWriter) DuplexSink
+
+	// activeAudioSessions counts the number of live audio sessions on this pod.
+	// Manipulated via sync/atomic so ensureAudioSession can read/CAS without
+	// holding a broad lock.
+	activeAudioSessions atomic.Int64
 
 	mu           sync.RWMutex
 	connections  map[*websocket.Conn]*Connection
@@ -271,6 +290,23 @@ func WithMgmtPlaneValidator(v auth.Validator) ServerOption {
 func WithAuthChain(chain auth.Chain) ServerOption {
 	return func(s *Server) {
 		s.authChain = chain
+	}
+}
+
+// WithDuplexSinkFactory sets the factory used to create a DuplexSink for
+// each connection's persistent audio duplex stream. When nil (default),
+// inbound BinaryMessageTypeMediaChunk frames are rejected with a graceful
+// error — audio is not enabled. The factory is called lazily on the first
+// inbound media chunk for a given connection.
+//
+// The factory signature deliberately references only facade-exported types
+// (sessionID string, ResponseWriter) so internal/facade stays decoupled from
+// internal/agent. The real sink implementation in internal/agent satisfies
+// the DuplexSink interface and is injected here at binary wiring time in
+// cmd/agent.
+func WithDuplexSinkFactory(f func(sessionID string, w ResponseWriter) DuplexSink) ServerOption {
+	return func(s *Server) {
+		s.duplexSinkFactory = f
 	}
 }
 

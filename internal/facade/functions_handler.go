@@ -29,6 +29,7 @@ import (
 	"github.com/go-logr/logr"
 	"github.com/google/uuid"
 	"github.com/santhosh-tekuri/jsonschema/v6"
+	"google.golang.org/grpc"
 
 	"github.com/altairalabs/omnia/internal/session"
 	runtimev1 "github.com/altairalabs/omnia/pkg/runtime/v1"
@@ -69,8 +70,10 @@ type FunctionRegistry interface {
 // InvocationInvoker is the subset of the runtime gRPC client used by
 // FunctionsHandler. Pulled out as an interface so tests can substitute a
 // mock without standing up a real gRPC server.
+// The opts variadic allows callers to control per-call gRPC options such as
+// compression (e.g. grpc.UseCompressor(gzip.Name) for text/function paths).
 type InvocationInvoker interface {
-	Invoke(ctx context.Context, req *runtimev1.InvocationRequest) (*runtimev1.InvocationResponse, error)
+	Invoke(ctx context.Context, req *runtimev1.InvocationRequest, opts ...grpc.CallOption) (*runtimev1.InvocationResponse, error)
 }
 
 // FunctionsHandler serves POST /functions/{name} for function-mode

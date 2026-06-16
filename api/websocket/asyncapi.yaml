@@ -23,6 +23,34 @@ channels:
       Main WebSocket channel for agent communication.
       Requires `?agent=<name>` query parameter.
       Optional: `?namespace=<ns>`, `?binary=true`
+
+      ## Binary frames (WebSocket opcode 0x2)
+
+      Binary WebSocket messages use the OMNI framing format defined in
+      `internal/facade/binary_protocol.go`. The 8-byte header encodes
+      `MessageType`, `Flags`, `Sequence` (uint32), and `PayloadLen` (uint32).
+
+      ### Inbound audio frames — duplex audio sessions
+
+      When a duplex audio session is active (initiated by the runtime via a
+      `DuplexStart` gRPC message), the client sends raw audio as binary frames
+      with `MessageType = BinaryMessageTypeMediaChunk (0x01)`.
+
+      `is_last` contract (CRITICAL for producers):
+      - The `FlagIsLast (0x01)` header flag marks the **final frame of the entire
+        call** and causes the facade to tear down the duplex session (the runtime's
+        `pumpDuplexInput` returns on it, triggering pipeline drain and session close).
+      - Producers MUST set `FlagIsLast` **only on the true final frame**, NOT on
+        every chunk. Setting it prematurely closes the session mid-call.
+      - This is distinct from the outbound `MediaChunkInfo.is_last` field, which
+        the server sets per-chunk per TTS stream (different semantic).
+
+      ### Outbound media chunks — TTS / audio output
+
+      The server sends TTS and streaming media as binary frames with
+      `MessageType = BinaryMessageTypeMediaChunk`. The payload is encoded as a
+      `MediaChunkFrame` (see `binary_protocol.go`). Clients can also receive
+      `media_chunk` JSON messages for non-binary paths.
     messages:
       # Client -> Server
       clientMessage:

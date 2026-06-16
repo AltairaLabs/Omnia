@@ -134,6 +134,18 @@ func buildWebSocketServer(
 	if pf, ok := store.(facade.PolicyFetcher); ok {
 		serverOpts = append(serverOpts, facade.WithPolicyFetcher(pf))
 	}
+	// Wire the duplex sink factory if the handler is a RuntimeHandler — that
+	// means a runtime gRPC client is available and audio duplex is supported.
+	// When the handler is echo/demo mode there is no runtime client, so the
+	// factory stays nil and inbound audio frames are rejected gracefully.
+	if rh, ok := handler.(*agent.RuntimeHandler); ok {
+		runtimeClient := rh.Client()
+		serverOpts = append(serverOpts, facade.WithDuplexSinkFactory(
+			func(sessionID string, w facade.ResponseWriter) facade.DuplexSink {
+				return agent.NewGRPCDuplexSink(sessionID, runtimeClient, w)
+			},
+		))
+	}
 	// Build the auth chain: data-plane validators (sharedToken in PR 2b;
 	// apiKeys/oidc/edgeTrust in PRs 2c–2e) followed by the mgmt-plane
 	// validator. Loading failures (malformed PEM, missing Secret data

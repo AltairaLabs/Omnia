@@ -25,6 +25,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/encoding/gzip"
 	"google.golang.org/grpc/metadata"
 
 	"github.com/altairalabs/omnia/pkg/policy"
@@ -273,4 +274,17 @@ func TestPolicyStreamClientInterceptor(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, []string{"stream-agent"}, md.Get(policy.HeaderAgentName))
 	assert.Equal(t, []string{"stream-user"}, md.Get(policy.HeaderUserID))
+}
+
+func TestConverseAndInvoke_AcceptCallOptions(t *testing.T) {
+	// Compile-time guard: Converse and Invoke must accept per-call gRPC options
+	// so callers choose compression (audio omits gzip). Fails to compile until
+	// the signatures change.
+	var c *RuntimeClient
+	_ = func() {
+		if c != nil {
+			_, _ = c.Converse(context.Background(), grpc.UseCompressor(gzip.Name))
+			_, _ = c.Invoke(context.Background(), nil, grpc.UseCompressor(gzip.Name))
+		}
+	}
 }
