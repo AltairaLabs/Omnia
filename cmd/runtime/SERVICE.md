@@ -14,6 +14,8 @@
 - **gRPC** from Facade (bidirectional Converse stream):
   - ClientMessage with user content (text, multimodal parts)
   - ClientToolResult with tool execution results
+  - `DuplexStart` (first message of a duplex audio session) — switches the stream into `handleDuplexSession` mode, opening an `sdk.OpenDuplex` conversation. Fields: `codec`, `sample_rate`, `channels`, `system_instruction` (optional).
+  - `AudioInputChunk` — subsequent audio frames forwarded via `pumpDuplexInput` → `conv.SendChunk`. `is_last` on a chunk signals stream end; the pipeline drains and the session closes.
 
 ## Outputs
 - **gRPC** to Facade (bidirectional Converse stream):

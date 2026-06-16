@@ -22,6 +22,11 @@ import (
 )
 
 // AudioSessionStart holds negotiated audio parameters for a duplex session.
+//
+// TODO: DuplexStart.system_instruction is honored by the runtime (injected as a
+// template variable and forwarded in StreamingInputConfig) but is not yet
+// populated by any facade caller. This field is forward-scaffolding for the
+// EE assist layer, which will supply per-session system instructions here.
 type AudioSessionStart struct {
 	Codec      string
 	SampleRate int32
@@ -77,6 +82,15 @@ func (a *audioSession) pushAudio(data []byte, seq uint32, isLast bool) error {
 
 // handleInboundFrame maps an OMNI media-chunk binary frame to a pushAudio
 // call, extracting sequence number and the FlagIsLast flag from the header.
+//
+// is_last (FlagIsLast) contract:
+//   - FlagIsLast signals the FINAL frame of the entire duplex call.
+//     When received, the runtime's pumpDuplexInput returns, triggering
+//     EOS signal → pipeline drain → session close.
+//   - Producers MUST set FlagIsLast only on the true final frame, NOT on
+//     every chunk. Setting it prematurely tears down the whole session.
+//   - This is distinct from the outbound NewMediaChunkFrame pattern (TTS),
+//     which sets is_last per-chunk per media stream — a different semantic.
 func (a *audioSession) handleInboundFrame(frame *BinaryFrame) error {
 	isLast := frame.Header.Flags&FlagIsLast != 0
 	return a.pushAudio(frame.Payload, frame.Header.Sequence, isLast)

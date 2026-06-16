@@ -19,16 +19,17 @@
   - `message` — user text or multimodal content
   - `tool_result` — client-side tool execution result
   - `upload_request` — file upload initiation
+  - **Binary frames** (`BinaryMessageTypeMediaChunk`) — raw audio frames during a duplex audio session. Routed to a per-connection `audioSession` → `grpcDuplexSink` which forwards them over the runtime `Converse` gRPC stream as `AudioInputChunk`. A frame with `FlagIsLast` set tears down the session.
 - **gRPC** from Runtime (response stream):
   - `chunk` — streaming text
   - `done` — response complete
   - `tool_call` — client-side tool call (server-side tool calls are filtered)
   - `error` — error response
-  - `media_chunk` — streaming audio/video
+  - `media_chunk` — streaming audio/video (also used for duplex audio output)
 
 ## Outputs
 - **WebSocket** to browser/dashboard: ServerMessage (chunk, done, tool_call, error, connected, media_chunk, upload_ready, upload_complete)
-- **gRPC** to Runtime: ClientMessage (user message, client tool result)
+- **gRPC** to Runtime: ClientMessage (user message, client tool result, `DuplexStart` to open a duplex audio session, `AudioInputChunk` per audio frame)
 - **HTTP** to Session API: session create, message append, TTL refresh, `GET /api/v1/privacy-policy` (at connection time, cached 60s per WebSocket session)
 
 ## Does NOT Own
@@ -46,6 +47,7 @@
 - Request counters: `requests_total` (by status), `messages_received_total`, `messages_sent_total`
 - Latency: `request_duration_seconds` (by handler)
 - Media transfer: `uploads_total`, `upload_bytes_total`, `downloads_total`, `media_chunks_total`
+- Duplex audio: `omnia_facade_audio_sessions_active` (gauge, current live duplex sessions; concurrency cap default 8), `omnia_facade_audio_ingest_duration_seconds` (histogram, facade-receive→sink-send latency per inbound frame; sub-ms buckets)
 
 **Traces** (OpenTelemetry):
 - `omnia.facade.message` — per-message span wrapping the full request lifecycle

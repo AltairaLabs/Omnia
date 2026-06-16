@@ -310,9 +310,9 @@ func (s *Server) ensureAudioSession(ctx context.Context, c *Connection, log logr
 // keep cognitive complexity manageable.
 func (s *Server) tryStartAudioSession(ctx context.Context, c *Connection, log logr.Logger) *audioSession {
 	// Part A: check the pod-level cap.
-	cap := s.maxAudioSessions()
-	if int(s.activeAudioSessions.Load()) >= cap {
-		log.V(1).Info("audio session shed", "reason", "cap reached", "cap", cap, "sessionID", c.sessionID)
+	limit := s.maxAudioSessions()
+	if int(s.activeAudioSessions.Load()) >= limit {
+		log.V(1).Info("audio session shed", "reason", "cap reached", "cap", limit, "sessionID", c.sessionID)
 		s.sendError(c, c.sessionID, ErrorCodeRateLimited, "audio session limit reached")
 		return nil
 	}

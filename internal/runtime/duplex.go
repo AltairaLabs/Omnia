@@ -199,6 +199,11 @@ func (s *Server) pumpDuplexInput(ctx context.Context, stream runtimev1.RuntimeSe
 
 // forwardDuplexChunk converts a providers.StreamChunk into a gRPC ServerMessage
 // and writes it to the stream. It handles both audio (MediaChunk) and text (Chunk) output.
+//
+// MediaChunk.IsLast is intentionally always false here: duplex audio output is a
+// continuous stream and no consumer (grpcDuplexSink.relayOut) relies on it for
+// session teardown — the facade closes the session via the inbound is_last frame
+// / context cancellation path instead.
 func (s *Server) forwardDuplexChunk(stream runtimev1.RuntimeService_ConverseServer, chunk providers.StreamChunk) error {
 	if chunk.MediaData != nil && len(chunk.MediaData.Data) > 0 {
 		return stream.Send(&runtimev1.ServerMessage{
@@ -207,6 +212,7 @@ func (s *Server) forwardDuplexChunk(stream runtimev1.RuntimeService_ConverseServ
 					Data:     chunk.MediaData.Data,
 					MimeType: chunk.MediaData.MIMEType,
 					Sequence: int32(chunk.MediaData.FrameNum), //nolint:gosec // FrameNum is bounded by audio frame count
+					// IsLast is intentionally false — see function comment above.
 				},
 			},
 		})

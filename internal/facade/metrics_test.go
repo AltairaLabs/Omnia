@@ -81,3 +81,26 @@ func TestServerMetricsInterface(t *testing.T) {
 	metrics.MessageSent()
 	metrics.RecordingDropped()
 }
+
+func TestNoOpMetrics_AudioSessionStarted(t *testing.T) {
+	m := &NoOpMetrics{}
+	m.AudioSessionStarted() // Should not panic
+}
+
+func TestNoOpMetrics_AudioSessionEnded(t *testing.T) {
+	m := &NoOpMetrics{}
+	m.AudioSessionEnded() // Should not panic
+}
+
+func TestNoOpMetrics_AudioIngestLatency(t *testing.T) {
+	m := &NoOpMetrics{}
+	m.AudioIngestLatency(0.001) // Should not panic
+}
+
+func TestNoOpMetrics_AudioMethods_ViaInterface(t *testing.T) {
+	// Verify audio methods satisfy the ServerMetrics interface.
+	var metrics ServerMetrics = &NoOpMetrics{}
+	metrics.AudioSessionStarted()
+	metrics.AudioSessionEnded()
+	metrics.AudioIngestLatency(0.001)
+}
