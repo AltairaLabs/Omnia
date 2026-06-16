@@ -504,6 +504,41 @@ func TestAppendMCPServicePort_NoopWhenDisabled(t *testing.T) {
 	}
 }
 
+func TestAgentPortAppProtocol(t *testing.T) {
+	cases := []struct {
+		port   string
+		facade omniav1alpha1.FacadeType
+		want   string
+	}{
+		{"facade", omniav1alpha1.FacadeTypeWebSocket, appProtocolHTTP},
+		{"facade", omniav1alpha1.FacadeTypeA2A, appProtocolHTTP},
+		{"facade", omniav1alpha1.FacadeTypeGRPC, appProtocolGRPC},
+		{"a2a", omniav1alpha1.FacadeTypeWebSocket, appProtocolHTTP},
+		{portNameMCP, omniav1alpha1.FacadeTypeWebSocket, appProtocolHTTP},
+		// A facade port name we don't recognise yet must still be L7-routable.
+		{"some-future-facade", omniav1alpha1.FacadeTypeWebSocket, appProtocolHTTP},
+	}
+	for _, tc := range cases {
+		if got := agentPortAppProtocol(tc.port, tc.facade); got != tc.want {
+			t.Errorf("agentPortAppProtocol(%q,%q)=%q want %q", tc.port, tc.facade, got, tc.want)
+		}
+	}
+}
+
+func TestSetAgentPortAppProtocols(t *testing.T) {
+	ports := []corev1.ServicePort{{Name: "facade"}, {Name: "a2a"}, {Name: portNameMCP}}
+	setAgentPortAppProtocols(ports, omniav1alpha1.FacadeTypeGRPC)
+	want := map[string]string{"facade": appProtocolGRPC, "a2a": appProtocolHTTP, portNameMCP: appProtocolHTTP}
+	for _, p := range ports {
+		if p.AppProtocol == nil {
+			t.Fatalf("port %q has nil appProtocol", p.Name)
+		}
+		if *p.AppProtocol != want[p.Name] {
+			t.Errorf("port %q appProtocol = %q want %q", p.Name, *p.AppProtocol, want[p.Name])
+		}
+	}
+}
+
 func TestBuildA2ADualProtocolEnvVars(t *testing.T) {
 	r := &AgentRuntimeReconciler{}
 

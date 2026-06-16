@@ -715,6 +715,12 @@ func (r *AgentRuntimeReconciler) reconcileService(ctx context.Context, agentRunt
 		// MCP: expose MCP port on function-mode pods when enabled.
 		ports = appendMCPServicePort(ports, agentRuntime)
 
+		// Classify every port for Istio L7 (waypoint/sidecar). Done in one pass
+		// over the assembled ports so facades added over time are handled in a
+		// single place (agentPortAppProtocol) and never silently left as opaque
+		// TCP — which would break mode=mesh routing and the facade WS upgrade.
+		setAgentPortAppProtocols(ports, facadeTypeOrDefault(agentRuntime))
+
 		service.Spec = corev1.ServiceSpec{
 			Selector: labels,
 			Ports:    ports,
@@ -734,6 +740,39 @@ func (r *AgentRuntimeReconciler) reconcileService(ctx context.Context, agentRunt
 
 	log.Info("Service reconciled", "result", result, "endpoint", agentRuntime.Status.ServiceEndpoint)
 	return nil
+}
+
+// facadeTypeOrDefault returns the agent's facade type, defaulting to websocket
+// (the implicit default when spec.facade.type is unset).
+func facadeTypeOrDefault(ar *omniav1alpha1.AgentRuntime) omniav1alpha1.FacadeType {
+	if ar.Spec.Facade.Type != "" {
+		return ar.Spec.Facade.Type
+	}
+	return omniav1alpha1.FacadeTypeWebSocket
+}
+
+// agentPortAppProtocol is the single source of truth mapping an agent Service
+// port to its Istio appProtocol. Facades added over time get classified here in
+// one place; anything unrecognised falls back to http (HTTP/1.1) so a waypoint
+// still does L7 rather than silently treating a new port as opaque TCP. Only the
+// primary "facade" port varies by facade type (gRPC is HTTP/2); a2a (JSON-RPC)
+// and mcp (HTTP/SSE) are HTTP.
+func agentPortAppProtocol(portName string, facadeType omniav1alpha1.FacadeType) string {
+	if portName == "facade" && facadeType == omniav1alpha1.FacadeTypeGRPC {
+		return appProtocolGRPC
+	}
+	return appProtocolHTTP
+}
+
+// setAgentPortAppProtocols stamps appProtocol on every agent Service port so an
+// Istio waypoint/sidecar classifies them for L7 routing (required for mode=mesh
+// weighted routing and the facade WebSocket upgrade). One pass over the
+// assembled ports keeps new facades from being missed.
+func setAgentPortAppProtocols(ports []corev1.ServicePort, facadeType omniav1alpha1.FacadeType) {
+	for i := range ports {
+		ap := agentPortAppProtocol(ports[i].Name, facadeType)
+		ports[i].AppProtocol = &ap
+	}
 }
 
 func (r *AgentRuntimeReconciler) updateStatusFromDeployment(
