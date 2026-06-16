@@ -118,6 +118,29 @@ func TestEvalWorkerName_PerGroup(t *testing.T) {
 	require.Equal(t, "arena-eval-worker-prod", evalWorkerName("prod"))
 }
 
+func TestBuildEvalWorkerDeployment_PrometheusScrape(t *testing.T) {
+	r := newEvalWorkerTestReconciler()
+	dep := r.buildEvalWorkerDeployment(context.Background(), "ns", defaultSvcGroupName, nil)
+
+	tmpl := dep.Spec.Template
+
+	// The pod carries the app.kubernetes.io/component label the omnia-eval-worker
+	// scrape job keeps on, plus the prometheus.io scrape annotations.
+	require.Equal(t, "eval-worker", tmpl.Labels["app.kubernetes.io/component"])
+	require.Equal(t, "true", tmpl.Annotations["prometheus.io/scrape"])
+	require.Equal(t, "9090", tmpl.Annotations["prometheus.io/port"])
+	require.Equal(t, "/metrics", tmpl.Annotations["prometheus.io/path"])
+
+	// The component label must NOT be on the immutable selector.
+	_, inSelector := dep.Spec.Selector.MatchLabels["app.kubernetes.io/component"]
+	require.False(t, inSelector, "component label must not be added to the selector")
+
+	// The container exposes the metrics port the annotation points at.
+	ports := tmpl.Spec.Containers[0].Ports
+	require.Len(t, ports, 1)
+	require.Equal(t, int32(9090), ports[0].ContainerPort)
+}
+
 func keysOf(m map[string]*omniav1alpha1.PodOverrides) []string {
 	keys := make([]string, 0, len(m))
 	for k := range m {

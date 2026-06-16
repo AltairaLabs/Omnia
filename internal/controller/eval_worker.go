@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"strconv"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -37,6 +38,14 @@ import (
 // defaultSvcGroupName is the service-group name used when an AgentRuntime does
 // not set spec.serviceGroup.
 const defaultSvcGroupName = "default"
+
+// evalWorkerMetricsPort / evalWorkerMetricsPath are where the eval-worker serves
+// its Prometheus metrics (matches the binary's METRICS_ADDR default of :9090).
+// The pod is annotated with them so the omnia-eval-worker scrape job targets it.
+const (
+	evalWorkerMetricsPort = 9090
+	evalWorkerMetricsPath = "/metrics"
+)
 
 // evalWorkerName returns the per-service-group eval-worker Deployment name.
 func evalWorkerName(serviceGroup string) string {
@@ -238,6 +247,23 @@ func (r *AgentRuntimeReconciler) buildEvalWorkerDeployment(
 		labelServiceGroup: serviceGroup,
 	}
 
+	// The pod template carries the app.kubernetes.io/component label and the
+	// prometheus.io scrape annotations the omnia-eval-worker Prometheus job
+	// matches on, so omnia_eval_* (faithfulness, …) is scraped from every
+	// per-service-group worker across the cluster (multi-workspace: the job
+	// discovers pods by label, not by name). The component label is deliberately
+	// NOT added to the immutable Deployment selector.
+	podLabels := make(map[string]string, len(labels)+1)
+	for k, v := range labels {
+		podLabels[k] = v
+	}
+	podLabels[labelAppComponent] = labelEvalWorkerComp
+	podAnnotations := map[string]string{
+		"prometheus.io/scrape": labelValueTrue,
+		"prometheus.io/port":   strconv.Itoa(evalWorkerMetricsPort),
+		"prometheus.io/path":   evalWorkerMetricsPath,
+	}
+
 	image := r.evalWorkerImage()
 	replicas := int32(1)
 
@@ -254,7 +280,8 @@ func (r *AgentRuntimeReconciler) buildEvalWorkerDeployment(
 			},
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
-					Labels: labels,
+					Labels:      podLabels,
+					Annotations: podAnnotations,
 				},
 				Spec: corev1.PodSpec{
 					ServiceAccountName: name,
@@ -263,7 +290,11 @@ func (r *AgentRuntimeReconciler) buildEvalWorkerDeployment(
 							Name:            EvalWorkerContainerName,
 							Image:           image,
 							ImagePullPolicy: r.EvalWorkerImagePullPolicy,
-							Env:             r.buildEvalWorkerEnvVars(ctx, namespace, serviceGroup),
+							Ports: []corev1.ContainerPort{{
+								Name:          metricsPortName,
+								ContainerPort: evalWorkerMetricsPort,
+							}},
+							Env: r.buildEvalWorkerEnvVars(ctx, namespace, serviceGroup),
 						},
 					},
 				},
