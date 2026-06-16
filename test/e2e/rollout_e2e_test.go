@@ -306,7 +306,9 @@ spec:
         name: rollout-provider
   rollout:
     candidate:
-      promptPackVersion: "%s"
+      promptPackRef:
+        name: %s
+        version: "%s"
     steps:
       - setWeight: 20
       - pause:
@@ -315,7 +317,7 @@ spec:
       - pause:
           duration: "10m"
       - setWeight: 100
-`, rolloutAgentName, rolloutNamespace, promptPackName, candidateVersion))
+`, rolloutAgentName, rolloutNamespace, promptPackName, promptPackName, candidateVersion))
 
 			DeferCleanup(func() {
 				if CurrentSpecReport().Failed() {
@@ -590,7 +592,9 @@ spec:
         name: rollout-istio-provider
   rollout:
     candidate:
-      promptPackVersion: "%s"
+      promptPackRef:
+        name: %s
+        version: "%s"
     steps:
       - setWeight: 30
       - pause:
@@ -604,7 +608,7 @@ spec:
             - primary
         destinationRule:
           name: %s
-`, istioAgentName, rolloutNamespace, istioPromptPack, candidateVersion, vsName, drName))
+`, istioAgentName, rolloutNamespace, istioPromptPack, istioPromptPack, candidateVersion, vsName, drName))
 
 			DeferCleanup(func() {
 				if CurrentSpecReport().Failed() {

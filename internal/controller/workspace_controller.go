@@ -516,6 +516,17 @@ func (r *WorkspaceReconciler) reconcileNamespace(ctx context.Context, workspace 
 			updated = true
 		}
 
+		// Add spec namespace labels. These must reconcile onto an existing
+		// namespace too (not just at creation) — e.g. namespace.create=false
+		// installs, or enabling istio.io/dataplane-mode=ambient after the fact.
+		// Mirrors the create branch so labels and DefaultTags behave the same.
+		for k, v := range workspace.Spec.Namespace.Labels {
+			if ns.Labels[k] != v {
+				ns.Labels[k] = v
+				updated = true
+			}
+		}
+
 		// Add default tags
 		for k, v := range workspace.Spec.DefaultTags {
 			if ns.Labels[k] != v {
