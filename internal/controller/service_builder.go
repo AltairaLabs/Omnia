@@ -405,10 +405,7 @@ func addMemoryRedisURLEnv(dep *appsv1.Deployment, ref SecretKeyRef) {
 // memory-api / session-api binary's --enterprise gate reflects the operator's
 // license mode. The binaries read it via envBoolFallback("ENTERPRISE_ENABLED").
 func addEnterpriseEnv(dep *appsv1.Deployment, enterprise bool) {
-	val := "false"
-	if enterprise {
-		val = "true"
-	}
+	val := strconv.FormatBool(enterprise)
 	containers := dep.Spec.Template.Spec.Containers
 	for i := range containers {
 		containers[i].Env = append(containers[i].Env, corev1.EnvVar{

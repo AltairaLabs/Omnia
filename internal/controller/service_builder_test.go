@@ -17,6 +17,7 @@ limitations under the License.
 package controller
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 
@@ -959,16 +960,15 @@ func TestBuildMemoryDeployment_StampsEnterpriseEnv(t *testing.T) {
 	for _, tc := range []struct {
 		name       string
 		enterprise bool
-		want       string
 	}{
-		{"enabled", true, "true"},
-		{"disabled", false, "false"},
+		{"enabled", true},
+		{"disabled", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			sb := &ServiceBuilder{MemoryImage: "memory:test", Enterprise: tc.enterprise}
-			dep := sb.BuildMemoryDeployment("ws", "ns", omniav1alpha1.WorkspaceServiceGroup{Name: "default"})
+			dep := sb.BuildMemoryDeployment("ws", "ns", omniav1alpha1.WorkspaceServiceGroup{Name: defaultSvcGroupName})
 			got := deploymentEnvValue(t, dep, "ENTERPRISE_ENABLED")
-			assert.Equal(t, tc.want, got)
+			assert.Equal(t, strconv.FormatBool(tc.enterprise), got)
 		})
 	}
 }
@@ -977,15 +977,14 @@ func TestBuildSessionDeployment_StampsEnterpriseEnv(t *testing.T) {
 	for _, tc := range []struct {
 		name       string
 		enterprise bool
-		want       string
 	}{
-		{"enabled", true, "true"},
-		{"disabled", false, "false"},
+		{"enabled", true},
+		{"disabled", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			sb := &ServiceBuilder{SessionImage: "session:test", Enterprise: tc.enterprise}
-			dep := sb.BuildSessionDeployment("ws", "ns", omniav1alpha1.WorkspaceServiceGroup{Name: "default"})
-			assert.Equal(t, tc.want, deploymentEnvValue(t, dep, "ENTERPRISE_ENABLED"))
+			dep := sb.BuildSessionDeployment("ws", "ns", omniav1alpha1.WorkspaceServiceGroup{Name: defaultSvcGroupName})
+			assert.Equal(t, strconv.FormatBool(tc.enterprise), deploymentEnvValue(t, dep, "ENTERPRISE_ENABLED"))
 		})
 	}
 }
