@@ -46,6 +46,7 @@ export default defineConfig({
 
         // Visual components (tested via E2E, not unit tests)
         "src/components/agents/**",
+        "src/components/editors/**", // Monaco-based editors (browser-only; E2E-tested)
         "src/components/arena/index.ts", // Arena barrel re-export
         "src/components/arena/project-editor.tsx", // Project editor layout
         "src/components/arena/file-tree.tsx", // File tree browser

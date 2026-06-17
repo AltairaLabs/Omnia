@@ -7,6 +7,27 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+
+// Monaco doesn't render in jsdom; stand in a plain textarea that preserves the
+// editor's value/onChange contract so the panel's toggle/parse logic is tested.
+vi.mock("@/components/editors/json-editor", () => ({
+  JsonEditor: ({
+    value,
+    onChange,
+    ariaLabel,
+  }: {
+    value: string;
+    onChange: (v: string) => void;
+    ariaLabel?: string;
+  }) => (
+    <textarea
+      aria-label={ariaLabel}
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+    />
+  ),
+}));
+
 import { FunctionTestPanel } from "./function-test-panel";
 
 const mockFetch = vi.fn();

@@ -14,8 +14,8 @@ import {
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
+import { JsonEditor } from "@/components/editors/json-editor";
 import { Badge } from "@/components/ui/badge";
 import {
   Select,
@@ -283,7 +283,7 @@ function parseArgs(args: string): { value?: unknown; error?: string } {
   }
 }
 
-/** Arguments textarea + JSON error message (shared). */
+/** Arguments editor (Monaco, self-validated) + JSON error message (shared). */
 function ArgsInput({
   args,
   jsonError,
@@ -291,14 +291,8 @@ function ArgsInput({
 }: Readonly<{ args: string; jsonError: string | null; onChange: (v: string) => void }>) {
   return (
     <div className="space-y-2">
-      <Label htmlFor="args-input">Arguments (JSON)</Label>
-      <Textarea
-        id="args-input"
-        value={args}
-        onChange={(e) => onChange(e.target.value)}
-        className="font-mono text-sm min-h-[120px]"
-        placeholder='{"key": "value"}'
-      />
+      <Label>Arguments (JSON)</Label>
+      <JsonEditor value={args} onChange={onChange} ariaLabel="Arguments (JSON)" />
       {jsonError && <p className="text-sm text-red-500">{jsonError}</p>}
     </div>
   );

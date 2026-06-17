@@ -18,9 +18,9 @@ import { Play, CheckCircle, XCircle, Loader2, Clock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { JsonBlock } from "@/components/ui/json-block";
+import { JsonEditor } from "@/components/editors/json-editor";
 import { SchemaForm, isRenderableObjectSchema } from "@/components/tools/schema-form";
 import { getSampleArgs } from "@/components/tools/tool-test-panel";
 
@@ -64,7 +64,7 @@ function parseArgsObject(raw: string): Record<string, unknown> {
   return {};
 }
 
-/** Raw JSON input editor. */
+/** Raw JSON input editor (Monaco, self-validated). */
 function JsonInput({
   args,
   jsonError,
@@ -72,14 +72,8 @@ function JsonInput({
 }: Readonly<{ args: string; jsonError: string | null; onChange: (v: string) => void }>) {
   return (
     <div className="space-y-2">
-      <Label htmlFor="fn-input">Input (JSON)</Label>
-      <Textarea
-        id="fn-input"
-        value={args}
-        onChange={(e) => onChange(e.target.value)}
-        className="font-mono text-sm min-h-[120px]"
-        placeholder='{"key": "value"}'
-      />
+      <Label>Input (JSON)</Label>
+      <JsonEditor value={args} onChange={onChange} ariaLabel="Input (JSON)" />
       {jsonError && <p className="text-sm text-red-500">{jsonError}</p>}
     </div>
   );
