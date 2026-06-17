@@ -23,6 +23,7 @@ import {
   agentNameByUidMap,
   resolveAgentRows,
 } from "@/lib/memory-analytics/agent-names";
+import { EnterpriseGate } from "@/components/license/license-gate";
 
 const DEFAULT_RANGE_DAYS: RangeDays = 30;
 
@@ -119,49 +120,51 @@ export default function MemoryAnalyticsPage() {
     enforcementQuery.isLoading;
 
   return (
-    <div className="flex flex-col h-full">
-      <Header
-        title="Memory analytics"
-        description="How memory is being collected, distributed, and consented to across this workspace."
-      />
-
-      <main className="flex-1 overflow-auto p-6 space-y-6">
-        <TierLegend />
-
-        <SummaryCards
-          totalMemories={totalMemories}
-          activeUsers={activeUsers}
-          memoriesToday={memoriesToday}
-          piiBlocked={enforcement.piiBlocked}
-          loading={summaryLoading}
+    <EnterpriseGate featureName="Memory analytics">
+      <div className="flex flex-col h-full">
+        <Header
+          title="Memory analytics"
+          description="How memory is being collected, distributed, and consented to across this workspace."
         />
 
-        <TierQuadCard
-          rows={tierQuery.data ?? []}
-          loading={tierQuery.isLoading}
-        />
+        <main className="flex-1 overflow-auto p-6 space-y-6">
+          <TierLegend />
 
-        <ConsolidationSection
-          stats={consolidationQuery.data}
-          loading={consolidationQuery.isLoading}
-        />
-
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-          <CategoryDonut rows={categoryQuery.data ?? []} />
-          <GrowthChart
-            rows={dayQuery.data ?? []}
-            rangeDays={rangeDays}
-            onRangeChange={setRangeDays}
+          <SummaryCards
+            totalMemories={totalMemories}
+            activeUsers={activeUsers}
+            memoriesToday={memoriesToday}
+            piiBlocked={enforcement.piiBlocked}
+            loading={summaryLoading}
           />
-        </div>
 
-        <AgentChart rows={agentRows} />
+          <TierQuadCard
+            rows={tierQuery.data ?? []}
+            loading={tierQuery.isLoading}
+          />
 
-        <PrivacyPosture
-          stats={consentQuery.data ?? EMPTY_CONSENT}
-          redactions={enforcement.redactions}
-        />
-      </main>
-    </div>
+          <ConsolidationSection
+            stats={consolidationQuery.data}
+            loading={consolidationQuery.isLoading}
+          />
+
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+            <CategoryDonut rows={categoryQuery.data ?? []} />
+            <GrowthChart
+              rows={dayQuery.data ?? []}
+              rangeDays={rangeDays}
+              onRangeChange={setRangeDays}
+            />
+          </div>
+
+          <AgentChart rows={agentRows} />
+
+          <PrivacyPosture
+            stats={consentQuery.data ?? EMPTY_CONSENT}
+            redactions={enforcement.redactions}
+          />
+        </main>
+      </div>
+    </EnterpriseGate>
   );
 }

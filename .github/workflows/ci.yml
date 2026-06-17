@@ -652,6 +652,10 @@ jobs:
       working-directory: dashboard
       env:
         NEXT_PUBLIC_DEMO_MODE: 'true'
+        # Demo E2E showcases the full product, incl. enterprise-gated views
+        # (Memory Galaxy/analytics, Arena). Build + serve as enterprise so the
+        # memory specs exercise those views instead of the upgrade gate.
+        NEXT_PUBLIC_ENTERPRISE_ENABLED: 'true'
 
     - name: Run E2E tests with coverage
       run: |
@@ -660,7 +664,9 @@ jobs:
         # - OMNIA_ALLOW_ANONYMOUS=true is the explicit opt-in the dashboard's
         #   boot guard requires when mode=anonymous + NODE_ENV=production.
         #   This env is a demo server for Playwright, so anonymous is intended.
-        NODE_ENV=production DEMO_MODE=true NEXT_PUBLIC_DEMO_MODE=true OMNIA_AUTH_ANONYMOUS_ROLE=editor OMNIA_ALLOW_ANONYMOUS=true npm run start &
+        # NEXT_PUBLIC_ENTERPRISE_ENABLED=true: /api/config reads this at runtime so
+        # useEnterpriseConfig reports enterprise on — the gated memory views render.
+        NODE_ENV=production DEMO_MODE=true NEXT_PUBLIC_DEMO_MODE=true NEXT_PUBLIC_ENTERPRISE_ENABLED=true OMNIA_AUTH_ANONYMOUS_ROLE=editor OMNIA_ALLOW_ANONYMOUS=true npm run start &
         # Wait for server to be ready
         npx wait-on http://localhost:3000 --timeout 60000
         # Run Playwright tests with coverage collection
