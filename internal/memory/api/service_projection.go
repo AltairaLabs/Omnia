@@ -11,8 +11,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/altairalabs/omnia/ee/pkg/memory/projection"
 	"github.com/altairalabs/omnia/internal/memory"
-	"github.com/altairalabs/omnia/internal/memory/projection"
 )
 
 // onDemandProjectionThreshold is the entity-count gate above which the endpoint
