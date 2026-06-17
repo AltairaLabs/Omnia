@@ -424,6 +424,7 @@ func main() {
 				Key:  sessionRedisURLSecretKey,
 			},
 			ServiceAuth: serviceAuth,
+			Enterprise:  enterpriseEnabled,
 		},
 		AgentWorkspaceReaderClusterRole:  agentWorkspaceReaderClusterRole,
 		OperatorNamespace:                os.Getenv("POD_NAMESPACE"),
