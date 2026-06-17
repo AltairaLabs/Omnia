@@ -781,6 +781,7 @@ func buildAPIMux(
 ) (http.Handler, func()) {
 	httpMetrics := memoryapi.NewHTTPMetrics(nil)
 
+	cfg.Enterprise = enterprise
 	svc := memoryapi.NewMemoryService(store, embeddingSvc, cfg, log)
 	if publisher != nil {
 		svc.SetEventPublisher(publisher)
@@ -813,6 +814,7 @@ func buildAPIMux(
 	}
 
 	handler := memoryapi.NewHandler(svc, log).
+		WithEnterprise(enterprise).
 		WithDimensionConsentRecorder(func(ctx context.Context, targetDim int, createdBy string) error {
 			return memorypg.InsertDimensionChangeConsent(ctx, pool, targetDim, createdBy)
 		})
