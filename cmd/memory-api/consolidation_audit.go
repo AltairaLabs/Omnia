@@ -10,7 +10,7 @@ import (
 	"context"
 	"strings"
 
-	"github.com/altairalabs/omnia/internal/memory/consolidation"
+	"github.com/altairalabs/omnia/ee/pkg/memory/consolidation"
 	sessionapi "github.com/altairalabs/omnia/internal/session/api"
 )
 

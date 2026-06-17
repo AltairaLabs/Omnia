@@ -12,8 +12,8 @@ import (
 	"time"
 
 	memoryv1 "github.com/altairalabs/omnia/api/v1alpha1"
+	"github.com/altairalabs/omnia/ee/pkg/memory/consolidation"
 	"github.com/altairalabs/omnia/internal/memory"
-	"github.com/altairalabs/omnia/internal/memory/consolidation"
 	"github.com/go-logr/logr"
 )
 

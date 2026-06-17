@@ -28,10 +28,10 @@ import (
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 	eeaudit "github.com/altairalabs/omnia/ee/pkg/audit"
+	"github.com/altairalabs/omnia/ee/pkg/memory/consolidation"
 	eemetrics "github.com/altairalabs/omnia/ee/pkg/metrics"
 	"github.com/altairalabs/omnia/internal/memory"
 	memoryapi "github.com/altairalabs/omnia/internal/memory/api"
-	"github.com/altairalabs/omnia/internal/memory/consolidation"
 	"github.com/altairalabs/omnia/internal/memory/ingestion"
 	memorypg "github.com/altairalabs/omnia/internal/memory/postgres"
 )

@@ -1,7 +1,9 @@
 /*
 Copyright 2026 Altaira Labs.
 
-SPDX-License-Identifier: Apache-2.0
+SPDX-License-Identifier: FSL-1.1-Apache-2.0
+This file is part of Omnia Enterprise and is subject to the
+Functional Source License. See ee/LICENSE for details.
 */
 
 package consolidation_test
@@ -18,7 +20,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
-	"github.com/altairalabs/omnia/internal/memory/consolidation"
+	"github.com/altairalabs/omnia/ee/pkg/memory/consolidation"
 )
 
 func newScheme(t *testing.T) *runtime.Scheme {
