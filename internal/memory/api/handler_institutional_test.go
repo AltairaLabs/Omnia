@@ -25,8 +25,8 @@ import (
 
 func newInstitutionalHandler(t *testing.T, store memory.Store) *http.ServeMux {
 	t.Helper()
-	svc := NewMemoryService(store, nil, MemoryServiceConfig{}, logr.Discard())
-	h := NewHandler(svc, logr.Discard())
+	svc := NewMemoryService(store, nil, MemoryServiceConfig{Enterprise: true}, logr.Discard())
+	h := NewHandler(svc, logr.Discard()).WithEnterprise(true)
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 	return mux
@@ -136,8 +136,8 @@ func TestHandleSaveInstitutional_RejectsExpiresAtInPast(t *testing.T) {
 
 func TestHandleSaveInstitutional_BodyTooLarge(t *testing.T) {
 	stub := &institutionalStub{}
-	svc := NewMemoryService(stub, nil, MemoryServiceConfig{}, logr.Discard())
-	h := NewHandler(svc, logr.Discard())
+	svc := NewMemoryService(stub, nil, MemoryServiceConfig{Enterprise: true}, logr.Discard())
+	h := NewHandler(svc, logr.Discard()).WithEnterprise(true)
 	h.maxBodySize = 16
 
 	mux := http.NewServeMux()
