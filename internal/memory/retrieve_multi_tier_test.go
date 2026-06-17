@@ -501,3 +501,21 @@ func TestComputeScore_FutureAccessedAtClampsToZeroAge(t *testing.T) {
 		t.Errorf("score above 1.0: %v", score)
 	}
 }
+
+func TestFilterTiers(t *testing.T) {
+	in := []*MultiTierMemory{
+		{Memory: &Memory{ID: "u"}, Tier: TierUser},
+		{Memory: &Memory{ID: "a"}, Tier: TierAgent},
+		{Memory: &Memory{ID: "i"}, Tier: TierInstitutional},
+	}
+	t.Run("nil allow keeps all", func(t *testing.T) {
+		assert.Len(t, filterTiers(in, nil), 3)
+	})
+	t.Run("user+agent drops institutional", func(t *testing.T) {
+		got := filterTiers(in, []Tier{TierUser, TierAgent})
+		assert.Len(t, got, 2)
+		for _, m := range got {
+			assert.NotEqual(t, TierInstitutional, m.Tier)
+		}
+	})
+}

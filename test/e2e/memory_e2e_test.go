@@ -188,6 +188,10 @@ spec:
             secretKeyRef:
               name: memory-e2e-postgres-conn
               key: connection-string
+        # This suite exercises enterprise-gated memory features (institutional
+        # tier writes + aggregate-by-tier), so run memory-api in enterprise mode.
+        - name: ENTERPRISE_ENABLED
+          value: "true"
         readinessProbe:
           httpGet:
             path: /healthz

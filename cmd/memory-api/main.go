@@ -781,6 +781,7 @@ func buildAPIMux(
 ) (http.Handler, func()) {
 	httpMetrics := memoryapi.NewHTTPMetrics(nil)
 
+	cfg.Enterprise = enterprise
 	svc := memoryapi.NewMemoryService(store, embeddingSvc, cfg, log)
 	if publisher != nil {
 		svc.SetEventPublisher(publisher)
@@ -813,6 +814,7 @@ func buildAPIMux(
 	}
 
 	handler := memoryapi.NewHandler(svc, log).
+		WithEnterprise(enterprise).
 		WithDimensionConsentRecorder(func(ctx context.Context, targetDim int, createdBy string) error {
 			return memorypg.InsertDimensionChangeConsent(ctx, pool, targetDim, createdBy)
 		})
@@ -1111,6 +1113,9 @@ func buildRetentionPolicyLoader(legacyInterval, workspace, serviceGroup string, 
 // gather external deps (untestable from unit tests), newConsolidationWorker
 // composes them into a worker (fully testable with a fake client).
 func buildConsolidationWorker(_ context.Context, f *flags, pgStore *memory.PostgresMemoryStore, auditLogger *eeaudit.Logger, log logr.Logger) *consolidation.Worker {
+	if !f.enterprise {
+		return nil
+	}
 	interval, ok := parseConsolidationInterval(f.consolidationInterval, log)
 	if !ok {
 		return nil
@@ -1128,6 +1133,9 @@ func buildConsolidationWorker(_ context.Context, f *flags, pgStore *memory.Postg
 // MemoryPolicy + Workspace CRs cluster-wide, reusing the consolidation client).
 // Caller invokes go pw.Run(ctx).
 func buildProjectionWorker(f *flags, pgStore *memory.PostgresMemoryStore, reg prometheus.Registerer, log logr.Logger) *projectionworker.Worker {
+	if !f.enterprise {
+		return nil
+	}
 	interval, err := time.ParseDuration(f.projectionInterval)
 	if f.projectionInterval == "" || err != nil {
 		if f.projectionInterval != "" {

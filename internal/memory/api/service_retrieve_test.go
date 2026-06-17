@@ -212,7 +212,7 @@ func TestRetrieveMultiTier_BuildsHalfLifeFromPolicyLoader(t *testing.T) {
 			},
 		},
 	}
-	svc := NewMemoryService(store, nil, MemoryServiceConfig{}, logr.Discard())
+	svc := NewMemoryService(store, nil, MemoryServiceConfig{Enterprise: true}, logr.Discard())
 	svc.SetPolicyLoader(loader)
 
 	_, err := svc.RetrieveMultiTier(context.Background(), memory.MultiTierRequest{WorkspaceID: testWS})
@@ -254,7 +254,7 @@ func TestRetrieveMultiTier_BuildsRankerFromPolicyLoader(t *testing.T) {
 			},
 		},
 	}
-	svc := NewMemoryService(store, nil, MemoryServiceConfig{}, logr.Discard())
+	svc := NewMemoryService(store, nil, MemoryServiceConfig{Enterprise: true}, logr.Discard())
 	svc.SetPolicyLoader(loader)
 
 	_, err := svc.RetrieveMultiTier(context.Background(), memory.MultiTierRequest{WorkspaceID: testWS})
@@ -275,7 +275,7 @@ func TestRetrieveMultiTier_PolicyLoaderErrorFallsBackToIdentity(t *testing.T) {
 		mtResult: &memory.MultiTierResult{Memories: nil, Total: 0},
 	}
 	loader := &stubPolicyLoader{err: errors.New("api outage")}
-	svc := NewMemoryService(store, nil, MemoryServiceConfig{}, logr.Discard())
+	svc := NewMemoryService(store, nil, MemoryServiceConfig{Enterprise: true}, logr.Discard())
 	svc.SetPolicyLoader(loader)
 
 	_, err := svc.RetrieveMultiTier(context.Background(), memory.MultiTierRequest{WorkspaceID: testWS})
@@ -303,7 +303,7 @@ func TestRetrieveMultiTier_PreservesCallerSuppliedRanker(t *testing.T) {
 			},
 		},
 	}
-	svc := NewMemoryService(store, nil, MemoryServiceConfig{}, logr.Discard())
+	svc := NewMemoryService(store, nil, MemoryServiceConfig{Enterprise: true}, logr.Discard())
 	svc.SetPolicyLoader(loader)
 
 	supplied := memory.IdentityTierRanker{}
@@ -318,4 +318,42 @@ func TestRetrieveMultiTier_PreservesCallerSuppliedRanker(t *testing.T) {
 	require.Len(t, store.mtCalls, 1)
 	_, ok := store.mtCalls[0].Ranker.(memory.IdentityTierRanker)
 	assert.True(t, ok, "caller-supplied ranker must take precedence over loader; got %T", store.mtCalls[0].Ranker)
+}
+
+// TestRetrieveMultiTier_OSSFloorGate proves that when enterprise is off the
+// gate restricts recall to user+agent tiers, the identity ranker, and the
+// zero HalfLife (so the store applies its uniform default).
+func TestRetrieveMultiTier_OSSFloorGate(t *testing.T) {
+	store := &multiTierStoreStub{mtResult: &memory.MultiTierResult{}}
+	svc := NewMemoryService(store, nil, MemoryServiceConfig{Enterprise: false}, logr.Discard())
+
+	_, err := svc.RetrieveMultiTier(context.Background(), memory.MultiTierRequest{WorkspaceID: testWS})
+	require.NoError(t, err)
+
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	require.Len(t, store.mtCalls, 1)
+	call := store.mtCalls[0]
+	assert.ElementsMatch(t, []memory.Tier{memory.TierUser, memory.TierAgent}, call.Tiers,
+		"OSS floor must restrict to user+agent tiers")
+	assert.IsType(t, memory.IdentityTierRanker{}, call.Ranker,
+		"OSS floor must use identity ranker; got %T", call.Ranker)
+	assert.Equal(t, memory.TierHalfLife{}, call.HalfLife,
+		"OSS floor must leave HalfLife zero so the store applies the uniform default")
+}
+
+// TestRetrieveMultiTier_EnterpriseUnrestricted proves that when enterprise is
+// on the gate is a no-op: the request reaches the store with no forced tiers.
+func TestRetrieveMultiTier_EnterpriseUnrestricted(t *testing.T) {
+	store := &multiTierStoreStub{mtResult: &memory.MultiTierResult{}}
+	svc := NewMemoryService(store, nil, MemoryServiceConfig{Enterprise: true}, logr.Discard())
+
+	_, err := svc.RetrieveMultiTier(context.Background(), memory.MultiTierRequest{WorkspaceID: testWS})
+	require.NoError(t, err)
+
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	require.Len(t, store.mtCalls, 1)
+	assert.Empty(t, store.mtCalls[0].Tiers,
+		"enterprise mode must not restrict tiers")
 }

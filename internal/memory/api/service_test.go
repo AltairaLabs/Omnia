@@ -1367,6 +1367,11 @@ func TestAuditLogger_ExportMemories_EmitsExported(t *testing.T) {
 	assert.Equal(t, auditEventMemoryExported, entry.EventType)
 }
 
+func TestNewMemoryService_CarriesEnterpriseFlag(t *testing.T) {
+	svc := NewMemoryService(nil, nil, MemoryServiceConfig{Enterprise: true}, logr.Discard())
+	assert.True(t, svc.enterprise)
+}
+
 func TestAuditLogger_NilLogger_NoEvents(t *testing.T) {
 	// No audit logger set — operations must succeed without panicking.
 	svc := newTestService(t)

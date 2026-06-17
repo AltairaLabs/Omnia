@@ -630,21 +630,23 @@ func TestBuildConsolidationWorkerOptions_AllFieldsWired(t *testing.T) {
 // consolidation E2E.
 func TestBuildConsolidationWorker_DisabledFastPaths(t *testing.T) {
 	t.Run("empty interval disables", func(t *testing.T) {
-		f := &flags{}
+		// enterprise=true so the interval check (not the enterprise gate) fires.
+		f := &flags{enterprise: true}
 		if w := buildConsolidationWorker(context.Background(), f, nil, nil, logr.Discard()); w != nil {
 			t.Errorf("expected nil worker when CONSOLIDATION_INTERVAL unset, got %v", w)
 		}
 	})
 	t.Run("invalid interval disables", func(t *testing.T) {
-		f := &flags{consolidationInterval: "not-a-duration"}
+		// enterprise=true so the interval-parse check (not the enterprise gate) fires.
+		f := &flags{enterprise: true, consolidationInterval: "not-a-duration"}
 		if w := buildConsolidationWorker(context.Background(), f, nil, nil, logr.Discard()); w != nil {
 			t.Errorf("expected nil worker on unparseable interval, got %v", w)
 		}
 	})
 	t.Run("no in-cluster config disables", func(t *testing.T) {
-		// Valid interval, but rest.InClusterConfig() fails in unit-test
-		// environments — exercises the kubeconfig-error branch.
-		f := &flags{consolidationInterval: "10m"}
+		// enterprise=true + valid interval, but rest.InClusterConfig() fails in
+		// unit-test environments — exercises the kubeconfig-error branch.
+		f := &flags{enterprise: true, consolidationInterval: "10m"}
 		if w := buildConsolidationWorker(context.Background(), f, nil, nil, logr.Discard()); w != nil {
 			t.Errorf("expected nil worker when no in-cluster config, got %v", w)
 		}
@@ -951,19 +953,21 @@ func TestBuildIngestOptions_QueueEnabledWhenDirSet(t *testing.T) {
 func TestBuildProjectionWorker_DisabledFastPaths(t *testing.T) {
 	reg := prometheus.NewRegistry()
 	t.Run("empty interval disables", func(t *testing.T) {
-		if w := buildProjectionWorker(&flags{}, nil, reg, logr.Discard()); w != nil {
+		// enterprise=true so the interval check (not the enterprise gate) fires.
+		if w := buildProjectionWorker(&flags{enterprise: true}, nil, reg, logr.Discard()); w != nil {
 			t.Errorf("expected nil worker when PROJECTION_INTERVAL unset, got %v", w)
 		}
 	})
 	t.Run("invalid interval disables", func(t *testing.T) {
-		if w := buildProjectionWorker(&flags{projectionInterval: "not-a-duration"}, nil, reg, logr.Discard()); w != nil {
+		// enterprise=true so the interval-parse check (not the enterprise gate) fires.
+		if w := buildProjectionWorker(&flags{enterprise: true, projectionInterval: "not-a-duration"}, nil, reg, logr.Discard()); w != nil {
 			t.Errorf("expected nil worker on unparseable interval, got %v", w)
 		}
 	})
 	t.Run("no in-cluster config disables", func(t *testing.T) {
-		// Valid interval, but rest.InClusterConfig() fails in unit tests —
-		// exercises the kubeconfig-error branch.
-		if w := buildProjectionWorker(&flags{projectionInterval: "30s"}, nil, reg, logr.Discard()); w != nil {
+		// enterprise=true + valid interval, but rest.InClusterConfig() fails in
+		// unit tests — exercises the kubeconfig-error branch.
+		if w := buildProjectionWorker(&flags{enterprise: true, projectionInterval: "30s"}, nil, reg, logr.Discard()); w != nil {
 			t.Errorf("expected nil worker when no in-cluster config, got %v", w)
 		}
 	})

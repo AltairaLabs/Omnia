@@ -118,6 +118,13 @@ type ServiceBuilder struct {
 	// SESSION_API_AUTH_* env and memory-api (a session-api caller) gets an
 	// audience-bound projected token. Zero value = disabled (no-op).
 	ServiceAuth ServiceAuthConfig
+
+	// Enterprise reflects the operator's --enterprise flag. Stamped as
+	// ENTERPRISE_ENABLED onto every memory-api / session-api pod so those
+	// binaries' runtime gate (audit, privacy, advanced-memory tiers) matches
+	// the operator's license mode. Enterprise is operator-wide; every
+	// workspace's services receive the same value.
+	Enterprise bool
 }
 
 // SecretKeyRef points at a single key within a Kubernetes Secret. Used
@@ -151,6 +158,7 @@ func (sb *ServiceBuilder) BuildSessionDeployment(workspaceName, namespace string
 	}
 	dep := buildServiceDeployment(name, namespace, sb.SessionImage, sb.SessionImagePullPolicy, args, labels, overrides)
 	addMemoryRedisURLEnv(dep, redisSecret)
+	addEnterpriseEnv(dep, sb.Enterprise)
 	// Server side: enforce ServiceAccount auth (SEC-1/SEC-5) when enabled.
 	sb.ServiceAuth.applySessionAPIServerAuthEnv(dep, workspaceName, sg.Name, namespace)
 	if dep.Spec.Template.Annotations == nil {
@@ -332,6 +340,7 @@ func (sb *ServiceBuilder) BuildMemoryDeployment(workspaceName, namespace string,
 	dep := buildServiceDeployment(name, namespace, sb.MemoryImage, sb.MemoryImagePullPolicy, args, labels, overrides)
 	addPodNamespaceEnv(dep)
 	addMemoryRedisURLEnv(dep, redisSecret)
+	addEnterpriseEnv(dep, sb.Enterprise)
 	// Caller side: memory-api emits provider_usage to the co-located
 	// session-api, so it presents an audience-bound projected SA token when
 	// auth is enabled (SEC-1/SEC-5).
@@ -388,6 +397,20 @@ func addMemoryRedisURLEnv(dep *appsv1.Deployment, ref SecretKeyRef) {
 					Key:                  ref.Key,
 				},
 			},
+		})
+	}
+}
+
+// addEnterpriseEnv stamps ENTERPRISE_ENABLED on every container so the
+// memory-api / session-api binary's --enterprise gate reflects the operator's
+// license mode. The binaries read it via envBoolFallback("ENTERPRISE_ENABLED").
+func addEnterpriseEnv(dep *appsv1.Deployment, enterprise bool) {
+	val := strconv.FormatBool(enterprise)
+	containers := dep.Spec.Template.Spec.Containers
+	for i := range containers {
+		containers[i].Env = append(containers[i].Env, corev1.EnvVar{
+			Name:  "ENTERPRISE_ENABLED",
+			Value: val,
 		})
 	}
 }

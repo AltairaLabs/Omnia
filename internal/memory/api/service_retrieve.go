@@ -39,6 +39,7 @@ const retrieveOperationTag = "retrieve_multi_tier"
 // one. Loader errors / nil policy fall through to the identity ranker
 // so retrieval keeps working when policy resolution is degraded.
 func (s *MemoryService) RetrieveMultiTier(ctx context.Context, req memory.MultiTierRequest) (*memory.MultiTierResult, error) {
+	s.applyEnterpriseGate(&req)
 	s.applyPolicyDefaults(ctx, &req)
 	result, err := s.retrieveMultiTierInner(ctx, req)
 	if err != nil {
@@ -55,12 +56,28 @@ func (s *MemoryService) RetrieveMultiTier(ctx context.Context, req memory.MultiT
 	return result, nil
 }
 
+// applyEnterpriseGate restricts recall to the OSS floor when enterprise is off:
+// user+agent tiers only, identity ranker, and the store's uniform default
+// half-life (zero HalfLife). No-op under enterprise, where applyPolicyDefaults
+// resolves the policy-driven ranker/half-life and all tiers are queried.
+func (s *MemoryService) applyEnterpriseGate(req *memory.MultiTierRequest) {
+	if s.enterprise {
+		return
+	}
+	req.Tiers = []memory.Tier{memory.TierUser, memory.TierAgent}
+	req.Ranker = memory.IdentityTierRanker{}
+	req.HalfLife = memory.TierHalfLife{}
+}
+
 // applyPolicyDefaults loads the MemoryPolicy once (when a loader is wired) and
 // fills in the per-tier ranker and recency half-life the caller didn't supply.
 // Caller-supplied values win; loader errors / nil policy fall through to the
 // identity ranker and default half-lives so retrieval keeps working when policy
 // resolution is degraded.
 func (s *MemoryService) applyPolicyDefaults(ctx context.Context, req *memory.MultiTierRequest) {
+	if !s.enterprise {
+		return
+	}
 	if s.policyLoader == nil {
 		return
 	}

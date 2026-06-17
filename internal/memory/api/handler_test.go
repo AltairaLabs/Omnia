@@ -249,8 +249,8 @@ func (m *mockStore) BatchDelete(_ context.Context, _ map[string]string, _ int) (
 }
 
 func newTestHandler(store memory.Store) *Handler {
-	svc := NewMemoryService(store, nil, MemoryServiceConfig{}, logr.Discard())
-	return NewHandler(svc, logr.Discard())
+	svc := NewMemoryService(store, nil, MemoryServiceConfig{Enterprise: true}, logr.Discard())
+	return NewHandler(svc, logr.Discard()).WithEnterprise(true)
 }
 
 func setupMux(h *Handler) *http.ServeMux {

@@ -33,9 +33,9 @@ import (
 
 func TestHandleIngest_Returns202AndSaves(t *testing.T) {
 	store := &recordingInstitutionalStore{}
-	svc := NewMemoryService(store, nil, MemoryServiceConfig{}, logr.Discard())
+	svc := NewMemoryService(store, nil, MemoryServiceConfig{Enterprise: true}, logr.Discard())
 	svc.SetIngestion(ingestion.Config{Strategy: ingestion.StrategyChunk, ChunkSize: 2, ChunkOverlap: 0}, nil)
-	h := NewHandler(svc, logr.Discard())
+	h := NewHandler(svc, logr.Discard()).WithEnterprise(true)
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 
@@ -51,9 +51,9 @@ func TestHandleIngest_Returns202AndSaves(t *testing.T) {
 }
 
 func TestHandleIngest_MissingWorkspace_400(t *testing.T) {
-	svc := NewMemoryService(&recordingInstitutionalStore{}, nil, MemoryServiceConfig{}, logr.Discard())
+	svc := NewMemoryService(&recordingInstitutionalStore{}, nil, MemoryServiceConfig{Enterprise: true}, logr.Discard())
 	svc.SetIngestion(ingestion.Config{Strategy: ingestion.StrategyChunk, ChunkSize: 2, ChunkOverlap: 0}, nil)
-	h := NewHandler(svc, logr.Discard())
+	h := NewHandler(svc, logr.Discard()).WithEnterprise(true)
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 

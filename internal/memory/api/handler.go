@@ -344,6 +344,7 @@ type Handler struct {
 	log              logr.Logger
 	maxBodySize      int64
 	recordDimConsent DimensionConsentRecorder
+	enterprise       bool
 }
 
 // NewHandler creates a new memory API handler.
@@ -362,6 +363,28 @@ func (h *Handler) WithDimensionConsentRecorder(r DimensionConsentRecorder) *Hand
 	return h
 }
 
+// WithEnterprise gates enterprise-only routes (institutional, projection,
+// analytics). When false they return 403 enterprise_required.
+func (h *Handler) WithEnterprise(enterprise bool) *Handler {
+	h.enterprise = enterprise
+	return h
+}
+
+// requireEnterprise wraps a handler so it returns 403 enterprise_required when
+// the binary is not in enterprise mode. Applied to the institutional tier,
+// projection, and memory-analytics routes; agent + user routes stay open.
+func (h *Handler) requireEnterprise(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !h.enterprise {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write([]byte(`{"error":"enterprise_required"}`))
+			return
+		}
+		next(w, r)
+	}
+}
+
 // RegisterRoutes registers all memory-api HTTP routes on the given mux.
 func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
@@ -373,8 +396,8 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/memories/search", h.handleSearchMemories)
 	mux.HandleFunc("GET /api/v1/memories/export", h.handleExportMemories)
 	mux.HandleFunc("POST /api/v1/memories", h.handleSaveMemory)
-	mux.HandleFunc("GET /api/v1/memories/aggregate", h.handleMemoryAggregate)
-	mux.HandleFunc("GET /api/v1/memories/projection", h.handleProjection)
+	mux.HandleFunc("GET /api/v1/memories/aggregate", h.requireEnterprise(h.handleMemoryAggregate))
+	mux.HandleFunc("GET /api/v1/memories/projection", h.requireEnterprise(h.handleProjection))
 	mux.HandleFunc("GET /api/v1/memories/{id}", h.handleOpenMemory)
 	mux.HandleFunc("PATCH /api/v1/memories/{id}", h.handleUpdateMemory)
 	mux.HandleFunc("POST /api/v1/memories/supersede", h.handleSupersedeMemories)
@@ -386,10 +409,10 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/memories/retrieve", h.handleRetrieveMultiTier)
 	mux.HandleFunc("POST /api/v1/memories/retrieve/semantic", h.handleSemanticRetrieve)
 
-	mux.HandleFunc("POST /api/v1/institutional/memories", h.handleSaveInstitutional)
-	mux.HandleFunc("GET /api/v1/institutional/memories", h.handleListInstitutional)
-	mux.HandleFunc("DELETE /api/v1/institutional/memories/{id}", h.handleDeleteInstitutional)
-	mux.HandleFunc("POST /api/v1/institutional/ingest", h.handleIngest)
+	mux.HandleFunc("POST /api/v1/institutional/memories", h.requireEnterprise(h.handleSaveInstitutional))
+	mux.HandleFunc("GET /api/v1/institutional/memories", h.requireEnterprise(h.handleListInstitutional))
+	mux.HandleFunc("DELETE /api/v1/institutional/memories/{id}", h.requireEnterprise(h.handleDeleteInstitutional))
+	mux.HandleFunc("POST /api/v1/institutional/ingest", h.requireEnterprise(h.handleIngest))
 	mux.HandleFunc("GET /api/v1/ingest/summary-candidates", h.handleListSummaryCandidates)
 	mux.HandleFunc("POST /api/v1/ingest/summaries", h.handleSaveDocumentSummary)
 
