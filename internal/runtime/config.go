@@ -153,19 +153,23 @@ const (
 	envTracingInsecure   = "OMNIA_TRACING_INSECURE"
 	envGRPCPort          = "OMNIA_GRPC_PORT"
 	envHealthPort        = "OMNIA_HEALTH_PORT"
+	// envCanaryOverridePath points at the mounted canary override file. Set on
+	// candidate pods by the operator; unset on stable / non-rollout pods.
+	envCanaryOverridePath = "OMNIA_CANARY_OVERRIDE_PATH"
 )
 
 // Default values.
 const (
-	defaultPromptPackPath  = "/etc/omnia/pack/pack.json"
-	defaultPromptName      = "default"
-	defaultSessionType     = "memory"
-	defaultSessionTTL      = 24 * time.Hour
-	defaultMediaBasePath   = "/etc/omnia/media"
-	defaultToolsMountPath  = "/etc/omnia/tools"
-	defaultToolsConfigFile = "tools.yaml"
-	defaultGRPCPort        = 9000
-	defaultHealthPort      = 9001
+	defaultPromptPackPath     = "/etc/omnia/pack/pack.json"
+	defaultPromptName         = "default"
+	defaultSessionType        = "memory"
+	defaultSessionTTL         = 24 * time.Hour
+	defaultMediaBasePath      = "/etc/omnia/media"
+	defaultToolsMountPath     = "/etc/omnia/tools"
+	defaultToolsConfigFile    = "tools.yaml"
+	defaultCanaryOverridePath = "/etc/omnia/canary/override.json"
+	defaultGRPCPort           = 9000
+	defaultHealthPort         = 9001
 )
 
 // Error format constants.
