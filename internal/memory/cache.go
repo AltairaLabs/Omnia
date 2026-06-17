@@ -285,6 +285,15 @@ func (c *CachedStore) Aggregate(ctx context.Context, opts AggregateOptions) ([]A
 	return agg.Aggregate(ctx, opts)
 }
 
+// InvalidateWorkspace bumps the workspace-scoped cache version so any cached
+// list/search results for that workspace are recomputed on next read. Used by
+// the service layer after an institutional write handled outside the cache
+// wrapper (the EE institutional store writes the row; the service asks the
+// cache to invalidate). Satisfies memory.WorkspaceInvalidator.
+func (c *CachedStore) InvalidateWorkspace(ctx context.Context, workspaceID string) {
+	c.bumpVersion(ctx, map[string]string{ScopeWorkspaceID: workspaceID})
+}
+
 // DeleteInstitutional delegates to the inner store then invalidates the
 // workspace-scoped cache.
 func (c *CachedStore) DeleteInstitutional(ctx context.Context, workspaceID, memoryID string) error {

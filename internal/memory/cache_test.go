@@ -1053,6 +1053,35 @@ func TestCachedStore_BatchDelete_InnerError(t *testing.T) {
 	}
 }
 
+// TestCachedStore_InvalidateWorkspace_Bumps verifies that calling
+// InvalidateWorkspace bumps the workspace-scoped cache version exactly as
+// SaveInstitutional does — same Redis key, same increment. This is the
+// entry point the service layer uses after an out-of-band EE institutional
+// write that bypasses the CachedStore wrapper.
+func TestCachedStore_InvalidateWorkspace_Bumps(t *testing.T) {
+	inner := &cacheTestStore{}
+	cs, mr := newTestCache(t, inner)
+	ctx := context.Background()
+	ws := "a0000000-0000-0000-0000-000000000001"
+
+	// The workspace version key must not exist yet (fresh miniredis).
+	sh := scopeHash(map[string]string{ScopeWorkspaceID: ws})
+	if _, err := mr.Get(versionKey(sh)); err == nil {
+		t.Fatal("expected version key to be absent before InvalidateWorkspace")
+	}
+
+	cs.InvalidateWorkspace(ctx, ws)
+
+	// After the call the version key must exist and equal "1".
+	v, err := mr.Get(versionKey(sh))
+	if err != nil {
+		t.Fatalf("version key missing after InvalidateWorkspace: %v", err)
+	}
+	if v != "1" {
+		t.Errorf("workspace version = %q, want %q", v, "1")
+	}
+}
+
 // errTest is a sentinel error for injection.
 var errTest = fmt.Errorf("injected error")
 
