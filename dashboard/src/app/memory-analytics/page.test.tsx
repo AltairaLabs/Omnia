@@ -2,6 +2,11 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
+
+const { mockUseEnterpriseConfig } = vi.hoisted(() => ({
+  mockUseEnterpriseConfig: vi.fn(),
+}));
+
 import MemoryAnalyticsPage from "./page";
 
 // Mock layout components that pull in complex infrastructure
@@ -19,6 +24,12 @@ vi.mock("@/components/layout", () => ({
       {description && <p>{description}</p>}
     </div>
   ),
+}));
+
+// EnterpriseGate uses useEnterpriseConfig — mock @/hooks/core so we can
+// control enterpriseEnabled per-test (default: enabled so existing tests pass)
+vi.mock("@/hooks/core", () => ({
+  useEnterpriseConfig: () => mockUseEnterpriseConfig(),
 }));
 
 vi.mock("@/contexts/workspace-context", () => ({
@@ -54,6 +65,12 @@ function wrapper({ children }: { children: ReactNode }) {
 }
 
 beforeEach(() => {
+  mockUseEnterpriseConfig.mockReturnValue({
+    enterpriseEnabled: true,
+    hideEnterprise: false,
+    loading: false,
+  });
+
   const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
     const url = typeof input === "string" ? input : input.toString();
     if (url.includes("groupBy=tier&metric=distinct_users")) {
@@ -127,6 +144,27 @@ describe("MemoryAnalyticsPage", () => {
     expect(screen.getByText(/Memory by agent/i)).toBeInTheDocument();
     expect(screen.getByText(/Privacy posture/i)).toBeInTheDocument();
     expect(screen.getByText(/How memory is organized/i)).toBeInTheDocument();
+  });
+
+  it("renders the upgrade gate when enterprise is disabled", () => {
+    mockUseEnterpriseConfig.mockReturnValue({
+      enterpriseEnabled: false,
+      hideEnterprise: false,
+      loading: false,
+    });
+    render(<MemoryAnalyticsPage />, { wrapper });
+    expect(screen.getByText("Enterprise Feature")).toBeInTheDocument();
+    expect(screen.queryByText(/Memory analytics$/)).not.toBeInTheDocument();
+  });
+
+  it("renders analytics when enterprise is enabled", () => {
+    mockUseEnterpriseConfig.mockReturnValue({
+      enterpriseEnabled: true,
+      hideEnterprise: false,
+      loading: false,
+    });
+    render(<MemoryAnalyticsPage />, { wrapper });
+    expect(screen.getByText(/Memory analytics$/)).toBeInTheDocument();
   });
 
 });
