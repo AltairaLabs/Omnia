@@ -35,11 +35,13 @@ graph TB
 
 Both Deployments run the same agent image. The only differences come from the `rollout.candidate` overrides — typically a different PromptPack version, provider, or tool configuration. Istio's VirtualService controls what percentage of traffic reaches each subset.
 
+The candidate's pods receive their **own** resolved configuration: the operator writes the candidate's provider refs into a per-agent override ConfigMap mounted into the candidate pods, so the runtime resolves the candidate's providers — not the stable spec's. A canary therefore genuinely exercises the overridden behaviour rather than silently running stable's config.
+
 This model means:
 
-- **No downtime** — the stable Deployment continues serving throughout the rollout
+- **No downtime** — the stable Deployment serves throughout the rollout, *and* promotion itself is zero-downtime (traffic stays on the warm candidate until stable is healthy on the new config — see [Promotion and Rollback](#promotion-and-rollback))
 - **Identical infrastructure** — both versions share the same Service, DNS, and TLS
-- **Clean teardown** — after promotion or rollback, the candidate Deployment is deleted
+- **Clean teardown** — after promotion or rollback, the candidate Deployment and its override ConfigMap are deleted
 
 ## Candidate Overrides
 
@@ -148,7 +150,7 @@ The rollout lifecycle has three terminal states:
 
 **Idle** — when `rollout.candidate` matches the current spec (or is absent), no rollout is active. The controller maintains a single Deployment.
 
-**Promotion** — when the rollout completes all steps, the candidate overrides are merged into the main spec. The candidate Deployment is deleted. The stable Deployment now runs the new configuration.
+**Promotion** — when the rollout completes all steps, the candidate's config is merged into the main spec and the stable Deployment rolls to it **in the background**. Throughout that roll, 100% of traffic stays on the already-validated, warm candidate; only once the stable Deployment is fully rolled out and healthy on the new config does traffic cut back to it and the candidate Deployment get deleted. No request is ever served from a cold or restarting pod — **promotion is zero-downtime**. While the background roll is underway, `status.rollout.promoting` is `true` and the `RolloutActive` condition reports reason `Promoting`.
 
 **Rollback** — the candidate is reverted to match the current spec, and the candidate Deployment is deleted. Traffic returns to 100% stable.
 
