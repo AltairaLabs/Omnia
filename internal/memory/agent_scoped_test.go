@@ -143,10 +143,10 @@ func TestListAgentScoped_FiltersByAgent(t *testing.T) {
 		Scope: map[string]string{ScopeWorkspaceID: testWorkspace1, ScopeAgentID: testAgent2},
 	}))
 	// Institutional row (should not appear in either agent list).
-	must(t, store.SaveInstitutional(ctx, &Memory{
+	seedInstitutional(t, store, &Memory{
 		Type: "policy", Content: "inst", Confidence: 1.0,
 		Scope: map[string]string{ScopeWorkspaceID: testWorkspace1},
-	}))
+	})
 
 	got, err := store.ListAgentScoped(ctx, testWorkspace1, testAgent1, ListOptions{Limit: 20})
 	if err != nil {

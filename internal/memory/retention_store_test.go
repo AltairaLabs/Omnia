@@ -94,8 +94,8 @@ func TestSoftDeleteExpiredTTL_InstitutionalTier(t *testing.T) {
 		Scope:     map[string]string{ScopeWorkspaceID: testWorkspace1},
 		ExpiresAt: &future,
 	}
-	require.NoError(t, store.SaveInstitutional(ctx, expired))
-	require.NoError(t, store.SaveInstitutional(ctx, keep))
+	seedInstitutional(t, store, expired)
+	seedInstitutional(t, store, keep)
 
 	n, err := store.SoftDeleteExpiredTTL(ctx, TierInstitutional, categoryScope{}, 100)
 	require.NoError(t, err)
@@ -120,7 +120,7 @@ func TestSoftDeleteExpiredTTL_TierIsolation(t *testing.T) {
 		Scope:     map[string]string{ScopeWorkspaceID: testWorkspace1, ScopeUserID: "user-a"},
 		ExpiresAt: &past,
 	}
-	require.NoError(t, store.SaveInstitutional(ctx, inst))
+	seedInstitutional(t, store, inst)
 	require.NoError(t, store.Save(ctx, userMem))
 
 	n, err := store.SoftDeleteExpiredTTL(ctx, TierUser, categoryScope{}, 100)
@@ -153,8 +153,8 @@ func TestSoftDeleteLRU_MarksOldestRowsFirst(t *testing.T) {
 		Type: "fact", Content: "fresh", Confidence: 0.9,
 		Scope: map[string]string{ScopeWorkspaceID: testWorkspace1},
 	}
-	require.NoError(t, store.SaveInstitutional(ctx, old))
-	require.NoError(t, store.SaveInstitutional(ctx, fresh))
+	seedInstitutional(t, store, old)
+	seedInstitutional(t, store, fresh)
 
 	// Backdate the old entity and every observation it owns. created_at
 	// and accessed_at both feed into the LRU calculation.
@@ -192,7 +192,7 @@ func TestHardDeleteForgottenOlderThan(t *testing.T) {
 		Type: "fact", Content: "obsolete", Confidence: 0.9,
 		Scope: map[string]string{ScopeWorkspaceID: testWorkspace1},
 	}
-	require.NoError(t, store.SaveInstitutional(ctx, mem))
+	seedInstitutional(t, store, mem)
 
 	_, err := store.pool.Exec(ctx,
 		"UPDATE memory_entities SET forgotten = true, updated_at = now() - interval '30 days' WHERE id = $1",
@@ -213,7 +213,7 @@ func TestHardDeleteForgottenOlderThan_RespectsGrace(t *testing.T) {
 		Type: "fact", Content: "recently forgotten", Confidence: 0.9,
 		Scope: map[string]string{ScopeWorkspaceID: testWorkspace1},
 	}
-	require.NoError(t, store.SaveInstitutional(ctx, mem))
+	seedInstitutional(t, store, mem)
 
 	// Soft-delete with recent updated_at — grace window of 7 days
 	// should keep the row around.

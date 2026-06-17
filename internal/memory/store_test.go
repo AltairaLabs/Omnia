@@ -1215,7 +1215,8 @@ func TestPostgresMemoryStore_List_VisibleToMe(t *testing.T) {
 		case scope[ScopeAgentID] != "":
 			err = store.SaveAgentScoped(ctx, mem)
 		default:
-			err = store.SaveInstitutional(ctx, mem)
+			seedInstitutional(t, store, mem)
+			return
 		}
 		require.NoError(t, err)
 	}

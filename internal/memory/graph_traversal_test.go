@@ -44,7 +44,7 @@ func TestTraverseRelations_FollowsEdges(t *testing.T) {
 	b := &Memory{Type: "company", Content: "Acme", Scope: map[string]string{ScopeWorkspaceID: ws}}
 	c := &Memory{Type: "product", Content: "Widget", Scope: map[string]string{ScopeWorkspaceID: ws}}
 	for _, m := range []*Memory{a, b, c} {
-		must(t, store.SaveInstitutional(ctx, m))
+		seedInstitutional(t, store, m)
 	}
 
 	// Create relations: Alice -works_at-> Acme; Acme -sells-> Widget.
@@ -95,7 +95,7 @@ func TestTraverseRelations_FilterByRelationType(t *testing.T) {
 	b := &Memory{Type: "company", Content: "Acme-rel", Scope: map[string]string{ScopeWorkspaceID: ws}}
 	c := &Memory{Type: "hobby", Content: "Knitting", Scope: map[string]string{ScopeWorkspaceID: ws}}
 	for _, m := range []*Memory{a, b, c} {
-		must(t, store.SaveInstitutional(ctx, m))
+		seedInstitutional(t, store, m)
 	}
 	mustInsertRelation(t, store, ws, a.ID, b.ID, "works_at")
 	mustInsertRelation(t, store, ws, a.ID, c.ID, "enjoys")

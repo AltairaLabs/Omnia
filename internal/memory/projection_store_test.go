@@ -30,7 +30,7 @@ func seedProjectionScope(t *testing.T, store *PostgresMemoryStore) (instID, agen
 
 	inst := &Memory{Type: projTypePolicy, Content: "refund policy: 30 days", Confidence: 0.9,
 		Scope: map[string]string{ScopeWorkspaceID: testWorkspace1}}
-	must(t, store.SaveInstitutional(ctx, inst))
+	seedInstitutional(t, store, inst)
 
 	ag := &Memory{Type: "pattern", Content: "legacy plan hits E_QUOTA", Confidence: 0.7,
 		Scope: map[string]string{ScopeWorkspaceID: testWorkspace1, ScopeAgentID: testAgent1}}
