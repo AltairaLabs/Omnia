@@ -10,6 +10,7 @@
  */
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   Table,
   TableBody,
@@ -22,12 +23,23 @@ import { StatusBadge } from "@/components/agents/status-badge";
 import { FrameworkBadge } from "@/components/agents/framework-badge";
 import { CostBadge } from "@/components/cost";
 import { useAgentCost } from "@/hooks/agents";
+import { useProvider } from "@/hooks/resources";
 import { getDefaultProviderRef } from "@/types/agent-runtime";
 import type { AgentRuntime } from "@/types";
 import { schemaFieldCount } from "./function-card";
 
 interface FunctionTableProps {
   functions: AgentRuntime[];
+}
+
+/** Provider cell — resolves the provider TYPE (e.g. "anthropic"), matching the
+ * card. Falls back to the ref name, then "-". */
+function FunctionProviderCell({
+  namespace,
+  providerRefName,
+}: Readonly<{ namespace: string; providerRefName?: string }>) {
+  const { data: provider } = useProvider(providerRefName, namespace);
+  return <span className="capitalize">{provider?.spec?.type || providerRefName || "-"}</span>;
 }
 
 function formatAge(timestamp?: string): string {
@@ -54,6 +66,7 @@ function FunctionCostCell({ namespace, name }: Readonly<{ namespace: string; nam
 }
 
 export function FunctionTable({ functions }: Readonly<FunctionTableProps>) {
+  const router = useRouter();
   return (
     <div className="rounded-md border">
       <Table>
@@ -71,39 +84,51 @@ export function FunctionTable({ functions }: Readonly<FunctionTableProps>) {
           </TableRow>
         </TableHeader>
         <TableBody>
-          {functions.map((fn) => (
-            <TableRow key={fn.metadata.uid ?? fn.metadata.name}>
-              <TableCell>
-                <Link
-                  href={`/functions/${fn.metadata.name}?namespace=${fn.metadata.namespace ?? "default"}`}
-                  className="font-medium hover:underline"
-                >
-                  {fn.metadata.name}
-                </Link>
-              </TableCell>
-              <TableCell className="text-muted-foreground">{fn.metadata.namespace}</TableCell>
-              <TableCell>
-                <StatusBadge phase={fn.status?.phase} />
-              </TableCell>
-              <TableCell>
-                <FrameworkBadge framework={fn.spec.framework?.type} />
-              </TableCell>
-              <TableCell>{fieldsLabel(schemaFieldCount(fn.spec.inputSchema))}</TableCell>
-              <TableCell>{fieldsLabel(schemaFieldCount(fn.spec.outputSchema))}</TableCell>
-              <TableCell className="capitalize">
-                {getDefaultProviderRef(fn.spec)?.name || "-"}
-              </TableCell>
-              <TableCell>
-                <FunctionCostCell
-                  namespace={fn.metadata.namespace || "default"}
-                  name={fn.metadata.name || ""}
-                />
-              </TableCell>
-              <TableCell className="text-muted-foreground">
-                {formatAge(fn.metadata.creationTimestamp)}
-              </TableCell>
-            </TableRow>
-          ))}
+          {functions.map((fn) => {
+            const href = `/functions/${fn.metadata.name}?namespace=${fn.metadata.namespace ?? "default"}`;
+            return (
+              <TableRow
+                key={fn.metadata.uid ?? fn.metadata.name}
+                data-testid="function-row"
+                className="cursor-pointer"
+                onClick={() => router.push(href)}
+              >
+                <TableCell>
+                  <Link
+                    href={href}
+                    className="font-medium hover:underline"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    {fn.metadata.name}
+                  </Link>
+                </TableCell>
+                <TableCell className="text-muted-foreground">{fn.metadata.namespace}</TableCell>
+                <TableCell>
+                  <StatusBadge phase={fn.status?.phase} />
+                </TableCell>
+                <TableCell>
+                  <FrameworkBadge framework={fn.spec.framework?.type} />
+                </TableCell>
+                <TableCell>{fieldsLabel(schemaFieldCount(fn.spec.inputSchema))}</TableCell>
+                <TableCell>{fieldsLabel(schemaFieldCount(fn.spec.outputSchema))}</TableCell>
+                <TableCell>
+                  <FunctionProviderCell
+                    namespace={fn.metadata.namespace || "default"}
+                    providerRefName={getDefaultProviderRef(fn.spec)?.name}
+                  />
+                </TableCell>
+                <TableCell>
+                  <FunctionCostCell
+                    namespace={fn.metadata.namespace || "default"}
+                    name={fn.metadata.name || ""}
+                  />
+                </TableCell>
+                <TableCell className="text-muted-foreground">
+                  {formatAge(fn.metadata.creationTimestamp)}
+                </TableCell>
+              </TableRow>
+            );
+          })}
         </TableBody>
       </Table>
     </div>

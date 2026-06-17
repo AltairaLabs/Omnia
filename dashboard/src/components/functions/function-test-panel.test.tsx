@@ -62,6 +62,20 @@ describe("FunctionTestPanel", () => {
     expect(screen.getByLabelText("topic *")).toBeInTheDocument();
   });
 
+  it("seeds the input from the schema example so Run works out of the box", () => {
+    const withExample = {
+      type: "object",
+      required: ["topic"],
+      properties: {
+        topic: { type: "string", example: "What drove the 2023 battery surge?" },
+      },
+    };
+    render(
+      <FunctionTestPanel functionName="deep-research" workspace="demo" inputSchema={withExample} />,
+    );
+    expect(screen.getByLabelText("topic *")).toHaveValue("What drove the 2023 battery surge?");
+  });
+
   it("toggles to JSON mode and shows the sample arguments", () => {
     render(
       <FunctionTestPanel functionName="deep-research" workspace="demo" inputSchema={inputSchema} />,
@@ -85,6 +99,36 @@ describe("FunctionTestPanel", () => {
     );
     await screen.findByText("Success");
     expect(screen.getByText(/all done/)).toBeInTheDocument();
+  });
+
+  it("unwraps the success envelope, links the invocation, and shows usage", async () => {
+    mockFetch.mockResolvedValue(
+      mkResponse(
+        200,
+        JSON.stringify({
+          output: { report: "done" },
+          invocation_id: "sess-12345678",
+          duration_ms: 1500,
+          usage: { input_tokens: 10, output_tokens: 20, cost_usd: 0.0012 },
+        }),
+      ),
+    );
+    render(
+      <FunctionTestPanel functionName="deep-research" workspace="demo" inputSchema={inputSchema} />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Run/ }));
+
+    await screen.findByText("Success");
+    // Output is unwrapped (the envelope's `output`, not the whole envelope).
+    expect(screen.getByText(/report/)).toBeInTheDocument();
+    expect(screen.getByText(/done/)).toBeInTheDocument();
+    // Server-side duration is preferred over the client round-trip.
+    expect(screen.getByText(/1500ms/)).toBeInTheDocument();
+    // invocation_id links to the recorded session.
+    const link = screen.getByRole("link", { name: /invocation/i });
+    expect(link).toHaveAttribute("href", "/sessions/sess-12345678");
+    // Usage chips (tokens combined into one node, plus cost).
+    expect(screen.getByText(/10 in \/ 20 out/)).toBeInTheDocument();
   });
 
   it("renders a Failed result with the error body on a non-2xx response", async () => {
@@ -188,5 +232,59 @@ describe("FunctionTestPanel", () => {
     await waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(1));
     const body = JSON.parse(mockFetch.mock.calls[0][1].body as string);
     expect(body).toEqual({ topic: "quantum" });
+  });
+
+  it("runs on Cmd/Ctrl+Enter", async () => {
+    mockFetch.mockResolvedValue(mkResponse(200, "{}"));
+    render(
+      <FunctionTestPanel functionName="deep-research" workspace="demo" inputSchema={inputSchema} />,
+    );
+    fireEvent.keyDown(screen.getByLabelText("topic *"), { key: "Enter", metaKey: true });
+    await waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(1));
+  });
+
+  it("does not run on Cmd+Enter when the function is not ready", () => {
+    render(
+      <FunctionTestPanel
+        functionName="deep-research"
+        workspace="demo"
+        inputSchema={inputSchema}
+        ready={false}
+      />,
+    );
+    fireEvent.keyDown(screen.getByLabelText("topic *"), { key: "Enter", ctrlKey: true });
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it("copies the response output to the clipboard", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, { clipboard: { writeText } });
+    mockFetch.mockResolvedValue(
+      mkResponse(200, JSON.stringify({ output: { report: "done" }, invocation_id: "s1" })),
+    );
+    render(
+      <FunctionTestPanel functionName="deep-research" workspace="demo" inputSchema={inputSchema} />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Run/ }));
+    await screen.findByText("Success");
+    fireEvent.click(screen.getByRole("button", { name: /copy/i }));
+    expect(writeText).toHaveBeenCalledWith(JSON.stringify({ report: "done" }, null, 2));
+  });
+
+  it("notes that a successful output matched the declared output schema", async () => {
+    mockFetch.mockResolvedValue(
+      mkResponse(200, JSON.stringify({ output: { report: "done" }, invocation_id: "s1" })),
+    );
+    render(
+      <FunctionTestPanel
+        functionName="deep-research"
+        workspace="demo"
+        inputSchema={inputSchema}
+        outputSchema={{ type: "object", properties: { report: { type: "string" } } }}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Run/ }));
+    await screen.findByText("Success");
+    expect(screen.getByText(/matches the output schema/i)).toBeInTheDocument();
   });
 });

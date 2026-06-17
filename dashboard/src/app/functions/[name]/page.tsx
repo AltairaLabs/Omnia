@@ -138,7 +138,9 @@ export default function FunctionDetailPage() {
         </div>
 
         <Tabs value={currentTab} onValueChange={handleTabChange}>
-          <TabsList>
+          {/* Horizontal scroll instead of wrap when all ten tabs don't fit. */}
+          <div className="max-w-full overflow-x-auto">
+            <TabsList className="w-max">
             <TabsTrigger value="overview">Overview</TabsTrigger>
             <TabsTrigger value="schema" className="gap-1.5">
               <Braces className="h-4 w-4" />
@@ -170,7 +172,8 @@ export default function FunctionDetailPage() {
             </TabsTrigger>
             <TabsTrigger value="config">Configuration</TabsTrigger>
             <TabsTrigger value="events">Events</TabsTrigger>
-          </TabsList>
+            </TabsList>
+          </div>
 
           <TabsContent value="overview" className="space-y-4 mt-4">
             <AgentTopology
@@ -223,11 +226,14 @@ export default function FunctionDetailPage() {
             </div>
           </TabsContent>
 
-          <TabsContent value="test" className="mt-4">
+          {/* forceMount: keep the panel mounted across tab switches so a typed
+              input and last result survive a detour to Schema/Invocations. */}
+          <TabsContent value="test" className="mt-4" forceMount>
             <FunctionTestPanel
               functionName={metadata.name}
               workspace={workspace}
               inputSchema={spec.inputSchema}
+              outputSchema={spec.outputSchema}
               ready={status?.phase === "Running" && (status?.replicas?.ready ?? 0) > 0}
               unavailableReason={status?.phase ?? "Unknown"}
             />

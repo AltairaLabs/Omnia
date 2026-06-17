@@ -29,6 +29,30 @@ import type { AgentRuntimePhase } from "@/types";
 type ViewMode = "cards" | "table";
 type FilterPhase = "all" | AgentRuntimePhase;
 
+/** Empty state — distinguishes "no functions exist" from "filters matched
+ * nothing", offering a clear-filters affordance only in the latter case. */
+function renderEmptyState(hasAnyFunctions: boolean, onClear: () => void) {
+  if (!hasAnyFunctions) {
+    return (
+      <div className="flex flex-col items-center justify-center py-12 text-center">
+        <p className="text-muted-foreground">No function-mode AgentRuntimes found.</p>
+        <p className="mt-2 text-sm text-muted-foreground">
+          Set <code className="font-mono">spec.mode: function</code> on an AgentRuntime to register
+          it here.
+        </p>
+      </div>
+    );
+  }
+  return (
+    <div className="flex flex-col items-center justify-center py-12 text-center">
+      <p className="text-muted-foreground">No functions match the current filters.</p>
+      <Button variant="outline" size="sm" className="mt-3" onClick={onClear}>
+        Clear filters
+      </Button>
+    </div>
+  );
+}
+
 function renderLoadingSkeleton(viewMode: ViewMode) {
   if (viewMode === "cards") {
     return (
@@ -56,6 +80,11 @@ export default function FunctionsPage() {
 
   const handleNamespaceChange = useCallback((namespaces: string[]) => {
     setSelectedNamespaces(namespaces);
+  }, []);
+
+  const clearFilters = useCallback(() => {
+    setFilterPhase("all");
+    setSelectedNamespaces([]);
   }, []);
 
   // Only function-mode runtimes appear here; agent-mode rows belong to /agents.
@@ -162,15 +191,7 @@ export default function FunctionsPage() {
           <FunctionTable functions={visible} />
         )}
 
-        {!isLoading && visible.length === 0 && (
-          <div className="flex flex-col items-center justify-center py-12 text-center">
-            <p className="text-muted-foreground">No function-mode AgentRuntimes found.</p>
-            <p className="mt-2 text-sm text-muted-foreground">
-              Set <code className="font-mono">spec.mode: function</code> on an AgentRuntime to
-              register it here.
-            </p>
-          </div>
-        )}
+        {!isLoading && visible.length === 0 && renderEmptyState(functions.length > 0, clearFilters)}
       </div>
     </div>
   );

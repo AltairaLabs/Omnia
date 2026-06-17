@@ -1,9 +1,14 @@
 import { describe, it, expect, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
 import { FunctionTable } from "./function-table";
 import type { AgentRuntime } from "@/types";
 
 vi.mock("@/hooks/agents", () => ({ useAgentCost: vi.fn(() => ({ data: null })) }));
+vi.mock("@/hooks/resources", () => ({
+  useProvider: vi.fn(() => ({ data: { spec: { type: "anthropic", model: "claude-opus-4-8" } } })),
+}));
+const push = vi.fn();
+vi.mock("next/navigation", () => ({ useRouter: () => ({ push }) }));
 vi.mock("next/link", () => ({
   default: ({ children, href }: { children: React.ReactNode; href: string }) => (
     <a href={href}>{children}</a>
@@ -42,5 +47,17 @@ describe("FunctionTable", () => {
     render(<FunctionTable functions={[mkFn("a", "ns"), mkFn("b", "ns")]} />);
     expect(screen.getByRole("link", { name: "a" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "b" })).toBeInTheDocument();
+  });
+
+  it("resolves the Provider column to the provider type (matching the card)", () => {
+    render(<FunctionTable functions={[mkFn("summarizer", "ns-a")]} />);
+    expect(screen.getByText("anthropic")).toBeInTheDocument();
+  });
+
+  it("navigates to the detail page when a row is clicked", () => {
+    push.mockClear();
+    render(<FunctionTable functions={[mkFn("summarizer", "ns-a")]} />);
+    fireEvent.click(screen.getByTestId("function-row"));
+    expect(push).toHaveBeenCalledWith("/functions/summarizer?namespace=ns-a");
   });
 });

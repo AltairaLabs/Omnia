@@ -4,8 +4,36 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
-import { ToolTestPanel } from "./tool-test-panel";
+import { ToolTestPanel, getSampleArgs } from "./tool-test-panel";
 import type { ToolRegistry } from "@/types";
+
+describe("getSampleArgs", () => {
+  it("prefers a property's example over the type-zero value", () => {
+    const schema = {
+      type: "object",
+      properties: { topic: { type: "string", example: "battery storage" } },
+    };
+    expect(JSON.parse(getSampleArgs({ inputSchema: schema }))).toEqual({
+      topic: "battery storage",
+    });
+  });
+
+  it("falls back to examples[0], then default, then type-zero", () => {
+    const schema = {
+      type: "object",
+      properties: {
+        a: { type: "string", examples: ["from-examples"] },
+        b: { type: "number", default: 42 },
+        c: { type: "boolean" },
+      },
+    };
+    expect(JSON.parse(getSampleArgs({ inputSchema: schema }))).toEqual({
+      a: "from-examples",
+      b: 42,
+      c: false,
+    });
+  });
+});
 
 // Monaco doesn't render in jsdom; stand in a plain textarea that preserves the
 // editor's value/onChange contract so the arguments-editing tests still work.
