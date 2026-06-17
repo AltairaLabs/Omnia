@@ -16,9 +16,18 @@
 "use client";
 
 import Link from "next/link";
+import { ArrowUpRight } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { useSessions } from "@/hooks/sessions";
 import { formatCost } from "@/lib/pricing";
 import type { SessionSummary } from "@/types/session";
@@ -116,8 +125,17 @@ export function FunctionSessionsPanel({
 
   return (
     <Card data-testid="function-sessions-panel">
-      <CardHeader>
+      <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0">
         <CardTitle>Recent invocations</CardTitle>
+        {sessions.length > 0 && (
+          <Link
+            href={`/sessions?agent=${encodeURIComponent(functionName)}`}
+            className="flex items-center gap-0.5 text-sm text-muted-foreground hover:text-foreground hover:underline"
+          >
+            View all
+            <ArrowUpRight className="h-3.5 w-3.5" />
+          </Link>
+        )}
       </CardHeader>
       <CardContent>
         {sessions.length === 0 ? (
@@ -125,47 +143,39 @@ export function FunctionSessionsPanel({
             No invocations recorded yet.
           </p>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm" data-testid="function-sessions-table">
-              <thead className="text-left text-xs uppercase text-muted-foreground">
-                <tr>
-                  <th className="py-2 pr-4">When</th>
-                  <th className="py-2 pr-4">Status</th>
-                  <th className="py-2 pr-4 text-right">Latency</th>
-                  <th className="py-2 pr-4 text-right">Cost</th>
-                  <th className="py-2 pr-4">Session</th>
-                </tr>
-              </thead>
-              <tbody>
-                {sessions.map((s) => (
-                  <tr key={s.id} className="border-t" data-testid="function-sessions-row">
-                    <td className="py-2 pr-4 font-mono text-xs">
-                      {formatTimestamp(s.startedAt)}
-                    </td>
-                    <td className="py-2 pr-4">
-                      <Badge variant={STATUS_VARIANT[s.status] ?? "outline"}>
-                        {STATUS_LABEL[s.status] ?? s.status}
-                      </Badge>
-                    </td>
-                    <td className="py-2 pr-4 text-right">
-                      {formatLatency(durationMs(s))}
-                    </td>
-                    <td className="py-2 pr-4 text-right">
-                      {formatCost(s.estimatedCost ?? 0)}
-                    </td>
-                    <td className="py-2 pr-4">
-                      <Link
-                        href={`/sessions/${s.id}`}
-                        className="font-mono text-xs text-muted-foreground hover:text-foreground hover:underline"
-                      >
-                        {s.id.slice(0, 8)}…
-                      </Link>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <Table data-testid="function-sessions-table">
+            <TableHeader>
+              <TableRow>
+                <TableHead>When</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead className="text-right">Latency</TableHead>
+                <TableHead className="text-right">Cost</TableHead>
+                <TableHead>Session</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {sessions.map((s) => (
+                <TableRow key={s.id} data-testid="function-sessions-row">
+                  <TableCell className="font-mono text-xs">{formatTimestamp(s.startedAt)}</TableCell>
+                  <TableCell>
+                    <Badge variant={STATUS_VARIANT[s.status] ?? "outline"}>
+                      {STATUS_LABEL[s.status] ?? s.status}
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="text-right">{formatLatency(durationMs(s))}</TableCell>
+                  <TableCell className="text-right">{formatCost(s.estimatedCost ?? 0)}</TableCell>
+                  <TableCell>
+                    <Link
+                      href={`/sessions/${s.id}`}
+                      className="font-mono text-xs text-muted-foreground hover:text-foreground hover:underline"
+                    >
+                      {s.id.slice(0, 8)}…
+                    </Link>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
         )}
       </CardContent>
     </Card>

@@ -15,7 +15,16 @@
 
 import { useState, useCallback } from "react";
 import Link from "next/link";
-import { Play, CheckCircle, XCircle, Loader2, Clock, ArrowUpRight } from "lucide-react";
+import {
+  Play,
+  CheckCircle,
+  XCircle,
+  Loader2,
+  Clock,
+  ArrowUpRight,
+  Copy,
+  ShieldCheck,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
@@ -30,6 +39,8 @@ interface FunctionTestPanelProps {
   functionName: string;
   workspace: string;
   inputSchema?: Record<string, unknown>;
+  /** Declared output schema; presence drives the "matches output schema" note. */
+  outputSchema?: Record<string, unknown>;
   /** Whether the function is serving requests. When false, Run is disabled. */
   ready?: boolean;
   /** Human-readable reason shown when the function isn't ready (e.g. phase). */
@@ -81,11 +92,17 @@ function JsonInput({
   args,
   jsonError,
   onChange,
-}: Readonly<{ args: string; jsonError: string | null; onChange: (v: string) => void }>) {
+  onSubmit,
+}: Readonly<{
+  args: string;
+  jsonError: string | null;
+  onChange: (v: string) => void;
+  onSubmit?: () => void;
+}>) {
   return (
     <div className="space-y-2">
       <Label>Input (JSON)</Label>
-      <JsonEditor value={args} onChange={onChange} ariaLabel="Input (JSON)" />
+      <JsonEditor value={args} onChange={onChange} ariaLabel="Input (JSON)" onSubmit={onSubmit} />
       {jsonError && <p className="text-sm text-red-500">{jsonError}</p>}
     </div>
   );
@@ -97,11 +114,13 @@ function InputEditor({
   args,
   jsonError,
   onChange,
+  onSubmit,
 }: Readonly<{
   inputSchema?: Record<string, unknown>;
   args: string;
   jsonError: string | null;
   onChange: (v: string) => void;
+  onSubmit?: () => void;
 }>) {
   const canForm = isRenderableObjectSchema(inputSchema);
   const [mode, setMode] = useState<"form" | "json">(canForm ? "form" : "json");
@@ -137,7 +156,7 @@ function InputEditor({
           idPrefix="fn-args"
         />
       ) : (
-        <JsonInput args={args} jsonError={jsonError} onChange={onChange} />
+        <JsonInput args={args} jsonError={jsonError} onChange={onChange} onSubmit={onSubmit} />
       )}
     </div>
   );
@@ -160,7 +179,17 @@ function UsageChips({ usage }: Readonly<{ usage: InvokeUsage }>) {
 }
 
 /** Result card: status, duration, usage, invocation link, and the output. */
-function ResultCard({ result }: Readonly<{ result: InvokeResult }>) {
+function ResultCard({
+  result,
+  hasOutputSchema,
+}: Readonly<{ result: InvokeResult; hasOutputSchema: boolean }>) {
+  const copyOutput = () => {
+    const text = result.outputIsJson
+      ? JSON.stringify(result.output, null, 2)
+      : String(result.output);
+    navigator.clipboard?.writeText(text);
+  };
+
   return (
     <Card>
       <CardHeader>
@@ -204,7 +233,13 @@ function ResultCard({ result }: Readonly<{ result: InvokeResult }>) {
 
         {result.output != null && (
           <div className="space-y-2">
-            <Label>{result.ok ? "Output" : "Raw output"}</Label>
+            <div className="flex items-center justify-between">
+              <Label>{result.ok ? "Output" : "Raw output"}</Label>
+              <Button variant="ghost" size="sm" className="h-7 gap-1 text-xs" onClick={copyOutput}>
+                <Copy className="h-3 w-3" />
+                Copy
+              </Button>
+            </div>
             {result.outputIsJson ? (
               <JsonBlock data={result.output} className="max-h-[400px]" />
             ) : (
@@ -213,6 +248,13 @@ function ResultCard({ result }: Readonly<{ result: InvokeResult }>) {
               </pre>
             )}
           </div>
+        )}
+
+        {result.ok && hasOutputSchema && (
+          <p className="flex items-center gap-1 text-xs text-muted-foreground">
+            <ShieldCheck className="h-3.5 w-3.5 text-green-500" />
+            Output matches the output schema (validated by the facade).
+          </p>
         )}
       </CardContent>
     </Card>
@@ -317,6 +359,7 @@ export function FunctionTestPanel({
   functionName,
   workspace,
   inputSchema,
+  outputSchema,
   ready = true,
   unavailableReason,
 }: Readonly<FunctionTestPanelProps>) {
@@ -347,8 +390,19 @@ export function FunctionTestPanel({
     setIsRunning(false);
   }, [args, workspace, functionName, ready]);
 
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+        e.preventDefault();
+        handleRun();
+      }
+    },
+    [handleRun],
+  );
+
   return (
-    <div className="space-y-6">
+    // eslint-disable-next-line jsx-a11y/no-static-element-interactions
+    <div className="space-y-6" onKeyDown={handleKeyDown}>
       <Card>
         <CardHeader>
           <CardTitle className="text-base">Invoke Function</CardTitle>
@@ -363,6 +417,7 @@ export function FunctionTestPanel({
             args={args}
             jsonError={jsonError}
             onChange={handleArgsChange}
+            onSubmit={handleRun}
           />
 
           {!ready && (
@@ -391,7 +446,7 @@ export function FunctionTestPanel({
         </CardContent>
       </Card>
 
-      {result && <ResultCard result={result} />}
+      {result && <ResultCard result={result} hasOutputSchema={Boolean(outputSchema)} />}
     </div>
   );
 }

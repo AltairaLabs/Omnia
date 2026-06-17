@@ -233,4 +233,58 @@ describe("FunctionTestPanel", () => {
     const body = JSON.parse(mockFetch.mock.calls[0][1].body as string);
     expect(body).toEqual({ topic: "quantum" });
   });
+
+  it("runs on Cmd/Ctrl+Enter", async () => {
+    mockFetch.mockResolvedValue(mkResponse(200, "{}"));
+    render(
+      <FunctionTestPanel functionName="deep-research" workspace="demo" inputSchema={inputSchema} />,
+    );
+    fireEvent.keyDown(screen.getByLabelText("topic *"), { key: "Enter", metaKey: true });
+    await waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(1));
+  });
+
+  it("does not run on Cmd+Enter when the function is not ready", () => {
+    render(
+      <FunctionTestPanel
+        functionName="deep-research"
+        workspace="demo"
+        inputSchema={inputSchema}
+        ready={false}
+      />,
+    );
+    fireEvent.keyDown(screen.getByLabelText("topic *"), { key: "Enter", ctrlKey: true });
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it("copies the response output to the clipboard", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, { clipboard: { writeText } });
+    mockFetch.mockResolvedValue(
+      mkResponse(200, JSON.stringify({ output: { report: "done" }, invocation_id: "s1" })),
+    );
+    render(
+      <FunctionTestPanel functionName="deep-research" workspace="demo" inputSchema={inputSchema} />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Run/ }));
+    await screen.findByText("Success");
+    fireEvent.click(screen.getByRole("button", { name: /copy/i }));
+    expect(writeText).toHaveBeenCalledWith(JSON.stringify({ report: "done" }, null, 2));
+  });
+
+  it("notes that a successful output matched the declared output schema", async () => {
+    mockFetch.mockResolvedValue(
+      mkResponse(200, JSON.stringify({ output: { report: "done" }, invocation_id: "s1" })),
+    );
+    render(
+      <FunctionTestPanel
+        functionName="deep-research"
+        workspace="demo"
+        inputSchema={inputSchema}
+        outputSchema={{ type: "object", properties: { report: { type: "string" } } }}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Run/ }));
+    await screen.findByText("Success");
+    expect(screen.getByText(/matches the output schema/i)).toBeInTheDocument();
+  });
 });

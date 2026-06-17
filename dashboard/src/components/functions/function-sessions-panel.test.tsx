@@ -187,10 +187,27 @@ describe("FunctionSessionsPanel", () => {
       }),
     );
     render(<FunctionSessionsPanel functionName="summarizer" />);
-    const link = screen.getByRole("link");
+    const link = screen.getByRole("link", { name: /abcdef01/ });
     expect(link).toHaveAttribute("href", "/sessions/abcdef0123456789");
     // The truncated label (first 8 chars + ellipsis) is what the user sees.
     expect(link.textContent).toContain("abcdef01");
+  });
+
+  it("renders a 'View all' link to the function's sessions when rows exist", () => {
+    hookSpy.mockReturnValue(
+      mkHook({ data: { sessions: [mkSession()], total: 1, hasMore: false } }),
+    );
+    render(<FunctionSessionsPanel functionName="summarizer" />);
+    const viewAll = screen.getByRole("link", { name: /view all/i });
+    expect(viewAll).toHaveAttribute("href", "/sessions?agent=summarizer");
+  });
+
+  it("omits the 'View all' link when there are no invocations", () => {
+    hookSpy.mockReturnValue(
+      mkHook({ data: { sessions: [], total: 0, hasMore: false } }),
+    );
+    render(<FunctionSessionsPanel functionName="summarizer" />);
+    expect(screen.queryByRole("link", { name: /view all/i })).not.toBeInTheDocument();
   });
 
   it("passes the function name to useSessions as the `agent` filter", () => {

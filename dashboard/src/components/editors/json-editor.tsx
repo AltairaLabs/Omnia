@@ -20,8 +20,8 @@
 
 "use client";
 
-import { useCallback, useMemo } from "react";
-import Editor, { type OnChange, type BeforeMount } from "@monaco-editor/react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
+import Editor, { type OnChange, type OnMount, type BeforeMount } from "@monaco-editor/react";
 import { useTheme } from "next-themes";
 import { AlertTriangle, CheckCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -59,6 +59,8 @@ interface JsonEditorProps {
   /** Editor body height in pixels (excludes the status bar). */
   height?: number;
   className?: string;
+  /** Invoked on Cmd/Ctrl+Enter inside the editor (e.g. to run a function). */
+  onSubmit?: () => void;
 }
 
 interface JsonValidation {
@@ -84,11 +86,25 @@ export function JsonEditor({
   readOnly = false,
   height = 160,
   className,
+  onSubmit,
 }: Readonly<JsonEditorProps>) {
   const { resolvedTheme } = useTheme();
   const theme = resolvedTheme === "light" ? THEME_LIGHT : THEME_DARK;
   const validation = useMemo(() => validateJson(value), [value]);
   const handleChange: OnChange = useCallback((v) => onChange(v ?? ""), [onChange]);
+
+  // Latest-ref so the Monaco command (bound once at mount) always calls the
+  // current onSubmit rather than a stale closure.
+  const onSubmitRef = useRef(onSubmit);
+  useEffect(() => {
+    onSubmitRef.current = onSubmit;
+  }, [onSubmit]);
+
+  const handleMount: OnMount = useCallback((editor, monaco) => {
+    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => {
+      onSubmitRef.current?.();
+    });
+  }, []);
 
   return (
     <div className={cn("rounded-md border overflow-hidden bg-muted/30", className)}>
@@ -98,6 +114,7 @@ export function JsonEditor({
         value={value}
         onChange={handleChange}
         beforeMount={defineThemes}
+        onMount={handleMount}
         theme={theme}
         options={{
           readOnly,
