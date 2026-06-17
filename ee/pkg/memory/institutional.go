@@ -29,7 +29,10 @@ const (
 	institutionalSourceType = "operator_curated"
 )
 
-// ErrNotInstitutional — relocated from internal/memory/institutional.go.
+// ErrNotInstitutional is returned when DeleteInstitutional is called with a
+// memory ID that belongs to a user- or agent-scoped row. Callers MUST use
+// errors.Is against this sentinel so the HTTP handler in the institutional
+// admin API can map it to a 400 response rather than a 500.
 var ErrNotInstitutional = errors.New("memory: target is not an institutional memory")
 
 // InstitutionalStore is the enterprise admin surface for workspace-scoped memories.

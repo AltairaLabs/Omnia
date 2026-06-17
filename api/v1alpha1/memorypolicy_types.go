@@ -497,7 +497,7 @@ type MemoryConsolidationCandidateLimits struct {
 }
 
 // MemoryConsolidationSafetyGates configures the action validator's
-// per-action checks. See validator.go in internal/memory/consolidation.
+// per-action checks. See validator.go in ee/pkg/memory/consolidation.
 type MemoryConsolidationSafetyGates struct {
 	// MinDistinctUserCount is keyed by target tier
 	// ("agentScoped" / "userScoped"). Default agentScoped=5,

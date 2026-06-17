@@ -173,8 +173,8 @@ type SaveResult struct {
 // BatchDelete is needed for paginated DSAR deletion (Task 4 cascade).
 // RetrieveMultiTier runs a single query across institutional, agent, user and
 // user-for-agent tiers and returns ranked results for RAG context injection.
-// The three Institutional methods are the admin path for workspace-scoped
-// memories (no user_id, no agent_id) — see institutional.go.
+// The institutional admin path (workspace-scoped memories, no user_id/agent_id)
+// is not part of this OSS interface — it lives in ee/pkg/memory (InstitutionalStore).
 // The three AgentScoped methods mirror the institutional admin path but for
 // (workspace, agent) rows (user_id IS NULL, agent_id = X) — see
 // agent_scoped.go. They power operator-curated agent policies and training
