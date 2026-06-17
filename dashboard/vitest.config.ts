@@ -73,6 +73,7 @@ export default defineConfig({
         "src/app/**/layout.tsx",
         "src/app/page.tsx", // Root page
         "src/app/agents/**/page.tsx", // Agent pages (require full context)
+        "src/app/functions/**/page.tsx", // Function pages (compose heavy agent controls)
         "src/app/arena/configs/[name]/page.tsx", // Arena detail pages (complex UI)
         "src/app/arena/jobs/[name]/page.tsx", // Arena detail pages (complex UI)
         "src/app/arena/sources/[name]/page.tsx", // Arena detail pages (complex UI)

@@ -33,16 +33,16 @@ export interface AgentTopologyGraph {
 }
 
 // Layout constants — a fixed, deterministic placement.
-const FACADE_W = 200;
-const FACADE_H = 84;
-const FACADE_GAP = 28;
-const RUNTIME_X = 280;
-const RUNTIME_W = 460;
-const RUNTIME_HEADER = 52;
-const CHILD_W = 200;
-const CHILD_H = 72;
-const MEMORY_H = 60;
-const PAD = 20;
+const FACADE_W = 130;
+const FACADE_H = 60;
+const FACADE_GAP = 18;
+const RUNTIME_X = 180;
+const RUNTIME_W = 330;
+const RUNTIME_HEADER = 44;
+const CHILD_W = 140;
+const CHILD_H = 56;
+const MEMORY_H = 44;
+const PAD = 14;
 const RUNTIME_H = RUNTIME_HEADER + CHILD_H + PAD + MEMORY_H + PAD;
 
 // Non-interactive nodes: not draggable and not selectable. React Flow gives a

@@ -20,6 +20,14 @@ vi.mock("next/link", () => ({
   }) => <a href={href}>{children}</a>,
 }));
 
+// Cost is read from the same Prometheus-backed hook the agent cards use.
+vi.mock("@/hooks/agents", () => ({
+  useAgentCost: vi.fn(() => ({ data: { totalCost: 0, timeSeries: [] } })),
+}));
+vi.mock("@/hooks/resources", () => ({
+  useProvider: vi.fn(() => ({ data: { spec: { type: "anthropic", model: "claude-opus-4-8" } } })),
+}));
+
 function mkFn(overrides: Partial<AgentRuntime> = {}): AgentRuntime {
   return {
     apiVersion: "omnia.altairalabs.ai/v1alpha1",
@@ -58,6 +66,17 @@ describe("FunctionCard", () => {
     // 2 input properties, 1 output property
     expect(screen.getByText("2 fields")).toBeInTheDocument();
     expect(screen.getByText("1 field")).toBeInTheDocument();
+  });
+
+  it("renders the 24h cost section (same as agent cards)", () => {
+    render(<FunctionCard fn={mkFn()} />);
+    expect(screen.getByText("Cost (24h)")).toBeInTheDocument();
+  });
+
+  it("shows the resolved provider and model", () => {
+    render(<FunctionCard fn={mkFn()} />);
+    expect(screen.getByText("anthropic")).toBeInTheDocument();
+    expect(screen.getByText(/opus-4-8/)).toBeInTheDocument();
   });
 
   it("renders 0 fields when schemas are missing or malformed", () => {
