@@ -17,7 +17,7 @@
 import { useCallback } from "react";
 import { useParams, useSearchParams, useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, FileText, Activity, ShieldCheck, Workflow, Braces, History } from "lucide-react";
+import { ArrowLeft, FileText, Activity, ShieldCheck, Workflow, Braces, History, FlaskConical } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Header } from "@/components/layout";
 import {
@@ -34,6 +34,7 @@ import { SystemPackBadge } from "@/components/agents/system-pack-badge";
 import { AgentWorkloadTab } from "@/components/workload-graph/agent-workload-tab";
 import { LogViewer } from "@/components/logs";
 import { FunctionSessionsPanel } from "@/components/functions/function-sessions-panel";
+import { FunctionTestPanel } from "@/components/functions/function-test-panel";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -143,6 +144,10 @@ export default function FunctionDetailPage() {
               <Braces className="h-4 w-4" />
               Schema
             </TabsTrigger>
+            <TabsTrigger value="test" className="gap-1.5">
+              <FlaskConical className="h-4 w-4" />
+              Test
+            </TabsTrigger>
             <TabsTrigger value="invocations" className="gap-1.5">
               <History className="h-4 w-4" />
               Invocations
@@ -216,6 +221,14 @@ export default function FunctionDetailPage() {
               <SchemaCard label="Input schema" schema={spec.inputSchema} />
               <SchemaCard label="Output schema" schema={spec.outputSchema} />
             </div>
+          </TabsContent>
+
+          <TabsContent value="test" className="mt-4">
+            <FunctionTestPanel
+              functionName={metadata.name}
+              workspace={workspace}
+              inputSchema={spec.inputSchema}
+            />
           </TabsContent>
 
           <TabsContent value="invocations" className="mt-4 space-y-3">
