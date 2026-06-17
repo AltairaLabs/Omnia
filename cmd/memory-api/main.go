@@ -59,6 +59,7 @@ import (
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 	eeaudit "github.com/altairalabs/omnia/ee/pkg/audit"
+	eememory "github.com/altairalabs/omnia/ee/pkg/memory"
 	"github.com/altairalabs/omnia/ee/pkg/memory/consolidation"
 	"github.com/altairalabs/omnia/ee/pkg/memory/projectionworker"
 	eemetrics "github.com/altairalabs/omnia/ee/pkg/metrics"
@@ -783,6 +784,9 @@ func buildAPIMux(
 
 	cfg.Enterprise = enterprise
 	svc := memoryapi.NewMemoryService(store, embeddingSvc, cfg, log)
+	if enterprise {
+		svc.SetInstitutionalStore(eememory.NewInstitutionalStore(pool, log))
+	}
 	if publisher != nil {
 		svc.SetEventPublisher(publisher)
 	}

@@ -35,7 +35,8 @@ import (
 
 func newSummaryHandler(t *testing.T, store *recordingInstitutionalStore, queue ingestion.SummaryQueue) *Handler {
 	t.Helper()
-	svc := NewMemoryService(store, nil, MemoryServiceConfig{}, logr.Discard())
+	svc := NewMemoryService(&mockMemoryStore{}, nil, MemoryServiceConfig{}, logr.Discard())
+	svc.SetInstitutionalStore(store)
 	svc.SetIngestion(ingestion.Config{}, queue)
 	return NewHandler(svc, logr.Discard())
 }

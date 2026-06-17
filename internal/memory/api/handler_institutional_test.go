@@ -20,12 +20,14 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	eememory "github.com/altairalabs/omnia/ee/pkg/memory"
 	"github.com/altairalabs/omnia/internal/memory"
 )
 
-func newInstitutionalHandler(t *testing.T, store memory.Store) *http.ServeMux {
+func newInstitutionalHandler(t *testing.T, stub *institutionalStub) *http.ServeMux {
 	t.Helper()
-	svc := NewMemoryService(store, nil, MemoryServiceConfig{Enterprise: true}, logr.Discard())
+	svc := NewMemoryService(&mockMemoryStore{}, nil, MemoryServiceConfig{Enterprise: true}, logr.Discard())
+	svc.SetInstitutionalStore(stub)
 	h := NewHandler(svc, logr.Discard()).WithEnterprise(true)
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
@@ -136,7 +138,8 @@ func TestHandleSaveInstitutional_RejectsExpiresAtInPast(t *testing.T) {
 
 func TestHandleSaveInstitutional_BodyTooLarge(t *testing.T) {
 	stub := &institutionalStub{}
-	svc := NewMemoryService(stub, nil, MemoryServiceConfig{Enterprise: true}, logr.Discard())
+	svc := NewMemoryService(&mockMemoryStore{}, nil, MemoryServiceConfig{Enterprise: true}, logr.Discard())
+	svc.SetInstitutionalStore(stub)
 	h := NewHandler(svc, logr.Discard()).WithEnterprise(true)
 	h.maxBodySize = 16
 
@@ -223,7 +226,7 @@ func TestHandleDeleteInstitutional_RejectsMissingWorkspace(t *testing.T) {
 }
 
 func TestHandleDeleteInstitutional_NonInstitutionalReturns400(t *testing.T) {
-	stub := &institutionalStub{deleteErr: memory.ErrNotInstitutional}
+	stub := &institutionalStub{deleteErr: eememory.ErrNotInstitutional}
 	mux := newInstitutionalHandler(t, stub)
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/v1/institutional/memories/m-1?workspace=ws-1", nil)

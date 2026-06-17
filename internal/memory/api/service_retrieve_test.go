@@ -18,6 +18,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
+	eememory "github.com/altairalabs/omnia/ee/pkg/memory"
 	"github.com/altairalabs/omnia/internal/memory"
 )
 
@@ -264,7 +265,7 @@ func TestRetrieveMultiTier_BuildsRankerFromPolicyLoader(t *testing.T) {
 	defer store.mu.Unlock()
 	require.Len(t, store.mtCalls, 1)
 	require.NotNil(t, store.mtCalls[0].Ranker, "service must populate Ranker from policy loader")
-	mr, ok := store.mtCalls[0].Ranker.(memory.MultiplicativeTierRanker)
+	mr, ok := store.mtCalls[0].Ranker.(eememory.MultiplicativeTierRanker)
 	require.True(t, ok, "expected MultiplicativeTierRanker, got %T", store.mtCalls[0].Ranker)
 	assert.InDelta(t, 2.0, mr.Weights[memory.TierInstitutional], 1e-9)
 	assert.InDelta(t, 0.5, mr.Weights[memory.TierUser], 1e-9)

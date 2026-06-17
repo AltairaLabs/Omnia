@@ -61,7 +61,8 @@ func (e *erroringInstitutionalStore) SaveInstitutional(_ context.Context, _ *mem
 
 func TestIngestDocument_ChunkStrategy_SavesItemsWithAboutKey(t *testing.T) {
 	store := &recordingInstitutionalStore{}
-	svc := NewMemoryService(store, nil, MemoryServiceConfig{}, logr.Discard())
+	svc := NewMemoryService(&mockMemoryStore{}, nil, MemoryServiceConfig{}, logr.Discard())
+	svc.SetInstitutionalStore(store)
 	svc.SetIngestion(ingestion.Config{Strategy: ingestion.StrategyChunk, ChunkSize: 2, ChunkOverlap: 0}, nil)
 
 	err := svc.IngestDocument(context.Background(), testWS, ingestion.SourceDoc{
@@ -84,7 +85,8 @@ func TestIngestDocument_ChunkStrategy_SavesItemsWithAboutKey(t *testing.T) {
 
 func TestIngestDocument_NoConfig_DefaultsToChunk(t *testing.T) {
 	store := &recordingInstitutionalStore{}
-	svc := NewMemoryService(store, nil, MemoryServiceConfig{}, logr.Discard())
+	svc := NewMemoryService(&mockMemoryStore{}, nil, MemoryServiceConfig{}, logr.Discard())
+	svc.SetInstitutionalStore(store)
 	// No SetIngestion — zero Config must normalise to chunk with default geometry.
 	err := svc.IngestDocument(context.Background(), testWS, ingestion.SourceDoc{
 		URL: testURLAllowed, Text: "alpha beta gamma",
@@ -118,7 +120,8 @@ func (f *fakeSummaryQueue) Complete(context.Context, string, string) error { ret
 
 func TestIngestDocument_ExtractiveSummary_SavesOneItem(t *testing.T) {
 	store := &recordingInstitutionalStore{}
-	svc := NewMemoryService(store, nil, MemoryServiceConfig{}, logr.Discard())
+	svc := NewMemoryService(&mockMemoryStore{}, nil, MemoryServiceConfig{}, logr.Discard())
+	svc.SetInstitutionalStore(store)
 	svc.SetIngestion(ingestion.Config{
 		Strategy: ingestion.StrategySummary, Summarizer: ingestion.SummarizerExtractive,
 	}, nil)
@@ -134,7 +137,8 @@ func TestIngestDocument_ExtractiveSummary_SavesOneItem(t *testing.T) {
 func TestIngestDocument_AgentSummary_Enqueues(t *testing.T) {
 	store := &recordingInstitutionalStore{}
 	queue := &fakeSummaryQueue{}
-	svc := NewMemoryService(store, nil, MemoryServiceConfig{}, logr.Discard())
+	svc := NewMemoryService(&mockMemoryStore{}, nil, MemoryServiceConfig{}, logr.Discard())
+	svc.SetInstitutionalStore(store)
 	svc.SetIngestion(ingestion.Config{
 		Strategy: ingestion.StrategySummary, Summarizer: ingestion.SummarizerAgent,
 	}, queue)
@@ -151,7 +155,8 @@ func TestIngestDocument_AgentSummary_Enqueues(t *testing.T) {
 
 func TestIngestDocument_AgentSummary_NoQueue_FallsBackToExtractive(t *testing.T) {
 	store := &recordingInstitutionalStore{}
-	svc := NewMemoryService(store, nil, MemoryServiceConfig{}, logr.Discard())
+	svc := NewMemoryService(&mockMemoryStore{}, nil, MemoryServiceConfig{}, logr.Discard())
+	svc.SetInstitutionalStore(store)
 	svc.SetIngestion(ingestion.Config{
 		Strategy: ingestion.StrategySummary, Summarizer: ingestion.SummarizerAgent,
 	}, nil) // no queue
@@ -165,7 +170,8 @@ func TestIngestDocument_AgentSummary_NoQueue_FallsBackToExtractive(t *testing.T)
 
 func TestIngestDocument_RecordsSuccessAndItemsMetrics(t *testing.T) {
 	store := &recordingInstitutionalStore{}
-	svc := NewMemoryService(store, nil, MemoryServiceConfig{}, logr.Discard())
+	svc := NewMemoryService(&mockMemoryStore{}, nil, MemoryServiceConfig{}, logr.Discard())
+	svc.SetInstitutionalStore(store)
 	svc.SetIngestion(ingestion.Config{Strategy: ingestion.StrategyChunk, ChunkSize: 2, ChunkOverlap: 0}, nil)
 
 	docsBefore := testutil.ToFloat64(ingestDocumentsTotal.WithLabelValues(ingestion.StrategyChunk, ingestOutcomeSuccess))
@@ -184,7 +190,8 @@ func TestIngestDocument_RecordsSuccessAndItemsMetrics(t *testing.T) {
 
 func TestIngestDocument_RecordsErrorOutcome(t *testing.T) {
 	store := &erroringInstitutionalStore{}
-	svc := NewMemoryService(store, nil, MemoryServiceConfig{}, logr.Discard())
+	svc := NewMemoryService(&mockMemoryStore{}, nil, MemoryServiceConfig{}, logr.Discard())
+	svc.SetInstitutionalStore(store)
 	svc.SetIngestion(ingestion.Config{Strategy: ingestion.StrategyChunk, ChunkSize: 2, ChunkOverlap: 0}, nil)
 
 	before := testutil.ToFloat64(ingestDocumentsTotal.WithLabelValues(ingestion.StrategyChunk, ingestOutcomeError))
@@ -201,7 +208,8 @@ func TestIngestDocument_RecordsErrorOutcome(t *testing.T) {
 func TestIngestDocument_RecordsEnqueuedOutcome(t *testing.T) {
 	store := &recordingInstitutionalStore{}
 	queue := &fakeSummaryQueue{}
-	svc := NewMemoryService(store, nil, MemoryServiceConfig{}, logr.Discard())
+	svc := NewMemoryService(&mockMemoryStore{}, nil, MemoryServiceConfig{}, logr.Discard())
+	svc.SetInstitutionalStore(store)
 	svc.SetIngestion(ingestion.Config{
 		Strategy: ingestion.StrategySummary, Summarizer: ingestion.SummarizerAgent,
 	}, queue)
@@ -219,7 +227,8 @@ func TestIngestDocument_RecordsEnqueuedOutcome(t *testing.T) {
 
 func TestResolveIngestionConfig_PolicyOverridesFallback(t *testing.T) {
 	store := &recordingInstitutionalStore{}
-	svc := NewMemoryService(store, nil, MemoryServiceConfig{}, logr.Discard())
+	svc := NewMemoryService(&mockMemoryStore{}, nil, MemoryServiceConfig{}, logr.Discard())
+	svc.SetInstitutionalStore(store)
 	svc.SetIngestion(ingestion.Config{Strategy: ingestion.StrategyChunk, ChunkSize: 200, ChunkOverlap: 40}, nil)
 	svc.SetPolicyLoader(&memory.StaticPolicyLoader{Policy: &omniav1alpha1.MemoryPolicy{
 		Spec: omniav1alpha1.MemoryPolicySpec{Ingestion: &omniav1alpha1.MemoryIngestionConfig{
@@ -237,7 +246,8 @@ func TestResolveIngestionConfig_PolicyOverridesFallback(t *testing.T) {
 
 func TestResolveIngestionConfig_NilPolicy_UsesFallback(t *testing.T) {
 	store := &recordingInstitutionalStore{}
-	svc := NewMemoryService(store, nil, MemoryServiceConfig{}, logr.Discard())
+	svc := NewMemoryService(&mockMemoryStore{}, nil, MemoryServiceConfig{}, logr.Discard())
+	svc.SetInstitutionalStore(store)
 	svc.SetIngestion(ingestion.Config{
 		Strategy: ingestion.StrategySummary, Summarizer: ingestion.SummarizerExtractive,
 	}, nil)
@@ -253,7 +263,8 @@ func TestResolveIngestionConfig_NilPolicy_UsesFallback(t *testing.T) {
 
 func TestResolveIngestionConfig_LoaderError_UsesFallback(t *testing.T) {
 	store := &recordingInstitutionalStore{}
-	svc := NewMemoryService(store, nil, MemoryServiceConfig{}, logr.Discard())
+	svc := NewMemoryService(&mockMemoryStore{}, nil, MemoryServiceConfig{}, logr.Discard())
+	svc.SetInstitutionalStore(store)
 	svc.SetIngestion(ingestion.Config{Strategy: ingestion.StrategyChunk, ChunkSize: 2, ChunkOverlap: 0}, nil)
 	svc.SetPolicyLoader(erroringPolicyLoader{})
 
@@ -266,7 +277,8 @@ func TestResolveIngestionConfig_LoaderError_UsesFallback(t *testing.T) {
 
 func TestResolveIngestionConfig_PartialPolicy_FieldLevelFallback(t *testing.T) {
 	store := &recordingInstitutionalStore{}
-	svc := NewMemoryService(store, nil, MemoryServiceConfig{}, logr.Discard())
+	svc := NewMemoryService(&mockMemoryStore{}, nil, MemoryServiceConfig{}, logr.Discard())
+	svc.SetInstitutionalStore(store)
 	// Fallback carries the summarizer + chunk geometry; policy supplies only strategy.
 	svc.SetIngestion(ingestion.Config{
 		Summarizer: ingestion.SummarizerExtractive, ChunkSize: 2, ChunkOverlap: 0,

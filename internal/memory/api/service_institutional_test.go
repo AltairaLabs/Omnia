@@ -17,6 +17,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	eememory "github.com/altairalabs/omnia/ee/pkg/memory"
 	"github.com/altairalabs/omnia/internal/memory"
 )
 
@@ -65,9 +66,10 @@ func (i *institutionalStub) DeleteInstitutional(_ context.Context, ws, id string
 	return i.deleteErr
 }
 
-func newInstitutionalService(t *testing.T, store *institutionalStub) (*MemoryService, *mockAuditLogger) {
+func newInstitutionalService(t *testing.T, stub *institutionalStub) (*MemoryService, *mockAuditLogger) {
 	t.Helper()
-	svc := NewMemoryService(store, nil, MemoryServiceConfig{}, logr.Discard())
+	svc := NewMemoryService(&mockMemoryStore{}, nil, MemoryServiceConfig{Enterprise: true}, logr.Discard())
+	svc.SetInstitutionalStore(stub)
 	audit := newMockAuditLogger()
 	svc.SetAuditLogger(audit)
 	return svc, audit
@@ -157,16 +159,84 @@ func TestDeleteInstitutionalMemory_ForwardsAndEmitsAudit(t *testing.T) {
 }
 
 func TestDeleteInstitutionalMemory_PropagatesNotInstitutional(t *testing.T) {
-	store := &institutionalStub{deleteErr: memory.ErrNotInstitutional}
+	store := &institutionalStub{deleteErr: eememory.ErrNotInstitutional}
 	svc, audit := newInstitutionalService(t, store)
 
 	err := svc.DeleteInstitutionalMemory(context.Background(), "ws-1", "m-1")
 	require.Error(t, err)
-	assert.ErrorIs(t, err, memory.ErrNotInstitutional)
+	assert.ErrorIs(t, err, eememory.ErrNotInstitutional)
 
 	select {
 	case e := <-audit.entries:
 		t.Fatalf("unexpected audit on error: %+v", e)
 	case <-time.After(50 * time.Millisecond):
 	}
+}
+
+// invalidatingStore implements memory.Store (via embed) and memory.WorkspaceInvalidator.
+// Used to verify the type-assert cache-invalidation branch is exercised.
+type invalidatingStore struct {
+	mockMemoryStore
+	mu          sync.Mutex
+	invalidated []string
+}
+
+func (s *invalidatingStore) InvalidateWorkspace(_ context.Context, ws string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.invalidated = append(s.invalidated, ws)
+}
+
+func (s *invalidatingStore) invalidatedWorkspaces() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]string, len(s.invalidated))
+	copy(out, s.invalidated)
+	return out
+}
+
+func TestSaveInstitutionalMemory_InvalidatesWorkspaceCache(t *testing.T) {
+	const wsID = "ws-cache-1"
+	store := &invalidatingStore{}
+	svc := NewMemoryService(store, nil, MemoryServiceConfig{Enterprise: true}, logr.Discard())
+	svc.SetInstitutionalStore(&institutionalStub{saveMemID: "inst-x"})
+
+	mem := &memory.Memory{
+		Type:    "policy",
+		Content: "cache invalidation test",
+		Scope:   map[string]string{memory.ScopeWorkspaceID: wsID},
+	}
+	require.NoError(t, svc.SaveInstitutionalMemory(context.Background(), mem))
+
+	got := store.invalidatedWorkspaces()
+	require.Len(t, got, 1, "InvalidateWorkspace should have been called exactly once")
+	assert.Equal(t, wsID, got[0])
+}
+
+func TestDeleteInstitutionalMemory_InvalidatesWorkspaceCache(t *testing.T) {
+	const wsID = "ws-cache-2"
+	store := &invalidatingStore{}
+	svc := NewMemoryService(store, nil, MemoryServiceConfig{Enterprise: true}, logr.Discard())
+	svc.SetInstitutionalStore(&institutionalStub{})
+
+	require.NoError(t, svc.DeleteInstitutionalMemory(context.Background(), wsID, "m-del"))
+
+	got := store.invalidatedWorkspaces()
+	require.Len(t, got, 1, "InvalidateWorkspace should have been called exactly once")
+	assert.Equal(t, wsID, got[0])
+}
+
+func TestListInstitutionalMemories_DoesNotInvalidateCache(t *testing.T) {
+	const wsID = "ws-cache-3"
+	store := &invalidatingStore{}
+	svc := NewMemoryService(store, nil, MemoryServiceConfig{Enterprise: true}, logr.Discard())
+	svc.SetInstitutionalStore(&institutionalStub{
+		listResult: []*memory.Memory{{ID: "m-1"}},
+	})
+
+	_, err := svc.ListInstitutionalMemories(context.Background(), wsID, memory.ListOptions{})
+	require.NoError(t, err)
+
+	got := store.invalidatedWorkspaces()
+	assert.Empty(t, got, "List must NOT invalidate the cache")
 }

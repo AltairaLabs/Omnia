@@ -40,8 +40,11 @@ const (
 // agent_id) and emits a memory_created audit tagged scope=institutional.
 // Audit fires only on success, matching Save/List/Search semantics.
 func (s *MemoryService) SaveInstitutionalMemory(ctx context.Context, mem *memory.Memory) error {
-	if err := s.store.SaveInstitutional(ctx, mem); err != nil {
+	if err := s.institutional.SaveInstitutional(ctx, mem); err != nil {
 		return err
+	}
+	if inv, ok := s.store.(memory.WorkspaceInvalidator); ok {
+		inv.InvalidateWorkspace(ctx, mem.Scope[memory.ScopeWorkspaceID])
 	}
 	s.emitAuditEvent(ctx, &MemoryAuditEntry{
 		EventType:   eventTypeMemoryCreated,
@@ -59,7 +62,7 @@ func (s *MemoryService) SaveInstitutionalMemory(ctx context.Context, mem *memory
 // ListInstitutionalMemories returns all institutional memories in a workspace
 // and emits a memory_accessed audit tagged operation=list_institutional.
 func (s *MemoryService) ListInstitutionalMemories(ctx context.Context, workspaceID string, opts memory.ListOptions) ([]*memory.Memory, error) {
-	mems, err := s.store.ListInstitutional(ctx, workspaceID, opts)
+	mems, err := s.institutional.ListInstitutional(ctx, workspaceID, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -74,13 +77,16 @@ func (s *MemoryService) ListInstitutionalMemories(ctx context.Context, workspace
 	return mems, nil
 }
 
-// DeleteInstitutionalMemory soft-deletes an institutional memory. The store
+// DeleteInstitutionalMemory soft-deletes an institutional memory. The EE store
 // layer refuses to delete user- or agent-scoped rows via this path, returning
-// memory.ErrNotInstitutional; the error propagates unchanged so the HTTP
+// ErrNotInstitutional; the error propagates unchanged so the HTTP
 // handler can map it to a 400 response.
 func (s *MemoryService) DeleteInstitutionalMemory(ctx context.Context, workspaceID, memoryID string) error {
-	if err := s.store.DeleteInstitutional(ctx, workspaceID, memoryID); err != nil {
+	if err := s.institutional.DeleteInstitutional(ctx, workspaceID, memoryID); err != nil {
 		return err
+	}
+	if inv, ok := s.store.(memory.WorkspaceInvalidator); ok {
+		inv.InvalidateWorkspace(ctx, workspaceID)
 	}
 	s.emitAuditEvent(ctx, &MemoryAuditEntry{
 		EventType:   eventTypeMemoryDeleted,

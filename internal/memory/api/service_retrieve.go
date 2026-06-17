@@ -21,6 +21,7 @@ package api
 import (
 	"context"
 
+	eememory "github.com/altairalabs/omnia/ee/pkg/memory"
 	"github.com/altairalabs/omnia/internal/memory"
 )
 
@@ -91,10 +92,10 @@ func (s *MemoryService) applyPolicyDefaults(ctx context.Context, req *memory.Mul
 		s.log.V(1).Info("policy load failed, using defaults", "error", err.Error())
 	}
 	if needRanker {
-		req.Ranker = memory.NewTierRanker(policy)
+		req.Ranker = eememory.NewTierRanker(policy)
 	}
 	if needHalfLife {
-		req.HalfLife = memory.NewTierHalfLife(policy)
+		req.HalfLife = eememory.NewTierHalfLife(policy)
 	}
 }
 
