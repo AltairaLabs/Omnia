@@ -83,6 +83,11 @@ type MemoryServiceConfig struct {
 	// instead of atomic supersedes — the Phil/Slim Shard failure mode.
 	// Empty disables the check (back-compat default).
 	RequireAboutForKinds []string
+	// Enterprise gates advanced-memory recall. When false, RetrieveMultiTier
+	// is restricted to the OSS floor (user+agent tiers, identity ranker,
+	// default half-life); the institutional tier and policy-driven ranking
+	// are enterprise-only.
+	Enterprise bool
 }
 
 // MemoryAuditLogger is the audit logging interface for memory operations.
@@ -116,6 +121,7 @@ type MemoryService struct {
 	summaryQueue   ingestion.SummaryQueue   // nil disables the agent path (falls back to extractive)
 	config         MemoryServiceConfig
 	log            logr.Logger
+	enterprise     bool
 }
 
 // NewMemoryService creates a new MemoryService backed by the given store.
@@ -126,6 +132,7 @@ func NewMemoryService(store memory.Store, embeddingSvc *memory.EmbeddingService,
 		embeddingSvc: embeddingSvc,
 		config:       cfg,
 		log:          log.WithName("memory-service"),
+		enterprise:   cfg.Enterprise,
 	}
 }
 
