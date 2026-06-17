@@ -62,6 +62,20 @@ describe("FunctionTestPanel", () => {
     expect(screen.getByLabelText("topic *")).toBeInTheDocument();
   });
 
+  it("seeds the input from the schema example so Run works out of the box", () => {
+    const withExample = {
+      type: "object",
+      required: ["topic"],
+      properties: {
+        topic: { type: "string", example: "What drove the 2023 battery surge?" },
+      },
+    };
+    render(
+      <FunctionTestPanel functionName="deep-research" workspace="demo" inputSchema={withExample} />,
+    );
+    expect(screen.getByLabelText("topic *")).toHaveValue("What drove the 2023 battery surge?");
+  });
+
   it("toggles to JSON mode and shows the sample arguments", () => {
     render(
       <FunctionTestPanel functionName="deep-research" workspace="demo" inputSchema={inputSchema} />,

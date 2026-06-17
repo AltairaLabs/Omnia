@@ -85,6 +85,29 @@ function getDefaultToolName(
   return tools.length > 0 ? tools[0].name : "";
 }
 
+/** Type-zero value for a JSON Schema property type. */
+function typeZeroValue(type: unknown): unknown {
+  if (type === "string") return "";
+  if (type === "number" || type === "integer") return 0;
+  if (type === "boolean") return false;
+  if (type === "array") return [];
+  if (type === "object") return {};
+  return null;
+}
+
+/**
+ * Sample value for one property: prefer an authored `example`, then
+ * `examples[0]`, then `default`, falling back to the type-zero value. This
+ * lets a function/tool with a documented example seed a runnable input.
+ */
+function sampleValueForProperty(def: Record<string, unknown> | undefined): unknown {
+  if (def?.example !== undefined) return def.example;
+  const examples = def?.examples;
+  if (Array.isArray(examples) && examples.length > 0) return examples[0];
+  if (def?.default !== undefined) return def.default;
+  return typeZeroValue(def?.type);
+}
+
 /**
  * Get a sample arguments JSON from a tool's input schema.
  */
@@ -108,13 +131,7 @@ export function getSampleArgs(tool?: SchemaTool, handler?: HandlerDefinition): s
 
   const sample: Record<string, unknown> = {};
   for (const [key, def] of Object.entries(props as Record<string, Record<string, unknown>>)) {
-    const type = def?.type;
-    if (type === "string") sample[key] = "";
-    else if (type === "number" || type === "integer") sample[key] = 0;
-    else if (type === "boolean") sample[key] = false;
-    else if (type === "array") sample[key] = [];
-    else if (type === "object") sample[key] = {};
-    else sample[key] = null;
+    sample[key] = sampleValueForProperty(def);
   }
   return JSON.stringify(sample, null, 2);
 }
