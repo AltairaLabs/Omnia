@@ -26,6 +26,10 @@ import (
 // rolloutEnvtestCounter gives each spec a unique resource suffix.
 var rolloutEnvtestCounter uint64
 
+// testRolloutPodImage is a throwaway image for hand-built test Deployments
+// (envtest never schedules pods, so the image is never pulled).
+const testRolloutPodImage = "busybox"
+
 var _ = Describe("AgentRuntime Rollout (envtest)", func() {
 	var (
 		ctx       context.Context
@@ -289,10 +293,10 @@ var _ = Describe("AgentRuntime Rollout (envtest)", func() {
 				ObjectMeta: metav1.ObjectMeta{Name: arName, Namespace: namespace},
 				Spec: appsv1.DeploymentSpec{
 					Replicas: ptr.To[int32](1),
-					Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": arName}},
+					Selector: &metav1.LabelSelector{MatchLabels: map[string]string{testAppLabelKey: arName}},
 					Template: corev1.PodTemplateSpec{
-						ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": arName}},
-						Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "c", Image: "busybox"}}},
+						ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{testAppLabelKey: arName}},
+						Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "c", Image: testRolloutPodImage}}},
 					},
 				},
 			}

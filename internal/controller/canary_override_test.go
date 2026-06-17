@@ -47,14 +47,14 @@ func TestReconcileCanaryOverrideConfigMap_WritesCandidateProviders(t *testing.T)
 	scheme := canaryTestScheme(t)
 	ar := &omniav1alpha1.AgentRuntime{}
 	ar.Name = "rag"
-	ar.Namespace = "default"
+	ar.Namespace = gateTestNamespace
 	ar.Spec.Providers = []omniav1alpha1.NamedProviderRef{
-		{Name: "default", ProviderRef: omniav1alpha1.ProviderRef{Name: "p-stable"}},
+		{Name: gateTestNamespace, ProviderRef: omniav1alpha1.ProviderRef{Name: "p-stable"}},
 	}
 	ar.Spec.Rollout = &omniav1alpha1.RolloutConfig{
 		Candidate: &omniav1alpha1.CandidateOverrides{
 			ProviderRefs: []omniav1alpha1.NamedProviderRef{
-				{Name: "default", ProviderRef: omniav1alpha1.ProviderRef{Name: "p-candidate"}},
+				{Name: gateTestNamespace, ProviderRef: omniav1alpha1.ProviderRef{Name: "p-candidate"}},
 			},
 		},
 	}
@@ -65,7 +65,7 @@ func TestReconcileCanaryOverrideConfigMap_WritesCandidateProviders(t *testing.T)
 
 	cm := &corev1.ConfigMap{}
 	require.NoError(t, fc.Get(context.Background(),
-		types.NamespacedName{Name: "rag" + CanaryConfigMapSuffix, Namespace: "default"}, cm))
+		types.NamespacedName{Name: "rag" + CanaryConfigMapSuffix, Namespace: gateTestNamespace}, cm))
 
 	// Contract: the JSON deserializes to the same shape the runtime reads
 	// (field name "providerRefs") and carries the candidate provider.
@@ -88,7 +88,7 @@ func TestReconcileCanaryOverrideConfigMap_OwnerRefError(t *testing.T) {
 	require.NoError(t, corev1.AddToScheme(scheme)) // AgentRuntime deliberately absent
 	ar := &omniav1alpha1.AgentRuntime{}
 	ar.Name = "rag"
-	ar.Namespace = "default"
+	ar.Namespace = gateTestNamespace
 	fc := fake.NewClientBuilder().WithScheme(scheme).Build()
 	r := &AgentRuntimeReconciler{Client: fc, Scheme: scheme}
 
@@ -101,7 +101,7 @@ func TestDeleteCanaryOverrideConfigMap(t *testing.T) {
 	scheme := canaryTestScheme(t)
 	ar := &omniav1alpha1.AgentRuntime{}
 	ar.Name = "rag"
-	ar.Namespace = "default"
+	ar.Namespace = gateTestNamespace
 	cm := &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{Name: ar.Name + CanaryConfigMapSuffix, Namespace: ar.Namespace},
 	}

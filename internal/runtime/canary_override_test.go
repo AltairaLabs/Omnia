@@ -24,6 +24,13 @@ import (
 	v1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 )
 
+const (
+	provStable    = "p-stable"
+	provCandidate = "p-candidate"
+	// overrideJSON is the mounted CM payload pointing the canary at provCandidate.
+	overrideJSON = `{"providerRefs":[{"name":"default","providerRef":{"name":"p-candidate"}}]}`
+)
+
 // A pod with no mounted canary override (the common case: stable pods and
 // non-rollout agents) must report ok=false so LoadFromCRD keeps today's
 // live-spec behaviour.
@@ -42,15 +49,14 @@ func TestLoadCanaryOverride_AbsentIsNotAnError(t *testing.T) {
 // candidate's provider refs from it.
 func TestLoadCanaryOverride_ParsesProviderRefs(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "override.json")
-	data := `{"providerRefs":[{"name":"default","providerRef":{"name":"p-candidate"}}]}`
-	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte(overrideJSON), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	ov, ok, err := loadCanaryOverride(path)
 	if err != nil || !ok {
 		t.Fatalf("present override: ok=%v err=%v", ok, err)
 	}
-	if len(ov.ProviderRefs) != 1 || ov.ProviderRefs[0].ProviderRef.Name != "p-candidate" {
+	if len(ov.ProviderRefs) != 1 || ov.ProviderRefs[0].ProviderRef.Name != provCandidate {
 		t.Fatalf("unexpected providerRefs: %+v", ov.ProviderRefs)
 	}
 }
@@ -73,15 +79,15 @@ func TestLoadCanaryOverride_MalformedIsError(t *testing.T) {
 func TestApplyCanaryOverride_SubstitutesProviders(t *testing.T) {
 	ar := &v1alpha1.AgentRuntime{}
 	ar.Spec.Providers = []v1alpha1.NamedProviderRef{
-		{Name: "default", ProviderRef: v1alpha1.ProviderRef{Name: "p-stable"}},
+		{Name: ScenarioDefault, ProviderRef: v1alpha1.ProviderRef{Name: provStable}},
 	}
 	ov := &CanaryOverride{ProviderRefs: []v1alpha1.NamedProviderRef{
-		{Name: "default", ProviderRef: v1alpha1.ProviderRef{Name: "p-candidate"}},
+		{Name: ScenarioDefault, ProviderRef: v1alpha1.ProviderRef{Name: provCandidate}},
 	}}
 
 	applyCanaryOverride(ar, ov)
 
-	if ar.Spec.Providers[0].ProviderRef.Name != "p-candidate" {
+	if ar.Spec.Providers[0].ProviderRef.Name != provCandidate {
 		t.Fatalf("expected candidate provider, got %q", ar.Spec.Providers[0].ProviderRef.Name)
 	}
 }
@@ -91,7 +97,7 @@ func TestApplyCanaryOverride_SubstitutesProviders(t *testing.T) {
 func TestApplyCanaryOverrideFromMount(t *testing.T) {
 	ar := &v1alpha1.AgentRuntime{}
 	ar.Spec.Providers = []v1alpha1.NamedProviderRef{
-		{Name: "default", ProviderRef: v1alpha1.ProviderRef{Name: "p-stable"}},
+		{Name: ScenarioDefault, ProviderRef: v1alpha1.ProviderRef{Name: provStable}},
 	}
 
 	// No override mounted (path doesn't exist) → no-op.
@@ -99,21 +105,20 @@ func TestApplyCanaryOverrideFromMount(t *testing.T) {
 	if err := applyCanaryOverrideFromMount(ar); err != nil {
 		t.Fatalf("missing mount should be a no-op, got %v", err)
 	}
-	if ar.Spec.Providers[0].ProviderRef.Name != "p-stable" {
+	if ar.Spec.Providers[0].ProviderRef.Name != provStable {
 		t.Fatalf("missing mount changed providers to %q", ar.Spec.Providers[0].ProviderRef.Name)
 	}
 
 	// Override mounted → applied.
 	path := filepath.Join(t.TempDir(), "override.json")
-	if err := os.WriteFile(path,
-		[]byte(`{"providerRefs":[{"name":"default","providerRef":{"name":"p-candidate"}}]}`), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte(overrideJSON), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv(envCanaryOverridePath, path)
 	if err := applyCanaryOverrideFromMount(ar); err != nil {
 		t.Fatalf("present mount: %v", err)
 	}
-	if ar.Spec.Providers[0].ProviderRef.Name != "p-candidate" {
+	if ar.Spec.Providers[0].ProviderRef.Name != provCandidate {
 		t.Fatalf("present mount did not apply override, got %q", ar.Spec.Providers[0].ProviderRef.Name)
 	}
 
@@ -133,11 +138,11 @@ func TestApplyCanaryOverrideFromMount(t *testing.T) {
 func TestApplyCanaryOverride_EmptyKeepsStable(t *testing.T) {
 	ar := &v1alpha1.AgentRuntime{}
 	ar.Spec.Providers = []v1alpha1.NamedProviderRef{
-		{Name: "default", ProviderRef: v1alpha1.ProviderRef{Name: "p-stable"}},
+		{Name: ScenarioDefault, ProviderRef: v1alpha1.ProviderRef{Name: provStable}},
 	}
 	applyCanaryOverride(ar, &CanaryOverride{})
 
-	if len(ar.Spec.Providers) != 1 || ar.Spec.Providers[0].ProviderRef.Name != "p-stable" {
+	if len(ar.Spec.Providers) != 1 || ar.Spec.Providers[0].ProviderRef.Name != provStable {
 		t.Fatalf("empty override must keep stable providers, got %+v", ar.Spec.Providers)
 	}
 }
