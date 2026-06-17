@@ -6,15 +6,18 @@
 {{- if .Values.sharepointHero.meshWaypoint }}
 # Waypoint Gateway for the omnia-demo namespace. REQUIRED for the mode=mesh
 # weighted split: ztunnel is L4 only, the waypoint does the L7 stable/candidate
-# routing across the operator-owned VS/DR. The namespace must also be enrolled
-# in ambient (kubectl label namespace omnia-demo istio.io/dataplane-mode=ambient).
-# On-cluster validation required: the waypoint <-> CEL policy-proxy interaction
-# on the WebSocket path has not yet been smoke-tested on a real ambient cluster.
+# routing across the operator-owned VS/DR. The namespace is enrolled in ambient
+# and bound to this waypoint via spec.namespace.labels in workspace.yaml
+# (istio.io/dataplane-mode=ambient + istio.io/use-waypoint=waypoint).
+# Named "waypoint" to match the canonical, on-cluster-validated omnia-default
+# pattern: a namespace-bound waypoint named "waypoint" programs the L7 route for
+# every Service in the namespace (verified live: rag-hero WS routes through the
+# waypoint, faithfulness reaches Prometheus, the rollout gate reads it).
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: Gateway
 metadata:
-  name: omnia-demo-waypoint
+  name: waypoint
   namespace: {{ .Values.namespace }}
   labels:
     app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
