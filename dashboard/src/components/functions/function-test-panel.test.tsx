@@ -101,6 +101,36 @@ describe("FunctionTestPanel", () => {
     expect(screen.getByText(/all done/)).toBeInTheDocument();
   });
 
+  it("unwraps the success envelope, links the invocation, and shows usage", async () => {
+    mockFetch.mockResolvedValue(
+      mkResponse(
+        200,
+        JSON.stringify({
+          output: { report: "done" },
+          invocation_id: "sess-12345678",
+          duration_ms: 1500,
+          usage: { input_tokens: 10, output_tokens: 20, cost_usd: 0.0012 },
+        }),
+      ),
+    );
+    render(
+      <FunctionTestPanel functionName="deep-research" workspace="demo" inputSchema={inputSchema} />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Run/ }));
+
+    await screen.findByText("Success");
+    // Output is unwrapped (the envelope's `output`, not the whole envelope).
+    expect(screen.getByText(/report/)).toBeInTheDocument();
+    expect(screen.getByText(/done/)).toBeInTheDocument();
+    // Server-side duration is preferred over the client round-trip.
+    expect(screen.getByText(/1500ms/)).toBeInTheDocument();
+    // invocation_id links to the recorded session.
+    const link = screen.getByRole("link", { name: /invocation/i });
+    expect(link).toHaveAttribute("href", "/sessions/sess-12345678");
+    // Usage chips (tokens combined into one node, plus cost).
+    expect(screen.getByText(/10 in \/ 20 out/)).toBeInTheDocument();
+  });
+
   it("renders a Failed result with the error body on a non-2xx response", async () => {
     mockFetch.mockResolvedValue(mkResponse(400, '{"error":"invalid_input"}'));
     render(

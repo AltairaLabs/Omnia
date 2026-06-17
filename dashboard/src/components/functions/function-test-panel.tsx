@@ -14,7 +14,8 @@
 "use client";
 
 import { useState, useCallback } from "react";
-import { Play, CheckCircle, XCircle, Loader2, Clock } from "lucide-react";
+import Link from "next/link";
+import { Play, CheckCircle, XCircle, Loader2, Clock, ArrowUpRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
@@ -23,6 +24,7 @@ import { JsonBlock } from "@/components/ui/json-block";
 import { JsonEditor } from "@/components/editors/json-editor";
 import { SchemaForm, isRenderableObjectSchema } from "@/components/tools/schema-form";
 import { getSampleArgs } from "@/components/tools/tool-test-panel";
+import { formatCost } from "@/lib/pricing";
 
 interface FunctionTestPanelProps {
   functionName: string;
@@ -34,13 +36,23 @@ interface FunctionTestPanelProps {
   unavailableReason?: string;
 }
 
+interface InvokeUsage {
+  inputTokens?: number;
+  outputTokens?: number;
+  costUsd?: number;
+}
+
 interface InvokeResult {
   ok: boolean;
   status: number;
+  /** Server-reported duration when present, else the client round-trip. */
   durationMs: number;
-  /** Parsed JSON body when the response was JSON, else the raw text. */
-  body: unknown;
-  isJson: boolean;
+  /** The function output (envelope `output`) or raw body / error raw_output. */
+  output: unknown;
+  outputIsJson: boolean;
+  /** Recorded session id (envelope `invocation_id`), for deep-linking. */
+  invocationId?: string;
+  usage?: InvokeUsage;
   error?: string;
 }
 
@@ -131,7 +143,23 @@ function InputEditor({
   );
 }
 
-/** Result card: status, duration, and the pretty-printed response body. */
+/** Token + cost chips from the facade usage block. */
+function UsageChips({ usage }: Readonly<{ usage: InvokeUsage }>) {
+  const hasTokens = usage.inputTokens !== undefined || usage.outputTokens !== undefined;
+  if (!hasTokens && usage.costUsd === undefined) return null;
+  return (
+    <>
+      {hasTokens && (
+        <span className="flex items-center gap-1" title="Input / output tokens">
+          {usage.inputTokens ?? 0} in / {usage.outputTokens ?? 0} out
+        </span>
+      )}
+      {usage.costUsd !== undefined && <span title="Estimated cost">{formatCost(usage.costUsd)}</span>}
+    </>
+  );
+}
+
+/** Result card: status, duration, usage, invocation link, and the output. */
 function ResultCard({ result }: Readonly<{ result: InvokeResult }>) {
   return (
     <Card>
@@ -146,7 +174,7 @@ function ResultCard({ result }: Readonly<{ result: InvokeResult }>) {
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
-        <div className="flex items-center gap-4 text-xs text-muted-foreground">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
           <span className="flex items-center gap-1">
             <Clock className="h-3 w-3" />
             {result.durationMs}ms
@@ -154,6 +182,16 @@ function ResultCard({ result }: Readonly<{ result: InvokeResult }>) {
           <Badge variant="outline" className="text-xs">
             HTTP {result.status}
           </Badge>
+          {result.usage && <UsageChips usage={result.usage} />}
+          {result.invocationId && (
+            <Link
+              href={`/sessions/${result.invocationId}`}
+              className="flex items-center gap-0.5 text-foreground hover:underline"
+            >
+              View invocation
+              <ArrowUpRight className="h-3 w-3" />
+            </Link>
+          )}
         </div>
 
         {result.error && (
@@ -164,14 +202,14 @@ function ResultCard({ result }: Readonly<{ result: InvokeResult }>) {
           </div>
         )}
 
-        {result.body != null && (
+        {result.output != null && (
           <div className="space-y-2">
-            <Label>Response</Label>
-            {result.isJson ? (
-              <JsonBlock data={result.body} className="max-h-[400px]" />
+            <Label>{result.ok ? "Output" : "Raw output"}</Label>
+            {result.outputIsJson ? (
+              <JsonBlock data={result.output} className="max-h-[400px]" />
             ) : (
               <pre className="text-xs bg-muted p-3 rounded-lg overflow-auto max-h-[400px] font-mono break-all whitespace-pre-wrap">
-                {String(result.body)}
+                {String(result.output)}
               </pre>
             )}
           </div>
@@ -181,6 +219,69 @@ function ResultCard({ result }: Readonly<{ result: InvokeResult }>) {
   );
 }
 
+/** Reads a string field from a parsed object, or undefined. */
+function strField(obj: Record<string, unknown>, key: string): string | undefined {
+  const v = obj[key];
+  return typeof v === "string" ? v : undefined;
+}
+
+/** Maps the facade `usage` block to the panel's camelCase shape. */
+function parseUsage(raw: unknown): InvokeUsage | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const u = raw as Record<string, unknown>;
+  const num = (k: string) => (typeof u[k] === "number" ? (u[k] as number) : undefined);
+  return { inputTokens: num("input_tokens"), outputTokens: num("output_tokens"), costUsd: num("cost_usd") };
+}
+
+const isJsonObject = (v: unknown): v is Record<string, unknown> =>
+  v !== null && typeof v === "object" && !Array.isArray(v);
+
+/** Shapes a successful response, unwrapping the facade envelope when present. */
+function shapeSuccess(status: number, text: string, clientMs: number): InvokeResult {
+  const parsed = parseJson(text);
+  const bodyIsJson = parsed.error === undefined && text.trim() !== "";
+  const envelope = isJsonObject(parsed.value) ? parsed.value : null;
+
+  // Facade success envelope: { output, invocation_id, duration_ms, usage }.
+  if (envelope && "output" in envelope) {
+    return {
+      ok: true,
+      status,
+      durationMs: typeof envelope.duration_ms === "number" ? envelope.duration_ms : clientMs,
+      output: envelope.output,
+      outputIsJson: isJsonObject(envelope.output) || Array.isArray(envelope.output),
+      invocationId: strField(envelope, "invocation_id"),
+      usage: parseUsage(envelope.usage),
+    };
+  }
+  // Non-envelope (proxy passthrough / bare value): show the whole body.
+  return {
+    ok: true,
+    status,
+    durationMs: clientMs,
+    output: bodyIsJson ? parsed.value : text,
+    outputIsJson: bodyIsJson,
+  };
+}
+
+/** Shapes a non-2xx response, surfacing the facade error envelope. */
+function shapeError(status: number, text: string, clientMs: number): InvokeResult {
+  const parsed = parseJson(text);
+  const envelope = isJsonObject(parsed.value) ? parsed.value : null;
+  const error = envelope
+    ? [strField(envelope, "error"), strField(envelope, "detail")].filter(Boolean).join(": ")
+    : text.trim();
+  const raw = envelope?.raw_output;
+  return {
+    ok: false,
+    status,
+    durationMs: clientMs,
+    output: raw ?? null,
+    outputIsJson: isJsonObject(raw) || Array.isArray(raw),
+    error: error || `HTTP ${status}`,
+  };
+}
+
 /** POSTs the input to the function invoke proxy and shapes the result. */
 async function invoke(
   workspace: string,
@@ -188,36 +289,28 @@ async function invoke(
   parsed: unknown,
 ): Promise<InvokeResult> {
   const started = performance.now();
+  let response: Response;
   try {
-    const response = await fetch(
-      `/api/workspaces/${workspace}/functions/${functionName}/invoke`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(parsed),
-      },
-    );
-    const durationMs = Math.round(performance.now() - started);
-    const text = await response.text();
-    const json = parseJson(text);
-    const isJson = json.error === undefined && text.trim() !== "";
-    return {
-      ok: response.status < 400,
-      status: response.status,
-      durationMs,
-      body: isJson ? json.value : text,
-      isJson,
-    };
+    response = await fetch(`/api/workspaces/${workspace}/functions/${functionName}/invoke`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(parsed),
+    });
   } catch (err) {
     return {
       ok: false,
       status: 0,
       durationMs: Math.round(performance.now() - started),
-      body: null,
-      isJson: false,
+      output: null,
+      outputIsJson: false,
       error: err instanceof Error ? err.message : "Request failed",
     };
   }
+  const clientMs = Math.round(performance.now() - started);
+  const text = await response.text();
+  return response.status < 400
+    ? shapeSuccess(response.status, text, clientMs)
+    : shapeError(response.status, text, clientMs);
 }
 
 export function FunctionTestPanel({

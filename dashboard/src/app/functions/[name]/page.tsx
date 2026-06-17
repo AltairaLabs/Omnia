@@ -223,7 +223,9 @@ export default function FunctionDetailPage() {
             </div>
           </TabsContent>
 
-          <TabsContent value="test" className="mt-4">
+          {/* forceMount: keep the panel mounted across tab switches so a typed
+              input and last result survive a detour to Schema/Invocations. */}
+          <TabsContent value="test" className="mt-4" forceMount>
             <FunctionTestPanel
               functionName={metadata.name}
               workspace={workspace}
