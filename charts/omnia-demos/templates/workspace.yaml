@@ -16,13 +16,18 @@ spec:
     name: {{ .Values.namespace }}
     create: false
     {{- if .Values.sharepointHero.meshWaypoint }}
-    # Istio ambient enrollment. The operator reconciles spec.namespace.labels
-    # onto the (pre-existing, create=false) namespace, so this is declarative —
-    # no manual `kubectl label namespace`. Gated on the SAME toggle as the
-    # waypoint Gateway (sharepoint-hero-rollout.yaml) so one switch does both
-    # halves required for mode=mesh variant routing: enrollment + L7 waypoint.
+    # Istio ambient enrollment + namespace-level waypoint binding. The operator
+    # reconciles spec.namespace.labels onto the (pre-existing, create=false)
+    # namespace, so this is declarative — no manual `kubectl label namespace`.
+    # Gated on the SAME toggle as the waypoint Gateway
+    # (sharepoint-hero-rollout.yaml) so one switch does both halves required for
+    # mode=mesh variant routing: ambient enrollment + L7 waypoint binding.
+    # use-waypoint binds every Service in the namespace to the "waypoint"
+    # Gateway (the canonical omnia-default pattern), so the operator-owned
+    # VirtualService's L7 stable/candidate split actually routes.
     labels:
       istio.io/dataplane-mode: ambient
+      istio.io/use-waypoint: waypoint
     {{- end }}
   roleBindings: []
   {{- if .Values.workspace.anonymousAccess.enabled }}

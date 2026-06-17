@@ -92,11 +92,14 @@ spec:
     trafficRouting:
       mode: mesh
       mesh:
-        # When meshWaypoint is on, name the ambient waypoint so the operator
-        # stamps istio.io/use-waypoint on the agent Service — the piece that
-        # makes the operator-owned VirtualService's L7 split actually route
-        # (ztunnel alone is L4 and bypasses it). Same toggle as the waypoint
-        # Gateway (sharepoint-hero-rollout.yaml) + ambient enrollment
-        # (workspace.yaml). Empty leaves the Service unenrolled.
-        waypoint: {{ if .Values.sharepointHero.meshWaypoint }}omnia-demo-waypoint{{ else }}""{{ end }}
+        # The agent Service is bound to the ambient waypoint at the NAMESPACE
+        # level (istio.io/use-waypoint=waypoint in workspace.yaml) — the
+        # canonical Istio-ambient pattern (matches the working omnia-default
+        # workspace), so no per-Service waypoint name is set here. The waypoint
+        # Gateway (named "waypoint") lives in sharepoint-hero-rollout.yaml and
+        # the ambient + use-waypoint namespace labels in workspace.yaml, all
+        # gated on the same meshWaypoint toggle. ztunnel alone is L4 and bypasses
+        # the L7 split; the namespace-bound waypoint is what makes the
+        # operator-owned VirtualService actually route stable/candidate.
+        waypoint: ""
 {{- end }}
