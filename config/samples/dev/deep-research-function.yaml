@@ -1,0 +1,505 @@
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: PromptPack
+metadata:
+  labels:
+    app.kubernetes.io/name: omnia
+  name: deep-research
+  namespace: dev-agents
+spec:
+  # Source configuration - prompts stored in a ConfigMap
+  source:
+    type: configmap
+    configMapRef:
+      name: deep-research-prompts
+  # Semantic version for this prompt pack
+  version: "1.0.0"
+---
+# ConfigMap containing the compiled PromptPack JSON.
+#
+# A *Flow*-tier pack: a single agent walking a workflow state machine. It is the
+# companion to the Solo (demo-prompts) and the basic Flow (customer-support)
+# samples, and deliberately exercises the workflow features those packs omit:
+#   - engine.budget (max_total_visits / max_tool_calls / max_wall_time_sec)
+#   - a terminal state (complete)
+#   - a bounded loop (gather: max_visits + on_max_visits) plus event back-edges
+# so the dashboard WorkloadGraph renders its budget footer, terminal ✓, and
+# loop edges against real sample data.
+#
+# Use `packc compile --output pack.json --id deep-research` to regenerate this.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: deep-research-prompts
+  namespace: dev-agents
+data:
+  pack.json: |
+    {
+      "$schema": "https://promptpack.org/schema/latest/promptpack.schema.json",
+      "id": "deep-research",
+      "name": "Deep Research Assistant",
+      "version": "1.0.0",
+      "description": "A single agent that plans, gathers, assesses, synthesizes, and reviews research through a bounded workflow loop with an execution budget.",
+      "template_engine": {
+        "version": "v1",
+        "syntax": "{{variable}}",
+        "features": ["basic_substitution", "fragments"]
+      },
+      "fragments": {
+        "rigor": "Be rigorous and skeptical. Cite sources for every factual claim. Distinguish what the evidence shows from what you infer. Never fabricate URLs, quotes, or statistics."
+      },
+
+      "prompts": {
+        "planner": {
+          "id": "planner",
+          "name": "Research Planner",
+          "description": "Breaks the research question into a focused investigation plan.",
+          "version": "1.0.0",
+          "system_template": "You are a research planner investigating: {{topic}}.\n\n{{rigor}}\n\nDecompose the question into 3-5 concrete sub-questions, identify the evidence each requires, and note likely source types. Produce a short plan, then begin gathering.",
+          "variables": [
+            {
+              "name": "topic",
+              "type": "string",
+              "required": true,
+              "description": "The research question to investigate",
+              "example": "What drove the 2023 surge in utility-scale battery storage?"
+            }
+          ],
+          "parameters": {
+            "temperature": 0.4,
+            "max_tokens": 1024
+          }
+        },
+
+        "researcher": {
+          "id": "researcher",
+          "name": "Researcher",
+          "description": "Gathers evidence from the web against the open sub-questions.",
+          "version": "1.0.0",
+          "system_template": "You are a researcher gathering evidence on {{topic}}.\n\n{{rigor}}\n\nSearch for sources, fetch the most promising ones, and extract facts that bear on the open sub-questions. Record each fact with its source. When you believe a sub-question is answered, hand off for assessment.",
+          "variables": [
+            {
+              "name": "topic",
+              "type": "string",
+              "required": true,
+              "description": "The research question",
+              "example": "What drove the 2023 surge in utility-scale battery storage?"
+            }
+          ],
+          "tools": ["web_search", "fetch_url", "extract_facts"],
+          "tool_policy": {
+            "tool_choice": "auto",
+            "max_rounds": 6,
+            "max_tool_calls_per_turn": 8
+          },
+          "parameters": {
+            "temperature": 0.3,
+            "max_tokens": 2048
+          },
+          "evals": [
+            {
+              "id": "research-no-hallucinated-urls",
+              "type": "regex",
+              "trigger": "every_turn",
+              "description": "Researchers must not fabricate URLs",
+              "params": {
+                "pattern": "https?://example\\.(com|org)",
+                "expect_match": false
+              },
+              "metric": {
+                "name": "research_no_fake_urls",
+                "type": "boolean"
+              }
+            },
+            {
+              "id": "research-tools-used",
+              "type": "tools_called",
+              "trigger": "on_session_complete",
+              "description": "Researcher should search and fetch before extracting facts",
+              "params": {
+                "tool_names": ["web_search", "fetch_url"]
+              },
+              "metric": {
+                "name": "research_tools_used",
+                "type": "boolean"
+              }
+            }
+          ]
+        },
+
+        "critic": {
+          "id": "critic",
+          "name": "Coverage Critic",
+          "description": "Judges whether the gathered evidence is sufficient or needs another pass.",
+          "version": "1.0.0",
+          "system_template": "You are a coverage critic for the research on {{topic}}.\n\n{{rigor}}\n\nReview the evidence collected so far ({{artifacts.evidence}}) against the plan's sub-questions. Identify gaps, weak sources, and unsupported claims. Decide: is coverage sufficient to synthesize, or is another gathering pass needed?",
+          "variables": [
+            {
+              "name": "topic",
+              "type": "string",
+              "required": true,
+              "description": "The research question",
+              "example": "What drove the 2023 surge in utility-scale battery storage?"
+            }
+          ],
+          "tools": ["check_coverage"],
+          "tool_policy": {
+            "tool_choice": "auto",
+            "max_rounds": 2
+          },
+          "parameters": {
+            "temperature": 0.2,
+            "max_tokens": 1024
+          }
+        },
+
+        "writer": {
+          "id": "writer",
+          "name": "Synthesis Writer",
+          "description": "Synthesizes the evidence into a structured, cited report.",
+          "version": "1.0.0",
+          "system_template": "You are writing the research report on {{topic}}.\n\n{{rigor}}\n\nSynthesize the gathered evidence ({{artifacts.evidence}}) into a structured report: summary, findings (each with citations), and open questions. Save the report when complete.",
+          "variables": [
+            {
+              "name": "topic",
+              "type": "string",
+              "required": true,
+              "description": "The research question",
+              "example": "What drove the 2023 surge in utility-scale battery storage?"
+            }
+          ],
+          "tools": ["save_report"],
+          "tool_policy": {
+            "tool_choice": "auto",
+            "max_rounds": 3
+          },
+          "parameters": {
+            "temperature": 0.5,
+            "max_tokens": 4096
+          }
+        },
+
+        "reviewer": {
+          "id": "reviewer",
+          "name": "Citation Reviewer",
+          "description": "Verifies citations and report quality before completion.",
+          "version": "1.0.0",
+          "system_template": "You are reviewing the research report ({{artifacts.report}}) on {{topic}}.\n\n{{rigor}}\n\nVerify that every factual claim is backed by a citation, that sources are credible, and that the report answers the original question. Approve the report, or send it back for revision with specific notes.",
+          "variables": [
+            {
+              "name": "topic",
+              "type": "string",
+              "required": true,
+              "description": "The research question",
+              "example": "What drove the 2023 surge in utility-scale battery storage?"
+            }
+          ],
+          "tools": ["check_citations"],
+          "tool_policy": {
+            "tool_choice": "auto",
+            "max_rounds": 2
+          },
+          "parameters": {
+            "temperature": 0.2,
+            "max_tokens": 1024
+          },
+          "evals": [
+            {
+              "id": "review-quality",
+              "type": "llm_judge",
+              "trigger": "on_session_complete",
+              "description": "Judge whether the final report is well-supported and answers the question",
+              "params": {
+                "judge_prompt": "Review the final research report. Is every factual claim cited, are the sources credible, and does it answer the original question? Score 1-5.",
+                "passing_score": 4
+              },
+              "metric": {
+                "name": "report_quality",
+                "type": "gauge",
+                "range": { "min": 0, "max": 1 }
+              }
+            }
+          ]
+        },
+
+        "closer": {
+          "id": "closer",
+          "name": "Session Closer",
+          "description": "Delivers the approved report and closes the session.",
+          "version": "1.0.0",
+          "system_template": "You are closing the research session on {{topic}}.\n\n{{rigor}}\n\nPresent the approved report ({{artifacts.report}}) to the user, note any caveats or open questions, and end the session.",
+          "variables": [
+            {
+              "name": "topic",
+              "type": "string",
+              "required": true,
+              "description": "The research question",
+              "example": "What drove the 2023 surge in utility-scale battery storage?"
+            }
+          ],
+          "parameters": {
+            "temperature": 0.6,
+            "max_tokens": 1024
+          }
+        }
+      },
+
+      "tools": {
+        "web_search": {
+          "name": "web_search",
+          "description": "Search the web for sources relevant to a query",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "query": {
+                "type": "string",
+                "description": "Search query"
+              },
+              "recency_days": {
+                "type": "integer",
+                "description": "Restrict results to the last N days"
+              }
+            },
+            "required": ["query"]
+          }
+        },
+        "fetch_url": {
+          "name": "fetch_url",
+          "description": "Fetch and extract the readable text of a web page",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "url": {
+                "type": "string",
+                "description": "The URL to fetch"
+              }
+            },
+            "required": ["url"]
+          }
+        },
+        "extract_facts": {
+          "name": "extract_facts",
+          "description": "Extract atomic, source-attributed facts from a passage of text",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "text": {
+                "type": "string",
+                "description": "The source text to extract facts from"
+              },
+              "source_url": {
+                "type": "string",
+                "description": "The URL the text came from, used for attribution"
+              }
+            },
+            "required": ["text", "source_url"]
+          }
+        },
+        "check_coverage": {
+          "name": "check_coverage",
+          "description": "Compare collected facts against the plan's sub-questions and report gaps",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "sub_questions": {
+                "type": "array",
+                "items": { "type": "string" },
+                "description": "The open sub-questions to score coverage against"
+              }
+            },
+            "required": ["sub_questions"]
+          }
+        },
+        "save_report": {
+          "name": "save_report",
+          "description": "Persist the synthesized report as a workflow artifact",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "title": {
+                "type": "string",
+                "description": "Report title"
+              },
+              "markdown": {
+                "type": "string",
+                "description": "The full report body in Markdown, with inline citations"
+              }
+            },
+            "required": ["title", "markdown"]
+          }
+        },
+        "check_citations": {
+          "name": "check_citations",
+          "description": "Validate that every claim in a report resolves to a cited, reachable source",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "markdown": {
+                "type": "string",
+                "description": "The report body to verify"
+              }
+            },
+            "required": ["markdown"]
+          }
+        }
+      },
+
+      "evals": [
+        {
+          "id": "no-fabricated-stats",
+          "type": "regex",
+          "trigger": "every_turn",
+          "description": "Discourage precise statistics presented without a citation marker",
+          "params": {
+            "pattern": "\\b\\d+(\\.\\d+)?%(?![^\\[]*\\])",
+            "expect_match": false
+          },
+          "metric": {
+            "name": "stats_are_cited",
+            "type": "boolean"
+          }
+        },
+        {
+          "id": "response-length",
+          "type": "max_length",
+          "trigger": "every_turn",
+          "description": "Keep individual turns within a reasonable length",
+          "params": {
+            "maxLength": 6000
+          },
+          "metric": {
+            "name": "response_length_ok",
+            "type": "boolean"
+          }
+        }
+      ],
+
+      "workflow": {
+        "version": 1,
+        "entry": "plan",
+        "states": {
+          "plan": {
+            "prompt_task": "planner",
+            "description": "Decompose the question into a research plan",
+            "on_event": {
+              "start": "gather"
+            }
+          },
+          "gather": {
+            "prompt_task": "researcher",
+            "description": "Search, fetch, and extract evidence for the open sub-questions",
+            "persistence": "persistent",
+            "max_visits": 4,
+            "on_max_visits": "synthesize",
+            "on_event": {
+              "assess": "assess"
+            },
+            "artifacts": {
+              "evidence": {
+                "type": "application/json",
+                "mode": "append",
+                "description": "Source-attributed facts accumulated across gathering passes"
+              }
+            }
+          },
+          "assess": {
+            "prompt_task": "critic",
+            "description": "Decide whether coverage is sufficient or another pass is needed",
+            "persistence": "persistent",
+            "on_event": {
+              "need_more": "gather",
+              "sufficient": "synthesize"
+            }
+          },
+          "synthesize": {
+            "prompt_task": "writer",
+            "description": "Write the structured, cited report",
+            "persistence": "persistent",
+            "on_event": {
+              "done": "review"
+            },
+            "artifacts": {
+              "report": {
+                "type": "text/markdown",
+                "mode": "replace",
+                "description": "The synthesized, cited research report"
+              }
+            }
+          },
+          "review": {
+            "prompt_task": "reviewer",
+            "description": "Verify citations and quality before completion",
+            "on_event": {
+              "approve": "complete",
+              "revise": "synthesize"
+            }
+          },
+          "complete": {
+            "prompt_task": "closer",
+            "description": "Deliver the approved report and close the session",
+            "terminal": true
+          }
+        },
+        "engine": {
+          "budget": {
+            "max_total_visits": 12,
+            "max_tool_calls": 30,
+            "max_wall_time_sec": 90
+          }
+        }
+      },
+
+      "metadata": {
+        "domain": "research",
+        "language": "en",
+        "tags": ["research", "workflow", "flow", "loop", "budget"]
+      }
+    }
+---
+# Function-mode AgentRuntime over the deep-research pack. One-shot structured
+# I/O: a research `topic` in, a cited `report` out. Invocations record as
+# sessions tagged "function" and surface in the Functions UI.
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: AgentRuntime
+metadata:
+  name: deep-research
+  namespace: dev-agents
+  labels:
+    app.kubernetes.io/name: omnia
+spec:
+  mode: function
+  promptPackRef:
+    name: deep-research
+  facade:
+    type: grpc
+    port: 8080
+  inputSchema:
+    type: object
+    required:
+      - topic
+    properties:
+      topic:
+        type: string
+        description: The research question to investigate
+        example: "What drove the 2023 surge in utility-scale battery storage?"
+  outputSchema:
+    type: object
+    required:
+      - report
+    properties:
+      summary:
+        type: string
+        description: One-paragraph summary of the findings
+      report:
+        type: string
+        description: The full cited research report, in Markdown
+      findings:
+        type: array
+        description: Individual findings, each with its citations
+        items:
+          type: object
+  runtime:
+    replicas: 1
+  providers:
+    - name: default
+      providerRef:
+        name: claude-provider

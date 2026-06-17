@@ -46,6 +46,7 @@ export default defineConfig({
 
         // Visual components (tested via E2E, not unit tests)
         "src/components/agents/**",
+        "src/components/editors/**", // Monaco-based editors (browser-only; E2E-tested)
         "src/components/arena/index.ts", // Arena barrel re-export
         "src/components/arena/project-editor.tsx", // Project editor layout
         "src/components/arena/file-tree.tsx", // File tree browser
@@ -73,6 +74,7 @@ export default defineConfig({
         "src/app/**/layout.tsx",
         "src/app/page.tsx", // Root page
         "src/app/agents/**/page.tsx", // Agent pages (require full context)
+        "src/app/functions/**/page.tsx", // Function pages (compose heavy agent controls)
         "src/app/arena/configs/[name]/page.tsx", // Arena detail pages (complex UI)
         "src/app/arena/jobs/[name]/page.tsx", // Arena detail pages (complex UI)
         "src/app/arena/sources/[name]/page.tsx", // Arena detail pages (complex UI)
@@ -99,6 +101,7 @@ export default defineConfig({
 
         // Other API routes that require K8s infrastructure
         "src/app/api/workspaces/[name]/agents/**",
+        "src/app/api/workspaces/[name]/functions/**", // Function invoke proxy (K8s + facade)
         "src/app/api/workspaces/[name]/costs/**",
         "src/app/api/workspaces/[name]/promptpacks/**",
         "src/app/api/workspaces/[name]/providers/**",

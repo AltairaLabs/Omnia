@@ -7,6 +7,22 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { ToolTestPanel } from "./tool-test-panel";
 import type { ToolRegistry } from "@/types";
 
+// Monaco doesn't render in jsdom; stand in a plain textarea that preserves the
+// editor's value/onChange contract so the arguments-editing tests still work.
+vi.mock("@/components/editors/json-editor", () => ({
+  JsonEditor: ({
+    value,
+    onChange,
+    ariaLabel,
+  }: {
+    value: string;
+    onChange: (v: string) => void;
+    ariaLabel?: string;
+  }) => (
+    <textarea aria-label={ariaLabel} value={value} onChange={(e) => onChange(e.target.value)} />
+  ),
+}));
+
 // Mock the OpenAPI preview hook so tests are deterministic.
 vi.mock("@/hooks/use-openapi-tool-preview", () => ({ useOpenAPIToolPreview: vi.fn() }));
 import { useOpenAPIToolPreview } from "@/hooks/use-openapi-tool-preview";

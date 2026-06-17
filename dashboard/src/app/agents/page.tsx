@@ -12,6 +12,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAgents } from "@/hooks/agents";
 import { useWorkspace } from "@/contexts/workspace-context";
+import { isFunctionMode } from "@/types/agent-runtime";
 import type { AgentRuntimePhase } from "@/types";
 
 type ViewMode = "cards" | "table";
@@ -48,11 +49,16 @@ export default function AgentsPage() {
   // Show loading when either workspace or agents are loading
   const isLoading = isWorkspaceLoading || isAgentsLoading;
 
+  // Exclude function-mode runtimes — those belong on /functions, not here.
+  const agentRuntimes = useMemo(
+    () => (agents ?? []).filter((a) => !isFunctionMode(a.spec)),
+    [agents],
+  );
+
   // Extract unique namespaces
   const allNamespaces = useMemo(() => {
-    if (!agents) return [];
-    return [...new Set(agents.map((a) => a.metadata.namespace).filter((ns): ns is string => !!ns))];
-  }, [agents]);
+    return [...new Set(agentRuntimes.map((a) => a.metadata.namespace).filter((ns): ns is string => !!ns))];
+  }, [agentRuntimes]);
 
   // Initialize selected namespaces when data loads
   const handleNamespaceChange = useCallback((namespaces: string[]) => {
@@ -61,10 +67,9 @@ export default function AgentsPage() {
 
   // Filter by namespace first, then by phase
   const namespaceFilteredAgents = useMemo(() => {
-    if (!agents) return [];
-    if (selectedNamespaces.length === 0) return agents;
-    return agents.filter((a) => a.metadata.namespace && selectedNamespaces.includes(a.metadata.namespace));
-  }, [agents, selectedNamespaces]);
+    if (selectedNamespaces.length === 0) return agentRuntimes;
+    return agentRuntimes.filter((a) => a.metadata.namespace && selectedNamespaces.includes(a.metadata.namespace));
+  }, [agentRuntimes, selectedNamespaces]);
 
   // Filter by phase and sort alphabetically by name
   const filteredAgents = useMemo(() => {

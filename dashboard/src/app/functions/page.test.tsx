@@ -20,6 +20,12 @@ const workspaceSpy = vi.hoisted(() => vi.fn());
 
 vi.mock("@/hooks/agents", () => ({
   useAgents: agentsSpy,
+  // FunctionCard reads cost from this Prometheus-backed hook.
+  useAgentCost: vi.fn(() => ({ data: { totalCost: 0, timeSeries: [] } })),
+}));
+
+vi.mock("@/hooks/resources", () => ({
+  useProvider: vi.fn(() => ({ data: { spec: { type: "anthropic", model: "claude-opus-4-8" } } })),
 }));
 
 vi.mock("@/contexts/workspace-context", () => ({

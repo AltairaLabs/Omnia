@@ -52,13 +52,14 @@ export function AgentTopology({
     // Inline height is required: React Flow measures this container and renders
     // nothing if it computes to 0 (error#004). A Tailwind arbitrary class is not
     // reliable here — match the working topology-graph and set it inline.
-    <div style={{ width: "100%", height: 320 }} className="rounded-lg border bg-card/40">
+    <div style={{ width: "100%", height: 200 }} className="rounded-lg border bg-card/40">
       <ReactFlow
         nodes={nodes}
         edges={edges}
         nodeTypes={agentTopologyNodeTypes}
         fitView
         fitViewOptions={{ padding: 0.06 }}
+        maxZoom={1}
         nodesDraggable={false}
         nodesConnectable={false}
         nodesFocusable={false}
