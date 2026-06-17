@@ -12,6 +12,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"strings"
 
 	runtimeevals "github.com/AltairaLabs/PromptKit/runtime/evals"
 	"github.com/AltairaLabs/PromptKit/runtime/events"
@@ -155,6 +156,22 @@ func (s *SDKRunner) evaluate(
 	trigger runtimeevals.EvalTrigger,
 	labels EvalLabels,
 ) []api.EvaluateResultItem {
+	// An answerless session has nothing to judge: when the provider stream fails
+	// (a 429/5xx yields an empty answer) every assistant turn is empty. Running
+	// quality evals on it would emit a score of 0 that an eval-gated rollout
+	// reads as a quality regression — so an infra failure would masquerade as a
+	// bad answer and could trip an auto-rollback. Skip these sessions entirely
+	// (no judge call, no omnia_eval_<name> series emitted).
+	if !hasEvaluableAnswer(messages) {
+		if s.logger != nil {
+			s.logger.Info("evals skipped",
+				"reason", "noAssistantAnswer",
+				"sessionID", sessionID,
+				"trigger", string(trigger))
+		}
+		return nil
+	}
+
 	opts := sdk.EvaluateOpts{
 		Messages:             ConvertToTypesMessages(messages),
 		SessionID:            sessionID,
@@ -301,6 +318,19 @@ func (s *SDKRunner) recordEvalMetrics(results []runtimeevals.EvalResult, trigger
 		durationSec := float64(r.DurationMs) / 1000.0
 		s.metrics.RecordEvalExecuted(r.Type, triggerStr, status, durationSec)
 	}
+}
+
+// hasEvaluableAnswer reports whether the session contains at least one assistant
+// message with non-empty text content. Sessions where every assistant turn is
+// empty — e.g. the provider stream failed and returned no content — have nothing
+// to evaluate; quality evals on them would emit a misleading score of 0.
+func hasEvaluableAnswer(messages []session.Message) bool {
+	for _, m := range messages {
+		if m.Role == session.RoleAssistant && strings.TrimSpace(m.Content) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // toAnyMap converts a typed map to map[string]any for SDK compatibility.

@@ -11,6 +11,8 @@ package evals
 import (
 	"context"
 	"encoding/json"
+	"io"
+	"log/slog"
 	"testing"
 
 	runtimeevals "github.com/AltairaLabs/PromptKit/runtime/evals"
@@ -203,6 +205,54 @@ func TestSDKRunner_RunSessionEvals(t *testing.T) {
 	items := runner.RunSessionEvals(context.Background(), packData, messages, "sess-1", 1, nil, EvalLabels{})
 	require.Len(t, items, 1)
 	assert.True(t, items[0].Passed)
+}
+
+func TestHasEvaluableAnswer(t *testing.T) {
+	tests := []struct {
+		name     string
+		messages []session.Message
+		want     bool
+	}{
+		{"non-empty assistant", []session.Message{{Role: session.RoleAssistant, Content: "hi"}}, true},
+		{"empty assistant (stream failed)", []session.Message{
+			{Role: session.RoleUser, Content: "q"},
+			{Role: session.RoleAssistant, Content: ""},
+		}, false},
+		{"whitespace-only assistant", []session.Message{{Role: session.RoleAssistant, Content: "   "}}, false},
+		{"no assistant message", []session.Message{{Role: session.RoleUser, Content: "q"}}, false},
+		{"empty list", nil, false},
+		{"answer among empties", []session.Message{
+			{Role: session.RoleAssistant, Content: ""},
+			{Role: session.RoleAssistant, Content: "real"},
+		}, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, hasEvaluableAnswer(tt.messages))
+		})
+	}
+}
+
+func TestSDKRunner_RunSessionEvals_SkipsAnswerlessSession(t *testing.T) {
+	// A logger is wired so the skip path's diagnostic log line is exercised.
+	runner := NewSDKRunner(WithLogger(slog.New(slog.NewTextHandler(io.Discard, nil))))
+	packData := testPackData([]runtimeevals.EvalDef{
+		{
+			ID:      "e1",
+			Type:    containsEvalType,
+			Trigger: runtimeevals.TriggerOnSessionComplete,
+			Params:  map[string]any{"patterns": []any{helloToken}},
+		},
+	})
+	// The assistant turn failed (e.g. provider 429) → empty content. The eval
+	// must be skipped so no score-0 series is emitted for an infra failure.
+	messages := []session.Message{
+		{ID: "m1", Role: session.RoleUser, Content: helloToken},
+		{ID: "m2", Role: session.RoleAssistant, Content: ""},
+	}
+
+	items := runner.RunSessionEvals(context.Background(), packData, messages, "sess-1", 1, nil, EvalLabels{})
+	assert.Empty(t, items)
 }
 
 func TestToAnyMap(t *testing.T) {
