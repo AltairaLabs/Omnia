@@ -202,14 +202,6 @@ func (m *mockStore) RetrieveMultiTierHybrid(_ context.Context, _ memory.MultiTie
 	return &memory.MultiTierResult{Memories: []*memory.MultiTierMemory{}, Total: 0}, nil
 }
 
-func (m *mockStore) SaveInstitutional(_ context.Context, _ *memory.Memory) error { return nil }
-
-func (m *mockStore) ListInstitutional(_ context.Context, _ string, _ memory.ListOptions) ([]*memory.Memory, error) {
-	return nil, nil
-}
-
-func (m *mockStore) DeleteInstitutional(_ context.Context, _, _ string) error { return nil }
-
 func (m *mockStore) SaveAgentScoped(_ context.Context, _ *memory.Memory) error { return nil }
 
 func (m *mockStore) ListAgentScoped(_ context.Context, _, _ string, _ memory.ListOptions) ([]*memory.Memory, error) {

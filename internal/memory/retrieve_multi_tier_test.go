@@ -16,6 +16,18 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// weightedTestRanker is a test-only TierRanker that applies per-tier weights,
+// standing in for the EE MultiplicativeTierRanker (which moved to ee/pkg/memory)
+// so the OSS recall-ranking tests stay self-contained. Same weights -> same scores.
+type weightedTestRanker struct{ w map[Tier]float64 }
+
+func (r weightedTestRanker) Adjust(base float64, t Tier) float64 {
+	if v, ok := r.w[t]; ok {
+		return base * v
+	}
+	return base
+}
+
 func TestBuildMultiTierQuery_RequiresWorkspace(t *testing.T) {
 	_, _, err := buildMultiTierQuery(MultiTierRequest{})
 	if err == nil {
@@ -171,7 +183,7 @@ func TestRankResults_TierPrecedenceOverridesScore(t *testing.T) {
 		{Memory: &Memory{Confidence: 0.5, AccessedAt: now, CreatedAt: now}, Tier: TierAgent, AccessCount: 5},
 		{Memory: &Memory{Confidence: 0.5, AccessedAt: now, CreatedAt: now}, Tier: TierInstitutional, AccessCount: 5},
 	}
-	ranker := MultiplicativeTierRanker{Weights: map[Tier]float64{
+	ranker := weightedTestRanker{w: map[Tier]float64{
 		TierInstitutional: 2.0,
 		TierAgent:         1.0,
 		TierUser:          0.5,

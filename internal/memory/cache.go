@@ -255,22 +255,6 @@ func (c *CachedStore) RetrieveMultiTierHybrid(ctx context.Context, req MultiTier
 	return c.inner.RetrieveMultiTierHybrid(ctx, req, queryEmbedding)
 }
 
-// SaveInstitutional delegates to the inner store then invalidates the
-// workspace-scoped cache so any cached list/search sees the new row.
-func (c *CachedStore) SaveInstitutional(ctx context.Context, mem *Memory) error {
-	if err := c.inner.SaveInstitutional(ctx, mem); err != nil {
-		return err
-	}
-	c.bumpVersion(ctx, map[string]string{ScopeWorkspaceID: mem.Scope[ScopeWorkspaceID]})
-	return nil
-}
-
-// ListInstitutional delegates to the inner store without caching. The admin
-// list path is infrequent and needs to reflect writes immediately.
-func (c *CachedStore) ListInstitutional(ctx context.Context, workspaceID string, opts ListOptions) ([]*Memory, error) {
-	return c.inner.ListInstitutional(ctx, workspaceID, opts)
-}
-
 // Aggregate delegates to the inner store's analytics aggregate (not cached —
 // the dashboard polls it and it must reflect writes immediately). This makes
 // *CachedStore satisfy Aggregator so MemoryService.AggregateMemories reaches
@@ -292,16 +276,6 @@ func (c *CachedStore) Aggregate(ctx context.Context, opts AggregateOptions) ([]A
 // cache to invalidate). Satisfies memory.WorkspaceInvalidator.
 func (c *CachedStore) InvalidateWorkspace(ctx context.Context, workspaceID string) {
 	c.bumpVersion(ctx, map[string]string{ScopeWorkspaceID: workspaceID})
-}
-
-// DeleteInstitutional delegates to the inner store then invalidates the
-// workspace-scoped cache.
-func (c *CachedStore) DeleteInstitutional(ctx context.Context, workspaceID, memoryID string) error {
-	if err := c.inner.DeleteInstitutional(ctx, workspaceID, memoryID); err != nil {
-		return err
-	}
-	c.bumpVersion(ctx, map[string]string{ScopeWorkspaceID: workspaceID})
-	return nil
 }
 
 // SaveAgentScoped delegates to the inner store then invalidates the

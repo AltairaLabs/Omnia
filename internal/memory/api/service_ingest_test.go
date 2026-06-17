@@ -37,10 +37,9 @@ const (
 	testTwoSentences = "First sentence. Second sentence."
 )
 
-// recordingInstitutionalStore embeds mockMemoryStore and overrides
-// SaveInstitutional to record calls for assertion.
+// recordingInstitutionalStore implements eememory.InstitutionalStore and
+// records SaveInstitutional calls for assertion.
 type recordingInstitutionalStore struct {
-	mockMemoryStore
 	saved []*memory.Memory
 }
 
@@ -49,14 +48,28 @@ func (r *recordingInstitutionalStore) SaveInstitutional(_ context.Context, mem *
 	return nil
 }
 
+func (r *recordingInstitutionalStore) ListInstitutional(_ context.Context, _ string, _ memory.ListOptions) ([]*memory.Memory, error) {
+	return nil, nil
+}
+
+func (r *recordingInstitutionalStore) DeleteInstitutional(_ context.Context, _, _ string) error {
+	return nil
+}
+
 // erroringInstitutionalStore fails every SaveInstitutional so the ingest
 // error path (outcome=error) can be exercised.
-type erroringInstitutionalStore struct {
-	mockMemoryStore
-}
+type erroringInstitutionalStore struct{}
 
 func (e *erroringInstitutionalStore) SaveInstitutional(_ context.Context, _ *memory.Memory) error {
 	return assert.AnError
+}
+
+func (e *erroringInstitutionalStore) ListInstitutional(_ context.Context, _ string, _ memory.ListOptions) ([]*memory.Memory, error) {
+	return nil, nil
+}
+
+func (e *erroringInstitutionalStore) DeleteInstitutional(_ context.Context, _, _ string) error {
+	return nil
 }
 
 func TestIngestDocument_ChunkStrategy_SavesItemsWithAboutKey(t *testing.T) {

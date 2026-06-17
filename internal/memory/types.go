@@ -312,9 +312,6 @@ type Store interface {
 	// FTS-only RetrieveMultiTier (the service layer also falls back here
 	// on embed failure / when no embedder is configured).
 	RetrieveMultiTierHybrid(ctx context.Context, req MultiTierRequest, queryEmbedding []float32) (*MultiTierResult, error)
-	SaveInstitutional(ctx context.Context, mem *Memory) error
-	ListInstitutional(ctx context.Context, workspaceID string, opts ListOptions) ([]*Memory, error)
-	DeleteInstitutional(ctx context.Context, workspaceID, memoryID string) error
 	SaveAgentScoped(ctx context.Context, mem *Memory) error
 	ListAgentScoped(ctx context.Context, workspaceID, agentID string, opts ListOptions) ([]*Memory, error)
 	DeleteAgentScoped(ctx context.Context, workspaceID, agentID, memoryID string) error
