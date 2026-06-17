@@ -100,6 +100,7 @@ export default defineConfig({
 
         // Other API routes that require K8s infrastructure
         "src/app/api/workspaces/[name]/agents/**",
+        "src/app/api/workspaces/[name]/functions/**", // Function invoke proxy (K8s + facade)
         "src/app/api/workspaces/[name]/costs/**",
         "src/app/api/workspaces/[name]/promptpacks/**",
         "src/app/api/workspaces/[name]/providers/**",
