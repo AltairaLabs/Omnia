@@ -6,9 +6,10 @@ import { useSidebarStore } from "@/stores/sidebar-store";
 
 // next/navigation
 vi.mock("next/navigation", () => ({ usePathname: () => "/" }));
-// enterprise gates → show everything, enterprise disabled (badge visible)
+// enterprise gates → controllable per-test; default true so existing tests pass
+const mockShowEnterpriseNav = vi.fn(() => ({ showEnterpriseNav: true }));
 vi.mock("@/components/license/license-gate", () => ({
-  useShowEnterpriseNav: () => ({ showEnterpriseNav: true }),
+  useShowEnterpriseNav: () => mockShowEnterpriseNav(),
 }));
 vi.mock("@/hooks/core", () => ({
   useEnterpriseConfig: () => ({ enterpriseEnabled: false }),
@@ -28,6 +29,7 @@ function setMatchMedia(matches: boolean) {
 }
 
 beforeEach(() => {
+  mockShowEnterpriseNav.mockReturnValue({ showEnterpriseNav: true });
   useSidebarStore.setState({ collapsed: false });
   setMatchMedia(false);
   window.localStorage.clear();
@@ -76,5 +78,20 @@ describe("Sidebar", () => {
     render(<Sidebar />);
     expect(screen.queryByText("Omnia")).not.toBeInTheDocument();
     expect(screen.getByLabelText("Overview")).toBeInTheDocument();
+  });
+
+  it("hides Memories and Memory analytics nav when enterprise nav is off", () => {
+    mockShowEnterpriseNav.mockReturnValue({ showEnterpriseNav: false });
+    render(<Sidebar />);
+    expect(screen.queryByText("Memories")).not.toBeInTheDocument();
+    expect(screen.queryByText("Memory analytics")).not.toBeInTheDocument();
+    expect(screen.getByText("Agents")).toBeInTheDocument(); // OSS item still shows
+  });
+
+  it("shows Memories and Memory analytics nav when enterprise nav is on", () => {
+    mockShowEnterpriseNav.mockReturnValue({ showEnterpriseNav: true });
+    render(<Sidebar />);
+    expect(screen.getByText("Memories")).toBeInTheDocument();
+    expect(screen.getByText("Memory analytics")).toBeInTheDocument();
   });
 });
