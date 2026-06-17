@@ -138,7 +138,9 @@ export default function FunctionDetailPage() {
         </div>
 
         <Tabs value={currentTab} onValueChange={handleTabChange}>
-          <TabsList>
+          {/* Horizontal scroll instead of wrap when all ten tabs don't fit. */}
+          <div className="max-w-full overflow-x-auto">
+            <TabsList className="w-max">
             <TabsTrigger value="overview">Overview</TabsTrigger>
             <TabsTrigger value="schema" className="gap-1.5">
               <Braces className="h-4 w-4" />
@@ -170,7 +172,8 @@ export default function FunctionDetailPage() {
             </TabsTrigger>
             <TabsTrigger value="config">Configuration</TabsTrigger>
             <TabsTrigger value="events">Events</TabsTrigger>
-          </TabsList>
+            </TabsList>
+          </div>
 
           <TabsContent value="overview" className="space-y-4 mt-4">
             <AgentTopology
