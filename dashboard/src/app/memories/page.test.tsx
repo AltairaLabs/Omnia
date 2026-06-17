@@ -3,13 +3,14 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const { mockUseWorkspace, mockUseMemoryProjection, mockDeleteMutate, mockGetItem, mockSetItem } =
+const { mockUseWorkspace, mockUseMemoryProjection, mockDeleteMutate, mockGetItem, mockSetItem, mockUseEnterpriseConfig } =
   vi.hoisted(() => ({
     mockUseWorkspace: vi.fn(),
     mockUseMemoryProjection: vi.fn(),
     mockDeleteMutate: vi.fn(),
     mockGetItem: vi.fn((_key: string) => null as string | null),
     mockSetItem: vi.fn(),
+    mockUseEnterpriseConfig: vi.fn(),
   }));
 
 // Mock layout components that pull in complex infrastructure (WorkspaceSwitcher, UserMenu)
@@ -100,6 +101,12 @@ vi.mock("@/components/memories/memory-galaxy", () => ({
   ),
 }));
 
+// EnterpriseGate uses useEnterpriseConfig — mock @/hooks/core so we can
+// control enterpriseEnabled per-test (default: enabled so existing tests pass)
+vi.mock("@/hooks/core", () => ({
+  useEnterpriseConfig: () => mockUseEnterpriseConfig(),
+}));
+
 // FacetRail stub
 vi.mock("@/components/memories/facet-rail", () => ({
   FacetRail: ({ onToggle }: { onToggle: (key: string) => void }) => (
@@ -144,6 +151,7 @@ function makePoint(
 describe("MemoriesPage (galaxy)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockUseEnterpriseConfig.mockReturnValue({ enterpriseEnabled: true, hideEnterprise: false, loading: false });
     mockUseWorkspace.mockReturnValue({ currentWorkspace: { name: "test-ws" } });
     mockUseMemoryProjection.mockReturnValue({
       data: { points: [], total: 0, capped: false, model: "tsne", embeddingModel: "text-embedding-3-small", embeddingDim: 1536, computedAt: new Date().toISOString() },
@@ -346,5 +354,18 @@ describe("MemoriesPage (galaxy)", () => {
     const input = screen.getByTestId("memory-search");
     fireEvent.change(input, { target: { value: "test" } });
     expect((input as HTMLInputElement).value).toBe("test");
+  });
+
+  it("renders the upgrade gate when enterprise is disabled", () => {
+    mockUseEnterpriseConfig.mockReturnValue({ enterpriseEnabled: false, hideEnterprise: false, loading: false });
+    render(<MemoriesPage />);
+    expect(screen.getByText("Enterprise Feature")).toBeInTheDocument();
+    expect(screen.queryByText("Memory Galaxy")).not.toBeInTheDocument();
+  });
+
+  it("renders the galaxy when enterprise is enabled", () => {
+    mockUseEnterpriseConfig.mockReturnValue({ enterpriseEnabled: true, hideEnterprise: false, loading: false });
+    render(<MemoriesPage />);
+    expect(screen.getByText("Memory Galaxy")).toBeInTheDocument();
   });
 });

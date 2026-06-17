@@ -29,6 +29,7 @@ import {
 import type { GalaxyPoint } from "@/lib/memory-galaxy/types";
 import type { Tier } from "@/lib/memory-analytics/types";
 import { useDeleteMemory } from "@/hooks/use-memory-mutations";
+import { EnterpriseGate } from "@/components/license/license-gate";
 
 const MemoryGalaxy = dynamic(
   () => import("@/components/memories/memory-galaxy").then((m) => m.MemoryGalaxy),
@@ -187,60 +188,62 @@ export default function MemoriesPage() {
   const clusterKind = data?.projectionInput === "tfidf" ? "lexical" : "semantic";
 
   return (
-    <div className="flex h-full flex-col">
-      <Header
-        title="Memory Galaxy"
-        description="A semantic map of everything your agents remember, across all four tiers."
-      />
+    <EnterpriseGate featureName="Memory Galaxy">
+      <div className="flex h-full flex-col">
+        <Header
+          title="Memory Galaxy"
+          description="A semantic map of everything your agents remember, across all four tiers."
+        />
 
-      <div className="flex-1 space-y-4 overflow-auto p-6">
-        {hasWorkspace && (
-          <div className="flex flex-wrap items-center gap-3" data-testid="memories-toolbar">
-            <div className="relative min-w-[200px] max-w-sm flex-1">
-              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                placeholder="Search memories..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-9"
-                data-testid="memory-search"
-              />
+        <div className="flex-1 space-y-4 overflow-auto p-6">
+          {hasWorkspace && (
+            <div className="flex flex-wrap items-center gap-3" data-testid="memories-toolbar">
+              <div className="relative min-w-[200px] max-w-sm flex-1">
+                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  placeholder="Search memories..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="pl-9"
+                  data-testid="memory-search"
+                />
+              </div>
+
+              <Select value={colorBy} onValueChange={(v) => setColorBy(v as "tier" | "category")}>
+                <SelectTrigger className="w-[160px]" data-testid="color-by">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="tier">Color: tier</SelectItem>
+                  <SelectItem value="category">Color: category</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
+          )}
 
-            <Select value={colorBy} onValueChange={(v) => setColorBy(v as "tier" | "category")}>
-              <SelectTrigger className="w-[160px]" data-testid="color-by">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="tier">Color: tier</SelectItem>
-                <SelectItem value="category">Color: category</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-        )}
+          {hasWorkspace && <FacetRail facets={facets} hidden={hidden} onToggle={toggleFacet} />}
 
-        {hasWorkspace && <FacetRail facets={facets} hidden={hidden} onToggle={toggleFacet} />}
+          {renderGalaxyBody({
+            hasWorkspace,
+            error,
+            isLoading,
+            status: data?.status,
+            total: data?.total ?? 0,
+            points,
+            colorBy,
+            hidden,
+            search: searchQuery,
+            onDelete: handleDelete,
+          })}
 
-        {renderGalaxyBody({
-          hasWorkspace,
-          error,
-          isLoading,
-          status: data?.status,
-          total: data?.total ?? 0,
-          points,
-          colorBy,
-          hidden,
-          search: searchQuery,
-          onDelete: handleDelete,
-        })}
-
-        {!isLoading && data?.status !== "pending" && (data?.total ?? 0) > 0 && (
-          <p className="text-center text-xs text-muted-foreground">
-            {data?.total} memories · {clusterKind} clustering
-            {data?.capped ? " (showing a capped subset)" : ""}
-          </p>
-        )}
+          {!isLoading && data?.status !== "pending" && (data?.total ?? 0) > 0 && (
+            <p className="text-center text-xs text-muted-foreground">
+              {data?.total} memories · {clusterKind} clustering
+              {data?.capped ? " (showing a capped subset)" : ""}
+            </p>
+          )}
+        </div>
       </div>
-    </div>
+    </EnterpriseGate>
   );
 }
