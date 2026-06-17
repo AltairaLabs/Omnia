@@ -22,6 +22,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
@@ -952,4 +953,51 @@ func TestBuildSessionDeployment_RollsOnGroupRedisChange(t *testing.T) {
 	annoB := depB.Spec.Template.Annotations[annotationConfigHash]
 	assert.NotEqual(t, annoA, annoB,
 		"group-level Redis change must alter the configHash so the pod rolls")
+}
+
+func TestBuildMemoryDeployment_StampsEnterpriseEnv(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		enterprise bool
+		want       string
+	}{
+		{"enabled", true, "true"},
+		{"disabled", false, "false"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sb := &ServiceBuilder{MemoryImage: "memory:test", Enterprise: tc.enterprise}
+			dep := sb.BuildMemoryDeployment("ws", "ns", omniav1alpha1.WorkspaceServiceGroup{Name: "default"})
+			got := deploymentEnvValue(t, dep, "ENTERPRISE_ENABLED")
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestBuildSessionDeployment_StampsEnterpriseEnv(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		enterprise bool
+		want       string
+	}{
+		{"enabled", true, "true"},
+		{"disabled", false, "false"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sb := &ServiceBuilder{SessionImage: "session:test", Enterprise: tc.enterprise}
+			dep := sb.BuildSessionDeployment("ws", "ns", omniav1alpha1.WorkspaceServiceGroup{Name: "default"})
+			assert.Equal(t, tc.want, deploymentEnvValue(t, dep, "ENTERPRISE_ENABLED"))
+		})
+	}
+}
+
+// deploymentEnvValue returns the literal Value of the named env on the first container.
+func deploymentEnvValue(t *testing.T, dep *appsv1.Deployment, name string) string {
+	t.Helper()
+	for _, e := range dep.Spec.Template.Spec.Containers[0].Env {
+		if e.Name == name {
+			return e.Value
+		}
+	}
+	t.Fatalf("env %q not found", name)
+	return ""
 }
