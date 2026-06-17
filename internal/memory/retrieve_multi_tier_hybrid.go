@@ -210,6 +210,8 @@ func (s *PostgresMemoryStore) RetrieveMultiTierHybrid(ctx context.Context, req M
 		return nil, err
 	}
 
+	memories = filterTiers(memories, req.Tiers)
+
 	rankHybridResults(memories, req.Ranker)
 
 	limit := req.Limit

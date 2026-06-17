@@ -88,6 +88,12 @@ type MultiTierRequest struct {
 	// means "unset" — the store substitutes defaultRecallHalfLife per tier,
 	// so direct callers without a MemoryPolicy still get a sane curve.
 	HalfLife TierHalfLife
+
+	// Tiers, when non-empty, restricts the result to memories from the listed
+	// tiers. Nil/empty means "all tiers" (the default — preserves behaviour for
+	// callers that don't restrict). The OSS gate sets {TierUser, TierAgent} to
+	// exclude the enterprise-only institutional / user-for-agent tiers.
+	Tiers []Tier
 }
 
 // MultiTierMemory augments a Memory with the tier it was retrieved from,
@@ -147,6 +153,8 @@ func (s *PostgresMemoryStore) RetrieveMultiTier(ctx context.Context, req MultiTi
 	if err != nil {
 		return nil, err
 	}
+
+	memories = filterTiers(memories, req.Tiers)
 
 	now := req.Now
 	if now.IsZero() {
@@ -439,6 +447,25 @@ func classifyTier(userID, agentID *string) Tier {
 	default:
 		return TierInstitutional
 	}
+}
+
+// filterTiers returns only memories whose tier is in allow. A nil/empty allow
+// list returns the input unchanged (all tiers).
+func filterTiers(memories []*MultiTierMemory, allow []Tier) []*MultiTierMemory {
+	if len(allow) == 0 {
+		return memories
+	}
+	set := make(map[Tier]bool, len(allow))
+	for _, t := range allow {
+		set[t] = true
+	}
+	out := make([]*MultiTierMemory, 0, len(memories))
+	for _, m := range memories {
+		if set[m.Tier] {
+			out = append(out, m)
+		}
+	}
+	return out
 }
 
 // rankResults assigns a Score to each MultiTierMemory and sorts the slice in
