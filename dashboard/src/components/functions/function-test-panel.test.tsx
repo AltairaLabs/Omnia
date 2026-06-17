@@ -120,6 +120,42 @@ describe("FunctionTestPanel", () => {
     expect(textarea.value).toBe("{}");
   });
 
+  it("disables Run and shows a notice when the function is not ready", () => {
+    render(
+      <FunctionTestPanel
+        functionName="deep-research"
+        workspace="demo"
+        inputSchema={inputSchema}
+        ready={false}
+        unavailableReason="Pending"
+      />,
+    );
+    const run = screen.getByRole("button", { name: /Run/ });
+    expect(run).toBeDisabled();
+    expect(screen.getByText(/not ready/i)).toBeInTheDocument();
+    expect(screen.getByText(/Pending/)).toBeInTheDocument();
+  });
+
+  it("does not invoke when the function is not ready", () => {
+    render(
+      <FunctionTestPanel
+        functionName="deep-research"
+        workspace="demo"
+        inputSchema={inputSchema}
+        ready={false}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Run/ }));
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it("enables Run by default (ready omitted)", () => {
+    render(
+      <FunctionTestPanel functionName="deep-research" workspace="demo" inputSchema={inputSchema} />,
+    );
+    expect(screen.getByRole("button", { name: /Run/ })).toBeEnabled();
+  });
+
   it("posts the edited form values as the request body", async () => {
     mockFetch.mockResolvedValue(mkResponse(200, "{}"));
     render(

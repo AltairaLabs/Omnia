@@ -28,6 +28,10 @@ interface FunctionTestPanelProps {
   functionName: string;
   workspace: string;
   inputSchema?: Record<string, unknown>;
+  /** Whether the function is serving requests. When false, Run is disabled. */
+  ready?: boolean;
+  /** Human-readable reason shown when the function isn't ready (e.g. phase). */
+  unavailableReason?: string;
 }
 
 interface InvokeResult {
@@ -226,6 +230,8 @@ export function FunctionTestPanel({
   functionName,
   workspace,
   inputSchema,
+  ready = true,
+  unavailableReason,
 }: Readonly<FunctionTestPanelProps>) {
   const [args, setArgs] = useState<string>(() =>
     inputSchema ? getSampleArgs({ inputSchema }) : "{}",
@@ -240,6 +246,7 @@ export function FunctionTestPanel({
   }, []);
 
   const handleRun = useCallback(async () => {
+    if (!ready) return;
     const parsed = parseJson(args);
     if (parsed.error) {
       setJsonError(parsed.error);
@@ -251,7 +258,7 @@ export function FunctionTestPanel({
     const res = await invoke(workspace, functionName, parsed.value);
     setResult(res);
     setIsRunning(false);
-  }, [args, workspace, functionName]);
+  }, [args, workspace, functionName, ready]);
 
   return (
     <div className="space-y-6">
@@ -271,7 +278,17 @@ export function FunctionTestPanel({
             onChange={handleArgsChange}
           />
 
-          <Button onClick={handleRun} disabled={isRunning} className="w-full">
+          {!ready && (
+            <div className="rounded-lg border border-amber-200 dark:border-amber-900/50 bg-amber-50 dark:bg-amber-950/20 p-3">
+              <p className="text-sm text-amber-700 dark:text-amber-400">
+                This function is not ready
+                {unavailableReason ? ` (${unavailableReason})` : ""} — its runtime or provider may
+                still be starting. The Run button is disabled until it&apos;s serving requests.
+              </p>
+            </div>
+          )}
+
+          <Button onClick={handleRun} disabled={isRunning || !ready} className="w-full">
             {isRunning ? (
               <>
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />

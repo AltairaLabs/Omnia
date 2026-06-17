@@ -228,6 +228,8 @@ export default function FunctionDetailPage() {
               functionName={metadata.name}
               workspace={workspace}
               inputSchema={spec.inputSchema}
+              ready={status?.phase === "Running" && (status?.replicas?.ready ?? 0) > 0}
+              unavailableReason={status?.phase ?? "Unknown"}
             />
           </TabsContent>
 
