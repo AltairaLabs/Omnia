@@ -49,6 +49,13 @@ func (r *AgentRuntimeReconciler) reconcileRollout(
 ) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
 
+	// A promotion in progress owns the reconcile until stable is healthy on the
+	// new config. Hold here so idle cleanup doesn't delete the still-serving
+	// candidate: spec has already advanced, so isRolloutActive is now false.
+	if ar.Status.Rollout != nil && ar.Status.Rollout.Promoting {
+		return r.reconcileRolloutPromote(ctx, ar)
+	}
+
 	if !isRolloutActive(ar) {
 		if r.RolloutMetrics != nil {
 			r.RolloutMetrics.Active.WithLabelValues(ar.Namespace, ar.Name).Set(0)
@@ -112,9 +119,12 @@ func (r *AgentRuntimeReconciler) reconcileRollout(
 		"paused", result.paused,
 		"message", result.message)
 
-	// Apply traffic routing if configured.
+	// Apply traffic routing if configured. Skip on a promote step: promotion
+	// owns its own routing (it holds traffic on the candidate until stable is
+	// healthy), and the promote step carries desiredWeight 0, which would
+	// otherwise momentarily slam traffic onto the not-yet-rolled stable.
 	if ar.Spec.Rollout.TrafficRouting != nil {
-		if !result.paused && !result.analysis {
+		if !result.paused && !result.analysis && !result.promote {
 			if err := r.applyTrafficRouting(ctx, ar, result.desiredWeight); err != nil {
 				return ctrl.Result{}, err
 			}
@@ -177,58 +187,6 @@ func (r *AgentRuntimeReconciler) reconcileRolloutIdle(
 		ConditionTypeRolloutActive, metav1.ConditionFalse,
 		"NoActiveRollout", "no active rollout")
 
-	return ctrl.Result{}, nil
-}
-
-// reconcileRolloutPromote copies candidate overrides into the main spec,
-// deletes the candidate Deployment, and marks the rollout inactive.
-func (r *AgentRuntimeReconciler) reconcileRolloutPromote(
-	ctx context.Context,
-	ar *omniav1alpha1.AgentRuntime,
-) (ctrl.Result, error) {
-	log := logf.FromContext(ctx)
-
-	promote(ar)
-
-	// Reset traffic to 100% stable before removing the candidate.
-	if ar.Spec.Rollout != nil && ar.Spec.Rollout.TrafficRouting != nil {
-		if err := r.resetTrafficRoutingForMode(ctx, ar); err != nil {
-			log.Error(err, "failed to reset traffic routing on promotion")
-		}
-		if ar.Spec.Rollout.TrafficRouting.Istio != nil {
-			if err := r.patchDestinationRuleConsistentHash(ctx, ar.Namespace,
-				ar.Spec.Rollout.TrafficRouting.Istio, ""); err != nil {
-				log.Error(err, "failed to remove consistent hash on promotion")
-			}
-		}
-	}
-
-	if r.RolloutMetrics != nil {
-		r.RolloutMetrics.TrafficWeight.WithLabelValues(ar.Namespace, ar.Name, "stable").Set(100)
-		r.RolloutMetrics.TrafficWeight.WithLabelValues(ar.Namespace, ar.Name, "canary").Set(0)
-		r.RolloutMetrics.Promotions.WithLabelValues(ar.Namespace, ar.Name).Inc()
-	}
-
-	// Persist the spec mutation (promote copies candidate overrides into main spec).
-	// This must happen before status update since they are separate API calls.
-	if err := r.Update(ctx, ar); err != nil {
-		return ctrl.Result{}, fmt.Errorf("persist promotion: %w", err)
-	}
-
-	if err := r.deleteCandidateDeployment(ctx, ar); err != nil {
-		return ctrl.Result{}, fmt.Errorf("delete candidate after promotion: %w", err)
-	}
-
-	ar.Status.Rollout = &omniav1alpha1.RolloutStatus{Active: false, Message: "promoted"}
-	SetCondition(&ar.Status.Conditions, ar.Generation,
-		ConditionTypeRolloutActive, metav1.ConditionFalse,
-		"NoActiveRollout", "rollout promoted successfully")
-
-	if err := r.Status().Update(ctx, ar); err != nil {
-		return ctrl.Result{}, fmt.Errorf("persist promotion status: %w", err)
-	}
-
-	log.Info("rollout promoted", "agentRuntime", ar.Name)
 	return ctrl.Result{}, nil
 }
 

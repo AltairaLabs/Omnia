@@ -23,11 +23,30 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 )
+
+// deleteCanaryOverrideConfigMap removes the candidate's override ConfigMap as
+// part of candidate teardown (promotion finish, rollback, idle cleanup). A
+// no-op when already gone. The CM is owner-ref'd so it is also GC'd with the
+// AgentRuntime, but deleting it here keeps a finished rollout from leaving a
+// stale override behind.
+func (r *AgentRuntimeReconciler) deleteCanaryOverrideConfigMap(ctx context.Context, ar *omniav1alpha1.AgentRuntime) error {
+	cm := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      ar.Name + CanaryConfigMapSuffix,
+			Namespace: ar.Namespace,
+		},
+	}
+	if err := r.Delete(ctx, cm); err != nil && !apierrors.IsNotFound(err) {
+		return fmt.Errorf("delete canary override ConfigMap: %w", err)
+	}
+	return nil
+}
 
 // canaryOverride is the wire contract written into the candidate pod's mounted
 // override ConfigMap and read by the runtime (internal/runtime.CanaryOverride).

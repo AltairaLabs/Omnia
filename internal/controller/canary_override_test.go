@@ -25,6 +25,7 @@ import (
 	"github.com/stretchr/testify/require"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -92,6 +93,28 @@ func TestReconcileCanaryOverrideConfigMap_OwnerRefError(t *testing.T) {
 	r := &AgentRuntimeReconciler{Client: fc, Scheme: scheme}
 
 	require.Error(t, r.reconcileCanaryOverrideConfigMap(context.Background(), ar))
+}
+
+// Candidate teardown removes the override CM, and is idempotent when it's
+// already gone.
+func TestDeleteCanaryOverrideConfigMap(t *testing.T) {
+	scheme := canaryTestScheme(t)
+	ar := &omniav1alpha1.AgentRuntime{}
+	ar.Name = "rag"
+	ar.Namespace = "default"
+	cm := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Name: ar.Name + CanaryConfigMapSuffix, Namespace: ar.Namespace},
+	}
+	fc := fake.NewClientBuilder().WithScheme(scheme).WithObjects(cm).Build()
+	r := &AgentRuntimeReconciler{Client: fc, Scheme: scheme}
+
+	require.NoError(t, r.deleteCanaryOverrideConfigMap(context.Background(), ar))
+	require.Error(t, fc.Get(context.Background(),
+		types.NamespacedName{Name: ar.Name + CanaryConfigMapSuffix, Namespace: ar.Namespace},
+		&corev1.ConfigMap{}), "CM should be deleted")
+
+	// Idempotent: deleting again when already gone is not an error.
+	require.NoError(t, r.deleteCanaryOverrideConfigMap(context.Background(), ar))
 }
 
 // mountCanaryOverride adds the override volume to the pod and the mount to

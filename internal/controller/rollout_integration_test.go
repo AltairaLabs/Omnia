@@ -167,36 +167,54 @@ func TestReconcileRollout_Promotion(t *testing.T) {
 		Build()
 
 	r := &AgentRuntimeReconciler{
-		Client: fakeClient,
-		Scheme: scheme,
+		Client:         fakeClient,
+		Scheme:         scheme,
+		RolloutMetrics: NewRolloutMetrics(prometheus.NewRegistry()),
 	}
 
-	// First create the candidate deployment so promotion can delete it.
+	// Create the candidate deployment (the warm, validated pods).
 	_, err := r.reconcileCandidateDeployment(context.Background(), ar, pp, nil, nil)
 	require.NoError(t, err)
 
+	candKey := types.NamespacedName{Name: candidateDeploymentName(ar.Name), Namespace: ar.Namespace}
+
+	// Phase 1: the promote step ENTERS promotion. Spec advances to the candidate
+	// config (stable will roll to it), but the candidate keeps serving and is
+	// NOT deleted — zero downtime.
 	result, err := r.reconcileRollout(context.Background(), ar, pp, nil, nil)
+	require.NoError(t, err)
+	assert.Positive(t, result.RequeueAfter, "promotion should requeue while stable rolls")
+
+	assert.Equal(t, "v2", *ar.Spec.PromptPackRef.Version, "spec advances to candidate on promote")
+	require.NotNil(t, ar.Status.Rollout)
+	assert.True(t, ar.Status.Rollout.Promoting, "rollout should be promoting")
+	assert.True(t, ar.Status.Rollout.Active)
+	assertCondition(t, ar.Status.Conditions, ConditionTypeRolloutActive, metav1.ConditionTrue)
+
+	require.NoError(t, fakeClient.Get(context.Background(), candKey, &appsv1.Deployment{}),
+		"candidate must still be serving during promotion")
+
+	// The stable Deployment rolls to the new config and becomes healthy.
+	stable := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{Name: ar.Name, Namespace: ar.Namespace},
+		Spec:       appsv1.DeploymentSpec{Replicas: ptr.To[int32](1)},
+		Status:     appsv1.DeploymentStatus{Replicas: 1, UpdatedReplicas: 1, AvailableReplicas: 1},
+	}
+	require.NoError(t, fakeClient.Create(context.Background(), stable))
+
+	// Phase 2: stable healthy on the new config → promotion finishes.
+	result, err = r.reconcileRollout(context.Background(), ar, pp, nil, nil)
 	require.NoError(t, err)
 	assert.Zero(t, result.RequeueAfter)
 
-	// Spec should be promoted: version is now v2.
-	assert.Equal(t, "v2", *ar.Spec.PromptPackRef.Version)
-
-	// Rollout status should be inactive.
 	require.NotNil(t, ar.Status.Rollout)
 	assert.False(t, ar.Status.Rollout.Active)
+	assert.False(t, ar.Status.Rollout.Promoting)
 	assert.Equal(t, "promoted", ar.Status.Rollout.Message)
 
-	// Candidate deployment should be deleted.
-	deploy := &appsv1.Deployment{}
-	key := types.NamespacedName{
-		Name:      candidateDeploymentName(ar.Name),
-		Namespace: ar.Namespace,
-	}
-	err = fakeClient.Get(context.Background(), key, deploy)
-	assert.Error(t, err, "candidate deployment should be deleted after promotion")
-
-	// RolloutActive condition should be False.
+	// Candidate deployment is deleted only now that stable serves the new config.
+	err = fakeClient.Get(context.Background(), candKey, &appsv1.Deployment{})
+	assert.Error(t, err, "candidate deployment should be deleted after promotion finishes")
 	assertCondition(t, ar.Status.Conditions, ConditionTypeRolloutActive, metav1.ConditionFalse)
 }
 
@@ -943,6 +961,19 @@ func TestReconcileRollout_Promotion_RemovesDRConsistentHash(t *testing.T) {
 	_, err := r.reconcileCandidateDeployment(context.Background(), ar, pp, nil, nil)
 	require.NoError(t, err)
 
+	// Phase 1: enter promotion (candidate keeps serving; hash not yet removed).
+	_, err = r.reconcileRollout(context.Background(), ar, pp, nil, nil)
+	require.NoError(t, err)
+
+	// Stable rolls to the new config and becomes healthy.
+	stable := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{Name: ar.Name, Namespace: ar.Namespace},
+		Spec:       appsv1.DeploymentSpec{Replicas: ptr.To[int32](1)},
+		Status:     appsv1.DeploymentStatus{Replicas: 1, UpdatedReplicas: 1, AvailableReplicas: 1},
+	}
+	require.NoError(t, fakeClient.Create(context.Background(), stable))
+
+	// Phase 2: promotion finishes — the consistentHash block is removed here.
 	_, err = r.reconcileRollout(context.Background(), ar, pp, nil, nil)
 	require.NoError(t, err)
 

@@ -182,11 +182,15 @@ func (r *AgentRuntimeReconciler) deleteCandidateDeployment(
 
 	if err := r.Get(ctx, key, deployment); err != nil {
 		if apierrors.IsNotFound(err) {
-			return nil
+			// Deployment already gone; still ensure the override CM is cleaned up.
+			return r.deleteCanaryOverrideConfigMap(ctx, ar)
 		}
 		return err
 	}
 
 	log.V(1).Info("deleting candidate deployment", "name", deployName)
-	return r.Delete(ctx, deployment)
+	if err := r.Delete(ctx, deployment); err != nil {
+		return err
+	}
+	return r.deleteCanaryOverrideConfigMap(ctx, ar)
 }
