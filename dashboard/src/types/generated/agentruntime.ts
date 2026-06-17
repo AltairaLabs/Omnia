@@ -6643,6 +6643,13 @@ export interface AgentRuntimeStatus {
     currentWeight?: number;
     /** message is a human-readable description of the current rollout state. */
     message?: string;
+    /** promoting indicates a promotion is in progress: spec has advanced to the
+     * candidate config and the stable Deployment is rolling to it in the
+     * background, while the validated candidate keeps serving 100% of traffic.
+     * Cleared once the stable Deployment is healthy on the new config and
+     * traffic has cut back to it. This is what makes promotion zero-downtime —
+     * no request is served from a cold/restarting stable pod. */
+    promoting?: boolean;
     /** stableVersion is the version identifier of the current stable deployment. */
     stableVersion?: string;
     /** startedAt is the RFC3339 timestamp when the rollout began. */

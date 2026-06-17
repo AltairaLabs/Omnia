@@ -200,6 +200,7 @@ func TestReconcileCandidateDeployment_MountsCandidatePromptPack(t *testing.T) {
 func TestDeleteCandidateDeployment_NotFound(t *testing.T) {
 	scheme := newTestScheme(t)
 	require.NoError(t, appsv1.AddToScheme(scheme))
+	require.NoError(t, corev1.AddToScheme(scheme)) // candidate teardown also deletes the override CM
 
 	ar := newRolloutTestAR()
 
@@ -220,6 +221,7 @@ func TestDeleteCandidateDeployment_NotFound(t *testing.T) {
 func TestDeleteCandidateDeployment_DeletesExisting(t *testing.T) {
 	scheme := newTestScheme(t)
 	require.NoError(t, appsv1.AddToScheme(scheme))
+	require.NoError(t, corev1.AddToScheme(scheme)) // candidate teardown also deletes the override CM
 
 	ar := newRolloutTestAR()
 

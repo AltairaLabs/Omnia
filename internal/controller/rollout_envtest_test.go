@@ -26,6 +26,10 @@ import (
 // rolloutEnvtestCounter gives each spec a unique resource suffix.
 var rolloutEnvtestCounter uint64
 
+// testRolloutPodImage is a throwaway image for hand-built test Deployments
+// (envtest never schedules pods, so the image is never pulled).
+const testRolloutPodImage = "busybox"
+
 var _ = Describe("AgentRuntime Rollout (envtest)", func() {
 	var (
 		ctx       context.Context
@@ -264,26 +268,66 @@ var _ = Describe("AgentRuntime Rollout (envtest)", func() {
 
 			r := &AgentRuntimeReconciler{Client: k8sClient, Scheme: k8sClient.Scheme()}
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: arName, Namespace: namespace}, live)).To(Succeed())
+
+			// --- Phase 1: promote ENTERS promotion (zero-downtime). ---
 			_, err := r.reconcileRollout(ctx, live, pp, nil, nil)
 			Expect(err).NotTo(HaveOccurred())
 
-			// --- After promote: spec should carry candidate overrides. ---
+			entered := &omniav1alpha1.AgentRuntime{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: arName, Namespace: namespace}, entered)).To(Succeed())
+			Expect(entered.Spec.PromptPackRef.Version).NotTo(BeNil())
+			Expect(*entered.Spec.PromptPackRef.Version).To(Equal("v2"),
+				"spec advances to candidate version on promote")
+			Expect(entered.Status.Rollout).NotTo(BeNil())
+			Expect(entered.Status.Rollout.Promoting).To(BeTrue(), "should be promoting")
+
+			// Candidate must STILL be serving while stable rolls — not deleted.
+			Expect(k8sClient.Get(ctx, types.NamespacedName{
+				Name: candidateDeploymentName(arName), Namespace: namespace,
+			}, &appsv1.Deployment{})).To(Succeed(), "candidate must still serve during promotion")
+
+			// The stable Deployment rolls to the new config and becomes healthy.
+			// envtest has no Deployment controller, so we create it and mark it
+			// complete by hand.
+			stable := &appsv1.Deployment{
+				ObjectMeta: metav1.ObjectMeta{Name: arName, Namespace: namespace},
+				Spec: appsv1.DeploymentSpec{
+					Replicas: ptr.To[int32](1),
+					Selector: &metav1.LabelSelector{MatchLabels: map[string]string{testAppLabelKey: arName}},
+					Template: corev1.PodTemplateSpec{
+						ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{testAppLabelKey: arName}},
+						Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "c", Image: testRolloutPodImage}}},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, stable)).To(Succeed())
+			stable.Status = appsv1.DeploymentStatus{
+				ObservedGeneration: stable.Generation,
+				Replicas:           1,
+				UpdatedReplicas:    1,
+				ReadyReplicas:      1,
+				AvailableReplicas:  1,
+			}
+			Expect(k8sClient.Status().Update(ctx, stable)).To(Succeed())
+
+			// --- Phase 2: stable healthy → promotion finishes. ---
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: arName, Namespace: namespace}, live)).To(Succeed())
+			_, err = r.reconcileRollout(ctx, live, pp, nil, nil)
+			Expect(err).NotTo(HaveOccurred())
+
 			afterPromote := &omniav1alpha1.AgentRuntime{}
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: arName, Namespace: namespace}, afterPromote)).To(Succeed())
-			Expect(afterPromote.Spec.PromptPackRef.Version).NotTo(BeNil())
-			Expect(*afterPromote.Spec.PromptPackRef.Version).To(Equal("v2"),
-				"candidate PromptPackRef version should be promoted into stable spec")
 
-			// Candidate Deployment should have been deleted.
+			// Candidate Deployment is deleted only now that stable serves new config.
 			err = k8sClient.Get(ctx, types.NamespacedName{
 				Name: candidateDeploymentName(arName), Namespace: namespace,
 			}, &appsv1.Deployment{})
 			Expect(apierrors.IsNotFound(err)).To(BeTrue(),
-				"candidate deployment should be deleted after promotion, got: %v", err)
+				"candidate deployment should be deleted after promotion finishes, got: %v", err)
 
-			// Rollout status should report inactive.
 			Expect(afterPromote.Status.Rollout).NotTo(BeNil())
 			Expect(afterPromote.Status.Rollout.Active).To(BeFalse())
+			Expect(afterPromote.Status.Rollout.Promoting).To(BeFalse())
 			Expect(afterPromote.Status.Rollout.Message).To(Equal("promoted"))
 		})
 

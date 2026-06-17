@@ -41,6 +41,14 @@ func LoadFromCRD(ctx context.Context, c client.Client, name, namespace string) (
 		return nil, fmt.Errorf("load AgentRuntime CRD: %w", err)
 	}
 
+	// Apply the canary override (candidate pods only): substitute the
+	// candidate's provider refs onto the in-memory AgentRuntime so the live
+	// provider resolution below runs against the candidate's providers, not the
+	// shared stable spec (#1468). A no-op on stable / non-rollout pods.
+	if err := applyCanaryOverrideFromMount(ar); err != nil {
+		return nil, fmt.Errorf("apply canary override: %w", err)
+	}
+
 	workspaceName, err := k8s.ResolveWorkspaceName(ctx, c, ar.Labels, namespace)
 	if err != nil {
 		return nil, fmt.Errorf("resolve workspace name: %w", err)

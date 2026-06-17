@@ -37,6 +37,34 @@ import (
 // merely still starting.
 const reasonProgressDeadlineExceeded = "ProgressDeadlineExceeded"
 
+// Rollout lifecycle Event reasons. Emitted as Kubernetes Events so the rollout
+// progression is visible as a chronological history (kubectl describe /
+// dashboard timeline) — status conditions only hold current state.
+const (
+	eventReasonRolloutStep    = "RolloutStep"
+	eventReasonPromoting      = "RolloutPromoting"
+	eventReasonPromoted       = "RolloutPromoted"
+	eventReasonRolledBack     = "RolloutRolledBack"
+	eventReasonAnalysisPassed = "RolloutAnalysisPassed"
+	eventReasonAnalysisFailed = "RolloutAnalysisFailed"
+)
+
+// recordRolloutNormal emits a Normal rollout Event (nil-safe for tests without
+// a recorder).
+func (r *AgentRuntimeReconciler) recordRolloutNormal(ar *omniav1alpha1.AgentRuntime, reason, message string) {
+	if r.Recorder != nil {
+		r.Recorder.Event(ar, corev1.EventTypeNormal, reason, message)
+	}
+}
+
+// recordRolloutWarning emits a Warning rollout Event (nil-safe for tests
+// without a recorder).
+func (r *AgentRuntimeReconciler) recordRolloutWarning(ar *omniav1alpha1.AgentRuntime, reason, message string) {
+	if r.Recorder != nil {
+		r.Recorder.Event(ar, corev1.EventTypeWarning, reason, message)
+	}
+}
+
 // reconcileRollout manages the candidate Deployment lifecycle, step progression,
 // promotion, and cleanup. Called from the main Reconcile loop after stable
 // resources are created.
@@ -48,6 +76,13 @@ func (r *AgentRuntimeReconciler) reconcileRollout(
 	providers map[string]*omniav1alpha1.Provider,
 ) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
+
+	// A promotion in progress owns the reconcile until stable is healthy on the
+	// new config. Hold here so idle cleanup doesn't delete the still-serving
+	// candidate: spec has already advanced, so isRolloutActive is now false.
+	if ar.Status.Rollout != nil && ar.Status.Rollout.Promoting {
+		return r.reconcileRolloutPromote(ctx, ar)
+	}
 
 	if !isRolloutActive(ar) {
 		if r.RolloutMetrics != nil {
@@ -95,6 +130,7 @@ func (r *AgentRuntimeReconciler) reconcileRollout(
 			r.RolloutMetrics.TrafficWeight.WithLabelValues(ar.Namespace, ar.Name, "canary").Set(0)
 		}
 		ar.Status.Rollout = &omniav1alpha1.RolloutStatus{Active: false, Message: "auto-rollback: pod unhealthy"}
+		r.recordRolloutWarning(ar, eventReasonRolledBack, "auto-rollback: candidate pods unhealthy (progress deadline exceeded)")
 		SetCondition(&ar.Status.Conditions, ar.Generation,
 			ConditionTypeRolloutActive, metav1.ConditionFalse,
 			"NoActiveRollout", "auto-rollback triggered: pod unhealthy")
@@ -112,9 +148,12 @@ func (r *AgentRuntimeReconciler) reconcileRollout(
 		"paused", result.paused,
 		"message", result.message)
 
-	// Apply traffic routing if configured.
+	// Apply traffic routing if configured. Skip on a promote step: promotion
+	// owns its own routing (it holds traffic on the candidate until stable is
+	// healthy), and the promote step carries desiredWeight 0, which would
+	// otherwise momentarily slam traffic onto the not-yet-rolled stable.
 	if ar.Spec.Rollout.TrafficRouting != nil {
-		if !result.paused && !result.analysis {
+		if !result.paused && !result.analysis && !result.promote {
 			if err := r.applyTrafficRouting(ctx, ar, result.desiredWeight); err != nil {
 				return ctrl.Result{}, err
 			}
@@ -180,58 +219,6 @@ func (r *AgentRuntimeReconciler) reconcileRolloutIdle(
 	return ctrl.Result{}, nil
 }
 
-// reconcileRolloutPromote copies candidate overrides into the main spec,
-// deletes the candidate Deployment, and marks the rollout inactive.
-func (r *AgentRuntimeReconciler) reconcileRolloutPromote(
-	ctx context.Context,
-	ar *omniav1alpha1.AgentRuntime,
-) (ctrl.Result, error) {
-	log := logf.FromContext(ctx)
-
-	promote(ar)
-
-	// Reset traffic to 100% stable before removing the candidate.
-	if ar.Spec.Rollout != nil && ar.Spec.Rollout.TrafficRouting != nil {
-		if err := r.resetTrafficRoutingForMode(ctx, ar); err != nil {
-			log.Error(err, "failed to reset traffic routing on promotion")
-		}
-		if ar.Spec.Rollout.TrafficRouting.Istio != nil {
-			if err := r.patchDestinationRuleConsistentHash(ctx, ar.Namespace,
-				ar.Spec.Rollout.TrafficRouting.Istio, ""); err != nil {
-				log.Error(err, "failed to remove consistent hash on promotion")
-			}
-		}
-	}
-
-	if r.RolloutMetrics != nil {
-		r.RolloutMetrics.TrafficWeight.WithLabelValues(ar.Namespace, ar.Name, "stable").Set(100)
-		r.RolloutMetrics.TrafficWeight.WithLabelValues(ar.Namespace, ar.Name, "canary").Set(0)
-		r.RolloutMetrics.Promotions.WithLabelValues(ar.Namespace, ar.Name).Inc()
-	}
-
-	// Persist the spec mutation (promote copies candidate overrides into main spec).
-	// This must happen before status update since they are separate API calls.
-	if err := r.Update(ctx, ar); err != nil {
-		return ctrl.Result{}, fmt.Errorf("persist promotion: %w", err)
-	}
-
-	if err := r.deleteCandidateDeployment(ctx, ar); err != nil {
-		return ctrl.Result{}, fmt.Errorf("delete candidate after promotion: %w", err)
-	}
-
-	ar.Status.Rollout = &omniav1alpha1.RolloutStatus{Active: false, Message: "promoted"}
-	SetCondition(&ar.Status.Conditions, ar.Generation,
-		ConditionTypeRolloutActive, metav1.ConditionFalse,
-		"NoActiveRollout", "rollout promoted successfully")
-
-	if err := r.Status().Update(ctx, ar); err != nil {
-		return ctrl.Result{}, fmt.Errorf("persist promotion status: %w", err)
-	}
-
-	log.Info("rollout promoted", "agentRuntime", ar.Name)
-	return ctrl.Result{}, nil
-}
-
 // reconcileRolloutUpdateStatus updates the rollout status from the step result
 // and advances to the next step for setWeight steps that are not paused.
 func (r *AgentRuntimeReconciler) reconcileRolloutUpdateStatus(
@@ -290,6 +277,7 @@ func (r *AgentRuntimeReconciler) reconcileRolloutUpdateStatus(
 		if r.RolloutMetrics != nil {
 			r.RolloutMetrics.StepTransitions.WithLabelValues(ar.Namespace, ar.Name, "setWeight").Inc()
 		}
+		r.recordRolloutNormal(ar, eventReasonRolloutStep, result.message)
 	}
 
 	if result.requeueAfter > 0 {
@@ -422,6 +410,7 @@ func (r *AgentRuntimeReconciler) handleAnalysisPass(
 		Message:     fmt.Sprintf("analysis %s passed", result.analysisName),
 	}
 	carryTrafficStatus(ar, prevTraffic)
+	r.recordRolloutNormal(ar, eventReasonAnalysisPassed, fmt.Sprintf("analysis %s passed", result.analysisName))
 	if err := r.Status().Update(ctx, ar); err != nil {
 		return ctrl.Result{}, fmt.Errorf("persist analysis pass status: %w", err)
 	}
@@ -455,6 +444,7 @@ func (r *AgentRuntimeReconciler) handleAnalysisAutoRollback(
 	}
 
 	ar.Status.Rollout = &omniav1alpha1.RolloutStatus{Active: false, Message: "auto-rollback: " + failMessage}
+	r.recordRolloutWarning(ar, eventReasonRolledBack, "auto-rollback: analysis failed: "+failMessage)
 	SetCondition(&ar.Status.Conditions, ar.Generation,
 		ConditionTypeRolloutActive, metav1.ConditionFalse,
 		"NoActiveRollout", "auto-rollback triggered: analysis failed")
@@ -479,6 +469,7 @@ func (r *AgentRuntimeReconciler) handleAnalysisManualPause(
 		Message:     "analysis failed: " + failMessage,
 	}
 	carryTrafficStatus(ar, prevTraffic)
+	r.recordRolloutWarning(ar, eventReasonAnalysisFailed, "analysis failed (manual intervention required): "+failMessage)
 	SetCondition(&ar.Status.Conditions, ar.Generation,
 		ConditionTypeRolloutActive, metav1.ConditionTrue,
 		"AnalysisFailed", "analysis failed: "+failMessage)

@@ -103,6 +103,13 @@ func (r *AgentRuntimeReconciler) reconcileCandidateDeployment(
 		candidatePromptPack = resolved
 	}
 
+	// Deliver the candidate's provider refs to its pods via a mounted CM so the
+	// runtime resolves the candidate's providers, not the shared stable spec
+	// (#1468). Reconciled before the Deployment so the volume reference resolves.
+	if err := r.reconcileCanaryOverrideConfigMap(ctx, ar); err != nil {
+		return nil, err
+	}
+
 	deployment := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      deployName,
@@ -147,6 +154,9 @@ func (r *AgentRuntimeReconciler) reconcileCandidateDeployment(
 		}
 		deployment.Spec.Template.Labels[labelOmniaTrack] = "canary"
 
+		// Mount the candidate's provider-ref override into the candidate pods.
+		mountCanaryOverride(deployment, ar.Name)
+
 		r.preserveWeightedReplicas(ctx, ar, deployment, liveReplicas)
 		return nil
 	})
@@ -172,11 +182,15 @@ func (r *AgentRuntimeReconciler) deleteCandidateDeployment(
 
 	if err := r.Get(ctx, key, deployment); err != nil {
 		if apierrors.IsNotFound(err) {
-			return nil
+			// Deployment already gone; still ensure the override CM is cleaned up.
+			return r.deleteCanaryOverrideConfigMap(ctx, ar)
 		}
 		return err
 	}
 
 	log.V(1).Info("deleting candidate deployment", "name", deployName)
-	return r.Delete(ctx, deployment)
+	if err := r.Delete(ctx, deployment); err != nil {
+		return err
+	}
+	return r.deleteCanaryOverrideConfigMap(ctx, ar)
 }

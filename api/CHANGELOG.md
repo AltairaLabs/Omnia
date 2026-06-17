@@ -10,6 +10,19 @@ or `api/proto/`, add an entry below with the date, affected API, and reason.
 
 ## Unreleased
 
+### Added (CRD: AgentRuntime rollout zero-downtime promotion)
+
+- **`AgentRuntime.status.rollout.promoting`** (bool) — set while a promotion is
+  in progress: spec has advanced to the candidate config and the stable
+  Deployment is rolling to it in the background, while the validated candidate
+  keeps serving 100% of traffic. Cleared once stable is healthy on the new
+  config and traffic has cut back. Makes promotion zero-downtime (no request is
+  served from a cold/restarting stable pod). Consumers can surface a "promoting"
+  state distinct from an active step rollout.
+- The operator now also writes a per-agent `<agent>-canary-config` ConfigMap
+  (candidate provider refs) mounted into candidate pods so the runtime resolves
+  the candidate's providers rather than the shared stable spec (closes #1468).
+
 ### Added (runtime/facade: duplex audio transport)
 
 New OSS low-latency bidirectional audio transport between the Facade WebSocket and the Runtime gRPC layer.
