@@ -21,9 +21,34 @@
 "use client";
 
 import { useCallback, useMemo } from "react";
-import Editor, { type OnChange } from "@monaco-editor/react";
+import Editor, { type OnChange, type BeforeMount } from "@monaco-editor/react";
+import { useTheme } from "next-themes";
 import { AlertTriangle, CheckCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
+
+const THEME_LIGHT = "omnia-json-light";
+const THEME_DARK = "omnia-json-dark";
+
+/**
+ * Register themes that inherit vs / vs-dark but drop the editor background to
+ * transparent, so the editor adopts the surrounding card's themed background
+ * instead of Monaco's stock white / #1e1e1e.
+ */
+const defineThemes: BeforeMount = (monaco) => {
+  const transparent = { "editor.background": "#00000000", "editorGutter.background": "#00000000" };
+  monaco.editor.defineTheme(THEME_LIGHT, {
+    base: "vs",
+    inherit: true,
+    rules: [],
+    colors: transparent,
+  });
+  monaco.editor.defineTheme(THEME_DARK, {
+    base: "vs-dark",
+    inherit: true,
+    rules: [],
+    colors: transparent,
+  });
+};
 
 interface JsonEditorProps {
   value: string;
@@ -60,17 +85,20 @@ export function JsonEditor({
   height = 160,
   className,
 }: Readonly<JsonEditorProps>) {
+  const { resolvedTheme } = useTheme();
+  const theme = resolvedTheme === "light" ? THEME_LIGHT : THEME_DARK;
   const validation = useMemo(() => validateJson(value), [value]);
   const handleChange: OnChange = useCallback((v) => onChange(v ?? ""), [onChange]);
 
   return (
-    <div className={cn("rounded-md border overflow-hidden", className)}>
+    <div className={cn("rounded-md border overflow-hidden bg-muted/30", className)}>
       <Editor
         height={height}
         language="json"
         value={value}
         onChange={handleChange}
-        theme="vs-dark"
+        beforeMount={defineThemes}
+        theme={theme}
         options={{
           readOnly,
           ariaLabel,
