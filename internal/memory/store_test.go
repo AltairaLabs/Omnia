@@ -1584,3 +1584,11 @@ func TestPostgresMemoryStore_BatchDelete_MissingWorkspace(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "workspace_id")
 }
+
+// must is a shared test helper that calls t.Fatal if err is non-nil.
+func must(t *testing.T, err error) {
+	t.Helper()
+	if err != nil {
+		t.Fatal(err)
+	}
+}
