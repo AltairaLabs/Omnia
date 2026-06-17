@@ -93,6 +93,7 @@ func (r *AgentRuntimeReconciler) enterPromotion(
 		return ctrl.Result{}, fmt.Errorf("persist promotion status: %w", err)
 	}
 
+	r.recordRolloutNormal(ar, eventReasonPromoting, "promotion started: stable rolling to the new config, candidate still serving 100%")
 	log.Info("rollout promotion started", "agentRuntime", ar.Name)
 	return ctrl.Result{RequeueAfter: promotePollInterval}, nil
 }
@@ -158,6 +159,7 @@ func (r *AgentRuntimeReconciler) finishPromotion(
 		return ctrl.Result{}, fmt.Errorf("persist promotion-finished status: %w", err)
 	}
 
+	r.recordRolloutNormal(ar, eventReasonPromoted, "promotion complete: stable healthy on the new config, traffic cut over, candidate removed")
 	log.Info("rollout promoted", "agentRuntime", ar.Name)
 	return ctrl.Result{}, nil
 }

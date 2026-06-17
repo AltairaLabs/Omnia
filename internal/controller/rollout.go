@@ -37,6 +37,34 @@ import (
 // merely still starting.
 const reasonProgressDeadlineExceeded = "ProgressDeadlineExceeded"
 
+// Rollout lifecycle Event reasons. Emitted as Kubernetes Events so the rollout
+// progression is visible as a chronological history (kubectl describe /
+// dashboard timeline) — status conditions only hold current state.
+const (
+	eventReasonRolloutStep    = "RolloutStep"
+	eventReasonPromoting      = "RolloutPromoting"
+	eventReasonPromoted       = "RolloutPromoted"
+	eventReasonRolledBack     = "RolloutRolledBack"
+	eventReasonAnalysisPassed = "RolloutAnalysisPassed"
+	eventReasonAnalysisFailed = "RolloutAnalysisFailed"
+)
+
+// recordRolloutNormal emits a Normal rollout Event (nil-safe for tests without
+// a recorder).
+func (r *AgentRuntimeReconciler) recordRolloutNormal(ar *omniav1alpha1.AgentRuntime, reason, message string) {
+	if r.Recorder != nil {
+		r.Recorder.Event(ar, corev1.EventTypeNormal, reason, message)
+	}
+}
+
+// recordRolloutWarning emits a Warning rollout Event (nil-safe for tests
+// without a recorder).
+func (r *AgentRuntimeReconciler) recordRolloutWarning(ar *omniav1alpha1.AgentRuntime, reason, message string) {
+	if r.Recorder != nil {
+		r.Recorder.Event(ar, corev1.EventTypeWarning, reason, message)
+	}
+}
+
 // reconcileRollout manages the candidate Deployment lifecycle, step progression,
 // promotion, and cleanup. Called from the main Reconcile loop after stable
 // resources are created.
@@ -102,6 +130,7 @@ func (r *AgentRuntimeReconciler) reconcileRollout(
 			r.RolloutMetrics.TrafficWeight.WithLabelValues(ar.Namespace, ar.Name, "canary").Set(0)
 		}
 		ar.Status.Rollout = &omniav1alpha1.RolloutStatus{Active: false, Message: "auto-rollback: pod unhealthy"}
+		r.recordRolloutWarning(ar, eventReasonRolledBack, "auto-rollback: candidate pods unhealthy (progress deadline exceeded)")
 		SetCondition(&ar.Status.Conditions, ar.Generation,
 			ConditionTypeRolloutActive, metav1.ConditionFalse,
 			"NoActiveRollout", "auto-rollback triggered: pod unhealthy")
@@ -248,6 +277,7 @@ func (r *AgentRuntimeReconciler) reconcileRolloutUpdateStatus(
 		if r.RolloutMetrics != nil {
 			r.RolloutMetrics.StepTransitions.WithLabelValues(ar.Namespace, ar.Name, "setWeight").Inc()
 		}
+		r.recordRolloutNormal(ar, eventReasonRolloutStep, result.message)
 	}
 
 	if result.requeueAfter > 0 {
@@ -380,6 +410,7 @@ func (r *AgentRuntimeReconciler) handleAnalysisPass(
 		Message:     fmt.Sprintf("analysis %s passed", result.analysisName),
 	}
 	carryTrafficStatus(ar, prevTraffic)
+	r.recordRolloutNormal(ar, eventReasonAnalysisPassed, fmt.Sprintf("analysis %s passed", result.analysisName))
 	if err := r.Status().Update(ctx, ar); err != nil {
 		return ctrl.Result{}, fmt.Errorf("persist analysis pass status: %w", err)
 	}
@@ -413,6 +444,7 @@ func (r *AgentRuntimeReconciler) handleAnalysisAutoRollback(
 	}
 
 	ar.Status.Rollout = &omniav1alpha1.RolloutStatus{Active: false, Message: "auto-rollback: " + failMessage}
+	r.recordRolloutWarning(ar, eventReasonRolledBack, "auto-rollback: analysis failed: "+failMessage)
 	SetCondition(&ar.Status.Conditions, ar.Generation,
 		ConditionTypeRolloutActive, metav1.ConditionFalse,
 		"NoActiveRollout", "auto-rollback triggered: analysis failed")
@@ -437,6 +469,7 @@ func (r *AgentRuntimeReconciler) handleAnalysisManualPause(
 		Message:     "analysis failed: " + failMessage,
 	}
 	carryTrafficStatus(ar, prevTraffic)
+	r.recordRolloutWarning(ar, eventReasonAnalysisFailed, "analysis failed (manual intervention required): "+failMessage)
 	SetCondition(&ar.Status.Conditions, ar.Generation,
 		ConditionTypeRolloutActive, metav1.ConditionTrue,
 		"AnalysisFailed", "analysis failed: "+failMessage)

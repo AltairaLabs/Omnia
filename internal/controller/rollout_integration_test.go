@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -31,6 +32,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/record"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
@@ -166,10 +168,12 @@ func TestReconcileRollout_Promotion(t *testing.T) {
 		WithStatusSubresource(ar).
 		Build()
 
+	rec := record.NewFakeRecorder(20)
 	r := &AgentRuntimeReconciler{
 		Client:         fakeClient,
 		Scheme:         scheme,
 		RolloutMetrics: NewRolloutMetrics(prometheus.NewRegistry()),
+		Recorder:       rec,
 	}
 
 	// Create the candidate deployment (the warm, validated pods).
@@ -216,6 +220,24 @@ func TestReconcileRollout_Promotion(t *testing.T) {
 	err = fakeClient.Get(context.Background(), candKey, &appsv1.Deployment{})
 	assert.Error(t, err, "candidate deployment should be deleted after promotion finishes")
 	assertCondition(t, ar.Status.Conditions, ConditionTypeRolloutActive, metav1.ConditionFalse)
+
+	// Lifecycle Events form the rollout history: promoting (enter) + promoted (finish).
+	gotPromoting, gotPromoted := false, false
+	for drained := false; !drained; {
+		select {
+		case e := <-rec.Events:
+			if strings.Contains(e, eventReasonPromoting) {
+				gotPromoting = true
+			}
+			if strings.Contains(e, eventReasonPromoted) {
+				gotPromoted = true
+			}
+		default:
+			drained = true
+		}
+	}
+	assert.True(t, gotPromoting, "expected a RolloutPromoting event")
+	assert.True(t, gotPromoted, "expected a RolloutPromoted event")
 }
 
 func TestReconcileRollout_PauseStep_RequeuesAfterDuration(t *testing.T) {

@@ -25,11 +25,42 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/tools/record"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 )
+
+// The rollout Event helpers are nil-safe (no recorder in some tests) and emit
+// the expected type+reason when a recorder is present.
+func TestRecordRolloutEventHelpers(t *testing.T) {
+	ar := newRolloutTestAR()
+
+	// nil recorder → no panic.
+	(&AgentRuntimeReconciler{}).recordRolloutNormal(ar, eventReasonPromoted, "m")
+	(&AgentRuntimeReconciler{}).recordRolloutWarning(ar, eventReasonRolledBack, "m")
+
+	rec := record.NewFakeRecorder(5)
+	r := &AgentRuntimeReconciler{Recorder: rec}
+	r.recordRolloutNormal(ar, eventReasonPromoted, "promoted")
+	r.recordRolloutWarning(ar, eventReasonRolledBack, "rolled back")
+
+	var got []string
+	for drained := false; !drained; {
+		select {
+		case e := <-rec.Events:
+			got = append(got, e)
+		default:
+			drained = true
+		}
+	}
+	require.Len(t, got, 2)
+	assert.Contains(t, got[0], eventReasonPromoted)
+	assert.Contains(t, got[0], "Normal")
+	assert.Contains(t, got[1], eventReasonRolledBack)
+	assert.Contains(t, got[1], "Warning")
+}
 
 func TestDeploymentRolloutComplete(t *testing.T) {
 	mk := func(gen, observed int64, want, updated, avail, total int32) *appsv1.Deployment {
