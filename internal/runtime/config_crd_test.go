@@ -24,6 +24,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -461,6 +462,26 @@ func TestLoadFromCRD_InlineEvalGroups_Custom(t *testing.T) {
 	cfg, err := LoadFromCRD(context.Background(), c, "agent", "test-ns")
 	require.NoError(t, err)
 	assert.Equal(t, []string{"pii-checks", "brand-voice"}, cfg.InlineEvalGroups)
+}
+
+func TestLoadFromCRD_FunctionOutputFormat(t *testing.T) {
+	ar := &v1alpha1.AgentRuntime{
+		ObjectMeta: metav1.ObjectMeta{Name: "fn-agent", Namespace: "test-ns"},
+		Spec: v1alpha1.AgentRuntimeSpec{
+			PromptPackRef: v1alpha1.PromptPackRef{Name: "pack"},
+			Facade:        v1alpha1.FacadeConfig{Type: v1alpha1.FacadeTypeGRPC},
+			Mode:          v1alpha1.AgentRuntimeModeFunction,
+			InputSchema:   &apiextensionsv1.JSON{Raw: []byte(`{"type":"object"}`)},
+			OutputSchema:  &apiextensionsv1.JSON{Raw: []byte(`{"type":"object"}`)},
+			OutputFormat:  "json_schema",
+		},
+	}
+	c := buildTestClient(ar)
+	cfg, err := LoadFromCRD(context.Background(), c, "fn-agent", "test-ns")
+	require.NoError(t, err)
+	assert.Equal(t, "function", cfg.Mode)
+	assert.Equal(t, "json_schema", cfg.OutputFormat)
+	assert.JSONEq(t, `{"type":"object"}`, string(cfg.OutputSchemaJSON))
 }
 
 func TestLoadFromCRD_AgentRuntimeNotFound(t *testing.T) {

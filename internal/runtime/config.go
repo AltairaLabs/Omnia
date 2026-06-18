@@ -42,6 +42,12 @@ type Config struct {
 	PromptPackVersion   string // Version of the PromptPack (for tracing)
 	PromptName          string // Name of the prompt to use from the pack
 
+	// Function configuration (spec.mode == "function"). Consumed by
+	// resolveResponseFormat to constrain the provider's output (#1483).
+	Mode             string // AgentRuntime spec.mode ("agent" or "function")
+	OutputFormat     string // spec.outputFormat ("", "text", "json", "json_schema"); "" resolves to the default
+	OutputSchemaJSON []byte // raw spec.outputSchema bytes, used as the json_schema response-format schema
+
 	// Session configuration
 	SessionType string        // "memory" or "redis"
 	SessionURL  string        // Redis URL for session store

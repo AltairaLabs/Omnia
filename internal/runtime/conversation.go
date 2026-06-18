@@ -142,6 +142,17 @@ func (s *Server) buildConversationOptions(ctx context.Context, sessionID string)
 	// Wire each resolved non-default provider to its role's SDK option.
 	opts = append(opts, s.extraProviderOptions(log)...)
 
+	// Function-mode response-format constraint (#1483). resolveResponseFormat
+	// returns nil for agent mode and for outputFormat "text", so this is a
+	// no-op outside constrained function invocations.
+	if rf := resolveResponseFormat(s.mode, s.outputFormat, s.outputSchemaJSON, s.agentName); rf != nil {
+		opts = append(opts, sdk.WithResponseFormat(rf))
+		log.V(1).Info("response format wired",
+			"mode", s.mode,
+			"outputFormat", s.outputFormat,
+			"formatType", string(rf.Type))
+	}
+
 	// Wire eval middleware when collector is configured
 	evalOpts := s.buildEvalOptions()
 	log.V(1).Info("eval options wired",

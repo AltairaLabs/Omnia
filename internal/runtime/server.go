@@ -67,6 +67,9 @@ type Server struct {
 	stateStore        statestore.Store
 	mockProvider      bool
 	mockConfigPath    string
+	mode              string // AgentRuntime spec.mode; gates function response-format (#1483)
+	outputFormat      string // spec.outputFormat
+	outputSchemaJSON  []byte // spec.outputSchema bytes for json_schema mode
 	sdkOptions        []sdk.Option
 	conversations     map[string]*sdk.Conversation
 	turnIndices       map[string]int      // Track turn count per session
@@ -197,6 +200,25 @@ func WithPromptPackName(name string) ServerOption {
 	return func(s *Server) {
 		s.promptPackName = name
 	}
+}
+
+// WithFunctionOutputFormat configures the function-mode response format from
+// the AgentRuntime CRD (spec.mode / spec.outputFormat / spec.outputSchema). The
+// actual sdk.WithResponseFormat option is built lazily in
+// buildConversationOptions, where the agent name (used as the schema name) is
+// available. A no-op for non-function modes (see resolveResponseFormat). (#1483)
+func WithFunctionOutputFormat(mode, outputFormat string, outputSchema []byte) ServerOption {
+	return func(s *Server) {
+		s.mode = mode
+		s.outputFormat = outputFormat
+		s.outputSchemaJSON = outputSchema
+	}
+}
+
+// ServerOutputFormat returns the configured mode and outputFormat. Exposed for
+// wiring tests under cmd/runtime; production code should not depend on it.
+func ServerOutputFormat(s *Server) (mode, outputFormat string) {
+	return s.mode, s.outputFormat
 }
 
 // WithPromptPackVersion sets the PromptPack version for tracing.

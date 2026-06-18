@@ -472,6 +472,7 @@ func configDerivedServerOpts(cfg *pkruntime.Config) []pkruntime.ServerOption {
 		pkruntime.WithTruncationStrategy(cfg.TruncationStrategy),
 		pkruntime.WithMediaBasePath(cfg.MediaBasePath),
 		pkruntime.WithMemoryRetrieval(cfg.MemoryStrategy, cfg.MemoryDenyCEL, cfg.MemoryLimit),
+		pkruntime.WithFunctionOutputFormat(cfg.Mode, cfg.OutputFormat, cfg.OutputSchemaJSON),
 	}
 }
 

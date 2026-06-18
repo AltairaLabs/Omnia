@@ -73,11 +73,19 @@ spec:
         type: string
 ```
 
+By default the runtime constrains the model to emit JSON conforming to
+`spec.outputSchema` (provider structured output). Set `spec.outputFormat` to
+change this: `json_schema` (default), `json` (valid JSON, shape unenforced), or
+`text` (free-form, validated only post-hoc by the facade). If the provider
+cannot honour the requested format the invocation fails — see the
+[AgentRuntime reference](/reference/agentruntime/#outputformat).
+
 The CEL validation gates on the CRD enforce:
 
 - `spec.mode == "function"` requires both `spec.inputSchema` and
   `spec.outputSchema`.
-- `spec.mode == "agent"` (the default) forbids those schemas.
+- `spec.mode == "agent"` (the default) forbids those schemas (and
+  `spec.outputFormat`).
 - `spec.mode == "function"` rejects `spec.facade.type == "websocket"` —
   use `grpc`.
 

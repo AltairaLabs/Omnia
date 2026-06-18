@@ -10,6 +10,21 @@ or `api/proto/`, add an entry below with the date, affected API, and reason.
 
 ## Unreleased
 
+### Added (CRD: AgentRuntime function output format)
+
+- **`AgentRuntime.spec.outputFormat`** (enum `text|json|json_schema`, optional,
+  CEL-gated to `mode: function`) — controls how the runtime constrains the
+  model's response in function mode: `text` = free-form (validated post-hoc by
+  the facade), `json` = provider JSON mode (valid JSON, shape unenforced),
+  `json_schema` = provider structured output bound to `spec.outputSchema`. When
+  unset on a function-mode runtime it defaults to `json_schema`. The runtime sets
+  PromptKit `WithResponseFormat` accordingly; provider format errors propagate
+  (fail-fast, no fallback). (#1483)
+- **Migration:** existing function deployments on a provider/model without
+  structured-output support will fail under the new `json_schema` default; set
+  `outputFormat: text` (or `json`) explicitly, or use a provider that supports
+  structured outputs.
+
 ### Added (CRD: AgentRuntime rollout zero-downtime promotion)
 
 - **`AgentRuntime.status.rollout.promoting`** (bool) — set while a promotion is

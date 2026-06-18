@@ -68,6 +68,29 @@ spec:
         type: string
 ```
 
+### `outputFormat`
+
+Controls how the runtime constrains the model's response in function mode.
+Optional; forbidden when `mode: agent` (CEL-gated). When unset on a
+function-mode runtime it defaults to `json_schema`.
+
+| Value         | Behaviour |
+|---------------|-----------|
+| `text`        | Free-form generation; the facade still validates the output against `outputSchema` (HTTP 502 on mismatch). |
+| `json`        | Provider JSON mode — valid JSON object, shape not enforced. |
+| `json_schema` | Provider structured output bound to `outputSchema` (default). |
+
+The runtime sets the provider response format via PromptKit. If the configured
+provider/model cannot honour the requested format, the invocation **fails**
+(no silent fallback) — set `outputFormat: text` (or `json`), or use a provider
+that supports structured outputs.
+
+```yaml
+spec:
+  mode: function
+  outputFormat: json_schema
+```
+
 ### `promptPackRef`
 
 Reference to the PromptPack containing agent prompts.

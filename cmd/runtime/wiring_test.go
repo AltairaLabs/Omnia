@@ -294,3 +294,31 @@ func TestConfigDerivedServerOpts_EmptyMemoryRetrievalIsHarmless(t *testing.T) {
 		t.Errorf("expected 0 limit for unconfigured memory, got %d", gotLimit)
 	}
 }
+
+// TestConfigDerivedServerOpts_WiresOutputFormat is a wiring assertion that the
+// function-mode response format reaches the server: setting it on Config,
+// running configDerivedServerOpts, and reading back via ServerOutputFormat()
+// confirms WithFunctionOutputFormat is actually in the option list (#1483).
+func TestConfigDerivedServerOpts_WiresOutputFormat(t *testing.T) {
+	cfg := &pkruntime.Config{
+		AgentName:        "wiring-test",
+		Namespace:        "wiring",
+		Mode:             "function",
+		OutputFormat:     "json_schema",
+		OutputSchemaJSON: []byte(`{"type":"object"}`),
+	}
+	opts := configDerivedServerOpts(cfg)
+
+	srv := pkruntime.NewServer(opts...)
+	t.Cleanup(func() { _ = srv.Close() })
+
+	gotMode, gotFormat := pkruntime.ServerOutputFormat(srv)
+	if gotMode != "function" {
+		t.Errorf("Mode not propagated: got %q, want %q — "+
+			"WithFunctionOutputFormat is missing from configDerivedServerOpts", gotMode, "function")
+	}
+	if gotFormat != "json_schema" {
+		t.Errorf("OutputFormat not propagated: got %q, want %q — "+
+			"WithFunctionOutputFormat is missing from configDerivedServerOpts", gotFormat, "json_schema")
+	}
+}

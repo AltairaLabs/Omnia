@@ -2619,6 +2619,13 @@ export interface AgentRuntimeSpec {
    * When set to "function", spec.inputSchema and spec.outputSchema are
    * required and the facade type must not be 'websocket'. */
   mode?: "agent" | "function";
+  /** outputFormat controls how the model is asked to format its response in
+   * function mode. "text" = free-form (validated post-hoc by the facade),
+   * "json" = provider JSON mode (valid JSON, shape unenforced), "json_schema"
+   * = provider structured output bound to outputSchema. When unset on a
+   * function-mode runtime it defaults to "json_schema". Forbidden when
+   * spec.mode is not 'function' (CEL-gated). */
+  outputFormat?: "text" | "json" | "json_schema";
   /** outputSchema is the JSON Schema that the Function's response is
    * validated against before being returned to the caller. A
    * non-conforming model output is rejected with HTTP 502 and the raw

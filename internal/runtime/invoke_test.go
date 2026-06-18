@@ -80,6 +80,14 @@ func newRecordingProvider() *recordingProvider {
 	return &recordingProvider{Provider: mock.NewProvider("rec", "rec-model", false)}
 }
 
+// responseFormat returns the response format the runtime set on the captured
+// PredictionRequest (nil if none). Used by the #1483 output-format tests.
+func (r *recordingProvider) responseFormat() *providers.ResponseFormat {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.last.ResponseFormat
+}
+
 func (r *recordingProvider) PredictStream(_ context.Context, req providers.PredictionRequest) (<-chan providers.StreamChunk, error) {
 	r.mu.Lock()
 	r.last = req
@@ -178,6 +186,57 @@ func TestServer_Invoke_KeepsInputJSONAsUserTurn(t *testing.T) {
 	// turn so models that read structured input directly keep working.
 	assert.Contains(t, rec.userText(), input,
 		"the raw input JSON should remain the user-turn message")
+}
+
+func TestServer_Invoke_AppliesJSONSchemaResponseFormat(t *testing.T) {
+	rec := newRecordingProvider()
+	tmpDir := t.TempDir()
+	packPath := tmpDir + "/pack.promptpack"
+	require.NoError(t, writeTestFile(t, packPath, invokeTemplatePack))
+
+	schema := []byte(`{"type":"object","properties":{"topic":{"type":"string"}}}`)
+	s := NewServer(
+		WithLogger(logr.Discard()),
+		WithPackPath(packPath),
+		WithPromptName("default"),
+		WithAgentIdentity("deep-research", "default"),
+		WithFunctionOutputFormat("function", "json_schema", schema),
+		WithSDKOptions(sdk.WithProvider(rec)),
+	)
+
+	_, err := s.Invoke(context.Background(), &runtimev1.InvocationRequest{
+		InvocationId: "rf-1",
+		InputJson:    `{"topic":"x"}`,
+	})
+	require.NoError(t, err)
+
+	rf := rec.responseFormat()
+	require.NotNil(t, rf, "function json_schema mode must set a provider response format")
+	assert.Equal(t, providers.ResponseFormatJSONSchema, rf.Type)
+	assert.Equal(t, "deep-research", rf.SchemaName)
+}
+
+func TestServer_Invoke_TextFormatSetsNoResponseFormat(t *testing.T) {
+	rec := newRecordingProvider()
+	tmpDir := t.TempDir()
+	packPath := tmpDir + "/pack.promptpack"
+	require.NoError(t, writeTestFile(t, packPath, invokeTemplatePack))
+
+	s := NewServer(
+		WithLogger(logr.Discard()),
+		WithPackPath(packPath),
+		WithPromptName("default"),
+		WithAgentIdentity("deep-research", "default"),
+		WithFunctionOutputFormat("function", "text", nil),
+		WithSDKOptions(sdk.WithProvider(rec)),
+	)
+
+	_, err := s.Invoke(context.Background(), &runtimev1.InvocationRequest{
+		InvocationId: "rf-2",
+		InputJson:    `{"topic":"x"}`,
+	})
+	require.NoError(t, err)
+	assert.Nil(t, rec.responseFormat(), "text mode must not set a response format")
 }
 
 // invokeTestPack is the minimal pack body shared by every Invoke test.
