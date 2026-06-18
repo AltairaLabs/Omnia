@@ -59,14 +59,14 @@ func validClaims(now time.Time) IdentityClaims {
 		RegisteredClaims: jwt.RegisteredClaims{
 			Issuer:    IssuerDashboard,
 			Audience:  jwt.ClaimStrings{AudienceContentAPI},
-			Subject:   "u@x.io",
+			Subject:   testUser,
 			IssuedAt:  jwt.NewNumericDate(now),
 			NotBefore: jwt.NewNumericDate(now.Add(-time.Second)),
 			ExpiresAt: jwt.NewNumericDate(now.Add(5 * time.Minute)),
 		},
-		Identity:  "u@x.io",
+		Identity:  testUser,
 		Groups:    []string{"eng", "admins"},
-		Workspace: "team-a",
+		Workspace: wsTeamA,
 	}
 }
 
@@ -78,7 +78,7 @@ func TestIdentityVerifier_Valid(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Verify valid token: %v", err)
 	}
-	if id.Identity != "u@x.io" {
+	if id.Identity != testUser {
 		t.Errorf("Identity = %q, want u@x.io", id.Identity)
 	}
 	if id.Workspace != "team-a" {
