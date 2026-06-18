@@ -33,29 +33,35 @@ import (
 )
 
 type fakeResolver struct {
-	policies map[string]workspaceauth.Inputs
+	policies map[string]ResolvedWorkspace
 }
 
-func (f *fakeResolver) Resolve(_ context.Context, ws string) (workspaceauth.Inputs, error) {
-	in, ok := f.policies[ws]
+func (f *fakeResolver) Resolve(_ context.Context, ws string) (ResolvedWorkspace, error) {
+	rw, ok := f.policies[ws]
 	if !ok {
-		return workspaceauth.Inputs{}, ErrWorkspaceNotFound
+		return ResolvedWorkspace{}, ErrWorkspaceNotFound
 	}
-	return in, nil
+	return rw, nil
 }
 
 func newTestAuthorizer(t *testing.T) (*Authorizer, *rsa.PrivateKey) {
 	t.Helper()
 	v, key := testVerifier(t)
-	fr := &fakeResolver{policies: map[string]workspaceauth.Inputs{
+	fr := &fakeResolver{policies: map[string]ResolvedWorkspace{
 		"team-a": {
-			RoleBindings: []workspaceauth.RoleBinding{
-				{Groups: []string{"editors"}, Role: workspaceauth.RoleEditor},
-				{Groups: []string{"viewers"}, Role: workspaceauth.RoleViewer},
+			Namespace: "team-a-ns",
+			Inputs: workspaceauth.Inputs{
+				RoleBindings: []workspaceauth.RoleBinding{
+					{Groups: []string{"editors"}, Role: workspaceauth.RoleEditor},
+					{Groups: []string{"viewers"}, Role: workspaceauth.RoleViewer},
+				},
 			},
 		},
 		"anon-ws": {
-			AnonymousAccess: &workspaceauth.AnonymousAccess{Enabled: true},
+			Namespace: "anon-ns",
+			Inputs: workspaceauth.Inputs{
+				AnonymousAccess: &workspaceauth.AnonymousAccess{Enabled: true},
+			},
 		},
 	}}
 	return NewAuthorizer(v, fr), key
@@ -200,6 +206,7 @@ func TestClientWorkspaceResolver_MapsSpec(t *testing.T) {
 	ws := &omniav1alpha1.Workspace{
 		ObjectMeta: metav1.ObjectMeta{Name: "team-a"},
 		Spec: omniav1alpha1.WorkspaceSpec{
+			Namespace: omniav1alpha1.NamespaceConfig{Name: "team-a-ns"},
 			RoleBindings: []omniav1alpha1.RoleBinding{
 				{Groups: []string{"editors"}, Role: omniav1alpha1.WorkspaceRoleEditor},
 			},
@@ -212,10 +219,14 @@ func TestClientWorkspaceResolver_MapsSpec(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(newScheme(t)).WithObjects(ws).Build()
 	r := NewClientWorkspaceResolver(c)
 
-	in, err := r.Resolve(context.Background(), "team-a")
+	resolved, err := r.Resolve(context.Background(), "team-a")
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
+	if resolved.Namespace != "team-a-ns" {
+		t.Errorf("Namespace = %q, want team-a-ns", resolved.Namespace)
+	}
+	in := resolved.Inputs
 	if len(in.RoleBindings) != 1 || in.RoleBindings[0].Role != workspaceauth.RoleEditor ||
 		in.RoleBindings[0].Groups[0] != "editors" {
 		t.Errorf("RoleBindings mapped wrong: %+v", in.RoleBindings)

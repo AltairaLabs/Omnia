@@ -42,19 +42,29 @@ const bearerPrefix = "Bearer "
 // workspace does not exist. The middleware maps it to 404.
 var ErrWorkspaceNotFound = errors.New("authz: workspace not found")
 
-// WorkspaceResolver resolves a workspace name to the workspace-derived portion
-// of the authorization inputs (role bindings, direct grants, anonymous-access
-// config). The principal portion (identity, groups, anonymous) is filled in by
-// the middleware from the verified token.
+// ResolvedWorkspace is the workspace-derived authorization context: the
+// Kubernetes namespace backing the workspace (used by content handlers to
+// confine filesystem access) plus the workspace-derived portion of the authz
+// inputs (role bindings, direct grants, anonymous-access config). The principal
+// portion (identity, groups, anonymous) is filled in by the middleware from the
+// verified token.
+type ResolvedWorkspace struct {
+	Namespace string
+	Inputs    workspaceauth.Inputs
+}
+
+// WorkspaceResolver resolves a workspace name to its ResolvedWorkspace.
 type WorkspaceResolver interface {
-	Resolve(ctx context.Context, workspace string) (workspaceauth.Inputs, error)
+	Resolve(ctx context.Context, workspace string) (ResolvedWorkspace, error)
 }
 
 // RequestIdentity is the verified principal plus the role recomputed for the
-// target workspace, stashed in the request context for downstream handlers.
+// target workspace and the workspace's namespace, stashed in the request
+// context for downstream handlers.
 type RequestIdentity struct {
 	*VerifiedIdentity
-	Role workspaceauth.Role
+	Role      workspaceauth.Role
+	Namespace string
 }
 
 type contextKey int
@@ -66,6 +76,13 @@ const identityContextKey contextKey = iota
 func IdentityFromContext(ctx context.Context) (*RequestIdentity, bool) {
 	id, ok := ctx.Value(identityContextKey).(*RequestIdentity)
 	return id, ok
+}
+
+// ContextWithIdentity returns a copy of ctx carrying id, retrievable via
+// IdentityFromContext. The middleware uses it on the request path; it is also
+// exposed for downstream handler wiring and tests.
+func ContextWithIdentity(ctx context.Context, id *RequestIdentity) context.Context {
+	return context.WithValue(ctx, identityContextKey, id)
 }
 
 // Authorizer is HTTP middleware that verifies the identity token, recomputes
@@ -103,8 +120,7 @@ func (a *Authorizer) Middleware(next http.Handler) http.Handler {
 			http.Error(w, msg, status)
 			return
 		}
-		ctx := context.WithValue(r.Context(), identityContextKey, id)
-		next.ServeHTTP(w, r.WithContext(ctx))
+		next.ServeHTTP(w, r.WithContext(ContextWithIdentity(r.Context(), id)))
 	})
 }
 
@@ -130,7 +146,7 @@ func (a *Authorizer) authorize(r *http.Request) (*RequestIdentity, int, string) 
 		return nil, http.StatusForbidden, "token workspace mismatch"
 	}
 
-	inputs, err := a.resolver.Resolve(r.Context(), workspace)
+	resolved, err := a.resolver.Resolve(r.Context(), workspace)
 	if err != nil {
 		if errors.Is(err, ErrWorkspaceNotFound) {
 			return nil, http.StatusNotFound, "workspace not found"
@@ -138,6 +154,7 @@ func (a *Authorizer) authorize(r *http.Request) (*RequestIdentity, int, string) 
 		return nil, http.StatusInternalServerError, "workspace lookup failed"
 	}
 
+	inputs := resolved.Inputs
 	inputs.UserIdentity = verified.Identity
 	inputs.UserGroups = verified.Groups
 	inputs.Anonymous = verified.Anonymous
@@ -148,7 +165,11 @@ func (a *Authorizer) authorize(r *http.Request) (*RequestIdentity, int, string) 
 		return nil, http.StatusForbidden, "insufficient role"
 	}
 
-	return &RequestIdentity{VerifiedIdentity: verified, Role: role}, http.StatusOK, ""
+	return &RequestIdentity{
+		VerifiedIdentity: verified,
+		Role:             role,
+		Namespace:        resolved.Namespace,
+	}, http.StatusOK, ""
 }
 
 // requiredRoleForMethod maps an HTTP verb to the minimum role required: reads
@@ -188,15 +209,18 @@ func NewClientWorkspaceResolver(c client.Client) *ClientWorkspaceResolver {
 
 // Resolve loads the named Workspace and maps its RoleBindings / DirectGrants /
 // AnonymousAccess onto Inputs. Returns ErrWorkspaceNotFound when absent.
-func (r *ClientWorkspaceResolver) Resolve(ctx context.Context, name string) (workspaceauth.Inputs, error) {
+func (r *ClientWorkspaceResolver) Resolve(ctx context.Context, name string) (ResolvedWorkspace, error) {
 	ws := &omniav1alpha1.Workspace{}
 	if err := r.client.Get(ctx, types.NamespacedName{Name: name}, ws); err != nil {
 		if apierrors.IsNotFound(err) {
-			return workspaceauth.Inputs{}, ErrWorkspaceNotFound
+			return ResolvedWorkspace{}, ErrWorkspaceNotFound
 		}
-		return workspaceauth.Inputs{}, err
+		return ResolvedWorkspace{}, err
 	}
-	return workspaceSpecToInputs(&ws.Spec), nil
+	return ResolvedWorkspace{
+		Namespace: ws.Spec.Namespace.Name,
+		Inputs:    workspaceSpecToInputs(&ws.Spec),
+	}, nil
 }
 
 // workspaceSpecToInputs maps a Workspace's authorization spec to the
