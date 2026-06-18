@@ -32,10 +32,33 @@ import {
   type ArenaTemplateSource,
   type TemplateMetadata,
 } from "@/types/arena-template";
-import * as fs from "node:fs/promises";
+import { getContent, isContentFile } from "@/lib/data/content-api-service";
 import * as path from "node:path";
 
 const TEMPLATE_INDEX_DIR = "arena/template-indexes";
+
+/**
+ * Read and parse the controller-written template index for a source, returning
+ * an empty list when the index does not exist yet or is unreadable. The path is
+ * workspace-relative; the operator prepends <workspace>/<namespace>.
+ */
+async function readTemplateIndex(
+  workspace: string,
+  user: User,
+  sourceId: string,
+): Promise<TemplateMetadata[]> {
+  const relpath = `${TEMPLATE_INDEX_DIR}/${sourceId}.json`;
+  try {
+    const node = await getContent(workspace, user, relpath);
+    if (!isContentFile(node)) {
+      return [];
+    }
+    return JSON.parse(node.content);
+  } catch {
+    // Index file may not exist yet.
+    return [];
+  }
+}
 
 const CRD_KIND = "ArenaTemplateSource";
 const WORKSPACE_CONTENT_PATH = process.env.WORKSPACE_CONTENT_PATH || "/workspace-content";
@@ -123,22 +146,8 @@ export const POST = withWorkspaceAccess<{ name: string; id: string; templateName
       }
       const workspaceNamespace = workspace.spec.namespace.name;
 
-      // Read templates from the index file
-      const indexPath = path.join(
-        WORKSPACE_CONTENT_PATH,
-        name,
-        workspaceNamespace,
-        TEMPLATE_INDEX_DIR,
-        `${id}.json`
-      );
-
-      let templates: TemplateMetadata[] = [];
-      try {
-        const indexContent = await fs.readFile(indexPath, "utf-8");
-        templates = JSON.parse(indexContent);
-      } catch {
-        // Index file may not exist yet
-      }
+      // Read templates from the controller-written index.
+      const templates = await readTemplateIndex(name, user, id);
 
       const template = templates.find((t: TemplateMetadata) => t.name === templateName);
 

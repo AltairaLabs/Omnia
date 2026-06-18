@@ -29,11 +29,10 @@ vi.mock("@/lib/k8s/crd-operations", () => ({
   isForbiddenError: vi.fn(),
 }));
 
-vi.mock("node:fs/promises", () => ({
-  default: {
-    readFile: vi.fn(),
-  },
-}));
+vi.mock("@/lib/data/content-api-service", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/data/content-api-service")>();
+  return { ...actual, getContent: vi.fn() };
+});
 
 const mockUser = {
   id: "testuser-id",
@@ -134,6 +133,15 @@ describe("GET /api/workspaces/[name]/arena/template-sources/[id]/templates/[temp
       clientOptions: {},
     } as Awaited<ReturnType<typeof validateWorkspace>>);
     vi.mocked(getCrd).mockResolvedValue({ ...mockTemplateSource, status: { phase: "Ready", templates: [] } });
+    const svc = await import("@/lib/data/content-api-service");
+    // Index exists but contains no matching template.
+    vi.mocked(svc.getContent).mockResolvedValue({
+      path: "arena/template-indexes/test-source.json",
+      content: JSON.stringify([]),
+      encoding: "utf-8",
+      size: 2,
+      modifiedAt: "2025-01-01T00:00:00Z",
+    });
 
     const { GET } = await import("./route");
     const response = await GET(createMockRequest(), createMockContext());
@@ -146,7 +154,7 @@ describe("GET /api/workspaces/[name]/arena/template-sources/[id]/templates/[temp
     const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
     const { validateWorkspace } = await import("@/lib/k8s/workspace-route-helpers");
     const { getCrd } = await import("@/lib/k8s/crd-operations");
-    const fs = await import("node:fs/promises");
+    const svc = await import("@/lib/data/content-api-service");
 
     vi.mocked(getUser).mockResolvedValue(mockUser);
     vi.mocked(checkWorkspaceAccess).mockResolvedValue({ granted: true, role: "viewer", permissions: editorPermissions });
@@ -156,10 +164,16 @@ describe("GET /api/workspaces/[name]/arena/template-sources/[id]/templates/[temp
       clientOptions: {},
     } as Awaited<ReturnType<typeof validateWorkspace>>);
     vi.mocked(getCrd).mockResolvedValue(mockTemplateSource);
-    // Mock the template index file read
-    vi.mocked(fs.default.readFile).mockResolvedValue(
-      JSON.stringify([{ name: "basic-chatbot", displayName: "Basic Chatbot", path: "templates/basic-chatbot" }])
-    );
+    // Mock the template index file read (content-api ContentFile shape).
+    vi.mocked(svc.getContent).mockResolvedValue({
+      path: "arena/template-indexes/test-source.json",
+      content: JSON.stringify([
+        { name: "basic-chatbot", displayName: "Basic Chatbot", path: "templates/basic-chatbot" },
+      ]),
+      encoding: "utf-8",
+      size: 100,
+      modifiedAt: "2025-01-01T00:00:00Z",
+    });
 
     const { GET } = await import("./route");
     const response = await GET(createMockRequest(), createMockContext());
@@ -168,6 +182,11 @@ describe("GET /api/workspaces/[name]/arena/template-sources/[id]/templates/[temp
     const body = await response.json();
     expect(body.template.name).toBe("basic-chatbot");
     expect(body.sourceName).toBe("test-source");
+    expect(vi.mocked(svc.getContent)).toHaveBeenCalledWith(
+      "test-ws",
+      mockUser,
+      "arena/template-indexes/test-source.json",
+    );
   });
 
   it("handles errors when get fails", async () => {

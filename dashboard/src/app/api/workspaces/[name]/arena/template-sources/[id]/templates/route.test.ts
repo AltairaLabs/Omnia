@@ -29,17 +29,9 @@ vi.mock("@/lib/k8s/crd-operations", () => ({
   isForbiddenError: vi.fn(),
 }));
 
-const mockReadFile = vi.fn();
-vi.mock("node:fs/promises", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("fs/promises")>();
-  return {
-    ...actual,
-    default: {
-      ...actual,
-      readFile: mockReadFile,
-    },
-    readFile: mockReadFile,
-  };
+vi.mock("@/lib/data/content-api-service", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/data/content-api-service")>();
+  return { ...actual, getContent: vi.fn() };
 });
 
 const mockUser = {
@@ -142,7 +134,14 @@ describe("GET /api/workspaces/[name]/arena/template-sources/[id]/templates", () 
       clientOptions: {},
     } as Awaited<ReturnType<typeof validateWorkspace>>);
     vi.mocked(getCrd).mockResolvedValue(mockTemplateSource);
-    mockReadFile.mockResolvedValue(JSON.stringify(mockTemplates));
+    const svc = await import("@/lib/data/content-api-service");
+    vi.mocked(svc.getContent).mockResolvedValue({
+      path: "arena/template-indexes/test-source.json",
+      content: JSON.stringify(mockTemplates),
+      encoding: "utf-8",
+      size: 100,
+      modifiedAt: "2025-01-01T00:00:00Z",
+    });
 
     const { GET } = await import("./route");
     const response = await GET(createMockRequest(), createMockContext());
@@ -150,6 +149,36 @@ describe("GET /api/workspaces/[name]/arena/template-sources/[id]/templates", () 
     expect(response.status).toBe(200);
     const body = await response.json();
     expect(body.templates).toHaveLength(1);
+    expect(body.sourcePhase).toBe("Ready");
+    expect(vi.mocked(svc.getContent)).toHaveBeenCalledWith(
+      "test-ws",
+      mockUser,
+      "arena/template-indexes/test-source.json",
+    );
+  });
+
+  it("returns empty templates when the index does not exist yet", async () => {
+    const { getUser } = await import("@/lib/auth");
+    const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
+    const { validateWorkspace } = await import("@/lib/k8s/workspace-route-helpers");
+    const { getCrd } = await import("@/lib/k8s/crd-operations");
+    vi.mocked(getUser).mockResolvedValue(mockUser);
+    vi.mocked(checkWorkspaceAccess).mockResolvedValue({ granted: true, role: "viewer", permissions: editorPermissions });
+    vi.mocked(validateWorkspace).mockResolvedValue({
+      ok: true,
+      workspace: mockWorkspace,
+      clientOptions: {},
+    } as Awaited<ReturnType<typeof validateWorkspace>>);
+    vi.mocked(getCrd).mockResolvedValue(mockTemplateSource);
+    const svc = await import("@/lib/data/content-api-service");
+    vi.mocked(svc.getContent).mockRejectedValue(new svc.ContentApiError("not found", 404));
+
+    const { GET } = await import("./route");
+    const response = await GET(createMockRequest(), createMockContext());
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.templates).toHaveLength(0);
     expect(body.sourcePhase).toBe("Ready");
   });
 
