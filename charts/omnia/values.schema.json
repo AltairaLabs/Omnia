@@ -440,6 +440,15 @@
             "bindAddress": { "type": "string" }
           }
         },
+        "admissionPolicy": {
+          "type": "object",
+          "properties": {
+            "enabled":             { "type": "boolean" },
+            "failurePolicy":       { "type": "string", "enum": ["Fail", "Ignore"] },
+            "shareRootPath":       { "type": "string" },
+            "provisionerUsername": { "type": "string" }
+          }
+        },
         "persistence": {
           "type": "object",
           "properties": {

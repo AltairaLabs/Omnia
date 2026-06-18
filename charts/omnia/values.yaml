@@ -1499,6 +1499,25 @@ workspaceContent:
     # -- Bind address for the operator content API (port-only form, e.g. ":8084").
     bindAddress: ":8084"
 
+  # -- Layer-2 isolation backstop (#1463): a ValidatingAdmissionPolicy that
+  # denies a pod in a workspace namespace from mounting any workspace-content
+  # PVC other than its own `workspace-<namespace>-content` (catches foreign and
+  # share-root claims). Requires Kubernetes >= 1.30 with the
+  # ValidatingAdmissionPolicy feature; default off so older / VAP-less clusters
+  # install cleanly. Gatekeeper / Kyverno equivalents are documented in the
+  # workspace-content-isolation how-to.
+  admissionPolicy:
+    # -- Enable the workspace-content mount admission policy.
+    enabled: false
+    # -- failurePolicy for the policy (Fail = closed; Ignore = open on errors).
+    failurePolicy: Fail
+    # -- Optional: deny PersistentVolume creation whose nfs.path equals this
+    # share-root path (install-specific). Empty disables the PV policy.
+    shareRootPath: ""
+    # -- Optional: provisioner username exempted from the PV policy
+    # (e.g. system:serviceaccount:kube-system:<csi-provisioner>).
+    provisionerUsername: ""
+
   persistence:
     # -- Storage class for dashboard's workspace content PVC
     # For production: Use your cloud's RWX storage class (efs-sc, azurefile-csi-nfs, filestore-sc)

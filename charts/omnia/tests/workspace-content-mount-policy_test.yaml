@@ -1,0 +1,52 @@
+suite: workspace-content mount admission policy
+# Layer-2 isolation backstop (#1463): a ValidatingAdmissionPolicy gated behind
+# workspaceContent.admissionPolicy.enabled (default off). When enabled it denies
+# a workspace-namespace pod from mounting any workspace-content PVC other than
+# its own workspace-<namespace>-content. The optional PV policy renders only
+# when shareRootPath is set.
+values:
+  - ../values-chart-tests.yaml
+tests:
+  - it: does not render by default
+    template: templates/workspace-content-mount-policy.yaml
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: renders the policy and binding when enabled
+    template: templates/workspace-content-mount-policy.yaml
+    set:
+      workspaceContent.admissionPolicy.enabled: true
+    asserts:
+      - hasDocuments:
+          count: 2
+      - containsDocument:
+          kind: ValidatingAdmissionPolicy
+          apiVersion: admissionregistration.k8s.io/v1
+        documentIndex: 0
+      - containsDocument:
+          kind: ValidatingAdmissionPolicyBinding
+          apiVersion: admissionregistration.k8s.io/v1
+        documentIndex: 1
+
+  - it: confines a pod to its own namespace's workspace-content PVC
+    template: templates/workspace-content-mount-policy.yaml
+    documentIndex: 0
+    set:
+      workspaceContent.admissionPolicy.enabled: true
+    asserts:
+      - matchRegex:
+          path: spec.validations[0].expression
+          pattern: "workspace-' \\+ request.namespace \\+ '-content"
+      - equal:
+          path: spec.matchConditions[0].expression
+          value: "request.namespace != 'NAMESPACE'"
+
+  - it: adds the PV policy only when shareRootPath is set
+    template: templates/workspace-content-mount-policy.yaml
+    set:
+      workspaceContent.admissionPolicy.enabled: true
+      workspaceContent.admissionPolicy.shareRootPath: /data/omnia
+    asserts:
+      - hasDocuments:
+          count: 4

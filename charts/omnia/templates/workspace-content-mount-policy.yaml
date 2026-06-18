@@ -1,0 +1,99 @@
+{{- if .Values.workspaceContent.admissionPolicy.enabled }}
+{{- /*
+  Layer-2 isolation backstop (#1463). Beneath the per-namespace subtree NFS PVs
+  (Layer 1), this ValidatingAdmissionPolicy denies any pod in a workspace
+  namespace from mounting a workspace-content PVC other than its own namespace's
+  subtree PVC (workspace-<namespace>-content). It catches both a foreign
+  workspace's PVC and the shared-root PVC (e.g. <release>-workspace-content) —
+  any claim that mentions "workspace" and ends in "-content" but isn't this
+  namespace's own.
+
+  The control-plane namespace (this release's namespace) is exempted: the
+  operator / arena-controller / dashboard legitimately mount the share root.
+
+  Requires Kubernetes >= 1.30 with the ValidatingAdmissionPolicy feature.
+  Value-gated (default off) so vanilla / older / VAP-less clusters install
+  cleanly. Gatekeeper / Kyverno equivalents are documented in docs.
+*/}}
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: {{ include "omnia.fullname" . }}-workspace-content-mount
+  labels:
+    {{- include "omnia.labels" . | nindent 4 }}
+spec:
+  failurePolicy: {{ .Values.workspaceContent.admissionPolicy.failurePolicy | default "Fail" }}
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["pods"]
+  matchConditions:
+    # The control plane mounts the share root; only constrain workspace namespaces.
+    - name: exclude-control-plane
+      expression: "request.namespace != '{{ .Release.Namespace }}'"
+  validations:
+    - expression: >-
+        object.spec.volumes.all(v,
+          !has(v.persistentVolumeClaim) ||
+          !(v.persistentVolumeClaim.claimName.contains('workspace') && v.persistentVolumeClaim.claimName.endsWith('-content')) ||
+          v.persistentVolumeClaim.claimName == 'workspace-' + request.namespace + '-content'
+        )
+      message: "pod may only mount its own namespace's workspace-content PVC (workspace-<namespace>-content)"
+      reason: Forbidden
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: {{ include "omnia.fullname" . }}-workspace-content-mount
+  labels:
+    {{- include "omnia.labels" . | nindent 4 }}
+spec:
+  policyName: {{ include "omnia.fullname" . }}-workspace-content-mount
+  validationActions: ["Deny"]
+{{- if .Values.workspaceContent.admissionPolicy.shareRootPath }}
+---
+{{- /*
+  Optional second policy: deny creating a PersistentVolume whose nfs.path points
+  at the workspace-content share root, except by the configured provisioner
+  identity. The share-root path is install-specific, so this is enabled only
+  when workspaceContent.admissionPolicy.shareRootPath is set.
+*/}}
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: {{ include "omnia.fullname" . }}-workspace-content-pv
+  labels:
+    {{- include "omnia.labels" . | nindent 4 }}
+spec:
+  failurePolicy: {{ .Values.workspaceContent.admissionPolicy.failurePolicy | default "Fail" }}
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE"]
+        resources: ["persistentvolumes"]
+  {{- with .Values.workspaceContent.admissionPolicy.provisionerUsername }}
+  matchConditions:
+    # Exempt the provisioner that legitimately creates subtree PVs.
+    - name: exclude-provisioner
+      expression: "request.userInfo.username != '{{ . }}'"
+  {{- end }}
+  validations:
+    - expression: >-
+        !has(object.spec.nfs) || object.spec.nfs.path != '{{ .Values.workspaceContent.admissionPolicy.shareRootPath }}'
+      message: "PersistentVolume must not target the workspace-content share root"
+      reason: Forbidden
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: {{ include "omnia.fullname" . }}-workspace-content-pv
+  labels:
+    {{- include "omnia.labels" . | nindent 4 }}
+spec:
+  policyName: {{ include "omnia.fullname" . }}-workspace-content-pv
+  validationActions: ["Deny"]
+{{- end }}
+{{- end }}
