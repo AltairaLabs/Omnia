@@ -16,9 +16,9 @@ function badgeIcon(icon?: WorkloadBadge["icon"]) {
 }
 
 // Collapsed composition state: a distinct "subprocess" shape — a stacked,
-// rectangular indigo card with a centered [+] marker on the bottom edge (BPMN
-// collapsed-subprocess notation) — so it's visually obvious it expands into a
-// sub-flow. Clicking anywhere on it toggles the expansion.
+// rectangular indigo card with a top-right chevron-down (v) disclosure control —
+// so it's visually obvious it expands into a sub-flow. The whole node toggles;
+// `nodrag`/`nopan` keep React Flow's drag handler from swallowing repeat clicks.
 function CollapsedCompositionNode({
   node,
   onToggle,
@@ -36,7 +36,7 @@ function CollapsedCompositionNode({
         onClick={() => onToggle?.(node.id)}
         aria-label="Expand composition"
         style={{ width, height }}
-        className="relative box-border flex flex-col justify-center rounded-md border-2 border-indigo-500 bg-card px-4 text-left shadow-sm cursor-pointer hover:shadow-md overflow-hidden"
+        className="nodrag nopan relative box-border flex flex-col justify-center rounded-md border-2 border-indigo-500 bg-card pl-4 pr-8 text-left shadow-sm cursor-pointer hover:shadow-md overflow-hidden"
       >
         <span className="inline-flex items-center gap-1.5 font-medium text-sm truncate">
           <Workflow className="h-4 w-4 shrink-0 text-indigo-600" />
@@ -45,14 +45,9 @@ function CollapsedCompositionNode({
         <span className="text-[11px] text-indigo-700 dark:text-indigo-300">
           composition{steps ? ` · ${steps} steps` : ""}
         </span>
+        {/* top-right disclosure chevron: v = expand */}
+        <ChevronDown className="absolute right-2 top-2 h-4 w-4 text-indigo-600" />
       </button>
-      {/* Disclosure marker on the bottom edge — chevron-down = "expand to reveal". */}
-      <span
-        aria-hidden="true"
-        className="absolute left-1/2 -bottom-2.5 z-10 flex h-5 w-5 -translate-x-1/2 items-center justify-center rounded-full border border-indigo-500 bg-card text-indigo-600 shadow-sm"
-      >
-        <ChevronDown className="h-3 w-3" />
-      </span>
       <Handle type="source" position={Position.Bottom} className="!bg-indigo-500" />
     </div>
   );

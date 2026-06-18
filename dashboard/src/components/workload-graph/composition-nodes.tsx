@@ -33,7 +33,7 @@ export const CompositionContainerNode = memo(({ data }: Readonly<{ data: Workloa
           type="button"
           aria-label="Collapse composition"
           onClick={() => onToggle?.(node.id)}
-          className="rounded p-0.5 text-indigo-700 hover:bg-indigo-200/60 dark:text-indigo-300"
+          className="nodrag nopan rounded p-0.5 text-indigo-700 hover:bg-indigo-200/60 dark:text-indigo-300"
         >
           <ChevronUp className="h-4 w-4" />
         </button>
@@ -79,7 +79,7 @@ function BranchStep({ node, onClick }: Readonly<{ node: WorkloadNode; onClick?: 
   return (
     <div className="relative" style={{ width, height }}>
       <Handle type="target" position={Position.Top} className="!bg-blue-500" />
-      <button type="button" onClick={() => onClick?.(node.id)} className="h-full w-full cursor-pointer" aria-label={node.label}>
+      <button type="button" onClick={() => onClick?.(node.id)} className="nodrag nopan h-full w-full cursor-pointer" aria-label={node.label}>
         {branchShape(node)}
       </button>
       {node.detail.predicateText && (
@@ -105,7 +105,7 @@ export const CompositionStepNode = memo(({ data }: Readonly<{ data: WorkloadNode
         type="button"
         onClick={() => onClick?.(node.id)}
         style={{ width, height }}
-        className={cn("box-border flex flex-col justify-center gap-0.5 rounded-md border border-indigo-300 bg-card px-2 text-left shadow-sm cursor-pointer hover:shadow-md overflow-hidden")}
+        className={cn("nodrag nopan box-border flex flex-col justify-center gap-0.5 rounded-md border border-indigo-300 bg-card px-2 text-left shadow-sm cursor-pointer hover:shadow-md overflow-hidden")}
       >
         <span className="inline-flex items-center gap-1.5 text-xs font-medium truncate">
           {stepIcon(node.detail.stepKind)}
