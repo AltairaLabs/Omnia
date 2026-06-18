@@ -1482,8 +1482,22 @@ workspaceContent:
   # Default false = legacy shared-volume + full subPath.
   scoped: false
 
-  # -- Mount path in dashboard pod
+  # -- Mount path. The OPERATOR mounts the content share root here and serves
+  # it via the content API. The dashboard no longer mounts it (#1462) but still
+  # reads this as a path-string for arena template preview/render (the
+  # arena-controller owns its own mount).
   mountPath: /workspace-content
+
+  # -- Operator workspace-content API. The dashboard reads/writes workspace
+  # content through this authenticated operator endpoint instead of mounting
+  # the NFS volume directly (#1462). The operator verifies the dashboard-minted
+  # identity JWT and recomputes the workspace role server-side. Served only when
+  # both `dashboard.enabled` and `workspaceContent.enabled` are true.
+  contentApi:
+    # -- Enable the operator workspace-content API.
+    enabled: true
+    # -- Bind address for the operator content API (port-only form, e.g. ":8084").
+    bindAddress: ":8084"
 
   persistence:
     # -- Storage class for dashboard's workspace content PVC
