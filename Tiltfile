@@ -917,6 +917,12 @@ if ENABLE_DEMO or ENABLE_AUDIO_DEMO or ENABLE_MEMORY_DEMO:
             'toolsDemo.enabled=true',
         ])
 
+    if ENABLE_ENTERPRISE:
+        # Keep the demos chart's enterprise flag in sync with the omnia chart
+        # (which gets enterprise.enabled=true + devMode=true above), so the EE
+        # demos (Arena Fleet) light up against the operator's dev license.
+        demo_helm_set.append('enterprise.enabled=true')
+
     k8s_yaml(helm(
         './charts/omnia-demos',
         name='omnia-demos',
