@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ReactFlow,
   Background,
@@ -20,7 +20,7 @@ import { modelToFlow, type WorkloadNodeData } from "./to-flow";
 import { layoutFlow } from "./layout";
 import { workloadNodeTypes } from "./workload-nodes";
 import { NodeDrawer } from "./node-drawer";
-import { usePersistedNodeLayout } from "@/hooks/use-persisted-node-layout";
+import { usePersistedNodeLayout, loadExpanded, saveExpanded } from "@/hooks/use-persisted-node-layout";
 import type { WorkloadModel, WorkloadNode, WorkloadBudget } from "./types";
 
 type WorkloadFlowInstance = ReactFlowInstance<FlowNode<WorkloadNodeData>, FlowEdge>;
@@ -62,6 +62,17 @@ function bannerLabel(model: WorkloadModel): string {
   return "Definition · abstract workload";
 }
 
+// Resolve a selected id against top-level nodes and any composition step nodes
+// nested in detail.composition (which are not part of model.nodes).
+function findNode(model: WorkloadModel, id: string): WorkloadNode | undefined {
+  for (const n of model.nodes) {
+    if (n.id === id) return n;
+    const hit = n.detail.composition?.nodes.find((s) => s.id === id);
+    if (hit) return hit;
+  }
+  return undefined;
+}
+
 export function WorkloadGraph({
   model,
   className,
@@ -70,7 +81,19 @@ export function WorkloadGraph({
 }: Readonly<{ model: WorkloadModel; className?: string; namespace?: string; storageKey?: string }>) {
   const [selectedId, setSelectedId] = useState<string | undefined>();
   const [showData, setShowData] = useState(true);
-  const flow = useMemo(() => modelToFlow(model, setSelectedId), [model]);
+  const [expanded, setExpanded] = useState<Set<string>>(() => loadExpanded(storageKey ?? ""));
+  const toggleExpanded = useCallback((id: string) => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      saveExpanded(storageKey ?? "", next);
+      return next;
+    });
+  }, [storageKey]);
+  const flow = useMemo(
+    () => modelToFlow(model, { onClick: setSelectedId, onToggle: toggleExpanded, expanded }),
+    [model, toggleExpanded, expanded],
+  );
   const [nodes, setNodes, onNodesChange] = useNodesState(flow.nodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(flow.edges);
   const rf = useRef<WorkloadFlowInstance | null>(null);
@@ -129,7 +152,7 @@ export function WorkloadGraph({
     [edges, dataNodeIds, showData],
   );
 
-  const selected: WorkloadNode | undefined = model.nodes.find((n) => n.id === selectedId);
+  const selected: WorkloadNode | undefined = selectedId ? findNode(model, selectedId) : undefined;
   const hasData = dataNodeIds.size > 0;
   const banner = bannerLabel(model);
 

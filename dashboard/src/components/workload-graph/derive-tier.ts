@@ -12,6 +12,7 @@ import type {
   WorkloadToolDetail,
 } from "./types";
 import { workflowDataflow, collectVariables, variableNodesAndEdges } from "./workflow-dataflow";
+import { compositionToWorkload } from "./adapters/from-composition";
 
 function toolDetails(
   names: string[] | undefined,
@@ -101,6 +102,14 @@ function stateNode(
     { icon: "skill", label: `${skills.length}` },
   ];
   if (state.max_visits != null) badges.push({ icon: "loop", label: `≤${state.max_visits}` });
+  let composition;
+  if (state.orchestration === "composition" && state.composition) {
+    const comp = content.compositions?.[state.composition];
+    if (comp) {
+      composition = compositionToWorkload(id, state.composition, comp);
+      badges.push({ label: "composition" });
+    }
+  }
   return {
     id,
     kind: "state",
@@ -114,6 +123,9 @@ function stateNode(
       tools,
       skills,
       parameters: prompt?.parameters,
+      composition,
+      compositionName: composition?.name,
+      stepCount: composition?.nodes.filter((n) => n.parentId === id).length,
     },
   };
 }

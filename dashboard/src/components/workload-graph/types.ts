@@ -6,7 +6,8 @@ export type WorkloadTier = "single" | "workflow" | "multiagent";
 export type WorkloadAltitude = "definition" | "deployment" | "test";
 export type WorkloadNodeKind =
   | "agent" | "state" | "tool" | "skill" | "provider" | "scenario" | "judge"
-  | "initial" | "final" | "variable" | "artifact" | "persona";
+  | "initial" | "final" | "variable" | "artifact" | "persona"
+  | "composition" | "stepPrompt" | "stepAgent" | "stepTool" | "stepBranch" | "stepParallel";
 export type ResolutionStatus = "resolved" | "unresolved" | "unavailable";
 export type WorkloadEdgeStyle = "normal" | "loop" | "unresolved" | "provides" | "data";
 
@@ -64,6 +65,18 @@ export interface WorkloadNodeDetail {
   }>;
   judgeProvider?: string;                                              // judge node
   persona?: { id: string; role?: string; provider?: string };         // persona node
+  // composition / step node fields:
+  stepKind?: string;             // CompositionStep.kind
+  promptTask?: string;           // prompt/agent step
+  toolRef?: string;              // tool step
+  args?: Record<string, unknown>; // tool step
+  predicateText?: string;        // branch step, rendered predicate
+  reducer?: string;              // parallel step, e.g. "barrier → metadata"
+  termination?: string;          // agent step, e.g. "≤10 steps"
+  evals?: string[];              // step modifiers.eval
+  compositionName?: string;      // composition container
+  stepCount?: number;            // composition container
+  composition?: CompositionSubgraph; // attached to a composition-orchestrated state node
 }
 
 export interface WorkloadNode {
@@ -75,6 +88,8 @@ export interface WorkloadNode {
   isEntry?: boolean;
   isTerminal?: boolean;
   resolution?: ResolutionStatus;
+  parentId?: string;     // React Flow parent (set on composition step children)
+  isContainer?: boolean; // composition / parallel group box
 }
 
 export interface WorkloadEdge {
@@ -83,6 +98,12 @@ export interface WorkloadEdge {
   target: string;
   label?: string;
   style?: WorkloadEdgeStyle;
+}
+
+export interface CompositionSubgraph {
+  name: string;
+  nodes: WorkloadNode[];
+  edges: WorkloadEdge[];
 }
 
 export interface WorkloadBudget {

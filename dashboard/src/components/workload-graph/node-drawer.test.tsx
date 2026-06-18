@@ -53,6 +53,23 @@ describe("NodeDrawer", () => {
     expect(screen.getByText("billing")).toBeInTheDocument();
   });
 
+  it("renders composition step detail: kind, prompt task, predicate, termination, tool args, evals", () => {
+    const stepNode: WorkloadNode = {
+      id: "s", kind: "stepAgent", label: "synth", badges: [],
+      detail: {
+        stepKind: "agent", promptTask: "analyzer", termination: "≤10 steps",
+        toolRef: "doc.parse", args: { content: "${input.text}" },
+        predicateText: "${x} equals y", evals: ["quality"],
+      },
+    };
+    render(<NodeDrawer node={stepNode} onClose={vi.fn()} />);
+    expect(screen.getByText("agent")).toBeInTheDocument();
+    expect(screen.getByText("analyzer")).toBeInTheDocument();
+    expect(screen.getByText("≤10 steps")).toBeInTheDocument();
+    expect(screen.getByText("doc.parse")).toBeInTheDocument();
+    expect(screen.getByText(/quality/)).toBeInTheDocument();
+  });
+
   it("shows SkillSource detail with a deep link to the Skills explorer", () => {
     const skillNode: WorkloadNode = {
       id: "skill:anthropic", kind: "skill", label: "anthropic", resolution: "resolved", badges: [],

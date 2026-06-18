@@ -34,3 +34,36 @@ describe("layoutFlow — per-node sizes", () => {
     expect(routes.has("e")).toBe(true);
   });
 });
+
+function child(id: string, parentId?: string, isContainer = false): Node {
+  return {
+    id, parentId, position: { x: 0, y: 0 }, width: 170, height: 52,
+    data: { isContainer }, type: "x",
+  } as Node;
+}
+
+describe("layoutFlow — hierarchical", () => {
+  it("sizes a container from its children and positions children relative to it", async () => {
+    const nodes: Node[] = [
+      { ...child("main"), data: { isContainer: true } },
+      child("main::a", "main"),
+      child("main::b", "main"),
+    ];
+    const edges: Edge[] = [{ id: "e", source: "main::a", target: "main::b" }];
+    const { nodes: laid } = await layoutFlow(nodes, edges);
+    const container = laid.find((x) => x.id === "main")!;
+    const c = laid.find((x) => x.id === "main::a")!;
+    // container grew beyond a leaf's height to hold its stacked children
+    expect((container.height ?? 0)).toBeGreaterThan(52);
+    // child position is parent-relative (small, not absolute canvas coords)
+    expect(c.position.y).toBeGreaterThanOrEqual(0);
+    expect(c.position.y).toBeLessThan(container.height ?? 0);
+  });
+
+  it("lays out flat graphs as before when there are no parents", async () => {
+    const nodes: Node[] = [child("a"), child("b")];
+    const { nodes: laid } = await layoutFlow(nodes, [{ id: "e", source: "a", target: "b" }]);
+    expect(laid).toHaveLength(2);
+    expect(laid.find((x) => x.id === "b")!.position.y).toBeGreaterThan(0);
+  });
+});

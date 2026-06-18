@@ -162,6 +162,41 @@ describe("deriveWorkloadTier — malformed", () => {
   });
 });
 
+describe("deriveWorkloadTier — composition", () => {
+  it("attaches a composition sub-graph and badge to a composition-orchestrated state", () => {
+    const model = deriveWorkloadTier({
+      id: "p",
+      prompts: { c: { id: "c", name: "Classifier", system_template: "t" } },
+      workflow: {
+        entry: "main",
+        states: { main: { prompt_task: "", orchestration: "composition", composition: "classify_document", terminal: true } },
+      },
+      compositions: {
+        classify_document: {
+          version: 1,
+          steps: [{ id: "classify", kind: "prompt", prompt_task: "c", input: "${input.text}" }],
+        },
+      },
+    });
+    const main = model.nodes.find((n) => n.id === "main")!;
+    expect(main.kind).toBe("state");
+    expect(main.badges.some((b) => b.label === "composition")).toBe(true);
+    expect(main.detail.composition?.name).toBe("classify_document");
+    expect(main.detail.composition?.nodes.map((n) => n.id)).toEqual(["main::classify"]);
+    expect(main.detail.compositionName).toBe("classify_document");
+    expect(main.detail.stepCount).toBe(1);
+  });
+
+  it("leaves non-composition states untouched", () => {
+    const model = deriveWorkloadTier({
+      id: "p",
+      prompts: { a: { id: "a", name: "A", system_template: "t" } },
+      workflow: { entry: "a", states: { a: { prompt_task: "a", terminal: true } } },
+    });
+    expect(model.nodes.find((n) => n.id === "a")!.detail.composition).toBeUndefined();
+  });
+});
+
 describe("deriveWorkloadTier — dataflow", () => {
   it("workflow tier gains initial/final/variable/artifact nodes", () => {
     const model = deriveWorkloadTier({

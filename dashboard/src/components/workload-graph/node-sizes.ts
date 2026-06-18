@@ -14,6 +14,12 @@ const SIZES: Partial<Record<WorkloadNodeKind, NodeSize>> = {
   scenario: { width: 170, height: 56 },
   judge: { width: 170, height: 56 },
   persona: { width: 170, height: 56 },
+  composition: { width: 320, height: 200 },   // placeholder; elk overrides containers
+  stepParallel: { width: 280, height: 140 },  // placeholder; elk overrides containers
+  stepPrompt: { width: 170, height: 52 },
+  stepAgent: { width: 170, height: 52 },
+  stepTool: { width: 170, height: 52 },
+  stepBranch: { width: 120, height: 64 },
 };
 
 const DEFAULT: NodeSize = { width: 200, height: 68 };

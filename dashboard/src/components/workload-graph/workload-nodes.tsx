@@ -8,6 +8,7 @@ import {
   WorkflowStateNode, InitialNode, FinalNode, VariableNode, ArtifactNode,
   ScenarioGroupNode, JudgeNode, PersonaNode,
 } from "./workflow-nodes";
+import { CompositionContainerNode, CompositionStepNode, CompositionParallelNode } from "./composition-nodes";
 import type { WorkloadNodeData } from "./to-flow";
 import type { WorkloadBadge, WorkloadNode } from "./types";
 
@@ -170,4 +171,7 @@ export const workloadNodeTypes = {
   workflowScenario: ScenarioGroupNode,
   workflowJudge: JudgeNode,
   workflowPersona: PersonaNode,
+  composition: CompositionContainerNode,
+  compositionStep: CompositionStepNode,
+  compositionParallel: CompositionParallelNode,
 };

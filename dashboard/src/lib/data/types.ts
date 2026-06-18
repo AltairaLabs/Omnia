@@ -148,9 +148,59 @@ export interface PromptPackContent {
   validators?: ValidatorDefinition[];
   evals?: EvalDefinition[];
   workflow?: WorkflowConfig;
+  compositions?: Record<string, CompositionDef>;
   skills?: InlineSkill[];
   agents?: AgentsConfig;
   metadata?: Record<string, unknown>;
+}
+
+// RFC 0010 composition types. Field names mirror the SDK JSON tags in
+// PromptKit runtime/composition/types.go (v1.5.1) so fetched pack.json binds directly.
+export interface CompositionDef {
+  version?: number;
+  description?: string;
+  input_schema?: string;
+  output_schema?: string;
+  output?: string;
+  steps: CompositionStep[];
+  engine?: Record<string, unknown>;
+}
+
+export type CompositionStepKind = "prompt" | "agent" | "tool" | "branch" | "parallel";
+
+export interface CompositionStep {
+  id: string;
+  kind: CompositionStepKind;
+  description?: string;
+  depends_on?: string[];
+  // prompt / agent
+  prompt_task?: string;
+  input?: unknown;
+  output_schema?: string;
+  // agent
+  tools?: string[];
+  termination?: { max_steps?: number; tool_called?: string };
+  // tool
+  tool?: string;
+  args?: Record<string, unknown>;
+  // branch
+  predicate?: CompositionPredicate;
+  then?: string;
+  else?: string;
+  // parallel
+  branches?: CompositionStep[];
+  reduce?: { strategy: "append" | "replace" | "barrier"; into: string };
+  modifiers?: { eval?: string[]; retry?: { max_attempts?: number } };
+}
+
+export interface CompositionPredicate {
+  path?: string;
+  op?: string;
+  value?: unknown;
+  exists?: boolean;
+  all_of?: CompositionPredicate[];
+  any_of?: CompositionPredicate[];
+  not?: CompositionPredicate;
 }
 
 export interface PromptDefinition {
@@ -267,6 +317,8 @@ export interface WorkflowState {
   max_visits?: number;
   on_max_visits?: string;
   orchestration?: string;
+  /** Composition key (in PromptPackContent.compositions) run when orchestration === "composition". */
+  composition?: string;
   /** Skill availability filter for this state: a path, or 'none'. */
   skills?: string;
   artifacts?: Record<string, WorkflowArtifact>;
