@@ -6,6 +6,11 @@
  * POST /api/workspaces/:name/arena/projects/:id/files/:path - Create file/folder
  * DELETE /api/workspaces/:name/arena/projects/:id/files/:path - Delete file/folder
  *
+ * Content is served by the operator's authenticated content API (the dashboard
+ * no longer mounts the NFS workspace-content volume directly — see #1462).
+ * Path-confinement, max-size and text/binary encoding are operator-side and
+ * surface here as pass-through statuses (400/413).
+ *
  * Protected by workspace access checks.
  */
 
@@ -28,47 +33,27 @@ import type {
   FileCreateRequest,
   FileCreateResponse,
 } from "@/types/arena-project";
-import * as fs from "node:fs/promises";
-import * as path from "node:path";
-
-// Base path for workspace content (configurable via environment)
-const WORKSPACE_CONTENT_BASE =
-  process.env.WORKSPACE_CONTENT_PATH || "/workspace-content";
-
-// Max file size for reading (10MB)
-const MAX_FILE_SIZE = Number.parseInt(
-  process.env.MAX_CONTENT_FILE_SIZE || "10485760",
-  10
-);
+import {
+  ContentApiError,
+  getContent,
+  isContentListing,
+  makeContentDir,
+  writeContentFile,
+  deleteContent,
+} from "@/lib/data/content-api-service";
+import { contentErrorResponse } from "@/lib/data/content-api-response";
 
 const RESOURCE_TYPE = "ArenaProjectFile";
-const PATH_TRAVERSAL_ERROR = "Invalid path: path traversal not allowed";
 const BAD_REQUEST = "Bad Request";
+const PROJECT_CONFIG_FILE = "config.arena.yaml";
 
 interface RouteParams {
   params: Promise<{ name: string; id: string; path: string[] }>;
 }
 
-/**
- * Get the project directory path
- */
-function getProjectPath(workspaceName: string, namespace: string, projectId: string): string {
-  return path.join(
-    WORKSPACE_CONTENT_BASE,
-    workspaceName,
-    namespace,
-    "arena",
-    "projects",
-    projectId
-  );
-}
-
-/**
- * Check if a path is safe (no path traversal)
- */
-function isPathSafe(requestedPath: string, basePath: string): boolean {
-  const resolvedPath = path.resolve(basePath, requestedPath);
-  return resolvedPath.startsWith(path.resolve(basePath));
+/** The content relpath for a project's directory. */
+function projectRelPath(projectId: string): string {
+  return `arena/projects/${projectId}`;
 }
 
 /**
@@ -82,35 +67,75 @@ function isValidFilename(name: string): boolean {
   return true;
 }
 
-/**
- * Check if file is text based on extension
- */
-function isTextFile(filePath: string): boolean {
-  const textExtensions = new Set([
-    ".txt", ".md", ".yaml", ".yml", ".json", ".js", ".ts", ".jsx", ".tsx",
-    ".html", ".css", ".scss", ".xml", ".csv", ".sh", ".bash", ".py", ".go",
-    ".rs", ".java", ".c", ".cpp", ".h", ".hpp", ".sql", ".graphql", ".proto",
-    ".toml", ".ini", ".cfg", ".conf", ".env", ".gitignore", ".dockerignore",
-    ".editorconfig", "",
-  ]);
-  const ext = path.extname(filePath).toLowerCase();
-  return textExtensions.has(ext);
+/** True when the thrown error is a content-API 404. */
+function isNotFound(error: unknown): boolean {
+  return error instanceof ContentApiError && error.status === 404;
 }
 
 /**
- * Delete directory recursively
+ * Verify the parent path exists and is a directory. Returns an error response
+ * to send back, or null when the parent is a usable directory.
  */
-async function deleteRecursive(dirPath: string): Promise<void> {
-  const entries = await fs.readdir(dirPath, { withFileTypes: true });
-  for (const entry of entries) {
-    const fullPath = path.join(dirPath, entry.name);
-    if (entry.isDirectory()) {
-      await deleteRecursive(fullPath);
-    } else {
-      await fs.unlink(fullPath);
+async function checkParentDirectory(
+  workspace: string,
+  user: User,
+  parentRelPath: string,
+  parentPath: string
+): Promise<NextResponse | null> {
+  try {
+    const parent = await getContent(workspace, user, parentRelPath);
+    if (!isContentListing(parent)) {
+      return NextResponse.json(
+        { error: BAD_REQUEST, message: "Parent path is not a directory" },
+        { status: 400 }
+      );
     }
+    return null;
+  } catch (error) {
+    if (isNotFound(error)) {
+      return notFoundResponse(`Parent directory not found: ${parentPath}`);
+    }
+    throw error;
   }
-  await fs.rmdir(dirPath);
+}
+
+/**
+ * Return a 409 response when the target already exists, or null when it does
+ * not (a 404 from the content API). Re-throws other errors.
+ */
+async function conflictIfExists(
+  workspace: string,
+  user: User,
+  targetRelPath: string,
+  fileName: string
+): Promise<NextResponse | null> {
+  try {
+    await getContent(workspace, user, targetRelPath);
+    return NextResponse.json(
+      { error: "Conflict", message: `File or directory already exists: ${fileName}` },
+      { status: 409 }
+    );
+  } catch (error) {
+    if (isNotFound(error)) {
+      return null;
+    }
+    throw error;
+  }
+}
+
+/** Create a file or directory, returning the resulting size (undefined for dirs). */
+async function createNode(
+  workspace: string,
+  user: User,
+  targetRelPath: string,
+  body: FileCreateRequest
+): Promise<number | undefined> {
+  if (body.isDirectory) {
+    await makeContentDir(workspace, user, targetRelPath);
+    return undefined;
+  }
+  const writeResult = await writeContentFile(workspace, user, targetRelPath, body.content ?? "");
+  return writeResult.size;
 }
 
 /**
@@ -142,50 +167,31 @@ export const GET = withWorkspaceAccess<{ name: string; id: string; path: string[
         RESOURCE_TYPE
       );
 
-      const projectPath = getProjectPath(name, result.workspace.spec.namespace.name, projectId);
-      const fullPath = path.join(projectPath, filePath);
+      const relpath = `${projectRelPath(projectId)}/${filePath}`;
 
-      // Security check: prevent path traversal
-      if (!isPathSafe(filePath, projectPath)) {
-        return NextResponse.json(
-          { error: BAD_REQUEST, message: PATH_TRAVERSAL_ERROR },
-          { status: 400 }
-        );
-      }
-
-      // Check if file exists
+      let node;
       try {
-        await fs.access(fullPath);
-      } catch {
-        return notFoundResponse(`File not found: ${filePath}`);
+        node = await getContent(name, user, relpath);
+      } catch (error) {
+        if (isNotFound(error)) {
+          return notFoundResponse(`File not found: ${filePath}`);
+        }
+        throw error;
       }
 
-      const stats = await fs.stat(fullPath);
-
-      if (stats.isDirectory()) {
+      if (isContentListing(node)) {
         return NextResponse.json(
           { error: BAD_REQUEST, message: "Cannot get content of a directory" },
           { status: 400 }
         );
       }
 
-      // Check file size
-      if (stats.size > MAX_FILE_SIZE) {
-        return NextResponse.json(
-          { error: BAD_REQUEST, message: `File too large: ${stats.size} bytes (max: ${MAX_FILE_SIZE})` },
-          { status: 400 }
-        );
-      }
-
-      const content = await fs.readFile(fullPath);
-      const isText = isTextFile(fullPath);
-
       const response: FileContentResponse = {
         path: filePath,
-        content: isText ? content.toString("utf-8") : content.toString("base64"),
-        size: stats.size,
-        modifiedAt: stats.mtime.toISOString(),
-        encoding: isText ? "utf-8" : "base64",
+        content: node.content,
+        size: node.size,
+        modifiedAt: node.modifiedAt,
+        encoding: node.encoding,
       };
 
       auditSuccess(auditCtx, "get", `${projectId}/${filePath}`);
@@ -193,6 +199,9 @@ export const GET = withWorkspaceAccess<{ name: string; id: string; path: string[
     } catch (error) {
       if (auditCtx) {
         auditError(auditCtx, "get", `${projectId}/${filePath}`, error, 500);
+      }
+      if (error instanceof ContentApiError) {
+        return contentErrorResponse(error, "Failed to get file content");
       }
       return handleK8sError(error, "get file content");
     }
@@ -237,39 +246,31 @@ export const PUT = withWorkspaceAccess<{ name: string; id: string; path: string[
         );
       }
 
-      const projectPath = getProjectPath(name, result.workspace.spec.namespace.name, projectId);
-      const fullPath = path.join(projectPath, filePath);
+      const relpath = `${projectRelPath(projectId)}/${filePath}`;
 
-      // Security check: prevent path traversal
-      if (!isPathSafe(filePath, projectPath)) {
+      // The file must already exist for a PUT, and must not be a directory.
+      let existing;
+      try {
+        existing = await getContent(name, user, relpath);
+      } catch (error) {
+        if (isNotFound(error)) {
+          return notFoundResponse(`File not found: ${filePath}`);
+        }
+        throw error;
+      }
+      if (isContentListing(existing)) {
         return NextResponse.json(
-          { error: BAD_REQUEST, message: PATH_TRAVERSAL_ERROR },
+          { error: BAD_REQUEST, message: "Cannot update content of a directory" },
           { status: 400 }
         );
       }
 
-      // Check if file exists (must exist for PUT)
-      try {
-        const stats = await fs.stat(fullPath);
-        if (stats.isDirectory()) {
-          return NextResponse.json(
-            { error: BAD_REQUEST, message: "Cannot update content of a directory" },
-            { status: 400 }
-          );
-        }
-      } catch {
-        return notFoundResponse(`File not found: ${filePath}`);
-      }
-
-      // Write file
-      await fs.writeFile(fullPath, body.content, "utf-8");
-
-      const stats = await fs.stat(fullPath);
+      const writeResult = await writeContentFile(name, user, relpath, body.content);
 
       const response: FileUpdateResponse = {
         path: filePath,
-        size: stats.size,
-        modifiedAt: stats.mtime.toISOString(),
+        size: writeResult.size,
+        modifiedAt: writeResult.modifiedAt,
       };
 
       auditSuccess(auditCtx, "update", `${projectId}/${filePath}`);
@@ -277,6 +278,9 @@ export const PUT = withWorkspaceAccess<{ name: string; id: string; path: string[
     } catch (error) {
       if (auditCtx) {
         auditError(auditCtx, "update", `${projectId}/${filePath}`, error, 500);
+      }
+      if (error instanceof ContentApiError) {
+        return contentErrorResponse(error, "Failed to update file");
       }
       return handleK8sError(error, "update file");
     }
@@ -321,58 +325,26 @@ export const POST = withWorkspaceAccess<{ name: string; id: string; path: string
         );
       }
 
-      const projectPath = getProjectPath(name, result.workspace.spec.namespace.name, projectId);
-      const parentFullPath = path.join(projectPath, parentPath);
-      const targetPath = path.join(parentFullPath, body.name);
+      const basePath = projectRelPath(projectId);
+      const parentRelPath = `${basePath}/${parentPath}`;
+      const targetRelPath = `${parentRelPath}/${body.name}`;
       const targetRelativePath = `${parentPath}/${body.name}`;
 
-      // Security check: prevent path traversal
-      if (!isPathSafe(parentPath, projectPath) || !isPathSafe(targetRelativePath, projectPath)) {
-        return NextResponse.json(
-          { error: BAD_REQUEST, message: PATH_TRAVERSAL_ERROR },
-          { status: 400 }
-        );
-      }
+      const parentError = await checkParentDirectory(name, user, parentRelPath, parentPath);
+      if (parentError) return parentError;
 
-      // Check if parent exists and is a directory
-      try {
-        const parentStats = await fs.stat(parentFullPath);
-        if (!parentStats.isDirectory()) {
-          return NextResponse.json(
-            { error: BAD_REQUEST, message: "Parent path is not a directory" },
-            { status: 400 }
-          );
-        }
-      } catch {
-        return notFoundResponse(`Parent directory not found: ${parentPath}`);
-      }
+      const conflict = await conflictIfExists(name, user, targetRelPath, body.name);
+      if (conflict) return conflict;
 
-      // Check if already exists
-      try {
-        await fs.access(targetPath);
-        return NextResponse.json(
-          { error: "Conflict", message: `File or directory already exists: ${body.name}` },
-          { status: 409 }
-        );
-      } catch {
-        // Good, doesn't exist
-      }
-
-      if (body.isDirectory) {
-        await fs.mkdir(targetPath, { recursive: true });
-      } else {
-        const content = body.content ?? "";
-        await fs.writeFile(targetPath, content, "utf-8");
-      }
-
-      const stats = await fs.stat(targetPath);
+      const now = new Date().toISOString();
+      const size = await createNode(name, user, targetRelPath, body);
 
       const response: FileCreateResponse = {
         path: targetRelativePath,
         name: body.name,
         isDirectory: body.isDirectory,
-        size: body.isDirectory ? undefined : stats.size,
-        modifiedAt: stats.mtime.toISOString(),
+        size,
+        modifiedAt: now,
       };
 
       auditSuccess(auditCtx, "create", `${projectId}/${targetRelativePath}`);
@@ -380,6 +352,9 @@ export const POST = withWorkspaceAccess<{ name: string; id: string; path: string
     } catch (error) {
       if (auditCtx) {
         auditError(auditCtx, "create", `${projectId}/${parentPath}`, error, 500);
+      }
+      if (error instanceof ContentApiError) {
+        return contentErrorResponse(error, "Failed to create file");
       }
       return handleK8sError(error, "create file");
     }
@@ -415,45 +390,37 @@ export const DELETE = withWorkspaceAccess<{ name: string; id: string; path: stri
         RESOURCE_TYPE
       );
 
-      const projectPath = getProjectPath(name, result.workspace.spec.namespace.name, projectId);
-      const fullPath = path.join(projectPath, filePath);
-
-      // Security check: prevent path traversal
-      if (!isPathSafe(filePath, projectPath)) {
-        return NextResponse.json(
-          { error: BAD_REQUEST, message: PATH_TRAVERSAL_ERROR },
-          { status: 400 }
-        );
-      }
-
-      // Don't allow deleting config.arena.yaml
-      if (filePath === "config.arena.yaml") {
+      // Don't allow deleting config.arena.yaml.
+      if (filePath === PROJECT_CONFIG_FILE) {
         return NextResponse.json(
           { error: BAD_REQUEST, message: "Cannot delete project config file" },
           { status: 400 }
         );
       }
 
-      // Check if file exists
+      const relpath = `${projectRelPath(projectId)}/${filePath}`;
+
+      // Check if file exists.
       try {
-        await fs.access(fullPath);
-      } catch {
-        return notFoundResponse(`File not found: ${filePath}`);
+        await getContent(name, user, relpath);
+      } catch (error) {
+        if (isNotFound(error)) {
+          return notFoundResponse(`File not found: ${filePath}`);
+        }
+        throw error;
       }
 
-      const stats = await fs.stat(fullPath);
-
-      if (stats.isDirectory()) {
-        await deleteRecursive(fullPath);
-      } else {
-        await fs.unlink(fullPath);
-      }
+      // Delete (operator deletes directories recursively).
+      await deleteContent(name, user, relpath);
 
       auditSuccess(auditCtx, "delete", `${projectId}/${filePath}`);
       return new NextResponse(null, { status: 204 });
     } catch (error) {
       if (auditCtx) {
         auditError(auditCtx, "delete", `${projectId}/${filePath}`, error, 500);
+      }
+      if (error instanceof ContentApiError) {
+        return contentErrorResponse(error, "Failed to delete file");
       }
       return handleK8sError(error, "delete file");
     }

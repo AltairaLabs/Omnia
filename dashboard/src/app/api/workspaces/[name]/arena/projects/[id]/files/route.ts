@@ -4,6 +4,9 @@
  * GET /api/workspaces/:name/arena/projects/:id/files - List all files in project
  * POST /api/workspaces/:name/arena/projects/:id/files - Create file/folder at root
  *
+ * Content is served by the operator's authenticated content API (the dashboard
+ * no longer mounts the NFS workspace-content volume directly — see #1462).
+ *
  * Protected by workspace access checks.
  */
 
@@ -21,12 +24,15 @@ import type { WorkspaceAccess } from "@/types/workspace";
 import type { User } from "@/lib/auth/types";
 import { getFileType, type FileTreeNode, type FileCreateRequest, type FileCreateResponse, type ProviderBinding } from "@/types/arena-project";
 import { extractBindingAnnotations } from "@/lib/arena/provider-binding";
-import * as fs from "node:fs/promises";
-import * as path from "node:path";
-
-// Base path for workspace content (configurable via environment)
-const WORKSPACE_CONTENT_BASE =
-  process.env.WORKSPACE_CONTENT_PATH || "/workspace-content";
+import {
+  ContentApiError,
+  getContent,
+  isContentFile,
+  makeContentDir,
+  writeContentFile,
+} from "@/lib/data/content-api-service";
+import { listContentTree, type ContentTreeNode } from "@/lib/data/content-tree";
+import { contentErrorResponse } from "@/lib/data/content-api-response";
 
 const RESOURCE_TYPE = "ArenaProjectFile";
 
@@ -34,79 +40,75 @@ interface RouteParams {
   params: Promise<{ name: string; id: string }>;
 }
 
-/**
- * Get the project directory path
- */
-function getProjectPath(workspaceName: string, namespace: string, projectId: string): string {
-  return path.join(
-    WORKSPACE_CONTENT_BASE,
-    workspaceName,
-    namespace,
-    "arena",
-    "projects",
-    projectId
-  );
+/** The content relpath for a project's directory. */
+function projectRelPath(projectId: string): string {
+  return `arena/projects/${projectId}`;
 }
 
 /**
  * Read provider binding annotations from a file, if it is a provider YAML.
  */
-async function readProviderBinding(fullPath: string, fileType: string): Promise<ProviderBinding | undefined> {
+async function readProviderBinding(
+  workspace: string,
+  user: User,
+  relpath: string,
+  fileType: string
+): Promise<ProviderBinding | undefined> {
   if (fileType !== "provider") return undefined;
   try {
-    const content = await fs.readFile(fullPath, "utf-8");
-    return extractBindingAnnotations(content) ?? undefined;
+    const node = await getContent(workspace, user, relpath);
+    if (!isContentFile(node)) return undefined;
+    return extractBindingAnnotations(node.content) ?? undefined;
   } catch {
     return undefined;
   }
 }
 
 /**
- * Build file tree recursively from directory
+ * Map content-tree nodes (operator API) onto the arena FileTreeNode shape,
+ * enriching provider files with their binding annotations and sorting
+ * directories first, then alphabetically.
  */
-async function buildFileTree(dirPath: string, relativePath: string = ""): Promise<FileTreeNode[]> {
-  const entries = await fs.readdir(dirPath, { withFileTypes: true });
-  const nodes: FileTreeNode[] = [];
+async function toFileTree(
+  workspace: string,
+  user: User,
+  baseRelPath: string,
+  nodes: ContentTreeNode[]
+): Promise<FileTreeNode[]> {
+  const result: FileTreeNode[] = [];
 
-  for (const entry of entries) {
-    // Skip hidden files/directories
-    if (entry.name.startsWith(".")) continue;
-
-    const entryPath = relativePath ? `${relativePath}/${entry.name}` : entry.name;
-    const fullPath = path.join(dirPath, entry.name);
-    const stats = await fs.stat(fullPath);
-
-    if (entry.isDirectory()) {
-      const children = await buildFileTree(fullPath, entryPath);
-      nodes.push({
-        name: entry.name,
-        path: entryPath,
+  for (const node of nodes) {
+    const relpath = `${baseRelPath}/${node.path}`;
+    if (node.isDirectory) {
+      result.push({
+        name: node.name,
+        path: node.path,
         isDirectory: true,
-        children,
-        modifiedAt: stats.mtime.toISOString(),
+        modifiedAt: node.modifiedAt,
+        children: await toFileTree(workspace, user, baseRelPath, node.children ?? []),
       });
     } else {
-      const fileType = getFileType(entry.name);
-      nodes.push({
-        name: entry.name,
-        path: entryPath,
+      const fileType = getFileType(node.name);
+      result.push({
+        name: node.name,
+        path: node.path,
         isDirectory: false,
-        size: stats.size,
-        modifiedAt: stats.mtime.toISOString(),
+        size: node.size,
+        modifiedAt: node.modifiedAt,
         type: fileType,
-        providerBinding: await readProviderBinding(fullPath, fileType),
+        providerBinding: await readProviderBinding(workspace, user, relpath, fileType),
       });
     }
   }
 
-  // Sort: directories first, then alphabetically
-  nodes.sort((a, b) => {
+  // Sort: directories first, then alphabetically.
+  result.sort((a, b) => {
     if (a.isDirectory && !b.isDirectory) return -1;
     if (!a.isDirectory && b.isDirectory) return 1;
     return a.name.localeCompare(b.name);
   });
 
-  return nodes;
+  return result;
 }
 
 /**
@@ -118,6 +120,71 @@ function isValidFilename(name: string): boolean {
   if (name === "." || name === "..") return false;
   if (name.startsWith(".")) return false; // No hidden files
   return true;
+}
+
+/** True when the thrown error is a content-API 404. */
+function isNotFound(error: unknown): boolean {
+  return error instanceof ContentApiError && error.status === 404;
+}
+
+/**
+ * Return a notFound response when the project does not exist, or null when it
+ * does. Re-throws other content-API errors.
+ */
+async function checkProjectExists(
+  workspace: string,
+  user: User,
+  basePath: string,
+  projectId: string
+): Promise<NextResponse | null> {
+  try {
+    await getContent(workspace, user, basePath);
+    return null;
+  } catch (error) {
+    if (isNotFound(error)) {
+      return notFoundResponse(`Project not found: ${projectId}`);
+    }
+    throw error;
+  }
+}
+
+/**
+ * Return a 409 response when the target already exists, or null when it does
+ * not. Re-throws other content-API errors.
+ */
+async function conflictIfExists(
+  workspace: string,
+  user: User,
+  targetRelPath: string,
+  fileName: string
+): Promise<NextResponse | null> {
+  try {
+    await getContent(workspace, user, targetRelPath);
+    return NextResponse.json(
+      { error: "Conflict", message: `File or directory already exists: ${fileName}` },
+      { status: 409 }
+    );
+  } catch (error) {
+    if (isNotFound(error)) {
+      return null;
+    }
+    throw error;
+  }
+}
+
+/** Create a file or directory, returning the resulting size (undefined for dirs). */
+async function createNode(
+  workspace: string,
+  user: User,
+  targetRelPath: string,
+  body: FileCreateRequest
+): Promise<number | undefined> {
+  if (body.isDirectory) {
+    await makeContentDir(workspace, user, targetRelPath);
+    return undefined;
+  }
+  const writeResult = await writeContentFile(workspace, user, targetRelPath, body.content ?? "");
+  return writeResult.size;
 }
 
 /**
@@ -148,23 +215,22 @@ export const GET = withWorkspaceAccess<{ name: string; id: string }>(
         RESOURCE_TYPE
       );
 
-      const projectPath = getProjectPath(name, result.workspace.spec.namespace.name, projectId);
+      const basePath = projectRelPath(projectId);
 
-      // Check if project exists
-      try {
-        await fs.access(projectPath);
-      } catch {
-        return notFoundResponse(`Project not found: ${projectId}`);
-      }
+      const missing = await checkProjectExists(name, user, basePath, projectId);
+      if (missing) return missing;
 
-      // Build file tree
-      const tree = await buildFileTree(projectPath);
+      const treeNodes = await listContentTree(name, user, basePath, { skipHidden: true });
+      const tree = await toFileTree(name, user, basePath, treeNodes);
 
       auditSuccess(auditCtx, "list", projectId);
       return NextResponse.json({ tree });
     } catch (error) {
       if (auditCtx) {
         auditError(auditCtx, "list", projectId, error, 500);
+      }
+      if (error instanceof ContentApiError) {
+        return contentErrorResponse(error, "Failed to list project files");
       }
       return handleK8sError(error, "list project files");
     }
@@ -208,44 +274,24 @@ export const POST = withWorkspaceAccess<{ name: string; id: string }>(
         );
       }
 
-      const projectPath = getProjectPath(name, result.workspace.spec.namespace.name, projectId);
+      const basePath = projectRelPath(projectId);
 
-      // Check if project exists
-      try {
-        await fs.access(projectPath);
-      } catch {
-        return notFoundResponse(`Project not found: ${projectId}`);
-      }
+      const missing = await checkProjectExists(name, user, basePath, projectId);
+      if (missing) return missing;
 
-      const targetPath = path.join(projectPath, body.name);
+      const targetRelPath = `${basePath}/${body.name}`;
 
-      // Check if already exists
-      try {
-        await fs.access(targetPath);
-        return NextResponse.json(
-          { error: "Conflict", message: `File or directory already exists: ${body.name}` },
-          { status: 409 }
-        );
-      } catch {
-        // Good, doesn't exist
-      }
+      const conflict = await conflictIfExists(name, user, targetRelPath, body.name);
+      if (conflict) return conflict;
 
       const now = new Date().toISOString();
-
-      if (body.isDirectory) {
-        await fs.mkdir(targetPath, { recursive: true });
-      } else {
-        const content = body.content ?? "";
-        await fs.writeFile(targetPath, content, "utf-8");
-      }
-
-      const stats = await fs.stat(targetPath);
+      const size = await createNode(name, user, targetRelPath, body);
 
       const response: FileCreateResponse = {
         path: body.name,
         name: body.name,
         isDirectory: body.isDirectory,
-        size: body.isDirectory ? undefined : stats.size,
+        size,
         modifiedAt: now,
       };
 
@@ -254,6 +300,9 @@ export const POST = withWorkspaceAccess<{ name: string; id: string }>(
     } catch (error) {
       if (auditCtx) {
         auditError(auditCtx, "create", projectId, error, 500);
+      }
+      if (error instanceof ContentApiError) {
+        return contentErrorResponse(error, "Failed to create file");
       }
       return handleK8sError(error, "create file");
     }

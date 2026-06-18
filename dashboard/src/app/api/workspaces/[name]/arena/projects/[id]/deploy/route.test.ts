@@ -35,9 +35,26 @@ vi.mock("@/lib/k8s/crd-operations", () => ({
   updateCrd: vi.fn(),
 }));
 
-vi.mock("node:fs/promises", () => ({
-  readdir: vi.fn(),
-}));
+vi.mock("@/lib/data/content-api-service", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/data/content-api-service")>();
+  return {
+    ...actual,
+    getContent: vi.fn(),
+  };
+});
+
+/** A content listing with `count` file entries (project non-empty check). */
+function listingWith(count: number) {
+  return {
+    path: "arena/projects/project-1",
+    entries: Array.from({ length: count }, (_unused, i) => ({
+      name: `f${i}.json`,
+      type: "file" as const,
+      size: 1,
+      modifiedAt: "t",
+    })),
+  };
+}
 
 const mockUser = {
   id: "testuser-id",
@@ -106,8 +123,8 @@ describe("POST /api/workspaces/[name]/arena/projects/[id]/deploy", () => {
 
   it("returns 404 when the project dir does not exist", async () => {
     await grantAccess();
-    const fs = await import("node:fs/promises");
-    vi.mocked(fs.readdir).mockRejectedValue(new Error("ENOENT"));
+    const svc = await import("@/lib/data/content-api-service");
+    vi.mocked(svc.getContent).mockRejectedValue(new svc.ContentApiError("not found", 404));
 
     const { POST } = await import("./route");
     const response = await POST(createMockRequest(), createMockContext());
@@ -116,8 +133,8 @@ describe("POST /api/workspaces/[name]/arena/projects/[id]/deploy", () => {
 
   it("returns 400 when the project dir is empty", async () => {
     await grantAccess();
-    const fs = await import("node:fs/promises");
-    vi.mocked(fs.readdir).mockResolvedValue([] as unknown as Awaited<ReturnType<typeof fs.readdir>>);
+    const svc = await import("@/lib/data/content-api-service");
+    vi.mocked(svc.getContent).mockResolvedValue(listingWith(0));
 
     const { POST } = await import("./route");
     const response = await POST(createMockRequest(), createMockContext());
@@ -129,8 +146,8 @@ describe("POST /api/workspaces/[name]/arena/projects/[id]/deploy", () => {
   it("creates a workspace ArenaSource (no ConfigMap) on first deploy", async () => {
     await grantAccess();
     const { getCrd, createCrd } = await import("@/lib/k8s/crd-operations");
-    const fs = await import("node:fs/promises");
-    vi.mocked(fs.readdir).mockResolvedValue(["pack.json"] as unknown as Awaited<ReturnType<typeof fs.readdir>>);
+    const svc = await import("@/lib/data/content-api-service");
+    vi.mocked(svc.getContent).mockResolvedValue(listingWith(1));
     vi.mocked(getCrd).mockResolvedValue(null);
     vi.mocked(createCrd).mockResolvedValue({
       metadata: { name: "project-project-1", namespace: "test-ns" },
@@ -160,8 +177,8 @@ describe("POST /api/workspaces/[name]/arena/projects/[id]/deploy", () => {
   it("replaces a stale configmap source with a workspace source on redeploy", async () => {
     await grantAccess();
     const { getCrd, updateCrd } = await import("@/lib/k8s/crd-operations");
-    const fs = await import("node:fs/promises");
-    vi.mocked(fs.readdir).mockResolvedValue(["pack.json"] as unknown as Awaited<ReturnType<typeof fs.readdir>>);
+    const svc = await import("@/lib/data/content-api-service");
+    vi.mocked(svc.getContent).mockResolvedValue(listingWith(1));
     vi.mocked(getCrd).mockResolvedValue({
       metadata: { name: "project-project-1", namespace: "test-ns", labels: {} },
       spec: { type: "configmap", configMap: { name: "arena-project-project-1" }, interval: "5m" },
@@ -190,8 +207,8 @@ describe("POST /api/workspaces/[name]/arena/projects/[id]/deploy", () => {
   it("uses a custom source name and sync interval from the request body", async () => {
     await grantAccess();
     const { getCrd, createCrd } = await import("@/lib/k8s/crd-operations");
-    const fs = await import("node:fs/promises");
-    vi.mocked(fs.readdir).mockResolvedValue(["pack.json"] as unknown as Awaited<ReturnType<typeof fs.readdir>>);
+    const svc = await import("@/lib/data/content-api-service");
+    vi.mocked(svc.getContent).mockResolvedValue(listingWith(1));
     vi.mocked(getCrd).mockResolvedValue(null);
     vi.mocked(createCrd).mockResolvedValue({
       metadata: { name: "custom-source-name", namespace: "test-ns" },

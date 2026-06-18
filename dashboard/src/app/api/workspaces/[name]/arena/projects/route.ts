@@ -1,11 +1,14 @@
 /**
- * API routes for Arena projects (filesystem-based).
+ * API routes for Arena projects (workspace-content based).
  *
  * GET /api/workspaces/:name/arena/projects - List all projects
  * POST /api/workspaces/:name/arena/projects - Create a new project
  *
- * Projects are stored in the workspace volume at:
- * /workspace-content/{workspace}/{namespace}/arena/projects/{project-id}/
+ * Projects live in the workspace content at the relative path
+ * `arena/projects/{project-id}/`. Content is served by the operator's
+ * authenticated content API (the dashboard no longer mounts the NFS
+ * workspace-content volume directly — see #1462); the operator resolves the
+ * workspace's namespace and confines access.
  *
  * Protected by workspace access checks.
  */
@@ -22,15 +25,20 @@ import {
 import type { WorkspaceAccess } from "@/types/workspace";
 import type { User } from "@/lib/auth/types";
 import type { ArenaProject, ProjectListResponse, ProjectCreateRequest } from "@/types/arena-project";
-import * as fs from "node:fs/promises";
-import * as path from "node:path";
+import {
+  ContentApiError,
+  getContent,
+  isContentFile,
+  isContentListing,
+  makeContentDir,
+  writeContentFile,
+} from "@/lib/data/content-api-service";
+import { contentErrorResponse } from "@/lib/data/content-api-response";
 import * as yaml from "js-yaml";
 
-// Base path for workspace content (configurable via environment)
-const WORKSPACE_CONTENT_BASE =
-  process.env.WORKSPACE_CONTENT_PATH || "/workspace-content";
-
 const RESOURCE_TYPE = "ArenaProject";
+const PROJECTS_REL_PATH = "arena/projects";
+const PROJECT_CONFIG_FILE = "config.arena.yaml";
 
 interface ProjectConfig {
   name: string;
@@ -40,54 +48,44 @@ interface ProjectConfig {
   updatedAt?: string;
 }
 
-/**
- * Get the projects directory path for a workspace
- */
-function getProjectsPath(workspaceName: string, namespace: string): string {
-  return path.join(
-    WORKSPACE_CONTENT_BASE,
-    workspaceName,
-    namespace,
-    "arena",
-    "projects"
-  );
+/** The content relpath for a project's directory. */
+function projectRelPath(projectId: string): string {
+  return `${PROJECTS_REL_PATH}/${projectId}`;
 }
 
 /**
- * Read project config from config.arena.yaml
+ * Read a project's config.arena.yaml via the content API, returning project
+ * metadata. Falls back to the project id as the name if the config is absent
+ * or invalid.
  */
 async function readProjectConfig(
-  projectPath: string,
-  projectId: string
-): Promise<ArenaProject | null> {
-  const configPath = path.join(projectPath, "config.arena.yaml");
+  workspace: string,
+  user: User,
+  projectId: string,
+): Promise<ArenaProject> {
+  const configPath = `${projectRelPath(projectId)}/${PROJECT_CONFIG_FILE}`;
+  let config: ProjectConfig | undefined;
+  let modifiedAt = "";
   try {
-    const content = await fs.readFile(configPath, "utf-8");
-    const config = yaml.load(content) as ProjectConfig;
-    const stats = await fs.stat(configPath);
-
-    return {
-      id: projectId,
-      name: config.name || projectId,
-      description: config.description,
-      tags: config.tags,
-      createdAt: config.createdAt || stats.birthtime.toISOString(),
-      updatedAt: config.updatedAt || stats.mtime.toISOString(),
-    };
-  } catch {
-    // Config file doesn't exist or is invalid, use defaults
-    try {
-      const stats = await fs.stat(projectPath);
-      return {
-        id: projectId,
-        name: projectId,
-        createdAt: stats.birthtime.toISOString(),
-        updatedAt: stats.mtime.toISOString(),
-      };
-    } catch {
-      return null;
+    const node = await getContent(workspace, user, configPath);
+    if (isContentFile(node)) {
+      config = yaml.load(node.content) as ProjectConfig;
+      modifiedAt = node.modifiedAt;
+    }
+  } catch (error) {
+    if (!(error instanceof ContentApiError && error.status === 404)) {
+      throw error;
     }
   }
+
+  return {
+    id: projectId,
+    name: config?.name || projectId,
+    description: config?.description,
+    tags: config?.tags,
+    createdAt: config?.createdAt || modifiedAt,
+    updatedAt: config?.updatedAt || modifiedAt,
+  };
 }
 
 /**
@@ -131,33 +129,7 @@ export const GET = withWorkspaceAccess(
         RESOURCE_TYPE
       );
 
-      const projectsPath = getProjectsPath(name, result.workspace.spec.namespace.name);
-
-      // Ensure projects directory exists
-      try {
-        await fs.access(projectsPath);
-      } catch {
-        // Directory doesn't exist, return empty list
-        const response: ProjectListResponse = { projects: [] };
-        auditSuccess(auditCtx, "list", undefined, { count: 0 });
-        return NextResponse.json(response);
-      }
-
-      // Read all project directories
-      const entries = await fs.readdir(projectsPath, { withFileTypes: true });
-      const projects: ArenaProject[] = [];
-
-      for (const entry of entries) {
-        if (!entry.isDirectory()) continue;
-        // Skip hidden directories
-        if (entry.name.startsWith(".")) continue;
-
-        const projectPath = path.join(projectsPath, entry.name);
-        const project = await readProjectConfig(projectPath, entry.name);
-        if (project) {
-          projects.push(project);
-        }
-      }
+      const projects = await listProjects(name, user);
 
       // Sort by updatedAt (most recent first)
       projects.sort((a, b) =>
@@ -171,10 +143,41 @@ export const GET = withWorkspaceAccess(
       if (auditCtx) {
         auditError(auditCtx, "list", undefined, error, 500);
       }
+      if (error instanceof ContentApiError) {
+        return contentErrorResponse(error, "Failed to list projects");
+      }
       return handleK8sError(error, "list projects");
     }
   }
 );
+
+/**
+ * List projects under arena/projects. A missing projects directory yields an
+ * empty list (404 from the content API is treated as "no projects yet").
+ */
+async function listProjects(workspace: string, user: User): Promise<ArenaProject[]> {
+  let listing;
+  try {
+    listing = await getContent(workspace, user, PROJECTS_REL_PATH);
+  } catch (error) {
+    if (error instanceof ContentApiError && error.status === 404) {
+      return [];
+    }
+    throw error;
+  }
+
+  if (!isContentListing(listing)) {
+    return [];
+  }
+
+  const projects: ArenaProject[] = [];
+  for (const entry of listing.entries) {
+    if (entry.type !== "directory") continue;
+    if (entry.name.startsWith(".")) continue;
+    projects.push(await readProjectConfig(workspace, user, entry.name));
+  }
+  return projects;
+}
 
 /**
  * POST /api/workspaces/:name/arena/projects
@@ -215,21 +218,15 @@ export const POST = withWorkspaceAccess(
       }
 
       projectId = generateProjectId(body.name);
-      const projectsPath = getProjectsPath(name, result.workspace.spec.namespace.name);
-      const projectPath = path.join(projectsPath, projectId);
+      const basePath = projectRelPath(projectId);
 
-      // Ensure projects directory exists
-      await fs.mkdir(projectsPath, { recursive: true });
-
-      // Create project directory
-      await fs.mkdir(projectPath, { recursive: true });
-
-      // Create standard subdirectories
+      // Create standard subdirectories (the project dir and parents are
+      // created implicitly by the operator's recursive mkdir).
       await Promise.all([
-        fs.mkdir(path.join(projectPath, "prompts"), { recursive: true }),
-        fs.mkdir(path.join(projectPath, "providers"), { recursive: true }),
-        fs.mkdir(path.join(projectPath, "scenarios"), { recursive: true }),
-        fs.mkdir(path.join(projectPath, "tools"), { recursive: true }),
+        makeContentDir(name, user, `${basePath}/prompts`),
+        makeContentDir(name, user, `${basePath}/providers`),
+        makeContentDir(name, user, `${basePath}/scenarios`),
+        makeContentDir(name, user, `${basePath}/tools`),
       ]);
 
       const now = new Date().toISOString();
@@ -241,10 +238,8 @@ export const POST = withWorkspaceAccess(
         updatedAt: now,
       };
 
-      // Write config.arena.yaml
-      const configPath = path.join(projectPath, "config.arena.yaml");
       const configContent = yaml.dump(config, { lineWidth: -1 });
-      await fs.writeFile(configPath, configContent, "utf-8");
+      await writeContentFile(name, user, `${basePath}/${PROJECT_CONFIG_FILE}`, configContent);
 
       const project: ArenaProject = {
         id: projectId,
@@ -260,6 +255,9 @@ export const POST = withWorkspaceAccess(
     } catch (error) {
       if (auditCtx) {
         auditError(auditCtx, "create", projectId, error, 500);
+      }
+      if (error instanceof ContentApiError) {
+        return contentErrorResponse(error, "Failed to create project");
       }
       return handleK8sError(error, "create project");
     }

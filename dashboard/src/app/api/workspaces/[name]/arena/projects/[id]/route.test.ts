@@ -1,5 +1,10 @@
 /**
  * Tests for single Arena project API routes.
+ *
+ * The routes now call the operator content API via content-api-service and
+ * content-tree instead of reading the NFS mount, so these mock those services
+ * (mock-to-contract: shapes match the Go content.Listing / content.FileContent
+ * json tags).
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -23,13 +28,17 @@ vi.mock("@/lib/k8s/workspace-route-helpers", async (importOriginal) => {
   };
 });
 
-vi.mock("node:fs/promises", () => ({
-  access: vi.fn(),
-  stat: vi.fn(),
-  readdir: vi.fn(),
-  readFile: vi.fn(),
-  rmdir: vi.fn(),
-  unlink: vi.fn(),
+vi.mock("@/lib/data/content-api-service", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/data/content-api-service")>();
+  return {
+    ...actual,
+    getContent: vi.fn(),
+    deleteContent: vi.fn(),
+  };
+});
+
+vi.mock("@/lib/data/content-tree", () => ({
+  listContentTree: vi.fn(),
 }));
 
 const mockUser = {
@@ -60,6 +69,18 @@ function createMockContext(projectId = "project-1") {
   };
 }
 
+async function grantWorkspace(role: "viewer" | "editor") {
+  const { getUser } = await import("@/lib/auth");
+  const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
+  const { validateWorkspace } = await import("@/lib/k8s/workspace-route-helpers");
+  vi.mocked(getUser).mockResolvedValue(mockUser);
+  vi.mocked(checkWorkspaceAccess).mockResolvedValue({ granted: true, role, permissions: editorPermissions });
+  vi.mocked(validateWorkspace).mockResolvedValue({
+    ok: true,
+    workspace: mockWorkspace,
+  } as Awaited<ReturnType<typeof validateWorkspace>>);
+}
+
 describe("GET /api/workspaces/[name]/arena/projects/[id]", () => {
   beforeEach(() => {
     vi.resetModules();
@@ -83,18 +104,9 @@ describe("GET /api/workspaces/[name]/arena/projects/[id]", () => {
   });
 
   it("returns 404 when project does not exist", async () => {
-    const { getUser } = await import("@/lib/auth");
-    const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
-    const { validateWorkspace } = await import("@/lib/k8s/workspace-route-helpers");
-    const fs = await import("node:fs/promises");
-
-    vi.mocked(getUser).mockResolvedValue(mockUser);
-    vi.mocked(checkWorkspaceAccess).mockResolvedValue({ granted: true, role: "viewer", permissions: editorPermissions });
-    vi.mocked(validateWorkspace).mockResolvedValue({
-      ok: true,
-      workspace: mockWorkspace,
-    } as Awaited<ReturnType<typeof validateWorkspace>>);
-    vi.mocked(fs.access).mockRejectedValue(new Error("ENOENT"));
+    await grantWorkspace("viewer");
+    const svc = await import("@/lib/data/content-api-service");
+    vi.mocked(svc.getContent).mockRejectedValue(new svc.ContentApiError("not found", 404));
 
     const { GET } = await import("./route");
     const response = await GET(createMockRequest(), createMockContext());
@@ -103,30 +115,28 @@ describe("GET /api/workspaces/[name]/arena/projects/[id]", () => {
   });
 
   it("returns project with file tree", async () => {
-    const { getUser } = await import("@/lib/auth");
-    const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
-    const { validateWorkspace } = await import("@/lib/k8s/workspace-route-helpers");
-    const fs = await import("node:fs/promises");
-
-    vi.mocked(getUser).mockResolvedValue(mockUser);
-    vi.mocked(checkWorkspaceAccess).mockResolvedValue({ granted: true, role: "viewer", permissions: editorPermissions });
-    vi.mocked(validateWorkspace).mockResolvedValue({
-      ok: true,
-      workspace: mockWorkspace,
-    } as Awaited<ReturnType<typeof validateWorkspace>>);
-    vi.mocked(fs.access).mockResolvedValue(undefined);
-    vi.mocked(fs.readFile).mockResolvedValue(Buffer.from("name: Test Project\ndescription: A test\ncreatedAt: 2024-01-01T00:00:00Z\nupdatedAt: 2024-01-01T00:00:00Z"));
-    vi.mocked(fs.stat).mockResolvedValue({
-      birthtime: new Date("2024-01-01T00:00:00Z"),
-      mtime: new Date("2024-01-01T00:00:00Z"),
-    } as unknown as Awaited<ReturnType<typeof fs.stat>>);
-    // First call returns project contents, second call returns empty for subdirectory
-    vi.mocked(fs.readdir)
-      .mockResolvedValueOnce([
-        { name: "config.arena.yaml", isDirectory: () => false },
-        { name: "prompts", isDirectory: () => true },
-      ] as unknown[] as Awaited<ReturnType<typeof fs.readdir>>)
-      .mockResolvedValueOnce([] as unknown[] as Awaited<ReturnType<typeof fs.readdir>>);
+    await grantWorkspace("viewer");
+    const svc = await import("@/lib/data/content-api-service");
+    const { listContentTree } = await import("@/lib/data/content-tree");
+    vi.mocked(svc.getContent).mockImplementation(async (_ws, _user, relpath = "") => {
+      if (relpath === "arena/projects/project-1") {
+        return { path: relpath, entries: [] };
+      }
+      if (relpath.endsWith("config.arena.yaml")) {
+        return {
+          path: relpath,
+          content: "name: Test Project\ndescription: A test\ncreatedAt: 2024-01-01T00:00:00Z\nupdatedAt: 2024-01-01T00:00:00Z",
+          encoding: "utf-8",
+          size: 80,
+          modifiedAt: "2024-01-01T00:00:00Z",
+        };
+      }
+      throw new svc.ContentApiError("not found", 404);
+    });
+    vi.mocked(listContentTree).mockResolvedValue([
+      { name: "config.arena.yaml", path: "config.arena.yaml", isDirectory: false, size: 80, modifiedAt: "2024-01-01T00:00:00Z" },
+      { name: "prompts", path: "prompts", isDirectory: true, modifiedAt: "2024-01-01T00:00:00Z", children: [] },
+    ]);
 
     const { GET } = await import("./route");
     const response = await GET(createMockRequest(), createMockContext());
@@ -137,6 +147,30 @@ describe("GET /api/workspaces/[name]/arena/projects/[id]", () => {
     expect(body.name).toBe("Test Project");
     expect(body.tree).toBeDefined();
     expect(Array.isArray(body.tree)).toBe(true);
+    // Directories sort before files.
+    expect(body.tree[0].name).toBe("prompts");
+    expect(body.tree[1].name).toBe("config.arena.yaml");
+  });
+
+  it("returns project using projectId as name when config is missing", async () => {
+    await grantWorkspace("viewer");
+    const svc = await import("@/lib/data/content-api-service");
+    const { listContentTree } = await import("@/lib/data/content-tree");
+    vi.mocked(svc.getContent).mockImplementation(async (_ws, _user, relpath = "") => {
+      if (relpath === "arena/projects/project-1") {
+        return { path: relpath, entries: [] };
+      }
+      throw new svc.ContentApiError("not found", 404);
+    });
+    vi.mocked(listContentTree).mockResolvedValue([]);
+
+    const { GET } = await import("./route");
+    const response = await GET(createMockRequest(), createMockContext());
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.name).toBe("project-1");
+    expect(body.tree).toEqual([]);
   });
 });
 
@@ -163,18 +197,9 @@ describe("DELETE /api/workspaces/[name]/arena/projects/[id]", () => {
   });
 
   it("returns 404 when project does not exist", async () => {
-    const { getUser } = await import("@/lib/auth");
-    const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
-    const { validateWorkspace } = await import("@/lib/k8s/workspace-route-helpers");
-    const fs = await import("node:fs/promises");
-
-    vi.mocked(getUser).mockResolvedValue(mockUser);
-    vi.mocked(checkWorkspaceAccess).mockResolvedValue({ granted: true, role: "editor", permissions: editorPermissions });
-    vi.mocked(validateWorkspace).mockResolvedValue({
-      ok: true,
-      workspace: mockWorkspace,
-    } as Awaited<ReturnType<typeof validateWorkspace>>);
-    vi.mocked(fs.access).mockRejectedValue(new Error("ENOENT"));
+    await grantWorkspace("editor");
+    const svc = await import("@/lib/data/content-api-service");
+    vi.mocked(svc.getContent).mockRejectedValue(new svc.ContentApiError("not found", 404));
 
     const { DELETE } = await import("./route");
     const response = await DELETE(createMockRequest("DELETE"), createMockContext());
@@ -182,140 +207,16 @@ describe("DELETE /api/workspaces/[name]/arena/projects/[id]", () => {
     expect(response.status).toBe(404);
   });
 
-  it("deletes project successfully", async () => {
-    const { getUser } = await import("@/lib/auth");
-    const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
-    const { validateWorkspace } = await import("@/lib/k8s/workspace-route-helpers");
-    const fs = await import("node:fs/promises");
-
-    vi.mocked(getUser).mockResolvedValue(mockUser);
-    vi.mocked(checkWorkspaceAccess).mockResolvedValue({ granted: true, role: "editor", permissions: editorPermissions });
-    vi.mocked(validateWorkspace).mockResolvedValue({
-      ok: true,
-      workspace: mockWorkspace,
-    } as Awaited<ReturnType<typeof validateWorkspace>>);
-    vi.mocked(fs.access).mockResolvedValue(undefined);
-    vi.mocked(fs.readdir).mockResolvedValue([]);
-    vi.mocked(fs.rmdir).mockResolvedValue(undefined);
+  it("deletes project successfully (recursive delete is operator-side)", async () => {
+    await grantWorkspace("editor");
+    const svc = await import("@/lib/data/content-api-service");
+    vi.mocked(svc.getContent).mockResolvedValue({ path: "arena/projects/project-1", entries: [] });
+    vi.mocked(svc.deleteContent).mockResolvedValue(undefined);
 
     const { DELETE } = await import("./route");
     const response = await DELETE(createMockRequest("DELETE"), createMockContext());
 
     expect(response.status).toBe(204);
-  });
-
-  it("deletes project with files and subdirectories recursively", async () => {
-    const { getUser } = await import("@/lib/auth");
-    const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
-    const { validateWorkspace } = await import("@/lib/k8s/workspace-route-helpers");
-    const fs = await import("node:fs/promises");
-
-    vi.mocked(getUser).mockResolvedValue(mockUser);
-    vi.mocked(checkWorkspaceAccess).mockResolvedValue({ granted: true, role: "editor", permissions: editorPermissions });
-    vi.mocked(validateWorkspace).mockResolvedValue({
-      ok: true,
-      workspace: mockWorkspace,
-    } as Awaited<ReturnType<typeof validateWorkspace>>);
-    vi.mocked(fs.access).mockResolvedValue(undefined);
-    // First call: project root with file and directory
-    vi.mocked(fs.readdir)
-      .mockResolvedValueOnce([
-        { name: "config.arena.yaml", isDirectory: () => false },
-        { name: "prompts", isDirectory: () => true },
-      ] as unknown[] as Awaited<ReturnType<typeof fs.readdir>>)
-      // Second call: prompts directory with a file
-      .mockResolvedValueOnce([
-        { name: "test.prompt.yaml", isDirectory: () => false },
-      ] as unknown[] as Awaited<ReturnType<typeof fs.readdir>>);
-    vi.mocked(fs.unlink).mockResolvedValue(undefined);
-    vi.mocked(fs.rmdir).mockResolvedValue(undefined);
-
-    const { DELETE } = await import("./route");
-    const response = await DELETE(createMockRequest("DELETE"), createMockContext());
-
-    expect(response.status).toBe(204);
-    expect(vi.mocked(fs.unlink)).toHaveBeenCalledTimes(2); // Both files
-    expect(vi.mocked(fs.rmdir)).toHaveBeenCalledTimes(2); // Both directories
-  });
-});
-
-describe("GET /api/workspaces/[name]/arena/projects/[id] - file tree", () => {
-  beforeEach(() => {
-    vi.resetModules();
-  });
-
-  afterEach(() => {
-    vi.resetAllMocks();
-  });
-
-  it("returns project with both files and directories in tree", async () => {
-    const { getUser } = await import("@/lib/auth");
-    const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
-    const { validateWorkspace } = await import("@/lib/k8s/workspace-route-helpers");
-    const fs = await import("node:fs/promises");
-
-    vi.mocked(getUser).mockResolvedValue(mockUser);
-    vi.mocked(checkWorkspaceAccess).mockResolvedValue({ granted: true, role: "viewer", permissions: editorPermissions });
-    vi.mocked(validateWorkspace).mockResolvedValue({
-      ok: true,
-      workspace: mockWorkspace,
-    } as Awaited<ReturnType<typeof validateWorkspace>>);
-    vi.mocked(fs.access).mockResolvedValue(undefined);
-    vi.mocked(fs.readFile).mockResolvedValue(Buffer.from("name: Test Project\ndescription: A test"));
-    // First call: project root
-    vi.mocked(fs.readdir)
-      .mockResolvedValueOnce([
-        { name: "config.arena.yaml", isDirectory: () => false },
-        { name: "prompts", isDirectory: () => true },
-        { name: ".hidden", isDirectory: () => true }, // Should be skipped
-      ] as unknown[] as Awaited<ReturnType<typeof fs.readdir>>)
-      // Second call: prompts directory
-      .mockResolvedValueOnce([
-        { name: "test.prompt.yaml", isDirectory: () => false },
-      ] as unknown[] as Awaited<ReturnType<typeof fs.readdir>>);
-    vi.mocked(fs.stat).mockResolvedValue({
-      birthtime: new Date("2024-01-01T00:00:00Z"),
-      mtime: new Date("2024-01-01T00:00:00Z"),
-      size: 100,
-    } as unknown as Awaited<ReturnType<typeof fs.stat>>);
-
-    const { GET } = await import("./route");
-    const response = await GET(createMockRequest(), createMockContext());
-
-    expect(response.status).toBe(200);
-    const body = await response.json();
-    expect(body.tree).toBeDefined();
-    // Should have prompts directory and config file (hidden is skipped)
-    expect(body.tree.length).toBe(2);
-  });
-
-  it("returns project when config file is missing", async () => {
-    const { getUser } = await import("@/lib/auth");
-    const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
-    const { validateWorkspace } = await import("@/lib/k8s/workspace-route-helpers");
-    const fs = await import("node:fs/promises");
-
-    vi.mocked(getUser).mockResolvedValue(mockUser);
-    vi.mocked(checkWorkspaceAccess).mockResolvedValue({ granted: true, role: "viewer", permissions: editorPermissions });
-    vi.mocked(validateWorkspace).mockResolvedValue({
-      ok: true,
-      workspace: mockWorkspace,
-    } as Awaited<ReturnType<typeof validateWorkspace>>);
-    vi.mocked(fs.access).mockResolvedValue(undefined);
-    // Config file doesn't exist
-    vi.mocked(fs.readFile).mockRejectedValue(new Error("ENOENT"));
-    vi.mocked(fs.readdir).mockResolvedValue([]);
-    vi.mocked(fs.stat).mockResolvedValue({
-      birthtime: new Date("2024-01-01T00:00:00Z"),
-      mtime: new Date("2024-01-01T00:00:00Z"),
-    } as unknown as Awaited<ReturnType<typeof fs.stat>>);
-
-    const { GET } = await import("./route");
-    const response = await GET(createMockRequest(), createMockContext());
-
-    expect(response.status).toBe(200);
-    const body = await response.json();
-    // Should use projectId as name
-    expect(body.name).toBe("project-1");
+    expect(vi.mocked(svc.deleteContent)).toHaveBeenCalledWith("test-ws", mockUser, "arena/projects/project-1");
   });
 });
