@@ -11,6 +11,7 @@
 
 import { getUser } from "./index";
 import { getCachedAccess, setCachedAccess } from "./authz-cache";
+import { computeWorkspaceRole } from "./compute-workspace-role";
 import { getWorkspace, listWorkspaces } from "@/lib/k8s/workspace-client";
 import {
   ROLE_HIERARCHY,
@@ -19,8 +20,6 @@ import {
   type Workspace,
   type WorkspaceRole,
   type WorkspaceAccess,
-  type RoleBinding,
-  type DirectGrant,
   type AnonymousAccessConfig,
 } from "@/types/workspace";
 
@@ -50,21 +49,6 @@ function userIdentity(user: { email?: string; username?: string }): string | und
 }
 
 /**
- * Compare two roles and return the higher-privilege one.
- * Returns null if both are null.
- */
-function maxRole(
-  role1: WorkspaceRole | null,
-  role2: WorkspaceRole | null
-): WorkspaceRole | null {
-  if (!role1) return role2;
-  if (!role2) return role1;
-  return ROLE_HIERARCHY[role1] >= ROLE_HIERARCHY[role2]
-    ? role1
-    : role2;
-}
-
-/**
  * Check if a role meets the required minimum role.
  */
 function meetsRoleRequirement(
@@ -72,67 +56,6 @@ function meetsRoleRequirement(
   requiredRole: WorkspaceRole
 ): boolean {
   return ROLE_HIERARCHY[grantedRole] >= ROLE_HIERARCHY[requiredRole];
-}
-
-/**
- * Find the highest role granted to a user through group membership.
- *
- * @param roleBindings - The workspace's role bindings
- * @param userGroups - The user's OIDC groups
- * @returns The highest role found, or null if no match
- */
-function findRoleFromBindings(
-  roleBindings: RoleBinding[],
-  userGroups: string[]
-): WorkspaceRole | null {
-  let highestRole: WorkspaceRole | null = null;
-
-  for (const binding of roleBindings) {
-    if (!binding.groups) continue;
-
-    // Check if user is in any of the bound groups
-    const hasMatchingGroup = binding.groups.some((group) =>
-      userGroups.includes(group)
-    );
-
-    if (hasMatchingGroup) {
-      highestRole = maxRole(highestRole, binding.role);
-    }
-  }
-
-  return highestRole;
-}
-
-/**
- * Find a direct grant for a specific user by email.
- * Checks expiration and ignores expired grants.
- *
- * @param directGrants - The workspace's direct grants
- * @param userEmail - The user's email address
- * @returns The granted role, or null if no valid grant found
- */
-function findDirectGrant(
-  directGrants: DirectGrant[] | undefined,
-  userEmail: string
-): WorkspaceRole | null {
-  if (!directGrants || !userEmail) return null;
-
-  for (const grant of directGrants) {
-    if (grant.user.toLowerCase() !== userEmail.toLowerCase()) continue;
-
-    // Check expiration
-    if (grant.expires) {
-      const expiresAt = new Date(grant.expires).getTime();
-      if (Date.now() > expiresAt) {
-        // Grant has expired
-        continue;
-      }
-    }
-
-    return grant.role;
-  }
-
-  return null;
 }
 
 /**
@@ -284,15 +207,17 @@ export async function checkWorkspaceAccess(
     return DENIED_ACCESS;
   }
 
-  // Check roleBindings for group-based access
-  let role = findRoleFromBindings(
-    workspace.spec.roleBindings || [],
-    user.groups
+  // Compute the highest role from roleBindings + directGrants
+  const role = computeWorkspaceRole(
+    {
+      roleBindings: workspace.spec.roleBindings,
+      directGrants: workspace.spec.directGrants,
+      userGroups: user.groups,
+      userIdentity: identity,
+      isAnonymous: false,
+    },
+    Date.now()
   );
-
-  // Check directGrants for individual user access
-  const directRole = findDirectGrant(workspace.spec.directGrants, identity);
-  role = maxRole(role, directRole);
 
   // Build access result
   const access = buildAccess(role, requiredRole);
@@ -336,15 +261,17 @@ export async function getAccessibleWorkspaces(
   const accessible: Array<{ workspace: Workspace; access: WorkspaceAccess }> = [];
 
   for (const workspace of workspaces) {
-    // Check roleBindings
-    let role = findRoleFromBindings(
-      workspace.spec.roleBindings || [],
-      user.groups
+    // Compute the highest role from roleBindings + directGrants
+    const role = computeWorkspaceRole(
+      {
+        roleBindings: workspace.spec.roleBindings,
+        directGrants: workspace.spec.directGrants,
+        userGroups: user.groups,
+        userIdentity: identity,
+        isAnonymous: false,
+      },
+      Date.now()
     );
-
-    // Check directGrants
-    const directRole = findDirectGrant(workspace.spec.directGrants, identity);
-    role = maxRole(role, directRole);
 
     if (!role) continue;
 
