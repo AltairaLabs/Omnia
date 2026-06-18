@@ -132,7 +132,7 @@ func TestRetrieveMultiTierHybrid_TierRankerReorders(t *testing.T) {
 	insertHybridMemory(t, store, "", "", hybridKindFact, "institutional refund policy", 0.9, emb)
 	insertHybridMemory(t, store, hybridTestUser, multiTierAgentID, hybridKindFact, "user prefers fast refunds", 0.9, emb)
 
-	ranker := MultiplicativeTierRanker{Weights: map[Tier]float64{
+	ranker := weightedTestRanker{w: map[Tier]float64{
 		TierInstitutional: 0.1,
 		TierUser:          1.0,
 	}}

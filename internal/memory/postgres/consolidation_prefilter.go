@@ -13,7 +13,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/altairalabs/omnia/internal/memory/consolidation"
+	"github.com/altairalabs/omnia/ee/pkg/memory/consolidation"
 )
 
 // PreFilterRunner runs the SQL from consolidation/prefilter.go against

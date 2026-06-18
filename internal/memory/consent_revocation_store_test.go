@@ -95,7 +95,7 @@ func TestSoftDeleteRevokedConsent_SkipsInstitutionalRows(t *testing.T) {
 		Scope:    map[string]string{ScopeWorkspaceID: testWorkspace1},
 		Metadata: map[string]any{MetaKeyConsentCategory: "memory:health"},
 	}
-	require.NoError(t, store.SaveInstitutional(context.Background(), inst))
+	seedInstitutional(t, store, inst)
 
 	n, err := store.SoftDeleteRevokedConsent(context.Background(), 100)
 	require.NoError(t, err)
@@ -157,7 +157,7 @@ func TestHardDeleteForgottenByConsentOlderThan_SkipsTTLForgottenRows(t *testing.
 		Type: "fact", Content: "ttl-flipped", Confidence: 0.9,
 		Scope: map[string]string{ScopeWorkspaceID: testWorkspace1},
 	}
-	require.NoError(t, store.SaveInstitutional(context.Background(), mem))
+	seedInstitutional(t, store, mem)
 	_, err := store.pool.Exec(context.Background(),
 		"UPDATE memory_entities SET forgotten = true, updated_at = now() - interval '30 days' WHERE id = $1",
 		mem.ID)

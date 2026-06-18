@@ -17,9 +17,9 @@ func TestRender_ComputesAndPersists(t *testing.T) {
 	ctx := context.Background()
 	// seed a few institutional memories in testWorkspace1
 	for i := 0; i < 5; i++ {
-		must(t, store.SaveInstitutional(ctx, &Memory{Type: projTypePolicy,
+		seedInstitutional(t, store, &Memory{Type: projTypePolicy,
 			Content: "policy fact number " + string(rune('a'+i)), Confidence: 0.9,
-			Scope: map[string]string{ScopeWorkspaceID: testWorkspace1}}))
+			Scope: map[string]string{ScopeWorkspaceID: testWorkspace1}})
 	}
 	scope := map[string]string{ScopeWorkspaceID: testWorkspace1}
 

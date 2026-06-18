@@ -11,7 +11,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/altairalabs/omnia/internal/memory/projection"
+	"github.com/altairalabs/omnia/ee/pkg/memory/projection"
 )
 
 // ProjectionScopeKey is the stable key for a projection scope (workspace[:user][:agent]).

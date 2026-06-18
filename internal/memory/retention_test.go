@@ -229,13 +229,13 @@ func TestRetentionWorker_Run_ExecutesAllBranches(t *testing.T) {
 		Scope:     map[string]string{ScopeWorkspaceID: testWorkspace1},
 		ExpiresAt: &past,
 	}
-	require.NoError(t, store.SaveInstitutional(ctx, expired))
+	seedInstitutional(t, store, expired)
 
 	stale := &Memory{
 		Type: "fact", Content: "lru-target", Confidence: 0.9,
 		Scope: map[string]string{ScopeWorkspaceID: testWorkspace1},
 	}
-	require.NoError(t, store.SaveInstitutional(ctx, stale))
+	seedInstitutional(t, store, stale)
 	_, err := store.pool.Exec(ctx,
 		"UPDATE memory_entities SET created_at = now() - interval '2 hours' WHERE id = $1",
 		stale.ID)
@@ -282,7 +282,7 @@ func TestRetentionWorker_Run_BadLRUConfigIsNonFatal(t *testing.T) {
 		Scope:     map[string]string{ScopeWorkspaceID: testWorkspace1},
 		ExpiresAt: &past,
 	}
-	require.NoError(t, store.SaveInstitutional(ctx, expired))
+	seedInstitutional(t, store, expired)
 
 	policy := &omniav1alpha1.MemoryPolicy{
 		Spec: omniav1alpha1.MemoryPolicySpec{

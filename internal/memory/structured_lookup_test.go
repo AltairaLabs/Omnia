@@ -26,14 +26,14 @@ func TestLookupStructured_FiltersByKindAndPurpose(t *testing.T) {
 	ws := "77777777-7777-7777-7777-777777777777"
 
 	// Mixed rows; purpose defaults to support_continuity.
-	must(t, store.SaveInstitutional(ctx, &Memory{
+	seedInstitutional(t, store, &Memory{
 		Type: "policy", Content: "snake_case",
 		Scope: map[string]string{ScopeWorkspaceID: ws},
-	}))
-	must(t, store.SaveInstitutional(ctx, &Memory{
+	})
+	seedInstitutional(t, store, &Memory{
 		Type: "glossary", Content: "API terms",
 		Scope: map[string]string{ScopeWorkspaceID: ws},
-	}))
+	})
 
 	// Filter to kind=policy — should only get one row.
 	res, err := store.LookupStructured(ctx, StructuredLookup{
@@ -57,14 +57,14 @@ func TestLookupStructured_FiltersByNamePrefix(t *testing.T) {
 	ctx := context.Background()
 
 	ws := "88888888-8888-8888-8888-888888888888"
-	must(t, store.SaveInstitutional(ctx, &Memory{
+	seedInstitutional(t, store, &Memory{
 		Type: "doc", Content: "API authentication guide",
 		Scope: map[string]string{ScopeWorkspaceID: ws},
-	}))
-	must(t, store.SaveInstitutional(ctx, &Memory{
+	})
+	seedInstitutional(t, store, &Memory{
 		Type: "doc", Content: "Runbook for incident response",
 		Scope: map[string]string{ScopeWorkspaceID: ws},
-	}))
+	})
 
 	res, err := store.LookupStructured(ctx, StructuredLookup{
 		WorkspaceID: ws,
@@ -84,9 +84,9 @@ func TestLookupStructured_MultiKindUsesAny(t *testing.T) {
 	ctx := context.Background()
 
 	ws := "99999999-9999-9999-9999-999999999999"
-	must(t, store.SaveInstitutional(ctx, &Memory{Type: "policy", Content: "a", Scope: map[string]string{ScopeWorkspaceID: ws}}))
-	must(t, store.SaveInstitutional(ctx, &Memory{Type: "glossary", Content: "b", Scope: map[string]string{ScopeWorkspaceID: ws}}))
-	must(t, store.SaveInstitutional(ctx, &Memory{Type: "note", Content: "c", Scope: map[string]string{ScopeWorkspaceID: ws}}))
+	seedInstitutional(t, store, &Memory{Type: "policy", Content: "a", Scope: map[string]string{ScopeWorkspaceID: ws}})
+	seedInstitutional(t, store, &Memory{Type: "glossary", Content: "b", Scope: map[string]string{ScopeWorkspaceID: ws}})
+	seedInstitutional(t, store, &Memory{Type: "note", Content: "c", Scope: map[string]string{ScopeWorkspaceID: ws}})
 
 	res, err := store.LookupStructured(ctx, StructuredLookup{
 		WorkspaceID: ws,
@@ -110,9 +110,9 @@ func TestLookupStructured_UserAndAgentFilters(t *testing.T) {
 	agent := "dddddddd-dddd-dddd-dddd-dddddddddddd"
 
 	// Institutional (workspace only).
-	must(t, store.SaveInstitutional(ctx, &Memory{
+	seedInstitutional(t, store, &Memory{
 		Type: "rule", Content: "inst", Scope: map[string]string{ScopeWorkspaceID: ws},
-	}))
+	})
 	// User-scoped.
 	must(t, store.Save(ctx, &Memory{
 		Type: "rule", Content: "user", Confidence: 1.0,
@@ -164,10 +164,10 @@ func TestLookupStructured_FiltersByPurpose(t *testing.T) {
 	// Directly set purpose — SaveInstitutional leaves it at default
 	// 'support_continuity'. We insert a second row with a distinct purpose
 	// via raw SQL to exercise the WHERE e.purpose clause.
-	must(t, store.SaveInstitutional(ctx, &Memory{
+	seedInstitutional(t, store, &Memory{
 		Type: "note", Content: "default purpose row",
 		Scope: map[string]string{ScopeWorkspaceID: ws},
-	}))
+	})
 	_, err := store.pool.Exec(ctx, `
 		WITH e AS (
 			INSERT INTO memory_entities (workspace_id, name, kind, purpose, source_type, trust_model)

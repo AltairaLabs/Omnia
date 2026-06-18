@@ -19,8 +19,8 @@ func TestRetrieveMultiTier_MergesGraphTraversal(t *testing.T) {
 
 	seed := &Memory{Type: "person", Content: "Alice-graph", Scope: map[string]string{ScopeWorkspaceID: ws}}
 	related := &Memory{Type: "company", Content: "Acme-graph", Scope: map[string]string{ScopeWorkspaceID: ws}}
-	must(t, store.SaveInstitutional(ctx, seed))
-	must(t, store.SaveInstitutional(ctx, related))
+	seedInstitutional(t, store, seed)
+	seedInstitutional(t, store, related)
 	mustInsertRelation(t, store, ws, seed.ID, related.ID, "works_at")
 
 	// Use a query that matches seed by ILIKE but NOT related ("Alice-graph").
@@ -53,8 +53,8 @@ func TestRetrieveMultiTier_MergesStructuredLookup(t *testing.T) {
 
 	other := &Memory{Type: "fact", Content: "unrelated stuff", Scope: map[string]string{ScopeWorkspaceID: ws}}
 	policy := &Memory{Type: "policy", Content: "API uses snake_case", Scope: map[string]string{ScopeWorkspaceID: ws}}
-	must(t, store.SaveInstitutional(ctx, other))
-	must(t, store.SaveInstitutional(ctx, policy))
+	seedInstitutional(t, store, other)
+	seedInstitutional(t, store, policy)
 
 	// Query string won't match policy content. Structured lookup pulls it in.
 	res, err := store.RetrieveMultiTier(ctx, MultiTierRequest{
@@ -85,7 +85,7 @@ func TestRetrieveMultiTier_DedupesAcrossSources(t *testing.T) {
 	ws := "10000001-0000-0000-0000-000000000001"
 
 	mem := &Memory{Type: "policy", Content: "dedupe me", Scope: map[string]string{ScopeWorkspaceID: ws}}
-	must(t, store.SaveInstitutional(ctx, mem))
+	seedInstitutional(t, store, mem)
 
 	// The ILIKE query + the structured lookup should both match this row.
 	// Expect exactly one copy in the result.

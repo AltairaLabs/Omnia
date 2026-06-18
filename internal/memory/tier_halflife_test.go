@@ -11,56 +11,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
-
-	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 )
-
-func TestNewTierHalfLife_DefaultsWhenUnset(t *testing.T) {
-	for _, p := range []*omniav1alpha1.MemoryPolicy{
-		nil,
-		{Spec: omniav1alpha1.MemoryPolicySpec{}},
-		{Spec: omniav1alpha1.MemoryPolicySpec{Recall: &omniav1alpha1.MemoryRecallConfig{}}},
-	} {
-		hl := NewTierHalfLife(p)
-		assert.Equal(t, defaultRecallHalfLife, hl.User)
-		assert.Equal(t, defaultRecallHalfLife, hl.Agent)
-		assert.Equal(t, defaultRecallHalfLife, hl.Institutional)
-	}
-}
-
-func TestNewTierHalfLife_ParsesPerTierAndDaySuffix(t *testing.T) {
-	hl := NewTierHalfLife(&omniav1alpha1.MemoryPolicy{
-		Spec: omniav1alpha1.MemoryPolicySpec{
-			Recall: &omniav1alpha1.MemoryRecallConfig{
-				HalfLife: &omniav1alpha1.MemoryRecallHalfLife{
-					User:          "7d",
-					Agent:         "720h",
-					Institutional: "365d",
-				},
-			},
-		},
-	})
-	assert.Equal(t, 7*24*time.Hour, hl.User)
-	assert.Equal(t, 720*time.Hour, hl.Agent)
-	assert.Equal(t, 365*24*time.Hour, hl.Institutional)
-}
-
-func TestNewTierHalfLife_InvalidOrEmptyFallsBackPerTier(t *testing.T) {
-	hl := NewTierHalfLife(&omniav1alpha1.MemoryPolicy{
-		Spec: omniav1alpha1.MemoryPolicySpec{
-			Recall: &omniav1alpha1.MemoryRecallConfig{
-				HalfLife: &omniav1alpha1.MemoryRecallHalfLife{
-					User:          "garbage",
-					Agent:         "", // unset
-					Institutional: "90d",
-				},
-			},
-		},
-	})
-	assert.Equal(t, defaultRecallHalfLife, hl.User, "unparseable falls back to default")
-	assert.Equal(t, defaultRecallHalfLife, hl.Agent, "empty falls back to default")
-	assert.Equal(t, 90*24*time.Hour, hl.Institutional)
-}
 
 func TestRecencyDecay(t *testing.T) {
 	// age == halfLife → exactly 0.5 (the documented semantics).

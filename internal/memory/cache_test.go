@@ -71,13 +71,6 @@ type cacheTestStore struct {
 	deleteAgentScopedCalls int
 	agentScopedErr         error
 
-	// Institutional wrapper counters — same rationale as the agent-scoped
-	// ones; exist so coverage on cache.go reaches the 80% gate without
-	// introducing a second mock type.
-	saveInstitutionalCalls   int
-	listInstitutionalCalls   int
-	deleteInstitutionalCalls int
-
 	// Compaction wrapper counters.
 	findCompactionCalls int
 	saveCompactionCalls int
@@ -185,27 +178,6 @@ func (m *cacheTestStore) RetrieveMultiTier(_ context.Context, _ MultiTierRequest
 
 func (m *cacheTestStore) RetrieveMultiTierHybrid(_ context.Context, _ MultiTierRequest, _ []float32) (*MultiTierResult, error) {
 	return &MultiTierResult{Memories: []*MultiTierMemory{}, Total: 0}, nil
-}
-
-func (m *cacheTestStore) SaveInstitutional(_ context.Context, _ *Memory) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.saveInstitutionalCalls++
-	return nil
-}
-
-func (m *cacheTestStore) ListInstitutional(_ context.Context, _ string, _ ListOptions) ([]*Memory, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.listInstitutionalCalls++
-	return nil, nil
-}
-
-func (m *cacheTestStore) DeleteInstitutional(_ context.Context, _, _ string) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.deleteInstitutionalCalls++
-	return nil
 }
 
 func (m *cacheTestStore) SaveAgentScoped(_ context.Context, _ *Memory) error {
@@ -865,53 +837,6 @@ func TestCachedStore_DeleteAgentScoped_PropagatesInnerError(t *testing.T) {
 	}
 }
 
-// --- Institutional wrapper tests ---------------------------------------------
-
-func TestCachedStore_SaveInstitutional_DelegatesAndBumps(t *testing.T) {
-	inner := &cacheTestStore{}
-	cs, mr := newTestCache(t, inner)
-
-	mem := &Memory{Scope: map[string]string{ScopeWorkspaceID: "ws-1"}}
-	if err := cs.SaveInstitutional(context.Background(), mem); err != nil {
-		t.Fatalf("SaveInstitutional: %v", err)
-	}
-	if inner.saveInstitutionalCalls != 1 {
-		t.Errorf("inner SaveInstitutional calls = %d, want 1", inner.saveInstitutionalCalls)
-	}
-	sh := scopeHash(map[string]string{ScopeWorkspaceID: "ws-1"})
-	if v, err := mr.Get(versionKey(sh)); err != nil || v != "1" {
-		t.Errorf("workspace version bump missing: v=%q err=%v", v, err)
-	}
-}
-
-func TestCachedStore_ListInstitutional_Delegates(t *testing.T) {
-	inner := &cacheTestStore{}
-	cs, _ := newTestCache(t, inner)
-
-	if _, err := cs.ListInstitutional(context.Background(), "ws-1", ListOptions{}); err != nil {
-		t.Fatalf("ListInstitutional: %v", err)
-	}
-	if inner.listInstitutionalCalls != 1 {
-		t.Errorf("inner ListInstitutional calls = %d, want 1", inner.listInstitutionalCalls)
-	}
-}
-
-func TestCachedStore_DeleteInstitutional_DelegatesAndBumps(t *testing.T) {
-	inner := &cacheTestStore{}
-	cs, mr := newTestCache(t, inner)
-
-	if err := cs.DeleteInstitutional(context.Background(), "ws-1", "mem-id"); err != nil {
-		t.Fatalf("DeleteInstitutional: %v", err)
-	}
-	if inner.deleteInstitutionalCalls != 1 {
-		t.Errorf("inner DeleteInstitutional calls = %d, want 1", inner.deleteInstitutionalCalls)
-	}
-	sh := scopeHash(map[string]string{ScopeWorkspaceID: "ws-1"})
-	if v, err := mr.Get(versionKey(sh)); err != nil || v != "1" {
-		t.Errorf("workspace version bump missing: v=%q err=%v", v, err)
-	}
-}
-
 func TestCachedStore_RetrieveMultiTier_Delegates(t *testing.T) {
 	inner := &cacheTestStore{}
 	cs, _ := newTestCache(t, inner)
@@ -1050,6 +975,34 @@ func TestCachedStore_BatchDelete_InnerError(t *testing.T) {
 	_, err := cs.BatchDelete(context.Background(), cacheTestScope(), 500)
 	if err == nil {
 		t.Fatal("expected error from inner batch delete, got nil")
+	}
+}
+
+// TestCachedStore_InvalidateWorkspace_Bumps verifies that calling
+// InvalidateWorkspace bumps the workspace-scoped cache version — same Redis
+// key, same increment. This is the entry point the service layer uses after
+// an out-of-band EE institutional write that bypasses the CachedStore wrapper.
+func TestCachedStore_InvalidateWorkspace_Bumps(t *testing.T) {
+	inner := &cacheTestStore{}
+	cs, mr := newTestCache(t, inner)
+	ctx := context.Background()
+	ws := "a0000000-0000-0000-0000-000000000001"
+
+	// The workspace version key must not exist yet (fresh miniredis).
+	sh := scopeHash(map[string]string{ScopeWorkspaceID: ws})
+	if _, err := mr.Get(versionKey(sh)); err == nil {
+		t.Fatal("expected version key to be absent before InvalidateWorkspace")
+	}
+
+	cs.InvalidateWorkspace(ctx, ws)
+
+	// After the call the version key must exist and equal "1".
+	v, err := mr.Get(versionKey(sh))
+	if err != nil {
+		t.Fatalf("version key missing after InvalidateWorkspace: %v", err)
+	}
+	if v != "1" {
+		t.Errorf("workspace version = %q, want %q", v, "1")
 	}
 }
 

@@ -16,7 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
-	"github.com/altairalabs/omnia/internal/memory/consolidation"
+	"github.com/altairalabs/omnia/ee/pkg/memory/consolidation"
 )
 
 // freshPgxPool creates a fresh database, runs all migrations, and returns

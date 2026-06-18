@@ -13,7 +13,7 @@ import (
 
 	"github.com/pgvector/pgvector-go"
 
-	"github.com/altairalabs/omnia/internal/memory/projection"
+	"github.com/altairalabs/omnia/ee/pkg/memory/projection"
 )
 
 // Compile-time check: the concrete store satisfies the Galaxy capability.

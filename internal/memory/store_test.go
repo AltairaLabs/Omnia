@@ -1215,7 +1215,8 @@ func TestPostgresMemoryStore_List_VisibleToMe(t *testing.T) {
 		case scope[ScopeAgentID] != "":
 			err = store.SaveAgentScoped(ctx, mem)
 		default:
-			err = store.SaveInstitutional(ctx, mem)
+			seedInstitutional(t, store, mem)
+			return
 		}
 		require.NoError(t, err)
 	}
@@ -1583,4 +1584,12 @@ func TestPostgresMemoryStore_BatchDelete_MissingWorkspace(t *testing.T) {
 	_, err := store.BatchDelete(ctx, map[string]string{}, 500)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "workspace_id")
+}
+
+// must is a shared test helper that calls t.Fatal if err is non-nil.
+func must(t *testing.T, err error) {
+	t.Helper()
+	if err != nil {
+		t.Fatal(err)
+	}
 }

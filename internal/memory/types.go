@@ -173,8 +173,8 @@ type SaveResult struct {
 // BatchDelete is needed for paginated DSAR deletion (Task 4 cascade).
 // RetrieveMultiTier runs a single query across institutional, agent, user and
 // user-for-agent tiers and returns ranked results for RAG context injection.
-// The three Institutional methods are the admin path for workspace-scoped
-// memories (no user_id, no agent_id) — see institutional.go.
+// The institutional admin path (workspace-scoped memories, no user_id/agent_id)
+// is not part of this OSS interface — it lives in ee/pkg/memory (InstitutionalStore).
 // The three AgentScoped methods mirror the institutional admin path but for
 // (workspace, agent) rows (user_id IS NULL, agent_id = X) — see
 // agent_scoped.go. They power operator-curated agent policies and training
@@ -312,9 +312,6 @@ type Store interface {
 	// FTS-only RetrieveMultiTier (the service layer also falls back here
 	// on embed failure / when no embedder is configured).
 	RetrieveMultiTierHybrid(ctx context.Context, req MultiTierRequest, queryEmbedding []float32) (*MultiTierResult, error)
-	SaveInstitutional(ctx context.Context, mem *Memory) error
-	ListInstitutional(ctx context.Context, workspaceID string, opts ListOptions) ([]*Memory, error)
-	DeleteInstitutional(ctx context.Context, workspaceID, memoryID string) error
 	SaveAgentScoped(ctx context.Context, mem *Memory) error
 	ListAgentScoped(ctx context.Context, workspaceID, agentID string, opts ListOptions) ([]*Memory, error)
 	DeleteAgentScoped(ctx context.Context, workspaceID, agentID, memoryID string) error

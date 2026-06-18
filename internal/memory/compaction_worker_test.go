@@ -365,12 +365,8 @@ func TestListWorkspaceIDs_ExcludesForgotten(t *testing.T) {
 		Type: "policy", Content: "will be forgotten", Confidence: 1.0,
 		Scope: map[string]string{ScopeWorkspaceID: ws},
 	}
-	if err := store.SaveInstitutional(ctx, mem); err != nil {
-		t.Fatalf("SaveInstitutional: %v", err)
-	}
-	if err := store.DeleteInstitutional(ctx, ws, mem.ID); err != nil {
-		t.Fatalf("DeleteInstitutional: %v", err)
-	}
+	seedInstitutional(t, store, mem)
+	deleteInstitutional(t, store, ws, mem.ID)
 
 	got, err := store.ListWorkspaceIDs(ctx)
 	if err != nil {
