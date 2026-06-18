@@ -8,7 +8,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { NextRequest } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 
 // Mock dependencies before imports
 vi.mock("@/lib/auth", () => ({
@@ -172,6 +172,99 @@ describe("GET /api/workspaces/[name]/arena/projects/[id]", () => {
     expect(body.name).toBe("project-1");
     expect(body.tree).toEqual([]);
   });
+
+  it("recurses into directories and enriches provider files", async () => {
+    await grantWorkspace("viewer");
+    const svc = await import("@/lib/data/content-api-service");
+    const { listContentTree } = await import("@/lib/data/content-tree");
+    vi.mocked(svc.getContent).mockImplementation(async (_ws, _user, relpath = "") => {
+      if (relpath === "arena/projects/project-1") return { path: relpath, entries: [] };
+      if (relpath.endsWith("config.arena.yaml")) {
+        return { path: relpath, content: "name: P", encoding: "utf-8", size: 6, modifiedAt: "t" };
+      }
+      if (relpath.endsWith(".provider.yaml")) {
+        return { path: relpath, content: "model: gpt-4", encoding: "utf-8", size: 12, modifiedAt: "t" };
+      }
+      throw new svc.ContentApiError("not found", 404);
+    });
+    vi.mocked(listContentTree).mockResolvedValue([
+      {
+        name: "providers",
+        path: "providers",
+        isDirectory: true,
+        modifiedAt: "t",
+        children: [
+          { name: "openai.provider.yaml", path: "providers/openai.provider.yaml", isDirectory: false, size: 12, modifiedAt: "t" },
+        ],
+      },
+      { name: "openai.provider.yaml", path: "openai.provider.yaml", isDirectory: false, size: 12, modifiedAt: "t" },
+    ]);
+
+    const { GET } = await import("./route");
+    const response = await GET(createMockRequest(), createMockContext());
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.tree[0].name).toBe("providers");
+    expect(body.tree[0].children[0].type).toBe("provider");
+    expect(body.tree[1].type).toBe("provider");
+  });
+
+  it("returns the validateWorkspace error when the workspace is invalid", async () => {
+    const { getUser } = await import("@/lib/auth");
+    const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
+    const { validateWorkspace } = await import("@/lib/k8s/workspace-route-helpers");
+    vi.mocked(getUser).mockResolvedValue(mockUser);
+    vi.mocked(checkWorkspaceAccess).mockResolvedValue({ granted: true, role: "viewer", permissions: editorPermissions });
+    vi.mocked(validateWorkspace).mockResolvedValue({
+      ok: false,
+      response: NextResponse.json({ error: "nope" }, { status: 404 }),
+    } as Awaited<ReturnType<typeof validateWorkspace>>);
+
+    const { GET } = await import("./route");
+    const response = await GET(createMockRequest(), createMockContext());
+    expect(response.status).toBe(404);
+  });
+
+  it("passes through a non-404 content error", async () => {
+    await grantWorkspace("viewer");
+    const svc = await import("@/lib/data/content-api-service");
+    vi.mocked(svc.getContent).mockRejectedValue(new svc.ContentApiError("boom", 500));
+
+    const { GET } = await import("./route");
+    const response = await GET(createMockRequest(), createMockContext());
+    expect(response.status).toBe(500);
+  });
+
+  it("rethrows a non-404 error from the config read", async () => {
+    await grantWorkspace("viewer");
+    const svc = await import("@/lib/data/content-api-service");
+    const { listContentTree } = await import("@/lib/data/content-tree");
+    vi.mocked(svc.getContent).mockImplementation(async (_ws, _user, relpath = "") => {
+      if (relpath === "arena/projects/project-1") return { path: relpath, entries: [] };
+      throw new svc.ContentApiError("boom", 500);
+    });
+    vi.mocked(listContentTree).mockResolvedValue([]);
+
+    const { GET } = await import("./route");
+    const response = await GET(createMockRequest(), createMockContext());
+    expect(response.status).toBe(500);
+  });
+
+  it("returns 500 via handleK8sError on a non-content error", async () => {
+    await grantWorkspace("viewer");
+    const svc = await import("@/lib/data/content-api-service");
+    const { listContentTree } = await import("@/lib/data/content-tree");
+    vi.mocked(svc.getContent).mockImplementation(async (_ws, _user, relpath = "") => {
+      if (relpath === "arena/projects/project-1") return { path: relpath, entries: [] };
+      throw new svc.ContentApiError("not found", 404);
+    });
+    vi.mocked(listContentTree).mockRejectedValue(new Error("k8s boom"));
+
+    const { GET } = await import("./route");
+    const response = await GET(createMockRequest(), createMockContext());
+    expect(response.status).toBe(500);
+  });
 });
 
 describe("DELETE /api/workspaces/[name]/arena/projects/[id]", () => {
@@ -218,5 +311,31 @@ describe("DELETE /api/workspaces/[name]/arena/projects/[id]", () => {
 
     expect(response.status).toBe(204);
     expect(vi.mocked(svc.deleteContent)).toHaveBeenCalledWith("test-ws", mockUser, "arena/projects/project-1");
+  });
+
+  it("returns the validateWorkspace error when the workspace is invalid", async () => {
+    const { getUser } = await import("@/lib/auth");
+    const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
+    const { validateWorkspace } = await import("@/lib/k8s/workspace-route-helpers");
+    vi.mocked(getUser).mockResolvedValue(mockUser);
+    vi.mocked(checkWorkspaceAccess).mockResolvedValue({ granted: true, role: "editor", permissions: editorPermissions });
+    vi.mocked(validateWorkspace).mockResolvedValue({
+      ok: false,
+      response: NextResponse.json({ error: "nope" }, { status: 404 }),
+    } as Awaited<ReturnType<typeof validateWorkspace>>);
+
+    const { DELETE } = await import("./route");
+    const response = await DELETE(createMockRequest("DELETE"), createMockContext());
+    expect(response.status).toBe(404);
+  });
+
+  it("passes through a non-404 content error", async () => {
+    await grantWorkspace("editor");
+    const svc = await import("@/lib/data/content-api-service");
+    vi.mocked(svc.getContent).mockRejectedValue(new svc.ContentApiError("boom", 500));
+
+    const { DELETE } = await import("./route");
+    const response = await DELETE(createMockRequest("DELETE"), createMockContext());
+    expect(response.status).toBe(500);
   });
 });
