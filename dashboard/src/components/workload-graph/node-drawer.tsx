@@ -174,6 +174,45 @@ function ArenaRoleDetail({ node }: Readonly<{ node: WorkloadNode }>) {
   return null;
 }
 
+const STEP_KINDS = new Set(["stepPrompt", "stepAgent", "stepTool", "stepBranch", "stepParallel"]);
+
+function Row({ label, value }: Readonly<{ label: string; value?: string }>) {
+  if (!value) return null;
+  return (
+    <div>
+      <span className="text-muted-foreground">{label}: </span>
+      <span className="font-mono">{value}</span>
+    </div>
+  );
+}
+
+function CompositionStepDetail({ node }: Readonly<{ node: WorkloadNode }>) {
+  if (!STEP_KINDS.has(node.kind)) return null;
+  const d = node.detail;
+  return (
+    <div className="mb-3 space-y-1 text-sm">
+      <Row label="Kind" value={d.stepKind} />
+      <Row label="Prompt task" value={d.promptTask} />
+      <Row label="Tool" value={d.toolRef} />
+      <Row label="Predicate" value={d.predicateText} />
+      <Row label="Termination" value={d.termination} />
+      <Row label="Reducer" value={d.reducer} />
+      {d.args && Object.keys(d.args).length > 0 && (
+        <div>
+          <span className="text-muted-foreground">Args: </span>
+          <pre className="mt-1 whitespace-pre-wrap rounded bg-muted p-2 text-xs">{JSON.stringify(d.args, null, 2)}</pre>
+        </div>
+      )}
+      {!!d.evals?.length && (
+        <div>
+          <span className="text-muted-foreground">Evals: </span>
+          <span className="font-mono">{d.evals.join(", ")}</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function NodeDrawer({
   node,
   onClose,
@@ -197,6 +236,7 @@ export function NodeDrawer({
       <ProviderPricingDetail node={node} />
       <ScenarioListDetail node={node} />
       <ArenaRoleDetail node={node} />
+      <CompositionStepDetail node={node} />
       {node.detail.systemTemplatePreview && (
         <pre className="text-xs bg-muted rounded p-2 whitespace-pre-wrap mb-3">
           {node.detail.systemTemplatePreview}

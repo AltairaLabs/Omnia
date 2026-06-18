@@ -37,6 +37,25 @@ export interface PersistedNodeLayout {
   reset: () => void;
 }
 
+export function loadExpanded(storageKey: string): Set<string> {
+  if (!storageKey || typeof window === "undefined") return new Set();
+  try {
+    const raw = window.localStorage.getItem(`${storageKey}:expanded`);
+    return new Set(raw ? (JSON.parse(raw) as string[]) : []);
+  } catch {
+    return new Set();
+  }
+}
+
+export function saveExpanded(storageKey: string, ids: Set<string>): void {
+  if (!storageKey || typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(`${storageKey}:expanded`, JSON.stringify([...ids]));
+  } catch {
+    /* quota exceeded / disabled — ignore */
+  }
+}
+
 export function usePersistedNodeLayout(storageKey: string): PersistedNodeLayout {
   const applyLayout = useCallback(
     <T extends Node>(nodes: T[]): T[] => {

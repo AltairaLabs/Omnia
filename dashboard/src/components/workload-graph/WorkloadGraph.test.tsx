@@ -1,27 +1,43 @@
 import type { ReactNode } from "react";
 import { describe, it, expect, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
 import type { WorkloadModel } from "./types";
 
 const fitViewSpy = vi.fn();
+
+interface MockFlowNode { id: string; type: string; data: unknown }
 
 vi.mock("@xyflow/react", () => ({
   __esModule: true,
   ReactFlow: ({
     children,
     onInit,
+    nodes,
+    nodeTypes,
   }: {
     children?: ReactNode;
     onInit?: (inst: { fitView: typeof fitViewSpy }) => void;
+    nodes?: MockFlowNode[];
+    nodeTypes?: Record<string, (p: { data: unknown }) => ReactNode>;
   }) => {
     onInit?.({ fitView: fitViewSpy });
-    return <div data-testid="rf">{children}</div>;
+    return (
+      <div data-testid="rf">
+        {(nodes ?? []).map((n) => {
+          const Comp = nodeTypes?.[n.type];
+          return Comp ? <Comp key={n.id} data={n.data} /> : null;
+        })}
+        {children}
+      </div>
+    );
   },
   Background: () => null,
   Controls: () => null,
   Panel: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
   BackgroundVariant: { Dots: "dots" },
   MarkerType: { ArrowClosed: "arrowclosed" },
+  Handle: () => null,
+  Position: { Top: "top", Right: "right", Bottom: "bottom", Left: "left" },
   useNodesState: (init: unknown[]) => [init, vi.fn(), vi.fn()],
   useEdgesState: (init: unknown[]) => [init, vi.fn(), vi.fn()],
 }));
@@ -90,6 +106,28 @@ describe("fitViewAfterPaint", () => {
     fitViewAfterPaint({ fitView } as unknown as Parameters<typeof fitViewAfterPaint>[0]);
     expect(fitView).toHaveBeenCalledWith({ padding: 0.08, duration: 250 });
     raf.mockRestore();
+  });
+});
+
+const withComposition: WorkloadModel = {
+  tier: "workflow", altitude: "definition",
+  nodes: [{
+    id: "main", kind: "state", label: "main", badges: [{ label: "composition" }],
+    detail: {
+      compositionName: "analyze", stepCount: 1,
+      composition: { name: "analyze", nodes: [{ id: "main::a", parentId: "main", kind: "stepPrompt", label: "a", badges: [], detail: {} }], edges: [] },
+    },
+  }],
+  edges: [],
+  meta: { counts: { agents: 1, tools: 0, skills: 0, states: 1 } },
+};
+
+describe("WorkloadGraph — composition expand", () => {
+  it("toggling expands the state into a container with the composition name", () => {
+    render(<WorkloadGraph model={withComposition} storageKey="t:comp" />);
+    const expand = screen.getByRole("button", { name: /expand composition/i });
+    fireEvent.click(expand);
+    expect(screen.getByText("analyze")).toBeInTheDocument();
   });
 });
 
