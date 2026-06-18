@@ -18,6 +18,7 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"time"
 
@@ -35,8 +36,9 @@ import (
 // Invoke handles a single one-shot Function call. Unlike Converse, the
 // conversation is ephemeral: it isn't tracked in s.conversations and is
 // closed before the method returns. Schema validation lives in the facade
-// (per #1103 PR-2 scope); the runtime treats input_json as opaque user
-// content and returns the model's response verbatim.
+// (per #1103 PR-2 scope); the runtime binds the validated input_json to the
+// PromptPack's template variables (see runInvocation, #1473) and also keeps
+// it as the user turn, then returns the model's response verbatim.
 //
 // Client-side tools are not supported in function mode — there's no
 // WebSocket peer to fulfil them. If the model emits a client tool call,
@@ -148,7 +150,13 @@ func (s *Server) runInvocation(ctx context.Context, conv *sdk.Conversation, inpu
 		defer llmSpan.End()
 	}
 
-	streamCh := conv.Stream(ctx, input)
+	// Bind the validated input JSON to the PromptPack's template variables:
+	// the whole object resolves {{input}}, and each top-level field resolves
+	// {{field}} (e.g. {{topic}}). Passing an empty user message keeps the raw
+	// JSON as the user turn (preserving prior behavior) while making
+	// spec.inputSchema ↔ pack-variables a real binding rather than convention.
+	// See #1473.
+	streamCh := conv.Stream(ctx, "", sdk.WithJSONInput(json.RawMessage(input)))
 	response, content, err := consumeInvocationStream(streamCh, llmSpan)
 	if err != nil {
 		return nil, "", err
