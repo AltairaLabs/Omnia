@@ -1196,25 +1196,33 @@ if ENABLE_FULL_STACK:
 # ============================================================================
 
 if ENABLE_DEMO:
-    # Ollama StatefulSet — keep only non-workload objects here so Tilt
-    # port-forwards to the ollama-0 pod (not an agent Deployment pod).
-    ollama_objects = [
-        'ollama-models:persistentvolumeclaim',
-        'ollama-credentials:secret',
-        'ollama:provider',
-        'ollama-tools:provider',
-    ]
-
+    # Ollama runs one Deployment per model instance (.Values.ollama.instances):
+    # ollama-chat (text/tools) and ollama-vision (multimodal). Configure each by
+    # its real workload name and port-forward to a distinct localhost port
+    # (11434 = chat, 11435 = vision) so they don't collide. The shared
+    # credentials Secret and the Provider CRs are grouped under the chat instance.
     k8s_resource(
-        'ollama',
+        'ollama-chat',
         labels=['demo'],
         port_forwards=['11434:11434'],
-        extra_pod_selectors={'app.kubernetes.io/name': 'ollama'},
-        objects=ollama_objects,
+        objects=[
+            'ollama-chat-models:persistentvolumeclaim',
+            'ollama-credentials:secret',
+            'ollama:provider',
+            'ollama-tools:provider',
+        ],
+    )
+    k8s_resource(
+        'ollama-vision',
+        labels=['demo'],
+        port_forwards=['11435:11434'],
+        objects=[
+            'ollama-vision-models:persistentvolumeclaim',
+        ],
     )
 
     # Agent CRs are grouped separately so their operator-created Deployments
-    # don't get associated with the ollama resource (which breaks port forwarding).
+    # don't get associated with the ollama resources (which breaks port forwarding).
     demo_agent_objects = [
         'demo-vision-prompts:configmap',
         'demo-vision-prompts:promptpack',
@@ -1222,6 +1230,9 @@ if ENABLE_DEMO:
         'demo-tools-prompts:configmap',
         'demo-tools-prompts:promptpack',
         'tools-demo:agentruntime',
+        'demo-composition-prompts:configmap',
+        'demo-composition:promptpack',
+        'composition-demo:agentruntime',
     ]
 
     if ENABLE_LANGCHAIN:
@@ -1235,7 +1246,7 @@ if ENABLE_DEMO:
         new_name='demo-agents',
         labels=['demo'],
         objects=demo_agent_objects,
-        resource_deps=['ollama'],
+        resource_deps=['ollama-chat', 'ollama-vision'],
     )
 
 if ENABLE_AUDIO_DEMO:
