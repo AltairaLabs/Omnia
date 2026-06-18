@@ -93,16 +93,28 @@ describe("fetchProviderCallsAggregate", () => {
     expect(rows).toEqual([]);
   });
 
-  it("throws on non-2xx response", async () => {
+  it("returns [] on a non-2xx response (cost data is non-critical)", async () => {
     const fakeFetch = vi.fn(async () =>
       new Response("nope", { status: 500, statusText: "Internal Server Error" }),
     );
-    await expect(
-      fetchProviderCallsAggregate(
-        { workspace: "ws", groupBy: "provider", metric: "count" },
-        fakeFetch as unknown as typeof fetch,
-      ),
-    ).rejects.toThrow(/provider-calls-aggregate: 500/);
+    const rows = await fetchProviderCallsAggregate(
+      { workspace: "ws", groupBy: "provider", metric: "count" },
+      fakeFetch as unknown as typeof fetch,
+    );
+    expect(rows).toEqual([]);
+  });
+
+  it("degrades to the proxy's empty rows on an unavailable (non-2xx) response", async () => {
+    // The proxy returns { rows: [] } with a 503/502 when session-api is not
+    // configured/unreachable; the client should honour it rather than throw.
+    const fakeFetch = vi.fn(async () =>
+      new Response(JSON.stringify({ error: "Session API not configured", rows: [] }), { status: 503 }),
+    );
+    const rows = await fetchProviderCallsAggregate(
+      { workspace: "ws", groupBy: "provider", metric: "count" },
+      fakeFetch as unknown as typeof fetch,
+    );
+    expect(rows).toEqual([]);
   });
 
   it("joins an array groupBy with commas", async () => {
@@ -163,12 +175,11 @@ describe("fetchProviderCallsDiscovery", () => {
     expect(res).toEqual({ providers: [], providerNames: [], models: [] });
   });
 
-  it("throws on non-2xx response", async () => {
+  it("returns empty slices on a non-2xx response", async () => {
     const fakeFetch = vi.fn(async () =>
       new Response("denied", { status: 403, statusText: "Forbidden" }),
     );
-    await expect(
-      fetchProviderCallsDiscovery("ws", fakeFetch as unknown as typeof fetch),
-    ).rejects.toThrow(/provider-calls-discover: 403/);
+    const res = await fetchProviderCallsDiscovery("ws", fakeFetch as unknown as typeof fetch);
+    expect(res).toEqual({ providers: [], providerNames: [], models: [] });
   });
 });
