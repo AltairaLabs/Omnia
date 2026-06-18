@@ -2,7 +2,7 @@
 
 import { memo } from "react";
 import { Handle, Position } from "@xyflow/react";
-import { Wrench, Sparkles, RotateCcw, Variable, FileText, Layers, Scale, User } from "lucide-react";
+import { Wrench, Sparkles, RotateCcw, Variable, FileText, Layers, Scale, User, Plus } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { nodeSize } from "./node-sizes";
 import type { WorkloadNodeData } from "./to-flow";
@@ -16,7 +16,7 @@ function badgeIcon(icon?: WorkloadBadge["icon"]) {
 }
 
 export const WorkflowStateNode = memo(({ data }: Readonly<{ data: WorkloadNodeData }>) => {
-  const { node, onClick } = data;
+  const { node, onClick, onToggle, expandable } = data;
   const { width, height } = nodeSize("state");
   return (
     <div className="relative" style={{ width, height }}>
@@ -38,6 +38,16 @@ export const WorkflowStateNode = memo(({ data }: Readonly<{ data: WorkloadNodeDa
           </span>
         )}
       </button>
+      {expandable && (
+        <button
+          type="button"
+          aria-label="Expand composition"
+          onClick={(e) => { e.stopPropagation(); onToggle?.(node.id); }}
+          className="absolute -right-2 -top-2 z-10 rounded-full border border-indigo-400 bg-card p-0.5 text-indigo-600 shadow hover:bg-indigo-50"
+        >
+          <Plus className="h-3.5 w-3.5" />
+        </button>
+      )}
       <Handle type="source" position={Position.Bottom} className="!bg-blue-500" />
     </div>
   );

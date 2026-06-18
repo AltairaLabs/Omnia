@@ -25,6 +25,16 @@ describe("workflow shape nodes", () => {
     expect(onClick).toHaveBeenCalledWith("s");
   });
 
+  it("shows an expand control for a composition state and fires onToggle without selecting", () => {
+    const node: WorkloadNode = { id: "main", kind: "state", label: "main", badges: [{ label: "composition" }], detail: {} };
+    const onClick = vi.fn();
+    const onToggle = vi.fn();
+    wrap(<WorkflowStateNode data={{ node, onClick, onToggle, expandable: true }} />);
+    fireEvent.click(screen.getByRole("button", { name: /expand composition/i }));
+    expect(onToggle).toHaveBeenCalledWith("main");
+    expect(onClick).not.toHaveBeenCalled();
+  });
+
   it("renders initial and final markers", () => {
     wrap(<InitialNode data={{ node: { id: "i", kind: "initial", label: "", badges: [], detail: {} } }} />);
     wrap(<FinalNode data={{ node: { id: "f", kind: "final", label: "", badges: [], detail: {} } }} />);
