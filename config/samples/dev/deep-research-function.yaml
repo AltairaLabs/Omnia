@@ -472,6 +472,11 @@ spec:
   facade:
     type: grpc
     port: 8080
+  # Constrain the model to emit JSON conforming to outputSchema (provider
+  # structured output). This is the default for function mode when unset;
+  # set explicitly here to document the knob. Use "text" for free-form
+  # output validated only post-hoc, or "json" for unenforced JSON. (#1483)
+  outputFormat: json_schema
   inputSchema:
     type: object
     required:

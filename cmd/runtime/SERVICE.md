@@ -9,6 +9,7 @@
 - Eval execution pipeline
 - Conversation state management (memory or Redis)
 - Event recording via event store to Session API
+- Function-mode (`spec.mode: function`) one-shot invocations: binds validated input JSON to PromptPack template variables and, per `spec.outputFormat`, constrains the provider's output (`text` = no constraint, `json` = JSON mode, `json_schema` = structured output bound to `spec.outputSchema`; default `json_schema`). Provider format errors propagate (fail-fast); the Facade's output-schema 502 remains the post-hoc backstop.
 
 ## Inputs
 - **gRPC** from Facade (bidirectional Converse stream):
@@ -16,6 +17,8 @@
   - ClientToolResult with tool execution results
   - `DuplexStart` (first message of a duplex audio session) — switches the stream into `handleDuplexSession` mode, opening an `sdk.OpenDuplex` conversation. Fields: `codec`, `sample_rate`, `channels`, `system_instruction` (optional).
   - `AudioInputChunk` — subsequent audio frames forwarded via `pumpDuplexInput` → `conv.SendChunk`. `is_last` on a chunk signals stream end; the pipeline drains and the session closes.
+  - **gRPC** `Invoke` (function mode) — one-shot `InvocationRequest` with `input_json` (already validated by the Facade against `spec.inputSchema`).
+- **AgentRuntime CRD** (read directly via the k8s client at startup): `spec.mode`, `spec.outputFormat`, and `spec.outputSchema` (used to constrain function-mode output), alongside the PromptPack, provider, tools, and eval config.
 
 ## Outputs
 - **gRPC** to Facade (bidirectional Converse stream):
