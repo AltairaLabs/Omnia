@@ -10,6 +10,8 @@
 
 Omnia is a Kubernetes operator that makes deploying, scaling, and managing AI agents simple. Deploy intelligent assistants that can safely access private, proprietary information — all within your existing infrastructure.
 
+**Open core:** the core platform is free and open source under Apache 2.0. Advanced production and scale features ship in the Enterprise edition under the [Functional Source License](ee/LICENSE) in `ee/`. See [Licensing & Features](https://omnia.altairalabs.ai/explanation/licensing/) for what's included in each edition.
+
 ## Features
 
 - **Kubernetes-Native**: Deploy AI agents as custom resources with full GitOps support
@@ -181,7 +183,12 @@ Contributions are welcome! Please read our [Contributing Guide](CONTRIBUTING.md)
 
 ## License
 
-Apache 2.0 - see [LICENSE](LICENSE) for details.
+Omnia is **open core**:
+
+- The core platform is licensed under **Apache 2.0** — see [LICENSE](LICENSE).
+- Enterprise features under `ee/` are licensed under the **Functional Source License 1.1 (FSL-1.1)** — see [ee/LICENSE](ee/LICENSE).
+
+See [Licensing & Features](https://omnia.altairalabs.ai/explanation/licensing/) for the Open Core vs Enterprise comparison.
 
 ---
 
