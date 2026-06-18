@@ -230,6 +230,14 @@ spec:
             - --tool-test-allowed-subjects=system:serviceaccount:{{ .Release.Namespace }}:{{ include "omnia.dashboard.serviceAccountName" . }}
             {{- end }}
             {{- end }}
+            {{- $contentApiAddr := include "omnia.contentApi.bindAddress" . }}
+            {{- if $contentApiAddr }}
+            # Workspace-content API: the dashboard reads/writes content here
+            # instead of mounting the NFS volume (#1462). The operator verifies
+            # the dashboard-minted identity JWT (via --mgmt-plane-jwks-url) and
+            # serves --workspace-content-path.
+            - --content-api-bind-address={{ $contentApiAddr }}
+            {{- end }}
             {{- if .Values.enterprise.enabled }}
             - --enterprise
             - --policy-proxy-image={{ .Values.enterprise.policyProxy.image.repository }}:{{ .Values.enterprise.policyProxy.image.tag | default .Chart.AppVersion }}
@@ -254,6 +262,12 @@ spec:
             {{- if $apiAddr }}
             - name: api
               containerPort: {{ trimPrefix ":" $apiAddr }}
+              protocol: TCP
+            {{- end }}
+            {{- $contentApiAddr := include "omnia.contentApi.bindAddress" . }}
+            {{- if $contentApiAddr }}
+            - name: content-api
+              containerPort: {{ trimPrefix ":" $contentApiAddr }}
               protocol: TCP
             {{- end }}
             {{- if .Values.metrics.enabled }}

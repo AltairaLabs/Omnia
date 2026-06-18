@@ -43,6 +43,8 @@ import (
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 	eev1alpha1 "github.com/altairalabs/omnia/ee/api/v1alpha1"
 	eesetup "github.com/altairalabs/omnia/ee/pkg/setup"
+	"github.com/altairalabs/omnia/internal/api/authz"
+	"github.com/altairalabs/omnia/internal/api/content"
 	"github.com/altairalabs/omnia/internal/controller"
 	"github.com/altairalabs/omnia/internal/schema"
 	"github.com/altairalabs/omnia/internal/tooltest"
@@ -93,6 +95,7 @@ func main() {
 	var agentWorkspaceReaderClusterRole string
 	var apiBindAddress string
 	var toolTestAllowedSubjects string
+	var contentAPIBindAddress string
 	var sessionAPIAuthEnabled bool
 	var sessionAPIAuthAudience string
 	var sessionAPIAuthTokenExpirationSeconds int64
@@ -190,6 +193,11 @@ func main() {
 		"Name of the ClusterRole granting agent pods read access to Workspace CRDs. If empty, no binding is created.")
 	flag.StringVar(&apiBindAddress, "api-bind-address", "",
 		"Address for the tool test API server (e.g., :8083). If empty, the API server is not started.")
+	flag.StringVar(&contentAPIBindAddress, "content-api-bind-address", "",
+		"Address for the workspace-content API server (e.g., :8084) the dashboard calls instead "+
+			"of mounting the NFS content volume. Requires --mgmt-plane-jwks-url (to verify the "+
+			"dashboard-minted identity token) and --workspace-content-path (the mounted content "+
+			"root). If empty, the content API server is not started.")
 	flag.StringVar(&toolTestAllowedSubjects, "tool-test-allowed-subjects", "",
 		"Comma-separated list of authenticated usernames allowed to call the tool-test API "+
 			"(e.g. system:serviceaccount:omnia-system:omnia-dashboard). Each request must present a "+
@@ -536,18 +544,51 @@ func main() {
 		}()
 	}
 
+	// Start workspace-content API server if configured. It lets the dashboard
+	// read/write workspace content via authenticated HTTP instead of mounting
+	// the NFS content volume directly.
+	var contentServer *content.Server
+	if contentAPIBindAddress != "" {
+		if mgmtPlaneJWKSURL == "" {
+			setupLog.Error(fmt.Errorf("mgmt-plane-jwks-url required"),
+				"content-api-bind-address requires --mgmt-plane-jwks-url")
+			os.Exit(1)
+		}
+		verifier, verr := authz.NewIdentityVerifierFromJWKS(mgmtPlaneJWKSURL)
+		if verr != nil {
+			setupLog.Error(verr, "unable to build identity verifier for content API")
+			os.Exit(1)
+		}
+		contentLog := ctrl.Log.WithName("content-api")
+		authorizer := authz.NewAuthorizer(verifier, authz.NewClientWorkspaceResolver(mgr.GetClient()))
+		contentServer = content.NewServer(contentAPIBindAddress,
+			content.NewHandler(workspaceContentPath, contentLog), authorizer, contentLog)
+		go func() {
+			if err := contentServer.Start(ctx); err != nil {
+				setupLog.Error(err, "content API server stopped")
+			}
+		}()
+	}
+
 	setupLog.Info("starting manager")
 	if err := mgr.Start(ctx); err != nil {
 		setupLog.Error(err, "problem running manager")
 		os.Exit(1)
 	}
 
-	// Graceful shutdown of API server
+	// Graceful shutdown of API servers
 	if apiServer != nil {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		if err := apiServer.Shutdown(shutdownCtx); err != nil {
 			setupLog.Error(err, "API server shutdown error")
+		}
+	}
+	if contentServer != nil {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := contentServer.Shutdown(shutdownCtx); err != nil {
+			setupLog.Error(err, "content API server shutdown error")
 		}
 	}
 }

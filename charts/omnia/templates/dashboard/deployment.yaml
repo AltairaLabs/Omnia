@@ -239,10 +239,12 @@ spec:
             - name: data
               mountPath: /data
             {{- end }}
-            {{- if .Values.workspaceContent.enabled }}
-            - name: workspace-content
-              mountPath: {{ .Values.workspaceContent.mountPath | default "/workspace-content" }}
-            {{- end }}
+            {{- /*
+              The dashboard no longer mounts the NFS workspace-content volume
+              (#1462) — it reads/writes content through the operator content API
+              (OPERATOR_CONTENT_API_URL). Removing the mount eliminates the
+              cross-UID writer that caused the EACCES.
+            */}}
             - name: mgmt-plane-signing-key
               mountPath: /etc/omnia/mgmt-plane
               readOnly: true
@@ -260,11 +262,6 @@ spec:
         - name: data
           persistentVolumeClaim:
             claimName: {{ .Values.dashboard.persistence.existingClaim | default (printf "%s-data" (include "omnia.dashboard.fullname" .)) }}
-        {{- end }}
-        {{- if .Values.workspaceContent.enabled }}
-        - name: workspace-content
-          persistentVolumeClaim:
-            claimName: {{ .Values.workspaceContent.persistence.existingClaim | default (printf "%s-workspace-content" (include "omnia.fullname" .)) }}
         {{- end }}
         - name: mgmt-plane-signing-key
           secret:

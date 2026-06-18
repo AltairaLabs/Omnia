@@ -16,8 +16,10 @@ const require = createRequire(import.meta.url);
 const {
   loadSigningKey,
   mintToken,
+  mintIdentityToken,
   DEFAULT_ISSUER,
   DEFAULT_AUDIENCE,
+  CONTENT_API_AUDIENCE,
   DEFAULT_TTL_SECONDS,
   MGMT_PLANE_ORIGIN,
 } = require("./mgmt-plane-token.js");
@@ -161,5 +163,68 @@ describe("mintToken", () => {
     const opts = { key: signingKey, ...baseOpts };
     delete opts[missing];
     expect(() => mintToken(opts)).toThrowError(new RegExp(`opts.${missing} is required`));
+  });
+});
+
+describe("mintIdentityToken", () => {
+  const identity = "user@example.com";
+  const baseOpts = {
+    workspace: "team-a",
+    identity,
+    groups: ["eng", "admins"],
+  };
+
+  it("carries the content-API audience and identity claims", () => {
+    const { payload } = decodeJwt(mintIdentityToken({ key: signingKey, ...baseOpts }));
+    expect(payload.iss).toBe(DEFAULT_ISSUER);
+    expect(payload.aud).toBe(CONTENT_API_AUDIENCE);
+    expect(payload.aud).not.toBe(DEFAULT_AUDIENCE);
+    expect(payload.sub).toBe(identity);
+    expect(payload.identity).toBe(identity);
+    expect(payload.groups).toEqual(["eng", "admins"]);
+    expect(payload.workspace).toBe("team-a");
+    expect(payload.origin).toBeUndefined();
+    expect(payload.anonymous).toBeUndefined();
+  });
+
+  it("signs RS256 with the JWK-thumbprint kid the JWKS endpoint serves", () => {
+    const { publicJwkFromKey } = require("./jwks.js");
+    const { header } = decodeJwt(mintIdentityToken({ key: signingKey, ...baseOpts }));
+    expect(header.alg).toBe("RS256");
+    expect(header.kid).toBe(publicJwkFromKey(publicKey).kid);
+  });
+
+  it("produces a signature the public key verifies", () => {
+    const { signingInput, signature } = decodeJwt(mintIdentityToken({ key: signingKey, ...baseOpts }));
+    expect(crypto.verify("RSA-SHA256", signingInput, publicKey, signature)).toBe(true);
+  });
+
+  it("omits identity and groups for an anonymous principal", () => {
+    const { payload } = decodeJwt(
+      mintIdentityToken({ key: signingKey, workspace: "team-a", identity: "ignored", anonymous: true }),
+    );
+    expect(payload.anonymous).toBe(true);
+    expect(payload.sub).toBe("anonymous");
+    expect(payload.identity).toBeUndefined();
+    expect(payload.groups).toBeUndefined();
+  });
+
+  it("honours custom audience and ttlSeconds", () => {
+    const fixedNow = 1_700_000_000_000;
+    const { payload } = decodeJwt(
+      mintIdentityToken({ key: signingKey, ...baseOpts, audience: "custom", ttlSeconds: 30, now: () => fixedNow }),
+    );
+    expect(payload.aud).toBe("custom");
+    expect(payload.exp - payload.iat).toBe(30);
+  });
+
+  it("rejects calls without a key", () => {
+    expect(() => mintIdentityToken({ ...baseOpts })).toThrowError(/opts.key is required/);
+  });
+
+  it("rejects calls without a workspace", () => {
+    expect(() => mintIdentityToken({ key: signingKey, identity: "u@x" })).toThrowError(
+      /opts.workspace is required/,
+    );
   });
 });

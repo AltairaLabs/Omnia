@@ -94,9 +94,13 @@ export default defineConfig({
         // License API routes - require license server
         "src/app/api/license/**",
 
-        // Arena project/source API routes - require K8s infrastructure
-        "src/app/api/workspaces/[name]/arena/projects/**",
-        "src/app/api/workspaces/[name]/arena/sources/[sourceName]/file/**",
+        // Arena project/source content API routes are now covered by tests
+        // (migrated off direct NFS onto the operator content API, #1462), so
+        // they are included in coverage. The remaining project subroutes still
+        // require live K8s (deploy status / job streaming / run dispatch).
+        "src/app/api/workspaces/[name]/arena/projects/[id]/deployment/**",
+        "src/app/api/workspaces/[name]/arena/projects/[id]/jobs/**",
+        "src/app/api/workspaces/[name]/arena/projects/[id]/run/**",
         "src/app/api/workspaces/[name]/arena/jobs/[jobName]/live-stats/**",
 
         // Other API routes that require K8s infrastructure

@@ -30,14 +30,14 @@ import {
 import type { WorkspaceAccess } from "@/types/workspace";
 import type { User } from "@/lib/auth/types";
 import type { ArenaSource, ArenaSourceSpec } from "@/types/arena";
-import * as fs from "node:fs/promises";
-import * as path from "node:path";
+import {
+  ContentApiError,
+  getContent,
+  isContentListing,
+} from "@/lib/data/content-api-service";
+import { contentErrorResponse } from "@/lib/data/content-api-response";
 
 const RESOURCE_TYPE = "ArenaProjectDeploy";
-
-// Base path for workspace content (mounted PVC).
-const WORKSPACE_CONTENT_BASE =
-  process.env.WORKSPACE_CONTENT_PATH || "/workspace-content";
 
 // Labels for tracking deployed resources.
 const PROJECT_LABEL = "arena.omnia.altairalabs.ai/project-id";
@@ -71,9 +71,91 @@ function deployTargetPath(projectId: string): string {
   return `arena/deployed/${projectId}`;
 }
 
-/** Absolute path to the editable project dir on the mounted volume. */
-function getProjectFsPath(workspaceName: string, namespace: string, projectId: string): string {
-  return path.join(WORKSPACE_CONTENT_BASE, workspaceName, namespace, "arena", "projects", projectId);
+/** Result of the project content pre-check: a count, or an error response. */
+type ContentCheck = { count: number } | { response: NextResponse };
+
+/**
+ * Verify the project dir exists and is non-empty via the content API. Returns
+ * the entry count, or an error response (404 missing / 400 empty).
+ */
+async function checkProjectContent(
+  workspace: string,
+  user: User,
+  projectId: string
+): Promise<ContentCheck> {
+  let count: number;
+  try {
+    const listing = await getContent(workspace, user, projectRelPath(projectId));
+    count = isContentListing(listing) ? listing.entries.length : 0;
+  } catch (error) {
+    if (error instanceof ContentApiError && error.status === 404) {
+      return { response: notFoundResponse(`Project not found: ${projectId}`) };
+    }
+    throw error;
+  }
+  if (count === 0) {
+    return {
+      response: NextResponse.json(
+        { error: "Bad Request", message: "Project has no files to deploy" },
+        { status: 400 }
+      ),
+    };
+  }
+  return { count };
+}
+
+type ClientOptions = Parameters<typeof getCrd>[0];
+
+interface UpsertParams {
+  workspace: string;
+  namespace: string;
+  sourceName: string;
+  projectId: string;
+  spec: ArenaSourceSpec;
+  syncInterval?: string;
+}
+
+/**
+ * Create or replace the project's ArenaSource. A full replace (PUT) drops any
+ * stale source block from a prior deploy.
+ */
+async function upsertSource(
+  clientOptions: ClientOptions,
+  params: UpsertParams
+): Promise<{ source: ArenaSource; isNew: boolean }> {
+  const { workspace, namespace, sourceName, projectId, spec, syncInterval } = params;
+  const labels = {
+    [PROJECT_LABEL]: projectId,
+    [MANAGED_BY_LABEL]: MANAGED_BY_VALUE,
+  };
+
+  const existingSource = await getCrd<ArenaSource>(clientOptions, CRD_ARENA_SOURCES, sourceName);
+
+  if (existingSource) {
+    const updatedSource = {
+      ...existingSource,
+      spec: { ...spec, interval: syncInterval || existingSource.spec.interval || "1h" },
+      metadata: {
+        ...existingSource.metadata,
+        labels: { ...existingSource.metadata.labels, ...labels },
+      },
+    };
+    const source = await updateCrd<ArenaSource>(
+      clientOptions,
+      CRD_ARENA_SOURCES,
+      sourceName,
+      updatedSource
+    );
+    return { source, isNew: false };
+  }
+
+  const newSource = buildCrdResource("ArenaSource", workspace, namespace, sourceName, spec, labels);
+  const source = await createCrd<ArenaSource>(
+    clientOptions,
+    CRD_ARENA_SOURCES,
+    newSource as unknown as ArenaSource
+  );
+  return { source, isNew: true };
 }
 
 /**
@@ -102,20 +184,8 @@ export const POST = withWorkspaceAccess<{ name: string; id: string }>(
       const body = (await request.json().catch(() => ({}))) as DeployRequest;
       const sourceName = body.name || `project-${projectId}`;
 
-      // Verify the project dir exists and is non-empty on the shared volume.
-      const projectPath = getProjectFsPath(name, namespace, projectId);
-      let entries: string[];
-      try {
-        entries = await fs.readdir(projectPath);
-      } catch {
-        return notFoundResponse(`Project not found: ${projectId}`);
-      }
-      if (entries.length === 0) {
-        return NextResponse.json(
-          { error: "Bad Request", message: "Project has no files to deploy" },
-          { status: 400 }
-        );
-      }
+      const contentCheck = await checkProjectContent(name, user, projectId);
+      if ("response" in contentCheck) return contentCheck.response;
 
       // Build a full workspace-type spec. A full replace (PUT) drops any stale
       // source block (e.g. a previous configmap deploy), satisfying the CRD's
@@ -126,55 +196,15 @@ export const POST = withWorkspaceAccess<{ name: string; id: string }>(
         targetPath: deployTargetPath(projectId),
         interval: body.syncInterval || "1h",
       };
-      const labels = {
-        [PROJECT_LABEL]: projectId,
-        [MANAGED_BY_LABEL]: MANAGED_BY_VALUE,
-      };
 
-      const existingSource = await getCrd<ArenaSource>(
+      const { source, isNew } = await upsertSource(
         result.clientOptions,
-        CRD_ARENA_SOURCES,
-        sourceName
+        { workspace: name, namespace, sourceName, projectId, spec, syncInterval: body.syncInterval }
       );
-
-      let source: ArenaSource;
-      let isNew = false;
-
-      if (existingSource) {
-        const updatedSource = {
-          ...existingSource,
-          spec: { ...spec, interval: body.syncInterval || existingSource.spec.interval || "1h" },
-          metadata: {
-            ...existingSource.metadata,
-            labels: { ...existingSource.metadata.labels, ...labels },
-          },
-        };
-        source = await updateCrd<ArenaSource>(
-          result.clientOptions,
-          CRD_ARENA_SOURCES,
-          sourceName,
-          updatedSource
-        );
-      } else {
-        isNew = true;
-        const newSource = buildCrdResource(
-          "ArenaSource",
-          name,
-          namespace,
-          sourceName,
-          spec,
-          labels
-        );
-        source = await createCrd<ArenaSource>(
-          result.clientOptions,
-          CRD_ARENA_SOURCES,
-          newSource as unknown as ArenaSource
-        );
-      }
 
       const response: DeployResponse = { source, isNew };
       auditSuccess(auditCtx, isNew ? "create" : "update", sourceName, {
-        fileCount: entries.length,
+        fileCount: contentCheck.count,
         targetPath: spec.targetPath,
       });
 
@@ -182,6 +212,9 @@ export const POST = withWorkspaceAccess<{ name: string; id: string }>(
     } catch (error) {
       if (auditCtx) {
         auditError(auditCtx, "create", projectId, error, 500);
+      }
+      if (error instanceof ContentApiError) {
+        return contentErrorResponse(error, "Failed to deploy project");
       }
       return handleK8sError(error, "deploy project");
     }

@@ -1,11 +1,14 @@
 /**
- * Tests for workspace content root listing API routes.
+ * Tests for workspace content root listing API route.
+ *
+ * The route now calls the operator content API via content-api-service instead
+ * of reading the NFS mount, so these mock that service (mock-to-contract: the
+ * mocked shapes match the Go content.Listing json tags).
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { NextRequest } from "next/server";
 
-// Mock dependencies before imports
 vi.mock("@/lib/auth", () => ({
   getUser: vi.fn(),
 }));
@@ -14,19 +17,10 @@ vi.mock("@/lib/auth/workspace-authz", () => ({
   checkWorkspaceAccess: vi.fn(),
 }));
 
-vi.mock("@/lib/k8s/workspace-route-helpers", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/k8s/workspace-route-helpers")>();
-  return {
-    ...actual,
-    getWorkspace: vi.fn(),
-  };
+vi.mock("@/lib/data/content-api-service", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/data/content-api-service")>();
+  return { ...actual, getContent: vi.fn() };
 });
-
-vi.mock("node:fs/promises", () => ({
-  access: vi.fn(),
-  stat: vi.fn(),
-  readdir: vi.fn(),
-}));
 
 const mockUser = {
   id: "testuser-id",
@@ -40,20 +34,23 @@ const mockUser = {
 const viewerPermissions = { read: true, write: false, delete: false, manageMembers: false };
 const noPermissions = { read: false, write: false, delete: false, manageMembers: false };
 
-const mockWorkspace = {
-  metadata: { name: "test-ws", namespace: "omnia-system" },
-  spec: { namespace: { name: "test-ns" } },
-};
-
 function createMockRequest(): NextRequest {
-  const url = "http://localhost:3000/api/workspaces/test-ws/content";
-  return new NextRequest(url, { method: "GET" });
+  return new NextRequest("http://localhost:3000/api/workspaces/test-ws/content", { method: "GET" });
 }
 
 function createMockContext() {
-  return {
-    params: Promise.resolve({ name: "test-ws" }),
-  };
+  return { params: Promise.resolve({ name: "test-ws" }) };
+}
+
+async function grantAccess() {
+  const { getUser } = await import("@/lib/auth");
+  const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
+  vi.mocked(getUser).mockResolvedValue(mockUser);
+  vi.mocked(checkWorkspaceAccess).mockResolvedValue({
+    granted: true,
+    role: "viewer",
+    permissions: viewerPermissions,
+  });
 }
 
 describe("GET /api/workspaces/[name]/content", () => {
@@ -68,7 +65,6 @@ describe("GET /api/workspaces/[name]/content", () => {
   it("returns 403 when user lacks workspace access", async () => {
     const { getUser } = await import("@/lib/auth");
     const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
-
     vi.mocked(getUser).mockResolvedValue(mockUser);
     vi.mocked(checkWorkspaceAccess).mockResolvedValue({ granted: false, role: null, permissions: noPermissions });
 
@@ -78,14 +74,50 @@ describe("GET /api/workspaces/[name]/content", () => {
     expect(response.status).toBe(403);
   });
 
-  it("returns 404 when workspace is not found", async () => {
-    const { getUser } = await import("@/lib/auth");
-    const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
-    const { getWorkspace } = await import("@/lib/k8s/workspace-route-helpers");
+  it("splits the operator listing into files and directories", async () => {
+    await grantAccess();
+    const svc = await import("@/lib/data/content-api-service");
+    vi.mocked(svc.getContent).mockResolvedValue({
+      path: "",
+      entries: [
+        { name: "README.md", type: "file", size: 10, modifiedAt: "2025-01-01T00:00:00Z" },
+        { name: "skills", type: "directory", size: 0, modifiedAt: "2025-01-01T00:00:00Z" },
+        { name: "arena", type: "directory", size: 0, modifiedAt: "2025-01-01T00:00:00Z" },
+        { name: "AGENTS.md", type: "file", size: 5, modifiedAt: "2025-01-01T00:00:00Z" },
+      ],
+    });
 
-    vi.mocked(getUser).mockResolvedValue(mockUser);
-    vi.mocked(checkWorkspaceAccess).mockResolvedValue({ granted: true, role: "viewer", permissions: viewerPermissions });
-    vi.mocked(getWorkspace).mockResolvedValue(null);
+    const { GET } = await import("./route");
+    const response = await GET(createMockRequest(), createMockContext());
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.path).toBe("/");
+    // Sorted alphabetically within each group.
+    expect(body.directories.map((d: { name: string }) => d.name)).toEqual(["arena", "skills"]);
+    expect(body.files.map((f: { name: string }) => f.name)).toEqual(["AGENTS.md", "README.md"]);
+    // Called with the empty root path for the authenticated user.
+    expect(vi.mocked(svc.getContent)).toHaveBeenCalledWith("test-ws", mockUser, "");
+  });
+
+  it("returns an empty listing for an empty workspace", async () => {
+    await grantAccess();
+    const svc = await import("@/lib/data/content-api-service");
+    vi.mocked(svc.getContent).mockResolvedValue({ path: "", entries: [] });
+
+    const { GET } = await import("./route");
+    const response = await GET(createMockRequest(), createMockContext());
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.files).toEqual([]);
+    expect(body.directories).toEqual([]);
+  });
+
+  it("passes through the operator status (404) when the workspace is unknown", async () => {
+    await grantAccess();
+    const svc = await import("@/lib/data/content-api-service");
+    vi.mocked(svc.getContent).mockRejectedValue(new svc.ContentApiError("workspace not found", 404));
 
     const { GET } = await import("./route");
     const response = await GET(createMockRequest(), createMockContext());
@@ -95,82 +127,14 @@ describe("GET /api/workspaces/[name]/content", () => {
     expect(body.error).toBe("Not Found");
   });
 
-  it("returns empty listing when directory does not exist", async () => {
-    const { getUser } = await import("@/lib/auth");
-    const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
-    const { getWorkspace } = await import("@/lib/k8s/workspace-route-helpers");
-    const fs = await import("node:fs/promises");
-
-    vi.mocked(getUser).mockResolvedValue(mockUser);
-    vi.mocked(checkWorkspaceAccess).mockResolvedValue({ granted: true, role: "viewer", permissions: viewerPermissions });
-    vi.mocked(getWorkspace).mockResolvedValue(mockWorkspace as any);
-    vi.mocked(fs.access).mockRejectedValue(new Error("ENOENT"));
-
-    const { GET } = await import("./route");
-    const response = await GET(createMockRequest(), createMockContext());
-
-    expect(response.status).toBe(200);
-    const body = await response.json();
-    expect(body.path).toBe("/");
-    expect(body.files).toEqual([]);
-    expect(body.directories).toEqual([]);
-  });
-
-  it("returns directory listing when content exists", async () => {
-    const { getUser } = await import("@/lib/auth");
-    const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
-    const { getWorkspace } = await import("@/lib/k8s/workspace-route-helpers");
-    const fs = await import("node:fs/promises");
-
-    vi.mocked(getUser).mockResolvedValue(mockUser);
-    vi.mocked(checkWorkspaceAccess).mockResolvedValue({ granted: true, role: "viewer", permissions: viewerPermissions });
-    vi.mocked(getWorkspace).mockResolvedValue(mockWorkspace as any);
-    vi.mocked(fs.access).mockResolvedValue(undefined);
-    vi.mocked(fs.stat).mockResolvedValue({
-      isDirectory: () => true,
-      isFile: () => false,
-      size: 4096,
-      mtime: new Date("2025-01-01T00:00:00Z"),
-    } as any);
-    vi.mocked(fs.readdir).mockResolvedValue([
-      { name: "arena", isDirectory: () => true, isFile: () => false },
-      { name: "README.md", isDirectory: () => false, isFile: () => true },
-    ] as any);
-
-    const { GET } = await import("./route");
-    const response = await GET(createMockRequest(), createMockContext());
-
-    expect(response.status).toBe(200);
-    const body = await response.json();
-    expect(body.path).toBe("/");
-    expect(body.directories.length).toBe(1);
-    expect(body.directories[0].name).toBe("arena");
-    expect(body.files.length).toBe(1);
-    expect(body.files[0].name).toBe("README.md");
-  });
-
-  it("returns 500 when path is not a directory", async () => {
-    const { getUser } = await import("@/lib/auth");
-    const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
-    const { getWorkspace } = await import("@/lib/k8s/workspace-route-helpers");
-    const fs = await import("node:fs/promises");
-
-    vi.mocked(getUser).mockResolvedValue(mockUser);
-    vi.mocked(checkWorkspaceAccess).mockResolvedValue({ granted: true, role: "viewer", permissions: viewerPermissions });
-    vi.mocked(getWorkspace).mockResolvedValue(mockWorkspace as any);
-    vi.mocked(fs.access).mockResolvedValue(undefined);
-    vi.mocked(fs.stat).mockResolvedValue({
-      isDirectory: () => false,
-      isFile: () => true,
-      size: 1024,
-      mtime: new Date("2025-01-01T00:00:00Z"),
-    } as any);
+  it("returns 500 on an unexpected error", async () => {
+    await grantAccess();
+    const svc = await import("@/lib/data/content-api-service");
+    vi.mocked(svc.getContent).mockRejectedValue(new Error("boom"));
 
     const { GET } = await import("./route");
     const response = await GET(createMockRequest(), createMockContext());
 
     expect(response.status).toBe(500);
-    const body = await response.json();
-    expect(body.message).toContain("not a directory");
   });
 });

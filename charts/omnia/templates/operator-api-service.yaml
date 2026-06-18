@@ -1,5 +1,6 @@
 {{- $apiAddr := include "omnia.toolTest.bindAddress" . }}
-{{- if $apiAddr }}
+{{- $contentApiAddr := include "omnia.contentApi.bindAddress" . }}
+{{- if or $apiAddr $contentApiAddr }}
 apiVersion: v1
 kind: Service
 metadata:
@@ -10,10 +11,18 @@ metadata:
 spec:
   type: ClusterIP
   ports:
+    {{- if $apiAddr }}
     - name: api
       port: {{ trimPrefix ":" $apiAddr }}
       targetPort: api
       protocol: TCP
+    {{- end }}
+    {{- if $contentApiAddr }}
+    - name: content-api
+      port: {{ trimPrefix ":" $contentApiAddr }}
+      targetPort: content-api
+      protocol: TCP
+    {{- end }}
   selector:
     {{- include "omnia.selectorLabels" . | nindent 4 }}
 {{- end }}

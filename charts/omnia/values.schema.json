@@ -431,7 +431,24 @@
       "description": "Shared workspace content PVC (requires RWX storage class in production)",
       "properties": {
         "enabled":    { "type": "boolean" },
+        "scoped":     { "type": "boolean" },
         "mountPath":  { "type": "string" },
+        "contentApi": {
+          "type": "object",
+          "properties": {
+            "enabled":     { "type": "boolean" },
+            "bindAddress": { "type": "string" }
+          }
+        },
+        "admissionPolicy": {
+          "type": "object",
+          "properties": {
+            "enabled":             { "type": "boolean" },
+            "failurePolicy":       { "type": "string", "enum": ["Fail", "Ignore"] },
+            "shareRootPath":       { "type": "string" },
+            "provisionerUsername": { "type": "string" }
+          }
+        },
         "persistence": {
           "type": "object",
           "properties": {

@@ -29,11 +29,10 @@ vi.mock("@/lib/k8s/crd-operations", () => ({
   isForbiddenError: vi.fn(),
 }));
 
-vi.mock("node:fs/promises", () => ({
-  stat: vi.fn(),
-  readFile: vi.fn(),
-  readdir: vi.fn(),
-}));
+vi.mock("@/lib/data/content-api-service", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/data/content-api-service")>();
+  return { ...actual, getContent: vi.fn() };
+});
 
 const mockUser = {
   id: "testuser-id",
@@ -86,16 +85,17 @@ const mockTemplateIndex = [
 ];
 
 /**
- * Helper to create a mock for fs.readFile that returns index JSON for index paths
- * and template content for other paths.
+ * Build a content-api ContentFile carrying the controller-written template
+ * index JSON (mock-to-contract: matches the Go content.FileContent json tags).
  */
-function createReadFileMock(templateContent: string, indexData: unknown[] = mockTemplateIndex) {
-  return vi.fn().mockImplementation(async (filePath: string) => {
-    if (typeof filePath === "string" && filePath.includes("template-indexes")) {
-      return JSON.stringify(indexData);
-    }
-    return templateContent;
-  });
+function indexContentFile(indexData: unknown[] = mockTemplateIndex) {
+  return {
+    path: "arena/template-indexes/test-source.json",
+    content: JSON.stringify(indexData),
+    encoding: "utf-8" as const,
+    size: 100,
+    modifiedAt: "2025-01-01T00:00:00Z",
+  };
 }
 
 function createMockRequest(body: unknown): NextRequest {
@@ -208,6 +208,9 @@ describe("POST /api/workspaces/[name]/arena/template-sources/[id]/templates/[tem
       ...mockTemplateSource,
       status: { phase: "Ready", templates: [] },
     });
+    const svc = await import("@/lib/data/content-api-service");
+    // Index exists but contains no matching template.
+    vi.mocked(svc.getContent).mockResolvedValue(indexContentFile([]));
 
     const { POST } = await import("./route");
     const response = await POST(createMockRequest({ variables: {} }), createMockContext());
@@ -220,7 +223,7 @@ describe("POST /api/workspaces/[name]/arena/template-sources/[id]/templates/[tem
     const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
     const { validateWorkspace, getWorkspace } = await import("@/lib/k8s/workspace-route-helpers");
     const { getCrd } = await import("@/lib/k8s/crd-operations");
-    const fs = await import("node:fs/promises");
+    const svc = await import("@/lib/data/content-api-service");
 
     vi.mocked(getUser).mockResolvedValue(mockUser);
     vi.mocked(checkWorkspaceAccess).mockResolvedValue({ granted: true, role: "viewer", permissions: editorPermissions });
@@ -231,10 +234,7 @@ describe("POST /api/workspaces/[name]/arena/template-sources/[id]/templates/[tem
     } as Awaited<ReturnType<typeof validateWorkspace>>);
     vi.mocked(getCrd).mockResolvedValue(mockTemplateSource);
     vi.mocked(getWorkspace).mockResolvedValue(mockWorkspace);
-    vi.mocked(fs.readdir).mockResolvedValue([
-      { name: "config.yaml", isDirectory: () => false },
-    ] as unknown as Awaited<ReturnType<typeof fs.readdir>>);
-    vi.mocked(fs.readFile).mockImplementation(createReadFileMock("name: {{ .projectName }}"));
+    vi.mocked(svc.getContent).mockResolvedValue(indexContentFile());
 
     const { POST } = await import("./route");
     const response = await POST(
@@ -245,6 +245,11 @@ describe("POST /api/workspaces/[name]/arena/template-sources/[id]/templates/[tem
     expect(response.status).toBe(200);
     const body = await response.json();
     expect(body.files).toBeDefined();
+    expect(vi.mocked(svc.getContent)).toHaveBeenCalledWith(
+      "test-ws",
+      mockUser,
+      "arena/template-indexes/test-source.json",
+    );
   });
 
   it("handles errors when preview fails", async () => {
@@ -252,7 +257,7 @@ describe("POST /api/workspaces/[name]/arena/template-sources/[id]/templates/[tem
     const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
     const { validateWorkspace, getWorkspace } = await import("@/lib/k8s/workspace-route-helpers");
     const { getCrd } = await import("@/lib/k8s/crd-operations");
-    const fs = await import("node:fs/promises");
+    const svc = await import("@/lib/data/content-api-service");
 
     vi.mocked(getUser).mockResolvedValue(mockUser);
     vi.mocked(checkWorkspaceAccess).mockResolvedValue({ granted: true, role: "viewer", permissions: editorPermissions });
@@ -263,7 +268,7 @@ describe("POST /api/workspaces/[name]/arena/template-sources/[id]/templates/[tem
     } as Awaited<ReturnType<typeof validateWorkspace>>);
     vi.mocked(getCrd).mockResolvedValue(mockTemplateSource);
     vi.mocked(getWorkspace).mockResolvedValue(mockWorkspace);
-    vi.mocked(fs.readFile).mockImplementation(createReadFileMock("content"));
+    vi.mocked(svc.getContent).mockResolvedValue(indexContentFile());
 
     // Mock fetch to fail for this test
     global.fetch = vi.fn().mockResolvedValue({
@@ -305,7 +310,7 @@ describe("POST /api/workspaces/[name]/arena/template-sources/[id]/templates/[tem
     const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
     const { validateWorkspace, getWorkspace } = await import("@/lib/k8s/workspace-route-helpers");
     const { getCrd } = await import("@/lib/k8s/crd-operations");
-    const fs = await import("node:fs/promises");
+    const svc = await import("@/lib/data/content-api-service");
 
     const templateWithFiles = {
       name: "basic-chatbot",
@@ -327,8 +332,7 @@ describe("POST /api/workspaces/[name]/arena/template-sources/[id]/templates/[tem
     } as Awaited<ReturnType<typeof validateWorkspace>>);
     vi.mocked(getCrd).mockResolvedValue(mockTemplateSource);
     vi.mocked(getWorkspace).mockResolvedValue(mockWorkspace);
-    vi.mocked(fs.stat).mockResolvedValue({ isDirectory: () => false } as Awaited<ReturnType<typeof fs.stat>>);
-    vi.mocked(fs.readFile).mockImplementation(createReadFileMock("name: {{ .projectName }}", [templateWithFiles]));
+    vi.mocked(svc.getContent).mockResolvedValue(indexContentFile([templateWithFiles]));
 
     // Mock fetch to return 2 files for this test
     global.fetch = vi.fn().mockResolvedValue({
@@ -357,7 +361,7 @@ describe("POST /api/workspaces/[name]/arena/template-sources/[id]/templates/[tem
     const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
     const { validateWorkspace, getWorkspace } = await import("@/lib/k8s/workspace-route-helpers");
     const { getCrd } = await import("@/lib/k8s/crd-operations");
-    const fs = await import("node:fs/promises");
+    const svc = await import("@/lib/data/content-api-service");
 
     const templateWithDirSpec = {
       name: "basic-chatbot",
@@ -376,11 +380,7 @@ describe("POST /api/workspaces/[name]/arena/template-sources/[id]/templates/[tem
     } as Awaited<ReturnType<typeof validateWorkspace>>);
     vi.mocked(getCrd).mockResolvedValue(mockTemplateSource);
     vi.mocked(getWorkspace).mockResolvedValue(mockWorkspace);
-    vi.mocked(fs.stat).mockResolvedValue({ isDirectory: () => true } as Awaited<ReturnType<typeof fs.stat>>);
-    vi.mocked(fs.readdir).mockResolvedValue([
-      { name: "main.yaml", isDirectory: () => false },
-    ] as unknown as Awaited<ReturnType<typeof fs.readdir>>);
-    vi.mocked(fs.readFile).mockImplementation(createReadFileMock("prompt: test", [templateWithDirSpec]));
+    vi.mocked(svc.getContent).mockResolvedValue(indexContentFile([templateWithDirSpec]));
 
     const { POST } = await import("./route");
     const response = await POST(
@@ -398,7 +398,7 @@ describe("POST /api/workspaces/[name]/arena/template-sources/[id]/templates/[tem
     const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
     const { validateWorkspace, getWorkspace } = await import("@/lib/k8s/workspace-route-helpers");
     const { getCrd } = await import("@/lib/k8s/crd-operations");
-    const fs = await import("node:fs/promises");
+    const svc = await import("@/lib/data/content-api-service");
 
     vi.mocked(getUser).mockResolvedValue(mockUser);
     vi.mocked(checkWorkspaceAccess).mockResolvedValue({ granted: true, role: "viewer", permissions: editorPermissions });
@@ -409,22 +409,7 @@ describe("POST /api/workspaces/[name]/arena/template-sources/[id]/templates/[tem
     } as Awaited<ReturnType<typeof validateWorkspace>>);
     vi.mocked(getCrd).mockResolvedValue(mockTemplateSource);
     vi.mocked(getWorkspace).mockResolvedValue(mockWorkspace);
-
-    // First call returns a directory, second returns files
-    let readdirCallCount = 0;
-    vi.mocked(fs.readdir).mockImplementation(async () => {
-      readdirCallCount++;
-      if (readdirCallCount === 1) {
-        return [
-          { name: "subdir", isDirectory: () => true },
-          { name: "root.yaml", isDirectory: () => false },
-        ] as unknown as Awaited<ReturnType<typeof fs.readdir>>;
-      }
-      return [
-        { name: "nested.yaml", isDirectory: () => false },
-      ] as unknown as Awaited<ReturnType<typeof fs.readdir>>;
-    });
-    vi.mocked(fs.readFile).mockImplementation(createReadFileMock("content"));
+    vi.mocked(svc.getContent).mockResolvedValue(indexContentFile());
 
     // Mock fetch to return multiple files for nested directories
     global.fetch = vi.fn().mockResolvedValue({
@@ -448,14 +433,14 @@ describe("POST /api/workspaces/[name]/arena/template-sources/[id]/templates/[tem
     expect(body.files.length).toBeGreaterThan(1);
   });
 
-  it("skips missing files in file specs", async () => {
+  it("returns the files the controller renders", async () => {
     const { getUser } = await import("@/lib/auth");
     const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
     const { validateWorkspace, getWorkspace } = await import("@/lib/k8s/workspace-route-helpers");
     const { getCrd } = await import("@/lib/k8s/crd-operations");
-    const fs = await import("node:fs/promises");
+    const svc = await import("@/lib/data/content-api-service");
 
-    const templateWithMissingFile = {
+    const templateWithFiles = {
       name: "basic-chatbot",
       displayName: "Basic Chatbot",
       path: "templates/basic-chatbot",
@@ -475,16 +460,15 @@ describe("POST /api/workspaces/[name]/arena/template-sources/[id]/templates/[tem
     } as Awaited<ReturnType<typeof validateWorkspace>>);
     vi.mocked(getCrd).mockResolvedValue(mockTemplateSource);
     vi.mocked(getWorkspace).mockResolvedValue(mockWorkspace);
+    vi.mocked(svc.getContent).mockResolvedValue(indexContentFile([templateWithFiles]));
 
-    let statCallCount = 0;
-    vi.mocked(fs.stat).mockImplementation(async () => {
-      statCallCount++;
-      if (statCallCount === 1) {
-        return { isDirectory: () => false } as Awaited<ReturnType<typeof fs.stat>>;
-      }
-      throw new Error("ENOENT");
+    // The controller only renders the file that exists.
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({
+        files: [{ path: "exists.yaml", content: "content" }],
+      }),
     });
-    vi.mocked(fs.readFile).mockImplementation(createReadFileMock("content", [templateWithMissingFile]));
 
     const { POST } = await import("./route");
     const response = await POST(
@@ -502,7 +486,7 @@ describe("POST /api/workspaces/[name]/arena/template-sources/[id]/templates/[tem
     const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
     const { validateWorkspace, getWorkspace } = await import("@/lib/k8s/workspace-route-helpers");
     const { getCrd } = await import("@/lib/k8s/crd-operations");
-    const fs = await import("node:fs/promises");
+    const svc = await import("@/lib/data/content-api-service");
 
     const templateWithVariables = {
       name: "basic-chatbot",
@@ -521,10 +505,7 @@ describe("POST /api/workspaces/[name]/arena/template-sources/[id]/templates/[tem
     } as Awaited<ReturnType<typeof validateWorkspace>>);
     vi.mocked(getCrd).mockResolvedValue(mockTemplateSource);
     vi.mocked(getWorkspace).mockResolvedValue(mockWorkspace);
-    vi.mocked(fs.readdir).mockResolvedValue([
-      { name: "config.yaml", isDirectory: () => false },
-    ] as unknown as Awaited<ReturnType<typeof fs.readdir>>);
-    vi.mocked(fs.readFile).mockImplementation(createReadFileMock("content", [templateWithVariables]));
+    vi.mocked(svc.getContent).mockResolvedValue(indexContentFile([templateWithVariables]));
 
     const { POST } = await import("./route");
     const response = await POST(

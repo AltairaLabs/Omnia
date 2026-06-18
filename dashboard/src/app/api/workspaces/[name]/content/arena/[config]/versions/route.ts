@@ -6,7 +6,7 @@
  * Response:
  * {
  *   configName: string;
- *   head: string;           // Current HEAD version
+ *   head: string | null;    // Current HEAD version
  *   versions: {
  *     hash: string;
  *     createdAt: string;
@@ -14,20 +14,24 @@
  *   }[];
  * }
  *
+ * Content is served by the operator's authenticated content API (the dashboard
+ * no longer mounts the NFS workspace-content volume directly — see #1462).
+ *
  * Protected by workspace access checks. User must have at least viewer role.
  */
 
 import { NextRequest, NextResponse } from "next/server";
 import { withWorkspaceAccess } from "@/lib/auth/workspace-guard";
-import { getWorkspace } from "@/lib/k8s/workspace-route-helpers";
 import type { WorkspaceAccess } from "@/types/workspace";
 import type { User } from "@/lib/auth/types";
-import * as fs from "node:fs/promises";
-import * as path from "node:path";
-
-// Base path for workspace content (configurable via environment)
-const WORKSPACE_CONTENT_BASE =
-  process.env.WORKSPACE_CONTENT_PATH || "/workspace-content";
+import {
+  ContentApiError,
+  getContent,
+  isContentFile,
+  isContentListing,
+} from "@/lib/data/content-api-service";
+import { listContentTree } from "@/lib/data/content-tree";
+import { contentErrorResponse } from "@/lib/data/content-api-response";
 
 interface RouteParams {
   params: Promise<{ name: string; config: string }>;
@@ -45,6 +49,81 @@ interface VersionsResponse {
   versions: VersionInfo[];
 }
 
+/** Read the HEAD pointer for an arena config, returning null when absent. */
+async function readHead(
+  workspace: string,
+  user: User,
+  metaPath: string
+): Promise<string | null> {
+  try {
+    const node = await getContent(workspace, user, `${metaPath}/HEAD`);
+    return isContentFile(node) ? node.content.trim() : null;
+  } catch (error) {
+    if (error instanceof ContentApiError && error.status === 404) {
+      return null;
+    }
+    throw error;
+  }
+}
+
+/** Recursively sum the byte size of all files under a version directory. */
+async function versionSize(
+  workspace: string,
+  user: User,
+  versionPath: string
+): Promise<number> {
+  const tree = await listContentTree(workspace, user, versionPath);
+  let total = 0;
+  const walk = (nodes: { isDirectory: boolean; size?: number; children?: typeof nodes }[]): void => {
+    for (const node of nodes) {
+      if (node.isDirectory) {
+        if (node.children) walk(node.children);
+      } else {
+        total += node.size ?? 0;
+      }
+    }
+  };
+  walk(tree);
+  return total;
+}
+
+/** List the versions under an arena config's .arena/versions directory. */
+async function listVersions(
+  workspace: string,
+  user: User,
+  versionsPath: string
+): Promise<VersionInfo[]> {
+  let listing;
+  try {
+    listing = await getContent(workspace, user, versionsPath);
+  } catch (error) {
+    if (error instanceof ContentApiError && error.status === 404) {
+      return [];
+    }
+    throw error;
+  }
+  if (!isContentListing(listing)) {
+    return [];
+  }
+
+  const versions: VersionInfo[] = [];
+  for (const entry of listing.entries) {
+    if (entry.type !== "directory") continue;
+    const size = await versionSize(workspace, user, `${versionsPath}/${entry.name}`);
+    versions.push({
+      hash: entry.name,
+      createdAt: entry.modifiedAt,
+      size,
+    });
+  }
+
+  // Sort by creation time (newest first).
+  versions.sort(
+    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+  );
+  return versions;
+}
+
 /**
  * GET /api/workspaces/:name/content/arena/:config/versions
  *
@@ -57,97 +136,17 @@ export const GET = withWorkspaceAccess(
     _request: NextRequest,
     context: RouteParams,
     _access: WorkspaceAccess,
-    _user: User
+    user: User
   ): Promise<NextResponse> => {
+    const { name: workspaceName, config: configName } = await context.params;
+
     try {
-      const { name: workspaceName, config: configName } = await context.params;
+      // Verify the arena config exists (pass through 404 if not).
+      await getContent(workspaceName, user, `arena/${configName}`);
 
-      // Get workspace to find the namespace
-      const workspace = await getWorkspace(workspaceName);
-      if (!workspace) {
-        return NextResponse.json(
-          { error: "Not Found", message: `Workspace not found: ${workspaceName}` },
-          { status: 404 }
-        );
-      }
-      const namespaceName = workspace.spec.namespace.name;
-
-      // Build paths: {base}/{workspace}/{namespace}/arena/{config}
-      const arenaBasePath = path.join(
-        WORKSPACE_CONTENT_BASE,
-        workspaceName,
-        namespaceName,
-        "arena",
-        configName
-      );
-      const arenaMetaPath = path.join(arenaBasePath, ".arena");
-      const versionsPath = path.join(arenaMetaPath, "versions");
-      const headPath = path.join(arenaMetaPath, "HEAD");
-
-      // Check if the arena config exists
-      try {
-        await fs.access(arenaBasePath);
-      } catch {
-        return NextResponse.json(
-          {
-            error: "Not Found",
-            message: `Arena config not found: ${configName}`,
-          },
-          { status: 404 }
-        );
-      }
-
-      // Read HEAD if it exists
-      let head: string | null = null;
-      try {
-        const headContent = await fs.readFile(headPath, "utf-8");
-        head = headContent.trim();
-      } catch {
-        // HEAD doesn't exist yet
-      }
-
-      // List versions
-      const versions: VersionInfo[] = [];
-      try {
-        const entries = await fs.readdir(versionsPath, { withFileTypes: true });
-
-        for (const entry of entries) {
-          if (!entry.isDirectory()) continue;
-
-          const versionDir = path.join(versionsPath, entry.name);
-          const stats = await fs.stat(versionDir);
-
-          // Calculate total size of version directory
-          let totalSize = 0;
-          const calculateSize = async (dir: string): Promise<void> => {
-            const items = await fs.readdir(dir, { withFileTypes: true });
-            for (const item of items) {
-              const itemPath = path.join(dir, item.name);
-              if (item.isDirectory()) {
-                await calculateSize(itemPath);
-              } else {
-                const itemStats = await fs.stat(itemPath);
-                totalSize += itemStats.size;
-              }
-            }
-          };
-          await calculateSize(versionDir);
-
-          versions.push({
-            hash: entry.name,
-            createdAt: stats.mtime.toISOString(),
-            size: totalSize,
-          });
-        }
-
-        // Sort by creation time (newest first)
-        versions.sort(
-          (a, b) =>
-            new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-        );
-      } catch {
-        // Versions directory doesn't exist yet
-      }
+      const metaPath = `arena/${configName}/.arena`;
+      const head = await readHead(workspaceName, user, metaPath);
+      const versions = await listVersions(workspaceName, user, `${metaPath}/versions`);
 
       const response: VersionsResponse = {
         configName,
@@ -157,15 +156,7 @@ export const GET = withWorkspaceAccess(
 
       return NextResponse.json(response);
     } catch (error) {
-      console.error("Failed to list versions:", error);
-      return NextResponse.json(
-        {
-          error: "Internal Server Error",
-          message:
-            error instanceof Error ? error.message : "Failed to list versions",
-        },
-        { status: 500 }
-      );
+      return contentErrorResponse(error, "Failed to list versions");
     }
   }
 );

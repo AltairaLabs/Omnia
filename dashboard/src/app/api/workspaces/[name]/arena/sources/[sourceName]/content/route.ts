@@ -5,6 +5,12 @@
  *
  * Returns the folder/file structure of the source content for browsing.
  * This is used by the ConfigDialog to let users select a root folder.
+ *
+ * Content is served by the operator's authenticated content API (the dashboard
+ * no longer mounts the NFS workspace-content volume directly — see #1462). The
+ * operator prepends <workspace>/<namespace>, so paths here are relative to the
+ * workspace root (e.g. `arena/<sourceName>`).
+ *
  * Protected by workspace access checks.
  */
 
@@ -19,8 +25,13 @@ import {
   auditError,
   notFoundResponse,
 } from "@/lib/k8s/workspace-route-helpers";
-import * as fs from "node:fs";
-import * as path from "node:path";
+import {
+  ContentApiError,
+  getContent,
+  isContentFile,
+  isContentListing,
+} from "@/lib/data/content-api-service";
+import { listContentTree, type ContentTreeNode } from "@/lib/data/content-tree";
 import type { WorkspaceAccess } from "@/types/workspace";
 import type { User } from "@/lib/auth/types";
 import type { ArenaSource, ArenaSourceContentResponse, ArenaSourceContentNode } from "@/types/arena";
@@ -30,113 +41,114 @@ type RouteContext = WorkspaceRouteContext<RouteParams>;
 
 const CRD_KIND = "ArenaSource";
 
-/** Base path for workspace content volume */
-const WORKSPACE_CONTENT_BASE = "/workspace-content";
-
 /**
- * Get the base path for an ArenaSource's content directory.
- * Pattern: /workspace-content/{workspace}/{namespace}/arena/{sourceName}
+ * Workspace-relative base path for an ArenaSource's content directory.
+ * The operator prepends <workspace>/<namespace>.
  */
-function getSourceBasePath(workspaceName: string, namespace: string, sourceName: string): string {
-  return path.join(WORKSPACE_CONTENT_BASE, workspaceName, namespace, "arena", sourceName);
+function sourceBasePath(sourceName: string): string {
+  return `arena/${sourceName}`;
 }
 
 /**
- * Read the HEAD file to get the current active version.
+ * Read a file's trimmed content, returning null when it does not exist.
  */
-function readHeadVersion(basePath: string): string | null {
-  const headPath = path.join(basePath, ".arena", "HEAD");
+async function readMaybeFile(workspace: string, user: User, relpath: string): Promise<string | null> {
   try {
-    if (fs.existsSync(headPath)) {
-      return fs.readFileSync(headPath, "utf-8").trim();
+    const node = await getContent(workspace, user, relpath);
+    return isContentFile(node) ? node.content.trim() : null;
+  } catch (error) {
+    if (error instanceof ContentApiError && error.status === 404) {
+      return null;
     }
-  } catch (err) {
-    console.error(`Error reading HEAD file at ${headPath}:`, err);
+    throw error;
   }
-  return null;
 }
 
 /**
- * Resolve the content path, preferring HEAD version over direct path.
+ * Report whether a path exists.
  */
-function resolveContentPath(basePath: string): string | null {
-  // Try to read HEAD file to get the current version
-  const headVersion = readHeadVersion(basePath);
+async function pathExists(workspace: string, user: User, relpath: string): Promise<boolean> {
+  try {
+    await getContent(workspace, user, relpath);
+    return true;
+  } catch (error) {
+    if (error instanceof ContentApiError && error.status === 404) {
+      return false;
+    }
+    throw error;
+  }
+}
+
+/**
+ * Report whether a directory listing has any non-hidden entries.
+ */
+async function hasVisibleContent(workspace: string, user: User, relpath: string): Promise<boolean> {
+  try {
+    const node = await getContent(workspace, user, relpath);
+    if (!isContentListing(node)) {
+      return false;
+    }
+    return node.entries.some(e => !e.name.startsWith("."));
+  } catch (error) {
+    if (error instanceof ContentApiError && error.status === 404) {
+      return false;
+    }
+    throw error;
+  }
+}
+
+/**
+ * Resolve the content path, preferring the HEAD version over the legacy
+ * direct-in-base layout. Returns null when no content is available.
+ */
+async function resolveContentPath(workspace: string, user: User, basePath: string): Promise<string | null> {
+  const headVersion = await readMaybeFile(workspace, user, `${basePath}/.arena/HEAD`);
   if (headVersion) {
-    const versionPath = path.join(basePath, ".arena", "versions", headVersion);
-    if (fs.existsSync(versionPath)) {
+    const versionPath = `${basePath}/.arena/versions/${headVersion}`;
+    if (await pathExists(workspace, user, versionPath)) {
       return versionPath;
     }
-    console.warn(`HEAD points to version ${headVersion} but directory doesn't exist`);
   }
 
-  // Fall back to looking for content directly in basePath (legacy)
-  if (fs.existsSync(basePath)) {
-    // Check if there's actual content (not just .arena folder)
-    const entries = fs.readdirSync(basePath);
-    const hasContent = entries.some(e => !e.startsWith("."));
-    if (hasContent) {
-      return basePath;
-    }
+  if (await hasVisibleContent(workspace, user, basePath)) {
+    return basePath;
   }
 
   return null;
 }
 
 /**
- * Build the content tree from a directory.
- * Returns nodes for directories and files, with directories containing children.
+ * Map a content tree (paths relative to the workspace root) to the
+ * ArenaSource node shape (paths relative to the content root).
  */
-function buildContentTree(
-  contentPath: string,
-  relativePath: string = ""
-): ArenaSourceContentNode[] {
-  const nodes: ArenaSourceContentNode[] = [];
-  const fullPath = relativePath ? path.join(contentPath, relativePath) : contentPath;
-
-  try {
-    const entries = fs.readdirSync(fullPath, { withFileTypes: true });
-
-    for (const entry of entries) {
-      // Skip hidden files and directories
-      if (entry.name.startsWith(".")) continue;
-
-      const entryRelativePath = relativePath ? `${relativePath}/${entry.name}` : entry.name;
-      const entryFullPath = path.join(fullPath, entry.name);
-
-      if (entry.isDirectory()) {
-        // Recursively build children for directories
-        const children = buildContentTree(contentPath, entryRelativePath);
-        nodes.push({
-          name: entry.name,
-          path: entryRelativePath,
-          isDirectory: true,
-          children,
-        });
-      } else if (entry.isFile()) {
-        // Get file size
-        const stats = fs.statSync(entryFullPath);
-        nodes.push({
-          name: entry.name,
-          path: entryRelativePath,
-          isDirectory: false,
-          size: stats.size,
-        });
-      }
+function toSourceTree(nodes: ContentTreeNode[], rootPrefix: string): ArenaSourceContentNode[] {
+  const mapped: ArenaSourceContentNode[] = nodes.map(node => {
+    const relativePath = node.path.startsWith(rootPrefix) ? node.path.slice(rootPrefix.length) : node.path;
+    if (node.isDirectory) {
+      return {
+        name: node.name,
+        path: relativePath,
+        isDirectory: true,
+        children: toSourceTree(node.children ?? [], rootPrefix),
+      };
     }
-  } catch (err) {
-    console.error(`Error reading directory ${fullPath}:`, err);
-  }
+    return {
+      name: node.name,
+      path: relativePath,
+      isDirectory: false,
+      size: node.size,
+    };
+  });
 
-  // Sort: directories first, then files, alphabetically
-  nodes.sort((a, b) => {
+  // Sort: directories first, then files, alphabetically.
+  mapped.sort((a, b) => {
     if (a.isDirectory !== b.isDirectory) {
       return a.isDirectory ? -1 : 1;
     }
     return a.name.localeCompare(b.name);
   });
 
-  return nodes;
+  return mapped;
 }
 
 /**
@@ -186,7 +198,7 @@ export const GET = withWorkspaceAccess<RouteParams>(
     let auditCtx;
 
     try {
-      // Get the ArenaSource to verify it exists and get namespace
+      // Get the ArenaSource to verify it exists and read its phase.
       const result = await getWorkspaceResource<ArenaSource>(
         name,
         access.role!,
@@ -205,10 +217,10 @@ export const GET = withWorkspaceAccess<RouteParams>(
         CRD_KIND
       );
 
-      const basePath = getSourceBasePath(name, namespace, sourceName);
+      const basePath = sourceBasePath(sourceName);
 
-      // Check if the source content directory exists
-      if (!fs.existsSync(basePath)) {
+      // Check if the source content directory exists.
+      if (!(await pathExists(name, user, basePath))) {
         const sourcePhase = result.resource.status?.phase;
         if (sourcePhase !== "Ready") {
           return notFoundResponse(
@@ -220,16 +232,17 @@ export const GET = withWorkspaceAccess<RouteParams>(
         );
       }
 
-      // Resolve the content path (HEAD version or fallback)
-      const contentPath = resolveContentPath(basePath);
+      // Resolve the content path (HEAD version or fallback).
+      const contentPath = await resolveContentPath(name, user, basePath);
       if (!contentPath) {
         return notFoundResponse(
           "No content found. The source may need to be synced."
         );
       }
 
-      // Build the content tree
-      const tree = buildContentTree(contentPath);
+      // Build the content tree (skip dotfiles, e.g. the .arena dir).
+      const treeNodes = await listContentTree(name, user, contentPath, { skipHidden: true });
+      const tree = toSourceTree(treeNodes, `${contentPath}/`);
 
       const response: ArenaSourceContentResponse = {
         sourceName,

@@ -4,8 +4,13 @@
  * GET /api/workspaces/:name/arena/sources/:sourceName/versions - List all versions with metadata
  * POST /api/workspaces/:name/arena/sources/:sourceName/versions - Switch active version (update HEAD)
  *
- * Versions are stored in `.arena/versions/{hash}/` directories in the workspace filesystem.
- * The HEAD file points to the current active version.
+ * Versions are stored in `.arena/versions/{hash}/` directories under the
+ * source's content root. The `.arena/HEAD` file points to the active version.
+ *
+ * Content is served by the operator's authenticated content API (the dashboard
+ * no longer mounts the NFS workspace-content volume directly — see #1462). The
+ * operator prepends <workspace>/<namespace>, so paths here are relative to the
+ * workspace root (e.g. `arena/<sourceName>`).
  *
  * Protected by workspace access checks.
  */
@@ -21,8 +26,16 @@ import {
   auditError,
   notFoundResponse,
 } from "@/lib/k8s/workspace-route-helpers";
-import * as fs from "node:fs";
-import * as path from "node:path";
+import {
+  ContentApiError,
+  getContent,
+  isContentFile,
+  isContentListing,
+  makeContentDir,
+  writeContentFile,
+  type ContentEntry,
+} from "@/lib/data/content-api-service";
+import { listContentTree, type ContentTreeNode } from "@/lib/data/content-tree";
 import type { WorkspaceAccess } from "@/types/workspace";
 import type { User } from "@/lib/auth/types";
 import type { ArenaSource, ArenaVersion, ArenaVersionsResponse } from "@/types/arena";
@@ -32,162 +45,147 @@ type RouteContext = WorkspaceRouteContext<RouteParams>;
 
 const CRD_KIND = "ArenaSource";
 
-/** Base path for workspace content volume */
-const WORKSPACE_CONTENT_BASE = "/workspace-content";
-
 /**
- * Get the base path for an ArenaSource's content directory.
- * Pattern: /workspace-content/{workspace}/{namespace}/arena/{sourceName}
+ * Workspace-relative base path for an ArenaSource's content directory.
+ * The operator prepends <workspace>/<namespace>.
  */
-function getSourceBasePath(workspaceName: string, namespace: string, sourceName: string): string {
-  return path.join(WORKSPACE_CONTENT_BASE, workspaceName, namespace, "arena", sourceName);
+function sourceBasePath(sourceName: string): string {
+  return `arena/${sourceName}`;
 }
 
 /**
- * Read the HEAD file to get the current active version.
+ * Read the HEAD file to get the current active version, returning null when
+ * it does not exist.
  */
-function readHeadVersion(basePath: string): string | null {
-  const headPath = path.join(basePath, ".arena", "HEAD");
+async function readHeadVersion(workspace: string, user: User, basePath: string): Promise<string | null> {
   try {
-    if (fs.existsSync(headPath)) {
-      return fs.readFileSync(headPath, "utf-8").trim();
-    }
-  } catch (err) {
-    console.error(`Error reading HEAD file at ${headPath}:`, err);
-  }
-  return null;
-}
-
-/**
- * Write the HEAD file to switch to a new version.
- */
-function writeHeadVersion(basePath: string, versionHash: string): void {
-  const arenaDir = path.join(basePath, ".arena");
-  const headPath = path.join(arenaDir, "HEAD");
-
-  // Ensure .arena directory exists
-  if (!fs.existsSync(arenaDir)) {
-    fs.mkdirSync(arenaDir, { recursive: true });
-  }
-
-  fs.writeFileSync(headPath, versionHash + "\n", "utf-8");
-}
-
-/**
- * Get metadata for a single version directory.
- */
-function getVersionMetadata(versionsPath: string, hash: string, latestHash: string | null): ArenaVersion | null {
-  const versionPath = path.join(versionsPath, hash);
-
-  try {
-    const stats = fs.statSync(versionPath);
-    if (!stats.isDirectory()) {
+    const node = await getContent(workspace, user, `${basePath}/.arena/HEAD`);
+    return isContentFile(node) ? node.content.trim() : null;
+  } catch (error) {
+    if (error instanceof ContentApiError && error.status === 404) {
       return null;
     }
-
-    // Count files and calculate total size
-    let fileCount = 0;
-    let totalSize = 0;
-
-    const countFiles = (dir: string) => {
-      const entries = fs.readdirSync(dir, { withFileTypes: true });
-      for (const entry of entries) {
-        const fullPath = path.join(dir, entry.name);
-        if (entry.isDirectory()) {
-          countFiles(fullPath);
-        } else if (entry.isFile()) {
-          fileCount++;
-          totalSize += fs.statSync(fullPath).size;
-        }
-      }
-    };
-
-    countFiles(versionPath);
-
-    return {
-      hash,
-      createdAt: stats.birthtime.toISOString(),
-      size: totalSize,
-      fileCount,
-      isLatest: hash === latestHash,
-    };
-  } catch (err) {
-    console.error(`Error getting metadata for version ${hash}:`, err);
-    return null;
+    throw error;
   }
 }
 
 /**
- * Check if an entry is a valid version directory.
+ * Write the HEAD file to switch to a new version, ensuring `.arena` exists.
  */
-function isValidVersionEntry(entry: fs.Dirent): boolean {
-  return entry.isDirectory() && !entry.name.startsWith(".");
+async function writeHeadVersion(
+  workspace: string,
+  user: User,
+  basePath: string,
+  versionHash: string
+): Promise<void> {
+  await makeContentDir(workspace, user, `${basePath}/.arena`);
+  await writeContentFile(workspace, user, `${basePath}/.arena/HEAD`, versionHash + "\n");
 }
 
 /**
- * Find the latest version hash from a list of version directories.
+ * Report whether a path exists.
  */
-function findLatestVersionHash(versionsPath: string, versionNames: string[]): string | null {
-  let latestHash: string | null = null;
-  let latestTime = 0;
+async function pathExists(workspace: string, user: User, relpath: string): Promise<boolean> {
+  try {
+    await getContent(workspace, user, relpath);
+    return true;
+  } catch (error) {
+    if (error instanceof ContentApiError && error.status === 404) {
+      return false;
+    }
+    throw error;
+  }
+}
 
-  for (const name of versionNames) {
-    const versionPath = path.join(versionsPath, name);
-    const stats = fs.statSync(versionPath);
-    const createdTime = stats.birthtime.getTime();
+/**
+ * List the version directory entries under `.arena/versions`, or [] when the
+ * directory is missing.
+ */
+async function listVersionEntries(workspace: string, user: User, basePath: string): Promise<ContentEntry[]> {
+  try {
+    const node = await getContent(workspace, user, `${basePath}/.arena/versions`);
+    if (!isContentListing(node)) {
+      return [];
+    }
+    return node.entries.filter(e => e.type === "directory" && !e.name.startsWith("."));
+  } catch (error) {
+    if (error instanceof ContentApiError && error.status === 404) {
+      return [];
+    }
+    throw error;
+  }
+}
 
-    if (createdTime > latestTime) {
-      latestTime = createdTime;
-      latestHash = name;
+/** Sum file count and total size from a content tree. */
+function tallyTree(nodes: ContentTreeNode[]): { fileCount: number; totalSize: number } {
+  let fileCount = 0;
+  let totalSize = 0;
+  for (const node of nodes) {
+    if (node.isDirectory) {
+      const child = tallyTree(node.children ?? []);
+      fileCount += child.fileCount;
+      totalSize += child.totalSize;
+    } else {
+      fileCount++;
+      totalSize += node.size ?? 0;
     }
   }
+  return { fileCount, totalSize };
+}
 
+/**
+ * Build metadata for a single version directory.
+ */
+async function buildVersionMetadata(
+  workspace: string,
+  user: User,
+  basePath: string,
+  entry: ContentEntry,
+  latestHash: string | null
+): Promise<ArenaVersion> {
+  const tree = await listContentTree(workspace, user, `${basePath}/.arena/versions/${entry.name}`);
+  const { fileCount, totalSize } = tallyTree(tree);
+  return {
+    hash: entry.name,
+    createdAt: entry.modifiedAt,
+    size: totalSize,
+    fileCount,
+    isLatest: entry.name === latestHash,
+  };
+}
+
+/**
+ * Find the latest version hash (newest modifiedAt) from version entries.
+ */
+function findLatestVersionHash(entries: ContentEntry[]): string | null {
+  let latestHash: string | null = null;
+  let latestTime = -Infinity;
+  for (const entry of entries) {
+    const time = new Date(entry.modifiedAt).getTime();
+    if (time > latestTime) {
+      latestTime = time;
+      latestHash = entry.name;
+    }
+  }
   return latestHash;
 }
 
 /**
- * List all available versions from the versions directory.
+ * List all available versions with metadata, newest first.
  */
-function listVersions(basePath: string): ArenaVersion[] {
-  const versionsPath = path.join(basePath, ".arena", "versions");
-
-  try {
-    if (!fs.existsSync(versionsPath)) {
-      return [];
-    }
-
-    // Get all valid version directory names
-    const entries = fs.readdirSync(versionsPath, { withFileTypes: true });
-    const versionNames = entries.filter(isValidVersionEntry).map(e => e.name);
-
-    // Find the latest version
-    const latestHash = findLatestVersionHash(versionsPath, versionNames);
-
-    // Collect metadata for all versions
-    const versions = versionNames
-      .map(name => getVersionMetadata(versionsPath, name, latestHash))
-      .filter((v): v is ArenaVersion => v !== null);
-
-    // Sort by createdAt descending (newest first)
-    versions.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-
-    return versions;
-  } catch (err) {
-    console.error(`Error listing versions at ${versionsPath}:`, err);
+async function listVersions(workspace: string, user: User, basePath: string): Promise<ArenaVersion[]> {
+  const entries = await listVersionEntries(workspace, user, basePath);
+  if (entries.length === 0) {
     return [];
   }
-}
 
-/**
- * Check if a version exists in the versions directory.
- */
-function versionExists(basePath: string, hash: string): boolean {
-  const versionPath = path.join(basePath, ".arena", "versions", hash);
-  try {
-    return fs.existsSync(versionPath) && fs.statSync(versionPath).isDirectory();
-  } catch {
-    return false;
-  }
+  const latestHash = findLatestVersionHash(entries);
+  const versions = await Promise.all(
+    entries.map(entry => buildVersionMetadata(workspace, user, basePath, entry, latestHash))
+  );
+
+  versions.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  return versions;
 }
 
 // =============================================================================
@@ -206,7 +204,7 @@ export const GET = withWorkspaceAccess<RouteParams>(
     let auditCtx;
 
     try {
-      // Get the ArenaSource to verify it exists and get namespace
+      // Get the ArenaSource to verify it exists and read its phase.
       const result = await getWorkspaceResource<ArenaSource>(
         name,
         access.role!,
@@ -225,10 +223,10 @@ export const GET = withWorkspaceAccess<RouteParams>(
         CRD_KIND
       );
 
-      const basePath = getSourceBasePath(name, namespace, sourceName);
+      const basePath = sourceBasePath(sourceName);
 
-      // Check if the source content directory exists
-      if (!fs.existsSync(basePath)) {
+      // Check if the source content directory exists.
+      if (!(await pathExists(name, user, basePath))) {
         const sourcePhase = result.resource.status?.phase;
         if (sourcePhase !== "Ready") {
           return notFoundResponse(
@@ -240,9 +238,9 @@ export const GET = withWorkspaceAccess<RouteParams>(
         );
       }
 
-      // Read HEAD and list versions
-      const head = readHeadVersion(basePath);
-      const versions = listVersions(basePath);
+      // Read HEAD and list versions.
+      const head = await readHeadVersion(name, user, basePath);
+      const versions = await listVersions(name, user, basePath);
 
       const response: ArenaVersionsResponse = {
         sourceName,
@@ -282,7 +280,7 @@ export const POST = withWorkspaceAccess<RouteParams>(
     let auditCtx;
 
     try {
-      // Get the ArenaSource to verify it exists and get namespace
+      // Get the ArenaSource to verify it exists.
       const result = await getWorkspaceResource<ArenaSource>(
         name,
         access.role!,
@@ -301,7 +299,7 @@ export const POST = withWorkspaceAccess<RouteParams>(
         CRD_KIND
       );
 
-      // Parse request body
+      // Parse request body.
       const body = await request.json();
       const targetVersion = body.version;
 
@@ -312,28 +310,28 @@ export const POST = withWorkspaceAccess<RouteParams>(
         );
       }
 
-      const basePath = getSourceBasePath(name, namespace, sourceName);
+      const basePath = sourceBasePath(sourceName);
 
-      // Check if the source content directory exists
-      if (!fs.existsSync(basePath)) {
+      // Check if the source content directory exists.
+      if (!(await pathExists(name, user, basePath))) {
         return notFoundResponse(
           "Source content directory not found. The source may need to be synced first."
         );
       }
 
-      // Check if the target version exists
-      if (!versionExists(basePath, targetVersion)) {
+      // Check if the target version exists.
+      if (!(await pathExists(name, user, `${basePath}/.arena/versions/${targetVersion}`))) {
         return NextResponse.json(
           { error: "Version not found. It may have been garbage collected." },
           { status: 404 }
         );
       }
 
-      // Read current HEAD for comparison
-      const previousHead = readHeadVersion(basePath);
+      // Read current HEAD for comparison.
+      const previousHead = await readHeadVersion(name, user, basePath);
 
-      // Write new HEAD
-      writeHeadVersion(basePath, targetVersion);
+      // Write new HEAD.
+      await writeHeadVersion(name, user, basePath, targetVersion);
 
       auditSuccess(auditCtx, "update", sourceName, {
         subresource: "versions",

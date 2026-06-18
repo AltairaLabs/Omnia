@@ -170,6 +170,22 @@ dashboard is enabled (its only consumer). Empty disables the API entirely.
 {{- end -}}
 
 {{/*
+omnia.contentApi.bindAddress — operator workspace-content API bind address.
+The dashboard reads/writes workspace content through this authenticated operator
+endpoint instead of mounting the NFS volume directly (#1462). Needs the
+dashboard (it mints the identity JWT the operator verifies via JWKS) and
+workspaceContent (the operator mounts the share root + has a content path).
+Explicit workspaceContent.contentApi.bindAddress wins; defaults to ":8084".
+Empty disables it.
+*/}}
+{{- define "omnia.contentApi.bindAddress" -}}
+{{- $ca := .Values.workspaceContent.contentApi | default dict -}}
+{{- if and .Values.dashboard.enabled .Values.workspaceContent.enabled $ca.enabled -}}
+{{- $ca.bindAddress | default ":8084" -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 Compaction image
 */}}
 {{- define "omnia.compaction.image" -}}

@@ -1482,8 +1482,41 @@ workspaceContent:
   # Default false = legacy shared-volume + full subPath.
   scoped: false
 
-  # -- Mount path in dashboard pod
+  # -- Mount path. The OPERATOR mounts the content share root here and serves
+  # it via the content API. The dashboard no longer mounts it (#1462) but still
+  # reads this as a path-string for arena template preview/render (the
+  # arena-controller owns its own mount).
   mountPath: /workspace-content
+
+  # -- Operator workspace-content API. The dashboard reads/writes workspace
+  # content through this authenticated operator endpoint instead of mounting
+  # the NFS volume directly (#1462). The operator verifies the dashboard-minted
+  # identity JWT and recomputes the workspace role server-side. Served only when
+  # both `dashboard.enabled` and `workspaceContent.enabled` are true.
+  contentApi:
+    # -- Enable the operator workspace-content API.
+    enabled: true
+    # -- Bind address for the operator content API (port-only form, e.g. ":8084").
+    bindAddress: ":8084"
+
+  # -- Layer-2 isolation backstop (#1463): a ValidatingAdmissionPolicy that
+  # denies a pod in a workspace namespace from mounting any workspace-content
+  # PVC other than its own `workspace-<namespace>-content` (catches foreign and
+  # share-root claims). Requires Kubernetes >= 1.30 with the
+  # ValidatingAdmissionPolicy feature; default off so older / VAP-less clusters
+  # install cleanly. Gatekeeper / Kyverno equivalents are documented in the
+  # workspace-content-isolation how-to.
+  admissionPolicy:
+    # -- Enable the workspace-content mount admission policy.
+    enabled: false
+    # -- failurePolicy for the policy (Fail = closed; Ignore = open on errors).
+    failurePolicy: Fail
+    # -- Optional: deny PersistentVolume creation whose nfs.path equals this
+    # share-root path (install-specific). Empty disables the PV policy.
+    shareRootPath: ""
+    # -- Optional: provisioner username exempted from the PV policy
+    # (e.g. system:serviceaccount:kube-system:<csi-provisioner>).
+    provisionerUsername: ""
 
   persistence:
     # -- Storage class for dashboard's workspace content PVC
