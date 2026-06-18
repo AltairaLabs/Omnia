@@ -274,6 +274,32 @@ toolsDemo:
 # dashboard's expandable composition sub-flow. Ollama-backed, self-contained.
 # ============================================================================
 
+# -- Default managed service group (session-api + a minimal lexical memory-api)
+# for the demo workspace, so session history + cost/usage light up out of the
+# box (open-core; the memory UI itself stays EE-gated). managed mode requires
+# both session and memory, so memory is included but has no embedding provider.
+# Skipped when sharepointHero/memoryDemo own the demo workspace's service group.
+demoWorkspace:
+  enabled: true
+  # Create dev-only Postgres Secrets pointing at the in-cluster dev postgres
+  # (shared omnia_sessions / omnia_memory DBs). For real clusters set
+  # createDevSecret=false and pre-create the Secrets with a POSTGRES_CONN key.
+  createDevSecret: true
+  sessionSecret: omnia-demo-session
+  devSessionConn: "postgres://omnia:omnia@omnia-postgres.omnia-system.svc.cluster.local:5432/omnia_sessions?sslmode=disable"
+  memorySecret: omnia-demo-memory
+  devMemoryConn: "postgres://omnia:omnia@omnia-postgres.omnia-system.svc.cluster.local:5432/omnia_memory?sslmode=disable"
+
+# -- Anthropic skills SkillSource. Syncs https://github.com/anthropics/skills
+# into the demo workspace so the Skills page is populated out of the box.
+skills:
+  enabled: true
+  git:
+    url: https://github.com/anthropics/skills.git
+    branch: main
+  interval: 1h
+  timeout: 2m
+
 compositionDemo:
   # -- Enable the composition demo agent + PromptPack
   enabled: true

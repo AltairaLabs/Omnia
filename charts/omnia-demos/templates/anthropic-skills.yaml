@@ -1,0 +1,25 @@
+{{- if .Values.skills.enabled }}
+{{- /* ============================================================================ */ -}}
+{{- /* Anthropic skills SkillSource                                                  */ -}}
+{{- /* Syncs the public Anthropic skills repo so the Skills page is populated and    */ -}}
+{{- /* demo agents can mount real skills. Each top-level directory in the repo is a  */ -}}
+{{- /* skill (contains a SKILL.md).                                                  */ -}}
+{{- /* ============================================================================ */ -}}
+---
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: SkillSource
+metadata:
+  name: anthropic-skills
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/name: omnia-skills-demo
+    app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
+spec:
+  type: git
+  git:
+    url: {{ .Values.skills.git.url | quote }}
+    ref:
+      branch: {{ .Values.skills.git.branch | quote }}
+  interval: {{ .Values.skills.interval | quote }}
+  timeout: {{ .Values.skills.timeout | quote }}
+{{- end }}
