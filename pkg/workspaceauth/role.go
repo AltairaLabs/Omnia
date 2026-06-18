@@ -27,8 +27,6 @@ func MeetsRequiredRole(granted, required Role) bool {
 }
 
 // maxRole returns the higher-privilege of two roles ("" treated as lowest).
-//
-//nolint:unused // used by ComputeRole, added in the next commit (TDD step).
 func maxRole(a, b Role) Role {
 	if roleRank[a] >= roleRank[b] {
 		if roleRank[a] == 0 {
