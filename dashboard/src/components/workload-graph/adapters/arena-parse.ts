@@ -4,6 +4,7 @@ import type {
   PromptDefinition,
   WorkflowConfig,
   AgentsConfig,
+  CompositionDef,
 } from "@/lib/data/types";
 
 export interface ArenaParsedProvider {
@@ -53,6 +54,7 @@ interface ArenaConfigShape {
     judges?: Array<{ name?: string; provider?: string }>;
     judge_specs?: Record<string, { provider?: string }>;
     workflow?: WorkflowConfig;
+    compositions?: Record<string, CompositionDef>;
     agents?: AgentsConfig;
     self_play?: {
       enabled?: boolean;
@@ -242,6 +244,7 @@ export function parseArenaProject(input: {
   const content: PromptPackContent = {
     prompts: buildPrompts(cfg, dir, readFile),
     workflow: cfg.spec?.workflow,
+    compositions: cfg.spec?.compositions,
     agents: cfg.spec?.agents,
   };
   return {
