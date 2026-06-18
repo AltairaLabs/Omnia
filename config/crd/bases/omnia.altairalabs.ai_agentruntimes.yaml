@@ -4789,6 +4789,19 @@ spec:
                 - agent
                 - function
                 type: string
+              outputFormat:
+                description: |-
+                  outputFormat controls how the model is asked to format its response in
+                  function mode. "text" = free-form (validated post-hoc by the facade),
+                  "json" = provider JSON mode (valid JSON, shape unenforced), "json_schema"
+                  = provider structured output bound to outputSchema. When unset on a
+                  function-mode runtime it defaults to "json_schema". Forbidden when
+                  spec.mode is not 'function' (CEL-gated).
+                enum:
+                - text
+                - json
+                - json_schema
+                type: string
               outputSchema:
                 description: |-
                   outputSchema is the JSON Schema that the Function's response is
@@ -11969,6 +11982,8 @@ spec:
               rule: self.mode == 'function' || !has(self.inputSchema)
             - message: spec.outputSchema is only valid when spec.mode is 'function'
               rule: self.mode == 'function' || !has(self.outputSchema)
+            - message: spec.outputFormat is only valid when spec.mode is 'function'
+              rule: self.mode == 'function' || !has(self.outputFormat)
             - message: facade.type 'websocket' is incompatible with mode 'function';
                 use 'grpc' or omit
               rule: self.mode != 'function' || self.facade.type != 'websocket'

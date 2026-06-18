@@ -1201,6 +1201,7 @@ type MemoryEmbeddingConfig struct {
 // +kubebuilder:validation:XValidation:rule="self.mode != 'function' || has(self.outputSchema)",message="spec.outputSchema is required when spec.mode is 'function'"
 // +kubebuilder:validation:XValidation:rule="self.mode == 'function' || !has(self.inputSchema)",message="spec.inputSchema is only valid when spec.mode is 'function'"
 // +kubebuilder:validation:XValidation:rule="self.mode == 'function' || !has(self.outputSchema)",message="spec.outputSchema is only valid when spec.mode is 'function'"
+// +kubebuilder:validation:XValidation:rule="self.mode == 'function' || !has(self.outputFormat)",message="spec.outputFormat is only valid when spec.mode is 'function'"
 // +kubebuilder:validation:XValidation:rule="self.mode != 'function' || self.facade.type != 'websocket'",message="facade.type 'websocket' is incompatible with mode 'function'; use 'grpc' or omit"
 // +kubebuilder:validation:XValidation:rule="!has(self.facade.mcp) || !self.facade.mcp.enabled || self.mode == 'function'",message="facade.mcp.enabled requires mode=function"
 type AgentRuntimeSpec struct {
@@ -1232,6 +1233,16 @@ type AgentRuntimeSpec struct {
 	// +kubebuilder:validation:Type=object
 	// +kubebuilder:pruning:PreserveUnknownFields
 	OutputSchema *apiextensionsv1.JSON `json:"outputSchema,omitempty"`
+
+	// outputFormat controls how the model is asked to format its response in
+	// function mode. "text" = free-form (validated post-hoc by the facade),
+	// "json" = provider JSON mode (valid JSON, shape unenforced), "json_schema"
+	// = provider structured output bound to outputSchema. When unset on a
+	// function-mode runtime it defaults to "json_schema". Forbidden when
+	// spec.mode is not 'function' (CEL-gated).
+	// +optional
+	// +kubebuilder:validation:Enum=text;json;json_schema
+	OutputFormat string `json:"outputFormat,omitempty"`
 
 	// framework specifies which agent framework to use.
 	// Supports PromptKit, LangChain, AutoGen, or a custom image.
