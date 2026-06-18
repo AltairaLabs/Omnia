@@ -1,6 +1,12 @@
 /**
  * Read a single file from a SkillSource. Mirrors arena sources/[name]/file.
  * GET /api/workspaces/:name/skills/:sourceName/file?path=<relativePath>
+ *
+ * Content is served by the operator's authenticated content API (the dashboard
+ * no longer mounts the NFS workspace-content volume directly — see #1462). The
+ * SkillSource CRD is still read to resolve the on-disk base (default
+ * skills/<sourceName> or spec.targetPath). Path-confinement and max-size are
+ * enforced operator-side and surfaced as pass-through statuses.
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -16,8 +22,13 @@ import {
   auditSuccess,
   auditError,
 } from "@/lib/k8s/workspace-route-helpers";
-import * as fs from "node:fs";
-import * as path from "node:path";
+import { contentErrorResponse } from "@/lib/data/content-api-response";
+import {
+  ContentApiError,
+  getContent,
+  isContentFile,
+  isContentListing,
+} from "@/lib/data/content-api-service";
 import type { WorkspaceAccess } from "@/types/workspace";
 import type { User } from "@/lib/auth/types";
 import type { SkillSource } from "@/types/skill-source";
@@ -26,35 +37,74 @@ type RouteParams = { name: string; sourceName: string };
 type RouteContext = WorkspaceRouteContext<RouteParams>;
 
 const CRD_KIND = "SkillSource";
-const WORKSPACE_CONTENT_BASE = "/workspace-content";
-const MAX_FILE_SIZE = 1024 * 1024;
 
-function getSourceBasePath(
-  workspaceName: string,
-  namespace: string,
-  sourceName: string,
-  targetPath?: string
-): string {
-  const target = targetPath && targetPath.length > 0 ? targetPath : path.join("skills", sourceName);
-  return path.join(WORKSPACE_CONTENT_BASE, workspaceName, namespace, target);
+/** Workspace-relative base path for a skill source's content. */
+function getSourceBaseRelPath(sourceName: string, targetPath?: string): string {
+  if (targetPath && targetPath.length > 0) {
+    return targetPath;
+  }
+  return `skills/${sourceName}`;
 }
 
-function resolveContentPath(basePath: string): string | null {
-  const headPath = path.join(basePath, ".arena", "HEAD");
+/** Read a file's trimmed content, or null if it does not exist. */
+async function readMaybeFile(
+  workspace: string,
+  user: User,
+  relpath: string
+): Promise<string | null> {
   try {
-    if (fs.existsSync(headPath)) {
-      const headVersion = fs.readFileSync(headPath, "utf-8").trim();
-      if (headVersion) {
-        const versionPath = path.join(basePath, ".arena", "versions", headVersion);
-        if (fs.existsSync(versionPath)) return versionPath;
-      }
+    const node = await getContent(workspace, user, relpath);
+    return isContentFile(node) ? node.content.trim() : null;
+  } catch (error) {
+    if (error instanceof ContentApiError && error.status === 404) {
+      return null;
     }
-  } catch {
-    // Fall through
+    throw error;
   }
-  if (fs.existsSync(basePath)) {
-    const entries = fs.readdirSync(basePath);
-    if (entries.some((e) => !e.startsWith("."))) return basePath;
+}
+
+/** Report whether a directory listing exists and has at least one non-hidden entry. */
+async function listingHasVisibleEntries(
+  workspace: string,
+  user: User,
+  relpath: string
+): Promise<boolean> {
+  try {
+    const node = await getContent(workspace, user, relpath);
+    return (
+      isContentListing(node) && node.entries.some((e) => !e.name.startsWith("."))
+    );
+  } catch (error) {
+    if (error instanceof ContentApiError && error.status === 404) {
+      return false;
+    }
+    throw error;
+  }
+}
+
+/**
+ * Resolve the content path for a source base: the HEAD version dir if present,
+ * otherwise the base itself when it has visible content. Returns null when no
+ * content is available.
+ */
+async function resolveContentRelPath(
+  workspace: string,
+  user: User,
+  baseRelPath: string
+): Promise<string | null> {
+  const headVersion = await readMaybeFile(
+    workspace,
+    user,
+    `${baseRelPath}/.arena/HEAD`
+  );
+  if (headVersion) {
+    const versionPath = `${baseRelPath}/.arena/versions/${headVersion}`;
+    if (await listingHasVisibleEntries(workspace, user, versionPath)) {
+      return versionPath;
+    }
+  }
+  if (await listingHasVisibleEntries(workspace, user, baseRelPath)) {
+    return baseRelPath;
   }
   return null;
 }
@@ -79,11 +129,6 @@ export const GET = withWorkspaceAccess<RouteParams>(
         );
       }
 
-      const normalized = path.normalize(filePath);
-      if (normalized.startsWith("..") || path.isAbsolute(normalized)) {
-        return NextResponse.json({ error: "Invalid file path" }, { status: 400 });
-      }
-
       const result = await getWorkspaceResource<SkillSource>(
         name,
         access.role!,
@@ -96,53 +141,41 @@ export const GET = withWorkspaceAccess<RouteParams>(
       const namespace = result.workspace.spec.namespace.name;
       auditCtx = createAuditContext(name, namespace, user, access.role!, CRD_KIND);
 
-      const basePath = getSourceBasePath(
-        name,
-        namespace,
+      const baseRelPath = getSourceBaseRelPath(
         sourceName,
         result.resource.spec?.targetPath
       );
-      const contentPath = resolveContentPath(basePath);
-      if (!contentPath) {
+      const contentRelPath = await resolveContentRelPath(name, user, baseRelPath);
+      if (!contentRelPath) {
         return NextResponse.json(
           { error: "Skill source content not available" },
           { status: 404 }
         );
       }
 
-      const fullPath = path.join(contentPath, normalized);
-      const resolvedFull = path.resolve(fullPath);
-      const resolvedContent = path.resolve(contentPath);
-      if (!resolvedFull.startsWith(resolvedContent + path.sep)) {
-        return NextResponse.json({ error: "Invalid file path" }, { status: 400 });
-      }
-
-      if (!fs.existsSync(fullPath)) {
-        return NextResponse.json({ error: "File not found" }, { status: 404 });
-      }
-
-      const stats = fs.statSync(fullPath);
-      if (stats.isDirectory()) {
+      const node = await getContent(name, user, `${contentRelPath}/${filePath}`);
+      if (isContentListing(node)) {
         return NextResponse.json({ error: "Path is a directory" }, { status: 400 });
       }
-      if (stats.size > MAX_FILE_SIZE) {
+      if (!isContentFile(node)) {
         return NextResponse.json(
-          { error: `File too large (${stats.size} bytes, max ${MAX_FILE_SIZE})` },
-          { status: 413 }
+          { error: "Internal Server Error", message: "Unexpected content response" },
+          { status: 500 }
         );
       }
 
-      const content = fs.readFileSync(fullPath, "utf-8");
-
       auditSuccess(auditCtx, "get", sourceName, {
         subresource: "file",
-        filePath: normalized,
-        size: stats.size,
+        filePath,
+        size: node.size,
       });
 
-      return NextResponse.json({ path: normalized, content, size: stats.size });
+      return NextResponse.json({ path: filePath, content: node.content, size: node.size });
     } catch (error) {
       if (auditCtx) auditError(auditCtx, "get", sourceName, error, 500);
+      if (error instanceof ContentApiError) {
+        return contentErrorResponse(error, "read file from skill source");
+      }
       return handleK8sError(error, "read file from skill source");
     }
   }
