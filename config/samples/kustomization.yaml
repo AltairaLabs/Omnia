@@ -4,6 +4,7 @@ resources:
 - omnia_v1alpha1_agentruntime_langchain.yaml
 - omnia_v1alpha1_promptpack.yaml
 - omnia_v1alpha1_promptpack_deep_research.yaml
+- omnia_v1alpha1_promptpack_doc_analysis.yaml
 - omnia_v1alpha1_toolregistry.yaml
 - omnia_v1alpha1_provider.yaml
 - omnia_v1alpha1_arenasource.yaml

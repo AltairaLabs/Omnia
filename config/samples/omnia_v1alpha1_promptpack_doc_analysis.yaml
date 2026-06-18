@@ -1,0 +1,215 @@
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: PromptPack
+metadata:
+  labels:
+    app.kubernetes.io/name: omnia
+    app.kubernetes.io/managed-by: kustomize
+  name: document-analysis
+spec:
+  # Prompts + composition stored in a ConfigMap (compiled pack.json).
+  source:
+    type: configmap
+    configMapRef:
+      name: document-analysis-prompts
+  version: "1.0.0"
+---
+# ConfigMap containing the compiled PromptPack JSON.
+#
+# A *composition* pack (PromptKit RFC 0010 / 1.5+). The workflow has two states:
+# a normal "intake" prompt state, then an "analyze" state with
+# `orchestration: composition` that runs the `analyze_document` step graph.
+#
+# The composition deliberately exercises all five v1 step kinds so the dashboard
+# WorkloadGraph renders the full sub-flow when you expand the `analyze` state:
+#   - prompt   (classify, title, summarize)
+#   - parallel (extract_meta — fan-out, barrier reducer into `metadata`)
+#   - tool     (structure — deterministic doc_parse_structure call)
+#   - branch   (route — predicate on the classifier's output)
+#   - agent    (analyze_paper — bounded tool loop with a max_steps termination)
+#
+# Open this pack on the PromptPacks page, switch to the Workload tab, and click
+# the `analyze` state's expand control to reveal the composition.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: document-analysis-prompts
+data:
+  pack.json: |
+    {
+      "$schema": "https://promptpack.org/schema/latest/promptpack.schema.json",
+      "id": "document-analysis",
+      "name": "Document Analysis",
+      "version": "1.0.0",
+      "description": "Classifies a document, extracts metadata in parallel, and routes to a type-specific analyzer via a declarative composition.",
+      "template_engine": {
+        "version": "v1",
+        "syntax": "{{variable}}",
+        "features": ["basic_substitution"]
+      },
+
+      "prompts": {
+        "triage": {
+          "id": "triage",
+          "name": "Intake",
+          "description": "Accepts the document and starts the analysis composition.",
+          "version": "1.0.0",
+          "system_template": "You receive a document to analyze. Acknowledge the request and hand off to the analysis pipeline.",
+          "parameters": { "temperature": 0.3, "max_tokens": 512 }
+        },
+        "classifier": {
+          "id": "classifier",
+          "name": "Document Classifier",
+          "description": "Classifies the document into a type.",
+          "version": "1.0.0",
+          "system_template": "Classify the document into one of: research_paper, report, article. Return the type as structured output.",
+          "parameters": { "temperature": 0.0, "max_tokens": 256 }
+        },
+        "title_extractor": {
+          "id": "title_extractor",
+          "name": "Title Extractor",
+          "description": "Extracts the document title.",
+          "version": "1.0.0",
+          "system_template": "Extract the document's title. Return only the title.",
+          "parameters": { "temperature": 0.0, "max_tokens": 128 }
+        },
+        "paper_analyzer": {
+          "id": "paper_analyzer",
+          "name": "Research Paper Analyzer",
+          "description": "Deep analysis of a research paper using lookup tools.",
+          "version": "1.0.0",
+          "system_template": "Analyze the research paper in depth. Use the section-lookup and reference-search tools to ground the analysis, then produce a structured summary.",
+          "tools": ["doc_section_lookup", "ref_search"],
+          "parameters": { "temperature": 0.3, "max_tokens": 2048 }
+        },
+        "summarizer": {
+          "id": "summarizer",
+          "name": "General Summarizer",
+          "description": "Summarizes a non-paper document.",
+          "version": "1.0.0",
+          "system_template": "Produce a concise structured summary of the document.",
+          "parameters": { "temperature": 0.4, "max_tokens": 1024 }
+        }
+      },
+
+      "tools": {
+        "doc_parse_structure": {
+          "name": "doc_parse_structure",
+          "description": "Parse a document's heading/section structure",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "content": { "type": "string", "description": "The document text" }
+            },
+            "required": ["content"]
+          }
+        },
+        "doc_section_lookup": {
+          "name": "doc_section_lookup",
+          "description": "Fetch the text of a named section of the document",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "section": { "type": "string", "description": "Section heading to fetch" }
+            },
+            "required": ["section"]
+          }
+        },
+        "ref_search": {
+          "name": "ref_search",
+          "description": "Search the document's reference list",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "query": { "type": "string", "description": "Reference search query" }
+            },
+            "required": ["query"]
+          }
+        }
+      },
+
+      "workflow": {
+        "version": 1,
+        "entry": "intake",
+        "states": {
+          "intake": {
+            "prompt_task": "triage",
+            "description": "Accept the document and start analysis",
+            "on_event": { "proceed": "analyze" }
+          },
+          "analyze": {
+            "description": "Run the document-analysis composition",
+            "orchestration": "composition",
+            "composition": "analyze_document",
+            "terminal": true
+          }
+        }
+      },
+
+      "compositions": {
+        "analyze_document": {
+          "version": 1,
+          "description": "Classify, extract metadata in parallel, then route to a type-specific analyzer.",
+          "steps": [
+            {
+              "id": "classify",
+              "kind": "prompt",
+              "prompt_task": "classifier",
+              "input": "${input.text}"
+            },
+            {
+              "id": "extract_meta",
+              "kind": "parallel",
+              "branches": [
+                {
+                  "id": "title",
+                  "kind": "prompt",
+                  "prompt_task": "title_extractor",
+                  "input": "${input.text}"
+                },
+                {
+                  "id": "structure",
+                  "kind": "tool",
+                  "tool": "doc_parse_structure",
+                  "args": { "content": "${input.text}" }
+                }
+              ],
+              "reduce": { "strategy": "barrier", "into": "metadata" }
+            },
+            {
+              "id": "route",
+              "kind": "branch",
+              "predicate": {
+                "path": "${classify.output.type}",
+                "op": "equals",
+                "value": "research_paper"
+              },
+              "then": "analyze_paper",
+              "else": "summarize"
+            },
+            {
+              "id": "analyze_paper",
+              "kind": "agent",
+              "depends_on": ["route"],
+              "prompt_task": "paper_analyzer",
+              "input": "${input.text}",
+              "tools": ["doc_section_lookup", "ref_search"],
+              "termination": { "max_steps": 8 },
+              "modifiers": { "eval": ["analysis_quality"] }
+            },
+            {
+              "id": "summarize",
+              "kind": "prompt",
+              "depends_on": ["route"],
+              "prompt_task": "summarizer",
+              "input": "${input.text}"
+            }
+          ]
+        }
+      },
+
+      "metadata": {
+        "domain": "document-analysis",
+        "language": "en",
+        "tags": ["composition", "workflow", "rfc-0010", "branch", "parallel"]
+      }
+    }

@@ -1,0 +1,299 @@
+{{- if .Values.compositionDemo.enabled }}
+{{- /* ============================================================================ */ -}}
+{{- /* Composition Demo (PromptKit RFC 0010 / 1.5+)                                  */ -}}
+{{- /* A document-analysis PromptPack whose `analyze` workflow state runs a          */ -}}
+{{- /* declarative composition exercising all five v1 step kinds (prompt, parallel,  */ -}}
+{{- /* tool, branch, agent). Open it on the PromptPacks page → Workload tab and      */ -}}
+{{- /* expand the `analyze` state to see the composition sub-flow.                    */ -}}
+{{- /* Self-contained: backed by the in-cluster Ollama chat instance, no API keys.   */ -}}
+{{- /* ============================================================================ */ -}}
+---
+# Provider for the composition demo (in-cluster Ollama chat instance).
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: Provider
+metadata:
+  name: ollama-composition
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/name: omnia-composition-demo
+    app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
+spec:
+  type: ollama
+  model: llama3.2:3b
+  baseURL: http://ollama-chat.{{ .Values.namespace }}:11434
+  defaults:
+    temperature: "0.3"
+    contextWindow: {{ .Values.ollama.contextWindow }}
+    truncationStrategy: sliding
+---
+# Compiled PromptPack JSON. The `analyze` workflow state has
+# orchestration: composition and runs the `analyze_document` step graph.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: demo-composition-prompts
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/name: omnia-composition-demo
+    app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
+data:
+  pack.json: |
+    {
+      "$schema": "https://promptpack.org/schema/latest/promptpack.schema.json",
+      "id": "demo-composition",
+      "name": "Document Analysis",
+      "version": "1.0.0",
+      "description": "Classifies a document, extracts metadata in parallel, and routes to a type-specific analyzer via a declarative composition.",
+      "template_engine": {
+        "version": "v1",
+        "syntax": "{{"{{variable}}"}}",
+        "features": ["basic_substitution"]
+      },
+      "prompts": {
+        "triage": {
+          "id": "triage",
+          "name": "Intake",
+          "description": "Accepts the document and starts the analysis composition.",
+          "version": "1.0.0",
+          "system_template": "You receive a document to analyze. Acknowledge the request and hand off to the analysis pipeline.",
+          "parameters": { "temperature": 0.3, "max_tokens": 512 }
+        },
+        "classifier": {
+          "id": "classifier",
+          "name": "Document Classifier",
+          "description": "Classifies the document into a type.",
+          "version": "1.0.0",
+          "system_template": "Classify the document into one of: research_paper, report, article. Return the type as structured output.",
+          "parameters": { "temperature": 0.0, "max_tokens": 256 }
+        },
+        "title_extractor": {
+          "id": "title_extractor",
+          "name": "Title Extractor",
+          "description": "Extracts the document title.",
+          "version": "1.0.0",
+          "system_template": "Extract the document's title. Return only the title.",
+          "parameters": { "temperature": 0.0, "max_tokens": 128 }
+        },
+        "paper_analyzer": {
+          "id": "paper_analyzer",
+          "name": "Research Paper Analyzer",
+          "description": "Deep analysis of a research paper using lookup tools.",
+          "version": "1.0.0",
+          "system_template": "Analyze the research paper in depth. Use the section-lookup and reference-search tools to ground the analysis, then produce a structured summary.",
+          "tools": ["doc_section_lookup", "ref_search"],
+          "parameters": { "temperature": 0.3, "max_tokens": 2048 }
+        },
+        "summarizer": {
+          "id": "summarizer",
+          "name": "General Summarizer",
+          "description": "Summarizes a non-paper document.",
+          "version": "1.0.0",
+          "system_template": "Produce a concise structured summary of the document.",
+          "parameters": { "temperature": 0.4, "max_tokens": 1024 }
+        }
+      },
+      "tools": {
+        "doc_parse_structure": {
+          "name": "doc_parse_structure",
+          "description": "Parse a document's heading/section structure",
+          "parameters": {
+            "type": "object",
+            "properties": { "content": { "type": "string", "description": "The document text" } },
+            "required": ["content"]
+          }
+        },
+        "doc_section_lookup": {
+          "name": "doc_section_lookup",
+          "description": "Fetch the text of a named section of the document",
+          "parameters": {
+            "type": "object",
+            "properties": { "section": { "type": "string", "description": "Section heading to fetch" } },
+            "required": ["section"]
+          }
+        },
+        "ref_search": {
+          "name": "ref_search",
+          "description": "Search the document's reference list",
+          "parameters": {
+            "type": "object",
+            "properties": { "query": { "type": "string", "description": "Reference search query" } },
+            "required": ["query"]
+          }
+        }
+      },
+      "workflow": {
+        "version": 1,
+        "entry": "intake",
+        "states": {
+          "intake": {
+            "prompt_task": "triage",
+            "description": "Accept the document and start analysis",
+            "on_event": { "proceed": "analyze" }
+          },
+          "analyze": {
+            "description": "Run the document-analysis composition",
+            "orchestration": "composition",
+            "composition": "analyze_document",
+            "terminal": true
+          }
+        }
+      },
+      "compositions": {
+        "analyze_document": {
+          "version": 1,
+          "description": "Classify, extract metadata in parallel, then route to a type-specific analyzer.",
+          "steps": [
+            { "id": "classify", "kind": "prompt", "prompt_task": "classifier", "input": "${input.text}" },
+            {
+              "id": "extract_meta",
+              "kind": "parallel",
+              "branches": [
+                { "id": "title", "kind": "prompt", "prompt_task": "title_extractor", "input": "${input.text}" },
+                { "id": "structure", "kind": "tool", "tool": "doc_parse_structure", "args": { "content": "${input.text}" } }
+              ],
+              "reduce": { "strategy": "barrier", "into": "metadata" }
+            },
+            {
+              "id": "route",
+              "kind": "branch",
+              "predicate": { "path": "${classify.output.type}", "op": "equals", "value": "research_paper" },
+              "then": "analyze_paper",
+              "else": "summarize"
+            },
+            {
+              "id": "analyze_paper",
+              "kind": "agent",
+              "depends_on": ["route"],
+              "prompt_task": "paper_analyzer",
+              "input": "${input.text}",
+              "tools": ["doc_section_lookup", "ref_search"],
+              "termination": { "max_steps": 8 },
+              "modifiers": { "eval": ["analysis_quality"] }
+            },
+            { "id": "summarize", "kind": "prompt", "depends_on": ["route"], "prompt_task": "summarizer", "input": "${input.text}" }
+          ]
+        }
+      },
+      "metadata": {
+        "domain": "document-analysis",
+        "language": "en",
+        "tags": ["composition", "workflow", "rfc-0010", "branch", "parallel"]
+      }
+    }
+---
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: PromptPack
+metadata:
+  name: demo-composition
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/name: omnia-composition-demo
+    app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
+spec:
+  source:
+    type: configmap
+    configMapRef:
+      name: demo-composition-prompts
+  version: "1.0.0"
+---
+# The composition's tools, browser-executed (client://) so the demo needs no
+# tool backend. They resolve in the deployment-altitude Workload view.
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: ToolRegistry
+metadata:
+  name: demo-composition-tools
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/name: omnia-composition-demo
+    app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
+spec:
+  handlers:
+    - name: parse-structure
+      type: client
+      clientConfig:
+        consentMessage: "This agent wants to parse the document's section structure."
+        categories:
+          - document
+      tool:
+        name: doc_parse_structure
+        description: Parse a document's heading/section structure
+        inputSchema:
+          type: object
+          properties:
+            content:
+              type: string
+              description: The document text
+          required:
+            - content
+    - name: section-lookup
+      type: client
+      clientConfig:
+        consentMessage: "This agent wants to read sections of the document."
+        categories:
+          - document
+      tool:
+        name: doc_section_lookup
+        description: Fetch the text of a named section of the document
+        inputSchema:
+          type: object
+          properties:
+            section:
+              type: string
+              description: Section heading to fetch
+          required:
+            - section
+    - name: ref-search
+      type: client
+      clientConfig:
+        consentMessage: "This agent wants to search the document's references."
+        categories:
+          - document
+      tool:
+        name: ref_search
+        description: Search the document's reference list
+        inputSchema:
+          type: object
+          properties:
+            query:
+              type: string
+              description: Reference search query
+          required:
+            - query
+---
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: AgentRuntime
+metadata:
+  name: {{ .Values.compositionDemo.agent.name }}
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/name: omnia-composition-demo
+    app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
+    omnia.altairalabs.ai/workspace: demo
+spec:
+  promptPackRef:
+    name: demo-composition
+  providers:
+    - name: default
+      providerRef:
+        name: ollama-composition
+  toolRegistryRef:
+    name: demo-composition-tools
+  evals:
+    enabled: true
+  facade:
+    type: websocket
+    port: 8080
+    handler: {{ .Values.compositionDemo.agent.handler }}
+  session:
+    type: memory
+    ttl: "1h"
+  runtime:
+    replicas: {{ .Values.compositionDemo.agent.replicas }}
+    resources:
+      requests:
+        cpu: {{ .Values.compositionDemo.agent.resources.requests.cpu | quote }}
+        memory: {{ .Values.compositionDemo.agent.resources.requests.memory | quote }}
+      limits:
+        cpu: {{ .Values.compositionDemo.agent.resources.limits.cpu | quote }}
+        memory: {{ .Values.compositionDemo.agent.resources.limits.memory | quote }}
+{{- end }}

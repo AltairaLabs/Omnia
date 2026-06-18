@@ -268,6 +268,34 @@ toolsDemo:
       Be concise and helpful.
 
 # ============================================================================
+# Composition Demo Agent (PromptKit RFC 0010 / 1.5+)
+# A document-analysis PromptPack whose `analyze` workflow state runs a
+# declarative composition (prompt → parallel → branch → agent). Showcases the
+# dashboard's expandable composition sub-flow. Ollama-backed, self-contained.
+# ============================================================================
+
+compositionDemo:
+  # -- Enable the composition demo agent + PromptPack
+  enabled: true
+
+  # -- Agent configuration
+  agent:
+    # -- Agent name
+    name: composition-demo
+    # -- Facade handler type
+    handler: runtime
+    # -- Number of replicas
+    replicas: 1
+    # -- Resource requirements
+    resources:
+      requests:
+        cpu: "100m"
+        memory: "128Mi"
+      limits:
+        cpu: "500m"
+        memory: "256Mi"
+
+# ============================================================================
 # LangChain Demo Agents
 # Mirrors vision-demo and tools-demo using the LangChain runtime framework
 # ============================================================================
