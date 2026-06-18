@@ -35,10 +35,9 @@ const (
 	testNamespace = "ns"
 )
 
-func newHandler(t *testing.T) (*Handler, string) {
+func newHandler(t *testing.T) *Handler {
 	t.Helper()
-	root := t.TempDir()
-	return NewHandler(root, logr.Discard()), root
+	return NewHandler(t.TempDir(), logr.Discard())
 }
 
 func req(t *testing.T, method, relpath string, body io.Reader, withIdentity bool) *http.Request {
@@ -57,7 +56,7 @@ func req(t *testing.T, method, relpath string, body io.Reader, withIdentity bool
 }
 
 func TestHandler_PutThenGet(t *testing.T) {
-	h, _ := newHandler(t)
+	h := newHandler(t)
 
 	rec := httptest.NewRecorder()
 	h.Put(rec, req(t, http.MethodPut, "arena/p1/config.yaml", strings.NewReader("hello: world"), true))
@@ -83,7 +82,7 @@ func TestHandler_PutThenGet(t *testing.T) {
 }
 
 func TestHandler_GetMissing(t *testing.T) {
-	h, _ := newHandler(t)
+	h := newHandler(t)
 	rec := httptest.NewRecorder()
 	h.Get(rec, req(t, http.MethodGet, "nope.txt", nil, true))
 	if rec.Code != http.StatusNotFound {
@@ -92,7 +91,7 @@ func TestHandler_GetMissing(t *testing.T) {
 }
 
 func TestHandler_MkDirThenList(t *testing.T) {
-	h, _ := newHandler(t)
+	h := newHandler(t)
 
 	rec := httptest.NewRecorder()
 	h.MkDir(rec, req(t, http.MethodPost, "arena/projects", nil, true))
@@ -115,7 +114,7 @@ func TestHandler_MkDirThenList(t *testing.T) {
 }
 
 func TestHandler_Delete(t *testing.T) {
-	h, _ := newHandler(t)
+	h := newHandler(t)
 
 	rec := httptest.NewRecorder()
 	h.Put(rec, req(t, http.MethodPut, "f.txt", strings.NewReader("x"), true))
@@ -137,7 +136,7 @@ func TestHandler_Delete(t *testing.T) {
 }
 
 func TestHandler_DeleteMissing(t *testing.T) {
-	h, _ := newHandler(t)
+	h := newHandler(t)
 	rec := httptest.NewRecorder()
 	h.Delete(rec, req(t, http.MethodDelete, "ghost", nil, true))
 	if rec.Code != http.StatusNotFound {
@@ -146,7 +145,7 @@ func TestHandler_DeleteMissing(t *testing.T) {
 }
 
 func TestHandler_PutBinaryGetBase64(t *testing.T) {
-	h, _ := newHandler(t)
+	h := newHandler(t)
 	binary := string([]byte{0xff, 0xfe, 0x00, 0x01})
 
 	rec := httptest.NewRecorder()
@@ -167,7 +166,7 @@ func TestHandler_PutBinaryGetBase64(t *testing.T) {
 }
 
 func TestHandler_PathEscapeRejected(t *testing.T) {
-	h, _ := newHandler(t)
+	h := newHandler(t)
 	rec := httptest.NewRecorder()
 	h.Get(rec, req(t, http.MethodGet, "../../etc/passwd", nil, true))
 	if rec.Code != http.StatusBadRequest {
@@ -176,7 +175,7 @@ func TestHandler_PathEscapeRejected(t *testing.T) {
 }
 
 func TestHandler_MissingIdentity(t *testing.T) {
-	h, _ := newHandler(t)
+	h := newHandler(t)
 	rec := httptest.NewRecorder()
 	h.Get(rec, req(t, http.MethodGet, "x", nil, false))
 	if rec.Code != http.StatusInternalServerError {
