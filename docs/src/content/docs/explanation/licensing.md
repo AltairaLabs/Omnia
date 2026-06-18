@@ -29,6 +29,24 @@ Omnia follows an **Open Core** model: the core platform is free and open source 
 | Dashboard UI | ✅ | ✅ |
 | Observability (metrics, traces) | ✅ | ✅ |
 
+### Agent Memory
+
+| Feature | Open Core | Enterprise |
+|---------|:---------:|:----------:|
+| Per-user & per-agent memory (save / retrieve / recall) | ✅ | ✅ |
+| Semantic + hybrid (lexical + vector) recall | ✅ | ✅ |
+| Agent-scoped memory (operator-curated, per-agent) | ✅ | ✅ |
+| Institutional (workspace-knowledge) memory tier | ❌ | ✅ |
+| Multi-tier recall across user / agent / institutional tiers | ❌ | ✅ |
+| Policy-driven tier ranking (`MemoryPolicy.tierPrecedence`) | ❌ | ✅ |
+| Per-tier recency half-life (`MemoryPolicy.recall.halfLife`) | ❌ | ✅ |
+| LLM-driven memory consolidation | ❌ | ✅ |
+| Memory Galaxy visualization | ❌ | ✅ |
+
+When running Open Core, agent memory recall is restricted to the user and agent
+tiers with uniform ranking; everything marked Enterprise above falls back to
+that Open Core behavior.
+
 ### Arena Fleet (Testing & Evaluation)
 
 | Feature | Open Core | Enterprise |
@@ -212,11 +230,11 @@ kubectl get namespace kube-system -o jsonpath='{.metadata.uid}'
 
 ### Can I use Open Core in production?
 
-Yes! Open Core is fully functional for agent deployment. The limitations only affect Arena Fleet testing features.
+Yes! Open Core is fully functional for agent deployment. The limitations affect Arena Fleet testing and advanced agent memory (see the feature comparison above) — the core agent runtime and per-user/per-agent memory are unrestricted.
 
 ### What happens when my license expires?
 
-Features gracefully degrade to Open Core functionality. Your agents continue running, but Enterprise Arena features become unavailable.
+Features gracefully degrade to Open Core functionality. Your agents continue running, but Enterprise features become unavailable — for example, memory recall falls back to the Open Core tiers and stored institutional memories are simply not surfaced.
 
 ### Can I downgrade from Enterprise to Open Core?
 
