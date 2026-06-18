@@ -32,6 +32,14 @@ const { publicJwkFromKey } = require("./jwks.js");
 const DEFAULT_ISSUER = "omnia-dashboard";
 const DEFAULT_AUDIENCE = "omnia-facade";
 
+/**
+ * Audience for operator content-API identity tokens. Distinct from
+ * DEFAULT_AUDIENCE so a content token can't be replayed against the facade
+ * (which requires aud=omnia-facade) and vice versa. Kept in sync with the
+ * Go-side AudienceContentAPI in internal/api/authz/identity.go.
+ */
+const CONTENT_API_AUDIENCE = "omnia-operator";
+
 /** Origin claim the facade requires to admit a mgmt-plane JWT. */
 const MGMT_PLANE_ORIGIN = "management-plane";
 
@@ -109,12 +117,6 @@ function mintToken(opts) {
   const nowMs = opts.now ? opts.now() : Date.now();
   const nowSec = Math.floor(nowMs / 1000);
 
-  // Derive the kid from the corresponding public JWK so facade-side
-  // JWKS lookup can pick the right key during rotation. createPublicKey
-  // accepts the private KeyObject and yields the matching public half.
-  const publicKey = crypto.createPublicKey(opts.key);
-  const kid = publicJwkFromKey(publicKey).kid;
-  const header = { alg: "RS256", typ: "JWT", kid };
   const payload = {
     iss: issuer,
     sub: opts.subject,
@@ -126,17 +128,87 @@ function mintToken(opts) {
     agent: opts.agent,
     workspace: opts.workspace,
   };
+  return signJwt(opts.key, payload);
+}
 
+/**
+ * Sign a JWT payload (RS256) with key, deriving the kid from the matching
+ * public JWK so JWKS consumers can pick the right key during rotation.
+ * createPublicKey accepts the private KeyObject and yields the public half.
+ * Shared by mintToken and mintIdentityToken.
+ */
+function signJwt(key, payload) {
+  const publicKey = crypto.createPublicKey(key);
+  const kid = publicJwkFromKey(publicKey).kid;
+  const header = { alg: "RS256", typ: "JWT", kid };
   const signingInput = `${base64url(JSON.stringify(header))}.${base64url(JSON.stringify(payload))}`;
-  const signature = crypto.sign("RSA-SHA256", Buffer.from(signingInput, "utf8"), opts.key);
+  const signature = crypto.sign("RSA-SHA256", Buffer.from(signingInput, "utf8"), key);
   return `${signingInput}.${base64url(signature)}`;
+}
+
+/**
+ * Mint a content-API identity JWT (RS256). Unlike mintToken (facade audience,
+ * fixed agent), this carries the authenticated end-user's {identity, groups,
+ * anonymous} so the operator content API can recompute the workspace role
+ * server-side — it never trusts a role claim. The CONTENT_API_AUDIENCE keeps
+ * content tokens and facade tokens non-interchangeable.
+ *
+ * @param {Object} opts
+ * @param {crypto.KeyObject} opts.key       - RSA private key from loadSigningKey()
+ * @param {string} opts.workspace           - target workspace (required)
+ * @param {string} [opts.identity]          - email-or-username; omitted when anonymous
+ * @param {string[]} [opts.groups]          - IdP groups
+ * @param {boolean} [opts.anonymous]        - principal admitted anonymously
+ * @param {string} [opts.issuer]            - defaults to DEFAULT_ISSUER
+ * @param {string} [opts.audience]          - defaults to CONTENT_API_AUDIENCE
+ * @param {number} [opts.ttlSeconds]        - defaults to DEFAULT_TTL_SECONDS
+ * @param {() => number} [opts.now]         - clock injection for tests; ms since epoch
+ * @returns {string} compact JWT (header.payload.signature)
+ */
+function mintIdentityToken(opts) {
+  if (!opts || !opts.key) {
+    throw new Error("mintIdentityToken: opts.key is required");
+  }
+  if (!opts.workspace) {
+    throw new Error("mintIdentityToken: opts.workspace is required");
+  }
+  const issuer = opts.issuer || DEFAULT_ISSUER;
+  const audience = opts.audience || CONTENT_API_AUDIENCE;
+  const ttlSeconds = opts.ttlSeconds || DEFAULT_TTL_SECONDS;
+  const nowMs = opts.now ? opts.now() : Date.now();
+  const nowSec = Math.floor(nowMs / 1000);
+  const anonymous = Boolean(opts.anonymous);
+  const identity = anonymous ? "" : opts.identity || "";
+  const groups = Array.isArray(opts.groups) ? opts.groups : [];
+
+  const payload = {
+    iss: issuer,
+    sub: identity || "anonymous",
+    aud: audience,
+    exp: nowSec + ttlSeconds,
+    nbf: nowSec - 1,
+    iat: nowSec,
+    workspace: opts.workspace,
+  };
+  if (identity) {
+    payload.identity = identity;
+  }
+  if (groups.length > 0) {
+    payload.groups = groups;
+  }
+  if (anonymous) {
+    payload.anonymous = true;
+  }
+  return signJwt(opts.key, payload);
 }
 
 module.exports = {
   loadSigningKey,
   mintToken,
+  mintIdentityToken,
   DEFAULT_ISSUER,
   DEFAULT_AUDIENCE,
+  CONTENT_API_AUDIENCE,
   DEFAULT_TTL_SECONDS,
   MGMT_PLANE_ORIGIN,
 };
