@@ -1,0 +1,9 @@
+[
+  {"name":"single binding viewer","roleBindings":[{"groups":["eng"],"role":"viewer"}],"directGrants":[],"userGroups":["eng"],"userIdentity":"u@x.io","anonymous":false,"expectedRole":"viewer"},
+  {"name":"highest of multiple bindings","roleBindings":[{"groups":["eng"],"role":"viewer"},{"groups":["admins"],"role":"owner"}],"directGrants":[],"userGroups":["eng","admins"],"userIdentity":"u@x.io","anonymous":false,"expectedRole":"owner"},
+  {"name":"no group match","roleBindings":[{"groups":["admins"],"role":"owner"}],"directGrants":[],"userGroups":["other"],"userIdentity":"u@x.io","anonymous":false,"expectedRole":""},
+  {"name":"direct grant only","roleBindings":[],"directGrants":[{"user":"U@X.io","role":"editor"}],"userGroups":[],"userIdentity":"u@x.io","anonymous":false,"expectedRole":"editor"},
+  {"name":"binding and grant max","roleBindings":[{"groups":["eng"],"role":"viewer"}],"directGrants":[{"user":"u@x.io","role":"owner"}],"userGroups":["eng"],"userIdentity":"u@x.io","anonymous":false,"expectedRole":"owner"},
+  {"name":"anonymous enabled default viewer","roleBindings":[],"directGrants":[],"anonymousAccess":{"enabled":true},"userGroups":[],"userIdentity":"","anonymous":true,"expectedRole":"viewer"},
+  {"name":"anonymous disabled","roleBindings":[],"directGrants":[],"anonymousAccess":{"enabled":false},"userGroups":[],"userIdentity":"","anonymous":true,"expectedRole":""}
+]

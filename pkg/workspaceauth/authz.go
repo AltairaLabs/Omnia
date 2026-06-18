@@ -7,22 +7,22 @@ import (
 
 // RoleBinding mirrors workspace.spec.roleBindings[]: a role granted to groups.
 type RoleBinding struct {
-	Groups []string
-	Role   Role
+	Groups []string `json:"groups"`
+	Role   Role     `json:"role"`
 }
 
 // DirectGrant mirrors workspace.spec.directGrants[]: a role granted to a user,
 // optionally expiring (RFC3339). Empty Expires = never expires.
 type DirectGrant struct {
-	User    string
-	Role    Role
-	Expires string
+	User    string `json:"user"`
+	Role    Role   `json:"role"`
+	Expires string `json:"expires,omitempty"`
 }
 
 // AnonymousAccess mirrors workspace.spec.anonymousAccess.
 type AnonymousAccess struct {
-	Enabled bool
-	Role    Role // "" defaults to viewer when Enabled
+	Enabled bool `json:"enabled"`
+	Role    Role `json:"role,omitempty"` // "" defaults to viewer when Enabled
 }
 
 // Inputs is the decoupled authorization input (caller maps the Workspace CR +
