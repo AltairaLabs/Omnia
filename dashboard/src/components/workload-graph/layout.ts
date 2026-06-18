@@ -53,8 +53,14 @@ function routeFromEdge(e: ElkEdge): Point[] | undefined {
 
 const CONTAINER_PADDING = "[top=36,left=12,bottom=12,right=12]";
 
+const CONTAINER_TYPES = new Set(["composition", "compositionParallel"]);
+
 function isContainerNode(n: Node): boolean {
-  return Boolean((n.data as { isContainer?: boolean } | undefined)?.isContainer);
+  // to-flow tags containers by node type; the WorkloadNode also carries the
+  // flag at data.node.isContainer. Accept data.isContainer too for direct tests.
+  if (n.type && CONTAINER_TYPES.has(n.type)) return true;
+  const data = n.data as { node?: { isContainer?: boolean }; isContainer?: boolean } | undefined;
+  return Boolean(data?.node?.isContainer ?? data?.isContainer);
 }
 
 function containerDirection(n: Node): string {

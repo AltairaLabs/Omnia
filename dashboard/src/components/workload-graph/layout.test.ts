@@ -44,8 +44,14 @@ function child(id: string, parentId?: string, isContainer = false): Node {
 
 describe("layoutFlow — hierarchical", () => {
   it("sizes a container from its children and positions children relative to it", async () => {
+    // Mirror the real to-flow output: container carries type "composition" and
+    // the isContainer flag at data.node.isContainer (not data.isContainer).
+    const containerNode = {
+      id: "main", position: { x: 0, y: 0 }, width: 320, height: 200,
+      type: "composition", data: { node: { id: "main", isContainer: true } },
+    } as unknown as Node;
     const nodes: Node[] = [
-      { ...child("main"), data: { isContainer: true } },
+      containerNode,
       child("main::a", "main"),
       child("main::b", "main"),
     ];

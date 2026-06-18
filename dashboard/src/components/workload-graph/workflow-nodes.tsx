@@ -2,11 +2,11 @@
 
 import { memo } from "react";
 import { Handle, Position } from "@xyflow/react";
-import { Wrench, Sparkles, RotateCcw, Variable, FileText, Layers, Scale, User, Plus } from "lucide-react";
+import { Wrench, Sparkles, RotateCcw, Variable, FileText, Layers, Scale, User, ChevronDown, Workflow } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { nodeSize } from "./node-sizes";
 import type { WorkloadNodeData } from "./to-flow";
-import type { WorkloadBadge } from "./types";
+import type { WorkloadBadge, WorkloadNode } from "./types";
 
 function badgeIcon(icon?: WorkloadBadge["icon"]) {
   if (icon === "tool") return <Wrench className="h-3 w-3" />;
@@ -15,8 +15,52 @@ function badgeIcon(icon?: WorkloadBadge["icon"]) {
   return null;
 }
 
+// Collapsed composition state: a distinct "subprocess" shape — a stacked,
+// rectangular indigo card with a centered [+] marker on the bottom edge (BPMN
+// collapsed-subprocess notation) — so it's visually obvious it expands into a
+// sub-flow. Clicking anywhere on it toggles the expansion.
+function CollapsedCompositionNode({
+  node,
+  onToggle,
+}: Readonly<{ node: WorkloadNode; onToggle?: (id: string) => void }>) {
+  const { width, height } = nodeSize("state");
+  const steps = node.detail.stepCount;
+  return (
+    <div className="relative" style={{ width, height }}>
+      <Handle type="target" position={Position.Top} className="!bg-indigo-500" />
+      {/* stacked layers behind, hinting "contains a sub-flow" */}
+      <div aria-hidden="true" className="absolute inset-0 translate-x-[5px] translate-y-[5px] rounded-md border-2 border-indigo-300 bg-indigo-50/50 dark:border-indigo-700 dark:bg-indigo-950/20" />
+      <div aria-hidden="true" className="absolute inset-0 translate-x-[2px] translate-y-[2px] rounded-md border-2 border-indigo-300 bg-indigo-50/70 dark:border-indigo-700 dark:bg-indigo-950/30" />
+      <button
+        type="button"
+        onClick={() => onToggle?.(node.id)}
+        aria-label="Expand composition"
+        style={{ width, height }}
+        className="relative box-border flex flex-col justify-center rounded-md border-2 border-indigo-500 bg-card px-4 text-left shadow-sm cursor-pointer hover:shadow-md overflow-hidden"
+      >
+        <span className="inline-flex items-center gap-1.5 font-medium text-sm truncate">
+          <Workflow className="h-4 w-4 shrink-0 text-indigo-600" />
+          {node.label}
+        </span>
+        <span className="text-[11px] text-indigo-700 dark:text-indigo-300">
+          composition{steps ? ` · ${steps} steps` : ""}
+        </span>
+      </button>
+      {/* Disclosure marker on the bottom edge — chevron-down = "expand to reveal". */}
+      <span
+        aria-hidden="true"
+        className="absolute left-1/2 -bottom-2.5 z-10 flex h-5 w-5 -translate-x-1/2 items-center justify-center rounded-full border border-indigo-500 bg-card text-indigo-600 shadow-sm"
+      >
+        <ChevronDown className="h-3 w-3" />
+      </span>
+      <Handle type="source" position={Position.Bottom} className="!bg-indigo-500" />
+    </div>
+  );
+}
+
 export const WorkflowStateNode = memo(({ data }: Readonly<{ data: WorkloadNodeData }>) => {
   const { node, onClick, onToggle, expandable } = data;
+  if (expandable) return <CollapsedCompositionNode node={node} onToggle={onToggle} />;
   const { width, height } = nodeSize("state");
   return (
     <div className="relative" style={{ width, height }}>
@@ -38,16 +82,6 @@ export const WorkflowStateNode = memo(({ data }: Readonly<{ data: WorkloadNodeDa
           </span>
         )}
       </button>
-      {expandable && (
-        <button
-          type="button"
-          aria-label="Expand composition"
-          onClick={(e) => { e.stopPropagation(); onToggle?.(node.id); }}
-          className="absolute -right-2 -top-2 z-10 rounded-full border border-indigo-400 bg-card p-0.5 text-indigo-600 shadow hover:bg-indigo-50"
-        >
-          <Plus className="h-3.5 w-3.5" />
-        </button>
-      )}
       <Handle type="source" position={Position.Bottom} className="!bg-blue-500" />
     </div>
   );
