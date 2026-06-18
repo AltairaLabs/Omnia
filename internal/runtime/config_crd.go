@@ -74,6 +74,13 @@ func LoadFromCRD(ctx context.Context, c client.Client, name, namespace string) (
 		cfg.PromptPackVersion = *ar.Spec.PromptPackRef.Version
 	}
 
+	// Function response-format inputs (consumed by resolveResponseFormat, #1483).
+	cfg.Mode = string(ar.Spec.Mode)
+	cfg.OutputFormat = ar.Spec.OutputFormat
+	if ar.Spec.OutputSchema != nil {
+		cfg.OutputSchemaJSON = ar.Spec.OutputSchema.Raw
+	}
+
 	// Session config from CRD
 	if err := loadRuntimeSessionFromCRD(cfg, ar); err != nil {
 		return nil, err
