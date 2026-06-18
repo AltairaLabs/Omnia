@@ -123,13 +123,8 @@ data:
       },
       "workflow": {
         "version": 1,
-        "entry": "intake",
+        "entry": "analyze",
         "states": {
-          "intake": {
-            "prompt_task": "triage",
-            "description": "Accept the document and start analysis",
-            "on_event": { "proceed": "analyze" }
-          },
           "analyze": {
             "description": "Run the document-analysis composition",
             "orchestration": "composition",
@@ -270,6 +265,29 @@ metadata:
     app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
     omnia.altairalabs.ai/workspace: demo
 spec:
+  # Function mode: a one-shot, structured request/response runtime — the natural
+  # fit for a declarative composition. Requires inputSchema + outputSchema, and
+  # the facade must be grpc (websocket is rejected for function mode).
+  mode: function
+  inputSchema:
+    type: object
+    properties:
+      text:
+        type: string
+        description: The document text to analyze
+    required:
+      - text
+  outputSchema:
+    type: object
+    properties:
+      type:
+        type: string
+        description: The classified document type
+      summary:
+        type: string
+        description: The analysis summary
+    required:
+      - summary
   promptPackRef:
     name: demo-composition
   providers:
@@ -281,12 +299,9 @@ spec:
   evals:
     enabled: true
   facade:
-    type: websocket
+    type: grpc
     port: 8080
     handler: {{ .Values.compositionDemo.agent.handler }}
-  session:
-    type: memory
-    ttl: "1h"
   runtime:
     replicas: {{ .Values.compositionDemo.agent.replicas }}
     resources:
