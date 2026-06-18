@@ -1,6 +1,6 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { modelToFlow } from "./to-flow";
-import type { WorkloadModel } from "./types";
+import type { WorkloadModel, WorkloadNode } from "./types";
 
 const model: WorkloadModel = {
   tier: "workflow",
@@ -48,8 +48,59 @@ describe("modelToFlow", () => {
 
   it("passes an onClick handler through to node data", () => {
     const onClick = () => {};
-    const { nodes } = modelToFlow(model, onClick);
+    const { nodes } = modelToFlow(model, { onClick });
     expect(nodes[0].data.onClick).toBe(onClick);
+  });
+});
+
+function compositionState(): WorkloadNode {
+  return {
+    id: "main", kind: "state", label: "main", badges: [{ label: "composition" }],
+    detail: {
+      compositionName: "analyze", stepCount: 2,
+      composition: {
+        name: "analyze",
+        nodes: [
+          { id: "main::a", parentId: "main", kind: "stepPrompt", label: "a", badges: [], detail: {} },
+          { id: "main::b", parentId: "main", kind: "stepPrompt", label: "b", badges: [], detail: {} },
+        ],
+        edges: [{ id: "main::a->b", source: "main::a", target: "main::b" }],
+      },
+    },
+  };
+}
+
+const compModel = (): WorkloadModel => ({
+  tier: "workflow", altitude: "definition",
+  nodes: [compositionState()], edges: [],
+  meta: { counts: { agents: 1, tools: 0, skills: 0, states: 1 } },
+});
+
+describe("modelToFlow — composition collapsed", () => {
+  it("emits a single workflowState node flagged expandable when not expanded", () => {
+    const { nodes } = modelToFlow(compModel(), { expanded: new Set() });
+    expect(nodes).toHaveLength(1);
+    expect(nodes[0].type).toBe("workflowState");
+    expect((nodes[0].data as { expandable?: boolean }).expandable).toBe(true);
+  });
+});
+
+describe("modelToFlow — composition expanded", () => {
+  it("emits a container before its children, children carry parentId + extent", () => {
+    const { nodes, edges } = modelToFlow(compModel(), { expanded: new Set(["main"]) });
+    const ids = nodes.map((n) => n.id);
+    expect(ids).toEqual(["main", "main::a", "main::b"]); // container first
+    expect(nodes[0].type).toBe("composition");
+    expect(nodes[1].parentId).toBe("main");
+    expect(nodes[1].extent).toBe("parent");
+    expect(edges.some((e) => e.source === "main::a" && e.target === "main::b")).toBe(true);
+  });
+
+  it("wires onToggle into container and collapsed node data", () => {
+    const onToggle = vi.fn();
+    const collapsed = modelToFlow(compModel(), { expanded: new Set(), onToggle });
+    (collapsed.nodes[0].data as { onToggle?: (id: string) => void }).onToggle?.("main");
+    expect(onToggle).toHaveBeenCalledWith("main");
   });
 });
 

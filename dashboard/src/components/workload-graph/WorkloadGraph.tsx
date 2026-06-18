@@ -70,7 +70,7 @@ export function WorkloadGraph({
 }: Readonly<{ model: WorkloadModel; className?: string; namespace?: string; storageKey?: string }>) {
   const [selectedId, setSelectedId] = useState<string | undefined>();
   const [showData, setShowData] = useState(true);
-  const flow = useMemo(() => modelToFlow(model, setSelectedId), [model]);
+  const flow = useMemo(() => modelToFlow(model, { onClick: setSelectedId }), [model]);
   const [nodes, setNodes, onNodesChange] = useNodesState(flow.nodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(flow.edges);
   const rf = useRef<WorkloadFlowInstance | null>(null);
