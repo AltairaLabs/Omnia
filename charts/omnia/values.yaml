@@ -916,13 +916,15 @@ dashboard:
   persistence:
     # -- Enable persistence (required for builtin auth with SQLite)
     enabled: false
-    # -- Storage class
+    # -- Storage class (empty = cluster default; local-path works)
     storageClass: ""
-    # -- Access modes (ReadWriteMany required for job mounting)
-    # For development with local-path, override to: ["ReadWriteOnce"]
+    # -- Access modes — RWO. This PVC backs the single-writer builtin-auth
+    # SQLite file mounted by the one dashboard pod; it is NOT a shared/content
+    # volume (content moved to the operator content API, #1462). Must not be
+    # ReadWriteMany — RWO-only classes like local-path reject RWX outright.
     accessModes:
-      - ReadWriteMany
-    # -- Volume size
+      - ReadWriteOnce
+    # -- Volume size (the SQLite store is a few MB)
     size: 1Gi
     # -- Existing PVC to use
     existingClaim: ""
