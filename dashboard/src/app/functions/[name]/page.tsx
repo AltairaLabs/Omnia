@@ -226,17 +226,23 @@ export default function FunctionDetailPage() {
             </div>
           </TabsContent>
 
-          {/* forceMount: keep the panel mounted across tab switches so a typed
-              input and last result survive a detour to Schema/Invocations. */}
+          {/* forceMount keeps the panel mounted across tab switches so a typed
+              input and last result survive a detour to Schema/Invocations. But
+              forceMount makes Radix render the content with hidden=false on
+              EVERY tab, so we hide it ourselves with a wrapper that carries a
+              plain `hidden` attribute unless the Test tab is active — no
+              reliance on Radix's data-state or a Tailwind variant. */}
           <TabsContent value="test" className="mt-4" forceMount>
-            <FunctionTestPanel
-              functionName={metadata.name}
-              workspace={workspace}
-              inputSchema={spec.inputSchema}
-              outputSchema={spec.outputSchema}
-              ready={status?.phase === "Running" && (status?.replicas?.ready ?? 0) > 0}
-              unavailableReason={status?.phase ?? "Unknown"}
-            />
+            <div hidden={currentTab !== "test"}>
+              <FunctionTestPanel
+                functionName={metadata.name}
+                workspace={workspace}
+                inputSchema={spec.inputSchema}
+                outputSchema={spec.outputSchema}
+                ready={status?.phase === "Running" && (status?.replicas?.ready ?? 0) > 0}
+                unavailableReason={status?.phase ?? "Unknown"}
+              />
+            </div>
           </TabsContent>
 
           <TabsContent value="invocations" className="mt-4 space-y-3">

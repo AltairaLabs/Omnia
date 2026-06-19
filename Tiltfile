@@ -4,18 +4,31 @@
 # on a local Kubernetes cluster (kind, Docker Desktop, etc.)
 #
 # Usage:
-#   tilt up                          # Start core development (dashboard + operator)
-#   ENABLE_ENTERPRISE=true tilt up   # Enable enterprise features (Arena, NFS, Redis)
+#   tilt up                          # Platform + demo content (dashboard, operator,
+#                                    #   omnia-demos: agents, ollama, skills, sessions);
+#                                    #   demos are ON by default
+#   ENABLE_DEMO=false tilt up        # Platform only — skip the demo workspace + Ollama
+#   ENABLE_ENTERPRISE=true tilt up   # + Arena Fleet on a dev license, NFS, policy-proxy
 #   tilt down                        # Stop and clean up
 #   tilt up --stream                 # Start with log streaming
 #
-# Environment variables:
-#   ENABLE_ENTERPRISE  - Enable enterprise features (Arena controller, NFS, Redis)
-#   ENABLE_DEMO        - Enable demo mode with Ollama
-#   ENABLE_OBSERVABILITY - Enable Prometheus/Grafana (default: true)
-#   ENABLE_FULL_STACK  - Enable full production-like stack (Istio, etc.)
+# Environment variables (default off unless noted):
+#   ENABLE_DEMO          - Deploy the demo content (default: ON; set false for lean/platform-only)
+#   ENABLE_ENTERPRISE    - EE: Arena controller + dev license, NFS, policy-proxy, Redis
+#   ENABLE_OBSERVABILITY - Prometheus/Grafana/Loki/Tempo/Alloy (default: ON)
+#   ENABLE_FULL_STACK    - Istio service mesh + Gateway API
+#   ENABLE_NFS           - RWX NFS storage (auto-on under ENABLE_ENTERPRISE / memory demo)
+#   ENABLE_AUDIO_DEMO    - Gemini audio demo agent (needs a gemini-credentials Secret)
+#   ENABLE_MEMORY_DEMO   - memory-api dev demo: a seeded galaxy across all tiers
+#   ENABLE_LANGCHAIN     - LangChain runtime demo agents
+#   DASHBOARD_PROD       - Build the dashboard as a prod image (enables the Monaco LSP editor)
+#   ENABLE_ENTRA         - Entra ID (Azure AD) OAuth for the dashboard
+#   USE_LOCAL_PROMPTKIT  - Build the runtime against ../PromptKit (auto-on if it exists)
 #
-# See docs/LOCAL_DEVELOPMENT.md for setup instructions.
+# Keep this list, docs/local-development.md, and the os.getenv() reads below in
+# sync when you add or remove a flag.
+#
+# See docs/local-development.md for full setup instructions.
 
 load('ext://helm_resource', 'helm_resource', 'helm_repo')
 load('ext://namespace', 'namespace_create')
@@ -24,14 +37,15 @@ load('ext://namespace', 'namespace_create')
 # Configuration
 # ============================================================================
 
-# Set to True to enable Prometheus/Grafana for cost tracking development
-ENABLE_OBSERVABILITY = True
+# Prometheus/Grafana/Loki/Tempo/Alloy observability stack (default: on).
+# Set ENABLE_OBSERVABILITY=false for a lighter cluster.
+ENABLE_OBSERVABILITY = os.getenv('ENABLE_OBSERVABILITY', 'true').lower() in ('true', '1', 'yes')
 
-# Set to True to enable Demo mode with Ollama + OPA model validation
-# Requires: 8GB+ RAM, 10GB+ disk for llava:7b model
-# Can be set via environment: ENABLE_DEMO=true tilt up
-# Also supports legacy ENABLE_OLLAMA for backwards compatibility
-ENABLE_DEMO = os.getenv('ENABLE_DEMO', os.getenv('ENABLE_OLLAMA', '')).lower() in ('true', '1', 'yes') or False
+# Demo content (the `demo` workspace, agents, Ollama, skills, session/memory-api)
+# from the omnia-demos chart. Defaults ON; set ENABLE_DEMO=false on resource-
+# constrained machines (or for platform-only work) to skip it — notably the
+# heavy ollama-vision (llava:7b ~7Gi) model.
+ENABLE_DEMO = os.getenv('ENABLE_DEMO', 'true').lower() in ('true', '1', 'yes')
 
 # Set to True to enable Audio Demo with Gemini (requires GEMINI_API_KEY)
 # Can be set via environment: ENABLE_AUDIO_DEMO=true tilt up
@@ -113,7 +127,7 @@ allow_k8s_contexts(['kind-omnia-dev', 'docker-desktop', 'minikube', 'kind-kind',
 # Also suppress langchain runtime which is referenced via Helm values, not directly in manifests
 _suppress_images = ['omnia-facade-dev', 'omnia-runtime-dev', 'omnia-langchain-runtime-dev']
 if ENABLE_ENTERPRISE:
-    _suppress_images.extend(['omnia-arena-controller-dev', 'omnia-promptkit-lsp-dev', 'omnia-policy-proxy-dev', 'omnia-session-api-dev', 'omnia-memory-api-dev'])
+    _suppress_images.extend(['omnia-arena-controller-dev', 'omnia-promptkit-lsp-dev', 'omnia-session-api-dev', 'omnia-memory-api-dev'])
 update_settings(suppress_unused_image_warnings=_suppress_images)
 
 
@@ -177,7 +191,6 @@ if ENABLE_FULL_STACK:
     local_resource(
         'istio-inject-labels',
         cmd='''
-            kubectl label namespace dev-agents istio-injection=enabled --overwrite 2>/dev/null || true
             kubectl label namespace omnia-demo istio-injection=enabled --overwrite 2>/dev/null || true
         ''',
         labels=['istio'],
@@ -308,108 +321,6 @@ docker_build(
         './go.mod',
         './go.sum',
     ],
-)
-
-# ============================================================================
-# Dev Ollama — pre-loaded with a small model for tool-calling tests
-# ============================================================================
-
-docker_build(
-    'ollama-preloaded',
-    context='.',
-    dockerfile='./hack/Dockerfile.ollama-preloaded',
-)
-
-k8s_yaml(blob("""
-apiVersion: apps/v1
-kind: StatefulSet
-metadata:
-  name: dev-ollama
-  namespace: dev-agents
-spec:
-  serviceName: dev-ollama
-  replicas: 1
-  selector:
-    matchLabels:
-      app: dev-ollama
-  template:
-    metadata:
-      labels:
-        app: dev-ollama
-    spec:
-      containers:
-        - name: ollama
-          image: ollama-preloaded
-          ports:
-            - containerPort: 11434
-          env:
-            # Keep the model resident in memory indefinitely so every
-            # request uses the warm model — no cold-start latency that
-            # would blow past the pipeline idle timeout.
-            - name: OLLAMA_KEEP_ALIVE
-              value: "-1"
-            # Only load one model at a time — the StatefulSet pre-pulls
-            # a single model so there's no contention.
-            - name: OLLAMA_MAX_LOADED_MODELS
-              value: "1"
-          # Basic TCP readiness — accepts connections as soon as the API
-          # server is up. Warmup is handled by a dedicated sidecar below
-          # that pre-compiles the model before agents start calling it.
-          readinessProbe:
-            tcpSocket:
-              port: 11434
-            initialDelaySeconds: 2
-            periodSeconds: 5
-        # Warmup sidecar: sends a chat completion with tools once the API
-        # is reachable, forcing the model to JIT-compile against the
-        # tool-calling code path. After it exits 0, subsequent requests
-        # from agents hit a warm model and complete in single-digit seconds.
-        - name: warmup
-          image: curlimages/curl:8.10.1
-          command:
-            - /bin/sh
-            - -c
-            - |
-              set -e
-              echo "waiting for ollama API..."
-              until curl -fsS -m 5 http://127.0.0.1:11434/api/tags > /dev/null 2>&1; do
-                sleep 2
-              done
-              echo "sending warmup chat completion..."
-              curl -fsS -m 180 -X POST http://127.0.0.1:11434/v1/chat/completions \\
-                -H 'Content-Type: application/json' \\
-                -d '{"model":"qwen2.5:14b","messages":[{"role":"user","content":"warmup"}],"max_tokens":4,"stream":false}' \\
-                > /dev/null
-              echo "warmup complete; sleeping"
-              # Keep the sidecar running so we don't churn — Kubernetes
-              # restarts completed containers under restartPolicy: Always.
-              while true; do sleep 3600; done
-          resources:
-            requests:
-              cpu: "2"
-              memory: 2Gi
-            limits:
-              cpu: "8"
-              memory: 4Gi
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: dev-ollama
-  namespace: dev-agents
-spec:
-  selector:
-    app: dev-ollama
-  ports:
-    - port: 11434
-      targetPort: 11434
-"""))
-
-k8s_resource(
-    'dev-ollama',
-    labels=['dev'],
-    port_forwards=['11434:11434'],
-    resource_deps=['sample-resources'],
 )
 
 # ============================================================================
@@ -561,22 +472,9 @@ if ENABLE_ENTERPRISE:
         labels=['arena'],
     )
 
-    # Build policy-proxy sidecar image (ToolPolicy enforcement sidecar)
-    docker_build(
-        'omnia-policy-proxy-dev',
-        context='.',
-        dockerfile='./ee/Dockerfile.policy-proxy',
-        only=[
-            './ee/cmd/policy-proxy',
-            './ee/api',
-            './ee/pkg',
-            './api',
-            './internal',
-            './pkg',
-            './go.mod',
-            './go.sum',
-        ],
-    )
+    # Policy-proxy sidecar image is built + rolled by the auto-rebuild-policy-proxy
+    # local_resource (Dynamic Services) so source edits restart the agent pods that
+    # carry the sidecar — a plain docker_build would rebuild but never roll them.
 
 # ============================================================================
 # LangChain Runtime - Python-based agent framework
@@ -637,11 +535,11 @@ helm_set = [
     'doctor.image.repository=omnia-doctor-dev',
     'doctor.image.tag=latest',
     'doctor.image.pullPolicy=Never',
-    'doctor.workspace=dev-agents',
+    'doctor.workspace=demo',
     'doctor.serviceGroup=default',
-    'doctor.agentNamespace=dev-agents',
-    'doctor.agentName=ollama-agent',
-    'doctor.ollamaService=dev-ollama',
+    'doctor.agentNamespace=omnia-demo',
+    'doctor.agentName=tools-demo',
+    'doctor.ollamaService=ollama-chat',
     # LangChain runtime image (used when framework.type=langchain)
     'langchainRuntime.image.repository=omnia-langchain-runtime-dev',
     'langchainRuntime.image.tag=latest',
@@ -703,7 +601,7 @@ if ENABLE_ENTERPRISE:
         # cluster.local:6379). Don't set arena.queue.redis.host
         # explicitly — that override produces a non-FQDN that fails
         # cross-namespace DNS lookup from arena workers in
-        # dev-agents/test-arena namespaces.
+        # omnia-demo/test-arena namespaces.
         'enterprise.arena.queue.type=redis',
         # PromptKit LSP server for YAML validation
         'enterprise.promptkitLsp.enabled=true',
@@ -772,7 +670,8 @@ else:
         'loki.enabled=false',
     ])
 
-# Demo mode namespace creation (demos are now in separate chart)
+# The omnia-demos chart deploys into omnia-demo (when any demo variant is on),
+# so the namespace must exist before the chart renders.
 if ENABLE_DEMO or ENABLE_AUDIO_DEMO or ENABLE_MEMORY_DEMO:
     namespace_create('omnia-demo')
 
@@ -865,8 +764,15 @@ k8s_resource(
 # Demo Charts (separate from main Omnia chart)
 # ============================================================================
 
+# The omnia-demos chart is the single source of local dev content: it provides
+# the `demo` workspace, agents, ollama (chat/vision), skills, and an
+# operator-managed session/memory-api. It deploys by default so a bare
+# `tilt up` has a working demo workspace; set ENABLE_DEMO=false to skip it. The
+# other ENABLE_* flags add optional demo surfaces (audio, langchain, memory
+# seeder, enterprise arena) and also pull the chart in.
+#
+# Build demo helm set values
 if ENABLE_DEMO or ENABLE_AUDIO_DEMO or ENABLE_MEMORY_DEMO:
-    # Build demo helm set values
     demo_helm_set = [
         'namespace=omnia-demo',
         # Use persistence for model cache
@@ -917,6 +823,12 @@ if ENABLE_DEMO or ENABLE_AUDIO_DEMO or ENABLE_MEMORY_DEMO:
             'toolsDemo.enabled=true',
         ])
 
+    if ENABLE_ENTERPRISE:
+        # Keep the demos chart's enterprise flag in sync with the omnia chart
+        # (which gets enterprise.enabled=true + devMode=true above), so the EE
+        # demos (Arena Fleet) light up against the operator's dev license.
+        demo_helm_set.append('enterprise.enabled=true')
+
     k8s_yaml(helm(
         './charts/omnia-demos',
         name='omnia-demos',
@@ -937,10 +849,13 @@ if ENABLE_DEMO or ENABLE_AUDIO_DEMO or ENABLE_MEMORY_DEMO:
 # `omnia-crds` must land before the operator/dashboard come up, or the operator's
 # first reconcile will fail watching CRDs that don't yet exist.
 controller_deps = ['omnia-crds']
-dashboard_deps = ['omnia-crds']
+# The dashboard is a SPA that reaches the operator / session-api over the network
+# at request time (with its own loading/error states) — it needs nothing deployed
+# first. Don't gate it on CRDs or, especially, the slow NFS controller/server
+# (which it never uses): get the UI up as fast as possible.
+dashboard_deps = []
 if ENABLE_NFS:
     controller_deps = ['omnia-crds', 'csi-nfs-controller', 'omnia-nfs-server']
-    dashboard_deps = ['omnia-crds', 'csi-nfs-controller', 'omnia-nfs-server']
 
 k8s_resource(
     'omnia-controller-manager',
@@ -962,30 +877,16 @@ k8s_resource(
 # Session API server and its dev Postgres
 k8s_resource(
     'omnia-postgres',
-    labels=['session-api'],
+    labels=['database'],
     objects=[
         'omnia-postgres:secret',
     ],
 )
 
 # Session-api and memory-api Deployments are created dynamically by the operator
-# when it reconciles the dev-agents Workspace CRD. We use local_resource to wait
-# for the pods and set up port-forwards. These are NOT tracked as k8s_resource
-# because Tilt can't discover operator-managed workloads from Helm output.
-# Session-api and memory-api are operator-managed: wait for them, then port-forward.
-local_resource(
-    'session-dev-agents-default',
-    serve_cmd='kubectl wait --for=condition=available deployment/session-dev-agents-default -n dev-agents --timeout=300s && kubectl port-forward -n dev-agents deployment/session-dev-agents-default 8180:8080',
-    labels=['session-api'],
-    resource_deps=['omnia-postgres', 'sample-resources'],
-)
-
-local_resource(
-    'memory-dev-agents-default',
-    serve_cmd='kubectl wait --for=condition=available deployment/memory-dev-agents-default -n dev-agents --timeout=300s && kubectl port-forward -n dev-agents deployment/memory-dev-agents-default 8083:8080',
-    labels=['memory-api'],
-    resource_deps=['omnia-postgres', 'sample-resources'],
-)
+# when it reconciles the `demo` Workspace CRD (from the omnia-demos chart). They
+# run as `session-demo-default` / `memory-demo-default` in the omnia-demo
+# namespace; the dashboard reaches them in-cluster, so no port-forward is needed.
 
 k8s_resource(
     'omnia-doctor',
@@ -1033,7 +934,7 @@ spec:
 
 k8s_resource(
     'omnia-pgweb',
-    labels=['session-api'],
+    labels=['database'],
     port_forwards=['8081:8081'],  # pgweb UI
     resource_deps=['omnia-postgres'],
 )
@@ -1195,26 +1096,48 @@ if ENABLE_FULL_STACK:
 # Demo Mode Resources (Ollama + OPA)
 # ============================================================================
 
+# Tilt-UI grouping + port-forwards for the demo content (from the omnia-demos
+# chart, gated on ENABLE_DEMO). Ollama runs one Deployment per model instance
+# (.Values.ollama.instances): ollama-chat (text/tools) and ollama-vision
+# (multimodal). Port-forward each to a distinct localhost port (11434 = chat,
+# 11435 = vision); group the shared credentials Secret + Provider CRs under chat.
 if ENABLE_DEMO:
-    # Ollama StatefulSet — keep only non-workload objects here so Tilt
-    # port-forwards to the ollama-0 pod (not an agent Deployment pod).
-    ollama_objects = [
-        'ollama-models:persistentvolumeclaim',
-        'ollama-credentials:secret',
-        'ollama:provider',
-        'ollama-tools:provider',
-    ]
-
     k8s_resource(
-        'ollama',
+        'ollama-chat',
         labels=['demo'],
         port_forwards=['11434:11434'],
-        extra_pod_selectors={'app.kubernetes.io/name': 'ollama'},
-        objects=ollama_objects,
+        objects=[
+            'ollama-chat-models:persistentvolumeclaim',
+            'ollama-credentials:secret',
+            'ollama:provider',
+            'ollama-tools:provider',
+        ],
+    )
+    k8s_resource(
+        'ollama-vision',
+        labels=['demo'],
+        port_forwards=['11435:11434'],
+        objects=[
+            'ollama-vision-models:persistentvolumeclaim',
+        ],
+    )
+
+    # The demo Workspace requests RWX (NFS) content storage, so hold its apply
+    # until the NFS server is Ready — otherwise the operator provisions the
+    # content PVC against a server that's still coming up and it stalls. NFS
+    # reliability itself is handled by the nfs-server module-loader initContainer;
+    # this is the ordering guard on top. With NFS disabled the Workspace has no
+    # storage dependency and applies immediately. The demo *agents* deliberately
+    # do NOT depend on this — only the Workspace's content storage needs NFS.
+    k8s_resource(
+        new_name='demo-workspace',
+        objects=['demo:workspace'],
+        labels=['demo'],
+        resource_deps=(['omnia-nfs-server'] if ENABLE_NFS else []),
     )
 
     # Agent CRs are grouped separately so their operator-created Deployments
-    # don't get associated with the ollama resource (which breaks port forwarding).
+    # don't get associated with the ollama resources (which breaks port forwarding).
     demo_agent_objects = [
         'demo-vision-prompts:configmap',
         'demo-vision-prompts:promptpack',
@@ -1222,6 +1145,9 @@ if ENABLE_DEMO:
         'demo-tools-prompts:configmap',
         'demo-tools-prompts:promptpack',
         'tools-demo:agentruntime',
+        'demo-composition-prompts:configmap',
+        'demo-composition:promptpack',
+        'composition-demo:agentruntime',
     ]
 
     if ENABLE_LANGCHAIN:
@@ -1235,7 +1161,7 @@ if ENABLE_DEMO:
         new_name='demo-agents',
         labels=['demo'],
         objects=demo_agent_objects,
-        resource_deps=['ollama'],
+        resource_deps=['ollama-chat', 'ollama-vision'],
     )
 
 if ENABLE_AUDIO_DEMO:
@@ -1257,54 +1183,27 @@ if ENABLE_AUDIO_DEMO:
     )
 
 # ============================================================================
-# Sample Resources for Development
+# Dev Content
 # ============================================================================
-
-# Apply sample resources using local_resource for better control.
-# Note: When ENABLE_DEMO is true, Ollama resources come from Helm chart, not samples.
 #
-# The dev-agents Workspace ships with anonymousAccess.enabled=true,role=owner
-# directly in samples.yaml — required for local "tilt up and click around"
-# without OAuth. Production Workspaces don't use these samples.
-local_resource(
-    'sample-resources',
-    cmd='kubectl apply -f config/samples/dev/',
-    deps=['config/samples/dev'],
-    labels=['samples'],
-    resource_deps=['omnia-controller-manager'],
-)
-
-# Enterprise arena fleet sample: seeds workspace PVC and creates ConfigMap + ArenaSource
-# so users can test fleet mode against echo-agent from the dashboard.
-if ENABLE_ENTERPRISE:
-    local_resource(
-        'arena-fleet-sample',
-        cmd='''
-            kubectl patch workspace dev-agents --type=merge -p '{"spec":{"storage":{"enabled":true,"storageClass":"omnia-nfs","size":"10Gi","accessModes":["ReadWriteMany"]}}}'
-            kubectl delete job arena-fleet-seeder -n omnia-system --ignore-not-found
-            kubectl apply -f config/samples/dev/enterprise/arena-fleet-seeder.yaml
-            kubectl wait --for=condition=complete job/arena-fleet-seeder -n omnia-system --timeout=60s 2>/dev/null || true
-            kubectl apply -f config/samples/dev/enterprise/arena-fleet-sample.yaml
-            kubectl apply -f config/samples/dev/enterprise/arena-promptkit-examples.yaml
-        ''',
-        deps=['config/samples/dev/enterprise/arena-fleet-sample.yaml', 'config/samples/dev/enterprise/arena-fleet-seeder.yaml', 'config/samples/dev/enterprise/arena-promptkit-examples.yaml'],
-        labels=['enterprise'],
-        resource_deps=['omnia-arena-controller', 'sample-resources'],
-    )
+# All local dev content (the `demo` workspace, agents, providers, ollama, skills,
+# and operator-managed session/memory-api) comes from the omnia-demos Helm chart
+# deployed above. The legacy config/samples/dev/ mechanism (the `dev-agents`
+# workspace) and its enterprise arena-fleet fixtures have been removed — the
+# demos chart's arenaDemo (gated on enterprise.enabled) provides arena content.
 
 # Rebuild facade/runtime images and restart agent pods.
 # Since these images are passed as CLI args to the operator (not in K8s YAML),
 # Tilt can't track them as k8s_image_json_path resources. Instead, we watch
 # source deps, rebuild images, and restart pods in a single atomic flow.
 
-_rebuild_facade_cmd = 'docker build --no-cache -f Dockerfile.agent -t omnia-facade-dev:latest .'
-_rebuild_runtime_cmd = 'docker build --no-cache -f Dockerfile.runtime'
+_rebuild_facade_cmd = 'docker build -f Dockerfile.agent -t omnia-facade-dev:latest .'
+_rebuild_runtime_cmd = 'docker build -f Dockerfile.runtime'
 if USE_LOCAL_PROMPTKIT:
     _rebuild_runtime_cmd += ' --build-arg USE_LOCAL_PROMPTKIT=true'
 _rebuild_runtime_cmd += ' -t omnia-runtime-dev:latest .'
 
 _restart_cmd = '''
-    kubectl delete po -n dev-agents -l omnia.altairalabs.ai/component=agent 2>/dev/null || true
     kubectl delete po -n omnia-demo -l omnia.altairalabs.ai/component=agent 2>/dev/null || true
 '''
 
@@ -1313,15 +1212,19 @@ _restart_cmd = '''
 # running pod without an explicit roll. Without this, fixes to the memory-api
 # binary silently sit in the image while the cluster runs the old code —
 # exactly the wiring trap that bit hybrid recall on the multi-tier path.
-_rebuild_memory_api_cmd = 'docker build --no-cache -f Dockerfile.memory-api -t omnia-memory-api-dev:latest .'
-_rebuild_session_api_cmd = 'docker build --no-cache -f Dockerfile.session-api -t omnia-session-api-dev:latest .'
+_rebuild_memory_api_cmd = 'docker build -f Dockerfile.memory-api -t omnia-memory-api-dev:latest .'
+_rebuild_session_api_cmd = 'docker build -f Dockerfile.session-api -t omnia-session-api-dev:latest .'
+# Policy-proxy is an operator-injected sidecar in agent pods (EE/ToolPolicy
+# enforcement). A source edit rebuilds the image, but only restarting the agent
+# pods picks up the new sidecar — same wiring trap as the api binaries above.
+_rebuild_policy_proxy_cmd = 'docker build -f ./ee/Dockerfile.policy-proxy -t omnia-policy-proxy-dev:latest .'
 # Delete the pod (not the deployment): the operator owns the Deployment spec
 # and reconciles `kubectl rollout restart` annotations away. Pod deletion lets
 # the existing ReplicaSet recreate with the same `:latest` image we just
 # rebuilt (imagePullPolicy: Never picks up the new image without an image-tag
 # bump). Same pattern as agent auto-rebuild.
-_restart_memory_api_cmd = 'kubectl delete po -n dev-agents -l app.kubernetes.io/component=memory-api 2>/dev/null || true'
-_restart_session_api_cmd = 'kubectl delete po -n dev-agents -l app.kubernetes.io/component=session-api 2>/dev/null || true'
+_restart_memory_api_cmd = 'kubectl delete po -n omnia-demo -l app.kubernetes.io/component=memory-api 2>/dev/null || true'
+_restart_session_api_cmd = 'kubectl delete po -n omnia-demo -l app.kubernetes.io/component=session-api 2>/dev/null || true'
 
 _memory_api_deps = [
     './cmd/memory-api',
@@ -1344,6 +1247,17 @@ _session_api_deps = [
     './internal/tracing',
     './pkg',
     './go.mod',
+]
+
+_policy_proxy_deps = [
+    './ee/cmd/policy-proxy',
+    './ee/api',
+    './ee/pkg',
+    './api',
+    './internal',
+    './pkg',
+    './go.mod',
+    './go.sum',
 ]
 
 # Auto-rebuild agent images when their specific source files change.
@@ -1380,29 +1294,39 @@ local_resource(
     'auto-rebuild-facade',
     cmd=_rebuild_facade_cmd + ' && ' + _restart_cmd,
     deps=_facade_deps,
-    labels=['agents'],
+    labels=['dynamic-services'],
 )
 
 local_resource(
     'auto-rebuild-runtime',
     cmd=_rebuild_runtime_cmd + ' && ' + _restart_cmd,
     deps=_runtime_deps,
-    labels=['agents'],
+    labels=['dynamic-services'],
 )
 
 local_resource(
     'auto-rebuild-memory-api',
     cmd=_rebuild_memory_api_cmd + ' && ' + _restart_memory_api_cmd,
     deps=_memory_api_deps,
-    labels=['memory-api'],
+    labels=['dynamic-services'],
 )
 
 local_resource(
     'auto-rebuild-session-api',
     cmd=_rebuild_session_api_cmd + ' && ' + _restart_session_api_cmd,
     deps=_session_api_deps,
-    labels=['session-api'],
+    labels=['dynamic-services'],
 )
+
+# Policy-proxy sidecar (EE/ToolPolicy). Rebuild the image and restart the agent
+# pods that carry it so source edits actually reach the running sidecar.
+if ENABLE_ENTERPRISE:
+    local_resource(
+        'auto-rebuild-policy-proxy',
+        cmd=_rebuild_policy_proxy_cmd + ' && ' + _restart_cmd,
+        deps=_policy_proxy_deps,
+        labels=['dynamic-services'],
+    )
 
 # ============================================================================
 # E2E Tests (run against the Tilt dev cluster)
@@ -1419,7 +1343,7 @@ _e2e_env = {
     'E2E_PREDEPLOYED': 'true',
     'E2E_SKIP_CLEANUP': 'true',
     'ENABLE_ARENA_E2E': 'true',
-    'SESSION_API_URL': 'http://session-dev-agents-default.dev-agents.svc.cluster.local:8080',
+    'SESSION_API_URL': 'http://session-demo-default.omnia-demo.svc.cluster.local:8080',
     'E2E_FACADE_IMAGE': 'omnia-facade-dev:latest',
     'E2E_RUNTIME_IMAGE': 'omnia-runtime-dev:latest',
     'E2E_SERVICE_ACCOUNT': 'omnia',
@@ -1436,7 +1360,7 @@ local_resource(
     labels=['test'],
     auto_init=False,
     trigger_mode=TRIGGER_MODE_MANUAL,
-    resource_deps=['omnia-controller-manager', 'sample-resources'] + (['omnia-arena-controller'] if ENABLE_ENTERPRISE else []),
+    resource_deps=['omnia-controller-manager'] + (['omnia-arena-controller'] if ENABLE_ENTERPRISE else []),
 )
 
 # CRD-only e2e tests — runs only the "Omnia CRDs" context (session-api, agents, tools).
@@ -1446,7 +1370,7 @@ local_resource(
     labels=['test'],
     auto_init=False,
     trigger_mode=TRIGGER_MODE_MANUAL,
-    resource_deps=['omnia-controller-manager', 'sample-resources'],
+    resource_deps=['omnia-controller-manager'],
 )
 
 # Policy e2e tests — runs only the "Policy E2E" context (AgentPolicy + ToolPolicy CRDs).
@@ -1460,7 +1384,9 @@ local_resource(
 )
 
 # Tool calling e2e tests — runs against pre-deployed demo agents with Ollama.
-# Requires ENABLE_DEMO=true. Tests real tool execution (calculate, weather) via llama3.2.
+# Tests real tool execution (calculate, weather) via llama3.2 against the
+# tools-demo agent. Manual-trigger. Gated on ENABLE_DEMO — it needs the demo's
+# tools-demo agent.
 if ENABLE_DEMO:
     _tool_e2e_env = dict(_e2e_env)
     _tool_e2e_env['ENABLE_TOOL_CALLING_E2E'] = 'true'

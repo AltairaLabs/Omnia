@@ -34,12 +34,13 @@ export function CostBreakdownTable({
     (acc, item) => ({
       inputCost: acc.inputCost + item.inputCost,
       outputCost: acc.outputCost + item.outputCost,
+      cachedCost: acc.cachedCost + item.cachedCost,
       cacheSavings: acc.cacheSavings + item.cacheSavings,
       totalCost: acc.totalCost + item.totalCost,
-      tokens: acc.tokens + item.inputTokens + item.outputTokens,
+      tokens: acc.tokens + item.inputTokens + item.outputTokens + item.cacheHits,
       requests: acc.requests + item.requests,
     }),
-    { inputCost: 0, outputCost: 0, cacheSavings: 0, totalCost: 0, tokens: 0, requests: 0 }
+    { inputCost: 0, outputCost: 0, cachedCost: 0, cacheSavings: 0, totalCost: 0, tokens: 0, requests: 0 }
   );
 
   return (
@@ -65,6 +66,7 @@ export function CostBreakdownTable({
               <TableHead className="text-right">Requests</TableHead>
               <TableHead className="text-right">Input Cost</TableHead>
               <TableHead className="text-right">Output Cost</TableHead>
+              <TableHead className="text-right">Cached Cost</TableHead>
               <TableHead className="text-right">Cache Savings</TableHead>
               <TableHead className="text-right">Total</TableHead>
             </TableRow>
@@ -93,7 +95,7 @@ export function CostBreakdownTable({
                   {item.model}
                 </TableCell>
                 <TableCell className="text-right font-mono text-sm">
-                  {formatTokens(item.inputTokens + item.outputTokens)}
+                  {formatTokens(item.inputTokens + item.outputTokens + item.cacheHits)}
                 </TableCell>
                 <TableCell className="text-right font-mono text-sm">
                   {item.requests.toLocaleString()}
@@ -103,6 +105,9 @@ export function CostBreakdownTable({
                 </TableCell>
                 <TableCell className="text-right font-mono text-sm">
                   {formatCost(item.outputCost)}
+                </TableCell>
+                <TableCell className="text-right font-mono text-sm">
+                  {item.cachedCost > 0 ? formatCost(item.cachedCost) : "-"}
                 </TableCell>
                 <TableCell className="text-right font-mono text-sm text-green-600 dark:text-green-400">
                   {item.cacheSavings > 0 ? `-${formatCost(item.cacheSavings)}` : "-"}
@@ -119,6 +124,9 @@ export function CostBreakdownTable({
               <TableCell className="text-right font-mono">{totals.requests.toLocaleString()}</TableCell>
               <TableCell className="text-right font-mono">{formatCost(totals.inputCost)}</TableCell>
               <TableCell className="text-right font-mono">{formatCost(totals.outputCost)}</TableCell>
+              <TableCell className="text-right font-mono">
+                {totals.cachedCost > 0 ? formatCost(totals.cachedCost) : "-"}
+              </TableCell>
               <TableCell className="text-right font-mono text-green-600 dark:text-green-400">
                 {totals.cacheSavings > 0 ? `-${formatCost(totals.cacheSavings)}` : "-"}
               </TableCell>

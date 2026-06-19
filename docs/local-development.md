@@ -71,10 +71,11 @@ curl -fsSL https://raw.githubusercontent.com/tilt-dev/tilt/master/scripts/instal
 # Create a kind cluster (one-time)
 make kind-cluster
 
-# Start Tilt (core features only)
+# Start Tilt — deploys the platform + demo content (the `demo` workspace,
+# agents, Ollama, skills, sessions). Arena/EE features stay gated.
 tilt up
 
-# Or with enterprise features (Arena, NFS, Redis)
+# Or with enterprise features (Arena Fleet on a dev license, NFS, policy-proxy)
 ENABLE_ENTERPRISE=true tilt up
 ```
 
@@ -86,13 +87,27 @@ Tilt will:
 
 ### Environment Variables
 
+The demo content (the `demo` workspace, agents, Ollama, skills, and the
+operator-managed session/memory-api) deploys from the `omnia-demos` chart and is
+**on by default**. Set `ENABLE_DEMO=false` on resource-constrained machines (or
+for platform-only work) to skip it — notably the heavy `ollama-vision` model.
+
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `ENABLE_ENTERPRISE` | `false` | Enable enterprise features (Arena controller, NFS, Redis) |
-| `ENABLE_DEMO` | `false` | Enable demo mode with Ollama + OPA |
-| `ENABLE_OBSERVABILITY` | `true` | Enable Prometheus/Grafana |
-| `ENABLE_FULL_STACK` | `false` | Enable Istio, Loki, Alloy |
-| `ENABLE_LANGCHAIN` | `false` | Enable LangChain runtime demos |
+| `ENABLE_DEMO` | `true` | Deploy the demo content; set `false` for a lean/platform-only cluster |
+| `ENABLE_ENTERPRISE` | `false` | EE: Arena controller + dev license, NFS, policy-proxy, Redis |
+| `ENABLE_OBSERVABILITY` | `true` | Prometheus / Grafana / Loki / Tempo / Alloy |
+| `ENABLE_FULL_STACK` | `false` | Istio service mesh + Gateway API |
+| `ENABLE_NFS` | auto | RWX NFS storage (auto-on under `ENABLE_ENTERPRISE` / memory demo) |
+| `ENABLE_AUDIO_DEMO` | `false` | Gemini audio demo agent (needs a `gemini-credentials` Secret) |
+| `ENABLE_MEMORY_DEMO` | `false` | memory-api dev demo: a seeded galaxy across all tiers |
+| `ENABLE_LANGCHAIN` | `false` | LangChain runtime demo agents |
+| `DASHBOARD_PROD` | `false` | Build the dashboard as a prod image (enables the Monaco LSP editor) |
+| `ENABLE_ENTRA` | `false` | Entra ID (Azure AD) OAuth for the dashboard |
+| `USE_LOCAL_PROMPTKIT` | auto | Build the runtime against `../PromptKit` (auto-on if it exists) |
+
+> **Keep this table in sync** with the `os.getenv()` reads documented in the
+> `Tiltfile` header whenever a flag is added or removed.
 
 ### Access Services
 

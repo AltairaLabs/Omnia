@@ -80,9 +80,8 @@ postgres:
   dev:
     enabled: false    # use external Postgres via Workspace CRs instead
 
-# Workspace content (RWX required — use EFS / Azure Files / Filestore)
+# Workspace content (always provisioned; RWX required — use EFS / Azure Files / Filestore)
 workspaceContent:
-  enabled: true
   persistence:
     storageClassName: efs-sc    # AWS example
     size: 100Gi
@@ -197,7 +196,7 @@ This removes all resources **except**:
 A selection of things that will bite you if you don't know about them:
 
 - **`dashboard.auth.mode` is required.** The chart intentionally has no default — avoids accidentally deploying with no auth.
-- **`workspaceContent.enabled: true` requires ReadWriteMany storage.** Azure Disk, AWS EBS will fail. Use Azure Files, EFS, Filestore, NFS, or an RWX CSI driver. Set `workspaces.storage.storageClass` accordingly.
+- **Workspace-content storage is always provisioned and Omnia requires a ReadWriteMany (RWX) StorageClass.** This is not a toggle — the operator writes SkillSource content into the workspace-content PVC and serves it via the content API; skills and arena read from it, so Omnia does not function without it. Azure Disk, AWS EBS, and GKE PD are NOT RWX and will fail to provision this volume. Use Azure Files, EFS, Filestore, NFS, or an RWX CSI driver and set `workspaces.storage.storageClass` / `workspaceContent.persistence.storageClass` accordingly. ReadWriteOnce is acceptable only on single-node clusters (e.g. local kind dev).
 - **Single-replica PDBs are refused.** `podDisruptionBudget.enabled=true` with `replicaCount: 1` renders a template `fail` — otherwise every drain/rollout would be permanently blocked. Either raise replicas or set `podDisruptionBudget.maxUnavailable: 1`.
 - **Dev Postgres (`postgres.dev.enabled`) is dev-only.** No volume persistence by default; restart loses data. Production installs MUST use external Postgres via a Secret referenced by the `Workspace` CR.
 - **Community templates (`enterprise.communityTemplates.enabled`) reach out to GitHub.** Disabled by default (0.9.0-beta.7+) for air-gap safety. Dev-enterprise values file turns it on explicitly.

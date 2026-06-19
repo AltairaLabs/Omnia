@@ -119,13 +119,21 @@ tests:
             mountPath: /etc/ssl/certs/custom
             readOnly: true
 
-  - it: operator renders neither volumes nor volumeMounts when nothing is set
+  - it: operator always renders the workspace-content volume and mount
     template: templates/deployment.yaml
     asserts:
-      - notExists:
+      # Workspace-content storage is always provisioned — Omnia requires it.
+      - contains:
           path: spec.template.spec.volumes
-      - notExists:
+          content:
+            name: workspace-content
+            persistentVolumeClaim:
+              claimName: RELEASE-NAME-omnia-workspace-content
+      - contains:
           path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: workspace-content
+            mountPath: /workspace-content
 
   # --- Arena controller (EE) ---
   - it: arena-controller injects extraEnv + extraEnvFrom

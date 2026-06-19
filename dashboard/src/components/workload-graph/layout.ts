@@ -53,13 +53,38 @@ function routeFromEdge(e: ElkEdge): Point[] | undefined {
 
 const CONTAINER_PADDING = "[top=36,left=12,bottom=12,right=12]";
 
+const CONTAINER_TYPES = new Set(["composition", "compositionParallel"]);
+
 function isContainerNode(n: Node): boolean {
-  return Boolean((n.data as { isContainer?: boolean } | undefined)?.isContainer);
+  // to-flow tags containers by node type; the WorkloadNode also carries the
+  // flag at data.node.isContainer. Accept data.isContainer too for direct tests.
+  if (n.type && CONTAINER_TYPES.has(n.type)) return true;
+  const data = n.data as { node?: { isContainer?: boolean }; isContainer?: boolean } | undefined;
+  return Boolean(data?.node?.isContainer ?? data?.isContainer);
 }
 
-function containerDirection(n: Node): string {
-  // parallel blocks fan out horizontally; compositions stack top-down
-  return (n.data as { node?: { kind?: string } } | undefined)?.node?.kind === "stepParallel" ? "RIGHT" : "DOWN";
+function isParallelContainer(n: Node): boolean {
+  return (n.data as { node?: { kind?: string } } | undefined)?.node?.kind === "stepParallel";
+}
+
+function containerLayoutOptions(n: Node): Record<string, string> {
+  // Everything flows top-to-bottom (DOWN). For a parallel container the branch
+  // children carry no edges between them, so with DOWN they all land in the
+  // first layer and spread across it — side by side. The earlier RIGHT made the
+  // layers run horizontally, which stacked the (disconnected) branches into a
+  // column. separateConnectedComponents=false keeps the branches in one graph
+  // so ELK shares a layer instead of packing each into its own component.
+  const opts: Record<string, string> = {
+    "elk.algorithm": "layered",
+    "elk.direction": "DOWN",
+    "elk.padding": CONTAINER_PADDING,
+    "elk.spacing.nodeNode": "28",
+    "elk.layered.spacing.nodeNodeBetweenLayers": "44",
+  };
+  if (isParallelContainer(n)) {
+    opts["elk.separateConnectedComponents"] = "false";
+  }
+  return opts;
 }
 
 function elkEdge(e: Edge): ElkEdge {
@@ -82,13 +107,7 @@ function buildElkTree<T extends Node>(
   }
   return {
     id: node.id,
-    layoutOptions: {
-      "elk.algorithm": "layered",
-      "elk.direction": containerDirection(node),
-      "elk.padding": CONTAINER_PADDING,
-      "elk.spacing.nodeNode": "28",
-      "elk.layered.spacing.nodeNodeBetweenLayers": "44",
-    },
+    layoutOptions: containerLayoutOptions(node),
     children: kids.map((k) => buildElkTree(k, childrenByParent, edgesByContainer)),
     edges: (edgesByContainer.get(node.id) ?? []).map(elkEdge),
   };

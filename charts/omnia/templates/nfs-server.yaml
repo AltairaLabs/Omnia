@@ -41,6 +41,36 @@ spec:
         {{- include "omnia.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: nfs-server
     spec:
+      initContainers:
+        # erichough/nfs-server refuses to boot until the `nfs` kernel module is
+        # loaded. On a fresh node whose kernel auto-loads modules lazily (Docker
+        # Desktop, OrbStack), nothing has mounted NFS yet, so the module is
+        # absent and the server crashloops — and every restart invalidates the
+        # client mounts already held by the operator (stale NFS handle). Trigger
+        # the kernel's module auto-loader up front: a throwaway `mount -t nfs`
+        # makes the kernel request_module("nfs") before it attempts the (refused,
+        # no server yet) connection. nfsd itself is built in on these kernels, so
+        # only the client module needs coaxing. Best-effort; never fails the pod.
+        - name: load-nfs-module
+          image: {{ .Values.nfs.server.image.repository }}:{{ .Values.nfs.server.image.tag }}
+          imagePullPolicy: {{ .Values.nfs.server.image.pullPolicy | default "IfNotPresent" }}
+          command:
+            - sh
+            - -c
+            - |
+              if ! grep -q '^nfs ' /proc/modules 2>/dev/null; then
+                mkdir -p /tmp/probe
+                timeout 5 mount -t nfs 127.0.0.1:/ /tmp/probe 2>/dev/null || true  # keep-hardcoded: short fixed probe timeout
+                timeout 5 mount -t nfs4 127.0.0.1:/ /tmp/probe 2>/dev/null || true # keep-hardcoded: short fixed probe timeout
+                umount /tmp/probe 2>/dev/null || true
+              fi
+              grep -q '^nfs ' /proc/modules 2>/dev/null && echo "nfs module loaded" || echo "nfs module not loaded (likely builtin)"
+              exit 0
+          securityContext:
+            privileged: true
+            capabilities:
+              add:
+                - SYS_ADMIN
       containers:
         - name: nfs-server
           image: {{ .Values.nfs.server.image.repository }}:{{ .Values.nfs.server.image.tag }}

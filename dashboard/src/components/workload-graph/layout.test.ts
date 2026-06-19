@@ -44,8 +44,14 @@ function child(id: string, parentId?: string, isContainer = false): Node {
 
 describe("layoutFlow — hierarchical", () => {
   it("sizes a container from its children and positions children relative to it", async () => {
+    // Mirror the real to-flow output: container carries type "composition" and
+    // the isContainer flag at data.node.isContainer (not data.isContainer).
+    const containerNode = {
+      id: "main", position: { x: 0, y: 0 }, width: 320, height: 200,
+      type: "composition", data: { node: { id: "main", isContainer: true } },
+    } as unknown as Node;
     const nodes: Node[] = [
-      { ...child("main"), data: { isContainer: true } },
+      containerNode,
       child("main::a", "main"),
       child("main::b", "main"),
     ];
@@ -58,6 +64,29 @@ describe("layoutFlow — hierarchical", () => {
     // child position is parent-relative (small, not absolute canvas coords)
     expect(c.position.y).toBeGreaterThanOrEqual(0);
     expect(c.position.y).toBeLessThan(container.height ?? 0);
+  });
+
+  it("lays out parallel branches side by side, not stacked", async () => {
+    // A stepParallel container with disconnected branch children (no edges
+    // between them) should sit in one row across the flow, not a column.
+    const par = {
+      id: "par", position: { x: 0, y: 0 }, width: 320, height: 200,
+      type: "compositionParallel",
+      data: { node: { id: "par", kind: "stepParallel", isContainer: true } },
+    } as unknown as Node;
+    const nodes: Node[] = [
+      par,
+      child("par::a", "par"),
+      child("par::b", "par"),
+      child("par::c", "par"),
+    ];
+    const { nodes: laid } = await layoutFlow(nodes, []);
+    const branches = ["par::a", "par::b", "par::c"].map((id) => laid.find((x) => x.id === id)!);
+    const xs = branches.map((b) => b.position.x);
+    const ys = branches.map((b) => b.position.y);
+    // distinct x (side by side); shared row (y spread < a node's height)
+    expect(new Set(xs).size).toBe(3);
+    expect(Math.max(...ys) - Math.min(...ys)).toBeLessThan(52);
   });
 
   it("lays out flat graphs as before when there are no parents", async () => {

@@ -98,14 +98,26 @@ describe("pricing utilities", () => {
     });
 
     it("should handle models without cache pricing", () => {
-      // gpt-4o doesn't have cache pricing
+      // gpt-4-turbo doesn't have cache pricing
       const cost = calculateCost(
-        "gpt-4o",
+        "gpt-4-turbo",
         1_000_000,
         500_000,
         200_000 // cache hits ignored since no cache pricing
       );
-      expect(cost).toBe(7.5);
+      // Input: 1M / 1M * 10 = 10; Output: 0.5M / 1M * 30 = 15; cache ignored
+      expect(cost).toBe(25);
+    });
+
+    it("should apply OpenAI prompt-cache savings for gpt-4o", () => {
+      const cost = calculateCost(
+        "gpt-4o",
+        1_000_000, // 1M input
+        500_000, // 0.5M output
+        200_000 // 0.2M cached input
+      );
+      // Input: 2.50, Output: 5.00, Cache savings: 0.2M * (2.50 - 1.25) = 0.25
+      expect(cost).toBeCloseTo(7.25, 2);
     });
 
     it("should handle zero tokens", () => {

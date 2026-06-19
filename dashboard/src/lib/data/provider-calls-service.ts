@@ -62,7 +62,11 @@ export interface ProviderCallAggregateParams {
 
 /**
  * Fetch aggregate provider-call metrics for a workspace.
- * Throws on non-2xx response so React Query can surface the failure.
+ *
+ * Returns [] on any non-2xx response. Cost/usage is non-critical product data,
+ * and the proxy legitimately returns non-2xx when a workspace has no session-api
+ * configured or it is unreachable — callers render "no data" rather than
+ * surfacing an error (the dashboard already treats this as a soft signal).
  */
 export async function fetchProviderCallsAggregate(
   params: ProviderCallAggregateParams,
@@ -83,11 +87,9 @@ export async function fetchProviderCallsAggregate(
 
   const url = `/api/workspaces/${encodeURIComponent(params.workspace)}/provider-calls/aggregate?${qs}`;
   const resp = await fetchImpl(url, { headers: { Accept: "application/json" } });
-  if (!resp.ok) {
-    throw new Error(`provider-calls-aggregate: ${resp.status} ${resp.statusText}`);
-  }
-  const body = (await resp.json()) as { rows?: ProviderCallAggregateRow[] };
-  return body.rows ?? [];
+  if (!resp.ok) return [];
+  const body = (await resp.json().catch(() => null)) as { rows?: ProviderCallAggregateRow[] } | null;
+  return body?.rows ?? [];
 }
 
 /**
@@ -100,13 +102,13 @@ export async function fetchProviderCallsDiscovery(
 ): Promise<ProviderCallDiscoveryResult> {
   const url = `/api/workspaces/${encodeURIComponent(workspace)}/provider-calls/discover`;
   const resp = await fetchImpl(url, { headers: { Accept: "application/json" } });
-  if (!resp.ok) {
-    throw new Error(`provider-calls-discover: ${resp.status} ${resp.statusText}`);
-  }
-  const body = (await resp.json()) as Partial<ProviderCallDiscoveryResult>;
+  // Non-critical: empty discovery slices on any non-2xx (not-configured /
+  // unreachable session-api) so provider/model dropdowns just show nothing.
+  if (!resp.ok) return { providers: [], providerNames: [], models: [] };
+  const body = (await resp.json().catch(() => null)) as Partial<ProviderCallDiscoveryResult> | null;
   return {
-    providers: body.providers ?? [],
-    providerNames: body.providerNames ?? [],
-    models: body.models ?? [],
+    providers: body?.providers ?? [],
+    providerNames: body?.providerNames ?? [],
+    models: body?.models ?? [],
   };
 }

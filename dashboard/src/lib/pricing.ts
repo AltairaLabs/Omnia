@@ -55,6 +55,8 @@ export const MODEL_PRICING: ModelPricing[] = [
     displayName: "GPT-4o",
     inputPer1M: 2.5,
     outputPer1M: 10,
+    // OpenAI prompt caching bills cached input at 50% of the input rate.
+    cachePer1M: 1.25,
   },
   {
     provider: "openai",
@@ -62,6 +64,7 @@ export const MODEL_PRICING: ModelPricing[] = [
     displayName: "GPT-4o Mini",
     inputPer1M: 0.15,
     outputPer1M: 0.6,
+    cachePer1M: 0.075,
   },
   {
     provider: "openai",

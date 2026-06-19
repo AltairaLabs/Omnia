@@ -158,4 +158,18 @@ describe("FunctionDetailPage", () => {
     expect(screen.getByTestId("sessions-panel")).toBeInTheDocument();
     expect(panelSpy).toHaveBeenCalledWith({ functionName: "summarizer" });
   });
+
+  it("keeps the forceMount Test panel hidden on other tabs", () => {
+    useAgentSpy.mockReturnValue({ data: mkFn(), isLoading: false });
+    renderPage(); // default tab = overview
+    // The Test panel is forceMount, so it stays in the DOM across tabs; without
+    // an explicit hide it would render on EVERY tab. The only inactive tabpanel
+    // present (the others unmount) is the Test panel — its content must be
+    // wrapped in a hidden element so it isn't shown when another tab is active.
+    const inactivePanel = screen
+      .getAllByRole("tabpanel")
+      .find((p) => p.getAttribute("data-state") === "inactive");
+    expect(inactivePanel).toBeTruthy();
+    expect(inactivePanel?.querySelector("[hidden]")).toBeTruthy();
+  });
 });

@@ -383,10 +383,14 @@ export interface CostAllocationItem {
   team?: string;
   inputTokens: number;
   outputTokens: number;
+  /** Cached input tokens (sum_cached_tokens), billed at the cached rate. */
   cacheHits: number;
   requests: number;
   inputCost: number;
   outputCost: number;
+  /** Cost of cached input tokens (cacheHits * cachePer1M). Part of totalCost. */
+  cachedCost: number;
+  /** Savings vs paying the full input rate for the cached tokens. Informational. */
   cacheSavings: number;
   totalCost: number;
 }
@@ -410,11 +414,16 @@ export interface CostSummary {
   totalCost: number;
   totalInputCost: number;
   totalOutputCost: number;
+  /** Total cost of cached input tokens across agents. Part of totalCost. */
+  totalCachedCost: number;
   totalCacheSavings: number;
   totalRequests: number;
+  /** Total tokens processed, including cached input tokens. */
   totalTokens: number;
   inputTokens: number;
   outputTokens: number;
+  /** Cached input tokens across agents. */
+  cachedTokens: number;
   projectedMonthlyCost: number;
   inputPercent: number;
   outputPercent: number;

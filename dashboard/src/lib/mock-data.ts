@@ -1345,6 +1345,7 @@ export interface CostAllocationItem {
   requests: number;
   inputCost: number;
   outputCost: number;
+  cachedCost: number;
   cacheSavings: number;
   totalCost: number;
 }
@@ -1366,6 +1367,7 @@ export const mockCostAllocation: CostAllocationItem[] = [
     requests: 3_247,
     inputCost: 7.35, // $3/1M * 2.45M
     outputCost: 28.35, // $15/1M * 1.89M
+    cachedCost: 0.135, // $0.30/1M * 0.45M
     cacheSavings: 1.22, // ($3 - $0.30)/1M * 0.45M
     totalCost: 35.7,
   },
@@ -1381,6 +1383,7 @@ export const mockCostAllocation: CostAllocationItem[] = [
     requests: 1_892,
     inputCost: 5.34,
     outputCost: 35.1,
+    cachedCost: 0.096, // $0.30/1M * 0.32M
     cacheSavings: 0.86,
     totalCost: 40.44,
   },
@@ -1396,6 +1399,7 @@ export const mockCostAllocation: CostAllocationItem[] = [
     requests: 856,
     inputCost: 8.9, // $10/1M
     outputCost: 33.6, // $30/1M
+    cachedCost: 0,
     cacheSavings: 0,
     totalCost: 42.5,
   },
@@ -1411,6 +1415,7 @@ export const mockCostAllocation: CostAllocationItem[] = [
     requests: 1_124,
     inputCost: 12.3,
     outputCost: 46.8,
+    cachedCost: 0,
     cacheSavings: 0,
     totalCost: 59.1,
   },
@@ -1426,6 +1431,7 @@ export const mockCostAllocation: CostAllocationItem[] = [
     requests: 0,
     inputCost: 0,
     outputCost: 0,
+    cachedCost: 0,
     cacheSavings: 0,
     totalCost: 0,
   },
@@ -1441,6 +1447,7 @@ export const mockCostAllocation: CostAllocationItem[] = [
     requests: 0,
     inputCost: 0,
     outputCost: 0,
+    cachedCost: 0,
     cacheSavings: 0,
     totalCost: 0,
   },
@@ -1547,11 +1554,13 @@ export function getMockCostSummary() {
   const totalCost = mockCostAllocation.reduce((sum, item) => sum + item.totalCost, 0);
   const totalInputCost = mockCostAllocation.reduce((sum, item) => sum + item.inputCost, 0);
   const totalOutputCost = mockCostAllocation.reduce((sum, item) => sum + item.outputCost, 0);
+  const totalCachedCost = mockCostAllocation.reduce((sum, item) => sum + item.cachedCost, 0);
   const totalCacheSavings = mockCostAllocation.reduce((sum, item) => sum + item.cacheSavings, 0);
   const totalRequests = mockCostAllocation.reduce((sum, item) => sum + item.requests, 0);
   const inputTokens = mockCostAllocation.reduce((sum, item) => sum + item.inputTokens, 0);
   const outputTokens = mockCostAllocation.reduce((sum, item) => sum + item.outputTokens, 0);
-  const totalTokens = inputTokens + outputTokens;
+  const cachedTokens = mockCostAllocation.reduce((sum, item) => sum + item.cacheHits, 0);
+  const totalTokens = inputTokens + outputTokens + cachedTokens;
 
   // Calculate projected monthly cost (24h * 30 days)
   const projectedMonthlyCost = totalCost * 30;
@@ -1560,11 +1569,13 @@ export function getMockCostSummary() {
     totalCost,
     totalInputCost,
     totalOutputCost,
+    totalCachedCost,
     totalCacheSavings,
     totalRequests,
     totalTokens,
     inputTokens,
     outputTokens,
+    cachedTokens,
     projectedMonthlyCost,
     // Percentage breakdowns
     inputPercent: totalCost > 0 ? (totalInputCost / (totalInputCost + totalOutputCost)) * 100 : 0,

@@ -268,6 +268,67 @@ toolsDemo:
       Be concise and helpful.
 
 # ============================================================================
+# Composition Demo Agent (PromptKit RFC 0010 / 1.5+)
+# A document-analysis PromptPack whose `analyze` workflow state runs a
+# declarative composition (prompt → parallel → branch → agent). Showcases the
+# dashboard's expandable composition sub-flow. Ollama-backed, self-contained.
+# ============================================================================
+
+# -- Enterprise demos. Mirrors the omnia chart's `enterprise.enabled` flag and is
+# kept in sync with it by Tilt (ENABLE_ENTERPRISE sets both). When true, the
+# EE demos (Arena Fleet) light up against the operator's dev license; default
+# off so the demo is open-core (EE features show upgrade CTAs).
+enterprise:
+  enabled: false
+
+# -- Default managed service group (session-api + a minimal lexical memory-api)
+# for the demo workspace, so session history + cost/usage light up out of the
+# box (open-core; the memory UI itself stays EE-gated). managed mode requires
+# both session and memory, so memory is included but has no embedding provider.
+# Skipped when sharepointHero/memoryDemo own the demo workspace's service group.
+demoWorkspace:
+  enabled: true
+  # Create dev-only Postgres Secrets pointing at the in-cluster dev postgres
+  # (shared omnia_sessions / omnia_memory DBs). For real clusters set
+  # createDevSecret=false and pre-create the Secrets with a POSTGRES_CONN key.
+  createDevSecret: true
+  sessionSecret: omnia-demo-session
+  devSessionConn: "postgres://omnia:omnia@omnia-postgres.omnia-system.svc.cluster.local:5432/omnia_sessions?sslmode=disable"
+  memorySecret: omnia-demo-memory
+  devMemoryConn: "postgres://omnia:omnia@omnia-postgres.omnia-system.svc.cluster.local:5432/omnia_memory?sslmode=disable"
+
+# -- Anthropic skills SkillSource. Syncs https://github.com/anthropics/skills
+# into the demo workspace so the Skills page is populated out of the box.
+skills:
+  enabled: true
+  git:
+    url: https://github.com/anthropics/skills.git
+    branch: main
+  interval: 1h
+  timeout: 2m
+
+compositionDemo:
+  # -- Enable the composition demo agent + PromptPack
+  enabled: true
+
+  # -- Agent configuration
+  agent:
+    # -- Agent name
+    name: composition-demo
+    # -- Facade handler type
+    handler: runtime
+    # -- Number of replicas
+    replicas: 1
+    # -- Resource requirements
+    resources:
+      requests:
+        cpu: "100m"
+        memory: "128Mi"
+      limits:
+        cpu: "500m"
+        memory: "256Mi"
+
+# ============================================================================
 # LangChain Demo Agents
 # Mirrors vision-demo and tools-demo using the LangChain runtime framework
 # ============================================================================

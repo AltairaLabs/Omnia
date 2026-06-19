@@ -27,7 +27,9 @@ type ConsentStats struct {
 func (s *PreferencesPostgresStore) Stats(ctx context.Context) (ConsentStats, error) {
 	const query = `
 		WITH grant_counts AS (
-		    SELECT g AS grant, COUNT(*)::bigint AS n
+		    -- grant is a reserved word in PostgreSQL, so the alias must be a
+		    -- non-reserved identifier (grant_key) to avoid a 42601 parse error.
+		    SELECT g AS grant_key, COUNT(*)::bigint AS n
 		    FROM user_privacy_preferences,
 		         UNNEST(consent_grants) AS g
 		    GROUP BY g
@@ -36,7 +38,7 @@ func (s *PreferencesPostgresStore) Stats(ctx context.Context) (ConsentStats, err
 		    (SELECT COUNT(*)::bigint FROM user_privacy_preferences)                              AS total_users,
 		    (SELECT COUNT(*)::bigint FROM user_privacy_preferences WHERE opt_out_all = TRUE)     AS opted_out_all,
 		    COALESCE(
-		        (SELECT JSONB_OBJECT_AGG(grant, n) FROM grant_counts),
+		        (SELECT JSONB_OBJECT_AGG(grant_key, n) FROM grant_counts),
 		        '{}'::jsonb
 		    ) AS grants_by_category`
 

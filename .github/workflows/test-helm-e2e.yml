@@ -109,7 +109,7 @@ jobs:
             --namespace omnia-system \
             --create-namespace \
             --set keda.enabled=false \
-            --set workspaceContent.enabled=false \
+            --set 'workspaceContent.persistence.accessModes[0]=ReadWriteOnce' \
             --timeout 2m
 
           echo "Verifying resources were created..."
@@ -130,6 +130,7 @@ jobs:
             -f charts/omnia/values-chart-tests.yaml \
             --namespace omnia-system \
             --set keda.enabled=false \
+            --set 'workspaceContent.persistence.accessModes[0]=ReadWriteOnce' \
             --timeout 2m
 
           echo "Upgrade successful"
@@ -228,7 +229,7 @@ jobs:
             --namespace omnia-system \
             --create-namespace \
             --set keda.enabled=false \
-            --set workspaceContent.enabled=false \
+            --set 'workspaceContent.persistence.accessModes[0]=ReadWriteOnce' \
             --timeout 2m
 
           echo "KEDA conflict detection test passed!"
@@ -280,7 +281,7 @@ jobs:
             --namespace omnia-system \
             --create-namespace \
             --set keda.enabled=false \
-            --set workspaceContent.enabled=false \
+            --set 'workspaceContent.persistence.accessModes[0]=ReadWriteOnce' \
             --set prometheus.enabled=true \
             --set grafana.enabled=true \
             --set loki.enabled=true \
@@ -337,7 +338,7 @@ jobs:
             --namespace omnia-system \
             --create-namespace \
             --set keda.enabled=false \
-            --set workspaceContent.enabled=false \
+            --set 'workspaceContent.persistence.accessModes[0]=ReadWriteOnce' \
             --set prometheus.enabled=true \
             --set prometheus.server.persistentVolume.enabled=false \
             --set prometheus.alertmanager.enabled=false \

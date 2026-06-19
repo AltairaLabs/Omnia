@@ -25,7 +25,7 @@ parameters:
   # Set mount permissions to 0777 so pods can write
   mountPermissions: "0777"
 mountOptions:
-  - nfsvers=4.1
+  {{- toYaml (.Values.nfs.csiDriver.storageClass.mountOptions | default (list "nfsvers=4.1" "soft" "timeo=150" "retrans=3")) | nindent 2 }}
 reclaimPolicy: {{ .Values.nfs.csiDriver.storageClass.reclaimPolicy | default "Delete" }}
 volumeBindingMode: Immediate
 allowVolumeExpansion: true

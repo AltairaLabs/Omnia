@@ -61,7 +61,7 @@ function rangeWindow(days: RangeDays): { from: string; to: string } {
   return { from: from.toISOString(), to: now.toISOString() };
 }
 
-export default function MemoryAnalyticsPage() {
+function MemoryAnalyticsContent() {
   const [rangeDays, setRangeDays] = useState<RangeDays>(DEFAULT_RANGE_DAYS);
 
   const tierQuery = useMemoryAggregate({ groupBy: "tier" });
@@ -120,51 +120,57 @@ export default function MemoryAnalyticsPage() {
     enforcementQuery.isLoading;
 
   return (
-    <EnterpriseGate featureName="Memory analytics">
-      <div className="flex flex-col h-full">
-        <Header
-          title="Memory analytics"
-          description="How memory is being collected, distributed, and consented to across this workspace."
+    <div className="flex flex-col h-full">
+      <Header
+        title="Memory analytics"
+        description="How memory is being collected, distributed, and consented to across this workspace."
+      />
+
+      <main className="flex-1 overflow-auto p-6 space-y-6">
+        <TierLegend />
+
+        <SummaryCards
+          totalMemories={totalMemories}
+          activeUsers={activeUsers}
+          memoriesToday={memoriesToday}
+          piiBlocked={enforcement.piiBlocked}
+          loading={summaryLoading}
         />
 
-        <main className="flex-1 overflow-auto p-6 space-y-6">
-          <TierLegend />
+        <TierQuadCard
+          rows={tierQuery.data ?? []}
+          loading={tierQuery.isLoading}
+        />
 
-          <SummaryCards
-            totalMemories={totalMemories}
-            activeUsers={activeUsers}
-            memoriesToday={memoriesToday}
-            piiBlocked={enforcement.piiBlocked}
-            loading={summaryLoading}
+        <ConsolidationSection
+          stats={consolidationQuery.data}
+          loading={consolidationQuery.isLoading}
+        />
+
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+          <CategoryDonut rows={categoryQuery.data ?? []} />
+          <GrowthChart
+            rows={dayQuery.data ?? []}
+            rangeDays={rangeDays}
+            onRangeChange={setRangeDays}
           />
+        </div>
 
-          <TierQuadCard
-            rows={tierQuery.data ?? []}
-            loading={tierQuery.isLoading}
-          />
+        <AgentChart rows={agentRows} />
 
-          <ConsolidationSection
-            stats={consolidationQuery.data}
-            loading={consolidationQuery.isLoading}
-          />
+        <PrivacyPosture
+          stats={consentQuery.data ?? EMPTY_CONSENT}
+          redactions={enforcement.redactions}
+        />
+      </main>
+    </div>
+  );
+}
 
-          <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-            <CategoryDonut rows={categoryQuery.data ?? []} />
-            <GrowthChart
-              rows={dayQuery.data ?? []}
-              rangeDays={rangeDays}
-              onRangeChange={setRangeDays}
-            />
-          </div>
-
-          <AgentChart rows={agentRows} />
-
-          <PrivacyPosture
-            stats={consentQuery.data ?? EMPTY_CONSENT}
-            redactions={enforcement.redactions}
-          />
-        </main>
-      </div>
+export default function MemoryAnalyticsPage() {
+  return (
+    <EnterpriseGate featureName="Memory analytics">
+      <MemoryAnalyticsContent />
     </EnterpriseGate>
   );
 }

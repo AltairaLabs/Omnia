@@ -221,7 +221,7 @@ export function UpgradeBanner({
       </AlertTitle>
       <AlertDescription className="text-amber-700 dark:text-amber-300">
         <p className="mb-3">
-          {description ?? `${feature} requires an Enterprise license. Upgrade to unlock unlimited access to all Arena Fleet features.`}
+          {description ?? `${feature} requires an Enterprise license. Upgrade to unlock it and the rest of Omnia's enterprise features.`}
         </p>
         <Button variant="outline" size="sm" asChild>
           <a href={upgradeUrl} target="_blank" rel="noopener noreferrer">
@@ -430,8 +430,8 @@ export function EnterpriseUpgradePage({ featureName }: Readonly<EnterpriseUpgrad
         <div className="space-y-2">
           <h1 className="text-2xl font-bold">Enterprise Feature</h1>
           <p className="text-muted-foreground">
-            {featureName} is an enterprise feature. Upgrade to unlock Arena Fleet
-            for AI agent evaluation, load testing, and data generation.
+            {featureName} is an Omnia Enterprise feature. Upgrade to unlock it
+            along with the rest of Omnia&apos;s enterprise capabilities.
           </p>
         </div>
         <div className="space-y-3">

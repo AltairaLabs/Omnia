@@ -428,9 +428,8 @@
 
     "workspaceContent": {
       "type": "object",
-      "description": "Shared workspace content PVC (requires RWX storage class in production)",
+      "description": "Shared workspace content PVC — REQUIRED; Omnia does not function without it (requires RWX storage class; RWO single-node only)",
       "properties": {
-        "enabled":    { "type": "boolean" },
         "scoped":     { "type": "boolean" },
         "mountPath":  { "type": "string" },
         "contentApi": {
@@ -650,7 +649,8 @@
               "properties": {
                 "name":          { "type": "string" },
                 "reclaimPolicy": { "type": "string", "enum": ["Delete", "Retain"] },
-                "subDir":        { "type": "string" }
+                "subDir":        { "type": "string" },
+                "mountOptions":  { "type": "array", "items": { "type": "string" } }
               }
             }
           }

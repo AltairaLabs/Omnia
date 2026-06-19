@@ -48,11 +48,13 @@ export function emptySummary(): CostSummary {
     totalCost: 0,
     totalInputCost: 0,
     totalOutputCost: 0,
+    totalCachedCost: 0,
     totalCacheSavings: 0,
     totalRequests: 0,
     totalTokens: 0,
     inputTokens: 0,
     outputTokens: 0,
+    cachedTokens: 0,
     projectedMonthlyCost: 0,
     inputPercent: 0,
     outputPercent: 0,
@@ -103,6 +105,7 @@ function accumulate(
         requests: 0,
         inputCost: 0,
         outputCost: 0,
+        cachedCost: 0,
         cacheSavings: 0,
         totalCost: 0,
       };
@@ -118,6 +121,9 @@ function applyPricing(item: CostAllocationItem): void {
   item.inputCost = (item.inputTokens / 1_000_000) * pricing.inputPer1M;
   item.outputCost = (item.outputTokens / 1_000_000) * pricing.outputPer1M;
   if (pricing.cachePer1M != null) {
+    // Cached input is billed separately at the cached rate, so it's a distinct
+    // line item in totalCost (input + output + cached), not a discount on input.
+    item.cachedCost = (item.cacheHits / 1_000_000) * pricing.cachePer1M;
     item.cacheSavings =
       (item.cacheHits / 1_000_000) * (pricing.inputPer1M - pricing.cachePer1M);
   }
@@ -141,16 +147,21 @@ function buildSummary(byAgent: CostAllocationItem[]): CostSummary {
     s.totalCost += i.totalCost;
     s.totalInputCost += i.inputCost;
     s.totalOutputCost += i.outputCost;
+    s.totalCachedCost += i.cachedCost;
     s.totalCacheSavings += i.cacheSavings;
     s.totalRequests += i.requests;
     s.inputTokens += i.inputTokens;
     s.outputTokens += i.outputTokens;
+    s.cachedTokens += i.cacheHits;
   }
-  s.totalTokens = s.inputTokens + s.outputTokens;
+  s.totalTokens = s.inputTokens + s.outputTokens + s.cachedTokens;
   s.projectedMonthlyCost = s.totalCost * 30;
-  if (s.totalTokens > 0) {
-    s.inputPercent = (s.inputTokens / s.totalTokens) * 100;
-    s.outputPercent = (s.outputTokens / s.totalTokens) * 100;
+  // Percentages describe the input/output split, so keep cached tokens out of
+  // the denominator (otherwise the two would no longer sum to ~100%).
+  const splitTokens = s.inputTokens + s.outputTokens;
+  if (splitTokens > 0) {
+    s.inputPercent = (s.inputTokens / splitTokens) * 100;
+    s.outputPercent = (s.outputTokens / splitTokens) * 100;
   }
   return s;
 }
@@ -170,7 +181,7 @@ function buildByProvider(byAgent: CostAllocationItem[]): ProviderCost[] {
     }
     p.cost += i.totalCost;
     p.requests += i.requests;
-    p.tokens += i.inputTokens + i.outputTokens;
+    p.tokens += i.inputTokens + i.outputTokens + i.cacheHits;
   }
   return Array.from(map.values()).sort((a, b) => b.cost - a.cost);
 }
@@ -192,7 +203,7 @@ function buildByModel(byAgent: CostAllocationItem[]): ModelCost[] {
     }
     m.cost += i.totalCost;
     m.requests += i.requests;
-    m.tokens += i.inputTokens + i.outputTokens;
+    m.tokens += i.inputTokens + i.outputTokens + i.cacheHits;
   }
   return Array.from(map.values()).sort((a, b) => b.cost - a.cost);
 }

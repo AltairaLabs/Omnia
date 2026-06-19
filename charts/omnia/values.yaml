@@ -1453,26 +1453,13 @@ extraObjects: []
 # ============================================================================
 
 workspaceContent:
-  # -- Enable the workspace-content PVC. The operator syncs SkillSource /
-  # ArenaSource content into it, and the dashboard mounts it read-only
-  # to browse that content.
-  #
-  # REQUIRED when `enterprise.enabled=true` and arena is active — the
-  # arena-controller unconditionally mounts this PVC. If you enable
-  # enterprise, also set `enabled: true` here and provide an RWX-capable
-  # StorageClass (or RWO on single-node clusters).
-  #
-  # REQUIRES RWX STORAGE. The default cloud StorageClasses on AKS (Azure
-  # Disk CSI), EKS (EBS CSI) and GKE (pd.csi.storage.gke.io) are block-
-  # mode and will fail to provision this PVC. If you enable this on a
-  # cloud cluster, also set `persistence.storageClass` to an RWX class
-  # (Azure Files CSI, EFS CSI, Filestore CSI) or provide an existing
-  # ReadWriteMany PVC via `persistence.existingClaim`.
-  #
-  # Defaults to false so a vanilla `helm install` on any cloud succeeds
-  # without extra storage setup. Dev mode (values-dev.yaml) overrides
-  # this to true + ReadWriteOnce on kind's local-path provisioner.
-  enabled: false
+  # Workspace-content storage is REQUIRED — Omnia does not function without it.
+  # The operator writes SkillSource content here and serves it via the content
+  # API; skills and arena read from it. You MUST provide a ReadWriteMany (RWX)
+  # StorageClass via workspaces.storage.storageClass / workspaceContent.persistence
+  # (ReadWriteOnce is acceptable only on single-node clusters). The default cloud
+  # block StorageClasses (Azure Disk, AWS EBS, GKE PD) are NOT RWX and will fail
+  # to provision this volume — use Azure Files, EFS, Filestore, or an NFS/RWX CSI.
 
   # -- When true, the operator mounts each workspace's content volume as
   # already scoped to the workspace's own subtree (storage-enforced
@@ -1492,7 +1479,7 @@ workspaceContent:
   # content through this authenticated operator endpoint instead of mounting
   # the NFS volume directly (#1462). The operator verifies the dashboard-minted
   # identity JWT and recomputes the workspace role server-side. Served only when
-  # both `dashboard.enabled` and `workspaceContent.enabled` are true.
+  # `dashboard.enabled` is true.
   contentApi:
     # -- Enable the operator workspace-content API.
     enabled: true
@@ -1585,6 +1572,21 @@ nfs:
       reclaimPolicy: Delete
       # -- Subdirectory for PVC data (optional, creates per-PVC subdirs automatically)
       subDir: ""
+      # -- NFS client mount options for provisioned volumes. `soft` makes I/O
+      # fail (EIO) after timeo*retrans deciseconds instead of hanging forever
+      # when the server is unreachable — so a dead/restarting NFS server can't
+      # wedge pods (they can unmount and terminate instead of getting stuck,
+      # which would otherwise pin the workspace-content PVC and block the
+      # control plane). Trade-off: a write interrupted by an outage returns an
+      # error rather than retrying indefinitely; acceptable here because the
+      # operator reconcile retries and content is largely write-once. Drop
+      # `soft` (or raise timeo/retrans) if you need write durability over
+      # liveness.
+      mountOptions:
+        - nfsvers=4.1
+        - soft
+        - timeo=150
+        - retrans=3
 
 # NFS CSI driver subchart values (when nfs.csiDriver.enabled)
 # See: https://github.com/kubernetes-csi/csi-driver-nfs

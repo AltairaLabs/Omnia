@@ -121,6 +121,23 @@ spec:
           extraEnv:
             - name: ENTERPRISE_ENABLED
               value: "true"
+  {{- else if .Values.demoWorkspace.enabled }}
+  # Default managed service group so the demo workspace has session history and
+  # cost/usage data out of the box (open-core). managed mode requires both
+  # session and memory; memory is minimal (no embedding provider, lexical-only)
+  # and its UI stays EE-gated. Secrets are created by
+  # demo-workspace-session-secret.yaml when createDevSecret is true.
+  services:
+    - name: default
+      mode: managed
+      session:
+        database:
+          secretRef:
+            name: {{ .Values.demoWorkspace.sessionSecret }}
+      memory:
+        database:
+          secretRef:
+            name: {{ .Values.demoWorkspace.memorySecret }}
   {{- end }}
 {{- if .Values.sharepointHero.enabled }}
 ---

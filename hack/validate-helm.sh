@@ -59,7 +59,7 @@ fi
 # Test with enterprise enabled. Enterprise implies arena.queue.type=redis,
 # which requires a resolvable Redis URL — chart fails render via
 # omnia.validateArenaQueue otherwise. Pair enterprise=true with the
-# Bitnami subchart so a CI / smoke render exercises both.
+# Bitnami Redis subchart so a CI / smoke render exercises all.
 if helm template omnia "$CHART_DIR" "${AUTH_VALUES[@]}" \
     --set enterprise.enabled=true \
     --set enterprise.arena.controller.image.repository=test \

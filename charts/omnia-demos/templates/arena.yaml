@@ -2,7 +2,7 @@
 {{- /* Arena Demo Resources */ -}}
 {{- /* Demonstrates prompt evaluation with Arena Fleet */ -}}
 {{- /* ============================================================================ */ -}}
-{{- if .Values.arenaDemo.enabled }}
+{{- if or .Values.enterprise.enabled .Values.arenaDemo.enabled }}
 ---
 # ConfigMap containing Arena pack as a tar.gz archive
 # The archive contains:
