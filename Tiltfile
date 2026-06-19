@@ -1122,6 +1122,20 @@ if ENABLE_DEMO:
         ],
     )
 
+    # The demo Workspace requests RWX (NFS) content storage, so hold its apply
+    # until the NFS server is Ready — otherwise the operator provisions the
+    # content PVC against a server that's still coming up and it stalls. NFS
+    # reliability itself is handled by the nfs-server module-loader initContainer;
+    # this is the ordering guard on top. With NFS disabled the Workspace has no
+    # storage dependency and applies immediately. The demo *agents* deliberately
+    # do NOT depend on this — only the Workspace's content storage needs NFS.
+    k8s_resource(
+        new_name='demo-workspace',
+        objects=['demo:workspace'],
+        labels=['demo'],
+        resource_deps=(['omnia-nfs-server'] if ENABLE_NFS else []),
+    )
+
     # Agent CRs are grouped separately so their operator-created Deployments
     # don't get associated with the ollama resources (which breaks port forwarding).
     demo_agent_objects = [
