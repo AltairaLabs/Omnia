@@ -130,6 +130,7 @@ jobs:
             -f charts/omnia/values-chart-tests.yaml \
             --namespace omnia-system \
             --set keda.enabled=false \
+            --set 'workspaceContent.persistence.accessModes[0]=ReadWriteOnce' \
             --timeout 2m
 
           echo "Upgrade successful"
