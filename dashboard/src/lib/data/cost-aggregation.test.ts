@@ -141,6 +141,35 @@ describe("buildCostData", () => {
     expect(data.timeSeries).toEqual([]);
   });
 
+  it("surfaces cached-input cost so the columns reconcile to total (issue #1489)", () => {
+    const k = "openai|gpt-4o|rag-hero";
+    const data = buildCostData({
+      cost: [{ key: k, value: 0.30807, count: 523 }],
+      inputTokens: [{ key: k, value: 19365, count: 523 }],
+      outputTokens: [{ key: k, value: 6558, count: 523 }],
+      cachedTokens: [{ key: k, value: 155264, count: 523 }],
+      requests: [{ key: k, value: 523, count: 523 }],
+      costByHourProvider: [],
+      namespace: "default",
+    });
+    const agent = data.byAgent[0];
+    // gpt-4o: input $2.50/1M, output $10/1M, cached $1.25/1M.
+    expect(agent.inputCost).toBeCloseTo(0.0484125, 6);
+    expect(agent.outputCost).toBeCloseTo(0.06558, 6);
+    expect(agent.cachedCost).toBeCloseTo(0.19408, 5);
+    // The three visible cost columns now reconcile to the stored total.
+    expect(agent.inputCost + agent.outputCost + agent.cachedCost).toBeCloseTo(
+      agent.totalCost,
+      4,
+    );
+    // Savings vs paying the full input rate for the cached tokens.
+    expect(agent.cacheSavings).toBeCloseTo(0.19408, 5);
+    // Tokens and summary now include cached input.
+    expect(data.summary.totalTokens).toBe(19365 + 6558 + 155264);
+    expect(data.summary.cachedTokens).toBe(155264);
+    expect(data.summary.totalCachedCost).toBeCloseTo(0.19408, 5);
+  });
+
   it("returns empty breakdowns for empty input", () => {
     const empty: CostAggregateInput = {
       cost: [], inputTokens: [], outputTokens: [], cachedTokens: [], requests: [],
