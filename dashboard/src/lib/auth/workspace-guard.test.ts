@@ -2,6 +2,8 @@ import { describe, it, expect, beforeEach, vi, Mock } from "vitest";
 import { NextRequest, NextResponse } from "next/server";
 import {
   withWorkspaceAccess,
+  withWorkspaceManage,
+  withWorkspaceView,
   withWorkspaceQuery,
   checkWorkspace,
   workspaceAccessDenied,
@@ -341,5 +343,110 @@ describe("workspace-guard", () => {
         "Insufficient workspace permissions: requires any, have viewer"
       );
     });
+  });
+});
+
+describe("withWorkspaceManage", () => {
+  const req = () => new NextRequest("http://localhost:3000/api/workspaces/w");
+  const ctx = (name = "w") => ({ params: Promise.resolve({ name }) });
+  const user: User = { id: "u", username: "u", groups: [], role: "admin", provider: "builtin" };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    (getUser as Mock).mockResolvedValue(user);
+  });
+
+  it("calls the handler when the user has manageMembers permission", async () => {
+    (checkWorkspaceAccess as Mock).mockResolvedValue({
+      granted: true,
+      role: null,
+      permissions: { read: false, write: false, delete: false, manageMembers: true },
+    });
+    const handler = vi.fn().mockResolvedValue(NextResponse.json({ ok: true }));
+    const res = await withWorkspaceManage(handler)(req(), ctx());
+    expect(handler).toHaveBeenCalled();
+    expect(res.status).toBe(200);
+  });
+
+  it("returns 403 when the user lacks manageMembers (editor)", async () => {
+    (checkWorkspaceAccess as Mock).mockResolvedValue({
+      granted: true,
+      role: "editor",
+      permissions: { read: true, write: true, delete: true, manageMembers: false },
+    });
+    const handler = vi.fn();
+    const res = await withWorkspaceManage(handler)(req(), ctx());
+    expect(handler).not.toHaveBeenCalled();
+    expect(res.status).toBe(403);
+  });
+
+  it("returns 403 when access is not granted", async () => {
+    (checkWorkspaceAccess as Mock).mockResolvedValue({
+      granted: false,
+      role: null,
+      permissions: { read: false, write: false, delete: false, manageMembers: false },
+    });
+    const handler = vi.fn();
+    const res = await withWorkspaceManage(handler)(req(), ctx());
+    expect(handler).not.toHaveBeenCalled();
+    expect(res.status).toBe(403);
+  });
+
+  it("checks access with no required role so platform-admins (role=null) pass", async () => {
+    (checkWorkspaceAccess as Mock).mockResolvedValue({
+      granted: true,
+      role: null,
+      permissions: { read: false, write: false, delete: false, manageMembers: true },
+    });
+    const handler = vi.fn().mockResolvedValue(NextResponse.json({ ok: true }));
+    await withWorkspaceManage(handler)(req(), ctx("w"));
+    expect(checkWorkspaceAccess).toHaveBeenCalledWith("w");
+  });
+});
+
+describe("withWorkspaceView", () => {
+  const req = () => new NextRequest("http://localhost:3000/api/workspaces/w");
+  const ctx = (name = "w") => ({ params: Promise.resolve({ name }) });
+  const user: User = { id: "u", username: "u", groups: [], role: "viewer", provider: "oauth" };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    (getUser as Mock).mockResolvedValue(user);
+  });
+
+  it("passes any user with granted access (viewer)", async () => {
+    (checkWorkspaceAccess as Mock).mockResolvedValue({
+      granted: true,
+      role: "viewer",
+      permissions: { read: true, write: false, delete: false, manageMembers: false },
+    });
+    const handler = vi.fn().mockResolvedValue(NextResponse.json({ ok: true }));
+    const res = await withWorkspaceView(handler)(req(), ctx());
+    expect(handler).toHaveBeenCalled();
+    expect(res.status).toBe(200);
+  });
+
+  it("passes a platform-admin with manage-only access (role=null), checking with no required role", async () => {
+    (checkWorkspaceAccess as Mock).mockResolvedValue({
+      granted: true,
+      role: null,
+      permissions: { read: false, write: false, delete: false, manageMembers: true },
+    });
+    const handler = vi.fn().mockResolvedValue(NextResponse.json({ ok: true }));
+    const res = await withWorkspaceView(handler)(req(), ctx("w"));
+    expect(res.status).toBe(200);
+    expect(checkWorkspaceAccess).toHaveBeenCalledWith("w");
+  });
+
+  it("403s a user with no access", async () => {
+    (checkWorkspaceAccess as Mock).mockResolvedValue({
+      granted: false,
+      role: null,
+      permissions: { read: false, write: false, delete: false, manageMembers: false },
+    });
+    const handler = vi.fn();
+    const res = await withWorkspaceView(handler)(req(), ctx());
+    expect(handler).not.toHaveBeenCalled();
+    expect(res.status).toBe(403);
   });
 });

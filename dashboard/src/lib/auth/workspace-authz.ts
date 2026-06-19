@@ -10,6 +10,7 @@
  */
 
 import { getUser } from "./index";
+import { canAdmin, type User } from "./types";
 import { getCachedAccess, setCachedAccess } from "./authz-cache";
 import { computeWorkspaceRole } from "./compute-workspace-role";
 import { getWorkspace, listWorkspaces } from "@/lib/k8s/workspace-client";
@@ -17,6 +18,7 @@ import {
   ROLE_HIERARCHY,
   ROLE_PERMISSIONS,
   NO_PERMISSIONS,
+  MANAGE_ONLY_PERMISSIONS,
   type Workspace,
   type WorkspaceRole,
   type WorkspaceAccess,
@@ -29,6 +31,16 @@ const DENIED_ACCESS: WorkspaceAccess = {
   role: null,
   permissions: NO_PERMISSIONS,
 };
+
+/**
+ * A platform admin may see every workspace and manage its access bindings (so
+ * they can self-grant a data role). Requires the global admin role AND an
+ * authenticated session — an anonymous user must never get manage-all-
+ * workspaces, even where dev sets anonymousRole=admin.
+ */
+export function isPlatformAdmin(user: User): boolean {
+  return user.provider !== "anonymous" && canAdmin(user);
+}
 
 /**
  * Stable identity for authorization decisions (cache key, directGrant
@@ -219,6 +231,18 @@ export async function checkWorkspaceAccess(
     Date.now()
   );
 
+  // Platform admins may manage access on every workspace (so they can
+  // self-grant a role), but hold NO data role until they do — a data
+  // requiredRole therefore still denies them. Not cached: it derives from the
+  // global role, not workspace state, and is cheap to recompute.
+  if (!role && isPlatformAdmin(user)) {
+    return {
+      granted: !requiredRole,
+      role: null,
+      permissions: MANAGE_ONLY_PERMISSIONS,
+    };
+  }
+
   // Build access result
   const access = buildAccess(role, requiredRole);
 
@@ -273,7 +297,18 @@ export async function getAccessibleWorkspaces(
       Date.now()
     );
 
-    if (!role) continue;
+    if (!role) {
+      // Platform admins see every workspace (manage-only) so they can
+      // self-grant. Only for the unfiltered listing — a data minimumRole
+      // excludes manage-only, since the admin holds no data role yet.
+      if (!minimumRole && isPlatformAdmin(user)) {
+        accessible.push({
+          workspace,
+          access: { granted: true, role: null, permissions: MANAGE_ONLY_PERMISSIONS },
+        });
+      }
+      continue;
+    }
 
     // Apply minimum role filter
     if (minimumRole && !meetsRoleRequirement(role, minimumRole)) {
