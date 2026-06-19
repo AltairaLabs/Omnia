@@ -1,5 +1,6 @@
 {{- include "omnia.validateAuth" . -}}
 {{- include "omnia.validateSession" . -}}
+{{- include "omnia.validateBuiltinStore" . -}}
 {{- if .Values.dashboard.enabled }}
 {{- $po := .Values.dashboard.podOverrides | default dict }}
 apiVersion: apps/v1
