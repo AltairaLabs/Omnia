@@ -29,6 +29,7 @@ try {
     //     stale-deploy false positives rather than real authoring bugs.
     //   - localhost: examples in local-development docs for dev services.
     //   - portal.azure.com: has anti-bot protection that returns 404 to crawlers.
+    //   - kind.sigs.k8s.io: same anti-bot 404 to crawlers; the quick-start link is valid.
     //   - github.com/.../edit/...: Starlight's "Edit this page" links redirect to
     //     login for unauthenticated crawlers and occasionally return 404 under
     //     rate limiting. The links are valid; they just aren't crawler-friendly.
@@ -36,6 +37,7 @@ try {
       '^https?://omnia\\.altairalabs\\.ai/',
       '^http://localhost:(?!' + PORT + ')\\d+',
       '^https?://portal\\.azure\\.com',
+      '^https?://kind\\.sigs\\.k8s\\.io',
       '^https?://github\\.com/[^/]+/[^/]+/edit/',
     ],
   });
