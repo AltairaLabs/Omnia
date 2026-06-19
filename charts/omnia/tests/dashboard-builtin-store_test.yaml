@@ -1,0 +1,51 @@
+suite: dashboard builtin SQLite store cannot scale out
+release:
+  name: omnia
+values:
+  - ../values-chart-tests.yaml
+templates:
+  - templates/dashboard/deployment.yaml
+  - templates/dashboard/configmap.yaml
+tests:
+  - it: fails render when replicaCount>1 with builtin auth + sqlite store
+    # SQLite is single-writer; a multi-replica builtin-auth deployment would
+    # wedge on RWO mount (multi-node) or corrupt the user DB (shared mount).
+    # redis.enabled satisfies the separate session guard so THIS guard is what
+    # trips, not omnia.validateSession.
+    template: templates/dashboard/deployment.yaml
+    set:
+      dashboard.enabled: true
+      dashboard.auth.mode: builtin
+      dashboard.replicaCount: 2
+      dashboard.builtin.storeType: sqlite
+      redis.enabled: true
+    asserts:
+      - failedTemplate:
+          errorPattern: "SQLite is single-writer and cannot be shared across replicas"
+
+  - it: renders when scaling out with the postgresql store
+    template: templates/dashboard/deployment.yaml
+    set:
+      dashboard.enabled: true
+      dashboard.auth.mode: builtin
+      dashboard.replicaCount: 2
+      dashboard.builtin.storeType: postgresql
+      redis.enabled: true
+    asserts:
+      - containsDocument:
+          kind: Deployment
+          apiVersion: apps/v1
+          name: omnia-dashboard
+
+  - it: renders a single-replica sqlite dashboard (the common dev default)
+    template: templates/dashboard/deployment.yaml
+    set:
+      dashboard.enabled: true
+      dashboard.auth.mode: builtin
+      dashboard.replicaCount: 1
+      dashboard.builtin.storeType: sqlite
+    asserts:
+      - containsDocument:
+          kind: Deployment
+          apiVersion: apps/v1
+          name: omnia-dashboard

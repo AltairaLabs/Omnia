@@ -511,6 +511,27 @@ Include this from every template that renders when dashboard.enabled=true.
 {{- end }}
 
 {{/*
+Render-time guard: a multi-replica dashboard on the builtin-auth SQLite
+store is broken. SQLite is single-writer — its PVC is RWO (one node only)
+and concurrent writers corrupt the file even on a shared mount, so the
+auth store cannot be shared across replicas. Scaling out the builtin auth
+store requires a real shared DB (postgresql). Fail render rather than ship
+a deployment that wedges on multi-node or silently corrupts the user DB.
+
+Include this from every template that renders when dashboard.enabled=true.
+*/}}
+{{- define "omnia.validateBuiltinStore" -}}
+{{- if .Values.dashboard.enabled -}}
+{{- $replicas := int (default 1 .Values.dashboard.replicaCount) -}}
+{{- $authMode := default "" .Values.dashboard.auth.mode -}}
+{{- $storeType := default "" .Values.dashboard.builtin.storeType -}}
+{{- if and (gt $replicas 1) (eq $authMode "builtin") (eq $storeType "sqlite") -}}
+{{- fail "dashboard.replicaCount > 1 with auth.mode=builtin requires builtin.storeType=postgresql — SQLite is single-writer and cannot be shared across replicas. Set dashboard.builtin.storeType=postgresql (with builtin.postgresUrl or builtin.existingPostgresSecret) or scale to dashboard.replicaCount=1." -}}
+{{- end -}}
+{{- end -}}
+{{- end }}
+
+{{/*
 Render-time guard: enterprise Arena queue requires durable Redis when
 type=redis (which is the default). The in-memory queue mode is only
 useful in dev / E2E; production Arena needs jobs to survive controller

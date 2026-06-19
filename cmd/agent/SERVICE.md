@@ -43,6 +43,14 @@
 ## Observability
 
 **Metrics** (Prometheus, prefix `omnia_agent_` and `omnia_facade_`):
+- Served on the facade **health port (8081)** at `/metrics` — NOT the app/WS port
+  (8080). The container declares this port with the name `metrics`; scrapers
+  discover it by that port NAME (the agent pod's bundled-Prometheus
+  `omnia-agents` job and the optional `podMonitor` both key on `port: metrics`).
+  An agent pod has metrics on two ports across two containers (facade 8081,
+  runtime 9001) with no in-pod consolidation, so a single `prometheus.io/port`
+  pod annotation cannot cover it — the port-name contract is what makes one
+  scrape job/PodMonitor reach both. See #1488.
 - Connection gauges: `connections_active`, `sessions_active`, `requests_inflight`
 - Request counters: `requests_total` (by status), `messages_received_total`, `messages_sent_total`
 - Latency: `request_duration_seconds` (by handler)

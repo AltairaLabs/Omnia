@@ -45,10 +45,16 @@
 ## Observability
 
 **Metrics** (Prometheus, prefix `omnia_provider_` and `omnia_runtime_`):
+- Served on the runtime **health port (9001)** at `/metrics` — NOT the gRPC port
+  (9000). The container declares this port with the name `metrics` (same
+  contract as the facade), so a single name-keyed scrape job/PodMonitor reaches
+  both containers' metrics. See `cmd/agent/SERVICE.md` and #1488.
 - LLM usage: `provider_input_tokens_total`, `provider_output_tokens_total`, `provider_cost_total` (by provider, model)
 - LLM requests: `provider_requests_total` (by status), `provider_request_duration_seconds`
 - Runtime info: `runtime_info` gauge with agent/namespace labels
-- PromptKit SDK metrics exported via isolated registry on `/metrics`
+- PromptKit SDK metrics + omnia runtime metrics are merged onto this one endpoint
+  via `prometheus.Gatherers` (intra-container only — there is no cross-container
+  consolidation with the facade)
 
 **Traces** (OpenTelemetry):
 - `omnia.runtime.conversation.turn` — wraps each conversation turn (session.id, turn.index, promptpack)

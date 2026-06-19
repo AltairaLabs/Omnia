@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -1478,4 +1479,72 @@ func TestBuildDeploymentSpec_PolicyProxyKeepsOwnSecurityContext(t *testing.T) {
 	if policyProxy.SecurityContext != nil {
 		assert.NotEqual(t, hardened, policyProxy.SecurityContext, "policy-proxy must not be overwritten with the facade/runtime hardened SC")
 	}
+}
+
+// containerPortByName returns the named container port, or nil. Test helper for
+// the metrics-port discovery contract assertions below.
+func containerPortByName(c *corev1.Container, name string) *corev1.ContainerPort {
+	for i := range c.Ports {
+		if c.Ports[i].Name == name {
+			return &c.Ports[i]
+		}
+	}
+	return nil
+}
+
+// TestBuildDeploymentSpec_MetricsPortContract is a regression guard for #1488:
+// the facade metrics endpoint (8081) was never scraped because the pod
+// advertised prometheus.io/port=8080 (no /metrics there) and relied on a
+// sidecar-only merge-metrics assumption. The fix is a port-NAME contract: every
+// metrics-serving container declares a port named "metrics", so pod
+// service-discovery finds every endpoint regardless of port number. This test
+// asserts that contract on the agent pod and that the misleading single-port
+// annotations are gone.
+func TestBuildDeploymentSpec_MetricsPortContract(t *testing.T) {
+	r := &AgentRuntimeReconciler{}
+	ar := &omniav1alpha1.AgentRuntime{}
+	ar.Name = "metrics-contract"
+	ar.Namespace = "ns"
+	ar.Spec.Facade.Type = omniav1alpha1.FacadeTypeWebSocket
+	ar.Spec.PromptPackRef.Name = "p"
+
+	dep := &appsv1.Deployment{}
+	r.buildDeploymentSpec(context.Background(), dep, ar, newTestPromptPack(), nil, "", nil)
+
+	// Both metrics-serving containers must declare a "metrics"-named port so a
+	// single name-keyed scrape job / PodMonitor covers the whole pod.
+	var facadeC, runtimeC *corev1.Container
+	for i := range dep.Spec.Template.Spec.Containers {
+		c := &dep.Spec.Template.Spec.Containers[i]
+		switch c.Name {
+		case FacadeContainerName:
+			facadeC = c
+		case RuntimeContainerName:
+			runtimeC = c
+		}
+	}
+	require.NotNil(t, facadeC, "facade container must be present")
+	require.NotNil(t, runtimeC, "runtime container must be present")
+
+	facadeMetrics := containerPortByName(facadeC, metricsPortName)
+	require.NotNil(t, facadeMetrics, "facade must declare a %q port", metricsPortName)
+	assert.Equal(t, int32(DefaultFacadeHealthPort), facadeMetrics.ContainerPort,
+		"facade metrics port number")
+
+	runtimeMetrics := containerPortByName(runtimeC, metricsPortName)
+	require.NotNil(t, runtimeMetrics, "runtime must declare a %q port", metricsPortName)
+	assert.Equal(t, int32(DefaultRuntimeHealthPort), runtimeMetrics.ContainerPort,
+		"runtime metrics port number")
+
+	// The misleading single-port annotations must be gone, and BOTH metrics
+	// ports must be excluded from sidecar mTLS so a direct scrape works.
+	anno := dep.Spec.Template.Annotations
+	_, hasPort := anno["prometheus.io/port"]
+	assert.False(t, hasPort, "prometheus.io/port must not be set (cannot express two metrics ports)")
+	_, hasMerge := anno["prometheus.istio.io/merge-metrics"]
+	assert.False(t, hasMerge, "sidecar-only merge-metrics assumption must be removed")
+	assert.Equal(t,
+		fmt.Sprintf("%d,%d", DefaultFacadeHealthPort, DefaultRuntimeHealthPort),
+		anno["traffic.sidecar.istio.io/excludeInboundPorts"],
+		"both metrics ports must be excluded from sidecar inbound interception")
 }

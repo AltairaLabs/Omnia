@@ -56,7 +56,8 @@ spec:
     include:
       - "*"
   providers:
-    - name: ollama
+    default:
+      - name: ollama
   evaluation:
     timeout: {{ .Values.arenaDemo.config.evaluation.timeout | quote }}
     maxRetries: {{ .Values.arenaDemo.config.evaluation.maxRetries }}

@@ -177,15 +177,14 @@ if ENABLE_FULL_STACK:
         resource_deps=['istio-crds'],
     )
 
-    # Install Istio ingress gateway for agent traffic
-    helm_resource(
-        'istio-ingress',
-        'istio/gateway',
-        namespace='istio-system',
-        flags=['--wait'],
-        labels=['istio'],
-        resource_deps=['istiod'],
-    )
+    # NOTE: no standalone istio/gateway install here. The omnia chart's
+    # gateway.enabled creates Gateway-API Gateways (omnia-agents,
+    # omnia-internal) under gatewayClassName=istio; Istio auto-provisions a
+    # gateway Deployment+Service per Gateway. A manual istio/gateway release
+    # was redundant scaffolding (it owned no HTTPRoutes — the routes attach to
+    # the chart Gateways) and just added a second, confusing ingress. Local dev
+    # reaches services via port-forward regardless, so no in-cluster ingress is
+    # required.
 
     # Enable sidecar injection for agent namespaces
     local_resource(
@@ -1089,7 +1088,10 @@ if ENABLE_FULL_STACK:
             'omnia-agents:gateway',
             'omnia-internal:gateway',
         ],
-        resource_deps=['istio-crds', 'istio-ingress'],
+        # istiod is the Gateway-API controller that programs these Gateways and
+        # auto-provisions their gateway pods (was depending on the now-removed
+        # standalone istio-ingress release).
+        resource_deps=['istio-crds', 'istiod'],
     )
 
 # ============================================================================

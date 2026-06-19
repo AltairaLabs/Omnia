@@ -510,6 +510,21 @@ metrics:
   # -- Enable secure metrics (HTTPS)
   secure: true
 
+# PodMonitor for agent pods (facade + runtime), consumed by an EXTERNAL
+# Prometheus Operator (kube-prometheus-stack, managed Prometheus). The bundled
+# Prometheus already scrapes agent pods via prometheus.extraScrapeConfigs, so
+# leave this off unless a separate operator-based Prometheus is collecting
+# metrics. Requires the monitoring.coreos.com/v1 PodMonitor CRD in the cluster;
+# off by default so installs without it don't fail to render/apply.
+podMonitor:
+  # -- Create a PodMonitor selecting agent pods' "metrics"-named container ports
+  enabled: false
+  # -- Scrape interval
+  interval: 30s
+  # -- Extra labels (e.g. release: kube-prometheus-stack) so the operator's
+  #    PodMonitor selector adopts it
+  labels: {}
+
 # Webhook configuration. Disabled by default. When enabled, cert-manager MUST
 # be installed in the cluster (it issues the serving cert and injects the
 # webhook caBundle). When disabled, no cert-manager dependency exists and a
@@ -901,13 +916,15 @@ dashboard:
   persistence:
     # -- Enable persistence (required for builtin auth with SQLite)
     enabled: false
-    # -- Storage class
+    # -- Storage class (empty = cluster default; local-path works)
     storageClass: ""
-    # -- Access modes (ReadWriteMany required for job mounting)
-    # For development with local-path, override to: ["ReadWriteOnce"]
+    # -- Access modes — RWO. This PVC backs the single-writer builtin-auth
+    # SQLite file mounted by the one dashboard pod; it is NOT a shared/content
+    # volume (content moved to the operator content API, #1462). Must not be
+    # ReadWriteMany — RWO-only classes like local-path reject RWX outright.
     accessModes:
-      - ReadWriteMany
-    # -- Volume size
+      - ReadWriteOnce
+    # -- Volume size (the SQLite store is a few MB)
     size: 1Gi
     # -- Existing PVC to use
     existingClaim: ""
@@ -1743,26 +1760,33 @@ prometheus:
               - localhost:9090
   # -- Extra scrape configs for Omnia agent metrics
   extraScrapeConfigs: |
-    # Scrape Omnia facade containers (WebSocket connections, media uploads)
-    # Uses prometheus.io annotations which point to facade port 8080
-    - job_name: 'omnia-agents-facade'
+    # Scrape Omnia agent pods (facade + runtime in one pod).
+    #
+    # An agent pod serves Prometheus metrics on TWO ports across TWO containers —
+    # the facade on its health port (8081, omnia_agent_*/omnia_facade_*) and the
+    # runtime on its health port (9001, PromptKit SDK + omnia_runtime_*) — and
+    # there is no in-pod consolidation of the two. A single prometheus.io/port
+    # annotation cannot express both, which is why the facade metrics were never
+    # scraped before (the old job trusted prometheus.io/port=8080, a port with no
+    # /metrics handler). Instead, both metrics-serving containers declare a
+    # container port NAMED "metrics", and pod service-discovery emits one target
+    # per declared container port — so this single job scrapes every agent
+    # metrics endpoint by matching the port NAME, independent of the port number
+    # and of which facade/runtime implementation is deployed.
+    - job_name: 'omnia-agents'
       kubernetes_sd_configs:
         - role: pod
       relabel_configs:
-        # Only scrape pods with omnia agent label
+        # Only scrape pods with the omnia agent component label
         - source_labels: [__meta_kubernetes_pod_label_omnia_altairalabs_ai_component]
           action: keep
           regex: agent
-        # Use prometheus.io annotations (works for both Istio and non-Istio pods)
-        - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
-          action: replace
-          regex: ([^:]+)(?::\d+)?;(\d+)
-          replacement: $1:$2
-          target_label: __address__
-        - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
-          action: replace
-          target_label: __metrics_path__
-          regex: (.+)
+        # Keep only the container port named "metrics" (facade 8081 + runtime 9001).
+        # role: pod sets __address__ to <podIP>:<containerPort> per port, so no
+        # manual __address__ rewrite is needed.
+        - source_labels: [__meta_kubernetes_pod_container_port_name]
+          action: keep
+          regex: metrics
         # Add useful labels
         - source_labels: [__meta_kubernetes_namespace]
           target_label: namespace
@@ -1770,33 +1794,9 @@ prometheus:
           target_label: pod
         - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_instance]
           target_label: agent
-        - target_label: container
-          replacement: facade
-    # Scrape Omnia runtime containers (LLM metrics: tokens, cost, latency)
-    # Runtime exposes metrics on port 9001 from PromptKit EventBus
-    - job_name: 'omnia-agents-runtime'
-      kubernetes_sd_configs:
-        - role: pod
-      relabel_configs:
-        # Only scrape pods with omnia agent label
-        - source_labels: [__meta_kubernetes_pod_label_omnia_altairalabs_ai_component]
-          action: keep
-          regex: agent
-        # Target runtime container's health port (9001) for LLM metrics
-        - source_labels: [__address__]
-          action: replace
-          regex: ([^:]+)(?::\d+)?
-          replacement: $1:9001
-          target_label: __address__
-        # Add useful labels
-        - source_labels: [__meta_kubernetes_namespace]
-          target_label: namespace
-        - source_labels: [__meta_kubernetes_pod_name]
-          target_label: pod
-        - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_instance]
-          target_label: agent
-        - target_label: container
-          replacement: runtime
+        # Distinguish facade vs runtime by the actual container name
+        - source_labels: [__meta_kubernetes_pod_container_name]
+          target_label: container
     # Scrape Omnia session-api pods (HTTP request metrics, event publishing)
     - job_name: 'omnia-session-api'
       kubernetes_sd_configs:
