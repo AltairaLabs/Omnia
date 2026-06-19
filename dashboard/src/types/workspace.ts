@@ -276,3 +276,15 @@ export const NO_PERMISSIONS: WorkspacePermissions = {
   delete: false,
   manageMembers: false,
 };
+
+/**
+ * Permissions for a platform admin on a workspace they have no explicit grant
+ * on: they may manage its access bindings (to self-grant a role) but hold no
+ * data access until they do. Data routes still deny them (role is null).
+ */
+export const MANAGE_ONLY_PERMISSIONS: WorkspacePermissions = {
+  read: false,
+  write: false,
+  delete: false,
+  manageMembers: true,
+};

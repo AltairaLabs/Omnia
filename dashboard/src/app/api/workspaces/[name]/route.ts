@@ -9,7 +9,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { withWorkspaceAccess } from "@/lib/auth/workspace-guard";
+import { withWorkspaceManage, withWorkspaceView } from "@/lib/auth/workspace-guard";
 import { getWorkspace, patchWorkspace } from "@/lib/k8s/workspace-client";
 import type { Workspace, WorkspaceAccess, WorkspaceSpec } from "@/types/workspace";
 import type { User } from "@/lib/auth/types";
@@ -53,8 +53,7 @@ function hasOwnerAccess(spec: WorkspaceSpec): boolean {
   return false;
 }
 
-export const PATCH = withWorkspaceAccess(
-  "owner",
+export const PATCH = withWorkspaceManage(
   async (
     request: NextRequest,
     context: RouteParams,
@@ -135,8 +134,7 @@ export const PATCH = withWorkspaceAccess(
  * - User's role and permissions
  * - Status information
  */
-export const GET = withWorkspaceAccess(
-  "viewer",
+export const GET = withWorkspaceView(
   async (
     _request: NextRequest,
     context: RouteParams,

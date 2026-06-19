@@ -130,6 +130,68 @@ export function withWorkspaceAccess<
 }
 
 /**
+ * Wrap a handler that MANAGES a workspace's access bindings.
+ *
+ * Requires the `manageMembers` permission — held by workspace owners AND by
+ * platform admins (the latter via the manage-only override in
+ * checkWorkspaceAccess, where role is null). Checking the permission rather
+ * than the "owner" role lets a platform admin self-grant access without being
+ * treated as a workspace owner by data routes elsewhere.
+ *
+ * @param handler - The handler to call if the user may manage members
+ * @returns Wrapped handler that enforces the manageMembers permission
+ */
+export function withWorkspaceManage<
+  TParams extends { name: string } = { name: string }
+>(
+  handler: WorkspaceApiHandler<TParams>
+): (request: NextRequest, context: WorkspaceRouteContext<TParams>) => Promise<NextResponse> {
+  return async (request: NextRequest, context: WorkspaceRouteContext<TParams>) => {
+    const user = await getUser();
+    const { name: workspaceName } = await context.params;
+
+    // No required role: a platform admin's manage-only access has role=null but
+    // manageMembers=true, and must pass.
+    const access = await checkWorkspaceAccess(workspaceName);
+    if (!access.permissions.manageMembers) {
+      return forbiddenResponse(workspaceName, access);
+    }
+
+    return handler(request, context, access, user);
+  };
+}
+
+/**
+ * Wrap a handler that VIEWS a workspace.
+ *
+ * Passes anyone with ANY granted access — a real data role (viewer or above)
+ * OR a platform admin's manage-only access (role=null, manageMembers=true).
+ * Used for endpoints that render workspace details/settings; the response
+ * itself gates sensitive fields (e.g. membership) on the caller's permissions.
+ *
+ * @param handler - The handler to call if the user may view the workspace
+ * @returns Wrapped handler that requires any granted access
+ */
+export function withWorkspaceView<
+  TParams extends { name: string } = { name: string }
+>(
+  handler: WorkspaceApiHandler<TParams>
+): (request: NextRequest, context: WorkspaceRouteContext<TParams>) => Promise<NextResponse> {
+  return async (request: NextRequest, context: WorkspaceRouteContext<TParams>) => {
+    const user = await getUser();
+    const { name: workspaceName } = await context.params;
+
+    // No required role: platform admins (role=null) must pass to manage access.
+    const access = await checkWorkspaceAccess(workspaceName);
+    if (!access.granted) {
+      return forbiddenResponse(workspaceName, access);
+    }
+
+    return handler(request, context, access, user);
+  };
+}
+
+/**
  * Wrap an API handler with workspace access checking (extracts name from query).
  *
  * Use this for routes where workspace is specified as a query parameter

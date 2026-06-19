@@ -4,6 +4,7 @@ import {
   getAccessibleWorkspaces,
   hasWorkspaceRole,
   requireWorkspaceAccess,
+  isPlatformAdmin,
 } from "./workspace-authz";
 import { clearAuthzCache } from "./authz-cache";
 import type { Workspace, WorkspaceRole } from "@/types/workspace";
@@ -698,5 +699,126 @@ describe("workspace-authz", () => {
       expect(access.granted).toBe(true);
       expect(access.role).toBe("owner");
     });
+  });
+});
+
+describe("isPlatformAdmin", () => {
+  const base: User = {
+    id: "u",
+    username: "admin",
+    email: "admin@example.com",
+    groups: [],
+    role: "admin",
+    provider: "builtin",
+  };
+
+  it("is true for an authenticated admin (builtin)", () => {
+    expect(isPlatformAdmin(base)).toBe(true);
+  });
+
+  it("is true for an oauth admin", () => {
+    expect(isPlatformAdmin({ ...base, provider: "oauth" })).toBe(true);
+  });
+
+  it("is false for an anonymous user even with the admin role", () => {
+    // An unauthenticated visitor must never get manage-all-workspaces, even
+    // when dev sets anonymousRole=admin.
+    expect(isPlatformAdmin({ ...base, provider: "anonymous" })).toBe(false);
+  });
+
+  it("is false for a non-admin (editor)", () => {
+    expect(isPlatformAdmin({ ...base, role: "editor" })).toBe(false);
+  });
+
+  it("is false for a viewer", () => {
+    expect(isPlatformAdmin({ ...base, role: "viewer" })).toBe(false);
+  });
+});
+
+describe("checkWorkspaceAccess platform-admin override", () => {
+  // platadmin matches no roleBinding (no groups) and no directGrant (email not
+  // listed) in mockWorkspace, so computeWorkspaceRole returns null for them.
+  const adminUser: User = {
+    id: "pa",
+    username: "platadmin",
+    email: "platadmin@example.com",
+    groups: [],
+    role: "admin",
+    provider: "builtin",
+  };
+
+  const wsFixture: Workspace = {
+    apiVersion: "omnia.altairalabs.ai/v1alpha1",
+    kind: "Workspace",
+    metadata: { name: "test-workspace", creationTimestamp: "2024-01-15T10:00:00Z" },
+    spec: {
+      displayName: "Test",
+      description: "",
+      environment: "development",
+      namespace: { name: "test-ns", create: true },
+      roleBindings: [{ groups: ["owners@example.com"], role: "owner" }],
+      directGrants: [{ user: "admin@example.com", role: "owner" }],
+    },
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    clearAuthzCache();
+    (getWorkspace as Mock).mockResolvedValue(wsFixture);
+    (listWorkspaces as Mock).mockResolvedValue([wsFixture]);
+  });
+
+  it("grants manage-only access to an admin with no explicit grant", async () => {
+    (getUser as Mock).mockResolvedValue(adminUser);
+    const access = await checkWorkspaceAccess("test-workspace");
+    expect(access.granted).toBe(true);
+    expect(access.role).toBeNull();
+    expect(access.permissions.manageMembers).toBe(true);
+    expect(access.permissions.read).toBe(false);
+    expect(access.permissions.write).toBe(false);
+    expect(access.permissions.delete).toBe(false);
+  });
+
+  it("denies an admin a DATA role they have not self-granted", async () => {
+    (getUser as Mock).mockResolvedValue(adminUser);
+    const access = await checkWorkspaceAccess("test-workspace", "viewer");
+    expect(access.granted).toBe(false);
+  });
+
+  it("does NOT grant manage access to a non-admin with no grant", async () => {
+    (getUser as Mock).mockResolvedValue({ ...adminUser, role: "viewer" as const });
+    const access = await checkWorkspaceAccess("test-workspace");
+    expect(access.granted).toBe(false);
+    expect(access.permissions.manageMembers).toBe(false);
+  });
+
+  it("uses the real grant for an admin who has self-granted (not the override)", async () => {
+    // admin@example.com holds a directGrant of owner in mockWorkspace.
+    (getUser as Mock).mockResolvedValue({ ...adminUser, email: "admin@example.com" });
+    const access = await checkWorkspaceAccess("test-workspace");
+    expect(access.granted).toBe(true);
+    expect(access.role).toBe("owner");
+    expect(access.permissions.read).toBe(true);
+  });
+
+  it("lists EVERY workspace for an admin with no grant (no minimumRole)", async () => {
+    (getUser as Mock).mockResolvedValue(adminUser);
+    const result = await getAccessibleWorkspaces();
+    expect(result).toHaveLength(1);
+    expect(result[0].workspace.metadata.name).toBe("test-workspace");
+    expect(result[0].access.permissions.manageMembers).toBe(true);
+    expect(result[0].access.role).toBeNull();
+  });
+
+  it("excludes manage-only workspaces when a DATA minimumRole is requested", async () => {
+    (getUser as Mock).mockResolvedValue(adminUser);
+    const result = await getAccessibleWorkspaces("editor");
+    expect(result).toHaveLength(0);
+  });
+
+  it("does not list ungranted workspaces for a non-admin", async () => {
+    (getUser as Mock).mockResolvedValue({ ...adminUser, role: "viewer" as const });
+    const result = await getAccessibleWorkspaces();
+    expect(result).toHaveLength(0);
   });
 });
