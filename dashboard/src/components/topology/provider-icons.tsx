@@ -8,9 +8,7 @@
 import type { ProviderType } from "@/types";
 
 interface ProviderIconProps {
-  // Accepts any provider-type string (from a Provider CRD); unknown values fall
-  // back to the neutral "mock" badge.
-  type: string;
+  type: ProviderType;
   size?: number;
   className?: string;
 }
@@ -31,7 +29,7 @@ const providerConfig: Record<ProviderType, { color: string; letter: string; labe
  * Renders a colored circle with the provider's initial letter.
  */
 export function ProviderIcon({ type, size = 24, className = "" }: Readonly<ProviderIconProps>) {
-  const config = providerConfig[type as ProviderType] || providerConfig.mock;
+  const config = providerConfig[type] || providerConfig.mock;
 
   return (
     <svg
