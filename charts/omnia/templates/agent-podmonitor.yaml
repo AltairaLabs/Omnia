@@ -1,0 +1,34 @@
+{{- if .Values.podMonitor.enabled }}
+# PodMonitor for EXTERNAL Prometheus Operator stacks (kube-prometheus-stack,
+# managed Prometheus that consumes monitoring.coreos.com CRDs). The bundled
+# Prometheus (prometheus.enabled) already scrapes agent pods via the
+# "omnia-agents" job in prometheus.extraScrapeConfigs; this artifact is for
+# operator-based Prometheus instead.
+#
+# An agent pod serves metrics on TWO ports across TWO containers (facade 8081 +
+# runtime 9001) with no in-pod consolidation, so a single prometheus.io/port
+# annotation cannot cover it. Both containers declare a port NAMED "metrics", so
+# selecting that port name here scrapes every agent metrics endpoint with one
+# PodMonitor — independent of the port number or which facade/runtime image is
+# deployed.
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: {{ include "omnia.fullname" . }}-agents
+  labels:
+    {{- include "omnia.labels" . | nindent 4 }}
+    {{- with .Values.podMonitor.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  # Agent pods live in workspace namespaces, not the release namespace.
+  namespaceSelector:
+    any: true
+  selector:
+    matchLabels:
+      omnia.altairalabs.ai/component: agent
+  podMetricsEndpoints:
+    - port: metrics
+      path: /metrics
+      interval: {{ .Values.podMonitor.interval }}
+{{- end }}

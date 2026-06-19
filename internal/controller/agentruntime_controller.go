@@ -680,15 +680,14 @@ func (r *AgentRuntimeReconciler) reconcileService(ctx context.Context, agentRunt
 			labels[labelIstioUseWaypoint] = wp
 		}
 
-		// Prometheus scrape annotations on Service (not pod, as Istio overrides pod annotations)
-		annotations := map[string]string{
-			"prometheus.io/scrape": "true",
-			"prometheus.io/port":   fmt.Sprintf("%d", port),
-			"prometheus.io/path":   "/metrics",
-		}
-
+		// No prometheus.io/* scrape annotations on the Service: it only exposes
+		// the facade app port (8080) and optional a2a/mcp ports — NOT the
+		// metrics ports (facade 8081, runtime 9001 live on the pod, not the
+		// Service). Pointing an annotation-based scraper here would 404 on
+		// 8080. Metrics are discovered via the pod's "metrics"-named container
+		// ports instead (see deployment_builder podAnnotations and the
+		// omnia-agents scrape job / PodMonitor).
 		service.Labels = labels
-		service.Annotations = annotations
 		ports := []corev1.ServicePort{
 			{
 				Name:       "facade",

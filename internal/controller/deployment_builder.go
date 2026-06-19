@@ -383,19 +383,26 @@ func (r *AgentRuntimeReconciler) buildDeploymentSpec(
 		}
 	}
 
-	// Prometheus scrape annotations for metrics collection
-	// - prometheus.io/* annotations tell Prometheus where to scrape (non-Istio pods use these directly)
-	// - prometheus.istio.io/merge-metrics tells Istio to merge app metrics with Envoy stats
-	//   Istio reads prometheus.io/port and prometheus.io/path BEFORE overwriting them,
-	//   then merges app metrics into port 15020 alongside Envoy metrics
-	// - traffic.sidecar.istio.io/excludeInboundPorts excludes runtime metrics port from Istio
-	//   so Prometheus can directly scrape port 9001 without mTLS
+	// Metrics discovery deliberately does NOT use the single-valued
+	// prometheus.io/port annotation. An agent pod serves Prometheus metrics on
+	// TWO ports across TWO containers — the facade on its health port (8081)
+	// and the runtime on its health port (9001) — and there is no in-pod
+	// consolidation of the two. A single prometheus.io/port cannot express
+	// both, and the old prometheus.istio.io/merge-metrics assumption only ever
+	// worked behind an Istio SIDECAR (it merges one app port + Envoy stats onto
+	// :15020 and never covered the runtime's 9001); under ambient mesh or no
+	// mesh it resolves to nothing. Instead both containers declare a container
+	// port NAMED "metrics" (see below), and scrapers discover every metrics
+	// endpoint by that port name via Kubernetes pod service-discovery — the
+	// bundled Prometheus "omnia-agents" job and the optional PodMonitor both
+	// key on it. This survives swapping the facade/runtime implementation since
+	// the contract is the port NAME, not its number.
+	//
+	// traffic.sidecar.istio.io/excludeInboundPorts lists BOTH metrics ports so
+	// that on a sidecar deployment Prometheus can scrape them directly without
+	// mTLS (ambient/no-mesh ignore the annotation harmlessly).
 	podAnnotations := map[string]string{
-		"prometheus.io/scrape":                         "true",
-		"prometheus.io/port":                           fmt.Sprintf("%d", facadePort),
-		"prometheus.io/path":                           "/metrics",
-		"prometheus.istio.io/merge-metrics":            "true",
-		"traffic.sidecar.istio.io/excludeInboundPorts": fmt.Sprintf("%d", DefaultRuntimeHealthPort),
+		"traffic.sidecar.istio.io/excludeInboundPorts": fmt.Sprintf("%d,%d", DefaultFacadeHealthPort, DefaultRuntimeHealthPort),
 	}
 
 	// Add config hash annotation to trigger rollouts when config changes
@@ -476,7 +483,12 @@ func (r *AgentRuntimeReconciler) buildFacadeContainer(
 				Protocol:      corev1.ProtocolTCP,
 			},
 			{
-				Name:          "facade-health",
+				// Serves /healthz, /readyz AND /metrics. Named "metrics" so
+				// pod service-discovery finds it by the fleet-wide port-name
+				// contract (memory-api/eval-worker use the same name). Probes
+				// reference this port by number, so the name is free to be the
+				// scrape contract.
+				Name:          metricsPortName,
 				ContainerPort: DefaultFacadeHealthPort,
 				Protocol:      corev1.ProtocolTCP,
 			},
@@ -795,7 +807,9 @@ func (r *AgentRuntimeReconciler) buildRuntimeContainer(
 				Protocol:      corev1.ProtocolTCP,
 			},
 			{
-				Name:          "runtime-health",
+				// Serves /healthz, /readyz AND /metrics. Named "metrics" for the
+				// same port-name discovery contract as the facade container.
+				Name:          metricsPortName,
 				ContainerPort: DefaultRuntimeHealthPort,
 				Protocol:      corev1.ProtocolTCP,
 			},

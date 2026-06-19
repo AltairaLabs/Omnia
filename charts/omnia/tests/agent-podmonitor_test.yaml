@@ -1,0 +1,52 @@
+suite: agent PodMonitor for external Prometheus Operator (#1488)
+release:
+  name: omnia
+values:
+  - ../values-chart-tests.yaml
+templates:
+  - templates/agent-podmonitor.yaml
+tests:
+  - it: renders no PodMonitor by default
+    # Off by default so installs without the monitoring.coreos.com CRD don't
+    # fail to apply. The bundled Prometheus scrapes agents via extraScrapeConfigs.
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: renders a PodMonitor selecting the "metrics" port when enabled
+    # The agent pod has metrics on two ports across two containers; selecting the
+    # shared "metrics" port NAME covers both facade (8081) and runtime (9001)
+    # with a single endpoint, independent of port numbers.
+    set:
+      podMonitor.enabled: true
+    asserts:
+      - hasDocuments:
+          count: 1
+      - isKind:
+          of: PodMonitor
+      - equal:
+          path: spec.selector.matchLabels["omnia.altairalabs.ai/component"]
+          value: agent
+      - equal:
+          path: spec.podMetricsEndpoints[0].port
+          value: metrics
+      - equal:
+          path: spec.podMetricsEndpoints[0].path
+          value: /metrics
+      - equal:
+          path: spec.namespaceSelector.any
+          value: true
+
+  - it: honors custom interval and labels
+    set:
+      podMonitor.enabled: true
+      podMonitor.interval: 15s
+      podMonitor.labels:
+        release: kube-prometheus-stack
+    asserts:
+      - equal:
+          path: spec.podMetricsEndpoints[0].interval
+          value: 15s
+      - equal:
+          path: metadata.labels.release
+          value: kube-prometheus-stack

@@ -129,6 +129,16 @@
       }
     },
 
+    "podMonitor": {
+      "type": "object",
+      "description": "PodMonitor for agent pods (facade + runtime) consumed by an external Prometheus Operator. Off by default; requires the monitoring.coreos.com/v1 CRD.",
+      "properties": {
+        "enabled":  { "type": "boolean" },
+        "interval": { "type": "string" },
+        "labels":   { "type": "object" }
+      }
+    },
+
     "webhook": {
       "type": "object",
       "properties": {
