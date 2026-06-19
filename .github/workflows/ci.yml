@@ -67,6 +67,22 @@ jobs:
               - 'config/crd/**'
 
   # ============================================================================
+  # OpenAPI ↔ dashboard route drift guard
+  # ============================================================================
+  # Fails if api/openapi/openapi.yaml documents any path/method that has no
+  # backing Next.js route handler. Keeps the spec honest so it can't drift
+  # back into documenting an unimplemented API. Fast + dependency-free, so it
+  # always runs rather than being change-gated.
+  openapi-routes:
+    name: OpenAPI Route Drift
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+      - name: Check OpenAPI spec matches dashboard routes
+        run: python3 hack/check-openapi-routes.py
+
+  # ============================================================================
   # Test & Coverage
   # ============================================================================
   test:

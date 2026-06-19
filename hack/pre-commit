@@ -58,9 +58,35 @@ cd "$REPO_ROOT"
 
 STAGED_GO_FILES=$(git diff --cached --name-only --diff-filter=ACM | grep '\.go$' || true)
 STAGED_DASHBOARD_FILES=$(git diff --cached --name-only --diff-filter=ACM | grep '^dashboard/.*\.\(ts\|tsx\|js\|jsx\)$' || true)
+STAGED_OPENAPI=$(git diff --cached --name-only --diff-filter=ACM | grep -E '^api/openapi/openapi\.yaml$' || true)
+STAGED_ROUTES=$(git diff --cached --name-only --diff-filter=ACM | grep -E '^dashboard/src/app/api/.*/route\.ts$' || true)
+
+#
+# 0. OpenAPI spec ↔ dashboard route drift guard.
+#    Runs whenever the spec OR a dashboard route changes, so the spec can
+#    never document an endpoint that no route handler implements.
+#
+if [ -n "$STAGED_OPENAPI" ] || [ -n "$STAGED_ROUTES" ]; then
+	print_header "Checking OpenAPI spec matches dashboard routes"
+	if command -v python3 &>/dev/null; then
+		if python3 "$REPO_ROOT/hack/check-openapi-routes.py"; then
+			print_success "OpenAPI routes check passed"
+		else
+			print_error "OpenAPI spec documents routes/methods that don't exist"
+			CHECKS_FAILED=1
+		fi
+	else
+		print_error "python3 not found; cannot run OpenAPI routes check"
+		CHECKS_FAILED=1
+	fi
+fi
 
 if [ -z "$STAGED_GO_FILES" ] && [ -z "$STAGED_DASHBOARD_FILES" ]; then
-	print_info "No Go or dashboard files staged. Skipping checks."
+	if [ $CHECKS_FAILED -ne 0 ]; then
+		print_error "Pre-commit checks failed!"
+		exit 1
+	fi
+	print_info "No Go or dashboard files staged. Skipping remaining checks."
 	exit 0
 fi
 
