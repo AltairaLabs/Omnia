@@ -11,7 +11,8 @@ import { deriveWorkloadTier } from "../derive-tier";
 import { attachSkills } from "./skills";
 
 export interface ResolvedProvider {
-  name: string;
+  name: string; // Provider CRD name (display label)
+  group?: string; // service-group / slot name (e.g. "default")
   type?: string;
   model?: string;
   baseURL?: string;
@@ -56,11 +57,13 @@ function resolveTool(
 
 function providerNode(p: ResolvedProvider): WorkloadNode {
   return {
-    id: `provider:${p.name}`,
+    // Key by the (unique) service-group slot so two slots pointing at the same
+    // Provider CRD don't collide; the label still shows the provider.
+    id: `provider:${p.group ?? p.name}`,
     kind: "provider",
     label: p.name,
     badges: p.role ? [{ label: p.role }] : [],
-    detail: { model: p.model, providerType: p.type, baseURL: p.baseURL, role: p.role },
+    detail: { group: p.group, model: p.model, providerType: p.type, baseURL: p.baseURL, role: p.role },
   };
 }
 

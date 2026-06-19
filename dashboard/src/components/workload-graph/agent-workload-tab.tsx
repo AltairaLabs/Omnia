@@ -24,7 +24,10 @@ export function AgentWorkloadTab({
   const providers: ResolvedProvider[] = (agent.spec.providers ?? []).map((ref) => {
     const p = allProviders?.find((x) => x.metadata.name === ref.providerRef.name);
     return {
-      name: ref.name ?? ref.providerRef.name,
+      // Display the Provider CRD name, not the service-group slot (ref.name,
+      // usually "default") — the slot goes in `group` for the drawer.
+      name: ref.providerRef.name,
+      group: ref.name,
       type: p?.spec?.type,
       model: p?.spec?.model,
       baseURL: p?.spec?.baseURL,

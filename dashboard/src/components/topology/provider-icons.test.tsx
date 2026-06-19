@@ -48,7 +48,6 @@ describe("ProviderIcon", () => {
   });
 
   it("falls back to mock config for unknown provider type", () => {
-    // @ts-expect-error - testing unknown provider type
     render(<ProviderIcon type="unknown" />);
 
     // Should fall back to mock styling

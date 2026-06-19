@@ -248,6 +248,24 @@ export function NodeDrawer({
           <span className="font-mono">{node.detail.model}</span>
         </div>
       )}
+      {node.detail.providerType && (
+        <div className="text-sm mb-3">
+          <span className="text-muted-foreground">Provider type: </span>
+          <span className="font-mono">{node.detail.providerType}</span>
+        </div>
+      )}
+      {node.detail.group && (
+        <div className="text-sm mb-3">
+          <span className="text-muted-foreground">Group: </span>
+          <span className="font-mono">{node.detail.group}</span>
+        </div>
+      )}
+      {node.detail.baseURL && (
+        <div className="text-sm mb-3">
+          <span className="text-muted-foreground">Base URL: </span>
+          <span className="font-mono break-all">{node.detail.baseURL}</span>
+        </div>
+      )}
       {!!node.detail.tools?.length && (
         <div className="mb-3">
           <p className="text-sm font-medium mb-1">Tools</p>

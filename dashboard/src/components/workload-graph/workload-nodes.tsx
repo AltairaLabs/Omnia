@@ -9,6 +9,7 @@ import {
   ScenarioGroupNode, JudgeNode, PersonaNode,
 } from "./workflow-nodes";
 import { CompositionContainerNode, CompositionStepNode, CompositionParallelNode } from "./composition-nodes";
+import { ProviderIcon } from "@/components/topology/provider-icons";
 import type { WorkloadNodeData } from "./to-flow";
 import type { WorkloadBadge, WorkloadNode } from "./types";
 
@@ -92,14 +93,17 @@ export const WorkloadProviderNode = memo(({ data }: Readonly<{ data: WorkloadNod
         className={cn(base, "border-2 border-green-500 border-dashed")}
         onClick={() => onClick?.(node.id)}
       >
-        <div className="flex flex-col">
-          <span className="font-medium text-sm">{node.label}</span>
-          <span className="text-xs text-muted-foreground">
-            {node.detail.model || node.detail.providerType}
-          </span>
-          {node.detail.role && (
-            <span className="text-xs text-muted-foreground">{node.detail.role}</span>
-          )}
+        <div className="flex items-center gap-2 min-w-0">
+          <ProviderIcon type={node.detail.providerType ?? ""} size={18} className="shrink-0" />
+          <div className="flex flex-col min-w-0">
+            <span className="font-medium text-sm truncate">{node.label}</span>
+            <span className="text-xs text-muted-foreground truncate">
+              {node.detail.model || node.detail.providerType}
+            </span>
+            {node.detail.role && (
+              <span className="text-xs text-muted-foreground truncate">{node.detail.role}</span>
+            )}
+          </div>
         </div>
       </button>
     </div>

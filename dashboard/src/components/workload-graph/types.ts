@@ -38,6 +38,7 @@ export interface WorkloadNodeDetail {
   providerType?: string;
   baseURL?: string;
   role?: string;
+  group?: string; // provider service-group / slot name (e.g. "default")
   // skill node fields (skill kind): a SkillSource the pack binds to.
   skillSource?: string;        // SkillSource CRD name
   include?: string[];          // include filter from the SkillRef

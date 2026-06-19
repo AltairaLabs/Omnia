@@ -24,6 +24,21 @@ describe("agentRuntimeToWorkload", () => {
     expect(model.meta.binding?.providers[0].model).toBe("claude-opus-4-8");
   });
 
+  it("labels the provider by its CRD name, with the slot in detail.group", () => {
+    const model = agentRuntimeToWorkload({
+      content,
+      providers: [{ name: "ollama-composition", group: "default", type: "ollama", model: "llama3.2:3b" }],
+      discoveredTools: [],
+    });
+    const provider = model.nodes.find((n) => n.kind === "provider")!;
+    // Label is the Provider CRD name, not the service-group slot ("default").
+    expect(provider.label).toBe("ollama-composition");
+    // Still keyed by the unique slot so two slots can reference the same CRD.
+    expect(provider.id).toBe("provider:default");
+    expect(provider.detail.group).toBe("default");
+    expect(provider.detail.providerType).toBe("ollama");
+  });
+
   it("resolves a referenced tool to its endpoint and marks a missing one unavailable", () => {
     const model = agentRuntimeToWorkload({
       content,
