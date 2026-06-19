@@ -125,12 +125,11 @@ nfs:
   provisioner:
     enabled: false
 
-# Workspace content storage for dashboard (only used when enterprise.enabled=true)
+# Workspace content storage (always provisioned — Omnia requires it).
 # Dev uses local-path (RWO). Operator + dashboard co-schedule on the single
 # kind node so both can mount the same PVC. Enterprise mode overrides with
 # NFS (RWX) in values-dev-enterprise.yaml.
 workspaceContent:
-  enabled: true
   persistence:
     accessModes:
       - ReadWriteOnce

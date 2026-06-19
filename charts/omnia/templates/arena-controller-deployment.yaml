@@ -126,15 +126,7 @@ spec:
             {{- else if and .Values.nfs.csiDriver.enabled (or .Values.nfs.server.enabled .Values.nfs.external.server) }}
             - --workspace-storage-class={{ include "omnia.nfsStorageClass" . }}
             {{- end }}
-            {{- if .Values.workspaceContent.enabled }}
             - --workspace-content-path={{ .Values.enterprise.arena.controller.workspaceContentPath | default (.Values.workspaceContent.mountPath | default "/workspace-content") }}
-            {{- else }}
-            # workspaceContent.enabled=false — pass an empty path so the
-            # arena-controller reports ContentStorageUnavailable on any
-            # ArenaSource/ArenaTemplateSource instead of silently writing
-            # to a non-existent directory.
-            - --workspace-content-path=
-            {{- end }}
             - --workspace-content-scoped={{ .Values.workspaceContent.scoped | default false }}
             {{- if .Values.dashboard.enabled }}
             # Injected onto worker pods as OMNIA_MGMT_PLANE_SERVICE_TOKEN_URL so
@@ -226,10 +218,8 @@ spec:
             {{- toYaml . | nindent 12 }}
           {{- end }}
           volumeMounts:
-            {{- if .Values.workspaceContent.enabled }}
             - name: workspace-content
               mountPath: /workspace-content
-            {{- end }}
             - name: tmp
               mountPath: /tmp
             {{- if .Values.webhook.enabled }}
@@ -242,11 +232,9 @@ spec:
             {{- toYaml . | nindent 12 }}
             {{- end }}
       volumes:
-        {{- if .Values.workspaceContent.enabled }}
         - name: workspace-content
           persistentVolumeClaim:
             claimName: {{ .Values.workspaceContent.persistence.existingClaim | default (printf "%s-workspace-content" (include "omnia.fullname" .)) }}
-        {{- end }}
         - name: tmp
           emptyDir: {}
         {{- if .Values.webhook.enabled }}

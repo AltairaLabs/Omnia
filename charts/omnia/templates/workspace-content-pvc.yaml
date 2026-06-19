@@ -1,7 +1,8 @@
-{{- if and .Values.workspaceContent.enabled (not .Values.workspaceContent.persistence.existingClaim) }}
-# PVC for workspace content storage (Enterprise feature)
-# Used by dashboard to browse and manage workspace content
-# Requires RWX storage class (NFS or cloud-native RWX)
+{{- if not .Values.workspaceContent.persistence.existingClaim }}
+# PVC for workspace content storage (REQUIRED — Omnia does not function without it)
+# The operator writes SkillSource content here and serves it via the content API;
+# skills and arena read from it.
+# Requires RWX storage class (NFS or cloud-native RWX); RWO single-node only.
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:

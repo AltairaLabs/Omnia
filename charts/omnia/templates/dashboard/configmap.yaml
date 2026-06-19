@@ -160,16 +160,14 @@ data:
   OMNIA_AUTH_API_KEYS_DEFAULT_EXPIRATION: {{ .Values.dashboard.apiKeys.defaultExpiration | quote }}
 
   # Workspace content storage
-  {{- if .Values.workspaceContent.enabled }}
   # WORKSPACE_CONTENT_PATH is no longer an NFS mount in the dashboard pod; it is
   # retained as a path-string config so arena template preview/render can build
   # the absolute paths the arena-controller (which owns its own mount) expects.
   WORKSPACE_CONTENT_PATH: {{ .Values.workspaceContent.mountPath | default "/workspace-content" | quote }}
-  {{- end }}
   {{- /*
     OPERATOR_CONTENT_API_URL points the dashboard's content-api-service at the
     operator's authenticated workspace-content API (#1462). Set whenever that
-    API is served (dashboard + workspaceContent enabled).
+    API is served (dashboard enabled).
   */}}
   {{- $contentApiAddr := include "omnia.contentApi.bindAddress" . }}
   {{- if $contentApiAddr }}
