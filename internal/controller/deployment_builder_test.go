@@ -1513,25 +1513,25 @@ func TestBuildDeploymentSpec_MetricsPortContract(t *testing.T) {
 
 	// Both metrics-serving containers must declare a "metrics"-named port so a
 	// single name-keyed scrape job / PodMonitor covers the whole pod.
-	var facade, runtime *corev1.Container
+	var facadeC, runtimeC *corev1.Container
 	for i := range dep.Spec.Template.Spec.Containers {
 		c := &dep.Spec.Template.Spec.Containers[i]
 		switch c.Name {
 		case FacadeContainerName:
-			facade = c
+			facadeC = c
 		case RuntimeContainerName:
-			runtime = c
+			runtimeC = c
 		}
 	}
-	require.NotNil(t, facade, "facade container must be present")
-	require.NotNil(t, runtime, "runtime container must be present")
+	require.NotNil(t, facadeC, "facade container must be present")
+	require.NotNil(t, runtimeC, "runtime container must be present")
 
-	facadeMetrics := containerPortByName(facade, metricsPortName)
+	facadeMetrics := containerPortByName(facadeC, metricsPortName)
 	require.NotNil(t, facadeMetrics, "facade must declare a %q port", metricsPortName)
 	assert.Equal(t, int32(DefaultFacadeHealthPort), facadeMetrics.ContainerPort,
 		"facade metrics port number")
 
-	runtimeMetrics := containerPortByName(runtime, metricsPortName)
+	runtimeMetrics := containerPortByName(runtimeC, metricsPortName)
 	require.NotNil(t, runtimeMetrics, "runtime must declare a %q port", metricsPortName)
 	assert.Equal(t, int32(DefaultRuntimeHealthPort), runtimeMetrics.ContainerPort,
 		"runtime metrics port number")
