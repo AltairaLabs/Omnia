@@ -53,7 +53,7 @@ describe("EnterpriseGate", () => {
 
     // Should show upgrade prompt
     expect(screen.getByText("Enterprise Feature")).toBeInTheDocument();
-    expect(screen.getByText(/Arena Fleet is an enterprise feature/)).toBeInTheDocument();
+    expect(screen.getByText(/Arena Fleet is an Omnia Enterprise feature/)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Upgrade to Enterprise/i })).toBeInTheDocument();
   });
 
@@ -127,7 +127,7 @@ describe("EnterpriseUpgradePage", () => {
     render(<EnterpriseUpgradePage featureName="Arena Fleet" />);
 
     expect(screen.getByText("Enterprise Feature")).toBeInTheDocument();
-    expect(screen.getByText(/Arena Fleet is an enterprise feature/)).toBeInTheDocument();
+    expect(screen.getByText(/Arena Fleet is an Omnia Enterprise feature/)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Upgrade to Enterprise/i })).toHaveAttribute(
       "href",
       "https://altairalabs.ai/enterprise"
