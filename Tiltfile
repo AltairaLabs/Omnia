@@ -1197,8 +1197,8 @@ if ENABLE_AUDIO_DEMO:
 # Tilt can't track them as k8s_image_json_path resources. Instead, we watch
 # source deps, rebuild images, and restart pods in a single atomic flow.
 
-_rebuild_facade_cmd = 'docker build --no-cache -f Dockerfile.agent -t omnia-facade-dev:latest .'
-_rebuild_runtime_cmd = 'docker build --no-cache -f Dockerfile.runtime'
+_rebuild_facade_cmd = 'docker build -f Dockerfile.agent -t omnia-facade-dev:latest .'
+_rebuild_runtime_cmd = 'docker build -f Dockerfile.runtime'
 if USE_LOCAL_PROMPTKIT:
     _rebuild_runtime_cmd += ' --build-arg USE_LOCAL_PROMPTKIT=true'
 _rebuild_runtime_cmd += ' -t omnia-runtime-dev:latest .'
@@ -1212,12 +1212,12 @@ _restart_cmd = '''
 # running pod without an explicit roll. Without this, fixes to the memory-api
 # binary silently sit in the image while the cluster runs the old code —
 # exactly the wiring trap that bit hybrid recall on the multi-tier path.
-_rebuild_memory_api_cmd = 'docker build --no-cache -f Dockerfile.memory-api -t omnia-memory-api-dev:latest .'
-_rebuild_session_api_cmd = 'docker build --no-cache -f Dockerfile.session-api -t omnia-session-api-dev:latest .'
+_rebuild_memory_api_cmd = 'docker build -f Dockerfile.memory-api -t omnia-memory-api-dev:latest .'
+_rebuild_session_api_cmd = 'docker build -f Dockerfile.session-api -t omnia-session-api-dev:latest .'
 # Policy-proxy is an operator-injected sidecar in agent pods (EE/ToolPolicy
 # enforcement). A source edit rebuilds the image, but only restarting the agent
 # pods picks up the new sidecar — same wiring trap as the api binaries above.
-_rebuild_policy_proxy_cmd = 'docker build --no-cache -f ./ee/Dockerfile.policy-proxy -t omnia-policy-proxy-dev:latest .'
+_rebuild_policy_proxy_cmd = 'docker build -f ./ee/Dockerfile.policy-proxy -t omnia-policy-proxy-dev:latest .'
 # Delete the pod (not the deployment): the operator owns the Deployment spec
 # and reconciles `kubectl rollout restart` annotations away. Pod deletion lets
 # the existing ReplicaSet recreate with the same `:latest` image we just
