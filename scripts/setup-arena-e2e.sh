@@ -331,7 +331,6 @@ retry 2 15 helm upgrade --install omnia charts/omnia \
     --set redis.master.containerSecurityContext.enabled=false \
     --set nfs.server.enabled=false \
     --set nfs.csiDriver.enabled=false \
-    --set workspaceContent.enabled=true \
     --set workspaceContent.persistence.accessModes[0]=ReadWriteOnce \
     --set workspaceContent.persistence.storageClass=omnia-workspace-content-static \
     --set workspaceContent.persistence.size=1Gi \

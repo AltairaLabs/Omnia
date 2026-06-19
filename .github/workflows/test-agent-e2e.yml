@@ -170,7 +170,7 @@ jobs:
             --set framework.image.pullPolicy=Never \
             --set dashboard.enabled=false \
             --set keda.enabled=false \
-            --set workspaceContent.enabled=false \
+            --set 'workspaceContent.persistence.accessModes[0]=ReadWriteOnce' \
             --set devMode=true \
             --timeout 10m
 
