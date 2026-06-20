@@ -102,6 +102,7 @@ func main() {
 	var sessionAPIAuthIstioMTLS bool
 	var sessionAPIAuthExtraSubjects string
 	var sessionAPITokenReviewClusterRole string
+	var memoryEnterpriseReaderClusterRole string
 	var enterpriseEnabled bool
 	var licenseServerURL string
 	var clusterName string
@@ -228,6 +229,11 @@ func main() {
 		"Name of the install-wide ClusterRole granting authentication.k8s.io/tokenreviews:create. "+
 			"When --session-api-auth-enabled is set, the operator binds each per-workspace session-api "+
 			"ServiceAccount to it so session-api can validate caller tokens. Provisioned by the chart.")
+	flag.StringVar(&memoryEnterpriseReaderClusterRole, "memory-enterprise-reader-clusterrole", "",
+		"Name of the install-wide ClusterRole granting cluster reads on sessionprivacypolicies + "+
+			"agentruntimes. On enterprise builds the operator binds each per-workspace memory-api "+
+			"ServiceAccount to it so the privacy/memory-policy watcher can start. Provisioned by the "+
+			"chart (enterprise only); empty disables the binding.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
 	flag.BoolVar(&enableLeaderElection, "leader-elect", false,
 		"Enable leader election for controller manager. "+
@@ -434,9 +440,10 @@ func main() {
 			ServiceAuth: serviceAuth,
 			Enterprise:  enterpriseEnabled,
 		},
-		AgentWorkspaceReaderClusterRole:  agentWorkspaceReaderClusterRole,
-		OperatorNamespace:                os.Getenv("POD_NAMESPACE"),
-		SessionAPITokenReviewClusterRole: sessionAPITokenReviewClusterRole,
+		AgentWorkspaceReaderClusterRole:   agentWorkspaceReaderClusterRole,
+		OperatorNamespace:                 os.Getenv("POD_NAMESPACE"),
+		SessionAPITokenReviewClusterRole:  sessionAPITokenReviewClusterRole,
+		MemoryEnterpriseReaderClusterRole: memoryEnterpriseReaderClusterRole,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, errUnableToCreateController, logKeyController, "Workspace")
 		os.Exit(1)

@@ -233,6 +233,11 @@ spec:
             {{- if .Values.enterprise.enabled }}
             - --enterprise
             - --policy-proxy-image={{ .Values.enterprise.policyProxy.image.repository }}:{{ .Values.enterprise.policyProxy.image.tag | default .Chart.AppVersion }}
+            # On enterprise builds, the managed memory-api runs a privacy/memory-policy
+            # watcher that lists SessionPrivacyPolicy + AgentRuntime CRDs cluster-wide.
+            # Tell the operator the reader ClusterRole name so it binds each memory-api
+            # ServiceAccount to it (#1444).
+            - --memory-enterprise-reader-clusterrole={{ include "omnia.fullname" . }}-memory-enterprise-reader
             {{- end }}
             {{- if .Values.rollout.meshEnabled }}
             # Istio ambient + waypoint present — let the operator manage
