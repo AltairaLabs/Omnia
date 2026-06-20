@@ -14,9 +14,10 @@ vi.mock("@/hooks/resources", () => ({
 
 vi.mock("next/navigation", () => ({
   usePathname: vi.fn(() => "/sessions"),
+  useSearchParams: vi.fn(() => new URLSearchParams()),
 }));
 
-import { usePathname } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import { useWorkspaces, type WorkspaceListItem } from "@/hooks/resources";
 
 const mockWorkspaces: WorkspaceListItem[] = [
@@ -160,6 +161,88 @@ describe("WorkspaceContext", () => {
   });
 
   it("auto-selects first workspace when none selected", async () => {
+    vi.mocked(useWorkspaces).mockReturnValue({
+      data: mockWorkspaces,
+      isLoading: false,
+      error: null,
+      refetch: vi.fn(),
+    } as unknown as ReturnType<typeof useWorkspaces>);
+
+    const Wrapper = createWrapper();
+    render(
+      <Wrapper>
+        <WorkspaceProvider>
+          <TestConsumer />
+        </WorkspaceProvider>
+      </Wrapper>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("current-workspace").textContent).toBe("workspace-1");
+    });
+  });
+
+  it("selects the workspace named by the ?workspace= URL anchor", async () => {
+    vi.mocked(useSearchParams).mockReturnValue(
+      new URLSearchParams("workspace=workspace-2") as unknown as ReturnType<
+        typeof useSearchParams
+      >
+    );
+    vi.mocked(useWorkspaces).mockReturnValue({
+      data: mockWorkspaces,
+      isLoading: false,
+      error: null,
+      refetch: vi.fn(),
+    } as unknown as ReturnType<typeof useWorkspaces>);
+
+    const Wrapper = createWrapper();
+    render(
+      <Wrapper>
+        <WorkspaceProvider>
+          <TestConsumer />
+        </WorkspaceProvider>
+      </Wrapper>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("current-workspace").textContent).toBe("workspace-2");
+    });
+  });
+
+  it("prefers the ?workspace= URL anchor over the stored workspace", async () => {
+    mockLocalStorage["omnia-selected-workspace"] = "workspace-1";
+    vi.mocked(useSearchParams).mockReturnValue(
+      new URLSearchParams("workspace=workspace-2") as unknown as ReturnType<
+        typeof useSearchParams
+      >
+    );
+    vi.mocked(useWorkspaces).mockReturnValue({
+      data: mockWorkspaces,
+      isLoading: false,
+      error: null,
+      refetch: vi.fn(),
+    } as unknown as ReturnType<typeof useWorkspaces>);
+
+    const Wrapper = createWrapper();
+    render(
+      <Wrapper>
+        <WorkspaceProvider>
+          <TestConsumer />
+        </WorkspaceProvider>
+      </Wrapper>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("current-workspace").textContent).toBe("workspace-2");
+    });
+  });
+
+  it("falls back to the first workspace when the ?workspace= anchor is unknown", async () => {
+    vi.mocked(useSearchParams).mockReturnValue(
+      new URLSearchParams("workspace=does-not-exist") as unknown as ReturnType<
+        typeof useSearchParams
+      >
+    );
     vi.mocked(useWorkspaces).mockReturnValue({
       data: mockWorkspaces,
       isLoading: false,

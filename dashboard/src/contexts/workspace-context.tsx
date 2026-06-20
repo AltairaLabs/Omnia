@@ -20,11 +20,18 @@ import {
   useCallback,
   type ReactNode,
 } from "react";
-import { usePathname } from "next/navigation";
+import {
+  usePathname,
+  useSearchParams,
+  type ReadonlyURLSearchParams,
+} from "next/navigation";
 import { useWorkspaces, type WorkspaceListItem } from "@/hooks/resources";
 import { isChromelessPath } from "@/lib/routes";
 
 const STORAGE_KEY = "omnia-selected-workspace";
+
+/** Query-string key that anchors a workspace in a URL for deep-linking. */
+export const WORKSPACE_QUERY_PARAM = "workspace";
 
 /**
  * Get the stored workspace name from localStorage.
@@ -33,6 +40,18 @@ const STORAGE_KEY = "omnia-selected-workspace";
 function getStoredWorkspaceName(): string | null {
   if (typeof window === "undefined") return null;
   return localStorage.getItem(STORAGE_KEY);
+}
+
+/**
+ * Initial workspace selection: a `?workspace=` URL anchor wins over the
+ * localStorage value, so a deep link / shared link resolves to the workspace
+ * it names. Falls back to the stored selection, then to null (the provider
+ * defaults to the first workspace once the list loads).
+ */
+function getInitialWorkspaceName(
+  searchParams: ReadonlyURLSearchParams | null
+): string | null {
+  return searchParams?.get(WORKSPACE_QUERY_PARAM) ?? getStoredWorkspaceName();
 }
 
 interface WorkspaceContextValue {
@@ -65,31 +84,33 @@ interface WorkspaceProviderProps {
  */
 export function WorkspaceProvider({ children }: Readonly<WorkspaceProviderProps>) {
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   const { data: workspaces = [], isLoading, error, refetch } = useWorkspaces({
     enabled: !isChromelessPath(pathname ?? ""),
   });
-  // Initialize state with stored value (lazy initializer runs once on mount)
+  // Initialize state from the URL anchor (deep link) or stored value.
+  // Lazy initializer runs once on mount, capturing the first-render params.
   const [selectedWorkspaceName, setSelectedWorkspaceName] = useState<string | null>(
-    () => getStoredWorkspaceName()
+    () => getInitialWorkspaceName(searchParams)
   );
 
-  // Compute the effective selected workspace name, defaulting to first workspace
-  // if no selection or the selected workspace doesn't exist
+  // Compute the effective selected workspace name, defaulting to the first
+  // workspace when there's no valid selection. Persists the chosen name so a
+  // deep-linked or switched workspace sticks across subsequent loads.
   const effectiveWorkspaceName = useMemo(() => {
     if (isLoading || workspaces.length === 0) return null;
 
-    // If we have a selection and it exists in the workspace list, use it
-    if (selectedWorkspaceName) {
-      const exists = workspaces.some(ws => ws.name === selectedWorkspaceName);
-      if (exists) return selectedWorkspaceName;
-    }
+    const selectionExists =
+      !!selectedWorkspaceName &&
+      workspaces.some(ws => ws.name === selectedWorkspaceName);
+    const chosen = selectionExists
+      ? (selectedWorkspaceName as string)
+      : workspaces[0].name;
 
-    // Default to first workspace and persist it
-    const firstWorkspace = workspaces[0].name;
     if (typeof window !== "undefined") {
-      localStorage.setItem(STORAGE_KEY, firstWorkspace);
+      localStorage.setItem(STORAGE_KEY, chosen);
     }
-    return firstWorkspace;
+    return chosen;
   }, [selectedWorkspaceName, workspaces, isLoading]);
 
   // Find the current workspace object
