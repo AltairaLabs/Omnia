@@ -4,33 +4,15 @@
  */
 
 export interface paths {
-    "/api/v1/agents": {
+    "/api/health": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /** List all AgentRuntimes */
-        get: operations["listAgents"];
-        put?: never;
-        /** Create a new AgentRuntime */
-        post: operations["createAgent"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/agents/{namespace}/{name}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get a specific AgentRuntime */
-        get: operations["getAgent"];
+        /** Service health check */
+        get: operations["getHealth"];
         put?: never;
         post?: never;
         delete?: never;
@@ -39,11 +21,61 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/agents/{namespace}/{name}/scale": {
+    "/api/workspaces/{name}/agents": {
         parameters: {
             query?: never;
             header?: never;
-            path?: never;
+            path: {
+                /** @description Workspace name; the server resolves the namespace from the Workspace CR. */
+                name: components["parameters"]["WorkspaceName"];
+            };
+            cookie?: never;
+        };
+        /** List AgentRuntimes in the workspace */
+        get: operations["listAgents"];
+        put?: never;
+        /** Create an AgentRuntime */
+        post: operations["createAgent"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workspaces/{name}/agents/{resourceName}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace name; the server resolves the namespace from the Workspace CR. */
+                name: components["parameters"]["WorkspaceName"];
+                /** @description Name of the resource within the workspace. */
+                resourceName: components["parameters"]["ResourceName"];
+            };
+            cookie?: never;
+        };
+        /** Get an AgentRuntime */
+        get: operations["getAgent"];
+        /** Update an AgentRuntime */
+        put: operations["updateAgent"];
+        post?: never;
+        /** Delete an AgentRuntime */
+        delete: operations["deleteAgent"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workspaces/{name}/agents/{resourceName}/scale": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace name; the server resolves the namespace from the Workspace CR. */
+                name: components["parameters"]["WorkspaceName"];
+                /** @description Name of the resource within the workspace. */
+                resourceName: components["parameters"]["ResourceName"];
+            };
             cookie?: never;
         };
         get?: never;
@@ -56,11 +88,16 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/agents/{namespace}/{name}/logs": {
+    "/api/workspaces/{name}/agents/{resourceName}/logs": {
         parameters: {
             query?: never;
             header?: never;
-            path?: never;
+            path: {
+                /** @description Workspace name; the server resolves the namespace from the Workspace CR. */
+                name: components["parameters"]["WorkspaceName"];
+                /** @description Name of the resource within the workspace. */
+                resourceName: components["parameters"]["ResourceName"];
+            };
             cookie?: never;
         };
         /** Get logs from an agent's pods */
@@ -73,21 +110,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/promptpacks": {
+    "/api/workspaces/{name}/promptpacks": {
         parameters: {
             query?: never;
             header?: never;
-            path?: never;
+            path: {
+                /** @description Workspace name; the server resolves the namespace from the Workspace CR. */
+                name: components["parameters"]["WorkspaceName"];
+            };
             cookie?: never;
         };
-        /** List all PromptPacks */
+        /** List PromptPacks in the workspace */
         get: operations["listPromptPacks"];
         put?: never;
         /**
-         * Create a new PromptPack
-         * @description Creates a PromptPack CRD. If the optional `content` field is provided in the
-         *     request body, a backing ConfigMap is created automatically and the PromptPack's
-         *     `spec.source` is set to reference it.
+         * Create a PromptPack
+         * @description Creates a PromptPack. If the optional `content` field is provided, a
+         *     backing ConfigMap named `{name}-content` is created automatically and
+         *     the PromptPack's `spec.source` is set to reference it server-side.
          */
         post: operations["createPromptPack"];
         delete?: never;
@@ -96,26 +136,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/promptpacks/{namespace}/{name}": {
+    "/api/workspaces/{name}/promptpacks/{resourceName}": {
         parameters: {
             query?: never;
             header?: never;
-            path?: never;
+            path: {
+                /** @description Workspace name; the server resolves the namespace from the Workspace CR. */
+                name: components["parameters"]["WorkspaceName"];
+                /** @description Name of the resource within the workspace. */
+                resourceName: components["parameters"]["ResourceName"];
+            };
             cookie?: never;
         };
-        /** Get a specific PromptPack */
+        /** Get a PromptPack */
         get: operations["getPromptPack"];
         /**
          * Update a PromptPack
-         * @description Updates a PromptPack CRD. If the optional `content` field is provided,
-         *     the backing ConfigMap is updated (or created if it doesn't exist).
+         * @description Updates a PromptPack. If `content` is provided, the backing ConfigMap
+         *     is updated (or created).
          */
         put: operations["updatePromptPack"];
         post?: never;
         /**
          * Delete a PromptPack
-         * @description Deletes a PromptPack CRD and its backing ConfigMap (if one exists
-         *     with the naming convention `{name}-content`).
+         * @description Deletes the PromptPack and its backing `{name}-content` ConfigMap.
          */
         delete: operations["deletePromptPack"];
         options?: never;
@@ -123,17 +167,20 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/toolregistries": {
+    "/api/workspaces/{name}/toolregistries": {
         parameters: {
             query?: never;
             header?: never;
-            path?: never;
+            path: {
+                /** @description Workspace name; the server resolves the namespace from the Workspace CR. */
+                name: components["parameters"]["WorkspaceName"];
+            };
             cookie?: never;
         };
-        /** List all ToolRegistries */
+        /** List ToolRegistries in the workspace */
         get: operations["listToolRegistries"];
         put?: never;
-        /** Create a new ToolRegistry */
+        /** Create a ToolRegistry */
         post: operations["createToolRegistry"];
         delete?: never;
         options?: never;
@@ -141,14 +188,19 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/toolregistries/{namespace}/{name}": {
+    "/api/workspaces/{name}/toolregistries/{resourceName}": {
         parameters: {
             query?: never;
             header?: never;
-            path?: never;
+            path: {
+                /** @description Workspace name; the server resolves the namespace from the Workspace CR. */
+                name: components["parameters"]["WorkspaceName"];
+                /** @description Name of the resource within the workspace. */
+                resourceName: components["parameters"]["ResourceName"];
+            };
             cookie?: never;
         };
-        /** Get a specific ToolRegistry */
+        /** Get a ToolRegistry */
         get: operations["getToolRegistry"];
         /** Update a ToolRegistry */
         put: operations["updateToolRegistry"];
@@ -160,33 +212,43 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/providers": {
+    "/api/workspaces/{name}/providers": {
         parameters: {
             query?: never;
             header?: never;
-            path?: never;
+            path: {
+                /** @description Workspace name; the server resolves the namespace from the Workspace CR. */
+                name: components["parameters"]["WorkspaceName"];
+            };
             cookie?: never;
         };
-        /** List all Providers */
+        /** List Providers in the workspace */
         get: operations["listProviders"];
         put?: never;
-        post?: never;
+        /** Create a Provider */
+        post: operations["createProvider"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/v1/providers/{namespace}/{name}": {
+    "/api/workspaces/{name}/providers/{resourceName}": {
         parameters: {
             query?: never;
             header?: never;
-            path?: never;
+            path: {
+                /** @description Workspace name; the server resolves the namespace from the Workspace CR. */
+                name: components["parameters"]["WorkspaceName"];
+                /** @description Name of the resource within the workspace. */
+                resourceName: components["parameters"]["ResourceName"];
+            };
             cookie?: never;
         };
-        /** Get a specific Provider */
+        /** Get a Provider */
         get: operations["getProvider"];
-        put?: never;
+        /** Update a Provider */
+        put: operations["updateProvider"];
         post?: never;
         delete?: never;
         options?: never;
@@ -194,17 +256,20 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/agentpolicies": {
+    "/api/workspaces/{name}/agentpolicies": {
         parameters: {
             query?: never;
             header?: never;
-            path?: never;
+            path: {
+                /** @description Workspace name; the server resolves the namespace from the Workspace CR. */
+                name: components["parameters"]["WorkspaceName"];
+            };
             cookie?: never;
         };
-        /** List all AgentPolicies */
+        /** List AgentPolicies in the workspace */
         get: operations["listAgentPolicies"];
         put?: never;
-        /** Create a new AgentPolicy */
+        /** Create an AgentPolicy */
         post: operations["createAgentPolicy"];
         delete?: never;
         options?: never;
@@ -212,14 +277,19 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/agentpolicies/{namespace}/{name}": {
+    "/api/workspaces/{name}/agentpolicies/{resourceName}": {
         parameters: {
             query?: never;
             header?: never;
-            path?: never;
+            path: {
+                /** @description Workspace name; the server resolves the namespace from the Workspace CR. */
+                name: components["parameters"]["WorkspaceName"];
+                /** @description Name of the resource within the workspace. */
+                resourceName: components["parameters"]["ResourceName"];
+            };
             cookie?: never;
         };
-        /** Get a specific AgentPolicy */
+        /** Get an AgentPolicy */
         get: operations["getAgentPolicy"];
         /** Update an AgentPolicy */
         put: operations["updateAgentPolicy"];
@@ -231,17 +301,20 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/toolpolicies": {
+    "/api/workspaces/{name}/toolpolicies": {
         parameters: {
             query?: never;
             header?: never;
-            path?: never;
+            path: {
+                /** @description Workspace name; the server resolves the namespace from the Workspace CR. */
+                name: components["parameters"]["WorkspaceName"];
+            };
             cookie?: never;
         };
-        /** List all ToolPolicies */
+        /** List ToolPolicies in the workspace */
         get: operations["listToolPolicies"];
         put?: never;
-        /** Create a new ToolPolicy */
+        /** Create a ToolPolicy */
         post: operations["createToolPolicy"];
         delete?: never;
         options?: never;
@@ -249,14 +322,19 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/toolpolicies/{namespace}/{name}": {
+    "/api/workspaces/{name}/toolpolicies/{resourceName}": {
         parameters: {
             query?: never;
             header?: never;
-            path?: never;
+            path: {
+                /** @description Workspace name; the server resolves the namespace from the Workspace CR. */
+                name: components["parameters"]["WorkspaceName"];
+                /** @description Name of the resource within the workspace. */
+                resourceName: components["parameters"]["ResourceName"];
+            };
             cookie?: never;
         };
-        /** Get a specific ToolPolicy */
+        /** Get a ToolPolicy */
         get: operations["getToolPolicy"];
         /** Update a ToolPolicy */
         put: operations["updateToolPolicy"];
@@ -268,32 +346,18 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/stats": {
+    "/api/workspaces/{name}/stats": {
         parameters: {
             query?: never;
             header?: never;
-            path?: never;
+            path: {
+                /** @description Workspace name; the server resolves the namespace from the Workspace CR. */
+                name: components["parameters"]["WorkspaceName"];
+            };
             cookie?: never;
         };
-        /** Get aggregated statistics */
+        /** Get aggregated statistics for the workspace */
         get: operations["getStats"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/namespaces": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List all namespaces */
-        get: operations["listNamespaces"];
         put?: never;
         post?: never;
         delete?: never;
@@ -306,6 +370,26 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /**
+         * @description Generic create/update body accepted by the workspace CRD routes. The
+         *     server reads `metadata` (name, labels, annotations) and `spec`, adds a
+         *     workspace label, and ignores any `apiVersion`/`kind`.
+         */
+        CrdWriteRequest: {
+            metadata?: {
+                name?: string;
+                labels?: {
+                    [key: string]: string;
+                };
+                annotations?: {
+                    [key: string]: string;
+                };
+            };
+            /** @description The resource spec (shape depends on the resource kind). */
+            spec: {
+                [key: string]: unknown;
+            };
+        };
         Error: {
             error: string;
         };
@@ -829,6 +913,33 @@ export interface components {
         };
     };
     responses: {
+        /** @description Missing or invalid API key */
+        Unauthorized: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
+        /** @description API key lacks the required workspace role */
+        Forbidden: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
+        /** @description Resource already exists */
+        Conflict: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
         /** @description Resource not found */
         NotFound: {
             headers: {
@@ -857,23 +968,55 @@ export interface components {
             };
         };
     };
-    parameters: never;
+    parameters: {
+        /** @description Workspace name; the server resolves the namespace from the Workspace CR. */
+        WorkspaceName: string;
+        /** @description Name of the resource within the workspace. */
+        ResourceName: string;
+        /** @description Kubernetes label selector for filtering. */
+        LabelSelector: string;
+    };
     requestBodies: never;
     headers: never;
     pathItems: never;
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    getHealth: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Service is healthy */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        status?: string;
+                        /** Format: date-time */
+                        timestamp?: string;
+                    };
+                };
+            };
+        };
+    };
     listAgents: {
         parameters: {
             query?: {
-                /** @description Filter by namespace */
-                namespace?: string;
-                /** @description Kubernetes label selector for filtering */
-                labelSelector?: string;
+                /** @description Kubernetes label selector for filtering. */
+                labelSelector?: components["parameters"]["LabelSelector"];
             };
             header?: never;
-            path?: never;
+            path: {
+                /** @description Workspace name; the server resolves the namespace from the Workspace CR. */
+                name: components["parameters"]["WorkspaceName"];
+            };
             cookie?: never;
         };
         requestBody?: never;
@@ -887,6 +1030,8 @@ export interface operations {
                     "application/json": components["schemas"]["AgentRuntime"][];
                 };
             };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -894,16 +1039,19 @@ export interface operations {
         parameters: {
             query?: never;
             header?: never;
-            path?: never;
+            path: {
+                /** @description Workspace name; the server resolves the namespace from the Workspace CR. */
+                name: components["parameters"]["WorkspaceName"];
+            };
             cookie?: never;
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["AgentRuntime"];
+                "application/json": components["schemas"]["CrdWriteRequest"];
             };
         };
         responses: {
-            /** @description Agent created successfully */
+            /** @description Agent created */
             201: {
                 headers: {
                     [name: string]: unknown;
@@ -913,15 +1061,9 @@ export interface operations {
                 };
             };
             400: components["responses"]["BadRequest"];
-            /** @description Agent already exists */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -930,8 +1072,10 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                namespace: string;
-                name: string;
+                /** @description Workspace name; the server resolves the namespace from the Workspace CR. */
+                name: components["parameters"]["WorkspaceName"];
+                /** @description Name of the resource within the workspace. */
+                resourceName: components["parameters"]["ResourceName"];
             };
             cookie?: never;
         };
@@ -950,13 +1094,72 @@ export interface operations {
             500: components["responses"]["InternalError"];
         };
     };
+    updateAgent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace name; the server resolves the namespace from the Workspace CR. */
+                name: components["parameters"]["WorkspaceName"];
+                /** @description Name of the resource within the workspace. */
+                resourceName: components["parameters"]["ResourceName"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CrdWriteRequest"];
+            };
+        };
+        responses: {
+            /** @description Agent updated */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentRuntime"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    deleteAgent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace name; the server resolves the namespace from the Workspace CR. */
+                name: components["parameters"]["WorkspaceName"];
+                /** @description Name of the resource within the workspace. */
+                resourceName: components["parameters"]["ResourceName"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Agent deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
     scaleAgent: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                namespace: string;
-                name: string;
+                /** @description Workspace name; the server resolves the namespace from the Workspace CR. */
+                name: components["parameters"]["WorkspaceName"];
+                /** @description Name of the resource within the workspace. */
+                resourceName: components["parameters"]["ResourceName"];
             };
             cookie?: never;
         };
@@ -966,7 +1169,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Agent scaled successfully */
+            /** @description Agent scaled */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -983,17 +1186,16 @@ export interface operations {
     getAgentLogs: {
         parameters: {
             query?: {
-                /** @description Number of lines to return from the end of logs */
                 tailLines?: number;
-                /** @description Return logs from the last N seconds */
                 sinceSeconds?: number;
-                /** @description Filter logs by container name */
                 container?: string;
             };
             header?: never;
             path: {
-                namespace: string;
-                name: string;
+                /** @description Workspace name; the server resolves the namespace from the Workspace CR. */
+                name: components["parameters"]["WorkspaceName"];
+                /** @description Name of the resource within the workspace. */
+                resourceName: components["parameters"]["ResourceName"];
             };
             cookie?: never;
         };
@@ -1014,13 +1216,14 @@ export interface operations {
     listPromptPacks: {
         parameters: {
             query?: {
-                /** @description Filter by namespace */
-                namespace?: string;
-                /** @description Kubernetes label selector for filtering */
-                labelSelector?: string;
+                /** @description Kubernetes label selector for filtering. */
+                labelSelector?: components["parameters"]["LabelSelector"];
             };
             header?: never;
-            path?: never;
+            path: {
+                /** @description Workspace name; the server resolves the namespace from the Workspace CR. */
+                name: components["parameters"]["WorkspaceName"];
+            };
             cookie?: never;
         };
         requestBody?: never;
@@ -1041,7 +1244,10 @@ export interface operations {
         parameters: {
             query?: never;
             header?: never;
-            path?: never;
+            path: {
+                /** @description Workspace name; the server resolves the namespace from the Workspace CR. */
+                name: components["parameters"]["WorkspaceName"];
+            };
             cookie?: never;
         };
         requestBody: {
@@ -1050,7 +1256,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description PromptPack created successfully */
+            /** @description PromptPack created */
             201: {
                 headers: {
                     [name: string]: unknown;
@@ -1060,15 +1266,7 @@ export interface operations {
                 };
             };
             400: components["responses"]["BadRequest"];
-            /** @description PromptPack already exists */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
+            409: components["responses"]["Conflict"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -1077,8 +1275,10 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                namespace: string;
-                name: string;
+                /** @description Workspace name; the server resolves the namespace from the Workspace CR. */
+                name: components["parameters"]["WorkspaceName"];
+                /** @description Name of the resource within the workspace. */
+                resourceName: components["parameters"]["ResourceName"];
             };
             cookie?: never;
         };
@@ -1102,8 +1302,10 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                namespace: string;
-                name: string;
+                /** @description Workspace name; the server resolves the namespace from the Workspace CR. */
+                name: components["parameters"]["WorkspaceName"];
+                /** @description Name of the resource within the workspace. */
+                resourceName: components["parameters"]["ResourceName"];
             };
             cookie?: never;
         };
@@ -1113,7 +1315,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description PromptPack updated successfully */
+            /** @description PromptPack updated */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -1132,14 +1334,16 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                namespace: string;
-                name: string;
+                /** @description Workspace name; the server resolves the namespace from the Workspace CR. */
+                name: components["parameters"]["WorkspaceName"];
+                /** @description Name of the resource within the workspace. */
+                resourceName: components["parameters"]["ResourceName"];
             };
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description PromptPack deleted successfully */
+            /** @description PromptPack deleted */
             204: {
                 headers: {
                     [name: string]: unknown;
@@ -1153,13 +1357,14 @@ export interface operations {
     listToolRegistries: {
         parameters: {
             query?: {
-                /** @description Filter by namespace */
-                namespace?: string;
-                /** @description Kubernetes label selector for filtering */
-                labelSelector?: string;
+                /** @description Kubernetes label selector for filtering. */
+                labelSelector?: components["parameters"]["LabelSelector"];
             };
             header?: never;
-            path?: never;
+            path: {
+                /** @description Workspace name; the server resolves the namespace from the Workspace CR. */
+                name: components["parameters"]["WorkspaceName"];
+            };
             cookie?: never;
         };
         requestBody?: never;
@@ -1180,16 +1385,19 @@ export interface operations {
         parameters: {
             query?: never;
             header?: never;
-            path?: never;
+            path: {
+                /** @description Workspace name; the server resolves the namespace from the Workspace CR. */
+                name: components["parameters"]["WorkspaceName"];
+            };
             cookie?: never;
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["ToolRegistry"];
+                "application/json": components["schemas"]["CrdWriteRequest"];
             };
         };
         responses: {
-            /** @description ToolRegistry created successfully */
+            /** @description ToolRegistry created */
             201: {
                 headers: {
                     [name: string]: unknown;
@@ -1199,15 +1407,7 @@ export interface operations {
                 };
             };
             400: components["responses"]["BadRequest"];
-            /** @description ToolRegistry already exists */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
+            409: components["responses"]["Conflict"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -1216,8 +1416,10 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                namespace: string;
-                name: string;
+                /** @description Workspace name; the server resolves the namespace from the Workspace CR. */
+                name: components["parameters"]["WorkspaceName"];
+                /** @description Name of the resource within the workspace. */
+                resourceName: components["parameters"]["ResourceName"];
             };
             cookie?: never;
         };
@@ -1241,18 +1443,20 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                namespace: string;
-                name: string;
+                /** @description Workspace name; the server resolves the namespace from the Workspace CR. */
+                name: components["parameters"]["WorkspaceName"];
+                /** @description Name of the resource within the workspace. */
+                resourceName: components["parameters"]["ResourceName"];
             };
             cookie?: never;
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["ToolRegistry"];
+                "application/json": components["schemas"]["CrdWriteRequest"];
             };
         };
         responses: {
-            /** @description ToolRegistry updated successfully */
+            /** @description ToolRegistry updated */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -1271,14 +1475,16 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                namespace: string;
-                name: string;
+                /** @description Workspace name; the server resolves the namespace from the Workspace CR. */
+                name: components["parameters"]["WorkspaceName"];
+                /** @description Name of the resource within the workspace. */
+                resourceName: components["parameters"]["ResourceName"];
             };
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description ToolRegistry deleted successfully */
+            /** @description ToolRegistry deleted */
             204: {
                 headers: {
                     [name: string]: unknown;
@@ -1292,13 +1498,14 @@ export interface operations {
     listProviders: {
         parameters: {
             query?: {
-                /** @description Filter by namespace */
-                namespace?: string;
-                /** @description Kubernetes label selector for filtering */
-                labelSelector?: string;
+                /** @description Kubernetes label selector for filtering. */
+                labelSelector?: components["parameters"]["LabelSelector"];
             };
             header?: never;
-            path?: never;
+            path: {
+                /** @description Workspace name; the server resolves the namespace from the Workspace CR. */
+                name: components["parameters"]["WorkspaceName"];
+            };
             cookie?: never;
         };
         requestBody?: never;
@@ -1315,13 +1522,45 @@ export interface operations {
             500: components["responses"]["InternalError"];
         };
     };
+    createProvider: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace name; the server resolves the namespace from the Workspace CR. */
+                name: components["parameters"]["WorkspaceName"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CrdWriteRequest"];
+            };
+        };
+        responses: {
+            /** @description Provider created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Provider"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            409: components["responses"]["Conflict"];
+            500: components["responses"]["InternalError"];
+        };
+    };
     getProvider: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                namespace: string;
-                name: string;
+                /** @description Workspace name; the server resolves the namespace from the Workspace CR. */
+                name: components["parameters"]["WorkspaceName"];
+                /** @description Name of the resource within the workspace. */
+                resourceName: components["parameters"]["ResourceName"];
             };
             cookie?: never;
         };
@@ -1340,16 +1579,49 @@ export interface operations {
             500: components["responses"]["InternalError"];
         };
     };
+    updateProvider: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace name; the server resolves the namespace from the Workspace CR. */
+                name: components["parameters"]["WorkspaceName"];
+                /** @description Name of the resource within the workspace. */
+                resourceName: components["parameters"]["ResourceName"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CrdWriteRequest"];
+            };
+        };
+        responses: {
+            /** @description Provider updated */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Provider"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
     listAgentPolicies: {
         parameters: {
             query?: {
-                /** @description Filter by namespace */
-                namespace?: string;
-                /** @description Kubernetes label selector for filtering */
-                labelSelector?: string;
+                /** @description Kubernetes label selector for filtering. */
+                labelSelector?: components["parameters"]["LabelSelector"];
             };
             header?: never;
-            path?: never;
+            path: {
+                /** @description Workspace name; the server resolves the namespace from the Workspace CR. */
+                name: components["parameters"]["WorkspaceName"];
+            };
             cookie?: never;
         };
         requestBody?: never;
@@ -1370,16 +1642,19 @@ export interface operations {
         parameters: {
             query?: never;
             header?: never;
-            path?: never;
+            path: {
+                /** @description Workspace name; the server resolves the namespace from the Workspace CR. */
+                name: components["parameters"]["WorkspaceName"];
+            };
             cookie?: never;
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["AgentPolicy"];
+                "application/json": components["schemas"]["CrdWriteRequest"];
             };
         };
         responses: {
-            /** @description AgentPolicy created successfully */
+            /** @description AgentPolicy created */
             201: {
                 headers: {
                     [name: string]: unknown;
@@ -1389,6 +1664,7 @@ export interface operations {
                 };
             };
             400: components["responses"]["BadRequest"];
+            409: components["responses"]["Conflict"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -1397,8 +1673,10 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                namespace: string;
-                name: string;
+                /** @description Workspace name; the server resolves the namespace from the Workspace CR. */
+                name: components["parameters"]["WorkspaceName"];
+                /** @description Name of the resource within the workspace. */
+                resourceName: components["parameters"]["ResourceName"];
             };
             cookie?: never;
         };
@@ -1422,18 +1700,20 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                namespace: string;
-                name: string;
+                /** @description Workspace name; the server resolves the namespace from the Workspace CR. */
+                name: components["parameters"]["WorkspaceName"];
+                /** @description Name of the resource within the workspace. */
+                resourceName: components["parameters"]["ResourceName"];
             };
             cookie?: never;
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["AgentPolicy"];
+                "application/json": components["schemas"]["CrdWriteRequest"];
             };
         };
         responses: {
-            /** @description AgentPolicy updated successfully */
+            /** @description AgentPolicy updated */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -1452,14 +1732,16 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                namespace: string;
-                name: string;
+                /** @description Workspace name; the server resolves the namespace from the Workspace CR. */
+                name: components["parameters"]["WorkspaceName"];
+                /** @description Name of the resource within the workspace. */
+                resourceName: components["parameters"]["ResourceName"];
             };
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description AgentPolicy deleted successfully */
+            /** @description AgentPolicy deleted */
             204: {
                 headers: {
                     [name: string]: unknown;
@@ -1473,13 +1755,14 @@ export interface operations {
     listToolPolicies: {
         parameters: {
             query?: {
-                /** @description Filter by namespace */
-                namespace?: string;
-                /** @description Kubernetes label selector for filtering */
-                labelSelector?: string;
+                /** @description Kubernetes label selector for filtering. */
+                labelSelector?: components["parameters"]["LabelSelector"];
             };
             header?: never;
-            path?: never;
+            path: {
+                /** @description Workspace name; the server resolves the namespace from the Workspace CR. */
+                name: components["parameters"]["WorkspaceName"];
+            };
             cookie?: never;
         };
         requestBody?: never;
@@ -1500,16 +1783,19 @@ export interface operations {
         parameters: {
             query?: never;
             header?: never;
-            path?: never;
+            path: {
+                /** @description Workspace name; the server resolves the namespace from the Workspace CR. */
+                name: components["parameters"]["WorkspaceName"];
+            };
             cookie?: never;
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["ToolPolicy"];
+                "application/json": components["schemas"]["CrdWriteRequest"];
             };
         };
         responses: {
-            /** @description ToolPolicy created successfully */
+            /** @description ToolPolicy created */
             201: {
                 headers: {
                     [name: string]: unknown;
@@ -1519,6 +1805,7 @@ export interface operations {
                 };
             };
             400: components["responses"]["BadRequest"];
+            409: components["responses"]["Conflict"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -1527,8 +1814,10 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                namespace: string;
-                name: string;
+                /** @description Workspace name; the server resolves the namespace from the Workspace CR. */
+                name: components["parameters"]["WorkspaceName"];
+                /** @description Name of the resource within the workspace. */
+                resourceName: components["parameters"]["ResourceName"];
             };
             cookie?: never;
         };
@@ -1552,18 +1841,20 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                namespace: string;
-                name: string;
+                /** @description Workspace name; the server resolves the namespace from the Workspace CR. */
+                name: components["parameters"]["WorkspaceName"];
+                /** @description Name of the resource within the workspace. */
+                resourceName: components["parameters"]["ResourceName"];
             };
             cookie?: never;
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["ToolPolicy"];
+                "application/json": components["schemas"]["CrdWriteRequest"];
             };
         };
         responses: {
-            /** @description ToolPolicy updated successfully */
+            /** @description ToolPolicy updated */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -1582,14 +1873,16 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                namespace: string;
-                name: string;
+                /** @description Workspace name; the server resolves the namespace from the Workspace CR. */
+                name: components["parameters"]["WorkspaceName"];
+                /** @description Name of the resource within the workspace. */
+                resourceName: components["parameters"]["ResourceName"];
             };
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description ToolPolicy deleted successfully */
+            /** @description ToolPolicy deleted */
             204: {
                 headers: {
                     [name: string]: unknown;
@@ -1604,7 +1897,10 @@ export interface operations {
         parameters: {
             query?: never;
             header?: never;
-            path?: never;
+            path: {
+                /** @description Workspace name; the server resolves the namespace from the Workspace CR. */
+                name: components["parameters"]["WorkspaceName"];
+            };
             cookie?: never;
         };
         requestBody?: never;
@@ -1616,27 +1912,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Stats"];
-                };
-            };
-            500: components["responses"]["InternalError"];
-        };
-    };
-    listNamespaces: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description List of namespace names */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": string[];
                 };
             };
             500: components["responses"]["InternalError"];
