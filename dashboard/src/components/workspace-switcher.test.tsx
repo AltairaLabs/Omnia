@@ -12,7 +12,6 @@ import type { WorkspaceListItem } from "@/hooks/resources";
 vi.mock("next/navigation", () => ({
   useRouter: vi.fn(() => ({ push: vi.fn(), replace: vi.fn() })),
   usePathname: vi.fn(() => "/agents"),
-  useSearchParams: vi.fn(() => new URLSearchParams()),
 }));
 
 // Mock the workspace context (keep the real WORKSPACE_QUERY_PARAM constant)
@@ -26,7 +25,7 @@ vi.mock("@/hooks/use-workspace-permissions", () => ({
   useWorkspacePermissions: vi.fn(() => ({ isOwner: false })),
 }));
 
-import { useRouter, usePathname, useSearchParams } from "next/navigation";
+import { useRouter, usePathname } from "next/navigation";
 import { useWorkspace } from "@/contexts/workspace-context";
 import { useWorkspacePermissions } from "@/hooks/use-workspace-permissions";
 
@@ -330,11 +329,7 @@ describe("WorkspaceSwitcher", () => {
       replace: mockReplace,
     } as unknown as ReturnType<typeof useRouter>);
     vi.mocked(usePathname).mockReturnValue("/agents");
-    vi.mocked(useSearchParams).mockReturnValue(
-      new URLSearchParams("tab=overview") as unknown as ReturnType<
-        typeof useSearchParams
-      >
-    );
+    window.history.replaceState(null, "", "/agents?tab=overview");
     vi.mocked(useWorkspace).mockReturnValue({
       workspaces: mockWorkspaces,
       currentWorkspace: mockWorkspaces[0],

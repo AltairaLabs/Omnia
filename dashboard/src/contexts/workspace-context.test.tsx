@@ -14,10 +14,9 @@ vi.mock("@/hooks/resources", () => ({
 
 vi.mock("next/navigation", () => ({
   usePathname: vi.fn(() => "/sessions"),
-  useSearchParams: vi.fn(() => new URLSearchParams()),
 }));
 
-import { usePathname, useSearchParams } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { useWorkspaces, type WorkspaceListItem } from "@/hooks/resources";
 
 const mockWorkspaces: WorkspaceListItem[] = [
@@ -76,6 +75,8 @@ describe("WorkspaceContext", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    // Reset the URL between tests so a ?workspace= anchor doesn't leak.
+    window.history.replaceState(null, "", "/");
     // Mock localStorage
     Object.defineProperty(window, "localStorage", {
       value: {
@@ -183,11 +184,7 @@ describe("WorkspaceContext", () => {
   });
 
   it("selects the workspace named by the ?workspace= URL anchor", async () => {
-    vi.mocked(useSearchParams).mockReturnValue(
-      new URLSearchParams("workspace=workspace-2") as unknown as ReturnType<
-        typeof useSearchParams
-      >
-    );
+    window.history.replaceState(null, "", "/sessions?workspace=workspace-2");
     vi.mocked(useWorkspaces).mockReturnValue({
       data: mockWorkspaces,
       isLoading: false,
@@ -211,11 +208,7 @@ describe("WorkspaceContext", () => {
 
   it("prefers the ?workspace= URL anchor over the stored workspace", async () => {
     mockLocalStorage["omnia-selected-workspace"] = "workspace-1";
-    vi.mocked(useSearchParams).mockReturnValue(
-      new URLSearchParams("workspace=workspace-2") as unknown as ReturnType<
-        typeof useSearchParams
-      >
-    );
+    window.history.replaceState(null, "", "/sessions?workspace=workspace-2");
     vi.mocked(useWorkspaces).mockReturnValue({
       data: mockWorkspaces,
       isLoading: false,
@@ -238,11 +231,7 @@ describe("WorkspaceContext", () => {
   });
 
   it("falls back to the first workspace when the ?workspace= anchor is unknown", async () => {
-    vi.mocked(useSearchParams).mockReturnValue(
-      new URLSearchParams("workspace=does-not-exist") as unknown as ReturnType<
-        typeof useSearchParams
-      >
-    );
+    window.history.replaceState(null, "", "/sessions?workspace=does-not-exist");
     vi.mocked(useWorkspaces).mockReturnValue({
       data: mockWorkspaces,
       isLoading: false,

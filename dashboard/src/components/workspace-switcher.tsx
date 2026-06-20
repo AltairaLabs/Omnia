@@ -8,7 +8,7 @@
  */
 
 import { Check, ChevronsUpDown, Building2, Loader2, Settings } from "lucide-react";
-import { useRouter, usePathname, useSearchParams } from "next/navigation";
+import { useRouter, usePathname } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -63,15 +63,18 @@ export function WorkspaceSwitcher() {
   const { workspaces, currentWorkspace, setCurrentWorkspace, isLoading, error } = useWorkspace();
   const router = useRouter();
   const pathname = usePathname();
-  const searchParams = useSearchParams();
   const { isOwner } = useWorkspacePermissions();
 
   // Switch the active workspace AND anchor it in the URL (?workspace=) so the
   // current page stays copy-paste shareable. Replace, not push, to avoid
-  // cluttering history with each switch.
+  // cluttering history with each switch. Reads the live query string from
+  // window.location rather than useSearchParams() — the latter forces a CSR
+  // bailout that breaks static prerendering, and this only runs on click.
   const selectWorkspace = (workspaceName: string) => {
     setCurrentWorkspace(workspaceName);
-    const params = new URLSearchParams(searchParams?.toString() ?? "");
+    const params = new URLSearchParams(
+      typeof window === "undefined" ? "" : window.location.search
+    );
     params.set(WORKSPACE_QUERY_PARAM, workspaceName);
     router.replace(`${pathname ?? "/"}?${params.toString()}`);
   };

@@ -20,11 +20,7 @@ import {
   useCallback,
   type ReactNode,
 } from "react";
-import {
-  usePathname,
-  useSearchParams,
-  type ReadonlyURLSearchParams,
-} from "next/navigation";
+import { usePathname } from "next/navigation";
 import { useWorkspaces, type WorkspaceListItem } from "@/hooks/resources";
 import { isChromelessPath } from "@/lib/routes";
 
@@ -47,11 +43,19 @@ function getStoredWorkspaceName(): string | null {
  * localStorage value, so a deep link / shared link resolves to the workspace
  * it names. Falls back to the stored selection, then to null (the provider
  * defaults to the first workspace once the list loads).
+ *
+ * Reads window.location directly rather than next's useSearchParams(): this
+ * provider wraps the whole app, and useSearchParams() forces a CSR bailout that
+ * breaks static prerendering of pages like /_not-found. The value is only
+ * needed once, on the client, at mount — so the lazy initializer (client-only)
+ * reads it from the URL with no hook.
  */
-function getInitialWorkspaceName(
-  searchParams: ReadonlyURLSearchParams | null
-): string | null {
-  return searchParams?.get(WORKSPACE_QUERY_PARAM) ?? getStoredWorkspaceName();
+function getInitialWorkspaceName(): string | null {
+  if (typeof window === "undefined") return null;
+  const param = new URLSearchParams(window.location.search).get(
+    WORKSPACE_QUERY_PARAM
+  );
+  return param ?? getStoredWorkspaceName();
 }
 
 interface WorkspaceContextValue {
@@ -84,14 +88,13 @@ interface WorkspaceProviderProps {
  */
 export function WorkspaceProvider({ children }: Readonly<WorkspaceProviderProps>) {
   const pathname = usePathname();
-  const searchParams = useSearchParams();
   const { data: workspaces = [], isLoading, error, refetch } = useWorkspaces({
     enabled: !isChromelessPath(pathname ?? ""),
   });
   // Initialize state from the URL anchor (deep link) or stored value.
-  // Lazy initializer runs once on mount, capturing the first-render params.
+  // Lazy initializer runs once on mount (client-only).
   const [selectedWorkspaceName, setSelectedWorkspaceName] = useState<string | null>(
-    () => getInitialWorkspaceName(searchParams)
+    () => getInitialWorkspaceName()
   );
 
   // Compute the effective selected workspace name, defaulting to the first
