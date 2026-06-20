@@ -273,15 +273,30 @@ describe("workspace-authz", () => {
         expect(access.role).toBe("viewer");
         expect(access.permissions.read).toBe(true);
       });
+
+      it("should report notFound for anonymous users when workspace is missing", async () => {
+        (getUser as Mock).mockResolvedValue({
+          ...mockUser,
+          provider: "anonymous",
+        });
+        (getWorkspace as Mock).mockResolvedValue(null);
+
+        const access = await checkWorkspaceAccess("nonexistent-workspace");
+
+        expect(access.granted).toBe(false);
+        expect(access.notFound).toBe(true);
+      });
     });
 
-    it("should deny access when workspace does not exist", async () => {
+    it("should report notFound when workspace does not exist", async () => {
       (getWorkspace as Mock).mockResolvedValue(null);
 
       const access = await checkWorkspaceAccess("nonexistent-workspace");
 
       expect(access.granted).toBe(false);
       expect(access.role).toBeNull();
+      // Distinct from "exists but denied" so guards can return 404, not 403.
+      expect(access.notFound).toBe(true);
     });
 
     it("should grant access based on group membership", async () => {

@@ -51,6 +51,23 @@ type WorkspaceApiHandlerSimple = (
 ) => Promise<NextResponse> | NextResponse;
 
 /**
+ * Returns 404 Not Found response when the workspace does not exist.
+ *
+ * Distinct from forbiddenResponse (403): a missing workspace is a 404 so
+ * clients can tell "no such workspace" apart from "exists but forbidden".
+ */
+function notFoundResponse(workspaceName: string): NextResponse {
+  return NextResponse.json(
+    {
+      error: "Not Found",
+      message: `Workspace not found: ${workspaceName}`,
+      workspace: workspaceName,
+    },
+    { status: 404 }
+  );
+}
+
+/**
  * Returns 403 Forbidden response for workspace access denial.
  */
 function forbiddenResponse(
@@ -121,6 +138,10 @@ export function withWorkspaceAccess<
     // Anonymous users get viewer access to existing workspaces
     const access = await checkWorkspaceAccess(workspaceName, requiredRole);
 
+    if (access.notFound) {
+      return notFoundResponse(workspaceName);
+    }
+
     if (!access.granted) {
       return forbiddenResponse(workspaceName, access, requiredRole);
     }
@@ -153,6 +174,9 @@ export function withWorkspaceManage<
     // No required role: a platform admin's manage-only access has role=null but
     // manageMembers=true, and must pass.
     const access = await checkWorkspaceAccess(workspaceName);
+    if (access.notFound) {
+      return notFoundResponse(workspaceName);
+    }
     if (!access.permissions.manageMembers) {
       return forbiddenResponse(workspaceName, access);
     }
@@ -183,6 +207,9 @@ export function withWorkspaceView<
 
     // No required role: platform admins (role=null) must pass to manage access.
     const access = await checkWorkspaceAccess(workspaceName);
+    if (access.notFound) {
+      return notFoundResponse(workspaceName);
+    }
     if (!access.granted) {
       return forbiddenResponse(workspaceName, access);
     }
@@ -225,6 +252,9 @@ export function withWorkspaceQuery(
     // checkWorkspaceAccess handles both authenticated and anonymous users
     // Anonymous users get viewer access to existing workspaces
     const access = await checkWorkspaceAccess(workspaceName, requiredRole);
+    if (access.notFound) {
+      return notFoundResponse(workspaceName);
+    }
     if (!access.granted) {
       return forbiddenResponse(workspaceName, access, requiredRole);
     }

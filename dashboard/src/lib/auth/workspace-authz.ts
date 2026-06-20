@@ -33,6 +33,17 @@ const DENIED_ACCESS: WorkspaceAccess = {
 };
 
 /**
+ * Access result when the workspace does not exist. Distinct from DENIED_ACCESS
+ * (which means "exists but no role") so API guards can return 404 vs 403.
+ */
+const NOT_FOUND_ACCESS: WorkspaceAccess = {
+  granted: false,
+  role: null,
+  notFound: true,
+  permissions: NO_PERMISSIONS,
+};
+
+/**
  * A platform admin may see every workspace and manage its access bindings (so
  * they can self-grant a data role). Requires the global admin role AND an
  * authenticated session — an anonymous user must never get manage-all-
@@ -185,7 +196,7 @@ export async function checkWorkspaceAccess(
     // Check if workspace exists
     const workspace = await getWorkspace(workspaceName);
     if (!workspace) {
-      return DENIED_ACCESS;
+      return NOT_FOUND_ACCESS;
     }
 
     // Check workspace's anonymous access configuration
@@ -215,8 +226,8 @@ export async function checkWorkspaceAccess(
   // Fetch workspace from K8s
   const workspace = await getWorkspace(workspaceName);
   if (!workspace) {
-    // Workspace doesn't exist - deny access
-    return DENIED_ACCESS;
+    // Workspace doesn't exist - 404, not a permission denial
+    return NOT_FOUND_ACCESS;
   }
 
   // Compute the highest role from roleBindings + directGrants
