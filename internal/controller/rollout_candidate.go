@@ -21,6 +21,7 @@ import (
 	"fmt"
 
 	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -154,6 +155,12 @@ func (r *AgentRuntimeReconciler) reconcileCandidateDeployment(
 		}
 		deployment.Spec.Template.Labels[labelOmniaTrack] = "canary"
 
+		// Tag candidate-served sessions variant=candidate. The base builder set
+		// OMNIA_VARIANT=stable; override it here so variant-gated RolloutAnalysis
+		// works in replica-weighted mode, where no routing layer sets the
+		// x-omnia-variant header (#1449).
+		setCandidateVariantEnv(deployment)
+
 		// Mount the candidate's provider-ref override into the candidate pods.
 		mountCanaryOverride(deployment, ar.Name)
 
@@ -193,4 +200,30 @@ func (r *AgentRuntimeReconciler) deleteCandidateDeployment(
 		return err
 	}
 	return r.deleteCanaryOverrideConfigMap(ctx, ar)
+}
+
+// setCandidateVariantEnv overrides the facade container's OMNIA_VARIANT env to
+// the candidate variant. The base deployment builder sets it to variantStable;
+// the candidate clone flips it to variantCandidate so candidate-served sessions
+// are recorded variant=candidate even in replica-weighted mode, where there is
+// no routing layer to set the x-omnia-variant header (#1449).
+func setCandidateVariantEnv(deployment *appsv1.Deployment) {
+	containers := deployment.Spec.Template.Spec.Containers
+	for i := range containers {
+		if containers[i].Name != FacadeContainerName {
+			continue
+		}
+		for j := range containers[i].Env {
+			if containers[i].Env[j].Name == envFacadeVariant {
+				containers[i].Env[j].Value = variantCandidate
+				return
+			}
+		}
+		// Defensive: builder always sets it, but append if somehow absent.
+		containers[i].Env = append(containers[i].Env, corev1.EnvVar{
+			Name:  envFacadeVariant,
+			Value: variantCandidate,
+		})
+		return
+	}
 }

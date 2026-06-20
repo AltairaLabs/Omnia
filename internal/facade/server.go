@@ -46,6 +46,13 @@ import (
 // envAllowedOrigins is the environment variable for configuring allowed WebSocket origins.
 const envAllowedOrigins = "OMNIA_ALLOWED_ORIGINS"
 
+// envVariant is the environment variable the operator injects on candidate and
+// stable Deployments (derived from the rollout track label). The facade falls
+// back to it when the x-omnia-variant request header is absent, so variant
+// tagging works in replica-weighted mode where there's no routing layer to set
+// the header (#1449).
+const envVariant = "OMNIA_VARIANT"
+
 // ServerConfig contains configuration for the WebSocket server.
 type ServerConfig struct {
 	// ReadBufferSize is the size of the read buffer.
@@ -582,8 +589,21 @@ func (s *Server) resolveUserContext(r *http.Request, authIdentity *policy.Authen
 		userEmail:     userEmail,
 		authorization: r.Header.Get("Authorization"),
 		cohortID:      r.Header.Get(policy.HeaderCohortID),
-		variant:       r.Header.Get(policy.HeaderVariant),
+		variant:       resolveVariant(r),
 	}
+}
+
+// resolveVariant returns the rollout variant for a request. It prefers the
+// x-omnia-variant header (set by the operator-owned mesh routing in mesh mode)
+// and falls back to the OMNIA_VARIANT env injected on the pod by the operator.
+// Replica-weighted mode has no per-pod routing layer to set the header, so the
+// env is the stable per-pod identity that makes variant tagging work across all
+// traffic modes (#1449); the header remains an override for mesh routing.
+func resolveVariant(r *http.Request) string {
+	if v := r.Header.Get(policy.HeaderVariant); v != "" {
+		return v
+	}
+	return os.Getenv(envVariant)
 }
 
 func (s *Server) buildConnectionContext(

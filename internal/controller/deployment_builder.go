@@ -642,6 +642,14 @@ func (r *AgentRuntimeReconciler) buildA2AEnvVars(
 			Name:  "OMNIA_PROMPTPACK_PATH",
 			Value: PromptPackMountPath,
 		},
+		{
+			// Rollout-semantic variant the facade records on each session when
+			// the x-omnia-variant request header is absent (replica-weighted
+			// mode has no routing layer to set it). The candidate Deployment
+			// overrides this to variantCandidate (#1449).
+			Name:  envFacadeVariant,
+			Value: variantStable,
+		},
 	}
 
 	// Handler mode
@@ -880,6 +888,14 @@ func (r *AgentRuntimeReconciler) buildFacadeEnvVars(
 		{
 			Name:  "OMNIA_HEALTH_PORT",
 			Value: fmt.Sprintf("%d", DefaultFacadeHealthPort),
+		},
+		{
+			// Rollout-semantic variant the facade records on each session when
+			// the x-omnia-variant request header is absent (replica-weighted
+			// mode has no routing layer to set it). The candidate Deployment
+			// overrides this to variantCandidate (#1449).
+			Name:  envFacadeVariant,
+			Value: variantStable,
 		},
 	}
 
