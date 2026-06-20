@@ -33,6 +33,10 @@ const (
 
 	// IndexAgentRuntimeByPromptPack indexes AgentRuntimes by the PromptPack name they reference.
 	IndexAgentRuntimeByPromptPack = ".spec.promptPackRef"
+
+	// IndexAgentRuntimeByToolRegistry indexes AgentRuntimes by the ToolRegistry they reference.
+	// Values are "namespace/name" of the referenced ToolRegistry (refs may be cross-namespace).
+	IndexAgentRuntimeByToolRegistry = ".spec.toolRegistryRef"
 )
 
 // SetupIndexers registers field indexers required by watch handlers.
@@ -47,11 +51,20 @@ func SetupIndexers(ctx context.Context, mgr manager.Manager) error {
 		return err
 	}
 
-	return mgr.GetFieldIndexer().IndexField(
+	if err := mgr.GetFieldIndexer().IndexField(
 		ctx,
 		&omniav1alpha1.AgentRuntime{},
 		IndexAgentRuntimeByPromptPack,
 		extractPromptPackRef,
+	); err != nil {
+		return err
+	}
+
+	return mgr.GetFieldIndexer().IndexField(
+		ctx,
+		&omniav1alpha1.AgentRuntime{},
+		IndexAgentRuntimeByToolRegistry,
+		extractToolRegistryRef,
 	)
 }
 
@@ -89,4 +102,24 @@ func extractPromptPackRef(obj client.Object) []string {
 		return nil
 	}
 	return []string{ar.Spec.PromptPackRef.Name}
+}
+
+// extractToolRegistryRef returns the "namespace/name" key for the ToolRegistry
+// referenced by an AgentRuntime, or nil if it references none.
+func extractToolRegistryRef(obj client.Object) []string {
+	ar := obj.(*omniav1alpha1.AgentRuntime)
+	if ar.Spec.ToolRegistryRef == nil || ar.Spec.ToolRegistryRef.Name == "" {
+		return nil
+	}
+	return []string{toolRegistryRefKey(ar.Spec.ToolRegistryRef, ar.Namespace)}
+}
+
+// toolRegistryRefKey builds a "namespace/name" key from a ToolRegistryRef,
+// defaulting to the AgentRuntime's namespace when the ref omits one.
+func toolRegistryRefKey(ref *omniav1alpha1.ToolRegistryRef, defaultNS string) string {
+	ns := defaultNS
+	if ref.Namespace != nil {
+		ns = *ref.Namespace
+	}
+	return ns + "/" + ref.Name
 }

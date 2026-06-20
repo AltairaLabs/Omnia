@@ -463,6 +463,13 @@ func (r *AgentRuntimeReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	// are tolerated until the next major.
 	omniav1alpha1.ProjectLegacyFacadeA2A(agentRuntime)
 
+	// Track the observed generation up front so EVERY status write below —
+	// including the dependency-missing / Failed early-return paths — carries a
+	// current observedGeneration. Without this, a Failed agent keeps an empty
+	// observedGeneration and consumers can't tell a current failure from a
+	// stale snapshot (#1491).
+	agentRuntime.Status.ObservedGeneration = agentRuntime.Generation
+
 	// Initialize status if needed
 	if agentRuntime.Status.Phase == "" {
 		agentRuntime.Status.Phase = omniav1alpha1.AgentRuntimePhasePending
@@ -489,7 +496,7 @@ func (r *AgentRuntimeReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{}, rolloutErr
 	} else if rolloutResult.RequeueAfter > 0 {
 		// Persist status before early return so rollout progress is not lost.
-		agentRuntime.Status.ObservedGeneration = agentRuntime.Generation
+		// observedGeneration is already set at the top of Reconcile.
 		if err := r.Status().Update(ctx, agentRuntime); err != nil {
 			return ctrl.Result{}, err
 		}
@@ -546,7 +553,7 @@ func (r *AgentRuntimeReconciler) Reconcile(ctx context.Context, req ctrl.Request
 			"RuntimeNotReady", "Waiting for pods to be ready")
 	}
 
-	agentRuntime.Status.ObservedGeneration = agentRuntime.Generation
+	// observedGeneration is already set at the top of Reconcile.
 	if err := r.Status().Update(ctx, agentRuntime); err != nil {
 		return ctrl.Result{}, err
 	}
@@ -839,6 +846,12 @@ func (r *AgentRuntimeReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Watches(
 			&omniav1alpha1.PromptPack{},
 			handler.EnqueueRequestsFromMapFunc(r.findAgentRuntimesForPromptPack),
+		).
+		// Watch ToolRegistry changes and reconcile AgentRuntimes that reference them.
+		// Without this, an agent never recovers when its ToolRegistry appears/changes (#1491).
+		Watches(
+			&omniav1alpha1.ToolRegistry{},
+			handler.EnqueueRequestsFromMapFunc(r.findAgentRuntimesForToolRegistry),
 		).
 		// Watch Secret changes and reconcile AgentRuntimes that use them for credentials
 		// This triggers pod rollouts when API keys are rotated

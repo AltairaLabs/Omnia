@@ -122,6 +122,62 @@ func (r *AgentRuntimeReconciler) findAgentRuntimesForPromptPack(ctx context.Cont
 	return requests
 }
 
+// findAgentRuntimesForToolRegistry returns reconcile requests for all AgentRuntimes
+// that reference the given ToolRegistry (including cross-namespace references).
+//
+// When a field index is available (production, via SetupIndexers), the list is
+// scoped by index. Otherwise falls back to list-all + local filter (envtest).
+func (r *AgentRuntimeReconciler) findAgentRuntimesForToolRegistry(ctx context.Context, obj client.Object) []reconcile.Request {
+	toolRegistry := obj.(*omniav1alpha1.ToolRegistry)
+	log := logf.FromContext(ctx).WithValues("toolregistry", toolRegistry.Name, "namespace", toolRegistry.Namespace)
+
+	key := toolRegistry.Namespace + "/" + toolRegistry.Name
+
+	// Try indexed list first; fall back to unscoped list if no index is registered.
+	var agentRuntimes omniav1alpha1.AgentRuntimeList
+	if err := r.List(ctx, &agentRuntimes, client.MatchingFields{IndexAgentRuntimeByToolRegistry: key}); err != nil {
+		// MatchingFields fails with a raw client (no index). Fall back to list+filter.
+		if err2 := r.List(ctx, &agentRuntimes); err2 != nil {
+			log.Error(err2, "failed to list AgentRuntimes for ToolRegistry watch")
+			return nil
+		}
+		return r.filterAgentRuntimesByToolRegistry(&agentRuntimes, key, log)
+	}
+
+	requests := make([]reconcile.Request, 0, len(agentRuntimes.Items))
+	for _, ar := range agentRuntimes.Items {
+		log.Info("enqueueing AgentRuntime for ToolRegistry change", "agentruntime", ar.Name)
+		requests = append(requests, reconcile.Request{
+			NamespacedName: types.NamespacedName{
+				Name:      ar.Name,
+				Namespace: ar.Namespace,
+			},
+		})
+	}
+	return requests
+}
+
+// filterAgentRuntimesByToolRegistry filters a list of AgentRuntimes to those that
+// reference the given ToolRegistry key ("namespace/name").
+func (r *AgentRuntimeReconciler) filterAgentRuntimesByToolRegistry(list *omniav1alpha1.AgentRuntimeList, key string, log logr.Logger) []reconcile.Request {
+	var requests []reconcile.Request
+	for _, ar := range list.Items {
+		if ar.Spec.ToolRegistryRef == nil {
+			continue
+		}
+		if toolRegistryRefKey(ar.Spec.ToolRegistryRef, ar.Namespace) == key {
+			log.Info("enqueueing AgentRuntime for ToolRegistry change", "agentruntime", ar.Name)
+			requests = append(requests, reconcile.Request{
+				NamespacedName: types.NamespacedName{
+					Name:      ar.Name,
+					Namespace: ar.Namespace,
+				},
+			})
+		}
+	}
+	return requests
+}
+
 // filterAgentRuntimesByPromptPack filters a list of AgentRuntimes to those that
 // reference the given PromptPack name.
 func (r *AgentRuntimeReconciler) filterAgentRuntimesByPromptPack(list *omniav1alpha1.AgentRuntimeList, name string, log logr.Logger) []reconcile.Request {
