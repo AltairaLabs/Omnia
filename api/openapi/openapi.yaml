@@ -1,17 +1,30 @@
 openapi: 3.0.3
 info:
   title: Omnia Dashboard API
-  description: REST API for the Omnia AI Agent Orchestration Platform dashboard
+  description: |
+    Workspace-scoped REST API served by the Omnia dashboard for managing
+    AI agent resources. This is the public, authenticated programmatic API
+    (used by the dashboard UI and external deploy tools such as the
+    promptarena-deploy-omnia adapter).
+
+    All resource routes are scoped to a workspace by name; the server resolves
+    the target Kubernetes namespace from the Workspace CR. Authenticate with an
+    `omnia_sk_` API key via the `Authorization: Bearer` header (or `X-API-Key`).
   version: 1.0.0
   license:
     name: Apache 2.0
     url: https://www.apache.org/licenses/LICENSE-2.0
 
 servers:
-  - url: http://localhost:8082
-    description: Local development
-  - url: http://omnia-controller-manager.omnia-system.svc.cluster.local:8082
-    description: In-cluster
+  - url: https://{dashboardHost}
+    description: Omnia dashboard (external ingress)
+    variables:
+      dashboardHost:
+        default: omnia.example.com
+        description: The dashboard ingress hostname for your deployment
+
+security:
+  - ApiKeyAuth: []
 
 tags:
   - name: agents
@@ -30,26 +43,36 @@ tags:
     description: ToolPolicy operations (Enterprise)
   - name: stats
     description: Aggregated statistics
-  - name: namespaces
-    description: Kubernetes namespaces
+  - name: health
+    description: Service health
 
 paths:
-  /api/v1/agents:
+  /api/health:
+    get:
+      tags: [health]
+      summary: Service health check
+      operationId: getHealth
+      security: []
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string }
+                  timestamp: { type: string, format: date-time }
+
+  /api/workspaces/{name}/agents:
+    parameters:
+      - $ref: '#/components/parameters/WorkspaceName'
     get:
       tags: [agents]
-      summary: List all AgentRuntimes
+      summary: List AgentRuntimes in the workspace
       operationId: listAgents
       parameters:
-        - name: namespace
-          in: query
-          description: Filter by namespace
-          schema:
-            type: string
-        - name: labelSelector
-          in: query
-          description: Kubernetes label selector for filtering
-          schema:
-            type: string
+        - $ref: '#/components/parameters/LabelSelector'
       responses:
         '200':
           description: List of agents
@@ -59,133 +82,116 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/AgentRuntime'
-        '500':
-          $ref: '#/components/responses/InternalError'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '500': { $ref: '#/components/responses/InternalError' }
     post:
       tags: [agents]
-      summary: Create a new AgentRuntime
+      summary: Create an AgentRuntime
       operationId: createAgent
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/AgentRuntime'
+              $ref: '#/components/schemas/CrdWriteRequest'
       responses:
         '201':
-          description: Agent created successfully
+          description: Agent created
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/AgentRuntime'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '409':
-          description: Agent already exists
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '500':
-          $ref: '#/components/responses/InternalError'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '500': { $ref: '#/components/responses/InternalError' }
 
-  /api/v1/agents/{namespace}/{name}:
+  /api/workspaces/{name}/agents/{resourceName}:
+    parameters:
+      - $ref: '#/components/parameters/WorkspaceName'
+      - $ref: '#/components/parameters/ResourceName'
     get:
       tags: [agents]
-      summary: Get a specific AgentRuntime
+      summary: Get an AgentRuntime
       operationId: getAgent
-      parameters:
-        - name: namespace
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: name
-          in: path
-          required: true
-          schema:
-            type: string
       responses:
         '200':
           description: Agent details
           content:
             application/json:
-              schema:
-                $ref: '#/components/schemas/AgentRuntime'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '500':
-          $ref: '#/components/responses/InternalError'
-
-  /api/v1/agents/{namespace}/{name}/scale:
+              schema: { $ref: '#/components/schemas/AgentRuntime' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
     put:
       tags: [agents]
-      summary: Scale an AgentRuntime
-      operationId: scaleAgent
-      parameters:
-        - name: namespace
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: name
-          in: path
-          required: true
-          schema:
-            type: string
+      summary: Update an AgentRuntime
+      operationId: updateAgent
       requestBody:
         required: true
         content:
           application/json:
-            schema:
-              $ref: '#/components/schemas/ScaleRequest'
+            schema: { $ref: '#/components/schemas/CrdWriteRequest' }
       responses:
         '200':
-          description: Agent scaled successfully
+          description: Agent updated
           content:
             application/json:
-              schema:
-                $ref: '#/components/schemas/AgentRuntime'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '500':
-          $ref: '#/components/responses/InternalError'
+              schema: { $ref: '#/components/schemas/AgentRuntime' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+    delete:
+      tags: [agents]
+      summary: Delete an AgentRuntime
+      operationId: deleteAgent
+      responses:
+        '204': { description: Agent deleted }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
 
-  /api/v1/agents/{namespace}/{name}/logs:
+  /api/workspaces/{name}/agents/{resourceName}/scale:
+    parameters:
+      - $ref: '#/components/parameters/WorkspaceName'
+      - $ref: '#/components/parameters/ResourceName'
+    put:
+      tags: [agents]
+      summary: Scale an AgentRuntime
+      operationId: scaleAgent
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ScaleRequest' }
+      responses:
+        '200':
+          description: Agent scaled
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AgentRuntime' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/workspaces/{name}/agents/{resourceName}/logs:
+    parameters:
+      - $ref: '#/components/parameters/WorkspaceName'
+      - $ref: '#/components/parameters/ResourceName'
     get:
       tags: [logs]
       summary: Get logs from an agent's pods
       operationId: getAgentLogs
       parameters:
-        - name: namespace
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: name
-          in: path
-          required: true
-          schema:
-            type: string
         - name: tailLines
           in: query
-          description: Number of lines to return from the end of logs
-          schema:
-            type: integer
-            default: 100
+          schema: { type: integer, default: 100 }
         - name: sinceSeconds
           in: query
-          description: Return logs from the last N seconds
-          schema:
-            type: integer
-            default: 3600
+          schema: { type: integer, default: 3600 }
         - name: container
           in: query
-          description: Filter logs by container name
-          schema:
-            type: string
+          schema: { type: string }
       responses:
         '200':
           description: Log entries
@@ -193,27 +199,18 @@ paths:
             application/json:
               schema:
                 type: array
-                items:
-                  $ref: '#/components/schemas/LogEntry'
-        '500':
-          $ref: '#/components/responses/InternalError'
+                items: { $ref: '#/components/schemas/LogEntry' }
+        '500': { $ref: '#/components/responses/InternalError' }
 
-  /api/v1/promptpacks:
+  /api/workspaces/{name}/promptpacks:
+    parameters:
+      - $ref: '#/components/parameters/WorkspaceName'
     get:
       tags: [promptpacks]
-      summary: List all PromptPacks
+      summary: List PromptPacks in the workspace
       operationId: listPromptPacks
       parameters:
-        - name: namespace
-          in: query
-          description: Filter by namespace
-          schema:
-            type: string
-        - name: labelSelector
-          in: query
-          description: Kubernetes label selector for filtering
-          schema:
-            type: string
+        - $ref: '#/components/parameters/LabelSelector'
       responses:
         '200':
           description: List of prompt packs
@@ -221,148 +218,87 @@ paths:
             application/json:
               schema:
                 type: array
-                items:
-                  $ref: '#/components/schemas/PromptPack'
-        '500':
-          $ref: '#/components/responses/InternalError'
+                items: { $ref: '#/components/schemas/PromptPack' }
+        '500': { $ref: '#/components/responses/InternalError' }
     post:
       tags: [promptpacks]
-      summary: Create a new PromptPack
+      summary: Create a PromptPack
       description: |
-        Creates a PromptPack CRD. If the optional `content` field is provided in the
-        request body, a backing ConfigMap is created automatically and the PromptPack's
-        `spec.source` is set to reference it.
+        Creates a PromptPack. If the optional `content` field is provided, a
+        backing ConfigMap named `{name}-content` is created automatically and
+        the PromptPack's `spec.source` is set to reference it server-side.
       operationId: createPromptPack
       requestBody:
         required: true
         content:
           application/json:
-            schema:
-              $ref: '#/components/schemas/PromptPackCreateRequest'
+            schema: { $ref: '#/components/schemas/PromptPackCreateRequest' }
       responses:
         '201':
-          description: PromptPack created successfully
+          description: PromptPack created
           content:
             application/json:
-              schema:
-                $ref: '#/components/schemas/PromptPack'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '409':
-          description: PromptPack already exists
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '500':
-          $ref: '#/components/responses/InternalError'
+              schema: { $ref: '#/components/schemas/PromptPack' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '500': { $ref: '#/components/responses/InternalError' }
 
-  /api/v1/promptpacks/{namespace}/{name}:
+  /api/workspaces/{name}/promptpacks/{resourceName}:
+    parameters:
+      - $ref: '#/components/parameters/WorkspaceName'
+      - $ref: '#/components/parameters/ResourceName'
     get:
       tags: [promptpacks]
-      summary: Get a specific PromptPack
+      summary: Get a PromptPack
       operationId: getPromptPack
-      parameters:
-        - name: namespace
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: name
-          in: path
-          required: true
-          schema:
-            type: string
       responses:
         '200':
           description: PromptPack details
           content:
             application/json:
-              schema:
-                $ref: '#/components/schemas/PromptPack'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '500':
-          $ref: '#/components/responses/InternalError'
+              schema: { $ref: '#/components/schemas/PromptPack' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
     put:
       tags: [promptpacks]
       summary: Update a PromptPack
       description: |
-        Updates a PromptPack CRD. If the optional `content` field is provided,
-        the backing ConfigMap is updated (or created if it doesn't exist).
+        Updates a PromptPack. If `content` is provided, the backing ConfigMap
+        is updated (or created).
       operationId: updatePromptPack
-      parameters:
-        - name: namespace
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: name
-          in: path
-          required: true
-          schema:
-            type: string
       requestBody:
         required: true
         content:
           application/json:
-            schema:
-              $ref: '#/components/schemas/PromptPackUpdateRequest'
+            schema: { $ref: '#/components/schemas/PromptPackUpdateRequest' }
       responses:
         '200':
-          description: PromptPack updated successfully
+          description: PromptPack updated
           content:
             application/json:
-              schema:
-                $ref: '#/components/schemas/PromptPack'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '500':
-          $ref: '#/components/responses/InternalError'
+              schema: { $ref: '#/components/schemas/PromptPack' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
     delete:
       tags: [promptpacks]
       summary: Delete a PromptPack
-      description: |
-        Deletes a PromptPack CRD and its backing ConfigMap (if one exists
-        with the naming convention `{name}-content`).
+      description: Deletes the PromptPack and its backing `{name}-content` ConfigMap.
       operationId: deletePromptPack
-      parameters:
-        - name: namespace
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: name
-          in: path
-          required: true
-          schema:
-            type: string
       responses:
-        '204':
-          description: PromptPack deleted successfully
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '500':
-          $ref: '#/components/responses/InternalError'
+        '204': { description: PromptPack deleted }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
 
-  /api/v1/toolregistries:
+  /api/workspaces/{name}/toolregistries:
+    parameters:
+      - $ref: '#/components/parameters/WorkspaceName'
     get:
       tags: [toolregistries]
-      summary: List all ToolRegistries
+      summary: List ToolRegistries in the workspace
       operationId: listToolRegistries
       parameters:
-        - name: namespace
-          in: query
-          description: Filter by namespace
-          schema:
-            type: string
-        - name: labelSelector
-          in: query
-          description: Kubernetes label selector for filtering
-          schema:
-            type: string
+        - $ref: '#/components/parameters/LabelSelector'
       responses:
         '200':
           description: List of tool registries
@@ -370,138 +306,79 @@ paths:
             application/json:
               schema:
                 type: array
-                items:
-                  $ref: '#/components/schemas/ToolRegistry'
-        '500':
-          $ref: '#/components/responses/InternalError'
+                items: { $ref: '#/components/schemas/ToolRegistry' }
+        '500': { $ref: '#/components/responses/InternalError' }
     post:
       tags: [toolregistries]
-      summary: Create a new ToolRegistry
+      summary: Create a ToolRegistry
       operationId: createToolRegistry
       requestBody:
         required: true
         content:
           application/json:
-            schema:
-              $ref: '#/components/schemas/ToolRegistry'
+            schema: { $ref: '#/components/schemas/CrdWriteRequest' }
       responses:
         '201':
-          description: ToolRegistry created successfully
+          description: ToolRegistry created
           content:
             application/json:
-              schema:
-                $ref: '#/components/schemas/ToolRegistry'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '409':
-          description: ToolRegistry already exists
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '500':
-          $ref: '#/components/responses/InternalError'
+              schema: { $ref: '#/components/schemas/ToolRegistry' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '500': { $ref: '#/components/responses/InternalError' }
 
-  /api/v1/toolregistries/{namespace}/{name}:
+  /api/workspaces/{name}/toolregistries/{resourceName}:
+    parameters:
+      - $ref: '#/components/parameters/WorkspaceName'
+      - $ref: '#/components/parameters/ResourceName'
     get:
       tags: [toolregistries]
-      summary: Get a specific ToolRegistry
+      summary: Get a ToolRegistry
       operationId: getToolRegistry
-      parameters:
-        - name: namespace
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: name
-          in: path
-          required: true
-          schema:
-            type: string
       responses:
         '200':
           description: ToolRegistry details
           content:
             application/json:
-              schema:
-                $ref: '#/components/schemas/ToolRegistry'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '500':
-          $ref: '#/components/responses/InternalError'
+              schema: { $ref: '#/components/schemas/ToolRegistry' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
     put:
       tags: [toolregistries]
       summary: Update a ToolRegistry
       operationId: updateToolRegistry
-      parameters:
-        - name: namespace
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: name
-          in: path
-          required: true
-          schema:
-            type: string
       requestBody:
         required: true
         content:
           application/json:
-            schema:
-              $ref: '#/components/schemas/ToolRegistry'
+            schema: { $ref: '#/components/schemas/CrdWriteRequest' }
       responses:
         '200':
-          description: ToolRegistry updated successfully
+          description: ToolRegistry updated
           content:
             application/json:
-              schema:
-                $ref: '#/components/schemas/ToolRegistry'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '500':
-          $ref: '#/components/responses/InternalError'
+              schema: { $ref: '#/components/schemas/ToolRegistry' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
     delete:
       tags: [toolregistries]
       summary: Delete a ToolRegistry
       operationId: deleteToolRegistry
-      parameters:
-        - name: namespace
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: name
-          in: path
-          required: true
-          schema:
-            type: string
       responses:
-        '204':
-          description: ToolRegistry deleted successfully
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '500':
-          $ref: '#/components/responses/InternalError'
+        '204': { description: ToolRegistry deleted }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
 
-  /api/v1/providers:
+  /api/workspaces/{name}/providers:
+    parameters:
+      - $ref: '#/components/parameters/WorkspaceName'
     get:
       tags: [providers]
-      summary: List all Providers
+      summary: List Providers in the workspace
       operationId: listProviders
       parameters:
-        - name: namespace
-          in: query
-          description: Filter by namespace
-          schema:
-            type: string
-        - name: labelSelector
-          in: query
-          description: Kubernetes label selector for filtering
-          schema:
-            type: string
+        - $ref: '#/components/parameters/LabelSelector'
       responses:
         '200':
           description: List of providers
@@ -509,55 +386,71 @@ paths:
             application/json:
               schema:
                 type: array
-                items:
-                  $ref: '#/components/schemas/Provider'
-        '500':
-          $ref: '#/components/responses/InternalError'
+                items: { $ref: '#/components/schemas/Provider' }
+        '500': { $ref: '#/components/responses/InternalError' }
+    post:
+      tags: [providers]
+      summary: Create a Provider
+      operationId: createProvider
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CrdWriteRequest' }
+      responses:
+        '201':
+          description: Provider created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Provider' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '500': { $ref: '#/components/responses/InternalError' }
 
-  /api/v1/providers/{namespace}/{name}:
+  /api/workspaces/{name}/providers/{resourceName}:
+    parameters:
+      - $ref: '#/components/parameters/WorkspaceName'
+      - $ref: '#/components/parameters/ResourceName'
     get:
       tags: [providers]
-      summary: Get a specific Provider
+      summary: Get a Provider
       operationId: getProvider
-      parameters:
-        - name: namespace
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: name
-          in: path
-          required: true
-          schema:
-            type: string
       responses:
         '200':
           description: Provider details
           content:
             application/json:
-              schema:
-                $ref: '#/components/schemas/Provider'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '500':
-          $ref: '#/components/responses/InternalError'
+              schema: { $ref: '#/components/schemas/Provider' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+    put:
+      tags: [providers]
+      summary: Update a Provider
+      operationId: updateProvider
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CrdWriteRequest' }
+      responses:
+        '200':
+          description: Provider updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Provider' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
 
-  /api/v1/agentpolicies:
+  /api/workspaces/{name}/agentpolicies:
+    parameters:
+      - $ref: '#/components/parameters/WorkspaceName'
     get:
       tags: [agentpolicies]
-      summary: List all AgentPolicies
+      summary: List AgentPolicies in the workspace
       operationId: listAgentPolicies
       parameters:
-        - name: namespace
-          in: query
-          description: Filter by namespace
-          schema:
-            type: string
-        - name: labelSelector
-          in: query
-          description: Kubernetes label selector for filtering
-          schema:
-            type: string
+        - $ref: '#/components/parameters/LabelSelector'
       responses:
         '200':
           description: List of agent policies
@@ -565,132 +458,79 @@ paths:
             application/json:
               schema:
                 type: array
-                items:
-                  $ref: '#/components/schemas/AgentPolicy'
-        '500':
-          $ref: '#/components/responses/InternalError'
+                items: { $ref: '#/components/schemas/AgentPolicy' }
+        '500': { $ref: '#/components/responses/InternalError' }
     post:
       tags: [agentpolicies]
-      summary: Create a new AgentPolicy
+      summary: Create an AgentPolicy
       operationId: createAgentPolicy
       requestBody:
         required: true
         content:
           application/json:
-            schema:
-              $ref: '#/components/schemas/AgentPolicy'
+            schema: { $ref: '#/components/schemas/CrdWriteRequest' }
       responses:
         '201':
-          description: AgentPolicy created successfully
+          description: AgentPolicy created
           content:
             application/json:
-              schema:
-                $ref: '#/components/schemas/AgentPolicy'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '500':
-          $ref: '#/components/responses/InternalError'
+              schema: { $ref: '#/components/schemas/AgentPolicy' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '500': { $ref: '#/components/responses/InternalError' }
 
-  /api/v1/agentpolicies/{namespace}/{name}:
+  /api/workspaces/{name}/agentpolicies/{resourceName}:
+    parameters:
+      - $ref: '#/components/parameters/WorkspaceName'
+      - $ref: '#/components/parameters/ResourceName'
     get:
       tags: [agentpolicies]
-      summary: Get a specific AgentPolicy
+      summary: Get an AgentPolicy
       operationId: getAgentPolicy
-      parameters:
-        - name: namespace
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: name
-          in: path
-          required: true
-          schema:
-            type: string
       responses:
         '200':
           description: AgentPolicy details
           content:
             application/json:
-              schema:
-                $ref: '#/components/schemas/AgentPolicy'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '500':
-          $ref: '#/components/responses/InternalError'
+              schema: { $ref: '#/components/schemas/AgentPolicy' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
     put:
       tags: [agentpolicies]
       summary: Update an AgentPolicy
       operationId: updateAgentPolicy
-      parameters:
-        - name: namespace
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: name
-          in: path
-          required: true
-          schema:
-            type: string
       requestBody:
         required: true
         content:
           application/json:
-            schema:
-              $ref: '#/components/schemas/AgentPolicy'
+            schema: { $ref: '#/components/schemas/CrdWriteRequest' }
       responses:
         '200':
-          description: AgentPolicy updated successfully
+          description: AgentPolicy updated
           content:
             application/json:
-              schema:
-                $ref: '#/components/schemas/AgentPolicy'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '500':
-          $ref: '#/components/responses/InternalError'
+              schema: { $ref: '#/components/schemas/AgentPolicy' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
     delete:
       tags: [agentpolicies]
       summary: Delete an AgentPolicy
       operationId: deleteAgentPolicy
-      parameters:
-        - name: namespace
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: name
-          in: path
-          required: true
-          schema:
-            type: string
       responses:
-        '204':
-          description: AgentPolicy deleted successfully
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '500':
-          $ref: '#/components/responses/InternalError'
+        '204': { description: AgentPolicy deleted }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
 
-  /api/v1/toolpolicies:
+  /api/workspaces/{name}/toolpolicies:
+    parameters:
+      - $ref: '#/components/parameters/WorkspaceName'
     get:
       tags: [toolpolicies]
-      summary: List all ToolPolicies
+      summary: List ToolPolicies in the workspace
       operationId: listToolPolicies
       parameters:
-        - name: namespace
-          in: query
-          description: Filter by namespace
-          schema:
-            type: string
-        - name: labelSelector
-          in: query
-          description: Kubernetes label selector for filtering
-          schema:
-            type: string
+        - $ref: '#/components/parameters/LabelSelector'
       responses:
         '200':
           description: List of tool policies
@@ -698,150 +538,135 @@ paths:
             application/json:
               schema:
                 type: array
-                items:
-                  $ref: '#/components/schemas/ToolPolicy'
-        '500':
-          $ref: '#/components/responses/InternalError'
+                items: { $ref: '#/components/schemas/ToolPolicy' }
+        '500': { $ref: '#/components/responses/InternalError' }
     post:
       tags: [toolpolicies]
-      summary: Create a new ToolPolicy
+      summary: Create a ToolPolicy
       operationId: createToolPolicy
       requestBody:
         required: true
         content:
           application/json:
-            schema:
-              $ref: '#/components/schemas/ToolPolicy'
+            schema: { $ref: '#/components/schemas/CrdWriteRequest' }
       responses:
         '201':
-          description: ToolPolicy created successfully
+          description: ToolPolicy created
           content:
             application/json:
-              schema:
-                $ref: '#/components/schemas/ToolPolicy'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '500':
-          $ref: '#/components/responses/InternalError'
+              schema: { $ref: '#/components/schemas/ToolPolicy' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '500': { $ref: '#/components/responses/InternalError' }
 
-  /api/v1/toolpolicies/{namespace}/{name}:
+  /api/workspaces/{name}/toolpolicies/{resourceName}:
+    parameters:
+      - $ref: '#/components/parameters/WorkspaceName'
+      - $ref: '#/components/parameters/ResourceName'
     get:
       tags: [toolpolicies]
-      summary: Get a specific ToolPolicy
+      summary: Get a ToolPolicy
       operationId: getToolPolicy
-      parameters:
-        - name: namespace
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: name
-          in: path
-          required: true
-          schema:
-            type: string
       responses:
         '200':
           description: ToolPolicy details
           content:
             application/json:
-              schema:
-                $ref: '#/components/schemas/ToolPolicy'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '500':
-          $ref: '#/components/responses/InternalError'
+              schema: { $ref: '#/components/schemas/ToolPolicy' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
     put:
       tags: [toolpolicies]
       summary: Update a ToolPolicy
       operationId: updateToolPolicy
-      parameters:
-        - name: namespace
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: name
-          in: path
-          required: true
-          schema:
-            type: string
       requestBody:
         required: true
         content:
           application/json:
-            schema:
-              $ref: '#/components/schemas/ToolPolicy'
+            schema: { $ref: '#/components/schemas/CrdWriteRequest' }
       responses:
         '200':
-          description: ToolPolicy updated successfully
+          description: ToolPolicy updated
           content:
             application/json:
-              schema:
-                $ref: '#/components/schemas/ToolPolicy'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '500':
-          $ref: '#/components/responses/InternalError'
+              schema: { $ref: '#/components/schemas/ToolPolicy' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
     delete:
       tags: [toolpolicies]
       summary: Delete a ToolPolicy
       operationId: deleteToolPolicy
-      parameters:
-        - name: namespace
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: name
-          in: path
-          required: true
-          schema:
-            type: string
       responses:
-        '204':
-          description: ToolPolicy deleted successfully
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '500':
-          $ref: '#/components/responses/InternalError'
+        '204': { description: ToolPolicy deleted }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
 
-  /api/v1/stats:
+  /api/workspaces/{name}/stats:
+    parameters:
+      - $ref: '#/components/parameters/WorkspaceName'
     get:
       tags: [stats]
-      summary: Get aggregated statistics
+      summary: Get aggregated statistics for the workspace
       operationId: getStats
       responses:
         '200':
           description: Aggregated statistics
           content:
             application/json:
-              schema:
-                $ref: '#/components/schemas/Stats'
-        '500':
-          $ref: '#/components/responses/InternalError'
-
-  /api/v1/namespaces:
-    get:
-      tags: [namespaces]
-      summary: List all namespaces
-      operationId: listNamespaces
-      responses:
-        '200':
-          description: List of namespace names
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  type: string
-        '500':
-          $ref: '#/components/responses/InternalError'
+              schema: { $ref: '#/components/schemas/Stats' }
+        '500': { $ref: '#/components/responses/InternalError' }
 
 components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: omnia_sk_
+      description: |
+        Omnia API key. Send as `Authorization: Bearer omnia_sk_...` (or the
+        `X-API-Key` header). Keys are minted in the dashboard under
+        settings/api-keys and are scoped to a workspace role (viewer/editor).
+  parameters:
+    WorkspaceName:
+      name: name
+      in: path
+      required: true
+      description: Workspace name; the server resolves the namespace from the Workspace CR.
+      schema:
+        type: string
+    ResourceName:
+      name: resourceName
+      in: path
+      required: true
+      description: Name of the resource within the workspace.
+      schema:
+        type: string
+    LabelSelector:
+      name: labelSelector
+      in: query
+      description: Kubernetes label selector for filtering.
+      schema:
+        type: string
   responses:
+    Unauthorized:
+      description: Missing or invalid API key
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Forbidden:
+      description: API key lacks the required workspace role
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Conflict:
+      description: Resource already exists
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
     NotFound:
       description: Resource not found
       content:
@@ -862,6 +687,28 @@ components:
             $ref: '#/components/schemas/Error'
 
   schemas:
+    CrdWriteRequest:
+      type: object
+      description: |
+        Generic create/update body accepted by the workspace CRD routes. The
+        server reads `metadata` (name, labels, annotations) and `spec`, adds a
+        workspace label, and ignores any `apiVersion`/`kind`.
+      required: [spec]
+      properties:
+        metadata:
+          type: object
+          properties:
+            name: { type: string }
+            labels:
+              type: object
+              additionalProperties: { type: string }
+            annotations:
+              type: object
+              additionalProperties: { type: string }
+        spec:
+          type: object
+          description: The resource spec (shape depends on the resource kind).
+          additionalProperties: true
     Error:
       type: object
       required: [error]

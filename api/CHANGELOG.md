@@ -10,6 +10,26 @@ or `api/proto/`, add an entry below with the date, affected API, and reason.
 
 ## Unreleased
 
+### Fixed (REST: dashboard OpenAPI spec corrected to the real workspace API)
+
+- **`api/openapi/openapi.yaml`** rewritten to document the API that is actually
+  implemented. It previously described namespace-scoped `/api/v1/agents`,
+  `/api/v1/promptpacks`, … endpoints served on the controller-manager `:8082`
+  — **none of which exist**. The real, externally-exposed, authenticated API is
+  the dashboard's workspace-scoped routes:
+  - Paths are now `/api/workspaces/{name}/<resource>` (and `/{resourceName}` for
+    items), matching `dashboard/src/app/api/workspaces/[name]/**`.
+  - Added an `ApiKeyAuth` security scheme (`Authorization: Bearer omnia_sk_…` /
+    `X-API-Key`) applied globally; `/api/health` is unauthenticated.
+  - Documented methods now match the route handlers' real exports (e.g. Providers
+    are GET/POST list + GET/PUT item; PromptPack create/update carry `content`,
+    which the server folds into a `{name}-content` ConfigMap).
+  - Dropped the unimplemented `/api/v1/namespaces` endpoint.
+- **Drift guard:** `hack/check-openapi-routes.py` (wired into `hack/pre-commit`
+  and a new `OpenAPI Route Drift` CI job) fails if the spec documents any
+  path/method without a backing `dashboard/src/app/api/**/route.ts` handler, so
+  the spec can never drift back into documenting a non-existent API.
+
 ### Added (CRD: AgentRuntime function output format)
 
 - **`AgentRuntime.spec.outputFormat`** (enum `text|json|json_schema`, optional,
