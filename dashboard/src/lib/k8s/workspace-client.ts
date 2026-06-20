@@ -8,6 +8,7 @@
 import * as k8s from "@kubernetes/client-node";
 import { of } from "@kubernetes/client-node/dist/gen/rxjsStub.js";
 import type { Workspace, WorkspaceSpec } from "@/types/workspace";
+import { isAuthError } from "./k8s-errors";
 
 const GROUP = "omnia.altairalabs.ai";
 const VERSION = "v1alpha1";
@@ -60,6 +61,26 @@ function getClient(): k8s.CustomObjectsApi | null {
  * @returns The workspace resource, or null if not found
  */
 export async function getWorkspace(name: string): Promise<Workspace | null> {
+  return getWorkspaceOnce(name, true);
+}
+
+/**
+ * Fetch a workspace, optionally rebuilding the client and retrying once on a
+ * 401.
+ *
+ * The singleton client caches a CustomObjectsApi built from the dashboard's
+ * in-cluster ServiceAccount token read at startup. kubelet rotates that token
+ * on disk periodically; once the cached client's token expires the K8s API
+ * answers 401 and, without this, every workspace resolution fails forever
+ * (a persistent 401 the user sees as a broken dashboard). On an auth error we
+ * reset the singleton — forcing getClient() to re-read the rotated token — and
+ * retry exactly once. allowRetry guards against an infinite loop if the fresh
+ * token is also rejected.
+ */
+async function getWorkspaceOnce(
+  name: string,
+  allowRetry: boolean
+): Promise<Workspace | null> {
   const k8sClient = getClient();
   if (!k8sClient) {
     return null;
@@ -80,6 +101,11 @@ export async function getWorkspace(name: string): Promise<Workspace | null> {
     // K8s API unreachable (e.g. dashboard E2E without cluster) — treat as not found
     if (isConnectionError(error)) {
       return null;
+    }
+    // Stale cached SA token → 401. Rebuild the client and retry once.
+    if (allowRetry && isAuthError(error)) {
+      resetWorkspaceClient();
+      return getWorkspaceOnce(name, false);
     }
     throw error;
   }
