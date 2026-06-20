@@ -75,6 +75,8 @@ describe("WorkspaceContext", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    // Reset the URL between tests so a ?workspace= anchor doesn't leak.
+    window.history.replaceState(null, "", "/");
     // Mock localStorage
     Object.defineProperty(window, "localStorage", {
       value: {
@@ -160,6 +162,76 @@ describe("WorkspaceContext", () => {
   });
 
   it("auto-selects first workspace when none selected", async () => {
+    vi.mocked(useWorkspaces).mockReturnValue({
+      data: mockWorkspaces,
+      isLoading: false,
+      error: null,
+      refetch: vi.fn(),
+    } as unknown as ReturnType<typeof useWorkspaces>);
+
+    const Wrapper = createWrapper();
+    render(
+      <Wrapper>
+        <WorkspaceProvider>
+          <TestConsumer />
+        </WorkspaceProvider>
+      </Wrapper>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("current-workspace").textContent).toBe("workspace-1");
+    });
+  });
+
+  it("selects the workspace named by the ?workspace= URL anchor", async () => {
+    window.history.replaceState(null, "", "/sessions?workspace=workspace-2");
+    vi.mocked(useWorkspaces).mockReturnValue({
+      data: mockWorkspaces,
+      isLoading: false,
+      error: null,
+      refetch: vi.fn(),
+    } as unknown as ReturnType<typeof useWorkspaces>);
+
+    const Wrapper = createWrapper();
+    render(
+      <Wrapper>
+        <WorkspaceProvider>
+          <TestConsumer />
+        </WorkspaceProvider>
+      </Wrapper>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("current-workspace").textContent).toBe("workspace-2");
+    });
+  });
+
+  it("prefers the ?workspace= URL anchor over the stored workspace", async () => {
+    mockLocalStorage["omnia-selected-workspace"] = "workspace-1";
+    window.history.replaceState(null, "", "/sessions?workspace=workspace-2");
+    vi.mocked(useWorkspaces).mockReturnValue({
+      data: mockWorkspaces,
+      isLoading: false,
+      error: null,
+      refetch: vi.fn(),
+    } as unknown as ReturnType<typeof useWorkspaces>);
+
+    const Wrapper = createWrapper();
+    render(
+      <Wrapper>
+        <WorkspaceProvider>
+          <TestConsumer />
+        </WorkspaceProvider>
+      </Wrapper>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("current-workspace").textContent).toBe("workspace-2");
+    });
+  });
+
+  it("falls back to the first workspace when the ?workspace= anchor is unknown", async () => {
+    window.history.replaceState(null, "", "/sessions?workspace=does-not-exist");
     vi.mocked(useWorkspaces).mockReturnValue({
       data: mockWorkspaces,
       isLoading: false,

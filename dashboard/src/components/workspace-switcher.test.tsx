@@ -4,17 +4,20 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { WorkspaceSwitcher } from "./workspace-switcher";
 import type { WorkspaceListItem } from "@/hooks/resources";
 
 // Mock next/navigation router
 vi.mock("next/navigation", () => ({
-  useRouter: vi.fn(() => ({ push: vi.fn() })),
+  useRouter: vi.fn(() => ({ push: vi.fn(), replace: vi.fn() })),
+  usePathname: vi.fn(() => "/agents"),
 }));
 
-// Mock the workspace context
+// Mock the workspace context (keep the real WORKSPACE_QUERY_PARAM constant)
 vi.mock("@/contexts/workspace-context", () => ({
   useWorkspace: vi.fn(),
+  WORKSPACE_QUERY_PARAM: "workspace",
 }));
 
 // Mock workspace permissions hook
@@ -22,7 +25,7 @@ vi.mock("@/hooks/use-workspace-permissions", () => ({
   useWorkspacePermissions: vi.fn(() => ({ isOwner: false })),
 }));
 
-import { useRouter } from "next/navigation";
+import { useRouter, usePathname } from "next/navigation";
 import { useWorkspace } from "@/contexts/workspace-context";
 import { useWorkspacePermissions } from "@/hooks/use-workspace-permissions";
 
@@ -315,5 +318,38 @@ describe("WorkspaceSwitcher", () => {
     fireEvent.click(gearButton);
 
     expect(mockPush).toHaveBeenCalledWith("/workspaces/dev-workspace/settings");
+  });
+
+  it("anchors the chosen workspace in the URL when switching", async () => {
+    const user = userEvent.setup();
+    const mockReplace = vi.fn();
+    const mockSetCurrentWorkspace = vi.fn();
+    vi.mocked(useRouter).mockReturnValue({
+      push: vi.fn(),
+      replace: mockReplace,
+    } as unknown as ReturnType<typeof useRouter>);
+    vi.mocked(usePathname).mockReturnValue("/agents");
+    window.history.replaceState(null, "", "/agents?tab=overview");
+    vi.mocked(useWorkspace).mockReturnValue({
+      workspaces: mockWorkspaces,
+      currentWorkspace: mockWorkspaces[0],
+      setCurrentWorkspace: mockSetCurrentWorkspace,
+      isLoading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+
+    render(<WorkspaceSwitcher />);
+
+    // Open the dropdown (the trigger shows the current workspace), then pick
+    // the staging workspace from the menu.
+    await user.click(screen.getByText("Development"));
+    await user.click(await screen.findByText("Staging"));
+
+    expect(mockSetCurrentWorkspace).toHaveBeenCalledWith("staging-workspace");
+    // Existing query params are preserved; the workspace anchor is added.
+    expect(mockReplace).toHaveBeenCalledWith(
+      "/agents?tab=overview&workspace=staging-workspace"
+    );
   });
 });

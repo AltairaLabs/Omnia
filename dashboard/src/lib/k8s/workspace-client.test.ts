@@ -126,6 +126,34 @@ describe("workspace-client", () => {
       );
     });
 
+    it("should rebuild the client and retry once on a 401, then succeed", async () => {
+      // Prime the singleton with a first successful call (1 KubeConfig).
+      mockGetClusterCustomObject.mockResolvedValueOnce(mockWorkspace);
+      await getWorkspace("warm-up");
+      expect(kubeConfigInstances).toBe(1);
+
+      // Now a stale-token 401 followed by success on the rebuilt client.
+      mockGetClusterCustomObject
+        .mockRejectedValueOnce({ statusCode: 401 })
+        .mockResolvedValueOnce(mockWorkspace);
+
+      const result = await getWorkspace("test-workspace");
+
+      expect(result).toEqual(mockWorkspace);
+      // Client was rebuilt to pick up the rotated SA token (2nd KubeConfig).
+      expect(kubeConfigInstances).toBe(2);
+    });
+
+    it("should throw if the 401 persists after one retry (no infinite loop)", async () => {
+      mockGetClusterCustomObject.mockRejectedValue({ statusCode: 401 });
+
+      await expect(getWorkspace("test-workspace")).rejects.toMatchObject({
+        statusCode: 401,
+      });
+      // Exactly two attempts: original + one retry.
+      expect(mockGetClusterCustomObject).toHaveBeenCalledTimes(2);
+    });
+
     it("should reuse singleton client", async () => {
       mockGetClusterCustomObject.mockResolvedValue(mockWorkspace);
 

@@ -217,6 +217,13 @@ export interface WorkspaceAccess {
   role: WorkspaceRole | null;
   /** Derived permissions based on role */
   permissions: WorkspacePermissions;
+  /**
+   * True when access was denied because the workspace does not exist (as
+   * opposed to existing but the caller lacking a role). Lets API guards return
+   * 404 instead of 403, so clients can distinguish "no such workspace" from
+   * "forbidden".
+   */
+  notFound?: boolean;
 }
 
 /**

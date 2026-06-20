@@ -8,7 +8,7 @@
  */
 
 import { Check, ChevronsUpDown, Building2, Loader2, Settings } from "lucide-react";
-import { useRouter } from "next/navigation";
+import { useRouter, usePathname } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -19,7 +19,10 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Badge } from "@/components/ui/badge";
-import { useWorkspace } from "@/contexts/workspace-context";
+import {
+  useWorkspace,
+  WORKSPACE_QUERY_PARAM,
+} from "@/contexts/workspace-context";
 import { useWorkspacePermissions } from "@/hooks/use-workspace-permissions";
 import type { WorkspaceRole } from "@/types/workspace";
 import { cn } from "@/lib/utils";
@@ -59,7 +62,22 @@ function getEnvironmentColor(environment: string): string {
 export function WorkspaceSwitcher() {
   const { workspaces, currentWorkspace, setCurrentWorkspace, isLoading, error } = useWorkspace();
   const router = useRouter();
+  const pathname = usePathname();
   const { isOwner } = useWorkspacePermissions();
+
+  // Switch the active workspace AND anchor it in the URL (?workspace=) so the
+  // current page stays copy-paste shareable. Replace, not push, to avoid
+  // cluttering history with each switch. Reads the live query string from
+  // window.location rather than useSearchParams() — the latter forces a CSR
+  // bailout that breaks static prerendering, and this only runs on click.
+  const selectWorkspace = (workspaceName: string) => {
+    setCurrentWorkspace(workspaceName);
+    const params = new URLSearchParams(
+      typeof window === "undefined" ? "" : window.location.search
+    );
+    params.set(WORKSPACE_QUERY_PARAM, workspaceName);
+    router.replace(`${pathname ?? "/"}?${params.toString()}`);
+  };
 
   // Loading state
   if (isLoading) {
@@ -118,7 +136,7 @@ export function WorkspaceSwitcher() {
         {workspaces.map((workspace) => (
           <DropdownMenuItem
             key={workspace.name}
-            onClick={() => setCurrentWorkspace(workspace.name)}
+            onClick={() => selectWorkspace(workspace.name)}
             className="flex items-center justify-between cursor-pointer"
           >
             <div className="flex items-center gap-2 min-w-0">

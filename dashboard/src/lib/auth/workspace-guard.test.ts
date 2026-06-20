@@ -75,6 +75,18 @@ describe("workspace-guard", () => {
     },
   };
 
+  const mockAccessNotFound: WorkspaceAccess = {
+    granted: false,
+    role: null,
+    notFound: true,
+    permissions: {
+      read: false,
+      write: false,
+      delete: false,
+      manageMembers: false,
+    },
+  };
+
   beforeEach(() => {
     vi.clearAllMocks();
     (getUser as Mock).mockResolvedValue(mockUser);
@@ -142,6 +154,22 @@ describe("workspace-guard", () => {
       );
       expect(body.required).toBe("owner");
       expect(body.current).toBe("viewer");
+      expect(handler).not.toHaveBeenCalled();
+    });
+
+    it("should return 404 when the workspace does not exist", async () => {
+      (checkWorkspaceAccess as Mock).mockResolvedValue(mockAccessNotFound);
+
+      const handler = vi.fn().mockResolvedValue(NextResponse.json({ ok: true }));
+      const wrapped = withWorkspaceAccess("viewer", handler);
+
+      const response = await wrapped(createMockRequest(), createMockContext());
+      const body = await response.json();
+
+      expect(response.status).toBe(404);
+      expect(body.error).toBe("Not Found");
+      expect(body.message).toBe("Workspace not found: test-workspace");
+      expect(body.workspace).toBe("test-workspace");
       expect(handler).not.toHaveBeenCalled();
     });
 
@@ -245,6 +273,21 @@ describe("workspace-guard", () => {
       expect(body.error).toBe("Forbidden");
       expect(body.required).toBe("owner");
       expect(body.current).toBe("viewer");
+      expect(handler).not.toHaveBeenCalled();
+    });
+
+    it("should return 404 when the workspace does not exist", async () => {
+      (checkWorkspaceAccess as Mock).mockResolvedValue(mockAccessNotFound);
+
+      const handler = vi.fn().mockResolvedValue(NextResponse.json({ ok: true }));
+      const wrapped = withWorkspaceQuery("viewer", handler);
+
+      const response = await wrapped(createMockRequest("test-ws"));
+      const body = await response.json();
+
+      expect(response.status).toBe(404);
+      expect(body.error).toBe("Not Found");
+      expect(body.message).toBe("Workspace not found: test-ws");
       expect(handler).not.toHaveBeenCalled();
     });
 
@@ -392,6 +435,19 @@ describe("withWorkspaceManage", () => {
     expect(res.status).toBe(403);
   });
 
+  it("returns 404 when the workspace does not exist", async () => {
+    (checkWorkspaceAccess as Mock).mockResolvedValue({
+      granted: false,
+      role: null,
+      notFound: true,
+      permissions: { read: false, write: false, delete: false, manageMembers: false },
+    });
+    const handler = vi.fn();
+    const res = await withWorkspaceManage(handler)(req(), ctx());
+    expect(handler).not.toHaveBeenCalled();
+    expect(res.status).toBe(404);
+  });
+
   it("checks access with no required role so platform-admins (role=null) pass", async () => {
     (checkWorkspaceAccess as Mock).mockResolvedValue({
       granted: true,
@@ -448,5 +504,18 @@ describe("withWorkspaceView", () => {
     const res = await withWorkspaceView(handler)(req(), ctx());
     expect(handler).not.toHaveBeenCalled();
     expect(res.status).toBe(403);
+  });
+
+  it("404s when the workspace does not exist", async () => {
+    (checkWorkspaceAccess as Mock).mockResolvedValue({
+      granted: false,
+      role: null,
+      notFound: true,
+      permissions: { read: false, write: false, delete: false, manageMembers: false },
+    });
+    const handler = vi.fn();
+    const res = await withWorkspaceView(handler)(req(), ctx());
+    expect(handler).not.toHaveBeenCalled();
+    expect(res.status).toBe(404);
   });
 });

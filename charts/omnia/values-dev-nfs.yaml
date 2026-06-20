@@ -1,0 +1,52 @@
+# Local NFS (RWX) workspace-content storage for Tilt development.
+#
+# Tilt ALWAYS applies this file (see the Tiltfile). It provides ReadWriteMany
+# (RWX) storage via an in-cluster NFS server + CSI driver so the
+# workspace-content PVC is always RWX on the `omnia-nfs` storage class — never
+# the cluster-default RWO class (e.g. local-path).
+#
+# Why this is unconditional in dev: the operator mounts the workspace-content
+# PVC unconditionally. If that PVC's storage class ever differs between Tilt
+# runs (e.g. omnia-nfs RWX one run, local-path RWO the next), the change is an
+# immutable PVC edit — Tilt tries to delete-and-recreate the PVC while the
+# operator pod holds it open, which deadlocks the apply and wedges the
+# dashboard. Pinning RWX/omnia-nfs for every Tilt config makes that impossible.
+#
+# Production does NOT use this. The chart ships local NFS OFF
+# (nfs.server.enabled=false); cloud deployments supply their own RWX CSI
+# (AWS EFS, Azure Files, GCP Filestore). This internal NFS server is dev-only.
+
+# Internal NFS server + CSI driver (dev only)
+nfs:
+  server:
+    enabled: true
+    internal: true
+    # Uses cluster default storage class for the NFS server's backing storage
+    storageClass: ""
+    size: 50Gi
+
+  # NFS CSI driver for dynamic PVC creation. With this enabled, the
+  # workspace-content PVC template auto-selects the omnia-nfs class.
+  csiDriver:
+    enabled: true
+    storageClass:
+      name: omnia-nfs
+      reclaimPolicy: Delete
+      # Shared subDir so all PVCs see the same content (without it each PVC
+      # gets its own isolated subdir).
+      subDir: omnia-content
+
+# Per-workspace storage uses the RWX NFS class
+workspaces:
+  storage:
+    storageClass: "omnia-nfs"
+    accessModes:
+      - ReadWriteMany
+
+# Shared workspace-content PVC: RWX, omnia-nfs (auto-selected via nfs.csiDriver)
+workspaceContent:
+  enabled: true
+  persistence:
+    accessModes:
+      - ReadWriteMany
+    size: 50Gi
