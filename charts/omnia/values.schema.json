@@ -742,13 +742,6 @@
       }
     },
 
-    "vscodeServer": {
-      "type": "object",
-      "properties": {
-        "enabled": { "type": "boolean" }
-      }
-    },
-
     "consolidation": {
       "type": "object",
       "description": "Memory consolidation reference packs. See docs/local-backlog/2026-05-22-memory-consolidation-design.md.",

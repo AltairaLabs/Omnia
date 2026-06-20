@@ -1625,23 +1625,8 @@ nfscsi:
 # Web-based VS Code for browsing/editing workspace content
 # ============================================================================
 
-vscodeServer:
-  # -- Enable VS Code server (only works when devMode is also true)
-  enabled: false
-  image:
-    # -- VS Code server image repository
-    repository: codercom/code-server
-    # -- VS Code server image tag
-    tag: "4.96.4"
-    # -- Image pull policy
-    pullPolicy: IfNotPresent
-  resources:
-    limits:
-      cpu: "1"
-      memory: 1Gi
-    requests:
-      cpu: 100m
-      memory: 256Mi
+# VS Code server (local dev workspace-content browser) is NOT a chart feature —
+# it's defined inline in the Tiltfile for local dev only. Same for pgweb.
 
 # Facade container configuration (used by AgentRuntime)
 facade:
