@@ -4,20 +4,22 @@
 # on a local Kubernetes cluster (kind, Docker Desktop, etc.)
 #
 # Usage:
-#   tilt up                          # Platform + demo content (dashboard, operator,
-#                                    #   omnia-demos: agents, ollama, skills, sessions);
-#                                    #   demos are ON by default
-#   ENABLE_DEMO=false tilt up        # Platform only — skip the demo workspace + Ollama
+#   tilt up                          # Platform only (dashboard, operator, session/memory
+#                                    #   API, postgres, redis, doctor) — lean by default
+#   ENABLE_DEMO=true tilt up         # + demo content (omnia-demos: the demo workspace,
+#                                    #   agents, ollama, skills, sessions)
+#   ENABLE_OBSERVABILITY=true tilt up# + Prometheus/Grafana/Loki/Tempo/Alloy
 #   ENABLE_ENTERPRISE=true tilt up   # + Arena Fleet on a dev license, NFS, policy-proxy
 #   tilt down                        # Stop and clean up
 #   tilt up --stream                 # Start with log streaming
 #
-# Environment variables (default off unless noted):
-#   ENABLE_DEMO          - Deploy the demo content (default: ON; set false for lean/platform-only)
+# Environment variables (default off):
+#   ENABLE_DEMO          - Deploy the demo content (default: OFF; set true for the demo workspace + Ollama)
 #   ENABLE_ENTERPRISE    - EE: Arena controller + dev license, NFS, policy-proxy, Redis
-#   ENABLE_OBSERVABILITY - Prometheus/Grafana/Loki/Tempo/Alloy (default: ON)
+#   ENABLE_OBSERVABILITY - Prometheus/Grafana/Loki/Tempo/Alloy (default: OFF)
 #   ENABLE_FULL_STACK    - Istio service mesh + Gateway API
-#   ENABLE_NFS           - RWX NFS storage (auto-on under ENABLE_ENTERPRISE / memory demo)
+#   (NFS/RWX workspace-content storage is ALWAYS on in Tilt — not a toggle; see
+#    the ENABLE_NFS note below. The cluster-default RWO class is never used.)
 #   ENABLE_AUDIO_DEMO    - Gemini audio demo agent (needs a gemini-credentials Secret)
 #   ENABLE_MEMORY_DEMO   - memory-api dev demo: a seeded galaxy across all tiers
 #   ENABLE_LANGCHAIN     - LangChain runtime demo agents
@@ -37,15 +39,15 @@ load('ext://namespace', 'namespace_create')
 # Configuration
 # ============================================================================
 
-# Prometheus/Grafana/Loki/Tempo/Alloy observability stack (default: on).
-# Set ENABLE_OBSERVABILITY=false for a lighter cluster.
-ENABLE_OBSERVABILITY = os.getenv('ENABLE_OBSERVABILITY', 'true').lower() in ('true', '1', 'yes')
+# Prometheus/Grafana/Loki/Tempo/Alloy observability stack (default: off).
+# Set ENABLE_OBSERVABILITY=true for system-health dashboards, traces, and logs.
+ENABLE_OBSERVABILITY = os.getenv('ENABLE_OBSERVABILITY', 'false').lower() in ('true', '1', 'yes')
 
 # Demo content (the `demo` workspace, agents, Ollama, skills, session/memory-api)
-# from the omnia-demos chart. Defaults ON; set ENABLE_DEMO=false on resource-
-# constrained machines (or for platform-only work) to skip it — notably the
-# heavy ollama-vision (llava:7b ~7Gi) model.
-ENABLE_DEMO = os.getenv('ENABLE_DEMO', 'true').lower() in ('true', '1', 'yes')
+# from the omnia-demos chart. Defaults OFF so a bare `tilt up` is platform-only;
+# set ENABLE_DEMO=true to deploy it — notably the heavy ollama-vision
+# (llava:7b ~7Gi) model.
+ENABLE_DEMO = os.getenv('ENABLE_DEMO', 'false').lower() in ('true', '1', 'yes')
 
 # Set to True to enable Audio Demo with Gemini (requires GEMINI_API_KEY)
 # Can be set via environment: ENABLE_AUDIO_DEMO=true tilt up
@@ -106,19 +108,16 @@ DASHBOARD_PROD = os.getenv('DASHBOARD_PROD', '').lower() in ('true', '1', 'yes')
 # Can be set via environment: ENABLE_ENTRA=true tilt up
 ENABLE_ENTRA = os.getenv('ENABLE_ENTRA', '').lower() in ('true', '1', 'yes') or False
 
-# Enable internal NFS server for workspace content storage
-# Provides ReadWriteMany (RWX) storage for Arena and workspace content
-# Auto-enabled when ENABLE_ENTERPRISE is true, can be explicitly controlled via ENABLE_NFS
-# Can be set via environment: ENABLE_NFS=true/false tilt up
-_nfs_env = os.getenv('ENABLE_NFS', '')
-if _nfs_env:
-    ENABLE_NFS = _nfs_env.lower() in ('true', '1', 'yes')
-else:
-    # Default: enabled when enterprise is enabled, OR when the memory demo is on
-    # (its Workspace requests ReadWriteMany content storage, which only the
-    # omnia-nfs class can provision — without NFS the workspace never goes Ready
-    # and the dashboard's memory proxy 503s). Disabled otherwise.
-    ENABLE_NFS = ENABLE_ENTERPRISE or ENABLE_MEMORY_DEMO
+# Internal NFS server for workspace-content storage — ALWAYS ON in Tilt, every
+# config. It provides the ReadWriteMany (RWX) `omnia-nfs` storage class so the
+# workspace-content PVC (which the operator mounts unconditionally) is always
+# RWX-backed. The cluster-default RWO class (local-path) must NEVER back it:
+# switching the PVC's storage class between runs is an immutable change that
+# deadlocks Tilt's apply (operator holds the PVC open while Tilt delete-recreates
+# it). Pinning RWX/omnia-nfs for every config makes that deadlock impossible.
+# Config lives in charts/omnia/values-dev-nfs.yaml (always applied below).
+# The chart itself ships local NFS OFF (cloud brings its own RWX CSI).
+ENABLE_NFS = True
 
 # Allow deployment to local clusters only (safety check)
 allow_k8s_contexts(['kind-omnia-dev', 'docker-desktop', 'minikube', 'kind-kind', 'orbstack'])
@@ -305,22 +304,26 @@ docker_build(
 # ============================================================================
 # Doctor - Cluster diagnostic service for Omnia health checks
 # ============================================================================
+# Doctor is a platform component (chart-owned, default off) but every target it
+# probes in dev is demo content (the tools-demo agent + ollama-chat), so it's
+# only useful — and only enabled — when ENABLE_DEMO is on.
 
-docker_build(
-    'omnia-doctor-dev',
-    context='.',
-    dockerfile='./Dockerfile.doctor',
-    only=[
-        './Dockerfile.doctor',
-        './cmd/doctor',
-        './internal',
-        './api',
-        './ee',
-        './pkg',
-        './go.mod',
-        './go.sum',
-    ],
-)
+if ENABLE_DEMO:
+    docker_build(
+        'omnia-doctor-dev',
+        context='.',
+        dockerfile='./Dockerfile.doctor',
+        only=[
+            './Dockerfile.doctor',
+            './cmd/doctor',
+            './internal',
+            './api',
+            './ee',
+            './pkg',
+            './go.mod',
+            './go.sum',
+        ],
+    )
 
 # ============================================================================
 # Local PromptKit Sync — rsync source into promptkit-local/ for Docker builds
@@ -529,16 +532,8 @@ helm_set = [
     'workspaceServices.memoryApi.projection.interval=30s',
     # Dev Postgres for workspace services
     'postgres.dev.enabled=true',
-    # Doctor
-    'doctor.enabled=true',
-    'doctor.image.repository=omnia-doctor-dev',
-    'doctor.image.tag=latest',
-    'doctor.image.pullPolicy=Never',
-    'doctor.workspace=demo',
-    'doctor.serviceGroup=default',
-    'doctor.agentNamespace=omnia-demo',
-    'doctor.agentName=tools-demo',
-    'doctor.ollamaService=ollama-chat',
+    # Doctor is gated on ENABLE_DEMO (see the conditional helm_set.extend below) —
+    # all of its probe targets are demo content.
     # LangChain runtime image (used when framework.type=langchain)
     'langchainRuntime.image.repository=omnia-langchain-runtime-dev',
     'langchainRuntime.image.tag=latest',
@@ -579,6 +574,22 @@ helm_set.extend([
     'redis.auth.enabled=false',
     'redis.master.persistence.enabled=false',
 ])
+
+# Doctor — only meaningful with demo content, so gate it on ENABLE_DEMO. The
+# chart defaults doctor off; these settings enable it and point it at the demo's
+# tools-demo agent + ollama-chat.
+if ENABLE_DEMO:
+    helm_set.extend([
+        'doctor.enabled=true',
+        'doctor.image.repository=omnia-doctor-dev',
+        'doctor.image.tag=latest',
+        'doctor.image.pullPolicy=Never',
+        'doctor.workspace=demo',
+        'doctor.serviceGroup=default',
+        'doctor.agentNamespace=omnia-demo',
+        'doctor.agentName=tools-demo',
+        'doctor.ollamaService=ollama-chat',
+    ])
 
 # Enterprise features configuration
 if ENABLE_ENTERPRISE:
@@ -704,9 +715,12 @@ if ENABLE_FULL_STACK:
 
     # Note: When full stack is enabled, OPA mode for demos is set in demos chart values
 
-# Build values files list
-helm_values = ['./charts/omnia/values-dev.yaml']
-if ENABLE_NFS:
+# Build values files list. values-dev-nfs.yaml is ALWAYS applied — it pins
+# workspace-content to RWX/omnia-nfs so the storage-class-change deadlock can
+# never happen (see the ENABLE_NFS note above). It must come before the
+# enterprise overlay so enterprise can still layer on top.
+helm_values = ['./charts/omnia/values-dev.yaml', './charts/omnia/values-dev-nfs.yaml']
+if ENABLE_ENTERPRISE:
     helm_values.append('./charts/omnia/values-dev-enterprise.yaml')
 if ENABLE_FULL_STACK:
     helm_values.append('./charts/omnia/values-istio-prometheus.yaml')
@@ -887,11 +901,14 @@ k8s_resource(
 # run as `session-demo-default` / `memory-demo-default` in the omnia-demo
 # namespace; the dashboard reaches them in-cluster, so no port-forward is needed.
 
-k8s_resource(
-    'omnia-doctor',
-    labels=['doctor'],
-    port_forwards=['8084:8080'],
-)
+# Doctor is only deployed when ENABLE_DEMO is on (all its probe targets are demo
+# content), so only register its Tilt resource then.
+if ENABLE_DEMO:
+    k8s_resource(
+        'omnia-doctor',
+        labels=['doctor'],
+        port_forwards=['8084:8080'],
+    )
 
 # pgweb — lightweight Postgres web UI for inspecting session data, eval results, etc.
 k8s_yaml(blob('''
@@ -936,6 +953,63 @@ k8s_resource(
     labels=['database'],
     port_forwards=['8081:8081'],  # pgweb UI
     resource_deps=['omnia-postgres'],
+)
+
+# VS Code server — local-dev-only browser for the NFS workspace-content volume
+# (the only way to see what's on it). Defined inline here, NOT in the chart:
+# like pgweb it's a dev convenience, not a platform feature. Mounts the always-on
+# omnia-nfs workspace-content PVC. Lives in the storage group.
+k8s_yaml(blob('''
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: omnia-vscode-server
+  namespace: omnia-system
+  labels:
+    app.kubernetes.io/name: vscode-server
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: vscode-server
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: vscode-server
+    spec:
+      containers:
+        - name: code-server
+          image: codercom/code-server:4.96.4
+          args:
+            - --auth
+            - none
+            - --bind-addr
+            - "0.0.0.0:8080"
+            - /workspace
+          ports:
+            - containerPort: 8080
+              protocol: TCP
+          volumeMounts:
+            - name: workspace-content
+              mountPath: /workspace
+          resources:
+            limits:
+              cpu: "1"
+              memory: 1Gi
+            requests:
+              cpu: 100m
+              memory: 256Mi
+      volumes:
+        - name: workspace-content
+          persistentVolumeClaim:
+            claimName: omnia-workspace-content
+'''))
+
+k8s_resource(
+    'omnia-vscode-server',
+    labels=['storage'],
+    port_forwards=['8888:8080'],  # VS Code Server UI
+    resource_deps=['csi-nfs-controller', 'omnia-nfs-server'],
 )
 
 if ENABLE_OBSERVABILITY:
@@ -990,14 +1064,15 @@ k8s_resource(
 )
 
 # ============================================================================
-# Enterprise Storage - NFS Server and CSI Driver
+# Storage - NFS Server and CSI Driver (ALWAYS ON in dev; ENABLE_NFS is forced
+# True above so workspace-content is always RWX/omnia-nfs)
 # ============================================================================
 
 if ENABLE_NFS:
-    # NFS server deployment and backing storage (enterprise shared filesystem)
+    # NFS server deployment and backing storage (shared RWX filesystem)
     k8s_resource(
         'omnia-nfs-server',
-        labels=['enterprise'],
+        labels=['storage'],
         objects=[
             'omnia-nfs-data:persistentvolumeclaim',
         ],
@@ -1007,7 +1082,7 @@ if ENABLE_NFS:
     # Must be ready before workspace-content PVC can be provisioned
     k8s_resource(
         'csi-nfs-controller',
-        labels=['enterprise'],
+        labels=['storage'],
         objects=[
             'omnia-nfs:storageclass',
             'omnia-workspace-content:persistentvolumeclaim',
@@ -1018,15 +1093,7 @@ if ENABLE_NFS:
     # NFS CSI driver node daemonset
     k8s_resource(
         'csi-nfs-node',
-        labels=['enterprise'],
-    )
-
-    # VS Code Server for browsing/editing workspace content
-    k8s_resource(
-        'omnia-vscode-server',
-        labels=['enterprise'],
-        port_forwards=['8888:8080'],  # VS Code Server UI
-        resource_deps=['csi-nfs-controller', 'omnia-nfs-server'],
+        labels=['storage'],
     )
 
 # ============================================================================
