@@ -16,6 +16,11 @@ import (
 	"github.com/prometheus/client_golang/prometheus/testutil"
 )
 
+const (
+	wsA = "ws-a"
+	wsB = "ws-b"
+)
+
 // fakeEmbStore is a programmable EmbeddingMetricsStore.
 type fakeEmbStore struct {
 	workspaces []string
@@ -51,23 +56,23 @@ func newCollector(store EmbeddingMetricsStore, m *EmbeddingMetrics) *EmbeddingMe
 
 func TestCollectOnce_SetsCoverageAndBacklog(t *testing.T) {
 	store := &fakeEmbStore{
-		workspaces: []string{"ws-a", "ws-b"},
-		coverage:   map[string][2]int{"ws-a": {10, 7}, "ws-b": {4, 4}},
-		backlog:    map[string]int{"ws-a": 3, "ws-b": 0},
+		workspaces: []string{wsA, wsB},
+		coverage:   map[string][2]int{wsA: {10, 7}, wsB: {4, 4}},
+		backlog:    map[string]int{wsA: 3, wsB: 0},
 	}
 	m := NewEmbeddingMetrics()
 	newCollector(store, m).collectOnce(context.Background())
 
-	if got := testutil.ToFloat64(m.Coverage.WithLabelValues("ws-a")); got != 0.7 {
+	if got := testutil.ToFloat64(m.Coverage.WithLabelValues(wsA)); got != 0.7 {
 		t.Errorf("ws-a coverage = %v, want 0.7", got)
 	}
-	if got := testutil.ToFloat64(m.Coverage.WithLabelValues("ws-b")); got != 1.0 {
+	if got := testutil.ToFloat64(m.Coverage.WithLabelValues(wsB)); got != 1.0 {
 		t.Errorf("ws-b coverage = %v, want 1.0", got)
 	}
-	if got := testutil.ToFloat64(m.Backlog.WithLabelValues("ws-a")); got != 3 {
+	if got := testutil.ToFloat64(m.Backlog.WithLabelValues(wsA)); got != 3 {
 		t.Errorf("ws-a backlog = %v, want 3", got)
 	}
-	if got := testutil.ToFloat64(m.Backlog.WithLabelValues("ws-b")); got != 0 {
+	if got := testutil.ToFloat64(m.Backlog.WithLabelValues(wsB)); got != 0 {
 		t.Errorf("ws-b backlog = %v, want 0", got)
 	}
 }
@@ -93,31 +98,31 @@ func TestCollectOnce_SkipsCoverageForEmptyWorkspace(t *testing.T) {
 
 func TestCollectOnce_ResetsStaleSeries(t *testing.T) {
 	store := &fakeEmbStore{
-		workspaces: []string{"ws-a", "ws-b"},
-		coverage:   map[string][2]int{"ws-a": {10, 5}, "ws-b": {2, 2}},
-		backlog:    map[string]int{"ws-a": 1, "ws-b": 1},
+		workspaces: []string{wsA, wsB},
+		coverage:   map[string][2]int{wsA: {10, 5}, wsB: {2, 2}},
+		backlog:    map[string]int{wsA: 1, wsB: 1},
 	}
 	m := NewEmbeddingMetrics()
 	c := newCollector(store, m)
 	c.collectOnce(context.Background())
 
 	// ws-b disappears (deleted). Its series must not linger at the old value.
-	store.workspaces = []string{"ws-a"}
+	store.workspaces = []string{wsA}
 	c.collectOnce(context.Background())
 
 	if n := testutil.CollectAndCount(m.Coverage); n != 1 {
 		t.Errorf("coverage series count = %d, want 1 after ws-b removed", n)
 	}
-	if got := testutil.ToFloat64(m.Coverage.WithLabelValues("ws-a")); got != 0.5 {
+	if got := testutil.ToFloat64(m.Coverage.WithLabelValues(wsA)); got != 0.5 {
 		t.Errorf("ws-a coverage = %v, want 0.5", got)
 	}
 }
 
 func TestCollectOnce_ListErrorLeavesGaugesUntouched(t *testing.T) {
 	store := &fakeEmbStore{
-		workspaces: []string{"ws-a"},
-		coverage:   map[string][2]int{"ws-a": {4, 2}},
-		backlog:    map[string]int{"ws-a": 5},
+		workspaces: []string{wsA},
+		coverage:   map[string][2]int{wsA: {4, 2}},
+		backlog:    map[string]int{wsA: 5},
 	}
 	m := NewEmbeddingMetrics()
 	c := newCollector(store, m)
@@ -127,16 +132,16 @@ func TestCollectOnce_ListErrorLeavesGaugesUntouched(t *testing.T) {
 	store.wsErr = errors.New("db down")
 	c.collectOnce(context.Background())
 
-	if got := testutil.ToFloat64(m.Coverage.WithLabelValues("ws-a")); got != 0.5 {
+	if got := testutil.ToFloat64(m.Coverage.WithLabelValues(wsA)); got != 0.5 {
 		t.Errorf("coverage after list error = %v, want preserved 0.5", got)
 	}
 }
 
 func TestCollectWorkspace_CoverageErrorSkipsBacklog(t *testing.T) {
 	store := &fakeEmbStore{
-		workspaces: []string{"ws-a"},
-		covErr:     map[string]error{"ws-a": errors.New("query failed")},
-		backlog:    map[string]int{"ws-a": 9},
+		workspaces: []string{wsA},
+		covErr:     map[string]error{wsA: errors.New("query failed")},
+		backlog:    map[string]int{wsA: 9},
 	}
 	m := NewEmbeddingMetrics()
 	newCollector(store, m).collectOnce(context.Background())
@@ -151,14 +156,14 @@ func TestCollectWorkspace_CoverageErrorSkipsBacklog(t *testing.T) {
 
 func TestCollectWorkspace_BacklogErrorStillSetsCoverage(t *testing.T) {
 	store := &fakeEmbStore{
-		workspaces: []string{"ws-a"},
-		coverage:   map[string][2]int{"ws-a": {4, 1}},
-		backErr:    map[string]error{"ws-a": errors.New("query failed")},
+		workspaces: []string{wsA},
+		coverage:   map[string][2]int{wsA: {4, 1}},
+		backErr:    map[string]error{wsA: errors.New("query failed")},
 	}
 	m := NewEmbeddingMetrics()
 	newCollector(store, m).collectOnce(context.Background())
 
-	if got := testutil.ToFloat64(m.Coverage.WithLabelValues("ws-a")); got != 0.25 {
+	if got := testutil.ToFloat64(m.Coverage.WithLabelValues(wsA)); got != 0.25 {
 		t.Errorf("coverage = %v, want 0.25 despite backlog error", got)
 	}
 	if n := testutil.CollectAndCount(m.Backlog); n != 0 {
@@ -168,9 +173,9 @@ func TestCollectWorkspace_BacklogErrorStillSetsCoverage(t *testing.T) {
 
 func TestRun_InitialCollectThenStopsOnCancel(t *testing.T) {
 	store := &fakeEmbStore{
-		workspaces: []string{"ws-a"},
-		coverage:   map[string][2]int{"ws-a": {2, 1}},
-		backlog:    map[string]int{"ws-a": 0},
+		workspaces: []string{wsA},
+		coverage:   map[string][2]int{wsA: {2, 1}},
+		backlog:    map[string]int{wsA: 0},
 	}
 	m := NewEmbeddingMetrics()
 	c := NewEmbeddingMetricsCollector(store, m, "model-x", time.Hour, logr.Discard())
@@ -186,7 +191,7 @@ func TestRun_InitialCollectThenStopsOnCancel(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("Run did not return after context cancel")
 	}
-	if got := testutil.ToFloat64(m.Coverage.WithLabelValues("ws-a")); got != 0.5 {
+	if got := testutil.ToFloat64(m.Coverage.WithLabelValues(wsA)); got != 0.5 {
 		t.Errorf("coverage after initial pass = %v, want 0.5", got)
 	}
 }

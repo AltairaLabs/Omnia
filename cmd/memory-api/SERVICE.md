@@ -145,6 +145,23 @@ and `consent_category` stays `NULL` (binary opt-out is the only gate).
   of stored categories.
 - `omnia_memory_classify_errors_total{reason}` — embedding failures.
 
+Embedding-pipeline health (the `--metrics-collect-interval` collector,
+default 60s, refreshes the two gauges per workspace; #1442):
+
+- `omnia_memory_embedding_coverage{workspace}` — fraction (0..1) of a
+  workspace's live entities whose latest active observation carries an
+  embedding. Below the projector's dense threshold (0.7) the Memory
+  Galaxy renders on the lexical basis.
+- `omnia_memory_reembed_backlog{workspace}` — count of active
+  observations awaiting (re-)embedding for the current model (the
+  re-embed worker's queue depth).
+- `omnia_memory_projection_renders_total{workspace,policy,status,basis}`
+  — the `basis` label (dense|lexical|unknown) makes a galaxy degrading to
+  lexical a queryable/alertable condition.
+
+The "Omnia Memory Pipeline" Grafana dashboard
+(`charts/omnia/dashboards/omnia-memory-pipeline.json`) visualises these.
+
 ### Future work
 
 A Helm sidecar option (`memoryApi.embeddingSidecar.enabled`) is planned

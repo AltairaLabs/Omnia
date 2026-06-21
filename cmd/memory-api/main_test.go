@@ -21,6 +21,10 @@ import (
 	"github.com/altairalabs/omnia/internal/memory"
 )
 
+// invalidInterval is an unparseable duration string used by the
+// "collector disabled on bad interval" cases.
+const invalidInterval = "not-a-duration"
+
 // TestConsolidationWorker_GatedByEnterprise asserts that
 // buildConsolidationWorker returns nil when enterprise is off, even
 // when a valid interval is supplied.
@@ -78,7 +82,7 @@ func TestEmbeddingMetricsCollector_Disabled(t *testing.T) {
 	assert.Nil(t, buildEmbeddingMetricsCollector(empty, nil, nil, prometheus.NewRegistry(), logr.Discard()),
 		"empty interval disables the collector")
 
-	bad := &flags{metricsCollectInterval: "not-a-duration"}
+	bad := &flags{metricsCollectInterval: invalidInterval}
 	assert.Nil(t, buildEmbeddingMetricsCollector(bad, nil, nil, prometheus.NewRegistry(), logr.Discard()),
 		"unparseable interval disables the collector")
 }

@@ -11,6 +11,9 @@ import (
 	"testing"
 )
 
+// seedEntityType is the memory type used for seeded coverage/backlog fixtures.
+const seedEntityType = "profile"
+
 // seedUnembeddedEntities saves n single-observation entities (distinct users so
 // each is its own entity) in workspace ws, none embedded. Returns nothing —
 // callers re-query via Find/Count.
@@ -19,7 +22,7 @@ func seedUnembeddedEntities(t *testing.T, store *PostgresMemoryStore, ws string,
 	ctx := context.Background()
 	for i, c := range contents {
 		must(t, store.Save(ctx, &Memory{
-			Type: "profile", Content: c, Confidence: 0.9,
+			Type: seedEntityType, Content: c, Confidence: 0.9,
 			Scope: map[string]string{ScopeWorkspaceID: ws, ScopeUserID: "u-" + string(rune('a'+i))},
 		}))
 	}
