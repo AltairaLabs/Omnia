@@ -10,6 +10,19 @@ or `api/proto/`, add an entry below with the date, affected API, and reason.
 
 ## Unreleased
 
+### Added (CRD: AgentRuntime independent memory toggles, #1517)
+
+- **`AgentRuntime.spec.memory.retrieval.enabled`** (`*bool`) — gates ambient RAG
+  auto-injection independently of the memory tools.
+- **`AgentRuntime.spec.memory.tools`** (`MemoryToolsConfig{ enabled *bool }`) —
+  gates the `memory__remember` / `memory__recall` tools independently of RAG.
+- Both default to **true** when unset, so existing `memory.enabled: true` specs
+  are unchanged. Combinations: RAG+tools (today), RAG-only, tools-only, or
+  neither.
+- Interim: with tools off the tools are still advertised to the LLM but backed by
+  a no-op store (writes discarded, reads empty). PromptKit#1427 tracks a
+  first-class option to skip tool registration entirely.
+
 ### Removed (CRD: AgentRuntime unwired memory fields, #1512)
 
 - Removed **`AgentRuntime.spec.memory.embedding`** (`MemoryEmbeddingConfig`),

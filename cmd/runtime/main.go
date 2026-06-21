@@ -260,6 +260,7 @@ func main() {
 	if cfg.MemoryEnabled && cfg.MemoryAPIURL != "" {
 		memStore := memoryhttpclient.NewStore(cfg.MemoryAPIURL, log)
 		serverOpts = append(serverOpts, pkruntime.WithMemoryStore(memStore))
+		serverOpts = append(serverOpts, pkruntime.WithMemoryModes(cfg.MemoryRetrievalEnabled, cfg.MemoryToolsEnabled))
 		if cfg.WorkspaceUID != "" {
 			serverOpts = append(serverOpts, pkruntime.WithWorkspaceUID(cfg.WorkspaceUID))
 		}

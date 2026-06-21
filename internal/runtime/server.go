@@ -126,6 +126,12 @@ type Server struct {
 	memoryStrategy string // Retrieval strategy: "semantic" or "" (keyword FTS)
 	memoryDenyCEL  string // Access deny-filter CEL expression (empty = no filter)
 	memoryLimit    int    // Max memories injected per turn; 0 = defaultEpisodicLimit (10)
+	// memoryRetrievalEnabled gates ambient RAG auto-injection; memoryToolsEnabled
+	// gates the memory__remember/recall tools. Both default true (see NewServer)
+	// so a wired memory store keeps its historical both-on behavior unless a
+	// CRD sub-toggle explicitly disables one.
+	memoryRetrievalEnabled bool
+	memoryToolsEnabled     bool
 
 	// Media resolution for mock provider
 	mediaResolver *MediaResolver
@@ -498,6 +504,17 @@ func WithMemoryRetrieval(strategy, denyCEL string, limit int) ServerOption {
 	}
 }
 
+// WithMemoryModes sets the two independent memory axes from
+// spec.memory.retrieval.enabled and spec.memory.tools.enabled. retrievalEnabled
+// gates ambient RAG auto-injection; toolsEnabled gates the memory__remember /
+// memory__recall tools. Both default true (see NewServer) when not set.
+func WithMemoryModes(retrievalEnabled, toolsEnabled bool) ServerOption {
+	return func(s *Server) {
+		s.memoryRetrievalEnabled = retrievalEnabled
+		s.memoryToolsEnabled = toolsEnabled
+	}
+}
+
 // WithMediaBasePath sets the base path for resolving mock:// URLs.
 func WithMediaBasePath(path string) ServerOption {
 	return func(s *Server) {
@@ -544,6 +561,9 @@ func NewServer(opts ...ServerOption) *Server {
 		turnIndices:    make(map[string]int),
 		unsubscribeFns: make(map[string][]func()),
 		healthy:        true,
+		// Default both memory axes on; WithMemoryModes overrides from the CRD.
+		memoryRetrievalEnabled: true,
+		memoryToolsEnabled:     true,
 	}
 
 	for _, opt := range opts {

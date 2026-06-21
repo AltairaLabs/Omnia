@@ -1110,10 +1110,23 @@ type MemoryConfig struct {
 	// Retrieval configures memory retrieval behavior.
 	// +optional
 	Retrieval *MemoryRetrievalConfig `json:"retrieval,omitempty"`
+
+	// Tools configures the memory tools (memory__remember / memory__recall)
+	// exposed to the LLM. Independent of retrieval: an agent can have ambient
+	// RAG without the tools, or the tools without RAG.
+	// +optional
+	Tools *MemoryToolsConfig `json:"tools,omitempty"`
 }
 
 // MemoryRetrievalConfig controls memory retrieval behavior.
 type MemoryRetrievalConfig struct {
+	// Enabled controls whether ambient RAG retrieval runs — the per-turn
+	// auto-injection of relevant memories into the prompt. Defaults to true
+	// (when unset) so memory.enabled keeps its existing behavior. Set to false
+	// to keep the memory tools without auto-injecting memories every turn.
+	// +optional
+	Enabled *bool `json:"enabled,omitempty"`
+
 	// Strategy selects the retrieval mode.
 	// +kubebuilder:validation:Enum=keyword;semantic;graph;composite
 	// +optional
@@ -1140,6 +1153,17 @@ type MemoryAccessFilterConfig struct {
 	// metadata.url.contains("restricted")
 	// +optional
 	DenyCEL string `json:"denyCEL,omitempty"`
+}
+
+// MemoryToolsConfig controls the memory tools exposed to the LLM.
+type MemoryToolsConfig struct {
+	// Enabled controls whether the memory tools (memory__remember /
+	// memory__recall) are active. Defaults to true (when unset) so
+	// memory.enabled keeps its existing behavior. Set to false for read-only
+	// ambient RAG over a curated store without letting the agent write or
+	// explicitly recall.
+	// +optional
+	Enabled *bool `json:"enabled,omitempty"`
 }
 
 // AgentRuntimeSpec defines the desired state of AgentRuntime.
