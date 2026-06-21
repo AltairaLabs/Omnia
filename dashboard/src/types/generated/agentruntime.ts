@@ -2561,42 +2561,9 @@ export interface AgentRuntimeSpec {
   };
   /** memory configures cross-session memory for this agent. */
   memory?: {
-    /** Embedding configures the embedding provider for semantic memory retrieval. */
-    embedding?: {
-      /** Model overrides the default embedding model for the provider. */
-      model?: string;
-      /** Provider specifies the embedding provider type (e.g., openai, gemini, voyageai). */
-      provider?: "openai" | "gemini" | "voyageai";
-      /** SecretRef references the Kubernetes secret containing the API key. */
-      secretRef?: {
-        /** Name of the referent.
-         * This field is effectively required, but due to backwards compatibility is
-         * allowed to be empty. Instances of this type with an empty value here are
-         * almost certainly wrong.
-         * More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names */
-        name?: string;
-      };
-    };
     /** Enabled controls whether cross-session memory is active.
      * Memory is disabled by default. */
     enabled?: boolean;
-    /** Extraction configures automatic memory extraction from conversations. */
-    extraction?: {
-      /** Enabled controls whether extraction runs post-conversation. */
-      enabled?: boolean;
-      /** Model overrides the extraction model. Empty uses the conversation model. */
-      model?: string;
-    };
-    /** Purpose defines the platform-enforced purpose tag for memories.
-     * Must be one of: personalisation, support_continuity, safety. */
-    purpose?: "personalisation" | "support_continuity" | "safety";
-    /** Retention configures memory TTL. */
-    retention?: {
-      /** DefaultTTL is the default time-to-live for memories (e.g., "720h" for 30 days). */
-      defaultTTL?: string;
-      /** MaxTTL is the maximum allowed TTL (e.g., "8760h" for 365 days). */
-      maxTTL?: string;
-    };
     /** Retrieval configures memory retrieval behavior. */
     retrieval?: {
       /** AccessFilter configures retrieval-time access control (a deny filter). */

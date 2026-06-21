@@ -1107,49 +1107,9 @@ type MemoryConfig struct {
 	// +optional
 	Enabled bool `json:"enabled,omitempty"`
 
-	// Purpose defines the platform-enforced purpose tag for memories.
-	// Must be one of: personalisation, support_continuity, safety.
-	// +kubebuilder:validation:Enum=personalisation;support_continuity;safety
-	// +optional
-	Purpose string `json:"purpose,omitempty"`
-
-	// Extraction configures automatic memory extraction from conversations.
-	// +optional
-	Extraction *MemoryExtractionConfig `json:"extraction,omitempty"`
-
-	// Retention configures memory TTL.
-	// +optional
-	Retention *MemoryRetentionConfig `json:"retention,omitempty"`
-
 	// Retrieval configures memory retrieval behavior.
 	// +optional
 	Retrieval *MemoryRetrievalConfig `json:"retrieval,omitempty"`
-
-	// Embedding configures the embedding provider for semantic memory retrieval.
-	// +optional
-	Embedding *MemoryEmbeddingConfig `json:"embedding,omitempty"`
-}
-
-// MemoryExtractionConfig controls how memories are extracted from conversations.
-type MemoryExtractionConfig struct {
-	// Enabled controls whether extraction runs post-conversation.
-	// +optional
-	Enabled bool `json:"enabled,omitempty"`
-
-	// Model overrides the extraction model. Empty uses the conversation model.
-	// +optional
-	Model string `json:"model,omitempty"`
-}
-
-// MemoryRetentionConfig controls memory lifecycle.
-type MemoryRetentionConfig struct {
-	// DefaultTTL is the default time-to-live for memories (e.g., "720h" for 30 days).
-	// +optional
-	DefaultTTL string `json:"defaultTTL,omitempty"`
-
-	// MaxTTL is the maximum allowed TTL (e.g., "8760h" for 365 days).
-	// +optional
-	MaxTTL string `json:"maxTTL,omitempty"`
 }
 
 // MemoryRetrievalConfig controls memory retrieval behavior.
@@ -1180,22 +1140,6 @@ type MemoryAccessFilterConfig struct {
 	// metadata.url.contains("restricted")
 	// +optional
 	DenyCEL string `json:"denyCEL,omitempty"`
-}
-
-// MemoryEmbeddingConfig configures the embedding provider for memory.
-type MemoryEmbeddingConfig struct {
-	// Provider specifies the embedding provider type (e.g., openai, gemini, voyageai).
-	// +kubebuilder:validation:Enum=openai;gemini;voyageai
-	// +optional
-	Provider string `json:"provider,omitempty"`
-
-	// Model overrides the default embedding model for the provider.
-	// +optional
-	Model string `json:"model,omitempty"`
-
-	// SecretRef references the Kubernetes secret containing the API key.
-	// +optional
-	SecretRef *corev1.LocalObjectReference `json:"secretRef,omitempty"`
 }
 
 // AgentRuntimeSpec defines the desired state of AgentRuntime.

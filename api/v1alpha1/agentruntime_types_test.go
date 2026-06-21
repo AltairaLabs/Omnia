@@ -19,7 +19,6 @@ package v1alpha1
 import (
 	"testing"
 
-	"github.com/stretchr/testify/assert"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -717,15 +716,6 @@ func TestAgentRuntimeMemoryConfig(t *testing.T) {
 			},
 			Memory: &MemoryConfig{
 				Enabled: true,
-				Purpose: "personalisation",
-				Extraction: &MemoryExtractionConfig{
-					Enabled: true,
-					Model:   "claude-sonnet-4-20250514",
-				},
-				Retention: &MemoryRetentionConfig{
-					DefaultTTL: "720h",
-					MaxTTL:     "8760h",
-				},
 				Retrieval: &MemoryRetrievalConfig{
 					Strategy: "keyword",
 					Limit:    &limit,
@@ -740,29 +730,6 @@ func TestAgentRuntimeMemoryConfig(t *testing.T) {
 	}
 	if !mem.Enabled {
 		t.Error("Memory.Enabled should be true")
-	}
-	if mem.Purpose != "personalisation" {
-		t.Errorf("Memory.Purpose = %q, want %q", mem.Purpose, "personalisation")
-	}
-
-	if mem.Extraction == nil {
-		t.Fatal("Memory.Extraction should not be nil")
-	}
-	if !mem.Extraction.Enabled {
-		t.Error("Memory.Extraction.Enabled should be true")
-	}
-	if mem.Extraction.Model != "claude-sonnet-4-20250514" {
-		t.Errorf("Memory.Extraction.Model = %q, want %q", mem.Extraction.Model, "claude-sonnet-4-20250514")
-	}
-
-	if mem.Retention == nil {
-		t.Fatal("Memory.Retention should not be nil")
-	}
-	if mem.Retention.DefaultTTL != "720h" {
-		t.Errorf("Memory.Retention.DefaultTTL = %q, want %q", mem.Retention.DefaultTTL, "720h")
-	}
-	if mem.Retention.MaxTTL != "8760h" {
-		t.Errorf("Memory.Retention.MaxTTL = %q, want %q", mem.Retention.MaxTTL, "8760h")
 	}
 
 	if mem.Retrieval == nil {
@@ -781,10 +748,6 @@ func TestAgentRuntimeMemoryConfig(t *testing.T) {
 		t.Fatal("copied.Spec.Memory should not be nil")
 	}
 	// Mutate copy and verify original is unchanged
-	copied.Spec.Memory.Purpose = "safety"
-	if ar.Spec.Memory.Purpose != "personalisation" {
-		t.Errorf("original Memory.Purpose was modified, got %q, want %q", ar.Spec.Memory.Purpose, "personalisation")
-	}
 	newLimit := int32(20)
 	copied.Spec.Memory.Retrieval.Limit = &newLimit
 	if *ar.Spec.Memory.Retrieval.Limit != 10 {
@@ -810,37 +773,4 @@ func TestAgentRuntimeMemoryConfigNil(t *testing.T) {
 	if ar.Spec.Memory != nil {
 		t.Error("Memory should be nil when not configured")
 	}
-}
-
-func TestAgentRuntimeMemoryEmbeddingConfig(t *testing.T) {
-	ar := &AgentRuntime{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "embedding-agent",
-			Namespace: "default",
-		},
-		Spec: AgentRuntimeSpec{
-			PromptPackRef: PromptPackRef{Name: testPromptPack},
-			Facade:        FacadeConfig{Type: FacadeTypeWebSocket},
-			Providers: []NamedProviderRef{
-				{Name: "default", ProviderRef: ProviderRef{Name: testCredentials}},
-			},
-			Memory: &MemoryConfig{
-				Enabled: true,
-				Embedding: &MemoryEmbeddingConfig{
-					Provider:  "openai",
-					Model:     "text-embedding-3-small",
-					SecretRef: &corev1.LocalObjectReference{Name: "openai-key"},
-				},
-			},
-		},
-	}
-
-	assert.Equal(t, "openai", ar.Spec.Memory.Embedding.Provider)
-	assert.Equal(t, "text-embedding-3-small", ar.Spec.Memory.Embedding.Model)
-	assert.Equal(t, "openai-key", ar.Spec.Memory.Embedding.SecretRef.Name)
-
-	// Deep copy test — mutating the copy must not affect the original.
-	copied := ar.DeepCopy()
-	copied.Spec.Memory.Embedding.Provider = "gemini"
-	assert.Equal(t, "openai", ar.Spec.Memory.Embedding.Provider)
 }
