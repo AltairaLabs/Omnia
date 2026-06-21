@@ -6,7 +6,7 @@
 
 import * as client from "openid-client";
 import { getAuthConfig } from "../config";
-import { getProviderConfig, providerSupportsDiscovery } from "./providers";
+import { getProviderConfig } from "./providers";
 import type { PKCEData } from "./types";
 
 // Cached configuration
@@ -43,21 +43,13 @@ export async function getOAuthConfig(): Promise<client.Configuration> {
     );
   }
 
-  // Use discovery for OIDC-compliant providers
-  if (providerSupportsDiscovery(authConfig.oauth.provider)) {
-    cachedConfig = await client.discovery(
-      new URL(issuerUrl),
-      authConfig.oauth.clientId,
-      authConfig.oauth.clientSecret
-    );
-  } else {
-    // For non-discovery providers like GitHub, we'd need manual configuration
-    // For now, require discovery support
-    throw new Error(
-      `Provider ${authConfig.oauth.provider} does not support OIDC discovery. ` +
-        `Please use a discovery-capable provider or configure endpoints manually.`
-    );
-  }
+  // All supported providers are OIDC-compliant: discover endpoints from the
+  // issuer's /.well-known/openid-configuration.
+  cachedConfig = await client.discovery(
+    new URL(issuerUrl),
+    authConfig.oauth.clientId,
+    authConfig.oauth.clientSecret
+  );
 
   return cachedConfig;
 }

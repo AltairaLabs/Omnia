@@ -18,6 +18,7 @@ import type { ProviderBindingInfo } from "@/hooks/arena";
 import { FileContextMenu } from "./file-context-menu";
 import { ProviderBindingIndicator } from "./provider-binding-indicator";
 import { NewItemDialog } from "./new-item-dialog";
+import { RenameDialog } from "./rename-dialog";
 import { DeleteConfirmDialog } from "./delete-confirm-dialog";
 import { ImportProviderDialog } from "./import-provider-dialog";
 import { ImportToolDialog } from "./import-tool-dialog";
@@ -37,9 +38,23 @@ interface FileTreeProps {
   readonly providerBindingStatus?: Map<string, ProviderBindingInfo>;
   readonly onSelectFile: (path: string, name: string) => void;
   readonly onCreateFile?: (parentPath: string | null, name: string, isDirectory: boolean, content?: string) => Promise<void>;
+  readonly onRenameFile?: (path: string, newName: string) => Promise<void>;
+  readonly onMoveFile?: (path: string, destDir: string) => Promise<void>;
   readonly onDeleteFile?: (path: string) => Promise<void>;
   readonly onBindProvider?: (node: FileTreeNode) => void;
   readonly className?: string;
+}
+
+interface DragHandlers {
+  readonly draggable: boolean;
+  readonly draggedPath: string | null;
+  readonly dropTargetPath: string | null;
+  readonly canDropOn: (targetDir: string) => boolean;
+  readonly onDragStartNode: (path: string) => void;
+  readonly onDragEndNode: () => void;
+  readonly onDragOverDir: (path: string, e: React.DragEvent) => void;
+  readonly onDragLeaveDir: () => void;
+  readonly onDropOnDir: (path: string, e: React.DragEvent) => void;
 }
 
 interface TreeNodeProps {
@@ -51,9 +66,19 @@ interface TreeNodeProps {
   readonly onToggleExpand: (path: string) => void;
   readonly onSelectFile: (path: string, name: string) => void;
   readonly onContextAction: (action: ContextAction, node: FileTreeNode, kind?: ArenaFileKind) => void;
+  readonly drag: DragHandlers;
 }
 
 type ContextAction = "newFile" | "newFolder" | "newTypedFile" | "importProvider" | "importTool" | "bindProvider" | "rename" | "delete" | "copyPath";
+
+/** Whether `src` can be dropped into directory `targetDir` ("" = project root). */
+function canDropInto(src: string | null, targetDir: string): boolean {
+  if (!src) return false;
+  if (targetDir === src) return false; // onto itself
+  if (targetDir.startsWith(`${src}/`)) return false; // into its own descendant
+  const currentParent = src.includes("/") ? src.slice(0, src.lastIndexOf("/")) : "";
+  return targetDir !== currentParent; // already lives there
+}
 
 /**
  * Get icon for file type
@@ -91,11 +116,26 @@ function TreeNode({
   onToggleExpand,
   onSelectFile,
   onContextAction,
+  drag,
 }: TreeNodeProps) {
   const isExpanded = expandedPaths.has(node.path);
   const isSelected = selectedPath === node.path;
   const hasChildren = node.children && node.children.length > 0;
   const paddingLeft = `${level * 16 + 8}px`;
+
+  // Check if this is the project config file (should not be deletable or moved).
+  const isConfigFile = node.name === "config.arena.yaml" && level === 0;
+  const isDraggable = drag.draggable && !isConfigFile;
+  const isDropTarget =
+    node.isDirectory && drag.dropTargetPath === node.path && drag.canDropOn(node.path);
+
+  const dirDropProps = node.isDirectory
+    ? {
+        onDragOver: (e: React.DragEvent) => drag.onDragOverDir(node.path, e),
+        onDragLeave: () => drag.onDragLeaveDir(),
+        onDrop: (e: React.DragEvent) => drag.onDropOnDir(node.path, e),
+      }
+    : {};
 
   const handleToggle = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -123,21 +163,27 @@ function TreeNode({
     onContextAction(action, node, kind);
   };
 
-  // Check if this is the project config file (should not be deletable)
-  const isConfigFile = node.name === "config.arena.yaml" && level === 0;
-
   const content = (
     <div
       role="button"
       tabIndex={0}
+      draggable={isDraggable}
+      onDragStart={(e) => {
+        e.dataTransfer.effectAllowed = "move";
+        e.dataTransfer.setData("text/plain", node.path);
+        drag.onDragStartNode(node.path);
+      }}
+      onDragEnd={() => drag.onDragEndNode()}
       className={cn(
         "flex items-center gap-1 py-1 px-2 rounded-sm transition-colors cursor-pointer",
         "hover:bg-muted/50",
-        isSelected && "bg-primary/10 text-primary font-medium"
+        isSelected && "bg-primary/10 text-primary font-medium",
+        isDropTarget && "ring-1 ring-primary bg-primary/10"
       )}
       style={{ paddingLeft }}
       onClick={handleClick}
       onKeyDown={handleKeyDown}
+      {...dirDropProps}
     >
       {/* Expand/collapse chevron for directories */}
       {node.isDirectory ? (
@@ -213,6 +259,7 @@ function TreeNode({
               onToggleExpand={onToggleExpand}
               onSelectFile={onSelectFile}
               onContextAction={onContextAction}
+              drag={drag}
             />
           ))}
         </div>
@@ -233,12 +280,20 @@ export function FileTree({
   providerBindingStatus,
   onSelectFile,
   onCreateFile,
+  onRenameFile,
+  onMoveFile,
   onDeleteFile,
   onBindProvider,
   className,
 }: Readonly<FileTreeProps>) {
   const { toast } = useToast();
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
+  const [draggedPath, setDraggedPath] = useState<string | null>(null);
+  const [dropTargetPath, setDropTargetPath] = useState<string | null>(null);
+  const [renameDialog, setRenameDialog] = useState<{
+    open: boolean;
+    node: FileTreeNode | null;
+  }>({ open: false, node: null });
   const [newItemDialog, setNewItemDialog] = useState<{
     open: boolean;
     mode: "file" | "folder";
@@ -268,6 +323,46 @@ export function FileTree({
       return next;
     });
   }, []);
+
+  const performMove = useCallback(
+    async (src: string, destDir: string) => {
+      if (!onMoveFile || !canDropInto(src, destDir)) return;
+      try {
+        await onMoveFile(src, destDir);
+      } catch {
+        // Error toast is handled by the parent component.
+      }
+    },
+    [onMoveFile]
+  );
+
+  const drag: DragHandlers = {
+    draggable: !!onMoveFile,
+    draggedPath,
+    dropTargetPath,
+    canDropOn: (targetDir: string) => canDropInto(draggedPath, targetDir),
+    onDragStartNode: (path: string) => setDraggedPath(path),
+    onDragEndNode: () => {
+      setDraggedPath(null);
+      setDropTargetPath(null);
+    },
+    onDragOverDir: (path: string, e: React.DragEvent) => {
+      if (!canDropInto(draggedPath, path)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      e.dataTransfer.dropEffect = "move";
+      if (dropTargetPath !== path) setDropTargetPath(path);
+    },
+    onDragLeaveDir: () => setDropTargetPath(null),
+    onDropOnDir: (path: string, e: React.DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const src = draggedPath;
+      setDraggedPath(null);
+      setDropTargetPath(null);
+      if (src) void performMove(src, path);
+    },
+  };
 
   const createTypedFile = useCallback(
     async (kind: ArenaFileKind, parentPath: string | null) => {
@@ -308,7 +403,7 @@ export function FileTree({
           onBindProvider?.(node);
           break;
         case "rename":
-          toast({ title: "Not implemented", description: "Rename functionality coming soon" });
+          if (onRenameFile) setRenameDialog({ open: true, node });
           break;
         case "delete":
           setDeleteDialog({ open: true, node });
@@ -319,8 +414,13 @@ export function FileTree({
           break;
       }
     },
-    [toast, createTypedFile, onBindProvider]
+    [toast, createTypedFile, onBindProvider, onRenameFile]
   );
+
+  const handleRenameItem = async (newName: string) => {
+    if (!onRenameFile || !renameDialog.node) return;
+    await onRenameFile(renameDialog.node.path, newName);
+  };
 
   const handleCreateItem = async (name: string) => {
     if (!onCreateFile) return;
@@ -459,7 +559,29 @@ export function FileTree({
           toast({ title: "Path copied", description: "/" });
         }}
       >
-        <div className="min-h-[100px]">
+        {/* Root drop zone for moving items to the project root. A drag-and-drop
+            target has no native interactive element / keyboard equivalent here;
+            the same move is reachable via the (future) context menu. */}
+        {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions */}
+        <div
+          className={cn(
+            "min-h-[100px] rounded-sm",
+            dropTargetPath === "" && draggedPath && canDropInto(draggedPath, "") && "ring-1 ring-primary ring-inset bg-primary/5"
+          )}
+          onDragOver={(e) => {
+            if (!canDropInto(draggedPath, "")) return;
+            e.preventDefault();
+            e.dataTransfer.dropEffect = "move";
+            if (dropTargetPath !== "") setDropTargetPath("");
+          }}
+          onDrop={(e) => {
+            e.preventDefault();
+            const src = draggedPath;
+            setDraggedPath(null);
+            setDropTargetPath(null);
+            if (src) void performMove(src, "");
+          }}
+        >
           {tree.map((node) => (
             <TreeNode
               key={node.path}
@@ -471,6 +593,7 @@ export function FileTree({
               onToggleExpand={handleToggleExpand}
               onSelectFile={onSelectFile}
               onContextAction={handleContextAction}
+              drag={drag}
             />
           ))}
         </div>
@@ -483,6 +606,14 @@ export function FileTree({
         mode={newItemDialog.mode}
         parentPath={newItemDialog.parentPath}
         onConfirm={handleCreateItem}
+      />
+
+      <RenameDialog
+        open={renameDialog.open}
+        onOpenChange={(open) => setRenameDialog((prev) => ({ ...prev, open }))}
+        currentName={renameDialog.node?.name || ""}
+        isDirectory={renameDialog.node?.isDirectory || false}
+        onConfirm={handleRenameItem}
       />
 
       <DeleteConfirmDialog

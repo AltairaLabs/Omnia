@@ -46,6 +46,7 @@ export interface ProjectEditorActions {
   closeAllFiles: () => void;
   closeOtherFiles: (path: string) => void;
   setActiveFile: (path: string | null) => void;
+  renameOpenPaths: (oldPath: string, newPath: string) => void;
   updateFileContent: (path: string, content: string) => void;
   markFileSaved: (path: string, newContent?: string) => void;
   setFileLoading: (path: string, loading: boolean) => void;
@@ -86,6 +87,17 @@ function createOpenFile(
     loading: false,
     error: null,
   };
+}
+
+/**
+ * Remap a path under a renamed node. Returns the rewritten path if `p` is the
+ * renamed node itself or a descendant of it, otherwise null (unaffected).
+ */
+function remapPath(p: string, oldPath: string, newPath: string): string | null {
+  if (p === oldPath) return newPath;
+  const prefix = `${oldPath}/`;
+  if (p.startsWith(prefix)) return `${newPath}/${p.slice(prefix.length)}`;
+  return null;
 }
 
 /**
@@ -267,6 +279,39 @@ export const useProjectEditorStore = create<ProjectEditorStore>()(
         if (path === null || state.openFiles.some((f) => f.path === path)) {
           set({ activeFilePath: path });
         }
+      },
+
+      renameOpenPaths: (oldPath, newPath) => {
+        const state = get();
+        // Remap the renamed file's own tab plus any descendant tabs (when a
+        // directory is renamed). Content / dirty state are preserved — only the
+        // path (and the renamed node's own name + type) change.
+        const newOpenFiles = state.openFiles.map((f) => {
+          const mapped = remapPath(f.path, oldPath, newPath);
+          if (mapped === null) return f;
+          return {
+            ...f,
+            path: mapped,
+            name: mapped.split("/").pop() ?? f.name,
+            type: getFileType(mapped),
+          };
+        });
+
+        const newActivePath =
+          state.activeFilePath === null
+            ? null
+            : remapPath(state.activeFilePath, oldPath, newPath) ?? state.activeFilePath;
+
+        const newExpanded = new Set<string>();
+        state.expandedPaths.forEach((p) => {
+          newExpanded.add(remapPath(p, oldPath, newPath) ?? p);
+        });
+
+        set({
+          openFiles: newOpenFiles,
+          activeFilePath: newActivePath,
+          expandedPaths: newExpanded,
+        });
       },
 
       updateFileContent: (path, content) => {

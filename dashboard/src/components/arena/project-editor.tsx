@@ -105,7 +105,7 @@ export function ProjectEditor({ className, initialProjectId }: ProjectEditorProp
   // Hooks
   const { projects, loading: projectsLoading, refetch: refetchProjects } = useArenaProjects();
   const { createProject, deleteProject } = useArenaProjectMutations();
-  const { getFileContent, updateFileContent: saveFileContent, createFile, deleteFile, refreshFileTree } = useArenaProjectFiles();
+  const { getFileContent, updateFileContent: saveFileContent, createFile, renameFile, moveFile, deleteFile, refreshFileTree } = useArenaProjectFiles();
   // Only show Ready providers in the dev console dropdown
   const { data: providers = [] } = useProviders({ phase: "Ready" });
 
@@ -149,6 +149,10 @@ export function ProjectEditor({ className, initialProjectId }: ProjectEditorProp
     setEditorView("yaml");
   }
   const [problems, setProblems] = useState<Problem[]>([]);
+  // Reveal target for jumping to a line after opening a file from a validation
+  // error / problem. The nonce lets the same line be re-revealed on repeat clicks.
+  const [revealTarget, setRevealTarget] = useState<{ line: number; nonce: number } | undefined>();
+  const revealNonceRef = useRef(0);
   const [selectedProvider, setSelectedProvider] = useState<string | undefined>();
   const [bindProviderDialog, setBindProviderDialog] = useState<{
     open: boolean;
@@ -375,6 +379,49 @@ export function ProjectEditor({ className, initialProjectId }: ProjectEditorProp
     [currentProject, deleteFile, refreshFileTree, setFileTree, toast]
   );
 
+  // Handle rename file/folder from file tree context menu
+  const handleRenameFile = useCallback(
+    async (path: string, newName: string) => {
+      if (!currentProject) return;
+
+      const result = await renameFile(currentProject.id, path, newName);
+      // Refresh the tree to reflect the new name.
+      const newTree = await refreshFileTree(currentProject.id);
+      setFileTree(newTree);
+
+      // Remap any open tabs in place — the renamed file itself and, when a
+      // directory is renamed, every open descendant — preserving unsaved edits.
+      useProjectEditorStore.getState().renameOpenPaths(path, result.path);
+
+      toast({ title: "Renamed", description: `"${path}" → "${result.path}"` });
+    },
+    [currentProject, renameFile, refreshFileTree, setFileTree, toast]
+  );
+
+  // Handle move (drag-and-drop) of a file/folder into another directory.
+  const handleMoveFile = useCallback(
+    async (path: string, destDir: string) => {
+      if (!currentProject) return;
+
+      const result = await moveFile(currentProject.id, path, destDir);
+      const newTree = await refreshFileTree(currentProject.id);
+      setFileTree(newTree);
+
+      // Remap open tabs (the moved file and any descendants) in place.
+      useProjectEditorStore.getState().renameOpenPaths(path, result.path);
+
+      toast({ title: "Moved", description: `"${path}" → "${result.path}"` });
+    },
+    [currentProject, moveFile, refreshFileTree, setFileTree, toast]
+  );
+
+  // Reveal a line in the active editor (jump-to-line from a validation error).
+  const revealAtLine = useCallback((line?: number) => {
+    if (!line || line < 1) return;
+    revealNonceRef.current += 1;
+    setRevealTarget({ line, nonce: revealNonceRef.current });
+  }, []);
+
   // Handle bind provider action from file tree context menu
   const handleBindProvider = useCallback(
     (node: { path: string }) => {
@@ -565,18 +612,16 @@ export function ProjectEditor({ className, initialProjectId }: ProjectEditorProp
 
   // Handle jumping to a file from validation results
   const handleValidationFileClick = useCallback(
-    // Line parameter required by ValidationResultsDialog callback signature
-    async (path: string, _line?: number) => {
+    async (path: string, line?: number) => {
       if (!currentProject) return;
 
-      // Open the file
+      // Open the file, then jump to the reported line once it's loaded.
       const fileName = path.split("/").pop() || path;
       await handleSelectFile(path, fileName);
-
-      // Line navigation would need editor ref - for now just open the file
+      revealAtLine(line);
       setValidationDialogOpen(false);
     },
-    [currentProject, handleSelectFile]
+    [currentProject, handleSelectFile, revealAtLine]
   );
 
   // Handle problem click in results panel
@@ -584,8 +629,9 @@ export function ProjectEditor({ className, initialProjectId }: ProjectEditorProp
     async (problem: Problem) => {
       const fileName = problem.file.split("/").pop() || problem.file;
       await handleSelectFile(problem.file, fileName);
+      revealAtLine(problem.line);
     },
-    [handleSelectFile]
+    [handleSelectFile, revealAtLine]
   );
 
   // Handle refresh
@@ -616,6 +662,7 @@ export function ProjectEditor({ className, initialProjectId }: ProjectEditorProp
             workspace={workspace}
             projectId={currentProject.id}
             filePath={activeFile.path}
+            revealTarget={revealTarget}
           />
         );
       }
@@ -626,6 +673,7 @@ export function ProjectEditor({ className, initialProjectId }: ProjectEditorProp
           onSave={handleSave}
           fileType={activeFile.type}
           loading={activeFile.loading}
+          revealTarget={revealTarget}
         />
       );
     }
@@ -743,6 +791,8 @@ export function ProjectEditor({ className, initialProjectId }: ProjectEditorProp
                   providerBindingStatus={providerBindingStatus}
                   onSelectFile={handleSelectFile}
                   onCreateFile={handleCreateFile}
+                  onRenameFile={handleRenameFile}
+                  onMoveFile={handleMoveFile}
                   onDeleteFile={handleDeleteFile}
                   onBindProvider={handleBindProvider}
                 />

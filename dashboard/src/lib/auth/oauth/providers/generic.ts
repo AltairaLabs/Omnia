@@ -16,7 +16,5 @@ export function getGenericProviderConfig(): Partial<OAuthProviderConfig> {
     name: "Identity Provider",
     // issuerUrl must be provided via OMNIA_OAUTH_ISSUER_URL
     scopes: [...DEFAULT_SCOPES, "groups"],
-    claims: DEFAULT_CLAIM_MAPPING,
-    supportsDiscovery: true,
-  };
+    claims: DEFAULT_CLAIM_MAPPING,  };
 }

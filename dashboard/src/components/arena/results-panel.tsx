@@ -139,7 +139,7 @@ function ConsolePlaceholder() {
   return (
     <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
       <p className="text-sm">Dev Console</p>
-      <p className="text-xs mt-1">Interactive testing coming soon</p>
+      <p className="text-xs mt-1">Select a project to start an interactive session</p>
     </div>
   );
 }

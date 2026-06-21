@@ -67,6 +67,7 @@ func registerRoutes(mux *http.ServeMux, h *Handler, a *authz.Authorizer) {
 	mux.Handle("GET "+routePrefix+"/{path...}", guard(http.HandlerFunc(h.Get)))
 	mux.Handle("PUT "+routePrefix+"/{path...}", guard(http.HandlerFunc(h.Put)))
 	mux.Handle("POST "+routePrefix+"/{path...}", guard(http.HandlerFunc(h.MkDir)))
+	mux.Handle("PATCH "+routePrefix+"/{path...}", guard(http.HandlerFunc(h.Move)))
 	mux.Handle("DELETE "+routePrefix+"/{path...}", guard(http.HandlerFunc(h.Delete)))
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)

@@ -157,9 +157,15 @@ export interface FileCreateResponse {
   modifiedAt: string;
 }
 
-/** Request body for renaming a file or directory */
+/**
+ * Request body for renaming or moving a file or directory. Exactly one of
+ * `newName` (rename in place) or `destDir` (move, keeping the basename) is used.
+ */
 export interface FileRenameRequest {
-  newName: string;
+  /** Rename in place within the current directory. */
+  newName?: string;
+  /** Move into this project-relative directory (root = ""), keeping the basename. */
+  destDir?: string;
 }
 
 // =============================================================================

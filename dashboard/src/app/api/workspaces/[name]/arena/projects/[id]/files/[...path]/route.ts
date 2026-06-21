@@ -32,12 +32,14 @@ import type {
   FileUpdateResponse,
   FileCreateRequest,
   FileCreateResponse,
+  FileRenameRequest,
 } from "@/types/arena-project";
 import {
   ContentApiError,
   getContent,
   isContentListing,
   makeContentDir,
+  moveContent,
   writeContentFile,
   deleteContent,
 } from "@/lib/data/content-api-service";
@@ -357,6 +359,131 @@ export const POST = withWorkspaceAccess<{ name: string; id: string; path: string
         return contentErrorResponse(error, "Failed to create file");
       }
       return handleK8sError(error, "create file");
+    }
+  }
+);
+
+/** Compute the project-relative destination for a rename within the same directory. */
+function siblingPath(filePath: string, newName: string): string {
+  const segs = filePath.split("/");
+  segs.pop();
+  segs.push(newName);
+  return segs.join("/");
+}
+
+function badRequest(message: string): NextResponse {
+  return NextResponse.json({ error: BAD_REQUEST, message }, { status: 400 });
+}
+
+/**
+ * Resolve the project-relative destination for a rename (`newName`) or move
+ * (`destDir`, keeping the basename). Returns the destination path or an error
+ * response to send back.
+ */
+function resolveMoveTarget(
+  filePath: string,
+  body: FileRenameRequest
+): { destRelativePath: string } | { error: NextResponse } {
+  if (typeof body.newName === "string") {
+    if (!isValidFilename(body.newName)) {
+      return { error: badRequest("Invalid filename") };
+    }
+    return { destRelativePath: siblingPath(filePath, body.newName) };
+  }
+
+  if (typeof body.destDir === "string") {
+    // Refuse to move a directory into itself or one of its own descendants.
+    if (body.destDir === filePath || body.destDir.startsWith(`${filePath}/`)) {
+      return { error: badRequest("Cannot move an item into itself") };
+    }
+    const basename = filePath.split("/").pop() ?? filePath;
+    const destRelativePath = body.destDir ? `${body.destDir}/${basename}` : basename;
+    return { destRelativePath };
+  }
+
+  return { error: badRequest("newName or destDir is required") };
+}
+
+/**
+ * PATCH /api/workspaces/:name/arena/projects/:id/files/:path
+ *
+ * Rename a file or directory in place (`newName`), or move it into another
+ * directory keeping its name (`destDir`).
+ */
+export const PATCH = withWorkspaceAccess<{ name: string; id: string; path: string[] }>(
+  "editor",
+  async (
+    request: NextRequest,
+    context: RouteParams,
+    access: WorkspaceAccess,
+    user: User
+  ): Promise<NextResponse> => {
+    const { name, id: projectId, path: pathSegments } = await context.params;
+    const filePath = pathSegments.join("/");
+    let auditCtx;
+
+    try {
+      const result = await validateWorkspace(name, access.role!);
+      if (!result.ok) return result.response;
+
+      auditCtx = createAuditContext(
+        name,
+        result.workspace.spec.namespace.name,
+        user,
+        access.role!,
+        RESOURCE_TYPE
+      );
+
+      const body = (await request.json()) as FileRenameRequest;
+
+      if (filePath === PROJECT_CONFIG_FILE) {
+        return badRequest("Cannot move project config file");
+      }
+
+      const resolved = resolveMoveTarget(filePath, body);
+      if ("error" in resolved) return resolved.error;
+      const { destRelativePath } = resolved;
+
+      const basePath = projectRelPath(projectId);
+      const srcRelPath = `${basePath}/${filePath}`;
+      const destRelPath = `${basePath}/${destRelativePath}`;
+
+      // The source must exist; capture its type for the response.
+      let existing;
+      try {
+        existing = await getContent(name, user, srcRelPath);
+      } catch (error) {
+        if (isNotFound(error)) {
+          return notFoundResponse(`File not found: ${filePath}`);
+        }
+        throw error;
+      }
+      const isDirectory = isContentListing(existing);
+      const destName = destRelativePath.split("/").pop() ?? destRelativePath;
+
+      const conflict = await conflictIfExists(name, user, destRelPath, destName);
+      if (conflict) return conflict;
+
+      const moveResult = await moveContent(name, user, srcRelPath, destRelPath);
+
+      const response: FileCreateResponse = {
+        path: destRelativePath,
+        name: destName,
+        isDirectory,
+        size: isDirectory ? undefined : moveResult.size,
+        modifiedAt: moveResult.modifiedAt,
+      };
+
+      auditSuccess(auditCtx, "patch", `${projectId}/${filePath} -> ${destRelativePath}`);
+      return NextResponse.json(response);
+    } catch (error) {
+      if (auditCtx) {
+        auditError(auditCtx, "patch", `${projectId}/${filePath}`, error, 500);
+      }
+      if (error instanceof ContentApiError) {
+        return contentErrorResponse(error, "Failed to rename file");
+      }
+      return handleK8sError(error, "rename file");
     }
   }
 );
