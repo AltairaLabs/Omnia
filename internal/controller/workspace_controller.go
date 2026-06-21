@@ -116,6 +116,14 @@ type WorkspaceReconciler struct {
 	// per-workspace session-api ServiceAccount to it so session-api can
 	// validate caller tokens. Empty disables the binding.
 	SessionAPITokenReviewClusterRole string
+
+	// MemoryEnterpriseReaderClusterRole is the install-wide ClusterRole the
+	// chart provisions (enterprise builds only) to grant cluster reads on
+	// sessionprivacypolicies + agentruntimes. When set, the reconciler binds
+	// each per-workspace memory-api ServiceAccount to it so the enterprise
+	// memory-policy/privacy watcher can list those CRDs (#1444). Empty
+	// disables the binding (OSS installs).
+	MemoryEnterpriseReaderClusterRole string
 }
 
 // +kubebuilder:rbac:groups=omnia.altairalabs.ai,resources=workspaces,verbs=get;list;watch;create;update;patch;delete

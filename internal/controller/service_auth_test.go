@@ -31,6 +31,7 @@ const (
 	testAgentWorkspaceReaderRole = "omnia-agent-workspace-reader"
 	testServiceAuthNetpolName    = "service-auth-acme"    // NetworkPolicy/PeerAuthentication name for workspace "acme"
 	testSessionSAName            = "session-acme-default" // session-api ServiceAccount in the "acme" workspace
+	testMemorySAName             = "memory-acme-default"  // memory-api ServiceAccount in the "acme" workspace
 )
 
 func enabledAuth() ServiceAuthConfig {

@@ -143,6 +143,14 @@ func (r *WorkspaceReconciler) reconcileManagedServiceGroup(
 		return omniav1alpha1.ServiceGroupStatus{}, fmt.Errorf("session tokenreview binding: %w", err)
 	}
 
+	// On enterprise builds, the managed memory-api runs a privacy/memory-policy
+	// watcher that lists SessionPrivacyPolicy + AgentRuntime CRDs cluster-wide.
+	// Bind the memory-api SA to the enterprise reader ClusterRole (provisioned
+	// by the chart) so the watcher can start (#1444). No-op on OSS installs.
+	if err := r.reconcileMemoryEnterpriseReaderBinding(ctx, namespace, memoryDepName); err != nil {
+		return omniav1alpha1.ServiceGroupStatus{}, fmt.Errorf("memory enterprise reader binding: %w", err)
+	}
+
 	// Internal-service-auth network hardening: default-deny ingress +
 	// allow-from-known-callers NetworkPolicy for session-api/memory-api, and
 	// (when Istio mTLS is requested) a STRICT PeerAuthentication. No-op when
@@ -360,6 +368,47 @@ func (r *WorkspaceReconciler) reconcileSessionAPITokenReviewBinding(
 			APIGroup: "rbac.authorization.k8s.io",
 			Kind:     "ClusterRole",
 			Name:     r.SessionAPITokenReviewClusterRole,
+		},
+	}
+	existing := &rbacv1.ClusterRoleBinding{}
+	if err := r.Get(ctx, client.ObjectKeyFromObject(crb), existing); apierrors.IsNotFound(err) {
+		return r.Create(ctx, crb)
+	} else if err != nil {
+		return err
+	}
+	return nil
+}
+
+// reconcileMemoryEnterpriseReaderBinding binds the per-workspace memory-api
+// ServiceAccount to the install-wide enterprise reader ClusterRole. On
+// enterprise builds the managed memory-api starts a privacy/memory-policy
+// watcher that lists SessionPrivacyPolicy + AgentRuntime CRDs cluster-wide
+// (ee/pkg/privacy/watcher.go); without this binding the watcher fails to start
+// with a forbidden error and SessionPrivacyPolicy enforcement is silently
+// skipped (#1444). These are cluster-scoped reads, so the grant must be a
+// ClusterRole + ClusterRoleBinding. The ClusterRole itself is provisioned by
+// the Helm chart (enterprise only); here we only create the binding for this
+// workspace's memory-api SA. No-op when the ClusterRole name is unset (OSS).
+func (r *WorkspaceReconciler) reconcileMemoryEnterpriseReaderBinding(
+	ctx context.Context,
+	namespace, memorySAName string,
+) error {
+	if r.MemoryEnterpriseReaderClusterRole == "" {
+		return nil
+	}
+
+	crbName := fmt.Sprintf("memory-enterprise-reader-%s-%s", namespace, memorySAName)
+	crb := &rbacv1.ClusterRoleBinding{
+		ObjectMeta: metav1.ObjectMeta{Name: crbName},
+		Subjects: []rbacv1.Subject{{
+			Kind:      "ServiceAccount",
+			Name:      memorySAName,
+			Namespace: namespace,
+		}},
+		RoleRef: rbacv1.RoleRef{
+			APIGroup: "rbac.authorization.k8s.io",
+			Kind:     "ClusterRole",
+			Name:     r.MemoryEnterpriseReaderClusterRole,
 		},
 	}
 	existing := &rbacv1.ClusterRoleBinding{}
