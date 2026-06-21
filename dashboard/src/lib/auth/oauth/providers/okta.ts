@@ -21,6 +21,5 @@ export function getOktaProviderConfig(): Partial<OAuthProviderConfig> {
       displayName: "name",
       groups: "groups",
     },
-    supportsDiscovery: true,
   };
 }

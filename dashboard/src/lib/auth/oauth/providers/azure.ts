@@ -23,6 +23,5 @@ export function getAzureProviderConfig(): Partial<OAuthProviderConfig> {
       // Groups require "groups" claim in token configuration
       groups: "groups",
     },
-    supportsDiscovery: true,
   };
 }

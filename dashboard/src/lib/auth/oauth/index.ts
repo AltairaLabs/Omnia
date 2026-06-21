@@ -6,7 +6,6 @@
  * Supported providers:
  * - generic: Any OIDC-compliant provider
  * - google: Google (accounts.google.com)
- * - github: GitHub (OAuth 2.0, not OIDC)
  * - azure: Microsoft Azure AD / Entra ID
  * - okta: Okta
  *
@@ -37,5 +36,4 @@ export { mapClaimsToUser, mapClaimsToUserAsync, extractClaims, validateClaims } 
 export {
   getProviderConfig,
   getProviderDisplayName,
-  providerSupportsDiscovery,
 } from "./providers";

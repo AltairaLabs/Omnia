@@ -5,7 +5,6 @@
 import type { OAuthProviderConfig, OAuthProviderType } from "../types";
 import { getGenericProviderConfig } from "./generic";
 import { getGoogleProviderConfig } from "./google";
-import { getGitHubProviderConfig } from "./github";
 import { getAzureProviderConfig } from "./azure";
 import { getOktaProviderConfig } from "./okta";
 
@@ -15,7 +14,6 @@ import { getOktaProviderConfig } from "./okta";
 const providers: Record<OAuthProviderType, () => Partial<OAuthProviderConfig>> = {
   generic: getGenericProviderConfig,
   google: getGoogleProviderConfig,
-  github: getGitHubProviderConfig,
   azure: getAzureProviderConfig,
   okta: getOktaProviderConfig,
 };
@@ -37,12 +35,4 @@ export function getProviderConfig(type: OAuthProviderType): Partial<OAuthProvide
 export function getProviderDisplayName(type: OAuthProviderType): string {
   const config = getProviderConfig(type);
   return config.name || type;
-}
-
-/**
- * Check if provider supports OIDC discovery.
- */
-export function providerSupportsDiscovery(type: OAuthProviderType): boolean {
-  const config = getProviderConfig(type);
-  return config.supportsDiscovery ?? true;
 }

@@ -21,6 +21,5 @@ export function getGoogleProviderConfig(): Partial<OAuthProviderConfig> {
       // Groups requires Google Workspace admin configuration
       groups: "groups",
     },
-    supportsDiscovery: true,
   };
 }

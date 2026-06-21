@@ -5,7 +5,7 @@
 /**
  * Supported OAuth provider types.
  */
-export type OAuthProviderType = "generic" | "google" | "github" | "azure" | "okta";
+export type OAuthProviderType = "generic" | "google" | "azure" | "okta";
 
 /**
  * Claim mapping configuration.
@@ -54,14 +54,6 @@ export interface OAuthProviderConfig {
   scopes: string[];
   /** Default claim mapping */
   claims: ClaimMapping;
-  /** Whether provider supports OIDC discovery */
-  supportsDiscovery: boolean;
-  /** Override authorization endpoint (for non-OIDC providers like GitHub) */
-  authorizationEndpoint?: string;
-  /** Override token endpoint */
-  tokenEndpoint?: string;
-  /** Override userinfo endpoint */
-  userinfoEndpoint?: string;
 }
 
 /**
