@@ -21,6 +21,10 @@ import (
 	"github.com/altairalabs/omnia/internal/memory"
 )
 
+// invalidInterval is an unparseable duration string used by the
+// "collector disabled on bad interval" cases.
+const invalidInterval = "not-a-duration"
+
 // TestConsolidationWorker_GatedByEnterprise asserts that
 // buildConsolidationWorker returns nil when enterprise is off, even
 // when a valid interval is supplied.
@@ -51,4 +55,34 @@ func TestReembedWorker_NotGatedByEnterprise(t *testing.T) {
 	svc := memory.NewEmbeddingService(nil, nil, logr.Discard())
 	_, enabled := f.reembedWorkerOptions(svc)
 	assert.True(t, enabled, "reembed must remain enabled (OSS floor) when enterprise is off")
+}
+
+// TestEmbeddingMetricsCollector_NotGatedByEnterprise proves the embedding
+// coverage/backlog collector builds even with enterprise off — coverage and
+// re-embed backlog are OSS operational signals (#1442).
+func TestEmbeddingMetricsCollector_NotGatedByEnterprise(t *testing.T) {
+	f := &flags{enterprise: false, metricsCollectInterval: "60s"}
+	mc := buildEmbeddingMetricsCollector(f, nil, nil, prometheus.NewRegistry(), logr.Discard())
+	assert.NotNil(t, mc, "embedding metrics collector is OSS and must build when enterprise is off")
+}
+
+// TestEmbeddingMetricsCollector_UsesEmbeddingModelName covers the path where an
+// embedding service is present (its ModelName is threaded into the collector).
+func TestEmbeddingMetricsCollector_UsesEmbeddingModelName(t *testing.T) {
+	f := &flags{metricsCollectInterval: "30s"}
+	svc := memory.NewEmbeddingService(nil, nil, logr.Discard())
+	mc := buildEmbeddingMetricsCollector(f, nil, svc, prometheus.NewRegistry(), logr.Discard())
+	assert.NotNil(t, mc)
+}
+
+// TestEmbeddingMetricsCollector_Disabled asserts the collector is off for an
+// empty interval and for an unparseable one (logged, not fatal).
+func TestEmbeddingMetricsCollector_Disabled(t *testing.T) {
+	empty := &flags{metricsCollectInterval: ""}
+	assert.Nil(t, buildEmbeddingMetricsCollector(empty, nil, nil, prometheus.NewRegistry(), logr.Discard()),
+		"empty interval disables the collector")
+
+	bad := &flags{metricsCollectInterval: invalidInterval}
+	assert.Nil(t, buildEmbeddingMetricsCollector(bad, nil, nil, prometheus.NewRegistry(), logr.Discard()),
+		"unparseable interval disables the collector")
 }

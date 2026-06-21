@@ -16,6 +16,7 @@ import (
 
 	memoryv1 "github.com/altairalabs/omnia/api/v1alpha1"
 	"github.com/altairalabs/omnia/ee/pkg/memory/consolidation"
+	"github.com/altairalabs/omnia/ee/pkg/memory/projection"
 	"github.com/altairalabs/omnia/internal/memory"
 	"github.com/go-logr/logr/testr"
 	"github.com/prometheus/client_golang/prometheus/testutil"
@@ -137,6 +138,17 @@ func TestRunOnce_RendersEnabledWorkspaceColdScope(t *testing.T) {
 	if len(store.rendered) != 1 || store.rendered[0] != testScopeKey {
 		t.Errorf("rendered = %v, want [%s]", store.rendered, testScopeKey)
 	}
+	// The fake's single input has no embedding, so the basis degrades to
+	// lexical — the render counter must carry that basis label (#1442).
+	if got := renderCount(w.opts.Metrics, "ok", projection.BasisLexical); got != 1 {
+		t.Errorf("ok/lexical render counter = %v, want 1", got)
+	}
+}
+
+// renderCount reads the omnia_memory_projection_renders_total value for the
+// test workspace/policy at the given status and basis.
+func renderCount(m *Metrics, status, basis string) float64 {
+	return testutil.ToFloat64(m.RendersTotal.WithLabelValues(testWSUID, testPolicyName, status, basis))
 }
 
 func TestRunOnce_SkipsDisabledPolicy(t *testing.T) {
@@ -202,10 +214,10 @@ func TestRunOnce_RecordsErrorMetricOnRenderFailure(t *testing.T) {
 	if len(store.rendered) != 0 {
 		t.Errorf("recorded a render despite SaveProjection error: %v", store.rendered)
 	}
-	if got := testutil.ToFloat64(m.RendersTotal.WithLabelValues(testWSUID, testPolicyName, "error")); got != 1 {
+	if got := renderCount(m, "error", projection.BasisUnknown); got != 1 {
 		t.Errorf("error render counter = %v, want 1", got)
 	}
-	if got := testutil.ToFloat64(m.RendersTotal.WithLabelValues(testWSUID, testPolicyName, "ok")); got != 0 {
+	if got := renderCount(m, "ok", projection.BasisLexical); got != 0 {
 		t.Errorf("ok render counter = %v, want 0", got)
 	}
 }

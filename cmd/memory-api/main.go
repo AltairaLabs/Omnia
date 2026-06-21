@@ -153,6 +153,9 @@ type flags struct {
 	// --- Memory Galaxy v2 pre-render ---
 	projectionInterval string // env: PROJECTION_INTERVAL, e.g. "30s". Empty disables the worker.
 
+	// --- Embedding-pipeline observability ---
+	metricsCollectInterval string // env: METRICS_COLLECT_INTERVAL, e.g. "60s". Empty disables the collector.
+
 	// --- Ingestion ---
 	ingestStrategy     string // env: INGEST_STRATEGY; chunk (default) | summary | summaryThenChunk
 	ingestSummarizer   string // env: INGEST_SUMMARIZER; extractive (default) | agent
@@ -192,6 +195,7 @@ func parseFlags() *flags {
 	flag.StringVar(&f.serviceGroup, "service-group", "", "Service group name within workspace")
 	flag.StringVar(&f.consolidationInterval, "consolidation-interval", "", "Schedule-evaluation (poll) interval for the consolidation worker, e.g. 1m. Each axis fires per its MemoryPolicy cron schedule; this controls how often schedules are checked. Empty disables the worker.")
 	flag.StringVar(&f.projectionInterval, "projection-interval", "", "Poll interval for the Memory Galaxy pre-render worker, e.g. 30s. Empty disables the worker.")
+	flag.StringVar(&f.metricsCollectInterval, "metrics-collect-interval", "60s", "Refresh interval for embedding-pipeline gauges (coverage, re-embed backlog), e.g. 60s. Empty disables the collector.")
 	flag.StringVar(&f.ingestStrategy, "ingest-strategy", ingestion.StrategyChunk, "Ingestion strategy: chunk | summary | summaryThenChunk (INGEST_STRATEGY).")
 	flag.StringVar(&f.ingestSummarizer, "ingest-summarizer", ingestion.SummarizerExtractive, "Summarizer backend for summary strategies: extractive | agent (INGEST_SUMMARIZER).")
 	flag.IntVar(&f.ingestChunkSize, "ingest-chunk-size", 200, "Word-window size for RAG chunking (INGEST_CHUNK_SIZE).")
@@ -250,6 +254,7 @@ func (f *flags) applyEnvFallbacks() {
 	}
 	envFallback(&f.consolidationInterval, "", "CONSOLIDATION_INTERVAL")
 	envFallback(&f.projectionInterval, "", "PROJECTION_INTERVAL")
+	envFallback(&f.metricsCollectInterval, "60s", "METRICS_COLLECT_INTERVAL")
 	envFallback(&f.ingestStrategy, ingestion.StrategyChunk, "INGEST_STRATEGY")
 	envFallback(&f.ingestSummarizer, ingestion.SummarizerExtractive, "INGEST_SUMMARIZER")
 	envFallback(&f.ingestQueueDir, "", "INGEST_QUEUE_DIR")
@@ -651,6 +656,14 @@ func run() error {
 	if pw := buildProjectionWorker(f, pgStore, prometheus.DefaultRegisterer, log); pw != nil {
 		go pw.Run(ctx)
 		log.Info("projection worker started", "interval", f.projectionInterval)
+	}
+
+	// --- Embedding-pipeline metrics collector (#1442) ---
+	// Periodically refreshes per-workspace embedding coverage + re-embed backlog
+	// gauges so a silently-degraded semantic index is observable. On by default.
+	if mc := buildEmbeddingMetricsCollector(f, pgStore, embeddingSvc, prometheus.DefaultRegisterer, log); mc != nil {
+		go mc.Run(ctx)
+		log.Info("embedding metrics collector started", "interval", f.metricsCollectInterval)
 	}
 
 	// --- Servers ---
@@ -1152,6 +1165,35 @@ func buildProjectionWorker(f *flags, pgStore *memory.PostgresMemoryStore, reg pr
 		return nil
 	}
 	return newProjectionWorker(interval, c, pgStore, reg, log)
+}
+
+// buildEmbeddingMetricsCollector constructs the embedding-pipeline metrics
+// collector when --metrics-collect-interval is non-empty (default 60s). It is a
+// pure-DB poller (no k8s client, not enterprise-gated): coverage + re-embed
+// backlog are OSS operational signals. currentModel comes from the embedding
+// service; when no embedding provider is configured it is empty and the backlog
+// counts only rows with no embedding at all. Returns nil when disabled or the
+// interval is unparseable. Caller invokes go mc.Run(ctx).
+func buildEmbeddingMetricsCollector(
+	f *flags, pgStore *memory.PostgresMemoryStore, embeddingSvc *memory.EmbeddingService,
+	reg prometheus.Registerer, log logr.Logger,
+) *memory.EmbeddingMetricsCollector {
+	if f.metricsCollectInterval == "" {
+		return nil
+	}
+	interval, err := time.ParseDuration(f.metricsCollectInterval)
+	if err != nil {
+		log.Error(err, "invalid --metrics-collect-interval; collector disabled", "value", f.metricsCollectInterval)
+		return nil
+	}
+	var currentModel string
+	if embeddingSvc != nil {
+		currentModel = embeddingSvc.ModelName()
+	}
+	metrics := memory.NewEmbeddingMetrics()
+	metrics.MustRegister(reg)
+	return memory.NewEmbeddingMetricsCollector(
+		pgStore, metrics, currentModel, interval, log.WithName("embedding-metrics"))
 }
 
 // newProjectionWorker composes the worker from already-acquired deps. Pure

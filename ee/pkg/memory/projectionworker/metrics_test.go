@@ -18,7 +18,7 @@ func TestMetrics_RegisterAndObserve(t *testing.T) {
 	m := NewMetrics()
 	reg := prometheus.NewRegistry()
 	m.MustRegister(reg)
-	m.RendersTotal.WithLabelValues("ws", "policy", "ok").Inc()
+	m.RendersTotal.WithLabelValues("ws", "policy", "ok", "dense").Inc()
 	m.RenderSeconds.WithLabelValues("ws", "policy").Observe(0.5)
 	got, err := reg.Gather()
 	if err != nil || len(got) == 0 {

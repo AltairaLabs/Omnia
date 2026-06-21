@@ -55,6 +55,9 @@ type Result struct {
 const (
 	BasisDense   = "dense"
 	BasisLexical = "lexical"
+	// BasisUnknown labels a render whose basis was never determined (e.g. the
+	// render failed before Project chose one). Used only for metric labels.
+	BasisUnknown = "unknown"
 	ModelTSNE    = "tsne"
 	ModelPCA     = "pca"
 )
