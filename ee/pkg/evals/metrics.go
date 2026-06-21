@@ -27,6 +27,12 @@ var DefaultEvalDurationBuckets = []float64{
 	0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30,
 }
 
+// DefaultEvalScoreBuckets are histogram buckets for eval quality scores, which
+// PromptKit normalizes to the 0..1 range.
+var DefaultEvalScoreBuckets = []float64{
+	0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0,
+}
+
 // WorkerMetrics holds Prometheus metrics for the eval worker.
 type WorkerMetrics struct {
 	// EventsReceived counts events consumed from Redis Streams by event type.
@@ -49,6 +55,14 @@ type WorkerMetrics struct {
 
 	// ResultsWritten counts eval results written to session-api.
 	ResultsWritten *prometheus.CounterVec
+
+	// EvalScore observes per-eval quality scores as a histogram, keyed by
+	// eval_id + the rollout instance labels (incl. variant). Its auto-emitted
+	// _sum/_count series let RolloutAnalysis gate on fresh scores only via
+	// increase(omnia_eval_score_sum[w]) / increase(omnia_eval_score_count[w]):
+	// stale periods contribute no increase, so a new rollout can't read a value
+	// left over from a previous one (the bug a last-write-wins gauge has) (#1467).
+	EvalScore *prometheus.HistogramVec
 }
 
 // WorkerMetricsConfig configures the eval worker metrics.
@@ -110,6 +124,12 @@ func NewWorkerMetricsWithRegisterer(reg prometheus.Registerer, cfg *WorkerMetric
 			Name: "omnia_eval_worker_results_written_total",
 			Help: "Eval results written to session-api",
 		}, []string{"status"}),
+
+		EvalScore: factory.NewHistogramVec(prometheus.HistogramOpts{
+			Name:    "omnia_eval_score",
+			Help:    "Per-eval quality score (0..1); _sum/_count enable windowed, freshness-guarded rollout gates",
+			Buckets: DefaultEvalScoreBuckets,
+		}, []string{labelKeyEvalID, labelKeyAgent, labelKeyNamespace, labelKeyPromptPackName, labelKeyVariant}),
 	}
 }
 
@@ -133,6 +153,7 @@ type WorkerMetricsRecorder interface {
 	RecordEventProcessing(eventType string, durationSec float64)
 	RecordResultsWritten(count int, success bool)
 	SetStreamLag(stream string, lag float64)
+	RecordEvalScore(evalID string, labels EvalLabels, score float64)
 }
 
 // Ensure implementations satisfy interfaces.
@@ -176,6 +197,14 @@ func (m *WorkerMetrics) SetStreamLag(stream string, lag float64) {
 	m.StreamLag.WithLabelValues(stream).Set(lag)
 }
 
+// RecordEvalScore observes a numeric eval quality score. The histogram's
+// _sum/_count series let rollout gates window on fresh observations only (#1467).
+func (m *WorkerMetrics) RecordEvalScore(evalID string, labels EvalLabels, score float64) {
+	m.EvalScore.WithLabelValues(
+		evalID, labels.Agent, labels.Namespace, labels.PromptPackName, labels.Variant,
+	).Observe(score)
+}
+
 // NoOpWorkerMetrics is a no-op implementation for when metrics are disabled.
 type NoOpWorkerMetrics struct{}
 
@@ -209,5 +238,10 @@ func (n *NoOpWorkerMetrics) RecordResultsWritten(_ int, _ bool) {
 
 // SetStreamLag is a no-op for the metrics-disabled build.
 func (n *NoOpWorkerMetrics) SetStreamLag(_ string, _ float64) {
+	// Intentionally empty — see RecordEventReceived for rationale.
+}
+
+// RecordEvalScore is a no-op for the metrics-disabled build.
+func (n *NoOpWorkerMetrics) RecordEvalScore(_ string, _ EvalLabels, _ float64) {
 	// Intentionally empty — see RecordEventReceived for rationale.
 }

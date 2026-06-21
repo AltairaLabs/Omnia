@@ -366,7 +366,7 @@ func TestRecordEvalMetrics_MixedResults(t *testing.T) {
 		{EvalID: "e3", Type: "regex", Skipped: true, SkipReason: "sampling"},
 	}
 
-	runner.recordEvalMetrics(results, runtimeevals.TriggerEveryTurn)
+	runner.recordEvalMetrics(results, runtimeevals.TriggerEveryTurn, EvalLabels{})
 
 	// Two executed, one skipped.
 	require.Len(t, spy.evalExecuted, 2)
@@ -386,13 +386,13 @@ func TestRecordEvalMetrics_NilMetrics(t *testing.T) {
 		{EvalID: "e1", Type: "contains"},
 	}
 	// Should not panic.
-	runner.recordEvalMetrics(results, runtimeevals.TriggerEveryTurn)
+	runner.recordEvalMetrics(results, runtimeevals.TriggerEveryTurn, EvalLabels{})
 }
 
 func TestRecordEvalMetrics_EmptyResults(t *testing.T) {
 	spy := &spyMetrics{}
 	runner := &SDKRunner{metrics: spy}
-	runner.recordEvalMetrics(nil, runtimeevals.TriggerEveryTurn)
+	runner.recordEvalMetrics(nil, runtimeevals.TriggerEveryTurn, EvalLabels{})
 	assert.Empty(t, spy.evalExecuted)
 	assert.Empty(t, spy.samplingDecision)
 }

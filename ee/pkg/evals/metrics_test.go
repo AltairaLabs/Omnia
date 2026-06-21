@@ -11,9 +11,15 @@ package evals
 import (
 	"testing"
 
+	runtimeevals "github.com/AltairaLabs/PromptKit/runtime/evals"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+)
+
+const (
+	candidateVariant = "candidate"
+	llmJudgeEvalType = "llm_judge"
 )
 
 func TestNewWorkerMetrics_DefaultBuckets(t *testing.T) {
@@ -28,6 +34,81 @@ func TestNewWorkerMetrics_DefaultBuckets(t *testing.T) {
 	assert.NotNil(t, m.StreamLag)
 	assert.NotNil(t, m.EventProcessingDuration)
 	assert.NotNil(t, m.ResultsWritten)
+	assert.NotNil(t, m.EvalScore)
+}
+
+func TestWorkerMetrics_RecordEvalScore(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	m := newWorkerMetricsWithRegistry(reg, nil)
+
+	labels := EvalLabels{Agent: "rag-hero", Namespace: "omnia-demo", PromptPackName: "p", Variant: candidateVariant}
+	m.RecordEvalScore("faithfulness", labels, 0.9)
+	m.RecordEvalScore("faithfulness", labels, 0.7)
+
+	families, err := reg.Gather()
+	require.NoError(t, err)
+
+	var found bool
+	for _, fam := range families {
+		if fam.GetName() != "omnia_eval_score" {
+			continue
+		}
+		found = true
+		require.Len(t, fam.GetMetric(), 1)
+		h := fam.GetMetric()[0].GetHistogram()
+		assert.Equal(t, uint64(2), h.GetSampleCount(), "_count must reflect both observations")
+		assert.InDelta(t, 1.6, h.GetSampleSum(), 1e-9, "_sum must be the score total")
+
+		labelMap := map[string]string{}
+		for _, l := range fam.GetMetric()[0].GetLabel() {
+			labelMap[l.GetName()] = l.GetValue()
+		}
+		assert.Equal(t, "faithfulness", labelMap[labelKeyEvalID])
+		assert.Equal(t, candidateVariant, labelMap[labelKeyVariant])
+		assert.Equal(t, "rag-hero", labelMap[labelKeyAgent])
+	}
+	assert.True(t, found, "omnia_eval_score histogram family not found")
+}
+
+// NoOpWorkerMetrics must satisfy the recorder interface without panicking.
+func TestNoOpWorkerMetrics_RecordEvalScore(t *testing.T) {
+	var m WorkerMetricsRecorder = &NoOpWorkerMetrics{}
+	assert.NotPanics(t, func() {
+		m.RecordEvalScore("faithfulness", EvalLabels{Variant: candidateVariant}, 0.5)
+	})
+}
+
+// recordEvalMetrics must observe the score histogram only for successful scored
+// evals — skipped, errored, and scoreless (boolean) results must not contribute.
+func TestRecordEvalMetrics_ScoreFiltering(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	m := newWorkerMetricsWithRegistry(reg, nil)
+	runner := NewSDKRunner(WithMetrics(m))
+
+	score := func(v float64) *float64 { return &v }
+	results := []runtimeevals.EvalResult{
+		{EvalID: "faithfulness", Type: llmJudgeEvalType, Score: score(0.8)}, // counted
+		{EvalID: "skipped-one", Type: llmJudgeEvalType, Score: score(1.0), Skipped: true},
+		{EvalID: "errored-one", Type: llmJudgeEvalType, Score: score(0.1), Error: "judge failed"},
+		{EvalID: "contains-one", Type: containsEvalType, Value: true}, // boolean, no score
+	}
+
+	runner.recordEvalMetrics(results, runtimeevals.TriggerOnSessionComplete,
+		EvalLabels{Agent: "a", Namespace: "n", PromptPackName: "p", Variant: candidateVariant})
+
+	families, err := reg.Gather()
+	require.NoError(t, err)
+
+	var totalSamples uint64
+	for _, fam := range families {
+		if fam.GetName() != "omnia_eval_score" {
+			continue
+		}
+		for _, metric := range fam.GetMetric() {
+			totalSamples += metric.GetHistogram().GetSampleCount()
+		}
+	}
+	assert.Equal(t, uint64(1), totalSamples, "only the successful scored eval should be observed")
 }
 
 func TestNewWorkerMetrics_CustomBuckets(t *testing.T) {

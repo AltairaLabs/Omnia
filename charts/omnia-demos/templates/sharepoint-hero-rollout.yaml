@@ -47,6 +47,14 @@ spec:
       provider:
         prometheus:
           address: {{ .Values.sharepointHero.prometheusUrl | quote }}
+          # Windowed mean over NEW observations only, via the omnia_eval_score
+          # histogram's _sum/_count counters. A bare gauge (omnia_eval_faithfulness)
+          # is last-write-wins and keeps re-scraping its final value, so a new
+          # rollout would read the previous run's score before any fresh traffic
+          # (#1467). increase(...[2m]) contributes nothing during stale periods,
+          # so the gate returns no data and Argo requeues until fresh evals land.
           query: |
-            avg(omnia_eval_faithfulness{agent="rag-hero", namespace="{{ .Values.namespace }}", variant="candidate"})
+            sum(increase(omnia_eval_score_sum{eval_id="faithfulness", agent="rag-hero", namespace="{{ .Values.namespace }}", variant="candidate"}[2m]))
+            /
+            sum(increase(omnia_eval_score_count{eval_id="faithfulness", agent="rag-hero", namespace="{{ .Values.namespace }}", variant="candidate"}[2m]))
 {{- end }}

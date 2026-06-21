@@ -103,6 +103,8 @@ const (
 	labelKeyNamespace      = "namespace"
 	labelKeyPromptPackName = "promptpack_name"
 	labelKeyVariant        = "variant"
+	// labelKeyEvalID identifies the eval on the omnia_eval_score histogram.
+	labelKeyEvalID = "eval_id"
 )
 
 // evalInstanceLabels builds the Prometheus instance-label set attached to every
@@ -225,7 +227,7 @@ func (s *SDKRunner) evaluate(
 		return nil
 	}
 
-	s.recordEvalMetrics(results, trigger)
+	s.recordEvalMetrics(results, trigger, labels)
 
 	return convertSDKResults(results, trigger)
 }
@@ -300,7 +302,11 @@ func buildDetailsJSON(r runtimeevals.EvalResult) json.RawMessage {
 
 // recordEvalMetrics records operational metrics for all eval results,
 // including both executed and skipped evals.
-func (s *SDKRunner) recordEvalMetrics(results []runtimeevals.EvalResult, trigger runtimeevals.EvalTrigger) {
+func (s *SDKRunner) recordEvalMetrics(
+	results []runtimeevals.EvalResult,
+	trigger runtimeevals.EvalTrigger,
+	labels EvalLabels,
+) {
 	if s.metrics == nil {
 		return
 	}
@@ -317,6 +323,14 @@ func (s *SDKRunner) recordEvalMetrics(results []runtimeevals.EvalResult, trigger
 		}
 		durationSec := float64(r.DurationMs) / 1000.0
 		s.metrics.RecordEvalExecuted(r.Type, triggerStr, status, durationSec)
+
+		// Observe the numeric score into the freshness-guarded histogram so
+		// rollout gates can window on new observations (#1467). Only successful
+		// scored evals (llm_judge quality, RAG metrics) carry a Score; boolean
+		// evals (contains/regex) don't.
+		if r.Error == "" && r.Score != nil {
+			s.metrics.RecordEvalScore(r.EvalID, labels, *r.Score)
+		}
 	}
 }
 
