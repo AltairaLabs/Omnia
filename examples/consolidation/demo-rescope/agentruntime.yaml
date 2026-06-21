@@ -13,7 +13,7 @@ spec:
   promptPackRef:
     name: demo-rescope
   facade:
-    type: grpc
+    type: rest
     port: 8080
   inputSchema:
     type: object

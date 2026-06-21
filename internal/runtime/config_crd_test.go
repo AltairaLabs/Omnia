@@ -469,7 +469,7 @@ func TestLoadFromCRD_FunctionOutputFormat(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "fn-agent", Namespace: "test-ns"},
 		Spec: v1alpha1.AgentRuntimeSpec{
 			PromptPackRef: v1alpha1.PromptPackRef{Name: "pack"},
-			Facade:        v1alpha1.FacadeConfig{Type: v1alpha1.FacadeTypeGRPC},
+			Facade:        v1alpha1.FacadeConfig{Type: v1alpha1.FacadeTypeREST},
 			Mode:          v1alpha1.AgentRuntimeModeFunction,
 			InputSchema:   &apiextensionsv1.JSON{Raw: []byte(`{"type":"object"}`)},
 			OutputSchema:  &apiextensionsv1.JSON{Raw: []byte(`{"type":"object"}`)},

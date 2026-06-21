@@ -40,7 +40,7 @@ function mkFn(overrides: Partial<AgentRuntime> = {}): AgentRuntime {
     spec: {
       mode: "function",
       promptPackRef: { name: "summarizer-pack" },
-      facade: { type: "grpc" as never },
+      facade: { type: "rest" as never },
       inputSchema: {
         type: "object",
         properties: { q: { type: "string" }, k: { type: "integer" } },
@@ -111,7 +111,7 @@ describe("FunctionCard", () => {
     const fn = mkFn({
       spec: {
         ...mkFn().spec,
-        facade: { type: "grpc" as never, mcp: { enabled: true } },
+        facade: { type: "rest" as never, mcp: { enabled: true } },
       },
     });
     render(<FunctionCard fn={fn} />);
@@ -128,7 +128,7 @@ describe("FunctionCard", () => {
     const fn = mkFn({
       spec: {
         ...mkFn().spec,
-        facade: { type: "grpc" as never, mcp: { enabled: false } },
+        facade: { type: "rest" as never, mcp: { enabled: false } },
       },
     });
     render(<FunctionCard fn={fn} />);

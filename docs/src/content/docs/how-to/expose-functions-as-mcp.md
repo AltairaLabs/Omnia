@@ -42,7 +42,7 @@ spec:
   promptPackRef:
     name: weather-pack
   facade:
-    type: grpc
+    type: rest
     port: 8080
     mcp:
       enabled: true

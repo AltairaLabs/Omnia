@@ -39,7 +39,7 @@ interface DeployWizardProps {
 }
 
 type FrameworkType = "promptkit" | "langchain" | "autogen" | "custom";
-type FacadeType = "websocket" | "grpc";
+type FacadeType = "websocket" | "grpc" | "rest";
 type SessionType = "memory" | "redis";
 type AgentMode = "agent" | "function";
 
@@ -203,10 +203,10 @@ export function composeAgentYaml(
   formData: WizardFormData,
   namespace: string | undefined,
 ): Record<string, unknown> {
-  // Function-mode must use a non-WebSocket facade (CEL gate). Pin it
-  // server-side rather than trusting the user-selected facadeType.
+  // Function mode serves HTTP (POST /functions/{name}); the CEL gate
+  // requires facade.type 'rest'. Pin it rather than trusting facadeType.
   const facadeType: FacadeType =
-    formData.mode === "function" ? "grpc" : formData.facadeType;
+    formData.mode === "function" ? "rest" : formData.facadeType;
   const yaml: Record<string, unknown> = {
     apiVersion: "omnia.altairalabs.ai/v1alpha1",
     kind: "AgentRuntime",
@@ -815,7 +815,7 @@ export function DeployWizard({ open, onOpenChange }: Readonly<DeployWizardProps>
               <div className="space-y-2">
                 <Label>Facade Type</Label>
                 <Select
-                  value={formData.mode === "function" ? "grpc" : formData.facadeType}
+                  value={formData.mode === "function" ? "rest" : formData.facadeType}
                   onValueChange={(v) => updateField("facadeType", v as FacadeType)}
                   disabled={formData.mode === "function"}
                 >
@@ -823,13 +823,19 @@ export function DeployWizard({ open, onOpenChange }: Readonly<DeployWizardProps>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="websocket">WebSocket</SelectItem>
-                    <SelectItem value="grpc">gRPC</SelectItem>
+                    {formData.mode === "function" ? (
+                      <SelectItem value="rest">REST (HTTP)</SelectItem>
+                    ) : (
+                      <>
+                        <SelectItem value="websocket">WebSocket</SelectItem>
+                        <SelectItem value="grpc">gRPC</SelectItem>
+                      </>
+                    )}
                   </SelectContent>
                 </Select>
                 {formData.mode === "function" && (
                   <p className="text-xs text-muted-foreground">
-                    Function mode requires the gRPC facade.
+                    Function mode uses the REST (HTTP) facade.
                   </p>
                 )}
               </div>

@@ -432,7 +432,7 @@ func TestApplyMCPFacadeOptions_AppendsPortAndEnv(t *testing.T) {
 		Spec: omniav1alpha1.AgentRuntimeSpec{
 			Mode: "function",
 			Facade: omniav1alpha1.FacadeConfig{
-				Type: omniav1alpha1.FacadeTypeGRPC,
+				Type: omniav1alpha1.FacadeTypeREST,
 				MCP:  &omniav1alpha1.MCPConfig{Enabled: enabled, Port: &port},
 			},
 		},
@@ -514,6 +514,8 @@ func TestAgentPortAppProtocol(t *testing.T) {
 		{"facade", omniav1alpha1.FacadeTypeWebSocket, appProtocolHTTP},
 		{"facade", omniav1alpha1.FacadeTypeA2A, appProtocolHTTP},
 		{"facade", omniav1alpha1.FacadeTypeGRPC, appProtocolGRPC},
+		// Function-mode rest facade serves HTTP — must NOT be mislabelled grpc.
+		{"facade", omniav1alpha1.FacadeTypeREST, appProtocolHTTP},
 		{"a2a", omniav1alpha1.FacadeTypeWebSocket, appProtocolHTTP},
 		{portNameMCP, omniav1alpha1.FacadeTypeWebSocket, appProtocolHTTP},
 		// A facade port name we don't recognise yet must still be L7-routable.
@@ -1263,7 +1265,7 @@ func TestBuildDeploymentSpec_SelectorExcludesMutableModeLabel(t *testing.T) {
 	ar.Name = "selector-test"
 	ar.Namespace = "ns"
 	ar.Spec.Mode = omniav1alpha1.AgentRuntimeModeFunction
-	ar.Spec.Facade.Type = omniav1alpha1.FacadeTypeGRPC
+	ar.Spec.Facade.Type = omniav1alpha1.FacadeTypeREST
 	ar.Spec.PromptPackRef.Name = "p"
 
 	dep := &appsv1.Deployment{}

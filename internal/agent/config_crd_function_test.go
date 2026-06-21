@@ -129,13 +129,13 @@ func TestLoadFromCRD_AgentMode_DoesNotPopulateFunctionFields(t *testing.T) {
 
 func TestLoadFromCRD_FunctionMode_PassesValidate(t *testing.T) {
 	// Wiring invariant: a function-mode AgentRuntime read from the CRD
-	// must produce a Config that survives Validate(). This is the
-	// regression seal for B1 (Validate() rejecting facade.type=grpc).
+	// must produce a Config that survives Validate(). Function mode serves
+	// HTTP, so its honest facade is rest (#1464).
 	ar := newFakeAgentRuntime("summarizer", "prod", v1alpha1.AgentRuntimeSpec{
 		Mode:          v1alpha1.AgentRuntimeModeFunction,
 		PromptPackRef: v1alpha1.PromptPackRef{Name: "summarizer-pack"},
 		Facade: v1alpha1.FacadeConfig{
-			Type: v1alpha1.FacadeTypeGRPC,
+			Type: v1alpha1.FacadeTypeREST,
 		},
 		InputSchema:  &apiextensionsv1.JSON{Raw: []byte(functionTestInputSchema)},
 		OutputSchema: &apiextensionsv1.JSON{Raw: []byte(functionTestOutputSchema)},
@@ -180,11 +180,54 @@ func TestLoadFromCRD_FunctionMode_RejectsMissingSchemas(t *testing.T) {
 		PromptPackName:   "p",
 		Mode:             ModeFunction,
 		HandlerMode:      HandlerModeRuntime,
-		FacadeType:       FacadeTypeGRPC,
+		FacadeType:       FacadeTypeREST,
 		MediaStorageType: MediaStorageTypeNone,
 	}
 	if err := cfg.Validate(); err == nil {
 		t.Fatalf("Validate must reject function-mode without schemas")
+	}
+}
+
+// functionFacadeConfig builds a minimal valid function-mode Config with the
+// given facade type and complete schemas, isolating the facade-type check.
+func functionFacadeConfig(facade FacadeType) *Config {
+	return &Config{
+		AgentName:                "x",
+		Namespace:                "y",
+		PromptPackName:           "p",
+		Mode:                     ModeFunction,
+		HandlerMode:              HandlerModeRuntime,
+		FacadeType:               facade,
+		MediaStorageType:         MediaStorageTypeNone,
+		FunctionInputSchemaJSON:  []byte(functionTestInputSchema),
+		FunctionOutputSchemaJSON: []byte(functionTestOutputSchema),
+	}
+}
+
+func TestFunctionMode_FacadeTypeValidation(t *testing.T) {
+	// Function mode serves HTTP (POST /functions/{name}); only rest and a2a
+	// are honest labels. websocket and grpc must be refused even if the CEL
+	// gate were bypassed, so the binary never boots half-working (#1464).
+	tests := []struct {
+		name    string
+		facade  FacadeType
+		wantErr bool
+	}{
+		{name: "rest accepted", facade: FacadeTypeREST, wantErr: false},
+		{name: "a2a accepted", facade: FacadeTypeA2A, wantErr: false},
+		{name: "websocket rejected", facade: FacadeTypeWebSocket, wantErr: true},
+		{name: "grpc rejected", facade: FacadeTypeGRPC, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := functionFacadeConfig(tt.facade).Validate()
+			if tt.wantErr && err == nil {
+				t.Fatalf("Validate() expected error for function + facade.type=%q, got nil", tt.facade)
+			}
+			if !tt.wantErr && err != nil {
+				t.Fatalf("Validate() unexpected error for function + facade.type=%q: %v", tt.facade, err)
+			}
+		})
 	}
 }
 

@@ -35,8 +35,8 @@ const (
 	// AgentRuntimeModeAgent is the conversational runtime mode.
 	AgentRuntimeModeAgent AgentRuntimeMode = "agent"
 	// AgentRuntimeModeFunction is the one-shot, structured-I/O runtime mode.
-	// Requires spec.inputSchema and spec.outputSchema; rejects
-	// spec.facade.type == "websocket" via CEL.
+	// Requires spec.inputSchema and spec.outputSchema; requires
+	// spec.facade.type to be "rest" or "a2a" via CEL.
 	AgentRuntimeModeFunction AgentRuntimeMode = "function"
 )
 
@@ -53,7 +53,7 @@ type PromptPackRef struct {
 }
 
 // FacadeType defines the type of facade for client connections.
-// +kubebuilder:validation:Enum=websocket;grpc;a2a
+// +kubebuilder:validation:Enum=websocket;grpc;a2a;rest
 type FacadeType string
 
 const (
@@ -63,6 +63,10 @@ const (
 	FacadeTypeGRPC FacadeType = "grpc"
 	// FacadeTypeA2A uses the A2A JSON-RPC protocol for agent-to-agent communication.
 	FacadeTypeA2A FacadeType = "a2a"
+	// FacadeTypeREST uses a one-shot HTTP/REST endpoint (POST /functions/{name}).
+	// Only valid for mode=function, which serves structured request/response over
+	// HTTP rather than a persistent client connection.
+	FacadeTypeREST FacadeType = "rest"
 )
 
 // HandlerMode defines the message handler mode for the facade.
@@ -1202,14 +1206,15 @@ type MemoryEmbeddingConfig struct {
 // +kubebuilder:validation:XValidation:rule="self.mode == 'function' || !has(self.inputSchema)",message="spec.inputSchema is only valid when spec.mode is 'function'"
 // +kubebuilder:validation:XValidation:rule="self.mode == 'function' || !has(self.outputSchema)",message="spec.outputSchema is only valid when spec.mode is 'function'"
 // +kubebuilder:validation:XValidation:rule="self.mode == 'function' || !has(self.outputFormat)",message="spec.outputFormat is only valid when spec.mode is 'function'"
-// +kubebuilder:validation:XValidation:rule="self.mode != 'function' || self.facade.type != 'websocket'",message="facade.type 'websocket' is incompatible with mode 'function'; use 'grpc' or omit"
+// +kubebuilder:validation:XValidation:rule="self.mode != 'function' || self.facade.type in ['rest', 'a2a']",message="mode 'function' requires facade.type 'rest' (HTTP) or 'a2a'; 'websocket' and 'grpc' are not valid for functions"
+// +kubebuilder:validation:XValidation:rule="self.facade.type != 'rest' || self.mode == 'function'",message="facade.type 'rest' is only valid when mode is 'function'"
 // +kubebuilder:validation:XValidation:rule="!has(self.facade.mcp) || !self.facade.mcp.enabled || self.mode == 'function'",message="facade.mcp.enabled requires mode=function"
 type AgentRuntimeSpec struct {
 	// mode controls how the AgentRuntime is invoked. "agent" (default) is
 	// the existing conversational runtime; "function" exposes the pack as
 	// a one-shot, structured-I/O HTTP endpoint at POST /functions/{name}.
 	// When set to "function", spec.inputSchema and spec.outputSchema are
-	// required and the facade type must not be 'websocket'.
+	// required and the facade type must be 'rest' or 'a2a'.
 	// +optional
 	// +kubebuilder:default="agent"
 	Mode AgentRuntimeMode `json:"mode,omitempty"`

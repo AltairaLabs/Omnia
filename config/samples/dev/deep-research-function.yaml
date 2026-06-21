@@ -470,7 +470,7 @@ spec:
   promptPackRef:
     name: deep-research
   facade:
-    type: grpc
+    type: rest
     port: 8080
   # Constrain the model to emit JSON conforming to outputSchema (provider
   # structured output). This is the default for function mode when unset;

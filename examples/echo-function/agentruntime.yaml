@@ -25,7 +25,7 @@ spec:
   promptPackRef:
     name: echo-pack
   facade:
-    type: grpc
+    type: rest
     port: 8080
   providers:
     - name: default

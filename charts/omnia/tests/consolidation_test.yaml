@@ -65,7 +65,7 @@ tests:
           value: function
       - equal:
           path: spec.facade.type
-          value: grpc
+          value: rest
       - equal:
           path: spec.facade.port
           value: 8080

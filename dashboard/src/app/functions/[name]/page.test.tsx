@@ -80,7 +80,7 @@ function mkFn(overrides: Partial<AgentRuntime["spec"]> = {}): AgentRuntime {
     spec: {
       mode: "function",
       promptPackRef: { name: "pack" },
-      facade: { type: "grpc" as never },
+      facade: { type: "rest" as never },
       inputSchema: { type: "object", properties: { q: { type: "string" } } },
       outputSchema: { type: "object", properties: { a: { type: "string" } } },
       ...overrides,

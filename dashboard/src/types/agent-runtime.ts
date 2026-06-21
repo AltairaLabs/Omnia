@@ -4,7 +4,7 @@ import { ObjectMeta, Condition, LocalObjectReference, SecretKeyRef } from "./com
 
 // Enums
 export type AgentRuntimePhase = "Pending" | "Running" | "Failed";
-export type FacadeType = "websocket" | "grpc";
+export type FacadeType = "websocket" | "grpc" | "a2a" | "rest";
 export type HandlerMode = "echo" | "demo" | "runtime";
 export type SessionStoreType = "memory" | "redis" | "postgres";
 export type ProviderType = "claude" | "openai" | "gemini" | "ollama" | "mock";

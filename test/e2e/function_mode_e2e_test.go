@@ -207,7 +207,7 @@ spec:
   promptPackRef:
     name: %[3]s
   facade:
-    type: grpc
+    type: rest
     port: 8080
     extraEnv:
       - name: OMNIA_FACADE_ALLOW_UNAUTHENTICATED
