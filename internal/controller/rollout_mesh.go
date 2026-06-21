@@ -52,6 +52,14 @@ const (
 	variantStable    = "stable"
 	variantCandidate = "candidate"
 
+	// envFacadeVariant is the env var the deployment builder sets on the facade
+	// container so it can record the session variant when no x-omnia-variant
+	// header is present (replica-weighted mode, which has no routing layer). It
+	// MUST equal the facade's env name (internal/facade/server.go envVariant).
+	// The value is the rollout-semantic variant (variantStable / variantCandidate),
+	// not the track subset name.
+	envFacadeVariant = "OMNIA_VARIANT"
+
 	// Istio resource spec field keys reused when building unstructured objects.
 	fieldName        = "name"
 	fieldHost        = "host"
