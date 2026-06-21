@@ -838,6 +838,49 @@ func TestLoadFromCRD_MemoryEnabled(t *testing.T) {
 
 	assert.True(t, cfg.MemoryEnabled)
 	assert.Equal(t, "http://omnia-memory-api.omnia-system:8080", cfg.MemoryAPIURL)
+	// Both axes default ON when memory is enabled and the sub-toggles are unset.
+	assert.True(t, cfg.MemoryRetrievalEnabled)
+	assert.True(t, cfg.MemoryToolsEnabled)
+}
+
+func TestLoadFromCRD_MemoryToggles(t *testing.T) {
+	boolPtr := func(b bool) *bool { return &b }
+	tests := []struct {
+		name          string
+		retrieval     *v1alpha1.MemoryRetrievalConfig
+		tools         *v1alpha1.MemoryToolsConfig
+		wantRetrieval bool
+		wantTools     bool
+	}{
+		{"unset defaults both on", nil, nil, true, true},
+		{"retrieval off keeps tools", &v1alpha1.MemoryRetrievalConfig{Enabled: boolPtr(false)}, nil, false, true},
+		{"tools off keeps retrieval", nil, &v1alpha1.MemoryToolsConfig{Enabled: boolPtr(false)}, true, false},
+		{"both explicitly off", &v1alpha1.MemoryRetrievalConfig{Enabled: boolPtr(false)}, &v1alpha1.MemoryToolsConfig{Enabled: boolPtr(false)}, false, false},
+		{"both explicitly on", &v1alpha1.MemoryRetrievalConfig{Enabled: boolPtr(true)}, &v1alpha1.MemoryToolsConfig{Enabled: boolPtr(true)}, true, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ar := &v1alpha1.AgentRuntime{
+				ObjectMeta: metav1.ObjectMeta{Name: "test-agent", Namespace: "test-ns"},
+				Spec: v1alpha1.AgentRuntimeSpec{
+					PromptPackRef: v1alpha1.PromptPackRef{Name: "test-pack"},
+					Facade:        v1alpha1.FacadeConfig{Type: v1alpha1.FacadeTypeWebSocket},
+					Memory: &v1alpha1.MemoryConfig{
+						Enabled:   true,
+						Retrieval: tt.retrieval,
+						Tools:     tt.tools,
+					},
+				},
+			}
+			t.Setenv("MEMORY_API_URL", "http://omnia-memory-api.omnia-system:8080")
+
+			cfg, err := LoadFromCRD(context.Background(), buildTestClient(ar), "test-agent", "test-ns")
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantRetrieval, cfg.MemoryRetrievalEnabled, "MemoryRetrievalEnabled")
+			assert.Equal(t, tt.wantTools, cfg.MemoryToolsEnabled, "MemoryToolsEnabled")
+		})
+	}
 }
 
 func TestLoadFromCRD_MemoryDisabled(t *testing.T) {

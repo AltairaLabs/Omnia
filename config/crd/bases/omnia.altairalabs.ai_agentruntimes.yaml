@@ -4696,6 +4696,13 @@ spec:
                               metadata.url.contains("restricted")
                             type: string
                         type: object
+                      enabled:
+                        description: |-
+                          Enabled controls whether ambient RAG retrieval runs — the per-turn
+                          auto-injection of relevant memories into the prompt. Defaults to true
+                          (when unset) so memory.enabled keeps its existing behavior. Set to false
+                          to keep the memory tools without auto-injecting memories every turn.
+                        type: boolean
                       limit:
                         description: Limit is the maximum number of memories injected
                           per turn.
@@ -4711,6 +4718,21 @@ spec:
                         - graph
                         - composite
                         type: string
+                    type: object
+                  tools:
+                    description: |-
+                      Tools configures the memory tools (memory__remember / memory__recall)
+                      exposed to the LLM. Independent of retrieval: an agent can have ambient
+                      RAG without the tools, or the tools without RAG.
+                    properties:
+                      enabled:
+                        description: |-
+                          Enabled controls whether the memory tools (memory__remember /
+                          memory__recall) are active. Defaults to true (when unset) so
+                          memory.enabled keeps its existing behavior. Set to false for read-only
+                          ambient RAG over a curated store without letting the agent write or
+                          explicitly recall.
+                        type: boolean
                     type: object
                 type: object
               mode:

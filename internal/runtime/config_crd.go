@@ -147,12 +147,19 @@ func LoadFromCRD(ctx context.Context, c client.Client, name, namespace string) (
 	// Memory config from CRD
 	if ar.Spec.Memory != nil && ar.Spec.Memory.Enabled {
 		cfg.MemoryEnabled = true
+		// Ambient RAG and the memory tools both default ON when memory is
+		// enabled and the sub-toggle is unset, preserving existing behavior.
+		cfg.MemoryRetrievalEnabled = true
+		cfg.MemoryToolsEnabled = true
 		uid, uidErr := resolveWorkspaceUID(ctx, c, namespace)
 		if uidErr != nil {
 			return nil, fmt.Errorf("resolve workspace UID for memory: %w", uidErr)
 		}
 		cfg.WorkspaceUID = uid
 		if r := ar.Spec.Memory.Retrieval; r != nil {
+			if r.Enabled != nil {
+				cfg.MemoryRetrievalEnabled = *r.Enabled
+			}
 			cfg.MemoryStrategy = r.Strategy
 			if r.Limit != nil {
 				cfg.MemoryLimit = int(*r.Limit)
@@ -160,6 +167,9 @@ func LoadFromCRD(ctx context.Context, c client.Client, name, namespace string) (
 			if r.AccessFilter != nil {
 				cfg.MemoryDenyCEL = r.AccessFilter.DenyCEL
 			}
+		}
+		if t := ar.Spec.Memory.Tools; t != nil && t.Enabled != nil {
+			cfg.MemoryToolsEnabled = *t.Enabled
 		}
 	}
 

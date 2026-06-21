@@ -181,7 +181,18 @@ func (s *Server) buildConversationOptions(ctx context.Context, sessionID string)
 	}
 
 	// Wire memory store for cross-session memory (via memory-api HTTP).
-	if s.memoryStore != nil && s.workspaceUID != "" {
+	//
+	// Two independent axes from the CRD (spec.memory.retrieval.enabled and
+	// spec.memory.tools.enabled):
+	//   - retrieval (ambient RAG): attach the CompositeRetriever so PromptKit's
+	//     MemoryRetrievalStage auto-injects the user's profile + a per-turn
+	//     similarity search into the prompt.
+	//   - tools: expose memory__remember / memory__recall to the LLM.
+	// PromptKit's memory capability always registers the tools when a store is
+	// passed, so tools-off feeds the executor a no-op store (writes discarded,
+	// reads empty) while the retriever keeps the real store. See #1517 and
+	// AltairaLabs/PromptKit#1427.
+	if s.memoryStore != nil && s.workspaceUID != "" && (s.memoryRetrievalEnabled || s.memoryToolsEnabled) {
 		scope := map[string]string{
 			"workspace_id": s.workspaceUID,
 		}
@@ -191,36 +202,38 @@ func (s *Server) buildConversationOptions(ctx context.Context, sessionID string)
 		if s.agentUID != "" {
 			scope["agent_id"] = s.agentUID
 		}
-		// CompositeRetriever auto-injects the user's profile + a per-turn
-		// similarity search into the prompt via PromptKit's
-		// MemoryRetrievalStage. Without it the agent only "knows" the
-		// user when it explicitly calls memory__recall — which is
-		// unreliable on cold-start turns where the user's opening
-		// message has no lexical overlap with stored facts.
-		// Strategy, denyCEL, and limit are threaded from s.memoryStrategy /
-		// s.memoryDenyCEL / s.memoryLimit, which WithMemoryRetrieval populates
-		// from spec.memory.retrieval on the AgentRuntime CRD.
-		retriever := NewCompositeRetriever(s.memoryStore, RetrievalConfig{
-			Strategy:    s.memoryStrategy,
-			DenyCEL:     s.memoryDenyCEL,
-			WorkspaceID: s.workspaceUID,
-			Limit:       s.memoryLimit,
-		}, log)
-		opts = append(opts, sdk.WithMemory(s.memoryStore, scope, sdk.WithMemoryRetriever(retriever)))
+
+		// Pick the executor store (real vs no-op for tools-off) and whether to
+		// attach the ambient retriever.
+		executorStore, attachRetriever := memoryWiring(s.memoryStore, s.memoryRetrievalEnabled, s.memoryToolsEnabled)
+
+		memOpts := []sdk.MemoryOption{}
+		if attachRetriever {
+			// Strategy, denyCEL, and limit are threaded from spec.memory.retrieval.
+			retriever := NewCompositeRetriever(s.memoryStore, RetrievalConfig{
+				Strategy:    s.memoryStrategy,
+				DenyCEL:     s.memoryDenyCEL,
+				WorkspaceID: s.workspaceUID,
+				Limit:       s.memoryLimit,
+			}, log)
+			memOpts = append(memOpts, sdk.WithMemoryRetriever(retriever))
+		}
+		opts = append(opts, sdk.WithMemory(executorStore, scope, memOpts...))
+
 		// Teach the LLM Omnia's memory model (tiers, structured dedup,
-		// purpose/title/summary) via the tool-calling instructions. PromptKit's
-		// generic memory tool descriptors can't know any of this; these
-		// overrides rewrite the descriptions and extend memory__remember's
-		// schema so extra args flow into Memory.Metadata for the memory-api.
-		opts = append(opts, memoryToolOverrides()...)
+		// purpose/title/summary) via the tool-calling instructions — only when
+		// the tools are actually active; no point describing no-op tools.
+		if s.memoryToolsEnabled {
+			opts = append(opts, memoryToolOverrides()...)
+		}
 		log.V(1).Info("memory store wired",
 			"session_id", sessionID,
 			"trace_id", sessionID,
 			"hasUserID", scope["user_id"] != "",
 			"hasAgentID", scope["agent_id"] != "",
 			"scopeKeys", len(scope),
-			"hasRetriever", true,
-			"memoryToolOverrides", len(memoryToolPatches()),
+			"retrievalEnabled", s.memoryRetrievalEnabled,
+			"toolsEnabled", s.memoryToolsEnabled,
 		)
 	}
 

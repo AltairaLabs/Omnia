@@ -116,6 +116,15 @@ type Config struct {
 	MemoryAPIURL  string // URL of memory-api service for memory store
 	WorkspaceUID  string // Kubernetes UID of the Workspace CRD (used as workspace_id scope for memory)
 
+	// MemoryRetrievalEnabled is spec.memory.retrieval.enabled (ambient RAG
+	// auto-injection). Defaults to true when memory is enabled and the field is
+	// unset, preserving existing behavior.
+	MemoryRetrievalEnabled bool
+	// MemoryToolsEnabled is spec.memory.tools.enabled (memory__remember /
+	// memory__recall). Defaults to true when memory is enabled and the field is
+	// unset, preserving existing behavior.
+	MemoryToolsEnabled bool
+
 	// MemoryStrategy is the retrieval strategy from spec.memory.retrieval.strategy
 	// ("keyword"|"semantic"|...). Empty defaults to the existing keyword/FTS path.
 	MemoryStrategy string

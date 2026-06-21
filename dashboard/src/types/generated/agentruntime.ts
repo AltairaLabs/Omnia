@@ -2574,10 +2574,26 @@ export interface AgentRuntimeSpec {
          * metadata.url.contains("restricted") */
         denyCEL?: string;
       };
+      /** Enabled controls whether ambient RAG retrieval runs — the per-turn
+       * auto-injection of relevant memories into the prompt. Defaults to true
+       * (when unset) so memory.enabled keeps its existing behavior. Set to false
+       * to keep the memory tools without auto-injecting memories every turn. */
+      enabled?: boolean;
       /** Limit is the maximum number of memories injected per turn. */
       limit?: number;
       /** Strategy selects the retrieval mode. */
       strategy?: "keyword" | "semantic" | "graph" | "composite";
+    };
+    /** Tools configures the memory tools (memory__remember / memory__recall)
+     * exposed to the LLM. Independent of retrieval: an agent can have ambient
+     * RAG without the tools, or the tools without RAG. */
+    tools?: {
+      /** Enabled controls whether the memory tools (memory__remember /
+       * memory__recall) are active. Defaults to true (when unset) so
+       * memory.enabled keeps its existing behavior. Set to false for read-only
+       * ambient RAG over a curated store without letting the agent write or
+       * explicitly recall. */
+      enabled?: boolean;
     };
   };
   /** mode controls how the AgentRuntime is invoked. "agent" (default) is

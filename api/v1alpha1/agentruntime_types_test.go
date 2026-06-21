@@ -701,6 +701,8 @@ func TestGroupVersionInfo(t *testing.T) {
 	}
 }
 
+func ptrBool(b bool) *bool { return &b }
+
 func TestAgentRuntimeMemoryConfig(t *testing.T) {
 	limit := int32(10)
 	ar := &AgentRuntime{
@@ -717,8 +719,12 @@ func TestAgentRuntimeMemoryConfig(t *testing.T) {
 			Memory: &MemoryConfig{
 				Enabled: true,
 				Retrieval: &MemoryRetrievalConfig{
+					Enabled:  ptrBool(false),
 					Strategy: "keyword",
 					Limit:    &limit,
+				},
+				Tools: &MemoryToolsConfig{
+					Enabled: ptrBool(true),
 				},
 			},
 		},
@@ -735,11 +741,17 @@ func TestAgentRuntimeMemoryConfig(t *testing.T) {
 	if mem.Retrieval == nil {
 		t.Fatal("Memory.Retrieval should not be nil")
 	}
+	if mem.Retrieval.Enabled == nil || *mem.Retrieval.Enabled {
+		t.Errorf("Memory.Retrieval.Enabled = %v, want false", mem.Retrieval.Enabled)
+	}
 	if mem.Retrieval.Strategy != "keyword" {
 		t.Errorf("Memory.Retrieval.Strategy = %q, want %q", mem.Retrieval.Strategy, "keyword")
 	}
 	if *mem.Retrieval.Limit != 10 {
 		t.Errorf("Memory.Retrieval.Limit = %d, want %d", *mem.Retrieval.Limit, 10)
+	}
+	if mem.Tools == nil || mem.Tools.Enabled == nil || !*mem.Tools.Enabled {
+		t.Errorf("Memory.Tools.Enabled = %v, want true", mem.Tools)
 	}
 
 	// Test deep copy independence
@@ -752,6 +764,10 @@ func TestAgentRuntimeMemoryConfig(t *testing.T) {
 	copied.Spec.Memory.Retrieval.Limit = &newLimit
 	if *ar.Spec.Memory.Retrieval.Limit != 10 {
 		t.Errorf("original Memory.Retrieval.Limit was modified, got %d, want %d", *ar.Spec.Memory.Retrieval.Limit, 10)
+	}
+	copied.Spec.Memory.Tools.Enabled = ptrBool(false)
+	if !*ar.Spec.Memory.Tools.Enabled {
+		t.Error("original Memory.Tools.Enabled was modified by deep copy mutation")
 	}
 }
 
