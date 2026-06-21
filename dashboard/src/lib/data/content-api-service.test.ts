@@ -12,6 +12,7 @@ import {
   isContentFile,
   isContentListing,
   makeContentDir,
+  moveContent,
   writeContentFile,
 } from "./content-api-service";
 
@@ -146,6 +147,25 @@ describe("writeContentFile / makeContentDir / deleteContent", () => {
     fetchMock.mockResolvedValue({ ok: true, status: 204 });
     await expect(deleteContent("team-a", user, "f.txt")).resolves.toBeUndefined();
     expect((fetchMock.mock.calls[0][1] as { method: string }).method).toBe("DELETE");
+  });
+
+  it("PATCHes the source URL with the destination in the body", async () => {
+    fetchMock.mockResolvedValue(okJson({ path: "dir/new.yaml", size: 7, modifiedAt: "t" }));
+    const res = await moveContent("team-a", user, "dir/old.yaml", "dir/new.yaml");
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, { method: string; body: string }];
+    expect(url).toBe(`${BASE_URL}/api/v1/workspaces/team-a/content/dir/old.yaml`);
+    expect(init.method).toBe("PATCH");
+    expect(JSON.parse(init.body)).toEqual({ to: "dir/new.yaml" });
+    expect(res.path).toBe("dir/new.yaml");
+  });
+
+  it("propagates a 409 from the operator when the destination exists", async () => {
+    fetchMock.mockResolvedValue({ ok: false, status: 409, json: async () => ({}) });
+    await expect(moveContent("team-a", user, "a.yaml", "b.yaml")).rejects.toMatchObject({
+      name: "ContentApiError",
+      status: 409,
+    });
   });
 });
 

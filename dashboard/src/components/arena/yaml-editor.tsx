@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useMemo } from "react";
+import { useCallback, useEffect, useRef, useMemo, useState } from "react";
 import Editor, { type OnMount, type OnChange } from "@monaco-editor/react";
 import type { editor } from "monaco-editor";
 import * as yaml from "js-yaml";
@@ -17,6 +17,9 @@ interface YamlEditorProps {
   readonly fileType?: FileType;
   readonly className?: string;
   readonly loading?: boolean;
+  /** When set, scroll to and select this 1-based line. The nonce re-triggers a
+   *  jump to the same line on repeat clicks. */
+  readonly revealTarget?: { line: number; nonce: number };
 }
 
 interface ValidationResult {
@@ -85,10 +88,29 @@ export function YamlEditor({
   fileType,
   className,
   loading = false,
+  revealTarget,
 }: YamlEditorProps) {
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null);
+  const [editorReady, setEditorReady] = useState(false);
+  const lastRevealNonce = useRef<number | undefined>(undefined);
   const monacoLanguage = language || getLanguage(fileType);
   const isYaml = monacoLanguage === "yaml";
+
+  // Jump to a requested line once the editor is mounted. Deferred a frame so
+  // Monaco has applied the latest model content before we scroll.
+  useEffect(() => {
+    if (!revealTarget || revealTarget.nonce === lastRevealNonce.current) return;
+    const ed = editorRef.current;
+    if (!ed || revealTarget.line < 1) return;
+    lastRevealNonce.current = revealTarget.nonce;
+    const line = revealTarget.line;
+    const raf = requestAnimationFrame(() => {
+      ed.revealLineInCenter(line);
+      ed.setPosition({ lineNumber: line, column: 1 });
+      ed.focus();
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [revealTarget, editorReady]);
 
   // Validate YAML - computed synchronously (debounce happens on input side)
   const validation = useMemo((): ValidationResult => {
@@ -101,6 +123,7 @@ export function YamlEditor({
   const handleEditorDidMount: OnMount = useCallback(
     (editor, monaco) => {
       editorRef.current = editor;
+      setEditorReady(true);
 
       // Configure editor keybindings
       // Ctrl/Cmd+S to save

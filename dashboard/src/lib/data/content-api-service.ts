@@ -179,3 +179,18 @@ export async function makeContentDir(
 export async function deleteContent(workspace: string, user: User, relpath: string): Promise<void> {
   await contentRequest<void>("DELETE", workspace, user, relpath);
 }
+
+/**
+ * Rename (move) a file or directory. `destRelPath` is workspace-relative, in the
+ * same coordinate system as `relpath`. Fails (409) if the destination exists.
+ */
+export async function moveContent(
+  workspace: string,
+  user: User,
+  relpath: string,
+  destRelPath: string,
+): Promise<ContentWriteResult> {
+  return (await contentRequest<ContentWriteResult>("PATCH", workspace, user, relpath, {
+    body: JSON.stringify({ to: destRelPath }),
+  })) as ContentWriteResult;
+}

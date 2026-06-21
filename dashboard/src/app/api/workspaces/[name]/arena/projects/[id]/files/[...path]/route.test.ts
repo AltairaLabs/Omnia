@@ -36,6 +36,7 @@ vi.mock("@/lib/data/content-api-service", async (importOriginal) => {
     getContent: vi.fn(),
     writeContentFile: vi.fn(),
     makeContentDir: vi.fn(),
+    moveContent: vi.fn(),
     deleteContent: vi.fn(),
   };
 });
@@ -367,6 +368,247 @@ describe("DELETE /api/workspaces/[name]/arena/projects/[id]/files/[...path]", ()
     const response = await DELETE(createMockRequest("DELETE"), createMockContext(["..", "etc", "passwd"]));
 
     expect(response.status).toBe(400);
+  });
+});
+
+describe("PATCH /api/workspaces/[name]/arena/projects/[id]/files/[...path]", () => {
+  const SRC_REL = "arena/projects/project-1/test.yaml";
+  const DEST_REL = "arena/projects/project-1/renamed.yaml";
+
+  beforeEach(() => {
+    vi.resetModules();
+  });
+
+  afterEach(() => {
+    vi.resetAllMocks();
+  });
+
+  it("returns 403 when user lacks editor access", async () => {
+    const { getUser } = await import("@/lib/auth");
+    const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
+
+    vi.mocked(getUser).mockResolvedValue(mockUser);
+    vi.mocked(checkWorkspaceAccess).mockResolvedValue({ granted: false, role: null, permissions: noPermissions });
+
+    const { PATCH } = await import("./route");
+    const response = await PATCH(createMockRequest("PATCH", { newName: "renamed.yaml" }), createMockContext());
+
+    expect(response.status).toBe(403);
+  });
+
+  it("renames a file within the same directory", async () => {
+    await grantWorkspace("editor");
+    const svc = await import("@/lib/data/content-api-service");
+    vi.mocked(svc.getContent).mockImplementation(async (_ws, _user, relpath = "") => {
+      if (relpath === SRC_REL) {
+        return { path: relpath, content: "x", encoding: "utf-8", size: 1, modifiedAt: "t" };
+      }
+      throw new svc.ContentApiError("not found", 404); // destination does not exist
+    });
+    vi.mocked(svc.moveContent).mockResolvedValue({ path: DEST_REL, size: 1, modifiedAt: "t2" });
+
+    const { PATCH } = await import("./route");
+    const response = await PATCH(createMockRequest("PATCH", { newName: "renamed.yaml" }), createMockContext());
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.path).toBe("renamed.yaml");
+    expect(body.name).toBe("renamed.yaml");
+    expect(body.isDirectory).toBe(false);
+    expect(vi.mocked(svc.moveContent)).toHaveBeenCalledWith("test-ws", mockUser, SRC_REL, DEST_REL);
+  });
+
+  it("renames a directory (reports isDirectory)", async () => {
+    await grantWorkspace("editor");
+    const svc = await import("@/lib/data/content-api-service");
+    vi.mocked(svc.getContent).mockImplementation(async (_ws, _user, relpath = "") => {
+      if (relpath === "arena/projects/project-1/prompts") {
+        return { path: relpath, entries: [] };
+      }
+      throw new svc.ContentApiError("not found", 404);
+    });
+    vi.mocked(svc.moveContent).mockResolvedValue({ path: "x", size: 0, modifiedAt: "t", directory: true });
+
+    const { PATCH } = await import("./route");
+    const response = await PATCH(createMockRequest("PATCH", { newName: "scenarios" }), createMockContext(["prompts"]));
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.isDirectory).toBe(true);
+    expect(body.path).toBe("scenarios");
+  });
+
+  it("returns 400 for an invalid new name", async () => {
+    await grantWorkspace("editor");
+
+    const { PATCH } = await import("./route");
+    const response = await PATCH(createMockRequest("PATCH", { newName: "../escape.yaml" }), createMockContext());
+
+    expect(response.status).toBe(400);
+    const body = await response.json();
+    expect(body.message).toContain("Invalid filename");
+  });
+
+  it("returns 400 when renaming config.arena.yaml", async () => {
+    await grantWorkspace("editor");
+
+    const { PATCH } = await import("./route");
+    const response = await PATCH(
+      createMockRequest("PATCH", { newName: "other.yaml" }),
+      createMockContext(["config.arena.yaml"])
+    );
+
+    expect(response.status).toBe(400);
+    const body = await response.json();
+    expect(body.message).toContain("config");
+  });
+
+  it("returns 404 when the source file does not exist", async () => {
+    await grantWorkspace("editor");
+    const svc = await import("@/lib/data/content-api-service");
+    vi.mocked(svc.getContent).mockRejectedValue(new svc.ContentApiError("not found", 404));
+
+    const { PATCH } = await import("./route");
+    const response = await PATCH(createMockRequest("PATCH", { newName: "renamed.yaml" }), createMockContext());
+
+    expect(response.status).toBe(404);
+    expect(vi.mocked(svc.moveContent)).not.toHaveBeenCalled();
+  });
+
+  it("returns 409 when the destination already exists", async () => {
+    await grantWorkspace("editor");
+    const svc = await import("@/lib/data/content-api-service");
+    // Both the source and the destination resolve (destination conflict).
+    vi.mocked(svc.getContent).mockResolvedValue({
+      path: "x",
+      content: "x",
+      encoding: "utf-8",
+      size: 1,
+      modifiedAt: "t",
+    });
+
+    const { PATCH } = await import("./route");
+    const response = await PATCH(createMockRequest("PATCH", { newName: "renamed.yaml" }), createMockContext());
+
+    expect(response.status).toBe(409);
+    expect(vi.mocked(svc.moveContent)).not.toHaveBeenCalled();
+  });
+
+  it("passes through a non-404 ContentApiError from the operator", async () => {
+    await grantWorkspace("editor");
+    const svc = await import("@/lib/data/content-api-service");
+    vi.mocked(svc.getContent).mockImplementation(async (_ws, _user, relpath = "") => {
+      if (relpath === SRC_REL) {
+        return { path: relpath, content: "x", encoding: "utf-8", size: 1, modifiedAt: "t" };
+      }
+      throw new svc.ContentApiError("not found", 404);
+    });
+    vi.mocked(svc.moveContent).mockRejectedValue(new svc.ContentApiError("too large", 413));
+
+    const { PATCH } = await import("./route");
+    const response = await PATCH(createMockRequest("PATCH", { newName: "renamed.yaml" }), createMockContext());
+
+    expect(response.status).toBe(413);
+  });
+
+  it("returns 500 on an unexpected (non-content-API) error", async () => {
+    await grantWorkspace("editor");
+    const svc = await import("@/lib/data/content-api-service");
+    vi.mocked(svc.getContent).mockRejectedValue(new Error("boom"));
+
+    const { PATCH } = await import("./route");
+    const response = await PATCH(createMockRequest("PATCH", { newName: "renamed.yaml" }), createMockContext());
+
+    expect(response.status).toBe(500);
+  });
+
+  it("moves a file into another directory keeping its basename (destDir)", async () => {
+    await grantWorkspace("editor");
+    const svc = await import("@/lib/data/content-api-service");
+    vi.mocked(svc.getContent).mockImplementation(async (_ws, _user, relpath = "") => {
+      if (relpath === SRC_REL) {
+        return { path: relpath, content: "x", encoding: "utf-8", size: 1, modifiedAt: "t" };
+      }
+      throw new svc.ContentApiError("not found", 404); // destination does not exist
+    });
+    vi.mocked(svc.moveContent).mockResolvedValue({
+      path: "arena/projects/project-1/scenarios/test.yaml",
+      size: 1,
+      modifiedAt: "t2",
+    });
+
+    const { PATCH } = await import("./route");
+    const response = await PATCH(createMockRequest("PATCH", { destDir: "scenarios" }), createMockContext());
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.path).toBe("scenarios/test.yaml");
+    expect(body.name).toBe("test.yaml");
+    expect(vi.mocked(svc.moveContent)).toHaveBeenCalledWith(
+      "test-ws",
+      mockUser,
+      SRC_REL,
+      "arena/projects/project-1/scenarios/test.yaml"
+    );
+  });
+
+  it("moves a file to the project root (empty destDir)", async () => {
+    await grantWorkspace("editor");
+    const svc = await import("@/lib/data/content-api-service");
+    vi.mocked(svc.getContent).mockImplementation(async (_ws, _user, relpath = "") => {
+      if (relpath === "arena/projects/project-1/prompts/test.yaml") {
+        return { path: relpath, content: "x", encoding: "utf-8", size: 1, modifiedAt: "t" };
+      }
+      throw new svc.ContentApiError("not found", 404);
+    });
+    vi.mocked(svc.moveContent).mockResolvedValue({
+      path: "arena/projects/project-1/test.yaml",
+      size: 1,
+      modifiedAt: "t2",
+    });
+
+    const { PATCH } = await import("./route");
+    const response = await PATCH(
+      createMockRequest("PATCH", { destDir: "" }),
+      createMockContext(["prompts", "test.yaml"])
+    );
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.path).toBe("test.yaml");
+    expect(vi.mocked(svc.moveContent)).toHaveBeenCalledWith(
+      "test-ws",
+      mockUser,
+      "arena/projects/project-1/prompts/test.yaml",
+      "arena/projects/project-1/test.yaml"
+    );
+  });
+
+  it("returns 400 when moving a directory into itself or a descendant", async () => {
+    await grantWorkspace("editor");
+    const svc = await import("@/lib/data/content-api-service");
+
+    const { PATCH } = await import("./route");
+    const response = await PATCH(
+      createMockRequest("PATCH", { destDir: "prompts/sub" }),
+      createMockContext(["prompts"])
+    );
+
+    expect(response.status).toBe(400);
+    const body = await response.json();
+    expect(body.message).toContain("itself");
+    expect(vi.mocked(svc.moveContent)).not.toHaveBeenCalled();
+  });
+
+  it("returns 400 when neither newName nor destDir is provided", async () => {
+    await grantWorkspace("editor");
+
+    const { PATCH } = await import("./route");
+    const response = await PATCH(createMockRequest("PATCH", {}), createMockContext());
+
+    expect(response.status).toBe(400);
+    const body = await response.json();
+    expect(body.message).toContain("required");
   });
 });
 

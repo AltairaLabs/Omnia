@@ -548,6 +548,102 @@ describe("use-arena-projects hooks", () => {
       );
     });
 
+    it("should rename file successfully", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            path: "renamed.yaml",
+            name: "renamed.yaml",
+            isDirectory: false,
+            modifiedAt: "t",
+          }),
+      });
+
+      const { result } = renderHook(() => useArenaProjectFiles(), {
+        wrapper: createWrapper(),
+      });
+
+      const response = await result.current.renameFile(
+        "test-project-1",
+        "old.yaml",
+        "renamed.yaml"
+      );
+
+      expect(response.path).toBe("renamed.yaml");
+      expect(mockFetch).toHaveBeenCalledWith(
+        "/api/workspaces/test-workspace/arena/projects/test-project-1/files/old.yaml",
+        expect.objectContaining({
+          method: "PATCH",
+          body: JSON.stringify({ newName: "renamed.yaml" }),
+        })
+      );
+    });
+
+    it("should handle rename file error with response text", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 409,
+        text: () => Promise.resolve("destination exists"),
+      });
+
+      const { result } = renderHook(() => useArenaProjectFiles(), {
+        wrapper: createWrapper(),
+      });
+
+      await expect(
+        result.current.renameFile("test-project-1", "old.yaml", "taken.yaml")
+      ).rejects.toThrow("destination exists");
+    });
+
+    it("should move file successfully", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            path: "scenarios/old.yaml",
+            name: "old.yaml",
+            isDirectory: false,
+            modifiedAt: "t",
+          }),
+      });
+
+      const { result } = renderHook(() => useArenaProjectFiles(), {
+        wrapper: createWrapper(),
+      });
+
+      const response = await result.current.moveFile(
+        "test-project-1",
+        "prompts/old.yaml",
+        "scenarios"
+      );
+
+      expect(response.path).toBe("scenarios/old.yaml");
+      expect(mockFetch).toHaveBeenCalledWith(
+        "/api/workspaces/test-workspace/arena/projects/test-project-1/files/prompts/old.yaml",
+        expect.objectContaining({
+          method: "PATCH",
+          body: JSON.stringify({ destDir: "scenarios" }),
+        })
+      );
+    });
+
+    it("should handle move file error with response text", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 409,
+        text: () => Promise.resolve("destination exists"),
+      });
+
+      const { result } = renderHook(() => useArenaProjectFiles(), {
+        wrapper: createWrapper(),
+      });
+
+      await expect(
+        result.current.moveFile("test-project-1", "a.yaml", "prompts")
+      ).rejects.toThrow("destination exists");
+    });
+
     it("should refresh file tree successfully", async () => {
       const fileTree: FileTreeNode[] = [
         {

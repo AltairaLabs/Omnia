@@ -400,6 +400,67 @@ describe("project-editor-store", () => {
     });
   });
 
+  describe("renameOpenPaths", () => {
+    it("remaps the renamed file's own tab and updates name/type/active", () => {
+      act(() => {
+        useProjectEditorStore.getState().openFile("old.prompt.yaml", "old.prompt.yaml", "body");
+        useProjectEditorStore.getState().renameOpenPaths("old.prompt.yaml", "new.scenario.yaml");
+      });
+
+      const state = useProjectEditorStore.getState();
+      expect(state.openFiles).toHaveLength(1);
+      expect(state.openFiles[0].path).toBe("new.scenario.yaml");
+      expect(state.openFiles[0].name).toBe("new.scenario.yaml");
+      expect(state.openFiles[0].type).toBe("scenario");
+      expect(state.activeFilePath).toBe("new.scenario.yaml");
+    });
+
+    it("preserves unsaved edits when remapping", () => {
+      act(() => {
+        useProjectEditorStore.getState().openFile("a.yaml", "a.yaml", "orig");
+        useProjectEditorStore.getState().updateFileContent("a.yaml", "edited");
+        useProjectEditorStore.getState().renameOpenPaths("a.yaml", "b.yaml");
+      });
+
+      const file = useProjectEditorStore.getState().openFiles[0];
+      expect(file.path).toBe("b.yaml");
+      expect(file.content).toBe("edited");
+      expect(file.isDirty).toBe(true);
+    });
+
+    it("remaps descendant tabs when a directory is renamed", () => {
+      act(() => {
+        useProjectEditorStore.getState().openFile("prompts/a.yaml", "a.yaml", "x");
+        useProjectEditorStore.getState().openFile("prompts/sub/b.yaml", "b.yaml", "y");
+        useProjectEditorStore.getState().openFile("other/c.yaml", "c.yaml", "z");
+        useProjectEditorStore.getState().setActiveFile("prompts/a.yaml");
+        useProjectEditorStore.getState().expandPath("prompts");
+        useProjectEditorStore.getState().renameOpenPaths("prompts", "scenarios");
+      });
+
+      const state = useProjectEditorStore.getState();
+      const paths = state.openFiles.map((f) => f.path).sort();
+      expect(paths).toEqual(["other/c.yaml", "scenarios/a.yaml", "scenarios/sub/b.yaml"]);
+      // The descendant's basename is unchanged.
+      expect(state.openFiles.find((f) => f.path === "scenarios/a.yaml")?.name).toBe("a.yaml");
+      expect(state.activeFilePath).toBe("scenarios/a.yaml");
+      expect(state.expandedPaths.has("scenarios")).toBe(true);
+      expect(state.expandedPaths.has("prompts")).toBe(false);
+    });
+
+    it("leaves unaffected tabs and active path untouched", () => {
+      act(() => {
+        useProjectEditorStore.getState().openFile("keep.yaml", "keep.yaml", "x");
+        useProjectEditorStore.getState().setActiveFile("keep.yaml");
+        useProjectEditorStore.getState().renameOpenPaths("missing.yaml", "renamed.yaml");
+      });
+
+      const state = useProjectEditorStore.getState();
+      expect(state.openFiles[0].path).toBe("keep.yaml");
+      expect(state.activeFilePath).toBe("keep.yaml");
+    });
+  });
+
   describe("utility methods", () => {
     it("should return hasUnsavedChanges correctly", () => {
       expect(useProjectEditorStore.getState().hasUnsavedChanges()).toBe(false);

@@ -94,6 +94,7 @@ func TestServer_RejectsRequestWithoutToken(t *testing.T) {
 		{http.MethodGet, "/api/v1/workspaces/ws/content/a/b.txt"},
 		{http.MethodPut, "/api/v1/workspaces/ws/content/a/b.txt"},
 		{http.MethodPost, "/api/v1/workspaces/ws/content/a"},
+		{http.MethodPatch, "/api/v1/workspaces/ws/content/a/b.txt"},
 		{http.MethodDelete, "/api/v1/workspaces/ws/content/a/b.txt"},
 	} {
 		r, err := http.NewRequest(tc.method, ts.URL+tc.path, nil)

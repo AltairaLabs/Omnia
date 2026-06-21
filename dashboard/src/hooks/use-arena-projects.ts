@@ -191,6 +191,8 @@ interface UseArenaProjectFilesResult {
   getFileContent: (projectId: string, filePath: string) => Promise<FileContentResponse>;
   updateFileContent: (projectId: string, filePath: string, content: string) => Promise<FileUpdateResponse>;
   createFile: (projectId: string, parentPath: string | null, name: string, isDirectory: boolean, content?: string) => Promise<FileCreateResponse>;
+  renameFile: (projectId: string, filePath: string, newName: string) => Promise<FileCreateResponse>;
+  moveFile: (projectId: string, filePath: string, destDir: string) => Promise<FileCreateResponse>;
   deleteFile: (projectId: string, filePath: string) => Promise<void>;
   refreshFileTree: (projectId: string) => Promise<FileTreeNode[]>;
   loading: boolean;
@@ -307,6 +309,60 @@ export function useArenaProjectFiles(): UseArenaProjectFilesResult {
     [workspace, wrap, invalidateProject],
   );
 
+  const renameFile = useCallback(
+    (
+      projectId: string,
+      filePath: string,
+      newName: string,
+    ): Promise<FileCreateResponse> =>
+      wrap(async () => {
+        if (!workspace) throw new Error(NO_WORKSPACE_ERROR);
+        const response = await fetch(
+          `/api/workspaces/${workspace}/arena/projects/${projectId}/files/${filePath}`,
+          {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ newName }),
+          },
+        );
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(errorText || "Failed to rename file");
+        }
+        const result = await response.json();
+        invalidateProject(projectId);
+        return result;
+      }),
+    [workspace, wrap, invalidateProject],
+  );
+
+  const moveFile = useCallback(
+    (
+      projectId: string,
+      filePath: string,
+      destDir: string,
+    ): Promise<FileCreateResponse> =>
+      wrap(async () => {
+        if (!workspace) throw new Error(NO_WORKSPACE_ERROR);
+        const response = await fetch(
+          `/api/workspaces/${workspace}/arena/projects/${projectId}/files/${filePath}`,
+          {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ destDir }),
+          },
+        );
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(errorText || "Failed to move file");
+        }
+        const result = await response.json();
+        invalidateProject(projectId);
+        return result;
+      }),
+    [workspace, wrap, invalidateProject],
+  );
+
   const deleteFile = useCallback(
     (projectId: string, filePath: string): Promise<void> =>
       wrap(async () => {
@@ -345,6 +401,8 @@ export function useArenaProjectFiles(): UseArenaProjectFilesResult {
     getFileContent,
     updateFileContent,
     createFile,
+    renameFile,
+    moveFile,
     deleteFile,
     refreshFileTree,
     loading,

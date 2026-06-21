@@ -32,6 +32,9 @@ interface LspYamlEditorProps {
   readonly projectId?: string;
   /** File path within the project */
   readonly filePath?: string;
+  /** When set, scroll to and select this 1-based line. The nonce re-triggers a
+   *  jump to the same line on repeat clicks. */
+  readonly revealTarget?: { line: number; nonce: number };
 }
 
 interface DiagnosticInfo {
@@ -124,8 +127,10 @@ export function LspYamlEditor({
   workspace,
   projectId,
   filePath,
+  revealTarget,
 }: LspYamlEditorProps) {
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null);
+  const lastRevealNonce = useRef<number | undefined>(undefined);
   const monacoRef = useRef<typeof import("monaco-editor") | null>(null);
   const clientRef = useRef<MonacoLanguageClient | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
@@ -334,6 +339,22 @@ export function LspYamlEditor({
       disposable.dispose();
     };
   }, []);
+
+  // Jump to a requested line once the editor is mounted. Deferred a frame so
+  // Monaco has applied the latest model content before we scroll.
+  useEffect(() => {
+    if (!revealTarget || revealTarget.nonce === lastRevealNonce.current) return;
+    const ed = editorRef.current;
+    if (!ed || revealTarget.line < 1) return;
+    lastRevealNonce.current = revealTarget.nonce;
+    const line = revealTarget.line;
+    const raf = requestAnimationFrame(() => {
+      ed.revealLineInCenter(line);
+      ed.setPosition({ lineNumber: line, column: 1 });
+      ed.focus();
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [revealTarget, monacoReady]);
 
   // Define custom theme before editor mounts to ensure semantic token colors are ready
   const handleEditorWillMount: BeforeMount = useCallback((monaco) => {
