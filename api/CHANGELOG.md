@@ -10,6 +10,21 @@ or `api/proto/`, add an entry below with the date, affected API, and reason.
 
 ## Unreleased
 
+### Removed (CRD: AgentRuntime unwired memory fields, #1512)
+
+- Removed **`AgentRuntime.spec.memory.embedding`** (`MemoryEmbeddingConfig`),
+  **`.extraction`** (`MemoryExtractionConfig`), **`.retention`**
+  (`MemoryRetentionConfig`), and **`.purpose`**. These fields had zero
+  consumers — no controller or runtime read them. Embedding is configured at the
+  **workspace** level (the embedding `Provider` CRD wired by `cmd/memory-api`);
+  per-agent extraction/retention/purpose were never implemented.
+- Retained and still wired: **`.enabled`** and **`.retrieval`**
+  (`strategy`, `limit`, `accessFilter.denyCEL`).
+- Breaking only in the sense that these keys are now rejected by validation on
+  apply; since they did nothing, removing them from a spec is behavior-preserving.
+- Follow-ups filed for the `retrieval.strategy` enum values that are accepted but
+  not yet implemented (`graph`, `composite`).
+
 ### Changed (CRD: AgentRuntime function-mode facade type — `rest`, #1464)
 
 - **`AgentRuntime.spec.facade.type`** gains a new enum value **`rest`**
