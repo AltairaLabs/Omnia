@@ -16,6 +16,7 @@ const (
 	labelWorkspace = "workspace"
 	labelPolicy    = "policy"
 	labelStatus    = "status"
+	labelBasis     = "basis"
 )
 
 // Metrics holds Prometheus collectors for the projection worker
@@ -30,8 +31,10 @@ func NewMetrics() *Metrics {
 	return &Metrics{
 		RendersTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "omnia_memory_projection_renders_total",
-			Help: "Projection pre-renders per workspace UID, policy, status (ok|error).",
-		}, []string{labelWorkspace, labelPolicy, labelStatus}),
+			Help: "Projection pre-renders per workspace UID, policy, status (ok|error), " +
+				"basis (dense|lexical|unknown). A render degrading to 'lexical' means the " +
+				"semantic index is below the dense-coverage threshold.",
+		}, []string{labelWorkspace, labelPolicy, labelStatus, labelBasis}),
 		RenderSeconds: prometheus.NewHistogramVec(prometheus.HistogramOpts{
 			Name:    "omnia_memory_projection_render_seconds",
 			Help:    "Duration of one workspace projection render.",
