@@ -1677,6 +1677,31 @@ func (s *PostgresMemoryStore) FindObservationsMissingEmbedding(
 	return out, rows.Err()
 }
 
+// CountObservationsMissingEmbedding returns how many active observations in a
+// workspace either have no embedding or were embedded with a different model
+// name — the re-embed worker's per-workspace backlog depth. Same predicate as
+// FindObservationsMissingEmbedding, scoped to one workspace and aggregated so
+// the metrics collector can poll it cheaply (#1442).
+func (s *PostgresMemoryStore) CountObservationsMissingEmbedding(
+	ctx context.Context, workspaceID, currentModel string,
+) (int, error) {
+	var n int
+	err := s.pool.QueryRow(ctx, `
+		SELECT count(*)
+		FROM memory_observations o
+		JOIN memory_entities e ON e.id = o.entity_id AND e.forgotten = false
+		WHERE e.workspace_id = $1
+		  AND o.superseded_by IS NULL
+		  AND (o.valid_until IS NULL OR o.valid_until > now())
+		  AND (o.embedding IS NULL
+		       OR ($2 <> '' AND coalesce(o.embedding_model, '') <> $2))`,
+		workspaceID, currentModel).Scan(&n)
+	if err != nil {
+		return 0, fmt.Errorf("memory: count missing embeddings: %w", err)
+	}
+	return n, nil
+}
+
 // UpdateObservationEmbedding writes the embedding + the model name
 // for one specific observation. Distinct from UpdateEmbedding (which
 // targets the latest observation per entity) — the re-embed worker

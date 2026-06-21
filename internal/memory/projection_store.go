@@ -104,30 +104,35 @@ func tierFromColumns(userID, agentID *string) string {
 	}
 }
 
+// latestActiveObservationCTE selects one row per live entity carrying whether
+// its most-recent active observation has an embedding (has_emb). It mirrors
+// LoadProjectionInputs exactly, so any aggregate built on it measures the SAME
+// population the projector's dense/lexical basis decision uses. Param order:
+// $1 workspace_id, $2 virtual_user_id (nullable), $3 agent_id (nullable).
+const latestActiveObservationCTE = `
+	WITH latest AS (
+	    SELECT DISTINCT ON (e.id)
+	        e.id, o.observed_at, (o.embedding IS NOT NULL) AS has_emb
+	    FROM memory_entities e
+	    JOIN memory_observations o ON o.entity_id = e.id
+	        AND o.superseded_by IS NULL
+	        AND (o.valid_until IS NULL OR o.valid_until > now())
+	    WHERE e.workspace_id = $1
+	        AND ($2::text IS NULL OR e.virtual_user_id = $2)
+	        AND ($3::uuid IS NULL OR e.agent_id = $3)
+	        AND e.forgotten = false
+	    ORDER BY e.id, o.observed_at DESC
+	)`
+
 // ProjectionFingerprint returns count + max(observed_at) for the scope, used to
 // invalidate a stored layout. Returns "" when the scope has no memories.
 func (s *PostgresMemoryStore) ProjectionFingerprint(ctx context.Context, scope map[string]string) (string, error) {
 	var count int
 	var maxObs *time.Time
 	var embedded int
-	// Mirror LoadProjectionInputs exactly — one row per entity carrying its
-	// most-recent active observation — so the embedded fraction matches the
-	// projector's basis decision. count(*) FILTER (...) counts entities whose
-	// latest active observation has an embedding.
-	err := s.pool.QueryRow(ctx, `
-		WITH latest AS (
-		    SELECT DISTINCT ON (e.id)
-		        e.id, o.observed_at, (o.embedding IS NOT NULL) AS has_emb
-		    FROM memory_entities e
-		    JOIN memory_observations o ON o.entity_id = e.id
-		        AND o.superseded_by IS NULL
-		        AND (o.valid_until IS NULL OR o.valid_until > now())
-		    WHERE e.workspace_id = $1
-		        AND ($2::text IS NULL OR e.virtual_user_id = $2)
-		        AND ($3::uuid IS NULL OR e.agent_id = $3)
-		        AND e.forgotten = false
-		    ORDER BY e.id, o.observed_at DESC
-		)
+	// count(*) FILTER (...) counts entities whose latest active observation has
+	// an embedding (see latestActiveObservationCTE).
+	err := s.pool.QueryRow(ctx, latestActiveObservationCTE+`
 		SELECT count(*), max(observed_at), count(*) FILTER (WHERE has_emb)
 		FROM latest`,
 		scope[ScopeWorkspaceID], scopeOrNil(scope, ScopeUserID), scopeOrNil(scope, ScopeAgentID),
@@ -148,6 +153,21 @@ func (s *PostgresMemoryStore) ProjectionFingerprint(ctx context.Context, scope m
 		denseEligible = 1
 	}
 	return fmt.Sprintf("%d:%d:%d", count, maxObs.UTC().UnixNano(), denseEligible), nil
+}
+
+// EmbeddingCoverage returns, for a workspace, how many live entities exist
+// (total) and how many have an embedding on their latest active observation
+// (embedded). It measures the exact population the projector's basis decision
+// uses, so embedded/total is the fraction that decides dense vs lexical. Used
+// by the embedding-pipeline metrics collector (#1442).
+func (s *PostgresMemoryStore) EmbeddingCoverage(ctx context.Context, workspaceID string) (total, embedded int, err error) {
+	err = s.pool.QueryRow(ctx, latestActiveObservationCTE+`
+		SELECT count(*), count(*) FILTER (WHERE has_emb)
+		FROM latest`, workspaceID, nil, nil).Scan(&total, &embedded)
+	if err != nil {
+		return 0, 0, fmt.Errorf("memory: embedding coverage: %w", err)
+	}
+	return total, embedded, nil
 }
 
 // LoadProjection returns the stored layout + metadata for scopeKey, or
