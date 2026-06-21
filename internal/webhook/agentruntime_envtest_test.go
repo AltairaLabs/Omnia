@@ -136,7 +136,7 @@ func firstEnvTestBinaryDir() string {
 }
 
 // functionAR builds a function-mode AgentRuntime that satisfies the CRD's CEL
-// rules (function mode requires both schemas and a non-websocket facade) so the
+// rules (function mode requires both schemas and a rest/a2a facade) so the
 // object reaches the validating webhook rather than being rejected by CEL first.
 func functionAR(name string, inputSchema, outputSchema string) *corev1alpha1.AgentRuntime {
 	ar := &corev1alpha1.AgentRuntime{
@@ -144,7 +144,7 @@ func functionAR(name string, inputSchema, outputSchema string) *corev1alpha1.Age
 	}
 	ar.Spec.Mode = corev1alpha1.AgentRuntimeModeFunction
 	ar.Spec.PromptPackRef = corev1alpha1.PromptPackRef{Name: "pack"}
-	ar.Spec.Facade = corev1alpha1.FacadeConfig{Type: corev1alpha1.FacadeTypeGRPC}
+	ar.Spec.Facade = corev1alpha1.FacadeConfig{Type: corev1alpha1.FacadeTypeREST}
 	ar.Spec.InputSchema = &apiextensionsv1.JSON{Raw: []byte(inputSchema)}
 	ar.Spec.OutputSchema = &apiextensionsv1.JSON{Raw: []byte(outputSchema)}
 	return ar

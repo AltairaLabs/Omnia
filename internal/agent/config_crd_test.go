@@ -719,7 +719,7 @@ func TestLoadMCPConfigFromCRD_FromFacade(t *testing.T) {
 		PromptPackRef: v1alpha1.PromptPackRef{Name: "p"},
 		Mode:          "function",
 		Facade: v1alpha1.FacadeConfig{
-			Type: v1alpha1.FacadeTypeGRPC,
+			Type: v1alpha1.FacadeTypeREST,
 			MCP:  &v1alpha1.MCPConfig{Enabled: true, Port: &port},
 		},
 	})
@@ -742,7 +742,7 @@ func TestLoadMCPConfigFromCRD_DefaultPortWhenUnset(t *testing.T) {
 		PromptPackRef: v1alpha1.PromptPackRef{Name: "p"},
 		Mode:          "function",
 		Facade: v1alpha1.FacadeConfig{
-			Type: v1alpha1.FacadeTypeGRPC,
+			Type: v1alpha1.FacadeTypeREST,
 			MCP:  &v1alpha1.MCPConfig{Enabled: true},
 		},
 	})

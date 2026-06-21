@@ -36,7 +36,7 @@ func validFunctionConfig() *agent.Config {
 		PromptPackName:           "summarizer-pack",
 		Mode:                     agent.ModeFunction,
 		HandlerMode:              agent.HandlerModeRuntime,
-		FacadeType:               agent.FacadeTypeGRPC,
+		FacadeType:               agent.FacadeTypeREST,
 		MediaStorageType:         agent.MediaStorageTypeNone,
 		FunctionInputSchemaJSON:  []byte(goodInputSchema),
 		FunctionOutputSchemaJSON: []byte(goodOutputSchema),

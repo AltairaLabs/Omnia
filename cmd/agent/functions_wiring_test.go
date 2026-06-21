@@ -17,9 +17,8 @@ limitations under the License.
 // This file holds the wiring tests for the function-mode pod startup
 // flow. They exercise functions.go end-to-end against a real stub
 // runtime so the mux mounting, auth middleware composition, response
-// envelope, and health probe are all proven before merge. Without
-// these tests B1 (Validate rejecting facade.type=grpc) would have
-// shipped silently.
+// envelope, and health probe are all proven before merge. Function mode
+// serves HTTP and validates with facade.type=rest (#1464).
 
 package main
 

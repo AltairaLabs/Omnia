@@ -4620,6 +4620,7 @@ spec:
                     - websocket
                     - grpc
                     - a2a
+                    - rest
                     type: string
                 required:
                 - type
@@ -4784,7 +4785,7 @@ spec:
                   the existing conversational runtime; "function" exposes the pack as
                   a one-shot, structured-I/O HTTP endpoint at POST /functions/{name}.
                   When set to "function", spec.inputSchema and spec.outputSchema are
-                  required and the facade type must not be 'websocket'.
+                  required and the facade type must be 'rest' or 'a2a'.
                 enum:
                 - agent
                 - function
@@ -11984,9 +11985,11 @@ spec:
               rule: self.mode == 'function' || !has(self.outputSchema)
             - message: spec.outputFormat is only valid when spec.mode is 'function'
               rule: self.mode == 'function' || !has(self.outputFormat)
-            - message: facade.type 'websocket' is incompatible with mode 'function';
-                use 'grpc' or omit
-              rule: self.mode != 'function' || self.facade.type != 'websocket'
+            - message: mode 'function' requires facade.type 'rest' (HTTP) or 'a2a';
+                'websocket' and 'grpc' are not valid for functions
+              rule: self.mode != 'function' || self.facade.type in ['rest', 'a2a']
+            - message: facade.type 'rest' is only valid when mode is 'function'
+              rule: self.facade.type != 'rest' || self.mode == 'function'
             - message: facade.mcp.enabled requires mode=function
               rule: '!has(self.facade.mcp) || !self.facade.mcp.enabled || self.mode
                 == ''function'''

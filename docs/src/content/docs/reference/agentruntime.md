@@ -176,10 +176,15 @@ WebSocket facade configuration.
 
 | Field | Type | Default | Required |
 |-------|------|---------|----------|
-| `facade.type` | string | websocket | Yes |
+| `facade.type` | string (`websocket` \| `grpc` \| `a2a` \| `rest`) | websocket | Yes |
 | `facade.port` | integer | 8080 | No |
 | `facade.handler` | string | runtime | No |
 | `facade.image` | string | - | No |
+
+`facade.type` must match how the runtime is invoked. `mode: agent` runtimes use
+`websocket` (or `a2a`); `mode: function` runtimes serve HTTP at
+`POST /functions/{name}` and must use `rest` (or `a2a` for agent-to-agent
+invocation). `websocket` and `grpc` are rejected for function mode.
 
 ```yaml
 spec:

@@ -10,6 +10,24 @@ or `api/proto/`, add an entry below with the date, affected API, and reason.
 
 ## Unreleased
 
+### Changed (CRD: AgentRuntime function-mode facade type — `rest`, #1464)
+
+- **`AgentRuntime.spec.facade.type`** gains a new enum value **`rest`**
+  (`websocket|grpc|a2a|rest`) — an honest label for function-mode runtimes,
+  which serve a one-shot HTTP endpoint at `POST /functions/{name}` rather than a
+  persistent client connection.
+- **`mode: function` now requires `facade.type` to be `rest` or `a2a`.** The CEL
+  gate previously only rejected `websocket`, steering authors to label functions
+  `grpc` (cosmetic, since the runtime ignores it). Both `websocket` and `grpc`
+  are now rejected for function mode, with an error pointing at `rest`. A
+  symmetric rule rejects `rest` outside function mode.
+- **Breaking for function specs only:** an already-deployed `mode: function`
+  AgentRuntime with `facade.type: grpc` fails validation on its next apply and
+  must switch to `rest`. Agent-mode specs are unaffected (`grpc` still accepted
+  for back-compat). In-repo samples, charts, and examples were migrated.
+- Side effect: function Services are no longer mislabelled with Istio
+  `appProtocol: grpc` on their HTTP `facade` port — `rest` maps to `http`.
+
 ### Fixed (REST: dashboard OpenAPI spec corrected to the real workspace API)
 
 - **`api/openapi/openapi.yaml`** rewritten to document the API that is actually

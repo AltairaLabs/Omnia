@@ -106,10 +106,14 @@ type FacadeType string
 const (
 	FacadeTypeWebSocket FacadeType = "websocket"
 	FacadeTypeA2A       FacadeType = "a2a"
-	// FacadeTypeGRPC is the facade type for function-mode AgentRuntimes
-	// (#1103). The route is HTTP (POST /functions/{name}); the value
-	// "grpc" reflects the CRD enum but the in-process surface is HTTP.
+	// FacadeTypeGRPC is retained for agent-mode back-compat with pre-Phase-1
+	// configs. Function-mode runtimes no longer use it (#1464); they declare
+	// FacadeTypeREST.
 	FacadeTypeGRPC FacadeType = "grpc"
+	// FacadeTypeREST is the facade type for function-mode AgentRuntimes
+	// (#1464). The route is HTTP (POST /functions/{name}) — an honest label
+	// for the one-shot request/response surface.
+	FacadeTypeREST FacadeType = "rest"
 )
 
 // Mode values for Config.Mode. Mirrors AgentRuntime.spec.mode.
@@ -282,12 +286,12 @@ func (c *Config) Validate() error {
 		return fmt.Errorf(errWithValueFmt, ErrInvalidHandlerMode, c.HandlerMode)
 	}
 
-	// Validate facade type. Function-mode AgentRuntimes use facade.type=grpc
-	// (the CRD's CEL gate rejects websocket for mode=function). Agent-mode
+	// Validate facade type. Function-mode AgentRuntimes use facade.type=rest
+	// (the CRD's CEL gate requires rest or a2a for mode=function). Agent-mode
 	// pods accept websocket or a2a as before. Grpc is also implicitly OK in
 	// agent mode for back-compat with pre-Phase-1 configs that already used it.
 	switch c.FacadeType {
-	case FacadeTypeWebSocket, FacadeTypeA2A, FacadeTypeGRPC:
+	case FacadeTypeWebSocket, FacadeTypeA2A, FacadeTypeGRPC, FacadeTypeREST:
 		// Valid
 	default:
 		return fmt.Errorf(errWithValueFmt, ErrInvalidFacadeType, c.FacadeType)
@@ -300,9 +304,10 @@ func (c *Config) Validate() error {
 		if len(c.FunctionOutputSchemaJSON) == 0 {
 			return ErrMissingFunctionOutputSchema
 		}
-		if c.FacadeType == FacadeTypeWebSocket {
-			return fmt.Errorf("%w: function mode does not support facade.type=websocket",
-				ErrInvalidFacadeType)
+		// Function mode serves HTTP; only rest (HTTP) and a2a are valid.
+		if c.FacadeType != FacadeTypeREST && c.FacadeType != FacadeTypeA2A {
+			return fmt.Errorf("%w: function mode requires facade.type=rest or a2a, got %q",
+				ErrInvalidFacadeType, c.FacadeType)
 		}
 	}
 

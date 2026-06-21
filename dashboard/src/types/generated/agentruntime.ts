@@ -2532,7 +2532,7 @@ export interface AgentRuntimeSpec {
     /** port is the port number for the facade service. */
     port?: number;
     /** type specifies the facade protocol type. */
-    type: "websocket" | "grpc" | "a2a";
+    type: "websocket" | "grpc" | "a2a" | "rest";
   };
   /** framework specifies which agent framework to use.
    * Supports PromptKit, LangChain, AutoGen, or a custom image.
@@ -2617,7 +2617,7 @@ export interface AgentRuntimeSpec {
    * the existing conversational runtime; "function" exposes the pack as
    * a one-shot, structured-I/O HTTP endpoint at POST /functions/{name}.
    * When set to "function", spec.inputSchema and spec.outputSchema are
-   * required and the facade type must not be 'websocket'. */
+   * required and the facade type must be 'rest' or 'a2a'. */
   mode?: "agent" | "function";
   /** outputFormat controls how the model is asked to format its response in
    * function mode. "text" = free-form (validated post-hoc by the facade),

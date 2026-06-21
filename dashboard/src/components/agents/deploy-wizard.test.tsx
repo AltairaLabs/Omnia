@@ -244,13 +244,13 @@ describe("composeAgentYaml", () => {
     expect(spec.outputSchema).toEqual({ type: "object", required: ["a"] });
   });
 
-  it("pins facade.type to 'grpc' in function mode regardless of facadeType", () => {
+  it("pins facade.type to 'rest' in function mode regardless of facadeType", () => {
     const yaml = composeAgentYaml(
       { ...baseForm, mode: "function", facadeType: "websocket" },
       "ns-a",
     );
     const spec = (yaml as { spec: { facade: { type: string } } }).spec;
-    expect(spec.facade.type).toBe("grpc");
+    expect(spec.facade.type).toBe("rest");
   });
 
   it("falls back to 'default' namespace when none supplied", () => {

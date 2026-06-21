@@ -53,6 +53,8 @@ func TestFacadeTypeConstants(t *testing.T) {
 	}{
 		{"WebSocket", FacadeTypeWebSocket, "websocket"},
 		{"gRPC", FacadeTypeGRPC, "grpc"},
+		{"A2A", FacadeTypeA2A, "a2a"},
+		{"REST", FacadeTypeREST, "rest"},
 	}
 
 	for _, tt := range tests {

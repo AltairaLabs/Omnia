@@ -299,7 +299,7 @@ spec:
   evals:
     enabled: true
   facade:
-    type: grpc
+    type: rest
     port: 8080
     handler: {{ .Values.compositionDemo.agent.handler }}
   runtime:
