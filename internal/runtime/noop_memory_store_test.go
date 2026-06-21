@@ -5,6 +5,10 @@ import (
 	"testing"
 
 	pkmemory "github.com/AltairaLabs/PromptKit/runtime/memory"
+	"github.com/go-logr/logr"
+	"github.com/stretchr/testify/require"
+
+	"github.com/altairalabs/omnia/pkg/policy"
 )
 
 // stubStore is a distinguishable real store for identity assertions in
@@ -65,6 +69,53 @@ func TestMemoryWiring(t *testing.T) {
 			}
 			if attach != tt.wantAttachRetr {
 				t.Errorf("attachRetriever = %v, want %v", attach, tt.wantAttachRetr)
+			}
+		})
+	}
+}
+
+// TestBuildConversationOptions_MemoryToggles drives the memory-wiring block in
+// buildConversationOptions across the four combos, guarding the "code exists but
+// isn't wired" failure mode and exercising the no-op store / retriever / tool-
+// override branches.
+func TestBuildConversationOptions_MemoryToggles(t *testing.T) {
+	ctx := policy.WithUserID(context.Background(), "user-1")
+
+	base := NewServer(WithLogger(logr.Discard()))
+	baseOpts, err := base.buildConversationOptions(ctx, "sess")
+	require.NoError(t, err)
+
+	newServer := func(retrieval, tools bool) *Server {
+		s := NewServer(
+			WithLogger(logr.Discard()),
+			WithMemoryStore(stubStore{}),
+			WithWorkspaceUID("ws-uid"),
+			WithMemoryModes(retrieval, tools),
+		)
+		s.agentUID = "agent-1"
+		return s
+	}
+
+	tests := []struct {
+		name          string
+		retrieval     bool
+		tools         bool
+		wantMemoryOpt bool // memory wiring should add at least the WithMemory option
+	}{
+		{"both on", true, true, true},
+		{"rag on, tools off", true, false, true},
+		{"rag off, tools on", false, true, true},
+		{"both off", false, false, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			opts, err := newServer(tt.retrieval, tt.tools).buildConversationOptions(ctx, "sess")
+			require.NoError(t, err)
+			if tt.wantMemoryOpt {
+				require.Greater(t, len(opts), len(baseOpts), "memory should add SDK options")
+			} else {
+				require.Equal(t, len(baseOpts), len(opts), "both-off should wire no memory options")
 			}
 		})
 	}
