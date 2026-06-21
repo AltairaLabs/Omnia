@@ -19,7 +19,9 @@ type stubStore struct{ noopMemoryStore }
 func TestNoopMemoryStore(t *testing.T) {
 	var s noopMemoryStore
 	ctx := context.Background()
-	scope := map[string]string{"workspace_id": "ws", "user_id": "u"}
+	// The no-op store ignores scope; an empty map keeps this test free of
+	// duplicated scope-key string literals (goconst).
+	scope := map[string]string{}
 
 	if err := s.Save(ctx, &pkmemory.Memory{Content: "x"}); err != nil {
 		t.Errorf("Save: unexpected error %v", err)
