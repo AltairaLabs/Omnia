@@ -559,6 +559,139 @@ func TestFindAgentRuntimesForPromptPack_Indexed(t *testing.T) {
 	assert.Equal(t, "match", requests[0].Name)
 }
 
+func TestFindAgentRuntimesForToolRegistry(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = omniav1alpha1.AddToScheme(scheme)
+
+	otherNS := "tools-ns"
+
+	toolRegistry := &omniav1alpha1.ToolRegistry{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-tools",
+			Namespace: "default",
+		},
+	}
+
+	agentRuntimes := []omniav1alpha1.AgentRuntime{
+		{
+			ObjectMeta: metav1.ObjectMeta{Name: "agent-using-tools", Namespace: "default"},
+			Spec: omniav1alpha1.AgentRuntimeSpec{
+				PromptPackRef:   omniav1alpha1.PromptPackRef{Name: "test-pack"},
+				ToolRegistryRef: &omniav1alpha1.ToolRegistryRef{Name: "test-tools"},
+			},
+		},
+		{
+			ObjectMeta: metav1.ObjectMeta{Name: "agent-using-other-tools", Namespace: "default"},
+			Spec: omniav1alpha1.AgentRuntimeSpec{
+				PromptPackRef:   omniav1alpha1.PromptPackRef{Name: "test-pack"},
+				ToolRegistryRef: &omniav1alpha1.ToolRegistryRef{Name: "other-tools"},
+			},
+		},
+		{
+			ObjectMeta: metav1.ObjectMeta{Name: "agent-without-tools", Namespace: "default"},
+			Spec: omniav1alpha1.AgentRuntimeSpec{
+				PromptPackRef: omniav1alpha1.PromptPackRef{Name: "test-pack"},
+			},
+		},
+		{
+			// References test-tools but resolves to a different namespace, so it
+			// must NOT match a ToolRegistry named test-tools in "default".
+			ObjectMeta: metav1.ObjectMeta{Name: "agent-cross-ns-other", Namespace: "default"},
+			Spec: omniav1alpha1.AgentRuntimeSpec{
+				PromptPackRef:   omniav1alpha1.PromptPackRef{Name: "test-pack"},
+				ToolRegistryRef: &omniav1alpha1.ToolRegistryRef{Name: "test-tools", Namespace: &otherNS},
+			},
+		},
+	}
+
+	objs := make([]runtime.Object, 0, 1+len(agentRuntimes))
+	objs = append(objs, toolRegistry)
+	for i := range agentRuntimes {
+		objs = append(objs, &agentRuntimes[i])
+	}
+
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithRuntimeObjects(objs...).
+		Build()
+
+	r := &AgentRuntimeReconciler{Client: fakeClient, Scheme: scheme}
+
+	requests := r.findAgentRuntimesForToolRegistry(context.Background(), toolRegistry)
+
+	assert.Len(t, requests, 1)
+	assert.Equal(t, "agent-using-tools", requests[0].Name)
+}
+
+func TestFindAgentRuntimesForToolRegistry_CrossNamespace(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = omniav1alpha1.AddToScheme(scheme)
+
+	toolsNS := "tools-ns"
+
+	toolRegistry := &omniav1alpha1.ToolRegistry{
+		ObjectMeta: metav1.ObjectMeta{Name: "shared-tools", Namespace: toolsNS},
+	}
+
+	// AgentRuntime in "default" references the ToolRegistry in "tools-ns".
+	agent := &omniav1alpha1.AgentRuntime{
+		ObjectMeta: metav1.ObjectMeta{Name: "agent-cross-ns", Namespace: "default"},
+		Spec: omniav1alpha1.AgentRuntimeSpec{
+			PromptPackRef:   omniav1alpha1.PromptPackRef{Name: "test-pack"},
+			ToolRegistryRef: &omniav1alpha1.ToolRegistryRef{Name: "shared-tools", Namespace: &toolsNS},
+		},
+	}
+
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithRuntimeObjects(toolRegistry, agent).
+		Build()
+
+	r := &AgentRuntimeReconciler{Client: fakeClient, Scheme: scheme}
+
+	requests := r.findAgentRuntimesForToolRegistry(context.Background(), toolRegistry)
+
+	assert.Len(t, requests, 1)
+	assert.Equal(t, "agent-cross-ns", requests[0].Name)
+}
+
+func TestFindAgentRuntimesForToolRegistry_Indexed(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = omniav1alpha1.AddToScheme(scheme)
+
+	matching := &omniav1alpha1.AgentRuntime{
+		ObjectMeta: metav1.ObjectMeta{Name: "match", Namespace: "default"},
+		Spec: omniav1alpha1.AgentRuntimeSpec{
+			ToolRegistryRef: &omniav1alpha1.ToolRegistryRef{Name: "target-tools"},
+		},
+	}
+	other := &omniav1alpha1.AgentRuntime{
+		ObjectMeta: metav1.ObjectMeta{Name: "other", Namespace: "default"},
+		Spec: omniav1alpha1.AgentRuntimeSpec{
+			ToolRegistryRef: &omniav1alpha1.ToolRegistryRef{Name: "other-tools"},
+		},
+	}
+
+	indexedClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(matching, other).
+		WithIndex(&omniav1alpha1.AgentRuntime{}, IndexAgentRuntimeByToolRegistry,
+			func(obj client.Object) []string {
+				return extractToolRegistryRef(obj)
+			}).
+		Build()
+
+	r := &AgentRuntimeReconciler{Client: indexedClient, Scheme: scheme}
+
+	toolRegistry := &omniav1alpha1.ToolRegistry{
+		ObjectMeta: metav1.ObjectMeta{Name: "target-tools", Namespace: "default"},
+	}
+
+	requests := r.findAgentRuntimesForToolRegistry(context.Background(), toolRegistry)
+	assert.Len(t, requests, 1)
+	assert.Equal(t, "match", requests[0].Name)
+}
+
 func TestGetConfigHash(t *testing.T) {
 	scheme := runtime.NewScheme()
 	_ = omniav1alpha1.AddToScheme(scheme)

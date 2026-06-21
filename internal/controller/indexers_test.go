@@ -120,6 +120,65 @@ func TestExtractPromptPackRef_Empty(t *testing.T) {
 	assert.Empty(t, refs)
 }
 
+func TestExtractToolRegistryRef(t *testing.T) {
+	otherNS := "tools-ns"
+	tests := []struct {
+		name     string
+		ar       *omniav1alpha1.AgentRuntime
+		expected []string
+	}{
+		{
+			name: "same-namespace ref",
+			ar: &omniav1alpha1.AgentRuntime{
+				ObjectMeta: metav1.ObjectMeta{Name: "agent1", Namespace: "ns1"},
+				Spec: omniav1alpha1.AgentRuntimeSpec{
+					ToolRegistryRef: &omniav1alpha1.ToolRegistryRef{Name: "my-tools"},
+				},
+			},
+			expected: []string{"ns1/my-tools"},
+		},
+		{
+			name: "cross-namespace ref",
+			ar: &omniav1alpha1.AgentRuntime{
+				ObjectMeta: metav1.ObjectMeta{Name: "agent1", Namespace: "app"},
+				Spec: omniav1alpha1.AgentRuntimeSpec{
+					ToolRegistryRef: &omniav1alpha1.ToolRegistryRef{Name: "my-tools", Namespace: &otherNS},
+				},
+			},
+			expected: []string{"tools-ns/my-tools"},
+		},
+		{
+			name: "no ref",
+			ar: &omniav1alpha1.AgentRuntime{
+				ObjectMeta: metav1.ObjectMeta{Name: "agent1", Namespace: "ns1"},
+				Spec:       omniav1alpha1.AgentRuntimeSpec{},
+			},
+			expected: nil,
+		},
+		{
+			name: "ref with empty name",
+			ar: &omniav1alpha1.AgentRuntime{
+				ObjectMeta: metav1.ObjectMeta{Name: "agent1", Namespace: "ns1"},
+				Spec: omniav1alpha1.AgentRuntimeSpec{
+					ToolRegistryRef: &omniav1alpha1.ToolRegistryRef{Name: ""},
+				},
+			},
+			expected: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			refs := extractToolRegistryRef(tt.ar)
+			if tt.expected == nil {
+				assert.Empty(t, refs)
+			} else {
+				assert.Equal(t, tt.expected, refs)
+			}
+		})
+	}
+}
+
 func TestProviderRefKey(t *testing.T) {
 	ns := "other-ns"
 	tests := []struct {
