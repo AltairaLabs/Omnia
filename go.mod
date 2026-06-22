@@ -38,7 +38,7 @@ require (
 	github.com/oapi-codegen/runtime v1.4.0
 	github.com/onsi/ginkgo/v2 v2.28.1
 	github.com/onsi/gomega v1.42.0
-	github.com/parquet-go/parquet-go v0.28.0
+	github.com/parquet-go/parquet-go v0.30.1
 	github.com/pgvector/pgvector-go v0.4.0
 	github.com/prometheus/client_golang v1.23.2
 	github.com/prometheus/client_model v0.6.2
