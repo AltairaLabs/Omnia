@@ -588,6 +588,10 @@ func (m *MockResponseWriter) WriteBinaryMediaChunk(
 	return nil
 }
 
+func (m *MockResponseWriter) WriteInterrupt() error {
+	return nil
+}
+
 func (m *MockResponseWriter) SupportsBinary() bool {
 	return false
 }

@@ -10,6 +10,11 @@ or `api/proto/`, add an entry below with the date, affected API, and reason.
 
 ## Unreleased
 
+### Added (WebSocket: `interrupt` server message + gRPC `Interruption` — realtime voice barge-in)
+
+- **gRPC `Interruption` ServerMessage** (`pkg/runtime/v1`): new oneof variant emitted by the runtime when a barge-in is detected during a duplex audio session. The facade's `relayOut` loop handles it.
+- **WebSocket `interrupt` message** (`internal/facade/protocol.go`): new server→client control message (`MessageTypeInterrupt = "interrupt"`). Signals the browser to clear its buffered audio output immediately. No payload beyond the standard `session_id` and `timestamp` fields.
+
 ### Changed (CRD: AgentRuntime memory retrieval strategy + denyCEL enforcement, #1513/#1514/#1515)
 
 - **`AgentRuntime.spec.memory.retrieval.strategy`** enum: removed unimplemented

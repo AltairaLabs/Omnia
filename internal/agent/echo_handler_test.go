@@ -115,6 +115,10 @@ func (m *mockResponseWriter) WriteMediaChunk(mc *facade.MediaChunkInfo) error {
 	return nil
 }
 
+func (m *mockResponseWriter) WriteInterrupt() error {
+	return m.err
+}
+
 func (m *mockResponseWriter) SupportsBinary() bool {
 	return false
 }

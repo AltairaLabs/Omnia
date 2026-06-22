@@ -74,6 +74,7 @@ func (c *captureWriter) WriteError(_, _ string) error                    { retur
 func (c *captureWriter) WriteUploadReady(_ *UploadReadyInfo) error       { return nil }
 func (c *captureWriter) WriteUploadComplete(_ *UploadCompleteInfo) error { return nil }
 func (c *captureWriter) WriteMediaChunk(_ *MediaChunkInfo) error         { return nil }
+func (c *captureWriter) WriteInterrupt() error                           { return nil }
 func (c *captureWriter) SupportsBinary() bool                            { return true }
 func (c *captureWriter) WriteBinaryMediaChunk(_ [MediaIDSize]byte, _ uint32, _ bool, _ string, payload []byte) error {
 	cp := make([]byte, len(payload))

@@ -18,13 +18,16 @@ package agent
 
 import (
 	"context"
+	"io"
 	"net"
 	"os"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/go-logr/logr"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/metadata"
 
 	"github.com/AltairaLabs/PromptKit/runtime/providers"
 	"github.com/AltairaLabs/PromptKit/sdk"
@@ -52,6 +55,7 @@ func (c *captureBinaryWriter) WriteUploadComplete(_ *facade.UploadCompleteInfo) 
 	return nil
 }
 func (c *captureBinaryWriter) WriteMediaChunk(_ *facade.MediaChunkInfo) error { return nil }
+func (c *captureBinaryWriter) WriteInterrupt() error                          { return nil }
 func (c *captureBinaryWriter) SupportsBinary() bool                           { return true }
 func (c *captureBinaryWriter) WriteBinaryMediaChunk(_ [facade.MediaIDSize]byte, _ uint32, _ bool, _ string, payload []byte) error {
 	cp := make([]byte, len(payload))
@@ -308,4 +312,75 @@ func TestDuplexSink_SendAudioWithoutStart(t *testing.T) {
 	sink := NewGRPCDuplexSink("sess-nostart", nil, w)
 	defer func() { _ = recover() }() // catch the expected nil-pointer panic
 	_ = sink.SendAudio([]byte{1}, 0, false)
+}
+
+// fakeConverseClient is a minimal RuntimeService_ConverseClient whose Recv
+// returns a fixed sequence of ServerMessages then io.EOF.
+// All methods not used by relayOut are no-ops.
+type fakeConverseClient struct {
+	msgs  []*runtimev1.ServerMessage
+	index int
+}
+
+func (f *fakeConverseClient) Send(_ *runtimev1.ClientMessage) error { return nil }
+func (f *fakeConverseClient) Recv() (*runtimev1.ServerMessage, error) {
+	if f.index >= len(f.msgs) {
+		return nil, io.EOF
+	}
+	m := f.msgs[f.index]
+	f.index++
+	return m, nil
+}
+func (f *fakeConverseClient) Header() (metadata.MD, error) { return nil, nil }
+func (f *fakeConverseClient) Trailer() metadata.MD         { return nil }
+func (f *fakeConverseClient) CloseSend() error             { return nil }
+func (f *fakeConverseClient) Context() context.Context     { return context.Background() }
+func (f *fakeConverseClient) SendMsg(_ any) error          { return nil }
+func (f *fakeConverseClient) RecvMsg(_ any) error          { return nil }
+
+// countingWriter counts WriteInterrupt calls.
+// It embeds captureBinaryWriter for all other methods.
+type countingWriter struct {
+	captureBinaryWriter
+	interruptCalls atomic.Int32
+}
+
+func (c *countingWriter) WriteInterrupt() error {
+	c.interruptCalls.Add(1)
+	return nil
+}
+
+// TestRelayOut_ForwardsInterruption verifies that relayOut calls WriteInterrupt
+// exactly once when the runtime stream delivers a ServerMessage_Interruption.
+func TestRelayOut_ForwardsInterruption(t *testing.T) {
+	stream := &fakeConverseClient{
+		msgs: []*runtimev1.ServerMessage{
+			{Message: &runtimev1.ServerMessage_Interruption{
+				Interruption: &runtimev1.Interruption{},
+			}},
+		},
+	}
+
+	w := &countingWriter{captureBinaryWriter: captureBinaryWriter{got: make(chan []byte, 1)}}
+	sink := &grpcDuplexSink{
+		sessionID: "sess-interrupt",
+		writer:    w,
+		stream:    stream,
+	}
+
+	done := make(chan struct{})
+	go func() {
+		sink.relayOut()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("relayOut did not return after stream EOF")
+	}
+
+	if got := w.interruptCalls.Load(); got != 1 {
+		t.Errorf("WriteInterrupt called %d times, want 1", got)
+	}
 }
