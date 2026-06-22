@@ -18,6 +18,9 @@ import (
 	"github.com/go-logr/logr"
 )
 
+// testDenyCEL is a sample deny expression reused across retrieval tests.
+const testDenyCEL = `metadata.url.contains("restricted")`
+
 // fakeStore is a minimal pkmemory.Store implementation for retriever tests.
 type fakeStore struct {
 	listMemories     []*pkmemory.Memory
@@ -27,15 +30,17 @@ type fakeStore struct {
 	retrieveErr      error
 	retrieveCalls    atomic.Int32
 	lastQuery        string
+	lastFetchLimit   int
 }
 
 func (f *fakeStore) Save(_ context.Context, _ *pkmemory.Memory) error { return nil }
 
 func (f *fakeStore) Retrieve(
-	_ context.Context, _ map[string]string, query string, _ pkmemory.RetrieveOptions,
+	_ context.Context, _ map[string]string, query string, opts pkmemory.RetrieveOptions,
 ) ([]*pkmemory.Memory, error) {
 	f.retrieveCalls.Add(1)
 	f.lastQuery = query
+	f.lastFetchLimit = opts.Limit
 	if f.retrieveErr != nil {
 		return nil, f.retrieveErr
 	}
@@ -98,8 +103,159 @@ func defaultScope() map[string]string {
 	return map[string]string{"workspace_id": "ws", "user_id": "u"}
 }
 
+// mustRetriever builds a CompositeRetriever and fails the test on a constructor
+// error (e.g. an invalid denyCEL). The logger arg is accepted and ignored so
+// existing call sites that pass logr.Discard() compile unchanged.
+func mustRetriever(t *testing.T, store pkmemory.Store, cfg RetrievalConfig, _ logr.Logger) *CompositeRetriever {
+	t.Helper()
+	r, err := NewCompositeRetriever(store, cfg, logr.Discard())
+	if err != nil {
+		t.Fatalf("NewCompositeRetriever: %v", err)
+	}
+	return r
+}
+
+// memWithMeta builds a memory whose metadata carries a url, for denyCEL tests.
+func memWithMeta(id, url string) *pkmemory.Memory {
+	return &pkmemory.Memory{ID: id, Content: id, Metadata: map[string]any{"url": url}}
+}
+
+func TestRetrieveKeyword_DropsDeniedItems(t *testing.T) {
+	store := &fakeStore{retrieveMemories: []*pkmemory.Memory{
+		memWithMeta("a", "https://ok/doc"),
+		memWithMeta("b", "https://restricted/doc"),
+		memWithMeta("c", "https://ok/other"),
+	}}
+	r, err := NewCompositeRetriever(store, RetrievalConfig{
+		Strategy: StrategyKeyword,
+		DenyCEL:  testDenyCEL,
+	}, logr.Discard())
+	if err != nil {
+		t.Fatalf("ctor: %v", err)
+	}
+	got, err := r.retrieveEpisodic(context.Background(), defaultScope(), "anything")
+	if err != nil {
+		t.Fatalf("retrieveEpisodic: %v", err)
+	}
+	for _, m := range got {
+		if m.ID == "b" {
+			t.Fatal("denied item 'b' was returned")
+		}
+	}
+	if len(got) != 2 {
+		t.Fatalf("expected 2 allowed items, got %d", len(got))
+	}
+}
+
+func TestRetrieveKeyword_OverFetchesWhenDenyActive(t *testing.T) {
+	store := &fakeStore{retrieveMemories: []*pkmemory.Memory{memWithMeta("a", "https://ok/doc")}}
+	r, err := NewCompositeRetriever(store, RetrievalConfig{
+		Strategy: StrategyKeyword,
+		DenyCEL:  testDenyCEL,
+		Limit:    5,
+	}, logr.Discard())
+	if err != nil {
+		t.Fatalf("ctor: %v", err)
+	}
+	if _, err := r.retrieveEpisodic(context.Background(), defaultScope(), "q"); err != nil {
+		t.Fatalf("retrieveEpisodic: %v", err)
+	}
+	if store.lastFetchLimit != 15 { // episodicLimit(5) * 3
+		t.Fatalf("expected over-fetch limit 15, got %d", store.lastFetchLimit)
+	}
+}
+
+// Silent-fallback trap: strategy=semantic but the store has no semantic
+// capability → keyword fallback must still enforce denyCEL.
+func TestSemanticFallback_StillEnforcesDeny(t *testing.T) {
+	store := &fakeStore{retrieveMemories: []*pkmemory.Memory{
+		memWithMeta("a", "https://ok/doc"),
+		memWithMeta("b", "https://restricted/doc"),
+	}}
+	r, err := NewCompositeRetriever(store, RetrievalConfig{
+		Strategy: StrategySemantic, // but fakeStore is not a SemanticRetriever
+		DenyCEL:  testDenyCEL,
+	}, logr.Discard())
+	if err != nil {
+		t.Fatalf("ctor: %v", err)
+	}
+	got, err := r.retrieveEpisodic(context.Background(), defaultScope(), "q")
+	if err != nil {
+		t.Fatalf("retrieveEpisodic: %v", err)
+	}
+	for _, m := range got {
+		if m.ID == "b" {
+			t.Fatal("semantic-fallback served a denied item")
+		}
+	}
+}
+
+func TestRetrieveComposite_FusesAndDedups(t *testing.T) {
+	store := &fakeSemanticStore{
+		fakeStore: fakeStore{retrieveMemories: []*pkmemory.Memory{
+			memWithMeta("k1", "https://ok/k1"),
+			memWithMeta("shared", "https://ok/shared"),
+		}},
+		semanticMemories: []*pkmemory.Memory{
+			memWithMeta("shared", "https://ok/shared"),
+			memWithMeta("s1", "https://ok/s1"),
+		},
+	}
+	r, err := NewCompositeRetriever(store, RetrievalConfig{Strategy: StrategyComposite, Limit: 10}, logr.Discard())
+	if err != nil {
+		t.Fatalf("ctor: %v", err)
+	}
+	got, err := r.retrieveEpisodic(context.Background(), defaultScope(), "q")
+	if err != nil {
+		t.Fatalf("retrieveEpisodic: %v", err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("expected 3 fused unique memories, got %d", len(got))
+	}
+	// "shared" appears rank-0 in both lists → highest fused score → first.
+	if got[0].ID != "shared" {
+		t.Fatalf("expected 'shared' ranked first, got %q", got[0].ID)
+	}
+	if store.semanticCalls.Load() != 1 {
+		t.Fatalf("expected semantic leg called once, got %d", store.semanticCalls.Load())
+	}
+}
+
+func TestRetrieveComposite_DegradesToKeywordWhenNoSemantic(t *testing.T) {
+	// fakeStore has no semantic capability → composite must run keyword only.
+	store := &fakeStore{retrieveMemories: []*pkmemory.Memory{memWithMeta("k1", "https://ok/k1")}}
+	r, err := NewCompositeRetriever(store, RetrievalConfig{Strategy: StrategyComposite}, logr.Discard())
+	if err != nil {
+		t.Fatalf("ctor: %v", err)
+	}
+	got, err := r.retrieveEpisodic(context.Background(), defaultScope(), "q")
+	if err != nil {
+		t.Fatalf("retrieveEpisodic: %v", err)
+	}
+	if len(got) != 1 || got[0].ID != "k1" {
+		t.Fatalf("expected keyword-only degrade to [k1], got %v", got)
+	}
+}
+
+func TestNewCompositeRetriever_InvalidDenyCELErrors(t *testing.T) {
+	_, err := NewCompositeRetriever(&fakeStore{}, RetrievalConfig{DenyCEL: "metadata.url.bad("}, logr.Discard())
+	if err == nil {
+		t.Fatal("expected error for invalid denyCEL, got nil")
+	}
+}
+
+func TestNewCompositeRetriever_ValidDenyCELSucceeds(t *testing.T) {
+	r, err := NewCompositeRetriever(&fakeStore{}, RetrievalConfig{DenyCEL: testDenyCEL}, logr.Discard())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !r.denyActive {
+		t.Fatal("expected denyActive true when denyCEL set")
+	}
+}
+
 func TestCompositeRetriever_NoUserIDReturnsNil(t *testing.T) {
-	r := NewCompositeRetriever(&fakeStore{}, RetrievalConfig{}, logr.Discard())
+	r := mustRetriever(t, &fakeStore{}, RetrievalConfig{}, logr.Discard())
 	got, err := r.RetrieveContext(context.Background(), map[string]string{"workspace_id": "ws"}, []types.Message{userMsg("hi")})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -118,7 +274,7 @@ func TestCompositeRetriever_ProfileOnlyWhenNoQuery(t *testing.T) {
 			mem("4", "memory:context", "planning Boston trip"),
 		},
 	}
-	r := NewCompositeRetriever(store, RetrievalConfig{}, logr.Discard())
+	r := mustRetriever(t, store, RetrievalConfig{}, logr.Discard())
 
 	// No user message → no episodic query → profile only.
 	got, err := r.RetrieveContext(context.Background(), defaultScope(), nil)
@@ -143,7 +299,7 @@ func TestCompositeRetriever_CompositeMergesProfileAndEpisodic(t *testing.T) {
 		mem("e2", "memory:context", "October Chicago trip"),
 	}
 	store := &fakeStore{listMemories: profile, retrieveMemories: episodic}
-	r := NewCompositeRetriever(store, RetrievalConfig{}, logr.Discard())
+	r := mustRetriever(t, store, RetrievalConfig{}, logr.Discard())
 
 	got, err := r.RetrieveContext(context.Background(), defaultScope(), []types.Message{userMsg("plan philly")})
 	if err != nil {
@@ -168,7 +324,7 @@ func TestCompositeRetriever_DropsEpisodicProfileCategoryDuplicates(t *testing.T)
 		mem("e2", "memory:history", "October trip"), // keep
 	}
 	store := &fakeStore{listMemories: profile, retrieveMemories: episodic}
-	r := NewCompositeRetriever(store, RetrievalConfig{}, logr.Discard())
+	r := mustRetriever(t, store, RetrievalConfig{}, logr.Discard())
 
 	got, err := r.RetrieveContext(context.Background(), defaultScope(), []types.Message{userMsg("hi")})
 	if err != nil {
@@ -186,7 +342,7 @@ func TestCompositeRetriever_DropsEpisodicProfileCategoryDuplicates(t *testing.T)
 func TestCompositeRetriever_EpisodicErrorFallsBackToProfile(t *testing.T) {
 	profile := []*pkmemory.Memory{mem("p1", "memory:identity", "Sarah")}
 	store := &fakeStore{listMemories: profile, retrieveErr: errors.New("upstream down")}
-	r := NewCompositeRetriever(store, RetrievalConfig{}, logr.Discard())
+	r := mustRetriever(t, store, RetrievalConfig{}, logr.Discard())
 
 	got, err := r.RetrieveContext(context.Background(), defaultScope(), []types.Message{userMsg("hi")})
 	if err != nil {
@@ -202,7 +358,7 @@ func TestCompositeRetriever_ListErrorReturnsEmptyProfile(t *testing.T) {
 		listErr:          errors.New("memory-api down"),
 		retrieveMemories: []*pkmemory.Memory{mem("e1", "memory:history", "thing")},
 	}
-	r := NewCompositeRetriever(store, RetrievalConfig{}, logr.Discard())
+	r := mustRetriever(t, store, RetrievalConfig{}, logr.Discard())
 
 	got, err := r.RetrieveContext(context.Background(), defaultScope(), []types.Message{userMsg("hi")})
 	if err != nil {
@@ -215,7 +371,7 @@ func TestCompositeRetriever_ListErrorReturnsEmptyProfile(t *testing.T) {
 
 func TestCompositeRetriever_ProfileCachedWithinTTL(t *testing.T) {
 	store := &fakeStore{listMemories: []*pkmemory.Memory{mem("p1", "memory:identity", "Sarah")}}
-	r := NewCompositeRetriever(store, RetrievalConfig{}, logr.Discard())
+	r := mustRetriever(t, store, RetrievalConfig{}, logr.Discard())
 
 	for i := 0; i < 5; i++ {
 		_, err := r.RetrieveContext(context.Background(), defaultScope(), nil)
@@ -230,7 +386,7 @@ func TestCompositeRetriever_ProfileCachedWithinTTL(t *testing.T) {
 
 func TestCompositeRetriever_ProfileCacheExpires(t *testing.T) {
 	store := &fakeStore{listMemories: []*pkmemory.Memory{mem("p1", "memory:identity", "Sarah")}}
-	r := NewCompositeRetriever(store, RetrievalConfig{}, logr.Discard())
+	r := mustRetriever(t, store, RetrievalConfig{}, logr.Discard())
 
 	if _, err := r.RetrieveContext(context.Background(), defaultScope(), nil); err != nil {
 		t.Fatalf("first call: %v", err)
@@ -254,7 +410,7 @@ func TestCompositeRetriever_ProfileCacheExpires(t *testing.T) {
 
 func TestCompositeRetriever_ProfileCacheKeyedPerUser(t *testing.T) {
 	store := &fakeStore{listMemories: []*pkmemory.Memory{mem("p1", "memory:identity", "Sarah")}}
-	r := NewCompositeRetriever(store, RetrievalConfig{}, logr.Discard())
+	r := mustRetriever(t, store, RetrievalConfig{}, logr.Discard())
 
 	if _, err := r.RetrieveContext(context.Background(), map[string]string{"workspace_id": "ws", "user_id": "alice"}, nil); err != nil {
 		t.Fatal(err)
@@ -279,7 +435,7 @@ func TestCompositeRetriever_NonProfileMemoriesFromListAreIgnored(t *testing.T) {
 			mem("noCat", "", "untagged"),
 		},
 	}
-	r := NewCompositeRetriever(store, RetrievalConfig{}, logr.Discard())
+	r := mustRetriever(t, store, RetrievalConfig{}, logr.Discard())
 
 	got, err := r.RetrieveContext(context.Background(), defaultScope(), nil)
 	if err != nil {
@@ -298,10 +454,10 @@ func TestCompositeRetriever_SemanticStrategyCallsSemanticRetriever(t *testing.T)
 	}
 	cfg := RetrievalConfig{
 		Strategy:    StrategySemantic,
-		DenyCEL:     `metadata.url.contains("restricted")`,
+		DenyCEL:     testDenyCEL,
 		WorkspaceID: "ws-configured",
 	}
-	r := NewCompositeRetriever(store, cfg, logr.Discard())
+	r := mustRetriever(t, store, cfg, logr.Discard())
 
 	_, err := r.RetrieveContext(context.Background(), defaultScope(), []types.Message{userMsg("plan a trip")})
 	if err != nil {
@@ -333,7 +489,7 @@ func TestCompositeRetriever_KeywordStrategyUsesFTS(t *testing.T) {
 		},
 	}
 	// strategy="" (keyword default) — must NOT call semantic even though store supports it.
-	r := NewCompositeRetriever(store, RetrievalConfig{Strategy: "keyword"}, logr.Discard())
+	r := mustRetriever(t, store, RetrievalConfig{Strategy: StrategyKeyword}, logr.Discard())
 
 	_, err := r.RetrieveContext(context.Background(), defaultScope(), []types.Message{userMsg("chicago trip")})
 	if err != nil {
@@ -356,10 +512,10 @@ func TestCompositeRetriever_SemanticStrategyFallsBackWhenStoreUnsupported(t *tes
 	}
 	cfg := RetrievalConfig{
 		Strategy:    StrategySemantic,
-		DenyCEL:     "some.cel",
+		DenyCEL:     testDenyCEL,
 		WorkspaceID: "ws1",
 	}
-	r := NewCompositeRetriever(store, cfg, logr.Discard())
+	r := mustRetriever(t, store, cfg, logr.Discard())
 
 	// Confirm the type-assert failed (semantic is nil).
 	if r.semantic != nil {
@@ -385,7 +541,7 @@ func TestCompositeRetriever_LimitAppliedToSemanticRetrieval(t *testing.T) {
 		WorkspaceID: "ws1",
 		Limit:       5,
 	}
-	r := NewCompositeRetriever(store, cfg, logr.Discard())
+	r := mustRetriever(t, store, cfg, logr.Discard())
 
 	if r.episodicLimit != 5 {
 		t.Fatalf("episodicLimit: got %d, want 5", r.episodicLimit)
@@ -410,7 +566,7 @@ func TestCompositeRetriever_ZeroLimitFallsBackToDefault(t *testing.T) {
 		Strategy:    StrategySemantic,
 		WorkspaceID: "ws1",
 	}
-	r := NewCompositeRetriever(store, cfg, logr.Discard())
+	r := mustRetriever(t, store, cfg, logr.Discard())
 
 	if r.episodicLimit != defaultEpisodicLimit {
 		t.Fatalf("episodicLimit: got %d, want %d (defaultEpisodicLimit)", r.episodicLimit, defaultEpisodicLimit)
@@ -436,7 +592,7 @@ func TestBuildConversationOptions_WiresMemoryRetriever(t *testing.T) {
 		WithLogger(logr.Discard()),
 		WithMemoryStore(store),
 		WithWorkspaceUID("ws-1"),
-		WithMemoryRetrieval(StrategySemantic, `metadata.url.contains("restricted")`, 5),
+		WithMemoryRetrieval(StrategySemantic, testDenyCEL, 5),
 	)
 
 	opts, err := srv.buildConversationOptions(context.Background(), "sess-1")

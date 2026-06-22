@@ -20,12 +20,14 @@ package runtime
 
 import (
 	"context"
+	"sort"
 	"strings"
 	"sync"
 	"time"
 
 	pkmemory "github.com/AltairaLabs/PromptKit/runtime/memory"
 	"github.com/AltairaLabs/PromptKit/runtime/types"
+	"github.com/altairalabs/omnia/internal/memory/access"
 	"github.com/go-logr/logr"
 )
 
@@ -41,9 +43,18 @@ var profileCategories = map[string]bool{
 	"memory:health":      true,
 }
 
-// StrategySemantic is the spec.memory.retrieval.strategy value that enables
-// semantic hybrid retrieval with the access deny-filter.
-const StrategySemantic = "semantic"
+// Strategy values for spec.memory.retrieval.strategy. StrategySemantic enables
+// workspace-scoped semantic hybrid retrieval with the access deny-filter;
+// StrategyComposite fuses keyword + semantic via RRF; StrategyKeyword (and any
+// other/empty value) uses keyword FTS.
+const (
+	StrategyKeyword   = "keyword"
+	StrategySemantic  = "semantic"
+	StrategyComposite = "composite"
+)
+
+// rrfK is the Reciprocal Rank Fusion constant (Cormack 2009; k=60).
+const rrfK = 60.0
 
 const (
 	// defaultProfileLimit caps the always-included subset.
@@ -102,6 +113,9 @@ type CompositeRetriever struct {
 	denyCEL     string            // spec.memory.retrieval.accessFilter.denyCEL
 	workspaceID string            // for the semantic call's scope
 
+	deny       *access.DenyFilter // compiled from cfg.DenyCEL; allow-all when empty
+	denyActive bool               // cfg.DenyCEL != "" (drives keyword over-fetch)
+
 	mu    sync.Mutex
 	cache map[string]profileCacheEntry
 }
@@ -115,7 +129,11 @@ type profileCacheEntry struct {
 // store implements SemanticRetriever AND cfg.Strategy=="semantic", per-turn
 // retrieval uses semantic hybrid search with the deny-filter; otherwise it uses
 // keyword FTS.
-func NewCompositeRetriever(store pkmemory.Store, cfg RetrievalConfig, log logr.Logger) *CompositeRetriever {
+func NewCompositeRetriever(store pkmemory.Store, cfg RetrievalConfig, log logr.Logger) (*CompositeRetriever, error) {
+	deny, err := access.NewDenyFilter(cfg.DenyCEL)
+	if err != nil {
+		return nil, err
+	}
 	r := &CompositeRetriever{
 		store:         store,
 		log:           log.WithName("memory-retriever"),
@@ -125,6 +143,8 @@ func NewCompositeRetriever(store pkmemory.Store, cfg RetrievalConfig, log logr.L
 		strategy:      cfg.Strategy,
 		denyCEL:       cfg.DenyCEL,
 		workspaceID:   cfg.WorkspaceID,
+		deny:          deny,
+		denyActive:    cfg.DenyCEL != "",
 	}
 	if sr, ok := store.(SemanticRetriever); ok {
 		r.semantic = sr
@@ -132,7 +152,7 @@ func NewCompositeRetriever(store pkmemory.Store, cfg RetrievalConfig, log logr.L
 	if cfg.Limit > 0 {
 		r.episodicLimit = cfg.Limit
 	}
-	return r
+	return r, nil
 }
 
 // RetrieveContext implements pkmemory.Retriever. Returns nil when the
@@ -181,14 +201,115 @@ func (r *CompositeRetriever) RetrieveContext(
 func (r *CompositeRetriever) retrieveEpisodic(
 	ctx context.Context, scope map[string]string, query string,
 ) ([]*pkmemory.Memory, error) {
-	if r.strategy == StrategySemantic && r.semantic != nil {
-		wsID := r.workspaceID
-		if wsID == "" {
-			wsID = scope["workspace_id"]
-		}
-		return r.semantic.RetrieveSemantic(ctx, wsID, query, r.denyCEL, r.episodicLimit)
+	switch {
+	case r.strategy == StrategyComposite && r.semantic != nil:
+		return r.retrieveComposite(ctx, scope, query)
+	case r.strategy == StrategySemantic && r.semantic != nil:
+		return r.semantic.RetrieveSemantic(ctx, r.semanticScope(scope), query, r.denyCEL, r.episodicLimit)
 	}
-	return r.store.Retrieve(ctx, scope, toFTSOrQuery(query), pkmemory.RetrieveOptions{Limit: r.episodicLimit})
+	if r.strategy == StrategyComposite {
+		r.log.V(1).Info("composite degraded to keyword",
+			"reason", "store has no semantic capability")
+	}
+	return r.retrieveKeyword(ctx, scope, query)
+}
+
+// semanticScope returns the workspace ID for the semantic call: the configured
+// override when set, else the scope's workspace_id.
+func (r *CompositeRetriever) semanticScope(scope map[string]string) string {
+	if r.workspaceID != "" {
+		return r.workspaceID
+	}
+	return scope["workspace_id"]
+}
+
+// retrieveComposite runs the keyword and semantic legs and RRF-fuses them. Both
+// legs are deny-filtered (keyword via applyDeny, semantic server-side), so the
+// fused output needs no further filtering.
+func (r *CompositeRetriever) retrieveComposite(
+	ctx context.Context, scope map[string]string, query string,
+) ([]*pkmemory.Memory, error) {
+	keyword, kerr := r.retrieveKeyword(ctx, scope, query)
+	if kerr != nil {
+		r.log.V(1).Info("composite keyword leg failed", "err", kerr.Error())
+	}
+	semantic, serr := r.semantic.RetrieveSemantic(ctx, r.semanticScope(scope), query, r.denyCEL, r.episodicLimit)
+	if serr != nil {
+		r.log.V(1).Info("composite semantic leg failed", "err", serr.Error())
+	}
+	if kerr != nil && serr != nil {
+		return nil, kerr
+	}
+	return rrfFuse([][]*pkmemory.Memory{keyword, semantic}, rrfK, r.episodicLimit), nil
+}
+
+// rrfFuse merges ranked lists via Reciprocal Rank Fusion (score += 1/(k+rank+1)
+// per appearance), dedups by Memory.ID, and returns the top `limit` by score.
+func rrfFuse(lists [][]*pkmemory.Memory, k float64, limit int) []*pkmemory.Memory {
+	scores := make(map[string]float64)
+	byID := make(map[string]*pkmemory.Memory)
+	order := make([]string, 0)
+	for _, list := range lists {
+		for rank, m := range list {
+			if m == nil {
+				continue
+			}
+			if _, seen := byID[m.ID]; !seen {
+				byID[m.ID] = m
+				order = append(order, m.ID)
+			}
+			scores[m.ID] += 1.0 / (k + float64(rank) + 1.0)
+		}
+	}
+	sort.SliceStable(order, func(i, j int) bool {
+		return scores[order[i]] > scores[order[j]]
+	})
+	out := make([]*pkmemory.Memory, 0, len(order))
+	for _, id := range order {
+		out = append(out, byID[id])
+		if len(out) >= limit {
+			break
+		}
+	}
+	return out
+}
+
+// retrieveKeyword runs keyword FTS and applies the access deny-filter. When a
+// filter is active it over-fetches so post-filtering still yields up to the
+// episodic limit, mirroring the semantic path's over-fetch-past-restricted.
+func (r *CompositeRetriever) retrieveKeyword(
+	ctx context.Context, scope map[string]string, query string,
+) ([]*pkmemory.Memory, error) {
+	fetch := r.episodicLimit
+	if r.denyActive {
+		fetch = r.episodicLimit * 3
+		if fetch > listFetchLimit {
+			fetch = listFetchLimit
+		}
+	}
+	mems, err := r.store.Retrieve(ctx, scope, toFTSOrQuery(query), pkmemory.RetrieveOptions{Limit: fetch})
+	if err != nil {
+		return nil, err
+	}
+	allowed := r.applyDeny(mems)
+	if len(allowed) > r.episodicLimit {
+		allowed = allowed[:r.episodicLimit]
+	}
+	return allowed, nil
+}
+
+// applyDeny drops items the access filter denies. Allow-all when no denyCEL.
+func (r *CompositeRetriever) applyDeny(mems []*pkmemory.Memory) []*pkmemory.Memory {
+	if !r.denyActive {
+		return mems
+	}
+	out := make([]*pkmemory.Memory, 0, len(mems))
+	for _, m := range mems {
+		if m != nil && r.deny.Allowed(m.Metadata) {
+			out = append(out, m)
+		}
+	}
+	return out
 }
 
 // fetchProfile returns the always-include subset, populating the cache

@@ -2582,7 +2582,7 @@ export interface AgentRuntimeSpec {
       /** Limit is the maximum number of memories injected per turn. */
       limit?: number;
       /** Strategy selects the retrieval mode. */
-      strategy?: "keyword" | "semantic" | "graph" | "composite";
+      strategy?: "keyword" | "semantic" | "composite";
     };
     /** Tools configures the memory tools (memory__remember / memory__recall)
      * exposed to the LLM. Independent of retrieval: an agent can have ambient

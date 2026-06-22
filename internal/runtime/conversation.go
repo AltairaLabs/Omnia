@@ -210,12 +210,15 @@ func (s *Server) buildConversationOptions(ctx context.Context, sessionID string)
 		memOpts := []sdk.MemoryOption{}
 		if attachRetriever {
 			// Strategy, denyCEL, and limit are threaded from spec.memory.retrieval.
-			retriever := NewCompositeRetriever(s.memoryStore, RetrievalConfig{
+			retriever, rerr := NewCompositeRetriever(s.memoryStore, RetrievalConfig{
 				Strategy:    s.memoryStrategy,
 				DenyCEL:     s.memoryDenyCEL,
 				WorkspaceID: s.workspaceUID,
 				Limit:       s.memoryLimit,
 			}, log)
+			if rerr != nil {
+				return nil, fmt.Errorf("memory retriever: %w", rerr)
+			}
 			memOpts = append(memOpts, sdk.WithMemoryRetriever(retriever))
 		}
 		opts = append(opts, sdk.WithMemory(executorStore, scope, memOpts...))

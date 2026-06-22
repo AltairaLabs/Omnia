@@ -1128,7 +1128,7 @@ type MemoryRetrievalConfig struct {
 	Enabled *bool `json:"enabled,omitempty"`
 
 	// Strategy selects the retrieval mode.
-	// +kubebuilder:validation:Enum=keyword;semantic;graph;composite
+	// +kubebuilder:validation:Enum=keyword;semantic;composite
 	// +optional
 	Strategy string `json:"strategy,omitempty"`
 

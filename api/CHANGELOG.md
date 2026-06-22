@@ -10,6 +10,17 @@ or `api/proto/`, add an entry below with the date, affected API, and reason.
 
 ## Unreleased
 
+### Changed (CRD: AgentRuntime memory retrieval strategy + denyCEL enforcement, #1513/#1514/#1515)
+
+- **`AgentRuntime.spec.memory.retrieval.strategy`** enum: removed unimplemented
+  **`graph`** (#1514); added **`composite`** (#1515) — RRF fusion of keyword +
+  semantic legs. Enum is now `keyword | semantic | composite`. `graph` was a
+  silent no-op (behaved as `keyword`), so nothing functional is lost.
+- **`accessFilter.denyCEL`** is now enforced on the **keyword** path, not only
+  semantic (#1513). This also closes a governance gap where `strategy: semantic`
+  silently fell back to keyword (when the store had no semantic capability) and
+  dropped the deny-filter. No schema change — behavioral hardening.
+
 ### Added (CRD: AgentRuntime independent memory toggles, #1517)
 
 - **`AgentRuntime.spec.memory.retrieval.enabled`** (`*bool`) — gates ambient RAG

@@ -80,15 +80,19 @@ The retriever honours three CRD fields from `spec.memory.retrieval`:
 
 | Field | Effect |
 |-------|--------|
-| `strategy` | `"semantic"` → memory-api hybrid search path; otherwise keyword FTS |
+| `strategy` | `"semantic"` → memory-api hybrid search path; `"composite"` → keyword + semantic fused via RRF; otherwise (`"keyword"`/empty) keyword FTS |
 | `limit` | Max episodic memories injected per turn (default 10 when absent or 0) |
-| `accessFilter.denyCEL` | CEL expression over a memory item's `metadata`; items that match are dropped (semantic path only) |
+| `accessFilter.denyCEL` | CEL expression over a memory item's `metadata`; items that match are dropped. Enforced on **every** path (keyword, semantic, composite) |
 
 The retriever runs two passes per turn:
 1. **Profile pull** — always-on; fetches `memory:identity`, `memory:preferences`,
    and `memory:health` categories regardless of query content (profile is cached
    per (workspace, user) for 30 s to avoid per-turn list calls).
-2. **Episodic search** — per-turn; uses semantic hybrid or keyword FTS based on
-   `strategy`; limited by `limit`; deny-filtered when `accessFilter.denyCEL`
-   is set and `strategy` is `"semantic"`. Profile-category results returned by
-   the search are deduplicated against the profile pull.
+2. **Episodic search** — per-turn; uses semantic hybrid, RRF-fused composite, or
+   keyword FTS based on `strategy`; limited by `limit`. The `accessFilter.denyCEL`
+   deny-filter is applied on all paths: the semantic leg filters server-side in
+   memory-api, while the keyword leg post-filters in the runtime (over-fetching
+   past restricted items to still return up to `limit`). When `strategy:
+   composite` but the store has no semantic capability, retrieval degrades to
+   keyword-only. Profile-category results returned by the search are deduplicated
+   against the profile pull.
