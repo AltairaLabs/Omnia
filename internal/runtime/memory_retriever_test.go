@@ -18,6 +18,9 @@ import (
 	"github.com/go-logr/logr"
 )
 
+// testDenyCEL is a sample deny expression reused across retrieval tests.
+const testDenyCEL = `metadata.url.contains("restricted")`
+
 // fakeStore is a minimal pkmemory.Store implementation for retriever tests.
 type fakeStore struct {
 	listMemories     []*pkmemory.Memory
@@ -124,8 +127,8 @@ func TestRetrieveKeyword_DropsDeniedItems(t *testing.T) {
 		memWithMeta("c", "https://ok/other"),
 	}}
 	r, err := NewCompositeRetriever(store, RetrievalConfig{
-		Strategy: "keyword",
-		DenyCEL:  `metadata.url.contains("restricted")`,
+		Strategy: StrategyKeyword,
+		DenyCEL:  testDenyCEL,
 	}, logr.Discard())
 	if err != nil {
 		t.Fatalf("ctor: %v", err)
@@ -147,8 +150,8 @@ func TestRetrieveKeyword_DropsDeniedItems(t *testing.T) {
 func TestRetrieveKeyword_OverFetchesWhenDenyActive(t *testing.T) {
 	store := &fakeStore{retrieveMemories: []*pkmemory.Memory{memWithMeta("a", "https://ok/doc")}}
 	r, err := NewCompositeRetriever(store, RetrievalConfig{
-		Strategy: "keyword",
-		DenyCEL:  `metadata.url.contains("restricted")`,
+		Strategy: StrategyKeyword,
+		DenyCEL:  testDenyCEL,
 		Limit:    5,
 	}, logr.Discard())
 	if err != nil {
@@ -170,8 +173,8 @@ func TestSemanticFallback_StillEnforcesDeny(t *testing.T) {
 		memWithMeta("b", "https://restricted/doc"),
 	}}
 	r, err := NewCompositeRetriever(store, RetrievalConfig{
-		Strategy: "semantic", // but fakeStore is not a SemanticRetriever
-		DenyCEL:  `metadata.url.contains("restricted")`,
+		Strategy: StrategySemantic, // but fakeStore is not a SemanticRetriever
+		DenyCEL:  testDenyCEL,
 	}, logr.Discard())
 	if err != nil {
 		t.Fatalf("ctor: %v", err)
@@ -198,7 +201,7 @@ func TestRetrieveComposite_FusesAndDedups(t *testing.T) {
 			memWithMeta("s1", "https://ok/s1"),
 		},
 	}
-	r, err := NewCompositeRetriever(store, RetrievalConfig{Strategy: "composite", Limit: 10}, logr.Discard())
+	r, err := NewCompositeRetriever(store, RetrievalConfig{Strategy: StrategyComposite, Limit: 10}, logr.Discard())
 	if err != nil {
 		t.Fatalf("ctor: %v", err)
 	}
@@ -221,7 +224,7 @@ func TestRetrieveComposite_FusesAndDedups(t *testing.T) {
 func TestRetrieveComposite_DegradesToKeywordWhenNoSemantic(t *testing.T) {
 	// fakeStore has no semantic capability → composite must run keyword only.
 	store := &fakeStore{retrieveMemories: []*pkmemory.Memory{memWithMeta("k1", "https://ok/k1")}}
-	r, err := NewCompositeRetriever(store, RetrievalConfig{Strategy: "composite"}, logr.Discard())
+	r, err := NewCompositeRetriever(store, RetrievalConfig{Strategy: StrategyComposite}, logr.Discard())
 	if err != nil {
 		t.Fatalf("ctor: %v", err)
 	}
@@ -242,7 +245,7 @@ func TestNewCompositeRetriever_InvalidDenyCELErrors(t *testing.T) {
 }
 
 func TestNewCompositeRetriever_ValidDenyCELSucceeds(t *testing.T) {
-	r, err := NewCompositeRetriever(&fakeStore{}, RetrievalConfig{DenyCEL: `metadata.url.contains("restricted")`}, logr.Discard())
+	r, err := NewCompositeRetriever(&fakeStore{}, RetrievalConfig{DenyCEL: testDenyCEL}, logr.Discard())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -451,7 +454,7 @@ func TestCompositeRetriever_SemanticStrategyCallsSemanticRetriever(t *testing.T)
 	}
 	cfg := RetrievalConfig{
 		Strategy:    StrategySemantic,
-		DenyCEL:     `metadata.url.contains("restricted")`,
+		DenyCEL:     testDenyCEL,
 		WorkspaceID: "ws-configured",
 	}
 	r := mustRetriever(t, store, cfg, logr.Discard())
@@ -486,7 +489,7 @@ func TestCompositeRetriever_KeywordStrategyUsesFTS(t *testing.T) {
 		},
 	}
 	// strategy="" (keyword default) — must NOT call semantic even though store supports it.
-	r := mustRetriever(t, store, RetrievalConfig{Strategy: "keyword"}, logr.Discard())
+	r := mustRetriever(t, store, RetrievalConfig{Strategy: StrategyKeyword}, logr.Discard())
 
 	_, err := r.RetrieveContext(context.Background(), defaultScope(), []types.Message{userMsg("chicago trip")})
 	if err != nil {
@@ -509,7 +512,7 @@ func TestCompositeRetriever_SemanticStrategyFallsBackWhenStoreUnsupported(t *tes
 	}
 	cfg := RetrievalConfig{
 		Strategy:    StrategySemantic,
-		DenyCEL:     `metadata.url.contains("restricted")`,
+		DenyCEL:     testDenyCEL,
 		WorkspaceID: "ws1",
 	}
 	r := mustRetriever(t, store, cfg, logr.Discard())
@@ -589,7 +592,7 @@ func TestBuildConversationOptions_WiresMemoryRetriever(t *testing.T) {
 		WithLogger(logr.Discard()),
 		WithMemoryStore(store),
 		WithWorkspaceUID("ws-1"),
-		WithMemoryRetrieval(StrategySemantic, `metadata.url.contains("restricted")`, 5),
+		WithMemoryRetrieval(StrategySemantic, testDenyCEL, 5),
 	)
 
 	opts, err := srv.buildConversationOptions(context.Background(), "sess-1")
