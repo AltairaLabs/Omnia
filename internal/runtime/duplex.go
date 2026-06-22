@@ -208,6 +208,11 @@ func (s *Server) pumpDuplexInput(ctx context.Context, stream runtimev1.RuntimeSe
 // session teardown — the facade closes the session via the inbound is_last frame
 // / context cancellation path instead.
 func (s *Server) forwardDuplexChunk(stream runtimev1.RuntimeService_ConverseServer, chunk providers.StreamChunk) error {
+	if chunk.Interrupted {
+		return stream.Send(&runtimev1.ServerMessage{
+			Message: &runtimev1.ServerMessage_Interruption{Interruption: &runtimev1.Interruption{}},
+		})
+	}
 	if chunk.MediaData != nil && len(chunk.MediaData.Data) > 0 {
 		return stream.Send(&runtimev1.ServerMessage{
 			Message: &runtimev1.ServerMessage_MediaChunk{

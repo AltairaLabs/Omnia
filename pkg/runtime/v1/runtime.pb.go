@@ -271,6 +271,7 @@ type ServerMessage struct {
 	//	*ServerMessage_Done
 	//	*ServerMessage_Error
 	//	*ServerMessage_MediaChunk
+	//	*ServerMessage_Interruption
 	Message       isServerMessage_Message `protobuf_oneof:"message"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -358,6 +359,15 @@ func (x *ServerMessage) GetMediaChunk() *MediaChunk {
 	return nil
 }
 
+func (x *ServerMessage) GetInterruption() *Interruption {
+	if x != nil {
+		if x, ok := x.Message.(*ServerMessage_Interruption); ok {
+			return x.Interruption
+		}
+	}
+	return nil
+}
+
 type isServerMessage_Message interface {
 	isServerMessage_Message()
 }
@@ -393,6 +403,11 @@ type ServerMessage_MediaChunk struct {
 	MediaChunk *MediaChunk `protobuf:"bytes,6,opt,name=media_chunk,json=mediaChunk,proto3,oneof"`
 }
 
+type ServerMessage_Interruption struct {
+	// interruption signals a barge-in; the client clears buffered audio.
+	Interruption *Interruption `protobuf:"bytes,7,opt,name=interruption,proto3,oneof"`
+}
+
 func (*ServerMessage_Chunk) isServerMessage_Message() {}
 
 func (*ServerMessage_ToolCall) isServerMessage_Message() {}
@@ -402,6 +417,8 @@ func (*ServerMessage_Done) isServerMessage_Message() {}
 func (*ServerMessage_Error) isServerMessage_Message() {}
 
 func (*ServerMessage_MediaChunk) isServerMessage_Message() {}
+
+func (*ServerMessage_Interruption) isServerMessage_Message() {}
 
 // Chunk contains a partial text response for streaming output.
 type Chunk struct {
@@ -920,6 +937,45 @@ func (x *Error) GetMessage() string {
 	return ""
 }
 
+// Interruption signals that the in-flight response was interrupted (e.g. the
+// user started speaking over the agent during a duplex session). The client
+// must clear any buffered audio playback immediately.
+type Interruption struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Interruption) Reset() {
+	*x = Interruption{}
+	mi := &file_api_proto_runtime_v1_runtime_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Interruption) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Interruption) ProtoMessage() {}
+
+func (x *Interruption) ProtoReflect() protoreflect.Message {
+	mi := &file_api_proto_runtime_v1_runtime_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Interruption.ProtoReflect.Descriptor instead.
+func (*Interruption) Descriptor() ([]byte, []int) {
+	return file_api_proto_runtime_v1_runtime_proto_rawDescGZIP(), []int{11}
+}
+
 // MediaChunk contains a streaming media chunk for progressive media delivery.
 // All chunks sharing the same media_id belong to the same media stream.
 type MediaChunk struct {
@@ -940,7 +996,7 @@ type MediaChunk struct {
 
 func (x *MediaChunk) Reset() {
 	*x = MediaChunk{}
-	mi := &file_api_proto_runtime_v1_runtime_proto_msgTypes[11]
+	mi := &file_api_proto_runtime_v1_runtime_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -952,7 +1008,7 @@ func (x *MediaChunk) String() string {
 func (*MediaChunk) ProtoMessage() {}
 
 func (x *MediaChunk) ProtoReflect() protoreflect.Message {
-	mi := &file_api_proto_runtime_v1_runtime_proto_msgTypes[11]
+	mi := &file_api_proto_runtime_v1_runtime_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -965,7 +1021,7 @@ func (x *MediaChunk) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MediaChunk.ProtoReflect.Descriptor instead.
 func (*MediaChunk) Descriptor() ([]byte, []int) {
-	return file_api_proto_runtime_v1_runtime_proto_rawDescGZIP(), []int{11}
+	return file_api_proto_runtime_v1_runtime_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *MediaChunk) GetMediaId() string {
@@ -1022,7 +1078,7 @@ type InvocationRequest struct {
 
 func (x *InvocationRequest) Reset() {
 	*x = InvocationRequest{}
-	mi := &file_api_proto_runtime_v1_runtime_proto_msgTypes[12]
+	mi := &file_api_proto_runtime_v1_runtime_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1034,7 +1090,7 @@ func (x *InvocationRequest) String() string {
 func (*InvocationRequest) ProtoMessage() {}
 
 func (x *InvocationRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_api_proto_runtime_v1_runtime_proto_msgTypes[12]
+	mi := &file_api_proto_runtime_v1_runtime_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1047,7 +1103,7 @@ func (x *InvocationRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InvocationRequest.ProtoReflect.Descriptor instead.
 func (*InvocationRequest) Descriptor() ([]byte, []int) {
-	return file_api_proto_runtime_v1_runtime_proto_rawDescGZIP(), []int{12}
+	return file_api_proto_runtime_v1_runtime_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *InvocationRequest) GetInputJson() string {
@@ -1092,7 +1148,7 @@ type InvocationResponse struct {
 
 func (x *InvocationResponse) Reset() {
 	*x = InvocationResponse{}
-	mi := &file_api_proto_runtime_v1_runtime_proto_msgTypes[13]
+	mi := &file_api_proto_runtime_v1_runtime_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1104,7 +1160,7 @@ func (x *InvocationResponse) String() string {
 func (*InvocationResponse) ProtoMessage() {}
 
 func (x *InvocationResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_api_proto_runtime_v1_runtime_proto_msgTypes[13]
+	mi := &file_api_proto_runtime_v1_runtime_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1117,7 +1173,7 @@ func (x *InvocationResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InvocationResponse.ProtoReflect.Descriptor instead.
 func (*InvocationResponse) Descriptor() ([]byte, []int) {
-	return file_api_proto_runtime_v1_runtime_proto_rawDescGZIP(), []int{13}
+	return file_api_proto_runtime_v1_runtime_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *InvocationResponse) GetOutputJson() string {
@@ -1157,7 +1213,7 @@ type HealthRequest struct {
 
 func (x *HealthRequest) Reset() {
 	*x = HealthRequest{}
-	mi := &file_api_proto_runtime_v1_runtime_proto_msgTypes[14]
+	mi := &file_api_proto_runtime_v1_runtime_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1169,7 +1225,7 @@ func (x *HealthRequest) String() string {
 func (*HealthRequest) ProtoMessage() {}
 
 func (x *HealthRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_api_proto_runtime_v1_runtime_proto_msgTypes[14]
+	mi := &file_api_proto_runtime_v1_runtime_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1182,7 +1238,7 @@ func (x *HealthRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HealthRequest.ProtoReflect.Descriptor instead.
 func (*HealthRequest) Descriptor() ([]byte, []int) {
-	return file_api_proto_runtime_v1_runtime_proto_rawDescGZIP(), []int{14}
+	return file_api_proto_runtime_v1_runtime_proto_rawDescGZIP(), []int{15}
 }
 
 // HealthResponse contains the health status of the runtime.
@@ -1198,7 +1254,7 @@ type HealthResponse struct {
 
 func (x *HealthResponse) Reset() {
 	*x = HealthResponse{}
-	mi := &file_api_proto_runtime_v1_runtime_proto_msgTypes[15]
+	mi := &file_api_proto_runtime_v1_runtime_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1210,7 +1266,7 @@ func (x *HealthResponse) String() string {
 func (*HealthResponse) ProtoMessage() {}
 
 func (x *HealthResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_api_proto_runtime_v1_runtime_proto_msgTypes[15]
+	mi := &file_api_proto_runtime_v1_runtime_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1223,7 +1279,7 @@ func (x *HealthResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HealthResponse.ProtoReflect.Descriptor instead.
 func (*HealthResponse) Descriptor() ([]byte, []int) {
-	return file_api_proto_runtime_v1_runtime_proto_rawDescGZIP(), []int{15}
+	return file_api_proto_runtime_v1_runtime_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *HealthResponse) GetHealthy() bool {
@@ -1257,7 +1313,7 @@ type DuplexStart struct {
 
 func (x *DuplexStart) Reset() {
 	*x = DuplexStart{}
-	mi := &file_api_proto_runtime_v1_runtime_proto_msgTypes[16]
+	mi := &file_api_proto_runtime_v1_runtime_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1269,7 +1325,7 @@ func (x *DuplexStart) String() string {
 func (*DuplexStart) ProtoMessage() {}
 
 func (x *DuplexStart) ProtoReflect() protoreflect.Message {
-	mi := &file_api_proto_runtime_v1_runtime_proto_msgTypes[16]
+	mi := &file_api_proto_runtime_v1_runtime_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1282,7 +1338,7 @@ func (x *DuplexStart) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DuplexStart.ProtoReflect.Descriptor instead.
 func (*DuplexStart) Descriptor() ([]byte, []int) {
-	return file_api_proto_runtime_v1_runtime_proto_rawDescGZIP(), []int{16}
+	return file_api_proto_runtime_v1_runtime_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *DuplexStart) GetCodec() string {
@@ -1328,7 +1384,7 @@ type AudioInputChunk struct {
 
 func (x *AudioInputChunk) Reset() {
 	*x = AudioInputChunk{}
-	mi := &file_api_proto_runtime_v1_runtime_proto_msgTypes[17]
+	mi := &file_api_proto_runtime_v1_runtime_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1340,7 +1396,7 @@ func (x *AudioInputChunk) String() string {
 func (*AudioInputChunk) ProtoMessage() {}
 
 func (x *AudioInputChunk) ProtoReflect() protoreflect.Message {
-	mi := &file_api_proto_runtime_v1_runtime_proto_msgTypes[17]
+	mi := &file_api_proto_runtime_v1_runtime_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1353,7 +1409,7 @@ func (x *AudioInputChunk) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AudioInputChunk.ProtoReflect.Descriptor instead.
 func (*AudioInputChunk) Descriptor() ([]byte, []int) {
-	return file_api_proto_runtime_v1_runtime_proto_rawDescGZIP(), []int{17}
+	return file_api_proto_runtime_v1_runtime_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *AudioInputChunk) GetData() []byte {
@@ -1402,14 +1458,15 @@ const file_api_proto_runtime_v1_runtime_proto_rawDesc = "" +
 	"resultJson\x12\x1f\n" +
 	"\vis_rejected\x18\x03 \x01(\bR\n" +
 	"isRejected\x12)\n" +
-	"\x10rejection_reason\x18\x04 \x01(\tR\x0frejectionReason\"\xa6\x02\n" +
+	"\x10rejection_reason\x18\x04 \x01(\tR\x0frejectionReason\"\xec\x02\n" +
 	"\rServerMessage\x12/\n" +
 	"\x05chunk\x18\x01 \x01(\v2\x17.omnia.runtime.v1.ChunkH\x00R\x05chunk\x129\n" +
 	"\ttool_call\x18\x02 \x01(\v2\x1a.omnia.runtime.v1.ToolCallH\x00R\btoolCall\x12,\n" +
 	"\x04done\x18\x04 \x01(\v2\x16.omnia.runtime.v1.DoneH\x00R\x04done\x12/\n" +
 	"\x05error\x18\x05 \x01(\v2\x17.omnia.runtime.v1.ErrorH\x00R\x05error\x12?\n" +
 	"\vmedia_chunk\x18\x06 \x01(\v2\x1c.omnia.runtime.v1.MediaChunkH\x00R\n" +
-	"mediaChunkB\t\n" +
+	"mediaChunk\x12D\n" +
+	"\finterruption\x18\a \x01(\v2\x1e.omnia.runtime.v1.InterruptionH\x00R\finterruptionB\t\n" +
 	"\amessage\"!\n" +
 	"\x05Chunk\x12\x18\n" +
 	"\acontent\x18\x01 \x01(\tR\acontent\"\xdd\x01\n" +
@@ -1446,7 +1503,8 @@ const file_api_proto_runtime_v1_runtime_proto_rawDesc = "" +
 	"\bcost_usd\x18\x03 \x01(\x02R\acostUsd\"5\n" +
 	"\x05Error\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\tR\x04code\x12\x18\n" +
-	"\amessage\x18\x02 \x01(\tR\amessage\"\x8d\x01\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\"\x0e\n" +
+	"\fInterruption\"\x8d\x01\n" +
 	"\n" +
 	"MediaChunk\x12\x19\n" +
 	"\bmedia_id\x18\x01 \x01(\tR\amediaId\x12\x1a\n" +
@@ -1504,7 +1562,7 @@ func file_api_proto_runtime_v1_runtime_proto_rawDescGZIP() []byte {
 }
 
 var file_api_proto_runtime_v1_runtime_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_api_proto_runtime_v1_runtime_proto_msgTypes = make([]protoimpl.MessageInfo, 20)
+var file_api_proto_runtime_v1_runtime_proto_msgTypes = make([]protoimpl.MessageInfo, 21)
 var file_api_proto_runtime_v1_runtime_proto_goTypes = []any{
 	(ToolExecution)(0),         // 0: omnia.runtime.v1.ToolExecution
 	(*ClientMessage)(nil),      // 1: omnia.runtime.v1.ClientMessage
@@ -1518,44 +1576,46 @@ var file_api_proto_runtime_v1_runtime_proto_goTypes = []any{
 	(*MediaContent)(nil),       // 9: omnia.runtime.v1.MediaContent
 	(*Usage)(nil),              // 10: omnia.runtime.v1.Usage
 	(*Error)(nil),              // 11: omnia.runtime.v1.Error
-	(*MediaChunk)(nil),         // 12: omnia.runtime.v1.MediaChunk
-	(*InvocationRequest)(nil),  // 13: omnia.runtime.v1.InvocationRequest
-	(*InvocationResponse)(nil), // 14: omnia.runtime.v1.InvocationResponse
-	(*HealthRequest)(nil),      // 15: omnia.runtime.v1.HealthRequest
-	(*HealthResponse)(nil),     // 16: omnia.runtime.v1.HealthResponse
-	(*DuplexStart)(nil),        // 17: omnia.runtime.v1.DuplexStart
-	(*AudioInputChunk)(nil),    // 18: omnia.runtime.v1.AudioInputChunk
-	nil,                        // 19: omnia.runtime.v1.ClientMessage.MetadataEntry
-	nil,                        // 20: omnia.runtime.v1.InvocationRequest.MetadataEntry
+	(*Interruption)(nil),       // 12: omnia.runtime.v1.Interruption
+	(*MediaChunk)(nil),         // 13: omnia.runtime.v1.MediaChunk
+	(*InvocationRequest)(nil),  // 14: omnia.runtime.v1.InvocationRequest
+	(*InvocationResponse)(nil), // 15: omnia.runtime.v1.InvocationResponse
+	(*HealthRequest)(nil),      // 16: omnia.runtime.v1.HealthRequest
+	(*HealthResponse)(nil),     // 17: omnia.runtime.v1.HealthResponse
+	(*DuplexStart)(nil),        // 18: omnia.runtime.v1.DuplexStart
+	(*AudioInputChunk)(nil),    // 19: omnia.runtime.v1.AudioInputChunk
+	nil,                        // 20: omnia.runtime.v1.ClientMessage.MetadataEntry
+	nil,                        // 21: omnia.runtime.v1.InvocationRequest.MetadataEntry
 }
 var file_api_proto_runtime_v1_runtime_proto_depIdxs = []int32{
-	19, // 0: omnia.runtime.v1.ClientMessage.metadata:type_name -> omnia.runtime.v1.ClientMessage.MetadataEntry
+	20, // 0: omnia.runtime.v1.ClientMessage.metadata:type_name -> omnia.runtime.v1.ClientMessage.MetadataEntry
 	8,  // 1: omnia.runtime.v1.ClientMessage.parts:type_name -> omnia.runtime.v1.ContentPart
 	2,  // 2: omnia.runtime.v1.ClientMessage.client_tool_result:type_name -> omnia.runtime.v1.ClientToolResult
-	17, // 3: omnia.runtime.v1.ClientMessage.duplex_start:type_name -> omnia.runtime.v1.DuplexStart
-	18, // 4: omnia.runtime.v1.ClientMessage.audio_input:type_name -> omnia.runtime.v1.AudioInputChunk
+	18, // 3: omnia.runtime.v1.ClientMessage.duplex_start:type_name -> omnia.runtime.v1.DuplexStart
+	19, // 4: omnia.runtime.v1.ClientMessage.audio_input:type_name -> omnia.runtime.v1.AudioInputChunk
 	4,  // 5: omnia.runtime.v1.ServerMessage.chunk:type_name -> omnia.runtime.v1.Chunk
 	5,  // 6: omnia.runtime.v1.ServerMessage.tool_call:type_name -> omnia.runtime.v1.ToolCall
 	7,  // 7: omnia.runtime.v1.ServerMessage.done:type_name -> omnia.runtime.v1.Done
 	11, // 8: omnia.runtime.v1.ServerMessage.error:type_name -> omnia.runtime.v1.Error
-	12, // 9: omnia.runtime.v1.ServerMessage.media_chunk:type_name -> omnia.runtime.v1.MediaChunk
-	0,  // 10: omnia.runtime.v1.ToolCall.execution:type_name -> omnia.runtime.v1.ToolExecution
-	10, // 11: omnia.runtime.v1.Done.usage:type_name -> omnia.runtime.v1.Usage
-	8,  // 12: omnia.runtime.v1.Done.parts:type_name -> omnia.runtime.v1.ContentPart
-	9,  // 13: omnia.runtime.v1.ContentPart.media:type_name -> omnia.runtime.v1.MediaContent
-	20, // 14: omnia.runtime.v1.InvocationRequest.metadata:type_name -> omnia.runtime.v1.InvocationRequest.MetadataEntry
-	10, // 15: omnia.runtime.v1.InvocationResponse.usage:type_name -> omnia.runtime.v1.Usage
-	1,  // 16: omnia.runtime.v1.RuntimeService.Converse:input_type -> omnia.runtime.v1.ClientMessage
-	13, // 17: omnia.runtime.v1.RuntimeService.Invoke:input_type -> omnia.runtime.v1.InvocationRequest
-	15, // 18: omnia.runtime.v1.RuntimeService.Health:input_type -> omnia.runtime.v1.HealthRequest
-	3,  // 19: omnia.runtime.v1.RuntimeService.Converse:output_type -> omnia.runtime.v1.ServerMessage
-	14, // 20: omnia.runtime.v1.RuntimeService.Invoke:output_type -> omnia.runtime.v1.InvocationResponse
-	16, // 21: omnia.runtime.v1.RuntimeService.Health:output_type -> omnia.runtime.v1.HealthResponse
-	19, // [19:22] is the sub-list for method output_type
-	16, // [16:19] is the sub-list for method input_type
-	16, // [16:16] is the sub-list for extension type_name
-	16, // [16:16] is the sub-list for extension extendee
-	0,  // [0:16] is the sub-list for field type_name
+	13, // 9: omnia.runtime.v1.ServerMessage.media_chunk:type_name -> omnia.runtime.v1.MediaChunk
+	12, // 10: omnia.runtime.v1.ServerMessage.interruption:type_name -> omnia.runtime.v1.Interruption
+	0,  // 11: omnia.runtime.v1.ToolCall.execution:type_name -> omnia.runtime.v1.ToolExecution
+	10, // 12: omnia.runtime.v1.Done.usage:type_name -> omnia.runtime.v1.Usage
+	8,  // 13: omnia.runtime.v1.Done.parts:type_name -> omnia.runtime.v1.ContentPart
+	9,  // 14: omnia.runtime.v1.ContentPart.media:type_name -> omnia.runtime.v1.MediaContent
+	21, // 15: omnia.runtime.v1.InvocationRequest.metadata:type_name -> omnia.runtime.v1.InvocationRequest.MetadataEntry
+	10, // 16: omnia.runtime.v1.InvocationResponse.usage:type_name -> omnia.runtime.v1.Usage
+	1,  // 17: omnia.runtime.v1.RuntimeService.Converse:input_type -> omnia.runtime.v1.ClientMessage
+	14, // 18: omnia.runtime.v1.RuntimeService.Invoke:input_type -> omnia.runtime.v1.InvocationRequest
+	16, // 19: omnia.runtime.v1.RuntimeService.Health:input_type -> omnia.runtime.v1.HealthRequest
+	3,  // 20: omnia.runtime.v1.RuntimeService.Converse:output_type -> omnia.runtime.v1.ServerMessage
+	15, // 21: omnia.runtime.v1.RuntimeService.Invoke:output_type -> omnia.runtime.v1.InvocationResponse
+	17, // 22: omnia.runtime.v1.RuntimeService.Health:output_type -> omnia.runtime.v1.HealthResponse
+	20, // [20:23] is the sub-list for method output_type
+	17, // [17:20] is the sub-list for method input_type
+	17, // [17:17] is the sub-list for extension type_name
+	17, // [17:17] is the sub-list for extension extendee
+	0,  // [0:17] is the sub-list for field type_name
 }
 
 func init() { file_api_proto_runtime_v1_runtime_proto_init() }
@@ -1569,6 +1629,7 @@ func file_api_proto_runtime_v1_runtime_proto_init() {
 		(*ServerMessage_Done)(nil),
 		(*ServerMessage_Error)(nil),
 		(*ServerMessage_MediaChunk)(nil),
+		(*ServerMessage_Interruption)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -1576,7 +1637,7 @@ func file_api_proto_runtime_v1_runtime_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_api_proto_runtime_v1_runtime_proto_rawDesc), len(file_api_proto_runtime_v1_runtime_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   20,
+			NumMessages:   21,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
