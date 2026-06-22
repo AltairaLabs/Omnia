@@ -129,6 +129,36 @@ describe("GET /api/workspaces/[name]/deploy-profile", () => {
     expect(res.status).toBe(500);
   });
 
+  it("returns the workspace-not-found response from validateWorkspace", async () => {
+    const { getUser } = await import("@/lib/auth");
+    const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
+    const { validateWorkspace } = await import("@/lib/k8s/workspace-route-helpers");
+    const { NextResponse } = await import("next/server");
+    vi.mocked(getUser).mockResolvedValue(mockUser);
+    vi.mocked(checkWorkspaceAccess).mockResolvedValue({
+      granted: true,
+      role: "viewer",
+      permissions: viewerPerms,
+    });
+    vi.mocked(validateWorkspace).mockResolvedValue({
+      ok: false,
+      response: NextResponse.json({ error: "Not Found" }, { status: 404 }),
+    } as Awaited<ReturnType<typeof validateWorkspace>>);
+    const { GET } = await import("./route");
+    const res = await GET(req({ "x-forwarded-host": "omnia.example.com" }), ctx());
+    expect(res.status).toBe(404);
+  });
+
+  it("yields an empty api_endpoint when no forwarded host and no env override", async () => {
+    await setupAuthorized();
+    const { listCrd } = await import("@/lib/k8s/crd-operations");
+    vi.mocked(listCrd).mockResolvedValue([] as never);
+    const { GET } = await import("./route");
+    const res = await GET(req(), ctx());
+    const body = await res.json();
+    expect(body.api_endpoint).toBe("");
+  });
+
   it("falls back to env URL when no forwarded host header", async () => {
     vi.stubEnv("OMNIA_DASHBOARD_EXTERNAL_URL", "https://env.example.com");
     await setupAuthorized();
