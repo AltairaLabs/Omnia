@@ -27,15 +27,17 @@ type fakeStore struct {
 	retrieveErr      error
 	retrieveCalls    atomic.Int32
 	lastQuery        string
+	lastFetchLimit   int
 }
 
 func (f *fakeStore) Save(_ context.Context, _ *pkmemory.Memory) error { return nil }
 
 func (f *fakeStore) Retrieve(
-	_ context.Context, _ map[string]string, query string, _ pkmemory.RetrieveOptions,
+	_ context.Context, _ map[string]string, query string, opts pkmemory.RetrieveOptions,
 ) ([]*pkmemory.Memory, error) {
 	f.retrieveCalls.Add(1)
 	f.lastQuery = query
+	f.lastFetchLimit = opts.Limit
 	if f.retrieveErr != nil {
 		return nil, f.retrieveErr
 	}
@@ -108,6 +110,81 @@ func mustRetriever(t *testing.T, store pkmemory.Store, cfg RetrievalConfig, _ lo
 		t.Fatalf("NewCompositeRetriever: %v", err)
 	}
 	return r
+}
+
+// memWithMeta builds a memory whose metadata carries a url, for denyCEL tests.
+func memWithMeta(id, url string) *pkmemory.Memory {
+	return &pkmemory.Memory{ID: id, Content: id, Metadata: map[string]any{"url": url}}
+}
+
+func TestRetrieveKeyword_DropsDeniedItems(t *testing.T) {
+	store := &fakeStore{retrieveMemories: []*pkmemory.Memory{
+		memWithMeta("a", "https://ok/doc"),
+		memWithMeta("b", "https://restricted/doc"),
+		memWithMeta("c", "https://ok/other"),
+	}}
+	r, err := NewCompositeRetriever(store, RetrievalConfig{
+		Strategy: "keyword",
+		DenyCEL:  `metadata.url.contains("restricted")`,
+	}, logr.Discard())
+	if err != nil {
+		t.Fatalf("ctor: %v", err)
+	}
+	got, err := r.retrieveEpisodic(context.Background(), defaultScope(), "anything")
+	if err != nil {
+		t.Fatalf("retrieveEpisodic: %v", err)
+	}
+	for _, m := range got {
+		if m.ID == "b" {
+			t.Fatal("denied item 'b' was returned")
+		}
+	}
+	if len(got) != 2 {
+		t.Fatalf("expected 2 allowed items, got %d", len(got))
+	}
+}
+
+func TestRetrieveKeyword_OverFetchesWhenDenyActive(t *testing.T) {
+	store := &fakeStore{retrieveMemories: []*pkmemory.Memory{memWithMeta("a", "https://ok/doc")}}
+	r, err := NewCompositeRetriever(store, RetrievalConfig{
+		Strategy: "keyword",
+		DenyCEL:  `metadata.url.contains("restricted")`,
+		Limit:    5,
+	}, logr.Discard())
+	if err != nil {
+		t.Fatalf("ctor: %v", err)
+	}
+	if _, err := r.retrieveEpisodic(context.Background(), defaultScope(), "q"); err != nil {
+		t.Fatalf("retrieveEpisodic: %v", err)
+	}
+	if store.lastFetchLimit != 15 { // episodicLimit(5) * 3
+		t.Fatalf("expected over-fetch limit 15, got %d", store.lastFetchLimit)
+	}
+}
+
+// Silent-fallback trap: strategy=semantic but the store has no semantic
+// capability → keyword fallback must still enforce denyCEL.
+func TestSemanticFallback_StillEnforcesDeny(t *testing.T) {
+	store := &fakeStore{retrieveMemories: []*pkmemory.Memory{
+		memWithMeta("a", "https://ok/doc"),
+		memWithMeta("b", "https://restricted/doc"),
+	}}
+	r, err := NewCompositeRetriever(store, RetrievalConfig{
+		Strategy: "semantic", // but fakeStore is not a SemanticRetriever
+		DenyCEL:  `metadata.url.contains("restricted")`,
+	}, logr.Discard())
+	if err != nil {
+		t.Fatalf("ctor: %v", err)
+	}
+	got, err := r.retrieveEpisodic(context.Background(), defaultScope(), "q")
+	if err != nil {
+		t.Fatalf("retrieveEpisodic: %v", err)
+	}
+	for _, m := range got {
+		if m.ID == "b" {
+			t.Fatal("semantic-fallback served a denied item")
+		}
+	}
 }
 
 func TestNewCompositeRetriever_InvalidDenyCELErrors(t *testing.T) {

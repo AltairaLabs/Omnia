@@ -198,7 +198,45 @@ func (r *CompositeRetriever) retrieveEpisodic(
 		}
 		return r.semantic.RetrieveSemantic(ctx, wsID, query, r.denyCEL, r.episodicLimit)
 	}
-	return r.store.Retrieve(ctx, scope, toFTSOrQuery(query), pkmemory.RetrieveOptions{Limit: r.episodicLimit})
+	return r.retrieveKeyword(ctx, scope, query)
+}
+
+// retrieveKeyword runs keyword FTS and applies the access deny-filter. When a
+// filter is active it over-fetches so post-filtering still yields up to the
+// episodic limit, mirroring the semantic path's over-fetch-past-restricted.
+func (r *CompositeRetriever) retrieveKeyword(
+	ctx context.Context, scope map[string]string, query string,
+) ([]*pkmemory.Memory, error) {
+	fetch := r.episodicLimit
+	if r.denyActive {
+		fetch = r.episodicLimit * 3
+		if fetch > listFetchLimit {
+			fetch = listFetchLimit
+		}
+	}
+	mems, err := r.store.Retrieve(ctx, scope, toFTSOrQuery(query), pkmemory.RetrieveOptions{Limit: fetch})
+	if err != nil {
+		return nil, err
+	}
+	allowed := r.applyDeny(mems)
+	if len(allowed) > r.episodicLimit {
+		allowed = allowed[:r.episodicLimit]
+	}
+	return allowed, nil
+}
+
+// applyDeny drops items the access filter denies. Allow-all when no denyCEL.
+func (r *CompositeRetriever) applyDeny(mems []*pkmemory.Memory) []*pkmemory.Memory {
+	if !r.denyActive {
+		return mems
+	}
+	out := make([]*pkmemory.Memory, 0, len(mems))
+	for _, m := range mems {
+		if m != nil && r.deny.Allowed(m.Metadata) {
+			out = append(out, m)
+		}
+	}
+	return out
 }
 
 // fetchProfile returns the always-include subset, populating the cache
