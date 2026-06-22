@@ -18,7 +18,7 @@ require (
 	github.com/aws/aws-sdk-go-v2 v1.42.0
 	github.com/aws/aws-sdk-go-v2/config v1.32.23
 	github.com/aws/aws-sdk-go-v2/credentials v1.19.24
-	github.com/aws/aws-sdk-go-v2/service/kms v1.50.5
+	github.com/aws/aws-sdk-go-v2/service/kms v1.53.4
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.104.0
 	github.com/cyphar/filepath-securejoin v0.6.1
 	github.com/danaugrs/go-tsne/tsne v0.0.0-20220306155740-2250969e057f
