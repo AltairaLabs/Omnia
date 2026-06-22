@@ -4205,5 +4205,44 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 				Expect(cond.Message).To(ContainSubstring(privPolicyName))
 			})
 		})
+
+		Context("duplex field validation (API server enforcement)", func() {
+			var duplexCtx context.Context
+
+			BeforeEach(func() {
+				duplexCtx = context.Background()
+			})
+
+			It("rejects an invalid duplex mode", func() {
+				ar := &omniav1alpha1.AgentRuntime{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "duplex-invalid-test",
+						Namespace: "default",
+					},
+					Spec: omniav1alpha1.AgentRuntimeSpec{
+						PromptPackRef: omniav1alpha1.PromptPackRef{Name: "dummy"},
+						Facade:        omniav1alpha1.FacadeConfig{Type: omniav1alpha1.FacadeTypeWebSocket},
+						Duplex:        &omniav1alpha1.DuplexConfig{Enabled: true, Mode: "hologram"},
+					},
+				}
+				Expect(k8sClient.Create(duplexCtx, ar)).To(MatchError(ContainSubstring("Unsupported value")))
+			})
+
+			It("accepts audio duplex mode", func() {
+				ar := &omniav1alpha1.AgentRuntime{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "duplex-valid-audio-test",
+						Namespace: "default",
+					},
+					Spec: omniav1alpha1.AgentRuntimeSpec{
+						PromptPackRef: omniav1alpha1.PromptPackRef{Name: "dummy"},
+						Facade:        omniav1alpha1.FacadeConfig{Type: omniav1alpha1.FacadeTypeWebSocket},
+						Duplex:        &omniav1alpha1.DuplexConfig{Enabled: true, Mode: "audio"},
+					},
+				}
+				Expect(k8sClient.Create(duplexCtx, ar)).To(Succeed())
+				defer func() { _ = k8sClient.Delete(duplexCtx, ar) }()
+			})
+		})
 	})
 })

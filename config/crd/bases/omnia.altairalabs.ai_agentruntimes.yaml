@@ -344,6 +344,15 @@ spec:
                       audio:
                         description: audio defines requirements for audio files.
                         properties:
+                          channels:
+                            description: channels is the audio channel count the client
+                              should capture/play (1=mono).
+                            format: int32
+                            type: integer
+                          format:
+                            description: format is the PCM sample format the client
+                              should send, e.g. "pcm16".
+                            type: string
                           maxDurationSeconds:
                             description: maxDurationSeconds is the maximum audio duration.
                             format: int32
@@ -471,6 +480,24 @@ spec:
                             type: boolean
                         type: object
                     type: object
+                type: object
+              duplex:
+                description: duplex configures the realtime voice/duplex console for
+                  this agent.
+                properties:
+                  enabled:
+                    description: enabled turns on the realtime voice console for this
+                      agent.
+                    type: boolean
+                  mode:
+                    default: audio
+                    description: |-
+                      mode is the duplex modality. "audio" (default) streams voice only;
+                      "audiovideo" additionally streams the browser camera (not yet implemented).
+                    enum:
+                    - audio
+                    - audiovideo
+                    type: string
                 type: object
               evals:
                 description: evals configures realtime eval execution for this agent's
