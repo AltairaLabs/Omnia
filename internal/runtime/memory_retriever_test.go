@@ -187,6 +187,53 @@ func TestSemanticFallback_StillEnforcesDeny(t *testing.T) {
 	}
 }
 
+func TestRetrieveComposite_FusesAndDedups(t *testing.T) {
+	store := &fakeSemanticStore{
+		fakeStore: fakeStore{retrieveMemories: []*pkmemory.Memory{
+			memWithMeta("k1", "https://ok/k1"),
+			memWithMeta("shared", "https://ok/shared"),
+		}},
+		semanticMemories: []*pkmemory.Memory{
+			memWithMeta("shared", "https://ok/shared"),
+			memWithMeta("s1", "https://ok/s1"),
+		},
+	}
+	r, err := NewCompositeRetriever(store, RetrievalConfig{Strategy: "composite", Limit: 10}, logr.Discard())
+	if err != nil {
+		t.Fatalf("ctor: %v", err)
+	}
+	got, err := r.retrieveEpisodic(context.Background(), defaultScope(), "q")
+	if err != nil {
+		t.Fatalf("retrieveEpisodic: %v", err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("expected 3 fused unique memories, got %d", len(got))
+	}
+	// "shared" appears rank-0 in both lists → highest fused score → first.
+	if got[0].ID != "shared" {
+		t.Fatalf("expected 'shared' ranked first, got %q", got[0].ID)
+	}
+	if store.semanticCalls.Load() != 1 {
+		t.Fatalf("expected semantic leg called once, got %d", store.semanticCalls.Load())
+	}
+}
+
+func TestRetrieveComposite_DegradesToKeywordWhenNoSemantic(t *testing.T) {
+	// fakeStore has no semantic capability → composite must run keyword only.
+	store := &fakeStore{retrieveMemories: []*pkmemory.Memory{memWithMeta("k1", "https://ok/k1")}}
+	r, err := NewCompositeRetriever(store, RetrievalConfig{Strategy: "composite"}, logr.Discard())
+	if err != nil {
+		t.Fatalf("ctor: %v", err)
+	}
+	got, err := r.retrieveEpisodic(context.Background(), defaultScope(), "q")
+	if err != nil {
+		t.Fatalf("retrieveEpisodic: %v", err)
+	}
+	if len(got) != 1 || got[0].ID != "k1" {
+		t.Fatalf("expected keyword-only degrade to [k1], got %v", got)
+	}
+}
+
 func TestNewCompositeRetriever_InvalidDenyCELErrors(t *testing.T) {
 	_, err := NewCompositeRetriever(&fakeStore{}, RetrievalConfig{DenyCEL: "metadata.url.bad("}, logr.Discard())
 	if err == nil {
