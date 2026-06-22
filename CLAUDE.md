@@ -15,6 +15,7 @@ If you find a bug or need a change in PromptKit, **do not fix it here**. Instead
 ## Git Workflow
 
 - **Never push directly to main** — main has branch protection enabled.
+- **Always sign off commits (DCO)** — this repo enforces the Developer Certificate of Origin. Commit with `git commit -s` so a `Signed-off-by:` line whose email matches the commit author is added; CI rejects commits without it. To fix a missed sign-off: `git commit --amend -s --no-edit` (last commit) or `git rebase --signoff <base>` (a range). The `commit-msg` git hook (installed by `make setup`) catches a missing or mismatched sign-off locally before push.
 - Always use feature branches: `git checkout -b feature/<issue-number>-<short-description>` or `feat/<description>`.
 - Standard flow: branch → commit → push with `-u` → create PR via `gh pr create` → monitor CI → merge via `gh pr merge --squash`.
 - When continuing a previous session, check `git status`, `git log --oneline -5`, and any existing plan files before taking action.
@@ -54,7 +55,10 @@ When you're unsure which class your data is, ask: *would a customer's compliance
 
 ## Pre-commit Hooks
 
-The repo has a pre-commit hook at `hack/pre-commit` that runs on every commit. **Run checks locally before committing to avoid retry cycles.**
+The repo has a pre-commit hook at `hack/pre-commit` that runs on every commit. **Run checks locally before committing to avoid retry cycles.** Install all hooks with `make setup`.
+
+### commit-msg hook (`hack/commit-msg`, runs on every commit)
+- Enforces a DCO `Signed-off-by:` line whose email matches the commit author. Use `git commit -s`. See "Git Workflow" above.
 
 ### Go checks (runs when `.go` files are staged)
 - `gofmt` / `goimports` formatting

@@ -49,7 +49,8 @@ help: ## Display this help.
 setup: ## Set up development environment (install git hooks)
 	@echo "Installing git hooks..."
 	@ln -sf ../../hack/pre-commit .git/hooks/pre-commit
-	@chmod +x hack/pre-commit
+	@ln -sf ../../hack/commit-msg .git/hooks/commit-msg
+	@chmod +x hack/pre-commit hack/commit-msg
 	@echo "Git hooks installed successfully"
 
 .PHONY: manifests

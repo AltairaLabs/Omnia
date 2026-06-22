@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+#
+# commit-msg hook for Omnia
+#
+# Enforces the Developer Certificate of Origin (DCO) sign-off locally so a
+# missing or mismatched "Signed-off-by:" line is caught before push/CI.
+#
+# This repo enforces DCO server-side (DCO app + branch ruleset). CI rejects
+# commits without a valid sign-off whose email matches the commit author, so
+# catching it here saves a failed push and a rebase --signoff round-trip.
+#
+# Add a sign-off automatically with `git commit -s`. Set git user.name and
+# user.email to the identity you author commits under.
+#
+set -euo pipefail
+
+msg_file="$1"
+
+# Collect any well-formed sign-off lines (ignore comment lines).
+signoffs="$(grep -iE '^Signed-off-by: .+ <.+@.+>' "$msg_file" || true)"
+
+if [ -z "$signoffs" ]; then
+  cat >&2 <<'EOF'
+✖ DCO sign-off missing: no 'Signed-off-by:' line in the commit message.
+  This repo enforces the Developer Certificate of Origin (DCO).
+
+  Re-commit with sign-off:   git commit -s
+  Amend the last commit:     git commit --amend -s --no-edit
+EOF
+  exit 1
+fi
+
+# If a git identity is configured, require a sign-off matching the author
+# email — a sign-off with the wrong email fails the server-side DCO check.
+author_email="$(git config user.email || true)"
+if [ -n "$author_email" ] && ! printf '%s\n' "$signoffs" | grep -qF "<${author_email}>"; then
+  cat >&2 <<EOF
+✖ DCO sign-off email does not match your git author email (${author_email}).
+  The server-side DCO check requires the Signed-off-by email to match the
+  commit author.
+
+  Found:
+$(printf '    %s\n' "$signoffs")
+
+  Fix your identity (git config user.email ...) then re-sign:
+    git commit --amend -s --no-edit
+EOF
+  exit 1
+fi
+
+exit 0
