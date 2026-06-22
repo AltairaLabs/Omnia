@@ -4715,7 +4715,6 @@ spec:
                         enum:
                         - keyword
                         - semantic
-                        - graph
                         - composite
                         type: string
                     type: object
