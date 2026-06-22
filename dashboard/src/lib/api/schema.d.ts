@@ -256,6 +256,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/workspaces/{name}/deploy-profile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace name; the server resolves the namespace from the Workspace CR. */
+                name: components["parameters"]["WorkspaceName"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Export the deploy publish-profile discovery menu for a workspace
+         * @description Returns connection details and a discovery menu (Providers with roles,
+         *     SkillSources) for bootstrapping the promptarena-deploy-omnia adapter
+         *     config. Discovery only — does not return any secret. Mint a token
+         *     separately via the API keys endpoint.
+         */
+        get: operations["getDeployProfile"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/workspaces/{name}/agentpolicies": {
         parameters: {
             query?: never;
@@ -370,6 +396,29 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /**
+         * @description Deploy publish-profile discovery payload. Connection details plus a
+         *     discovery menu of the workspace's Providers and SkillSources. Discovery
+         *     only — never contains a secret. See issue #1519.
+         */
+        DeployProfile: {
+            /** @description External dashboard ingress URL the adapter calls */
+            api_endpoint: string;
+            workspace: string;
+            providers: {
+                /** @description Provider CRD name (adapter ref) */
+                name: string;
+                /** @enum {string} */
+                role: "llm" | "embedding" | "tts" | "stt" | "image" | "inference";
+                type: string;
+                model?: string;
+            }[];
+            skills: {
+                name: string;
+                /** @enum {string} */
+                type: "git" | "oci" | "configmap";
+            }[];
+        };
         /**
          * @description Generic create/update body accepted by the workspace CRD routes. The
          *     server reads `metadata` (name, labels, annotations) and `spec`, adds a
@@ -1607,6 +1656,33 @@ export interface operations {
                 };
             };
             400: components["responses"]["BadRequest"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    getDeployProfile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace name; the server resolves the namespace from the Workspace CR. */
+                name: components["parameters"]["WorkspaceName"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deploy profile discovery payload */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeployProfile"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             500: components["responses"]["InternalError"];
         };
