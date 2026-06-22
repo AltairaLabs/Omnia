@@ -37,6 +37,8 @@ tags:
     description: ToolRegistry operations
   - name: providers
     description: Provider operations
+  - name: deploy
+    description: Deploy adapter bootstrap (publish profile)
   - name: agentpolicies
     description: AgentPolicy operations
   - name: toolpolicies
@@ -442,6 +444,29 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '500': { $ref: '#/components/responses/InternalError' }
 
+  /api/workspaces/{name}/deploy-profile:
+    parameters:
+      - $ref: '#/components/parameters/WorkspaceName'
+    get:
+      tags: [deploy]
+      summary: Export the deploy publish-profile discovery menu for a workspace
+      description: |
+        Returns connection details and a discovery menu (Providers with roles,
+        SkillSources) for bootstrapping the promptarena-deploy-omnia adapter
+        config. Discovery only — does not return any secret. Mint a token
+        separately via the API keys endpoint.
+      operationId: getDeployProfile
+      responses:
+        '200':
+          description: Deploy profile discovery payload
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DeployProfile' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
   /api/workspaces/{name}/agentpolicies:
     parameters:
       - $ref: '#/components/parameters/WorkspaceName'
@@ -687,6 +712,37 @@ components:
             $ref: '#/components/schemas/Error'
 
   schemas:
+    DeployProfile:
+      type: object
+      description: |
+        Deploy publish-profile discovery payload. Connection details plus a
+        discovery menu of the workspace's Providers and SkillSources. Discovery
+        only — never contains a secret. See issue #1519.
+      required: [api_endpoint, workspace, providers, skills]
+      properties:
+        api_endpoint:
+          type: string
+          description: External dashboard ingress URL the adapter calls
+        workspace:
+          type: string
+        providers:
+          type: array
+          items:
+            type: object
+            required: [name, role, type]
+            properties:
+              name: { type: string, description: Provider CRD name (adapter ref) }
+              role: { type: string, enum: [llm, embedding, tts, stt, image, inference] }
+              type: { type: string }
+              model: { type: string }
+        skills:
+          type: array
+          items:
+            type: object
+            required: [name, type]
+            properties:
+              name: { type: string }
+              type: { type: string, enum: [git, oci, configmap] }
     CrdWriteRequest:
       type: object
       description: |
