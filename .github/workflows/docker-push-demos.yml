@@ -24,7 +24,7 @@ jobs:
     name: Build & push omnia-sharepoint-adapter
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Compute image ref (GHCR requires lowercase)
         id: ref

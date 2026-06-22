@@ -37,7 +37,7 @@ jobs:
       shared: ${{ steps.filter.outputs.shared }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           # Need history for path-filter to diff against the previous commit.
           fetch-depth: 2
@@ -226,7 +226,7 @@ jobs:
             description: Language-server for PromptKit configs and arena YAML. Powers autocomplete and validation in the dev console.
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Compute image ref (GHCR requires lowercase)
         id: ref
