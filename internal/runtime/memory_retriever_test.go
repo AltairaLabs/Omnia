@@ -98,8 +98,37 @@ func defaultScope() map[string]string {
 	return map[string]string{"workspace_id": "ws", "user_id": "u"}
 }
 
+// mustRetriever builds a CompositeRetriever and fails the test on a constructor
+// error (e.g. an invalid denyCEL). The logger arg is accepted and ignored so
+// existing call sites that pass logr.Discard() compile unchanged.
+func mustRetriever(t *testing.T, store pkmemory.Store, cfg RetrievalConfig, _ logr.Logger) *CompositeRetriever {
+	t.Helper()
+	r, err := NewCompositeRetriever(store, cfg, logr.Discard())
+	if err != nil {
+		t.Fatalf("NewCompositeRetriever: %v", err)
+	}
+	return r
+}
+
+func TestNewCompositeRetriever_InvalidDenyCELErrors(t *testing.T) {
+	_, err := NewCompositeRetriever(&fakeStore{}, RetrievalConfig{DenyCEL: "metadata.url.bad("}, logr.Discard())
+	if err == nil {
+		t.Fatal("expected error for invalid denyCEL, got nil")
+	}
+}
+
+func TestNewCompositeRetriever_ValidDenyCELSucceeds(t *testing.T) {
+	r, err := NewCompositeRetriever(&fakeStore{}, RetrievalConfig{DenyCEL: `metadata.url.contains("restricted")`}, logr.Discard())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !r.denyActive {
+		t.Fatal("expected denyActive true when denyCEL set")
+	}
+}
+
 func TestCompositeRetriever_NoUserIDReturnsNil(t *testing.T) {
-	r := NewCompositeRetriever(&fakeStore{}, RetrievalConfig{}, logr.Discard())
+	r := mustRetriever(t, &fakeStore{}, RetrievalConfig{}, logr.Discard())
 	got, err := r.RetrieveContext(context.Background(), map[string]string{"workspace_id": "ws"}, []types.Message{userMsg("hi")})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -118,7 +147,7 @@ func TestCompositeRetriever_ProfileOnlyWhenNoQuery(t *testing.T) {
 			mem("4", "memory:context", "planning Boston trip"),
 		},
 	}
-	r := NewCompositeRetriever(store, RetrievalConfig{}, logr.Discard())
+	r := mustRetriever(t, store, RetrievalConfig{}, logr.Discard())
 
 	// No user message → no episodic query → profile only.
 	got, err := r.RetrieveContext(context.Background(), defaultScope(), nil)
@@ -143,7 +172,7 @@ func TestCompositeRetriever_CompositeMergesProfileAndEpisodic(t *testing.T) {
 		mem("e2", "memory:context", "October Chicago trip"),
 	}
 	store := &fakeStore{listMemories: profile, retrieveMemories: episodic}
-	r := NewCompositeRetriever(store, RetrievalConfig{}, logr.Discard())
+	r := mustRetriever(t, store, RetrievalConfig{}, logr.Discard())
 
 	got, err := r.RetrieveContext(context.Background(), defaultScope(), []types.Message{userMsg("plan philly")})
 	if err != nil {
@@ -168,7 +197,7 @@ func TestCompositeRetriever_DropsEpisodicProfileCategoryDuplicates(t *testing.T)
 		mem("e2", "memory:history", "October trip"), // keep
 	}
 	store := &fakeStore{listMemories: profile, retrieveMemories: episodic}
-	r := NewCompositeRetriever(store, RetrievalConfig{}, logr.Discard())
+	r := mustRetriever(t, store, RetrievalConfig{}, logr.Discard())
 
 	got, err := r.RetrieveContext(context.Background(), defaultScope(), []types.Message{userMsg("hi")})
 	if err != nil {
@@ -186,7 +215,7 @@ func TestCompositeRetriever_DropsEpisodicProfileCategoryDuplicates(t *testing.T)
 func TestCompositeRetriever_EpisodicErrorFallsBackToProfile(t *testing.T) {
 	profile := []*pkmemory.Memory{mem("p1", "memory:identity", "Sarah")}
 	store := &fakeStore{listMemories: profile, retrieveErr: errors.New("upstream down")}
-	r := NewCompositeRetriever(store, RetrievalConfig{}, logr.Discard())
+	r := mustRetriever(t, store, RetrievalConfig{}, logr.Discard())
 
 	got, err := r.RetrieveContext(context.Background(), defaultScope(), []types.Message{userMsg("hi")})
 	if err != nil {
@@ -202,7 +231,7 @@ func TestCompositeRetriever_ListErrorReturnsEmptyProfile(t *testing.T) {
 		listErr:          errors.New("memory-api down"),
 		retrieveMemories: []*pkmemory.Memory{mem("e1", "memory:history", "thing")},
 	}
-	r := NewCompositeRetriever(store, RetrievalConfig{}, logr.Discard())
+	r := mustRetriever(t, store, RetrievalConfig{}, logr.Discard())
 
 	got, err := r.RetrieveContext(context.Background(), defaultScope(), []types.Message{userMsg("hi")})
 	if err != nil {
@@ -215,7 +244,7 @@ func TestCompositeRetriever_ListErrorReturnsEmptyProfile(t *testing.T) {
 
 func TestCompositeRetriever_ProfileCachedWithinTTL(t *testing.T) {
 	store := &fakeStore{listMemories: []*pkmemory.Memory{mem("p1", "memory:identity", "Sarah")}}
-	r := NewCompositeRetriever(store, RetrievalConfig{}, logr.Discard())
+	r := mustRetriever(t, store, RetrievalConfig{}, logr.Discard())
 
 	for i := 0; i < 5; i++ {
 		_, err := r.RetrieveContext(context.Background(), defaultScope(), nil)
@@ -230,7 +259,7 @@ func TestCompositeRetriever_ProfileCachedWithinTTL(t *testing.T) {
 
 func TestCompositeRetriever_ProfileCacheExpires(t *testing.T) {
 	store := &fakeStore{listMemories: []*pkmemory.Memory{mem("p1", "memory:identity", "Sarah")}}
-	r := NewCompositeRetriever(store, RetrievalConfig{}, logr.Discard())
+	r := mustRetriever(t, store, RetrievalConfig{}, logr.Discard())
 
 	if _, err := r.RetrieveContext(context.Background(), defaultScope(), nil); err != nil {
 		t.Fatalf("first call: %v", err)
@@ -254,7 +283,7 @@ func TestCompositeRetriever_ProfileCacheExpires(t *testing.T) {
 
 func TestCompositeRetriever_ProfileCacheKeyedPerUser(t *testing.T) {
 	store := &fakeStore{listMemories: []*pkmemory.Memory{mem("p1", "memory:identity", "Sarah")}}
-	r := NewCompositeRetriever(store, RetrievalConfig{}, logr.Discard())
+	r := mustRetriever(t, store, RetrievalConfig{}, logr.Discard())
 
 	if _, err := r.RetrieveContext(context.Background(), map[string]string{"workspace_id": "ws", "user_id": "alice"}, nil); err != nil {
 		t.Fatal(err)
@@ -279,7 +308,7 @@ func TestCompositeRetriever_NonProfileMemoriesFromListAreIgnored(t *testing.T) {
 			mem("noCat", "", "untagged"),
 		},
 	}
-	r := NewCompositeRetriever(store, RetrievalConfig{}, logr.Discard())
+	r := mustRetriever(t, store, RetrievalConfig{}, logr.Discard())
 
 	got, err := r.RetrieveContext(context.Background(), defaultScope(), nil)
 	if err != nil {
@@ -301,7 +330,7 @@ func TestCompositeRetriever_SemanticStrategyCallsSemanticRetriever(t *testing.T)
 		DenyCEL:     `metadata.url.contains("restricted")`,
 		WorkspaceID: "ws-configured",
 	}
-	r := NewCompositeRetriever(store, cfg, logr.Discard())
+	r := mustRetriever(t, store, cfg, logr.Discard())
 
 	_, err := r.RetrieveContext(context.Background(), defaultScope(), []types.Message{userMsg("plan a trip")})
 	if err != nil {
@@ -333,7 +362,7 @@ func TestCompositeRetriever_KeywordStrategyUsesFTS(t *testing.T) {
 		},
 	}
 	// strategy="" (keyword default) — must NOT call semantic even though store supports it.
-	r := NewCompositeRetriever(store, RetrievalConfig{Strategy: "keyword"}, logr.Discard())
+	r := mustRetriever(t, store, RetrievalConfig{Strategy: "keyword"}, logr.Discard())
 
 	_, err := r.RetrieveContext(context.Background(), defaultScope(), []types.Message{userMsg("chicago trip")})
 	if err != nil {
@@ -356,10 +385,10 @@ func TestCompositeRetriever_SemanticStrategyFallsBackWhenStoreUnsupported(t *tes
 	}
 	cfg := RetrievalConfig{
 		Strategy:    StrategySemantic,
-		DenyCEL:     "some.cel",
+		DenyCEL:     `metadata.url.contains("restricted")`,
 		WorkspaceID: "ws1",
 	}
-	r := NewCompositeRetriever(store, cfg, logr.Discard())
+	r := mustRetriever(t, store, cfg, logr.Discard())
 
 	// Confirm the type-assert failed (semantic is nil).
 	if r.semantic != nil {
@@ -385,7 +414,7 @@ func TestCompositeRetriever_LimitAppliedToSemanticRetrieval(t *testing.T) {
 		WorkspaceID: "ws1",
 		Limit:       5,
 	}
-	r := NewCompositeRetriever(store, cfg, logr.Discard())
+	r := mustRetriever(t, store, cfg, logr.Discard())
 
 	if r.episodicLimit != 5 {
 		t.Fatalf("episodicLimit: got %d, want 5", r.episodicLimit)
@@ -410,7 +439,7 @@ func TestCompositeRetriever_ZeroLimitFallsBackToDefault(t *testing.T) {
 		Strategy:    StrategySemantic,
 		WorkspaceID: "ws1",
 	}
-	r := NewCompositeRetriever(store, cfg, logr.Discard())
+	r := mustRetriever(t, store, cfg, logr.Discard())
 
 	if r.episodicLimit != defaultEpisodicLimit {
 		t.Fatalf("episodicLimit: got %d, want %d (defaultEpisodicLimit)", r.episodicLimit, defaultEpisodicLimit)

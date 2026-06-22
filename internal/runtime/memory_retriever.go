@@ -26,6 +26,7 @@ import (
 
 	pkmemory "github.com/AltairaLabs/PromptKit/runtime/memory"
 	"github.com/AltairaLabs/PromptKit/runtime/types"
+	"github.com/altairalabs/omnia/internal/memory/access"
 	"github.com/go-logr/logr"
 )
 
@@ -102,6 +103,9 @@ type CompositeRetriever struct {
 	denyCEL     string            // spec.memory.retrieval.accessFilter.denyCEL
 	workspaceID string            // for the semantic call's scope
 
+	deny       *access.DenyFilter // compiled from cfg.DenyCEL; allow-all when empty
+	denyActive bool               // cfg.DenyCEL != "" (drives keyword over-fetch)
+
 	mu    sync.Mutex
 	cache map[string]profileCacheEntry
 }
@@ -115,7 +119,11 @@ type profileCacheEntry struct {
 // store implements SemanticRetriever AND cfg.Strategy=="semantic", per-turn
 // retrieval uses semantic hybrid search with the deny-filter; otherwise it uses
 // keyword FTS.
-func NewCompositeRetriever(store pkmemory.Store, cfg RetrievalConfig, log logr.Logger) *CompositeRetriever {
+func NewCompositeRetriever(store pkmemory.Store, cfg RetrievalConfig, log logr.Logger) (*CompositeRetriever, error) {
+	deny, err := access.NewDenyFilter(cfg.DenyCEL)
+	if err != nil {
+		return nil, err
+	}
 	r := &CompositeRetriever{
 		store:         store,
 		log:           log.WithName("memory-retriever"),
@@ -125,6 +133,8 @@ func NewCompositeRetriever(store pkmemory.Store, cfg RetrievalConfig, log logr.L
 		strategy:      cfg.Strategy,
 		denyCEL:       cfg.DenyCEL,
 		workspaceID:   cfg.WorkspaceID,
+		deny:          deny,
+		denyActive:    cfg.DenyCEL != "",
 	}
 	if sr, ok := store.(SemanticRetriever); ok {
 		r.semantic = sr
@@ -132,7 +142,7 @@ func NewCompositeRetriever(store pkmemory.Store, cfg RetrievalConfig, log logr.L
 	if cfg.Limit > 0 {
 		r.episodicLimit = cfg.Limit
 	}
-	return r
+	return r, nil
 }
 
 // RetrieveContext implements pkmemory.Retriever. Returns nil when the
