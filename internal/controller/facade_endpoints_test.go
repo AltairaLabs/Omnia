@@ -36,6 +36,43 @@ func TestFacadePortProtocolsGRPCSkipped(t *testing.T) {
 	}
 }
 
+func TestCanonicalFacadePath(t *testing.T) {
+	cases := []struct {
+		protocol string
+		want     string
+	}{
+		{omniav1alpha1.FacadeProtocolWebSocket, "/ws"},
+		{omniav1alpha1.FacadeProtocolA2A, "/a2a"},
+		{omniav1alpha1.FacadeProtocolMCP, "/mcp"},
+		{omniav1alpha1.FacadeProtocolREST, ""},
+	}
+	for _, c := range cases {
+		if got := canonicalFacadePath(c.protocol); got != c.want {
+			t.Errorf("canonicalFacadePath(%q) = %q, want %q", c.protocol, got, c.want)
+		}
+	}
+}
+
+func TestFacadePortProtocolsDefaultPorts(t *testing.T) {
+	agent := &omniav1alpha1.AgentRuntime{}
+	agent.Spec.Facade = omniav1alpha1.FacadeConfig{
+		Type: omniav1alpha1.FacadeType(omniav1alpha1.FacadeProtocolWebSocket),
+		// Port, A2A.Port, MCP.Port all nil — defaults should apply.
+		A2A: &omniav1alpha1.A2AConfig{Enabled: true},
+		MCP: &omniav1alpha1.MCPConfig{Enabled: true},
+	}
+	got := facadePortProtocols(agent)
+	want := map[int32]string{8080: "websocket", 9999: "a2a", 9998: "mcp"}
+	if len(got) != len(want) {
+		t.Fatalf("got %v want %v", got, want)
+	}
+	for p, proto := range want {
+		if got[p] != proto {
+			t.Errorf("port %d: got %q want %q", p, got[p], proto)
+		}
+	}
+}
+
 func TestJoinExternalPath(t *testing.T) {
 	cases := []struct{ prefix, suffix, want string }{
 		{"/", "/ws", "/ws"},
