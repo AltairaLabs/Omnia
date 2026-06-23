@@ -64,6 +64,15 @@ type mockStore struct {
 	// without a real DB.
 	conflicts []memory.ConflictedEntity
 
+	// Error-injection hooks for the dedup / relation / update / open
+	// store paths. Default nil preserves the happy-path behaviour the
+	// existing tests rely on.
+	conflictsErr error
+	linkErr      error
+	supersedeErr error
+	getMemErr    error
+	appendErr    error
+
 	// Memory Galaxy projection canned responses (memory.ProjectionStore).
 	projInputs      []memory.ProjectionInput
 	projFingerprint string
@@ -121,11 +130,17 @@ func (m *mockStore) FindSimilarObservations(_ context.Context, _ map[string]stri
 }
 
 func (m *mockStore) AppendObservationToEntity(_ context.Context, entityID string, mem *memory.Memory) ([]string, error) {
+	if m.appendErr != nil {
+		return nil, m.appendErr
+	}
 	mem.ID = entityID
 	return []string{"prior-obs"}, nil
 }
 
 func (m *mockStore) GetMemory(_ context.Context, _ map[string]string, entityID string) (*memory.Memory, error) {
+	if m.getMemErr != nil {
+		return nil, m.getMemErr
+	}
 	for _, mem := range m.memories {
 		if mem.ID == entityID {
 			return mem, nil
@@ -137,6 +152,9 @@ func (m *mockStore) GetMemory(_ context.Context, _ map[string]string, entityID s
 func (m *mockStore) LinkEntities(_ context.Context, _ map[string]string,
 	_, _, _ string, _ float64,
 ) (string, error) {
+	if m.linkErr != nil {
+		return "", m.linkErr
+	}
 	return "rel-mock", nil
 }
 
@@ -163,6 +181,9 @@ func (m *mockStore) RetrieveHybrid(_ context.Context, _ map[string]string,
 }
 
 func (m *mockStore) SupersedeMany(_ context.Context, sourceIDs []string, mem *memory.Memory) (string, []string, error) {
+	if m.supersedeErr != nil {
+		return "", nil, m.supersedeErr
+	}
 	if len(sourceIDs) == 0 {
 		return "", nil, nil
 	}
@@ -176,6 +197,9 @@ func (m *mockStore) SupersedeMany(_ context.Context, sourceIDs []string, mem *me
 }
 
 func (m *mockStore) FindConflictedEntities(_ context.Context, _ string, _ int) ([]memory.ConflictedEntity, error) {
+	if m.conflictsErr != nil {
+		return nil, m.conflictsErr
+	}
 	return m.conflicts, nil
 }
 

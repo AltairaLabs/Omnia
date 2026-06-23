@@ -22,4 +22,8 @@ package api
 const (
 	testMetaKeyURL = "url"
 	testURLAllowed = "https://sp/allowed/r.docx"
+
+	// testUser is the canonical user scope value reused across the
+	// handler tests (testWS is declared in service_ingest_test.go).
+	testUser = "u1"
 )
