@@ -1606,3 +1606,148 @@ func TestRecord_ZeroTimestampDefaultsToNow(t *testing.T) {
 		}))
 	})
 }
+
+// --- Runtime event reads ----------------------------------------------------
+
+func TestGetRuntimeEvents(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	p := newProvider(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Microsecond)
+
+	sess := makeSession("a0eebc99-9c0b-4ef8-bb6d-6bb9bd380e01", now)
+	require.NoError(t, p.CreateSession(ctx, sess))
+
+	require.NoError(t, p.RecordRuntimeEvent(ctx, sess.ID, &session.RuntimeEvent{
+		ID:        "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380e11",
+		EventType: "pipeline.started",
+		Timestamp: now,
+		Data:      map[string]any{"step": "init"},
+	}))
+	require.NoError(t, p.RecordRuntimeEvent(ctx, sess.ID, &session.RuntimeEvent{
+		ID:           "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380e12",
+		EventType:    "pipeline.completed",
+		Timestamp:    now.Add(time.Second),
+		DurationMs:   1500,
+		ErrorMessage: "boom",
+	}))
+
+	events, err := p.GetRuntimeEvents(ctx, sess.ID, providers.PaginationOpts{})
+	require.NoError(t, err)
+	require.Len(t, events, 2)
+	assert.Equal(t, "pipeline.started", events[0].EventType)
+	assert.Equal(t, map[string]any{"step": "init"}, events[0].Data)
+	assert.Equal(t, "pipeline.completed", events[1].EventType)
+	assert.Equal(t, int64(1500), events[1].DurationMs)
+	assert.Equal(t, "boom", events[1].ErrorMessage)
+}
+
+func TestGetRuntimeEvents_NotFound(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	p := newProvider(t)
+	ctx := context.Background()
+
+	_, err := p.GetRuntimeEvents(ctx, "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380e99", providers.PaginationOpts{})
+	assert.ErrorIs(t, err, session.ErrSessionNotFound)
+}
+
+// --- Artifact management ----------------------------------------------------
+
+func makeArtifact(id, messageID, sessionID string, now time.Time) *session.Artifact {
+	return &session.Artifact{
+		ID:         id,
+		MessageID:  messageID,
+		SessionID:  sessionID,
+		Type:       "image",
+		MIMEType:   "image/png",
+		StorageURI: "s3://bucket/" + id,
+		SizeBytes:  2048,
+		Filename:   "pic.png",
+		Checksum:   "abc123",
+		Metadata:   map[string]string{"alt": "a picture"},
+		Width:      640,
+		Height:     480,
+		CreatedAt:  now,
+	}
+}
+
+func TestArtifacts_SaveGetDelete(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	p := newProvider(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Microsecond)
+
+	sess := makeSession("a0eebc99-9c0b-4ef8-bb6d-6bb9bd380f01", now)
+	require.NoError(t, p.CreateSession(ctx, sess))
+
+	const msgID = "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380f10"
+	require.NoError(t, p.AppendMessage(ctx, sess.ID, makeMessage(msgID, 1, now)))
+
+	art1 := makeArtifact("a0eebc99-9c0b-4ef8-bb6d-6bb9bd380f21", msgID, sess.ID, now)
+	art2 := makeArtifact("a0eebc99-9c0b-4ef8-bb6d-6bb9bd380f22", msgID, sess.ID, now.Add(time.Second))
+	require.NoError(t, p.SaveArtifact(ctx, art1))
+	require.NoError(t, p.SaveArtifact(ctx, art2))
+
+	// GetArtifacts by message returns both, ordered by created_at.
+	byMsg, err := p.GetArtifacts(ctx, msgID)
+	require.NoError(t, err)
+	require.Len(t, byMsg, 2)
+	assert.Equal(t, art1.ID, byMsg[0].ID)
+	assert.Equal(t, art1.MIMEType, byMsg[0].MIMEType)
+	assert.Equal(t, art1.SizeBytes, byMsg[0].SizeBytes)
+	assert.Equal(t, art1.Filename, byMsg[0].Filename)
+	assert.Equal(t, art1.Checksum, byMsg[0].Checksum)
+	assert.Equal(t, art1.Metadata, byMsg[0].Metadata)
+	assert.Equal(t, art1.Width, byMsg[0].Width)
+	assert.Equal(t, art1.Height, byMsg[0].Height)
+
+	// GetSessionArtifacts returns all artifacts for the session.
+	bySession, err := p.GetSessionArtifacts(ctx, sess.ID)
+	require.NoError(t, err)
+	require.Len(t, bySession, 2)
+
+	// DeleteSessionArtifacts removes them all.
+	require.NoError(t, p.DeleteSessionArtifacts(ctx, sess.ID))
+	afterDelete, err := p.GetSessionArtifacts(ctx, sess.ID)
+	require.NoError(t, err)
+	assert.Empty(t, afterDelete)
+}
+
+func TestArtifacts_GetEmpty(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	p := newProvider(t)
+	ctx := context.Background()
+
+	byMsg, err := p.GetArtifacts(ctx, "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380fa0")
+	require.NoError(t, err)
+	assert.Empty(t, byMsg)
+
+	bySession, err := p.GetSessionArtifacts(ctx, "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380fa1")
+	require.NoError(t, err)
+	assert.Empty(t, bySession)
+}
+
+func TestDeleteSessionsBatch_Empty(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	p := newProvider(t)
+	ctx := context.Background()
+
+	// Empty slice is a no-op and must not error.
+	require.NoError(t, p.DeleteSessionsBatch(ctx, nil))
+	require.NoError(t, p.DeleteSessionsBatch(ctx, []string{}))
+}
