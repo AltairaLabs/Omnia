@@ -2437,6 +2437,11 @@ export interface AgentRuntimeSpec {
     /** clientToolTimeout is the max time to wait for client tool responses per turn.
      * Defaults to 60s. */
     clientToolTimeout?: string;
+    /** drainTimeout is how long the facade keeps serving active realtime calls
+     * after receiving SIGTERM (rollout/drain/scale-down) before cleanly tearing
+     * down the remainder. Duration format (e.g. "30s", "2m"). New calls stop
+     * immediately on drain regardless. Defaults to 30s when unset. */
+    drainTimeout?: string;
     /** extraEnv defines additional environment variables for the facade container.
      * Use this for debugging (e.g., LOG_LEVEL=debug) or custom configuration. */
     extraEnv?: {

@@ -1392,6 +1392,11 @@ func (in *FacadeConfig) DeepCopyInto(out *FacadeConfig) {
 		*out = new(int32)
 		**out = **in
 	}
+	if in.DrainTimeout != nil {
+		in, out := &in.DrainTimeout, &out.DrainTimeout
+		*out = new(string)
+		**out = **in
+	}
 	if in.Handler != nil {
 		in, out := &in.Handler, &out.Handler
 		*out = new(HandlerMode)

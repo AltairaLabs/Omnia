@@ -96,6 +96,13 @@ type FacadeConfig struct {
 	// +optional
 	Port *int32 `json:"port,omitempty"`
 
+	// drainTimeout is how long the facade keeps serving active realtime calls
+	// after receiving SIGTERM (rollout/drain/scale-down) before cleanly tearing
+	// down the remainder. Duration format (e.g. "30s", "2m"). New calls stop
+	// immediately on drain regardless. Defaults to 30s when unset.
+	// +optional
+	DrainTimeout *string `json:"drainTimeout,omitempty"`
+
 	// handler specifies the message handler mode.
 	// "echo" returns input messages back (for testing connectivity).
 	// "demo" provides streaming responses with simulated tool calls (for demos).
