@@ -92,6 +92,20 @@ type Metrics struct {
 	// AudioIngestDuration is the histogram of facade-receive→sink-send latency
 	// per inbound audio frame, in seconds.
 	AudioIngestDuration prometheus.Histogram
+
+	// Realtime blip-resume counters
+
+	// RealtimeSessionsParkedTotal is the total number of realtime sessions parked
+	// after a client disconnect, awaiting reconnect within the grace window.
+	RealtimeSessionsParkedTotal prometheus.Counter
+
+	// RealtimeReattachTotal is the total number of successful reattaches to
+	// a parked realtime session.
+	RealtimeReattachTotal prometheus.Counter
+
+	// RealtimeParkExpiredTotal is the total number of parked realtime sessions
+	// that expired without a client reconnecting within the grace window.
+	RealtimeParkExpiredTotal prometheus.Counter
 }
 
 // NewMetrics creates and registers all Prometheus metrics.
@@ -220,6 +234,25 @@ func NewMetrics(agentName, namespace string) *Metrics {
 			ConstLabels: labels,
 			// Sub-millisecond buckets for audio (10ms frame budgets are typical).
 			Buckets: []float64{0.0001, 0.0005, 0.001, 0.005, 0.01, 0.025, 0.05, 0.1},
+		}),
+
+		// Realtime blip-resume counters
+		RealtimeSessionsParkedTotal: promauto.NewCounter(prometheus.CounterOpts{
+			Name:        "omnia_facade_realtime_sessions_parked_total",
+			Help:        "Total number of realtime sessions parked after a client disconnect",
+			ConstLabels: labels,
+		}),
+
+		RealtimeReattachTotal: promauto.NewCounter(prometheus.CounterOpts{
+			Name:        "omnia_facade_realtime_reattach_total",
+			Help:        "Total number of successful reattaches to a parked realtime session",
+			ConstLabels: labels,
+		}),
+
+		RealtimeParkExpiredTotal: promauto.NewCounter(prometheus.CounterOpts{
+			Name:        "omnia_facade_realtime_park_expired_total",
+			Help:        "Total number of parked realtime sessions that expired without reconnect",
+			ConstLabels: labels,
 		}),
 	}
 }
@@ -388,4 +421,22 @@ func (m *Metrics) AudioSessionEnded() {
 // an inbound audio frame, in seconds.
 func (m *Metrics) AudioIngestLatency(seconds float64) {
 	m.AudioIngestDuration.Observe(seconds)
+}
+
+// RealtimeSessionParked records that a realtime session was parked after
+// a client disconnect, awaiting reconnect within the grace window.
+func (m *Metrics) RealtimeSessionParked() {
+	m.RealtimeSessionsParkedTotal.Inc()
+}
+
+// RealtimeSessionReattached records that a client successfully reattached
+// to a parked realtime session.
+func (m *Metrics) RealtimeSessionReattached() {
+	m.RealtimeReattachTotal.Inc()
+}
+
+// RealtimeSessionParkExpired records that a parked realtime session expired
+// without a client reconnecting within the grace window.
+func (m *Metrics) RealtimeSessionParkExpired() {
+	m.RealtimeParkExpiredTotal.Inc()
 }

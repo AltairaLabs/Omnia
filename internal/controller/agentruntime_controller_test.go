@@ -1320,7 +1320,7 @@ var _ = Describe("AgentRuntime Controller", func() {
 						Type: omniav1alpha1.SessionStoreTypeRedis,
 						TTL:  &sessionTTL,
 						StoreRef: &corev1.LocalObjectReference{
-							Name: "redis-secret",
+							Name: testRedisSecretName,
 						},
 					},
 					Providers: []omniav1alpha1.NamedProviderRef{

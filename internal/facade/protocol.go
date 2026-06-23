@@ -98,6 +98,10 @@ const (
 	MessageTypeUploadRequest MessageType = "upload_request"
 	MessageTypeToolCallAck   MessageType = "tool_call_ack"
 	MessageTypeToolCallNack  MessageType = "tool_call_nack"
+	// MessageTypeHangup is sent by the client to signal an intentional session
+	// end. The facade marks the connection as intentionalClose so that
+	// cleanupConnection does not park the realtime audio session.
+	MessageTypeHangup MessageType = "hangup"
 
 	// Bidirectional message types
 	// Server → Client: tool execution result (informational)
@@ -311,6 +315,10 @@ type ConnectionCapabilities struct {
 type ConnectedInfo struct {
 	// Capabilities describes the server's supported features.
 	Capabilities *ConnectionCapabilities `json:"capabilities,omitempty"`
+	// Resumed is true when this connection re-attached to a parked realtime
+	// session (T1 blip-resume) rather than starting fresh. The client keeps its
+	// sequence counter on resume and resets it on a fresh session.
+	Resumed bool `json:"resumed,omitempty"`
 }
 
 // Error codes.
@@ -387,6 +395,16 @@ func NewConnectedMessageWithCapabilities(sessionID string, capabilities *Connect
 		Connected: &ConnectedInfo{
 			Capabilities: capabilities,
 		},
+		Timestamp: time.Now(),
+	}
+}
+
+// NewConnectedMessageResumed creates a connected message carrying the resumed flag.
+func NewConnectedMessageResumed(sessionID string, capabilities *ConnectionCapabilities, resumed bool) *ServerMessage {
+	return &ServerMessage{
+		Type:      MessageTypeConnected,
+		SessionID: sessionID,
+		Connected: &ConnectedInfo{Capabilities: capabilities, Resumed: resumed},
 		Timestamp: time.Now(),
 	}
 }

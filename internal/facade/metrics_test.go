@@ -104,3 +104,10 @@ func TestNoOpMetrics_AudioMethods_ViaInterface(t *testing.T) {
 	metrics.AudioSessionEnded()
 	metrics.AudioIngestLatency(0.001)
 }
+
+func TestNoOpMetrics_RealtimeHooks(t *testing.T) {
+	var m ServerMetrics = &NoOpMetrics{}
+	m.RealtimeSessionParked()
+	m.RealtimeSessionReattached()
+	m.RealtimeSessionParkExpired()
+}

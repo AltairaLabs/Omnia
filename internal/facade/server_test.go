@@ -1710,3 +1710,22 @@ func TestServerWithAllowedOrigins(t *testing.T) {
 		t.Errorf("allowedOrigins[0] = %q, want https://example.com", server.allowedOrigins[0])
 	}
 }
+
+func TestServer_ResumeParamAndRegistryWired(t *testing.T) {
+	s := NewServer(DefaultServerConfig(), nil, nil, logr.Discard(),
+		WithPodAddr("10.0.0.9:8080"), WithGraceWindow(7*time.Second))
+	if s.parked == nil {
+		t.Fatalf("registry not initialised")
+	}
+	if s.graceWindow != 7*time.Second {
+		t.Fatalf("grace window not applied: %v", s.graceWindow)
+	}
+	r := httptest.NewRequest(http.MethodGet, "/ws?agent=a&namespace=n&binary=true&resume=sid-123", nil)
+	ac, err := s.resolveAgentContext(r)
+	if err != nil {
+		t.Fatalf("resolveAgentContext: %v", err)
+	}
+	if ac.resumeID != "sid-123" {
+		t.Fatalf("resume not parsed: %q", ac.resumeID)
+	}
+}

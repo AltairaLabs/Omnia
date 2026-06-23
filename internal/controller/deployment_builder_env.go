@@ -25,6 +25,10 @@ import (
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 )
 
+// secretKeyRedisURL is the key within a session storeRef secret that holds the
+// Redis connection URL (consumed by the facade's blip-resume route store).
+const secretKeyRedisURL = "url"
+
 // buildFacadeEnvVars creates environment variables for the facade container.
 func (r *AgentRuntimeReconciler) buildFacadeEnvVars(
 	agentRuntime *omniav1alpha1.AgentRuntime,
@@ -116,6 +120,36 @@ func (r *AgentRuntimeReconciler) buildFacadeEnvVars(
 		envVars = append(envVars, corev1.EnvVar{
 			Name:  EnvMgmtPlaneJWKSURL,
 			Value: r.MgmtPlaneJWKSURL,
+		})
+	}
+
+	// POD_IP via Downward API — used by the facade's blip-resume route store to
+	// record which pod holds a parked realtime session so peers can redirect
+	// reconnecting clients.
+	envVars = append(envVars, corev1.EnvVar{
+		Name: "POD_IP",
+		ValueFrom: &corev1.EnvVarSource{
+			FieldRef: &corev1.ObjectFieldSelector{
+				FieldPath: "status.podIP",
+			},
+		},
+	})
+
+	// OMNIA_ROUTE_REDIS_URL — the Redis URL used by the facade's blip-resume
+	// route store. Sourced from the same secret as the session store when a
+	// Redis-backed session store is configured; omitted otherwise so the facade
+	// falls back to the noop route store silently.
+	if agentRuntime.Spec.Session != nil &&
+		agentRuntime.Spec.Session.Type == omniav1alpha1.SessionStoreTypeRedis &&
+		agentRuntime.Spec.Session.StoreRef != nil {
+		envVars = append(envVars, corev1.EnvVar{
+			Name: "OMNIA_ROUTE_REDIS_URL",
+			ValueFrom: &corev1.EnvVarSource{
+				SecretKeyRef: &corev1.SecretKeySelector{
+					LocalObjectReference: *agentRuntime.Spec.Session.StoreRef,
+					Key:                  secretKeyRedisURL,
+				},
+			},
 		})
 	}
 

@@ -19,12 +19,16 @@ package main
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
+	"time"
 
 	"github.com/go-logr/logr"
+	"github.com/redis/go-redis/v9"
 
 	"github.com/altairalabs/omnia/internal/agent"
 	"github.com/altairalabs/omnia/internal/facade"
@@ -146,6 +150,28 @@ func buildWebSocketServer(
 			},
 		))
 	}
+	// Wire the route store for blip-resume: parked sessions need a Redis-backed
+	// hint so a peer can redirect reconnecting clients to the pod holding the
+	// open audio stream. When OMNIA_ROUTE_REDIS_URL is unset (non-audio or
+	// no Redis configured) the server falls back to noopRouteStore silently.
+	podAddr := net.JoinHostPort(os.Getenv("POD_IP"), strconv.Itoa(cfg.FacadePort))
+	serverOpts = append(serverOpts, facade.WithPodAddr(podAddr))
+	const defaultGraceWindow = 15 // seconds
+	graceWindowSecs := defaultGraceWindow
+	if gs := os.Getenv("OMNIA_GRACE_WINDOW_SECONDS"); gs != "" {
+		if n, parseErr := strconv.Atoi(gs); parseErr == nil && n > 0 {
+			graceWindowSecs = n
+		}
+	}
+	serverOpts = append(serverOpts, facade.WithGraceWindow(graceWindowDuration(graceWindowSecs)))
+	if routeURL := os.Getenv("OMNIA_ROUTE_REDIS_URL"); routeURL != "" {
+		ropts, parseErr := redis.ParseURL(routeURL)
+		if parseErr != nil {
+			return nil, nil, fmt.Errorf("parse route redis url: %w", parseErr)
+		}
+		serverOpts = append(serverOpts, facade.WithRouteStore(agent.NewRedisRouteStore(redis.NewClient(ropts))))
+	}
+
 	// Build the auth chain: data-plane validators (sharedToken in PR 2b;
 	// apiKeys/oidc/edgeTrust in PRs 2c–2e) followed by the mgmt-plane
 	// validator. Loading failures (malformed PEM, missing Secret data
@@ -360,4 +386,11 @@ func startA2AServer(
 	}
 
 	return a2aSrv, a2aHTTPServer, storeCleanup
+}
+
+// graceWindowDuration converts an integer number of seconds to a time.Duration.
+// Kept as a named function so it is easily testable and the call site in
+// buildWebSocketServer stays readable.
+func graceWindowDuration(secs int) time.Duration {
+	return time.Duration(secs) * time.Second
 }

@@ -55,12 +55,12 @@ func (s *Server) sendError(c *Connection, sessionID, code, message string) {
 }
 
 // sendConnected sends a connected message to a connection.
-func (s *Server) sendConnected(c *Connection, sessionID string) error {
+func (s *Server) sendConnected(c *Connection, sessionID string, resumed bool) error {
 	// Always send capabilities so clients know the max payload size
 	// for deciding when to use the upload mechanism
-	return s.sendMessage(c, NewConnectedMessageWithCapabilities(sessionID, &ConnectionCapabilities{
+	return s.sendMessage(c, NewConnectedMessageResumed(sessionID, &ConnectionCapabilities{
 		BinaryFrames:    c.binaryCapable,
 		MaxPayloadSize:  int(s.config.MaxMessageSize),
 		ProtocolVersion: BinaryVersion,
-	}))
+	}, resumed))
 }

@@ -210,6 +210,19 @@ type Server struct {
 	// holding a broad lock.
 	activeAudioSessions atomic.Int64
 
+	// routeStore is used by parked to persist/remove pod-address route hints.
+	// Defaults to noopRouteStore{} when not configured.
+	routeStore RouteStore
+	// podAddr is the "<podIP>:<port>" address for this pod, written into route
+	// hints so a redirecting peer knows where the parked session lives.
+	podAddr string
+	// graceWindow is how long a parked realtime session waits for a client
+	// to reconnect before being expired. Defaults to 15s.
+	graceWindow time.Duration
+	// parked holds in-flight realtime sessions that have disconnected but
+	// whose underlying audio stream is still alive (blip-resume).
+	parked *realtimeRegistry
+
 	mu           sync.RWMutex
 	connections  map[*websocket.Conn]*Connection
 	shutdown     bool
@@ -336,6 +349,26 @@ func WithAllowUnauthenticated(allow bool) ServerOption {
 	}
 }
 
+// WithRouteStore sets the RouteStore used by the parked session registry to
+// persist and remove pod-address route hints. Defaults to noopRouteStore{}.
+func WithRouteStore(rs RouteStore) ServerOption {
+	return func(s *Server) { s.routeStore = rs }
+}
+
+// WithPodAddr sets the "<podIP>:<port>" address for this pod. Written into
+// route hints when a realtime session is parked so a peer can redirect
+// reconnecting clients to the correct pod.
+func WithPodAddr(addr string) ServerOption {
+	return func(s *Server) { s.podAddr = addr }
+}
+
+// WithGraceWindow sets how long the parked session registry waits for a
+// client to reconnect before expiring the parked audio stream. When ≤0,
+// NewServer applies a conservative default of 15s.
+func WithGraceWindow(d time.Duration) ServerOption {
+	return func(s *Server) { s.graceWindow = d }
+}
+
 // NewServer creates a new WebSocket server.
 func NewServer(cfg ServerConfig, store session.Store, handler MessageHandler, log logr.Logger, opts ...ServerOption) *Server {
 	s := &Server{
@@ -367,6 +400,19 @@ func NewServer(cfg ServerConfig, store session.Store, handler MessageHandler, lo
 		ReadBufferSize:  cfg.ReadBufferSize,
 		WriteBufferSize: cfg.WriteBufferSize,
 		CheckOrigin:     s.checkOrigin,
+	}
+
+	// Initialise the parked session registry.
+	if s.routeStore == nil {
+		s.routeStore = noopRouteStore{}
+	}
+	if s.graceWindow <= 0 {
+		s.graceWindow = 15 * time.Second
+	}
+	s.parked = newRealtimeRegistry(s.routeStore, s.podAddr, s.graceWindow, s.log)
+	s.parked.onExpire = func(string) {
+		s.decrementAudioSessions(s.metrics)
+		s.metrics.RealtimeSessionParkExpired()
 	}
 
 	return s
@@ -522,6 +568,7 @@ type requestAgentContext struct {
 	namespace     string
 	workspaceName string
 	binaryCapable bool
+	resumeID      string // session_id the client asked to resume (from ?resume=)
 }
 
 type requestUserContext struct {
@@ -558,6 +605,7 @@ func (s *Server) resolveAgentContext(r *http.Request) (requestAgentContext, erro
 		namespace:     namespace,
 		workspaceName: workspaceName,
 		binaryCapable: r.URL.Query().Get("binary") == "true",
+		resumeID:      r.URL.Query().Get("resume"),
 	}, nil
 }
 
@@ -701,6 +749,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		namespace:     agentCtx.namespace,
 		workspaceName: agentCtx.workspaceName,
 		binaryCapable: agentCtx.binaryCapable,
+		resumeID:      agentCtx.resumeID,
 		userID:        userCtx.userID,
 		userRoles:     userCtx.userRoles,
 		userEmail:     userCtx.userEmail,
@@ -790,4 +839,12 @@ func (s *Server) ConnectionCount() int {
 // (otherwise the WebSocket upload_request flow fails with mediaStorage==nil).
 func (s *Server) HasMediaStorage() bool {
 	return s.mediaStorage != nil
+}
+
+// HasRouteStore reports whether a real RouteStore (not the no-op) is configured.
+// Used by wiring tests to assert that cmd/agent wires the Redis RouteStore
+// when OMNIA_ROUTE_REDIS_URL is set.
+func (s *Server) HasRouteStore() bool {
+	_, ok := s.routeStore.(noopRouteStore)
+	return !ok
 }

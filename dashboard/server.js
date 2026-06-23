@@ -28,6 +28,27 @@ const {
   handleServiceTokenRequest,
   parseAllowlist,
 } = require("./lib/service-token");
+const { resolveUpstreamTarget } = require("./lib/server-upstream");
+
+// Redis client for route-hint lookups (resume-based WS reconnect, Task 9).
+// Lazily created: only when OMNIA_ROUTE_REDIS_URL is set. When unset (dev /
+// test) the route resolver always falls back to the Service target.
+const OMNIA_ROUTE_REDIS_URL = process.env.OMNIA_ROUTE_REDIS_URL || "";
+let routeRedis = null;
+if (OMNIA_ROUTE_REDIS_URL) {
+  try {
+    const Redis = require("ioredis");
+    routeRedis = new Redis(OMNIA_ROUTE_REDIS_URL, {
+      lazyConnect: true,
+      enableOfflineQueue: false,
+      maxRetriesPerRequest: 1,
+    });
+    console.log(`> route-hint Redis configured`);
+  } catch (err) {
+    // Non-fatal: resume reconnects fall back to Service.
+    console.error(`[WS Proxy] Failed to init route-hint Redis: ${err.message}`);
+  }
+}
 
 // Refuse to start if we're configured to run unauthenticated in what looks
 // like production. Mirrors the Helm chart's render-time check
@@ -337,9 +358,26 @@ function sendError(clientSocket, message, code = "CONNECTION_ERROR") {
 
 /**
  * Proxy a WebSocket connection to an agent's facade.
+ *
+ * @param {WebSocket} clientSocket
+ * @param {string} namespace
+ * @param {string} name
+ * @param {Object} clientParams - forwarded query params
+ * @param {Object|null} req - original HTTP upgrade request
+ * @param {{ host: string, port: number }|null} podTarget - direct pod IP from
+ *   route hint (Task 9). When set, the proxy dials this host:port first; on
+ *   any connect error it retries against the Service target (stale-hint guard).
  */
-function proxyWebSocket(clientSocket, namespace, name, clientParams = {}, req = null) {
-  const upstreamUrl = getAgentWsUrl(namespace, name, clientParams);
+function proxyWebSocket(clientSocket, namespace, name, clientParams = {}, req = null, podTarget = null) {
+  const serviceUrl = getAgentWsUrl(namespace, name, clientParams);
+
+  // When a pod target is supplied (resume + route hint), dial the pod IP
+  // directly. Build an equivalent ws:// URL for that pod using the same
+  // query-string as the Service URL.
+  const upstreamUrl = podTarget
+    ? `ws://${podTarget.host}:${podTarget.port}/ws?${serviceUrl.split("?")[1] || ""}`
+    : serviceUrl;
+
   console.log(`[WS Proxy] Connecting to upstream: ${upstreamUrl}`);
   console.log(`[WS Proxy] SERVICE_DOMAIN=${SERVICE_DOMAIN}, DEFAULT_FACADE_PORT=${DEFAULT_FACADE_PORT}`);
 
@@ -427,6 +465,18 @@ function proxyWebSocket(clientSocket, namespace, name, clientParams = {}, req = 
       console.error(`[WS Proxy]   syscall: ${err.syscall}`);
       console.error(`[WS Proxy]   address: ${err.address}`);
       console.error(`[WS Proxy]   port: ${err.port}`);
+
+      // Stale route-hint guard (Task 9): if we dialled a pod IP directly and
+      // the connection failed before it was established, retry once against the
+      // Service target. Covers the window between pod eviction and Redis TTL
+      // expiry. Only retry on connection-level errors, not on protocol errors
+      // that happen after the connection is open.
+      if (podTarget && !upstreamConnected) {
+        console.warn(`[WS Proxy] Stale route hint for ${namespace}/${name} — retrying via Service`);
+        // Re-run the whole proxy logic against the Service (podTarget=null).
+        proxyWebSocket(clientSocket, namespace, name, clientParams, req, null);
+        return;
+      }
 
       // Provide more helpful error messages based on error type
       let errorMessage = `Failed to connect to agent ${name}`;
@@ -811,7 +861,9 @@ app.prepare().then(() => {
 
     if (agent) {
       const clientParams = parseQueryParams(req.url);
-      proxyWebSocket(ws, agent.namespace, agent.name, clientParams, req);
+      // omniaRouteTarget is set by the upgrade handler when a resume lookup
+      // resolves to a pod IP (Task 9). Falls back to null → Service target.
+      proxyWebSocket(ws, agent.namespace, agent.name, clientParams, req, req.omniaRouteTarget || null);
     } else if (isLspPath(pathname)) {
       // Parse query params for LSP context
       const params = parseQueryParams(req.url);
@@ -835,19 +887,39 @@ app.prepare().then(() => {
 
     if (agent) {
       console.log(`[WS Upgrade] Parsed agent: namespace=${agent.namespace}, name=${agent.name}`);
-      // Resolve the authenticated end-user id AND the workspace name BEFORE
-      // completing the upgrade (no WebSocket exists yet, so no client message
-      // can be missed while we await) and stash both on req for
-      // proxyWebSocket. Workspace resolution never rejects (resolveAgentWorkspace
-      // swallows lookup errors), so only an identity-resolve failure drops the
-      // upgrade — the workspace claim degrades to the namespace fallback.
+      // Resolve the authenticated end-user id, the workspace name, AND the pod
+      // route-hint BEFORE completing the upgrade (no WebSocket exists yet, so no
+      // client message can be missed while we await). All three are stashed on
+      // req for proxyWebSocket. Workspace resolution never rejects
+      // (resolveAgentWorkspace swallows lookup errors) and the route-hint
+      // resolver fails open to the Service target, so only an identity-resolve
+      // failure drops the upgrade.
+      const clientParams = parseQueryParams(req.url);
+      const serviceTarget = {
+        host: `${agent.name}.${agent.namespace}.${SERVICE_DOMAIN}`,
+        port: DEFAULT_FACADE_PORT,
+      };
       Promise.all([
         resolveEndUserId(req),
         resolveAgentWorkspace(agent.namespace, agent.name),
-      ]).then(([endUserId, workspace]) => {
+        resolveUpstreamTarget(
+          { resume: clientParams.resume || null, service: serviceTarget },
+          routeRedis,
+          { timeoutMs: 200 },
+        ),
+      ]).then(([endUserId, workspace, routeTarget]) => {
         req.omniaEndUserId = endUserId;
         if (typeof workspace === "string") {
           req.omniaWorkspace = workspace;
+        }
+        // Only stash a pod-IP target when it differs from the Service (i.e. a
+        // real route hint was returned). proxyWebSocket treats null as "use Service".
+        const isPodTarget =
+          routeTarget.host !== serviceTarget.host ||
+          routeTarget.port !== serviceTarget.port;
+        req.omniaRouteTarget = isPodTarget ? routeTarget : null;
+        if (req.omniaRouteTarget) {
+          console.log(`[WS Upgrade] Routing resume to pod: ${routeTarget.host}:${routeTarget.port}`);
         }
         wss.handleUpgrade(req, socket, head, (ws) => {
           wss.emit("connection", ws, req);

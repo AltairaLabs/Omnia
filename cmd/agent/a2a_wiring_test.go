@@ -56,7 +56,7 @@ func TestBuildA2AHandler_WiresTracingProvider(t *testing.T) {
 	inner := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
-	metrics := facadea2a.NewMetrics("probe", "ns")
+	metrics := facadea2a.NewMetrics(probeAgentName, "ns")
 	handler := buildA2AHandler(inner, metrics, provider, nil, logr.Discard())
 
 	req := httptest.NewRequest(http.MethodGet, "/a2a/test", nil)
@@ -106,7 +106,7 @@ func TestBuildA2AHandler_NoTracingProviderLeavesHandlerClean(t *testing.T) {
 		called = true
 		w.WriteHeader(http.StatusOK)
 	})
-	metrics := facadea2a.NewMetrics("probe", "ns")
+	metrics := facadea2a.NewMetrics(probeAgentName, "ns")
 	handler := buildA2AHandler(inner, metrics, nil, nil, logr.Discard())
 
 	req := httptest.NewRequest(http.MethodGet, "/a2a/test", nil)
@@ -139,7 +139,7 @@ func TestBuildA2AHandler_WiresAuthChain(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	metrics := facadea2a.NewMetrics("probe", "ns")
+	metrics := facadea2a.NewMetrics(probeAgentName, "ns")
 
 	t.Run("rejects invalid credential with 401", func(t *testing.T) {
 		innerCalled = false

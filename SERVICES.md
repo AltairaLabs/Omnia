@@ -85,12 +85,13 @@ This document maps every deployable service, how they communicate, and where to 
 
 | From | To | Protocol | Purpose |
 |------|----|----------|---------|
-| Dashboard | Facade | WebSocket | User chat messages, tool results |
+| Dashboard | Facade | WebSocket | User chat messages, tool results; realtime reconnect includes `resume=<session_id>` query param for blip-resume |
 | Dashboard | Operator | HTTP | CRUD for K8s resources |
 | Dashboard | LSP | WebSocket | Code intelligence for Arena |
 | Dashboard | Dev Console | WebSocket | Interactive agent testing |
 | Facade | Runtime | gRPC (bidirectional) | LLM conversation stream; duplex audio transport (persistent `Converse` stream opened per audio session, carrying `AudioInputChunk` inbound and `MediaChunk` outbound) |
 | Facade | Session API | HTTP | Session recording |
+| Facade | Redis | Direct | Realtime session route table (`rt:route:<session_id>`→podIP, TTL=grace period) for reconnect routing in multi-replica deployments |
 | Runtime | Session API | HTTP | Event recording |
 | Operator | K8s API | K8s client | CRD reconciliation |
 | Arena Controller | K8s API | K8s client | Job/worker pod management |
@@ -140,6 +141,14 @@ Browser ──WebSocket──▶ Facade ──gRPC──▶ Runtime ──HTTP�
 - **Eval Worker**: Inherits trace context from session events when available.
 - **Memory API**: Inherits trace context from HTTP requests. Records memory retrieval/extraction latency as spans.
 - **Operator, Compaction, Policy Proxy, LSP**: No OTel spans.
+
+### Metrics Inventory
+
+| Metric Name | Source | Type | Purpose |
+|-------------|--------|------|---------|
+| `omnia_facade_realtime_sessions_parked_total` | Facade | Counter | Realtime sessions parked on unintentional WebSocket close (blip-resume) |
+| `omnia_facade_realtime_reattach_total` | Facade | Counter | Successful realtime session reattaches via `resume=<session_id>` |
+| `omnia_facade_realtime_park_expired_total` | Facade | Counter | Parked realtime sessions expired before reattach |
 
 ## Key Architectural Rules
 

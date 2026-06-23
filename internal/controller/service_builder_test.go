@@ -273,7 +273,7 @@ func TestBuildSessionDeployment_PerWorkspaceRedisExistingSecret(t *testing.T) {
 		Redis: &omniav1alpha1.RedisConfig{
 			ExistingSecret: &omniav1alpha1.RedisSecretRef{
 				Name: "acme-session-redis",
-				Key:  "url",
+				Key:  testRedisSecretKey,
 			},
 		},
 	}
@@ -294,7 +294,7 @@ func TestBuildSessionDeployment_PerWorkspaceRedisExistingSecret(t *testing.T) {
 	require.NotNil(t, env.ValueFrom)
 	require.NotNil(t, env.ValueFrom.SecretKeyRef)
 	assert.Equal(t, "acme-session-redis", env.ValueFrom.SecretKeyRef.Name)
-	assert.Equal(t, "url", env.ValueFrom.SecretKeyRef.Key)
+	assert.Equal(t, testRedisSecretKey, env.ValueFrom.SecretKeyRef.Key)
 }
 
 func TestBuildMemoryDeployment(t *testing.T) {
@@ -539,7 +539,7 @@ func TestBuildMemoryDeployment_ProjectionIntervalAbsentByDefault(t *testing.T) {
 func TestBuildMemoryDeployment_RedisURLFromSecretMountsEnv(t *testing.T) {
 	sb := newTestServiceBuilder()
 	sb.MemoryRedisURL = "$(REDIS_URL)"
-	sb.MemoryRedisURLSecret = SecretKeyRef{Name: "redis-url-secret", Key: "url"}
+	sb.MemoryRedisURLSecret = SecretKeyRef{Name: "redis-url-secret", Key: testRedisSecretKey}
 	sg := newTestServiceGroup("default")
 
 	dep := sb.BuildMemoryDeployment("acme", "acme-ns", sg)
@@ -558,7 +558,7 @@ func TestBuildMemoryDeployment_RedisURLFromSecretMountsEnv(t *testing.T) {
 	require.NotNil(t, redisURLEnv.ValueFrom)
 	require.NotNil(t, redisURLEnv.ValueFrom.SecretKeyRef)
 	assert.Equal(t, "redis-url-secret", redisURLEnv.ValueFrom.SecretKeyRef.Name)
-	assert.Equal(t, "url", redisURLEnv.ValueFrom.SecretKeyRef.Key)
+	assert.Equal(t, testRedisSecretKey, redisURLEnv.ValueFrom.SecretKeyRef.Key)
 }
 
 // TestBuildMemoryDeployment_PerWorkspaceRedisURLOverridesOperator proves
@@ -593,14 +593,14 @@ func TestBuildMemoryDeployment_PerWorkspaceRedisURLOverridesOperator(t *testing.
 func TestBuildMemoryDeployment_PerWorkspaceRedisExistingSecret(t *testing.T) {
 	sb := newTestServiceBuilder()
 	sb.MemoryRedisURL = testOperatorRedisURL
-	sb.MemoryRedisURLSecret = SecretKeyRef{Name: "operator-secret", Key: "url"}
+	sb.MemoryRedisURLSecret = SecretKeyRef{Name: "operator-secret", Key: testRedisSecretKey}
 	sg := newTestServiceGroup("prod")
 	sg.Memory = &omniav1alpha1.MemoryServiceConfig{
 		Database: omniav1alpha1.DatabaseConfig{SecretRef: corev1.LocalObjectReference{Name: "memory-db"}},
 		Redis: &omniav1alpha1.RedisConfig{
 			ExistingSecret: &omniav1alpha1.RedisSecretRef{
 				Name: "acme-redis-creds",
-				Key:  "url",
+				Key:  testRedisSecretKey,
 			},
 		},
 	}
@@ -622,7 +622,7 @@ func TestBuildMemoryDeployment_PerWorkspaceRedisExistingSecret(t *testing.T) {
 	require.NotNil(t, env.ValueFrom.SecretKeyRef)
 	assert.Equal(t, "acme-redis-creds", env.ValueFrom.SecretKeyRef.Name,
 		"per-workspace Secret must override operator-wide Secret")
-	assert.Equal(t, "url", env.ValueFrom.SecretKeyRef.Key)
+	assert.Equal(t, testRedisSecretKey, env.ValueFrom.SecretKeyRef.Key)
 }
 
 // TestBuildMemoryDeployment_PerWorkspaceRedisHostSynthesisesURL proves
@@ -914,7 +914,7 @@ func TestBuildSessionDeployment_GroupRedisExistingSecret(t *testing.T) {
 	sb := newTestServiceBuilder()
 	sg := newTestServiceGroup("prod")
 	sg.Redis = &omniav1alpha1.RedisConfig{
-		ExistingSecret: &omniav1alpha1.RedisSecretRef{Name: "group-redis", Key: "url"},
+		ExistingSecret: &omniav1alpha1.RedisSecretRef{Name: "group-redis", Key: testRedisSecretKey},
 	}
 
 	dep := sb.BuildSessionDeployment("acme", "acme-ns", sg)
