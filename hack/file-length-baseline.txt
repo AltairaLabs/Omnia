@@ -24,4 +24,3 @@
 672 dashboard/src/lib/k8s/crd-operations.ts
 1573 dashboard/src/lib/mock-data.ts
 917 dashboard/src/types/arena.ts
-829 ee/pkg/evals/worker.go
