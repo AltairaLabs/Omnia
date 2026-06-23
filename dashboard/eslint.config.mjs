@@ -116,6 +116,7 @@ const eslintConfig = defineConfig([
       "sonarjs/pseudo-random": "off",
       "sonarjs/no-identical-functions": "off",
       "sonarjs/use-type-alias": "off",
+      "sonarjs/publicly-writable-directories": "off", // Test files use /tmp for fixtures
     },
   },
   // Mock data files - test fixtures

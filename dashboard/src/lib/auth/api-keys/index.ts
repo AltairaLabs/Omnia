@@ -30,12 +30,13 @@ import { headers } from "next/headers";
 import type { ApiKeyStore, ApiKey } from "./types";
 import { getMemoryApiKeyStore } from "./memory-store";
 import { getFileApiKeyStore } from "./file-store";
+import { getPostgresApiKeyStore } from "./postgres-store";
 import type { User } from "../types";
 
 /**
  * Store type for API keys.
  */
-export type ApiKeyStoreType = "memory" | "file";
+export type ApiKeyStoreType = "memory" | "file" | "postgres";
 
 /**
  * Configuration for API key authentication.
@@ -47,6 +48,8 @@ export interface ApiKeyConfig {
   storeType: ApiKeyStoreType;
   /** Path to keys file (when storeType=file) */
   filePath: string;
+  /** PostgreSQL connection string (when storeType=postgres) */
+  postgresUrl: string;
   /** Maximum keys per user (for memory store) */
   maxKeysPerUser: number;
   /** Default expiration in days (0 = never, for memory store) */
@@ -69,6 +72,10 @@ export function getApiKeyConfig(): ApiKeyConfig {
     enabled: process.env.OMNIA_AUTH_API_KEYS_ENABLED !== "false",
     storeType,
     filePath,
+    postgresUrl:
+      process.env.OMNIA_AUTH_API_KEYS_POSTGRES_URL ||
+      process.env.OMNIA_BUILTIN_POSTGRES_URL ||
+      "",
     maxKeysPerUser: Number.parseInt(
       process.env.OMNIA_AUTH_API_KEYS_MAX_PER_USER || "10",
       10
@@ -88,6 +95,7 @@ export function getApiKeyConfig(): ApiKeyConfig {
  * Store types:
  * - memory: In-memory store (default, for development)
  * - file: File-based store reading from mounted K8s Secret
+ * - postgres: PostgreSQL-backed store (production)
  */
 export function getApiKeyStore(): ApiKeyStore {
   const config = getApiKeyConfig();
@@ -95,6 +103,8 @@ export function getApiKeyStore(): ApiKeyStore {
   switch (config.storeType) {
     case "file":
       return getFileApiKeyStore(config.filePath);
+    case "postgres":
+      return getPostgresApiKeyStore(config.postgresUrl);
     case "memory":
     default:
       return getMemoryApiKeyStore();
