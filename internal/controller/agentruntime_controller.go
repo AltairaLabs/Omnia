@@ -38,7 +38,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
-	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 	eev1alpha1 "github.com/altairalabs/omnia/ee/api/v1alpha1"
@@ -879,21 +878,7 @@ func (r *AgentRuntimeReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			handler.EnqueueRequestsFromMapFunc(r.findAgentRuntimesForSecret),
 		)
 
-	// Only watch Gateway API resources when their CRDs are installed; watching
-	// an absent kind makes the cache crash-loop. When absent, log loudly at
-	// V(0) so the disabled external-endpoint feature is visible without debug
-	// logging — the operator must be restarted after installing the CRDs.
-	if r.gatewayAPIPresent {
-		b = b.Watches(
-			&gatewayv1.HTTPRoute{},
-			handler.EnqueueRequestsFromMapFunc(r.findAgentRuntimesForHTTPRoute),
-		).Watches(
-			&gatewayv1.Gateway{},
-			handler.EnqueueRequestsFromMapFunc(r.findAgentRuntimesForGateway),
-		)
-	} else {
-		ctrl.Log.WithName("setup").Info("gateway api not installed, external facade endpoints disabled; restart operator after installing gateway api crds")
-	}
+	b = r.registerFacadeWatches(b)
 
 	return b.Named("agentruntime").Complete(r)
 }

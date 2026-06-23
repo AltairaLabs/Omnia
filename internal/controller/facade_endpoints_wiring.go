@@ -21,7 +21,10 @@ import (
 
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
@@ -119,6 +122,24 @@ func (r *AgentRuntimeReconciler) findAgentRuntimesForHTTPRoute(ctx context.Conte
 		}
 	}
 	return reqs
+}
+
+// registerFacadeWatches adds the HTTPRoute and Gateway watches to the controller
+// builder when the Gateway API CRDs are present, or logs loudly at V(0) when
+// they are absent so the disabled external-endpoint feature is visible without
+// debug logging. The operator must be restarted after installing the CRDs.
+func (r *AgentRuntimeReconciler) registerFacadeWatches(b *builder.Builder) *builder.Builder {
+	if r.gatewayAPIPresent {
+		return b.Watches(
+			&gatewayv1.HTTPRoute{},
+			handler.EnqueueRequestsFromMapFunc(r.findAgentRuntimesForHTTPRoute),
+		).Watches(
+			&gatewayv1.Gateway{},
+			handler.EnqueueRequestsFromMapFunc(r.findAgentRuntimesForGateway),
+		)
+	}
+	ctrl.Log.WithName("setup").Info("gateway api not installed, external facade endpoints disabled; restart operator after installing gateway api crds")
+	return b
 }
 
 // findAgentRuntimesForGateway enqueues every AgentRuntime when a Gateway
