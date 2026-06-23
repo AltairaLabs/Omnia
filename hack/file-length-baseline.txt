@@ -28,5 +28,4 @@
 829 ee/pkg/evals/worker.go
 1123 internal/controller/workspace_controller.go
 946 internal/memory/api/handler.go
-1032 internal/memory/api/service.go
 1030 internal/session/api/handler.go
