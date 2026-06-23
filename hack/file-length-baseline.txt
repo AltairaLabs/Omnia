@@ -24,7 +24,6 @@
 672 dashboard/src/lib/k8s/crd-operations.ts
 1573 dashboard/src/lib/mock-data.ts
 917 dashboard/src/types/arena.ts
-896 ee/pkg/arena/queue/redis.go
 829 ee/pkg/evals/worker.go
 1123 internal/controller/workspace_controller.go
 946 internal/memory/api/handler.go
