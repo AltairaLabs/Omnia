@@ -35,3 +35,32 @@ Element.prototype.releasePointerCapture = vi.fn();
 
 // Mock scrollIntoView for Radix UI Select components
 Element.prototype.scrollIntoView = vi.fn();
+
+// Web Audio mocks (used by voice console hooks: useMicCapture / useAudioPlayback)
+class FakeAudioWorkletNode {
+  port = { onmessage: null as ((e: MessageEvent) => void) | null, postMessage: vi.fn() };
+  connect = vi.fn();
+  disconnect = vi.fn();
+}
+(globalThis as unknown as { AudioWorkletNode: unknown }).AudioWorkletNode = FakeAudioWorkletNode;
+
+class FakeAudioContext {
+  audioWorklet = { addModule: vi.fn().mockResolvedValue(undefined) };
+  createMediaStreamSource = vi.fn().mockReturnValue({ connect: vi.fn(), disconnect: vi.fn() });
+  createBuffer = vi.fn();
+  createBufferSource = vi.fn();
+  close = vi.fn().mockResolvedValue(undefined);
+  destination = {};
+  sampleRate = 24000;
+  state = "running";
+  currentTime = 0;
+}
+const FakeAudioContextSpy = vi.fn().mockImplementation(function (this: FakeAudioContext) {
+  return Object.assign(this, new FakeAudioContext());
+});
+(globalThis as unknown as { AudioContext: unknown }).AudioContext = FakeAudioContextSpy;
+
+Object.defineProperty(globalThis.navigator, "mediaDevices", {
+  configurable: true,
+  value: { getUserMedia: vi.fn().mockResolvedValue({ getTracks: () => [{ stop: vi.fn() }] }) },
+});
