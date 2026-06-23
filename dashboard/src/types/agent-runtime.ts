@@ -222,6 +222,40 @@ export interface DuplexConfig {
 }
 
 // Spec
+/** sharedToken auth: bearer token stored in a Secret. */
+export interface SharedTokenAuth {
+  secretRef: { name?: string };
+  trustEndUserHeader?: boolean;
+}
+
+/** apiKeys auth: per-caller API keys stored as Secrets. */
+export interface ApiKeysAuth {
+  defaultRole?: "viewer" | "editor" | "admin";
+  trustEndUserHeader?: boolean;
+}
+
+/** oidc auth: OIDC JWT validation. */
+export interface OidcAuth {
+  issuer: string;
+  audience: string;
+  claimMapping?: { subject?: string; role?: string; endUser?: string };
+}
+
+/** edgeTrust auth: edge-injected claim headers, no re-verification. */
+export interface EdgeTrustAuth {
+  headerMapping?: { subject?: string; role?: string; endUser?: string; email?: string };
+  claimsFromHeaders?: Record<string, string>;
+}
+
+/** externalAuth configures data-plane authentication for the agent facade. */
+export interface ExternalAuth {
+  allowManagementPlane?: boolean;
+  sharedToken?: SharedTokenAuth;
+  apiKeys?: ApiKeysAuth;
+  oidc?: OidcAuth;
+  edgeTrust?: EdgeTrustAuth;
+}
+
 export interface AgentRuntimeSpec {
   /** mode selects the runtime shape. Defaults to "agent" when unset. */
   mode?: AgentRuntimeMode;
@@ -246,6 +280,8 @@ export interface AgentRuntimeSpec {
   /** outputSchema is the JSON Schema the function's response is
    * validated against. Required when spec.mode === "function". */
   outputSchema?: Record<string, unknown>;
+  /** externalAuth configures authentication for external data-plane traffic. */
+  externalAuth?: ExternalAuth;
 }
 
 /** isFunctionMode returns true when the runtime is declared as a
@@ -345,6 +381,20 @@ export interface RolloutStatus {
   stepStartedAt?: string;
 }
 
+/** FacadeEndpoint is one externally-reachable URL derived from an HTTPRoute. */
+export interface FacadeEndpoint {
+  host: string;
+  path: string;
+  port: number;
+  protocol: "websocket" | "a2a" | "mcp" | "rest";
+  reason?: string;
+  routeName: string;
+  routeNamespace: string;
+  scheme: string;
+  url: string;
+  valid: boolean;
+}
+
 export interface AgentRuntimeStatus {
   phase?: AgentRuntimePhase;
   replicas?: ReplicaStatus;
@@ -352,6 +402,10 @@ export interface AgentRuntimeStatus {
   conditions?: Condition[];
   observedGeneration?: number;
   rollout?: RolloutStatus;
+  /** facade reports externally-reachable endpoints. Empty => in-cluster only. */
+  facade?: {
+    endpoints?: FacadeEndpoint[];
+  };
 }
 
 /** Get the default (or first) provider ref from an AgentRuntimeSpec */
