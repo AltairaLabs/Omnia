@@ -8,7 +8,6 @@
  * For production, use a persistent store like Redis or PostgreSQL.
  */
 
-import { randomBytes } from "node:crypto";
 import bcrypt from "bcryptjs";
 import {
   API_KEY_PREFIX,
@@ -19,24 +18,7 @@ import {
   type CreateApiKeyOptions,
   type NewApiKey,
 } from "./types";
-
-const BCRYPT_ROUNDS = 10;
-const KEY_LENGTH = 32; // 256 bits
-
-/**
- * Generate a secure random API key.
- */
-function generateKey(): string {
-  const randomPart = randomBytes(KEY_LENGTH).toString("base64url");
-  return `${API_KEY_PREFIX}${randomPart}`;
-}
-
-/**
- * Generate a unique ID.
- */
-function generateId(): string {
-  return randomBytes(16).toString("hex");
-}
+import { generateKey, generateId, keyPrefixOf, BCRYPT_ROUNDS } from "./key-utils";
 
 /**
  * In-memory API key store.
@@ -50,7 +32,7 @@ export class MemoryApiKeyStore implements ApiKeyStore {
   ): Promise<NewApiKey> {
     const key = generateKey();
     const keyHash = await bcrypt.hash(key, BCRYPT_ROUNDS);
-    const keyPrefix = key.substring(0, API_KEY_PREFIX.length + 8) + "...";
+    const kp = keyPrefixOf(key);
 
     const now = new Date();
     const expiresAt = options.expiresInDays
@@ -61,12 +43,13 @@ export class MemoryApiKeyStore implements ApiKeyStore {
       id: generateId(),
       userId,
       name: options.name,
-      keyPrefix,
+      keyPrefix: kp,
       keyHash,
       role: options.role || "viewer",
       expiresAt,
       createdAt: now,
       lastUsedAt: null,
+      workspaces: options.workspaces,
     };
 
     this.keys.set(apiKey.id, apiKey);

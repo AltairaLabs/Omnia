@@ -31,6 +31,8 @@ export interface ApiKey {
   createdAt: Date;
   /** Last usage timestamp */
   lastUsedAt: Date | null;
+  /** Workspace allowlist; null/undefined or empty = unrestricted (all of the user's workspaces). Enforcement is deferred (#1554 §G). */
+  workspaces?: string[];
 }
 
 /**
@@ -47,6 +49,8 @@ export interface ApiKeyInfo {
   lastUsedAt: Date | null;
   /** Whether the key is expired */
   isExpired: boolean;
+  /** Confine the key to this set of workspace names; omit for unrestricted. */
+  workspaces?: string[];
 }
 
 /**
@@ -67,6 +71,8 @@ export interface CreateApiKeyOptions {
   role?: UserRole;
   /** Expiration in days (null = never) */
   expiresInDays?: number | null;
+  /** Confine the key to this set of workspace names; omit for unrestricted. */
+  workspaces?: string[];
 }
 
 /**
@@ -122,5 +128,6 @@ export function toApiKeyInfo(key: ApiKey): ApiKeyInfo {
     createdAt: key.createdAt,
     lastUsedAt: key.lastUsedAt,
     isExpired: key.expiresAt !== null && key.expiresAt < new Date(),
+    workspaces: key.workspaces,
   };
 }

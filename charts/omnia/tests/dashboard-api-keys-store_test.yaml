@@ -1,0 +1,74 @@
+suite: dashboard API-key store wiring
+release:
+  name: omnia
+values:
+  - ../values-chart-tests.yaml
+templates:
+  - templates/dashboard/configmap.yaml
+  - templates/dashboard/deployment.yaml
+tests:
+  - it: defaults the store to memory in the configmap
+    template: templates/dashboard/configmap.yaml
+    set:
+      dashboard.enabled: true
+    asserts:
+      - equal:
+          path: data.OMNIA_AUTH_API_KEYS_STORE
+          value: "memory"
+
+  - it: renders the file path when store=file
+    template: templates/dashboard/configmap.yaml
+    set:
+      dashboard.enabled: true
+      dashboard.apiKeys.store: file
+      dashboard.apiKeys.keysSecret: my-keys
+    asserts:
+      - equal:
+          path: data.OMNIA_AUTH_API_KEYS_FILE_PATH
+          value: "/etc/omnia/api-keys/keys.json"
+
+  - it: mounts the keys Secret read-only when store=file
+    template: templates/dashboard/deployment.yaml
+    set:
+      dashboard.enabled: true
+      dashboard.apiKeys.store: file
+      dashboard.apiKeys.keysSecret: my-keys
+    asserts:
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: api-keys
+            secret:
+              secretName: my-keys
+              defaultMode: 256
+
+  - it: renders the postgres URL env when store=postgres
+    template: templates/dashboard/deployment.yaml
+    set:
+      dashboard.enabled: true
+      dashboard.apiKeys.store: postgres
+      dashboard.apiKeys.postgresUrl: postgres://x
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: OMNIA_AUTH_API_KEYS_POSTGRES_URL
+            value: postgres://x
+
+  - it: fails render when store=postgres without a URL
+    template: templates/dashboard/deployment.yaml
+    set:
+      dashboard.enabled: true
+      dashboard.apiKeys.store: postgres
+    asserts:
+      - failedTemplate:
+          errorPattern: "store=postgres requires"
+
+  - it: fails render when store=file without a keysSecret
+    template: templates/dashboard/deployment.yaml
+    set:
+      dashboard.enabled: true
+      dashboard.apiKeys.store: file
+    asserts:
+      - failedTemplate:
+          errorPattern: "store=file requires"

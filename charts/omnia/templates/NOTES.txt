@@ -40,6 +40,11 @@ Default admin credentials (change immediately!):
 {{- end }}
 {{- end }}
 
+API keys: store backend is "{{ .Values.dashboard.apiKeys.store }}".
+  - memory: keys are LOST on dashboard restart (dev only).
+  - postgres: durable; set dashboard.apiKeys.postgresUrl or existingPostgresSecret.
+  - file: read-only; provision keys via the Secret named in dashboard.apiKeys.keysSecret.
+
 {{- end }}
 
 === Operator ===
