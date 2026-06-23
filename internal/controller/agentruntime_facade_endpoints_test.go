@@ -90,7 +90,7 @@ var _ = Describe("AgentRuntime facade endpoints", func() {
 			DeferCleanup(func() { _ = k8sClient.Delete(ctx, route) })
 
 			r := &AgentRuntimeReconciler{Client: k8sClient, gatewayAPIPresent: true}
-			agent := wsAgent("my-agent", ns)
+			agent := wsAgent("my-agent")
 
 			Eventually(func(g Gomega) {
 				agent.Status.Facade = nil
@@ -134,7 +134,7 @@ var _ = Describe("AgentRuntime facade endpoints", func() {
 
 		It("clears status.facade when no route matches the agent", func() {
 			r := &AgentRuntimeReconciler{Client: k8sClient, gatewayAPIPresent: true}
-			agent := wsAgent("unrouted-agent", ns)
+			agent := wsAgent("unrouted-agent")
 			agent.Status.Facade = &omniav1alpha1.FacadeStatus{
 				Endpoints: []omniav1alpha1.FacadeEndpoint{{URL: "stale"}},
 			}
@@ -199,7 +199,7 @@ var _ = Describe("AgentRuntime facade endpoints", func() {
 	Context("when the Gateway API is absent (graceful degradation)", func() {
 		It("clears status.facade and returns no error", func() {
 			r := &AgentRuntimeReconciler{Client: k8sClient, gatewayAPIPresent: false}
-			agent := wsAgent("any-agent", ns)
+			agent := wsAgent("any-agent")
 			agent.Status.Facade = &omniav1alpha1.FacadeStatus{
 				Endpoints: []omniav1alpha1.FacadeEndpoint{{URL: "wss://stale.example.com/ws"}},
 			}

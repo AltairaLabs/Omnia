@@ -90,7 +90,7 @@ type GatewayResolver func(parent gatewayv1.ParentReference, routeNamespace strin
 // passed in (routes + resolve). Deterministically sorted.
 func BuildFacadeEndpoints(agent *omniav1alpha1.AgentRuntime, routes []gatewayv1.HTTPRoute, resolve GatewayResolver) []omniav1alpha1.FacadeEndpoint {
 	ports := facadePortProtocols(agent)
-	var out []omniav1alpha1.FacadeEndpoint
+	out := make([]omniav1alpha1.FacadeEndpoint, 0, len(routes))
 	for i := range routes {
 		out = append(out, endpointsForRoute(agent, &routes[i], ports, resolve)...)
 	}
@@ -188,7 +188,7 @@ func matchedProtocols(rule *gatewayv1.HTTPRouteRule, agentName string, ports map
 		if string(br.Name) != agentName || br.Port == nil {
 			continue
 		}
-		p := int32(*br.Port)
+		p := *br.Port
 		proto, ok := ports[p]
 		if !ok || seen[proto] {
 			continue

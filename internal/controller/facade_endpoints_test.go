@@ -8,6 +8,13 @@ import (
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 )
 
+const (
+	ns          = "default"
+	testPathWS  = "/ws"
+	testPathA2A = "/a2a"
+	testPathMCP = "/mcp"
+)
+
 func ptrI32(v int32) *int32 { return &v }
 
 func TestFacadePortProtocols(t *testing.T) {
@@ -43,9 +50,9 @@ func TestCanonicalFacadePath(t *testing.T) {
 		protocol string
 		want     string
 	}{
-		{omniav1alpha1.FacadeProtocolWebSocket, "/ws"},
-		{omniav1alpha1.FacadeProtocolA2A, "/a2a"},
-		{omniav1alpha1.FacadeProtocolMCP, "/mcp"},
+		{omniav1alpha1.FacadeProtocolWebSocket, testPathWS},
+		{omniav1alpha1.FacadeProtocolA2A, testPathA2A},
+		{omniav1alpha1.FacadeProtocolMCP, testPathMCP},
 		{omniav1alpha1.FacadeProtocolREST, ""},
 	}
 	for _, c := range cases {
@@ -77,13 +84,13 @@ func TestFacadePortProtocolsDefaultPorts(t *testing.T) {
 
 func TestJoinExternalPath(t *testing.T) {
 	cases := []struct{ prefix, suffix, want string }{
-		{"/", "/ws", "/ws"},
-		{"/my-agent", "/ws", "/my-agent/ws"},
-		{"/my-agent/", "/ws", "/my-agent/ws"},
+		{"/", testPathWS, testPathWS},
+		{"/my-agent", testPathWS, "/my-agent/ws"},
+		{"/my-agent/", testPathWS, "/my-agent/ws"},
 		{"/my-agent", "", "/my-agent"},
-		{"", "/mcp", "/mcp"},
-		{"", "", "/"},                       // both empty → root
-		{"no-slash", "/ws", "/no-slash/ws"}, // no leading slash → adds one
+		{"", testPathMCP, testPathMCP},
+		{"", "", "/"},                            // both empty → root
+		{"no-slash", testPathWS, "/no-slash/ws"}, // no leading slash → adds one
 	}
 	for _, c := range cases {
 		if got := joinExternalPath(c.prefix, c.suffix); got != c.want {
@@ -104,9 +111,9 @@ func gw(secure bool) *gatewayv1.Gateway {
 	return g
 }
 
-func hostRoute(name, ns, host, svc string, port int32, prefix string, rewrite bool) gatewayv1.HTTPRoute {
+func hostRoute(name, routeNS, host, svc string, port int32, prefix string, rewrite bool) gatewayv1.HTTPRoute {
 	pt := gatewayv1.PathMatchPathPrefix
-	pn := gatewayv1.PortNumber(port)
+	pn := port
 	rule := gatewayv1.HTTPRouteRule{
 		Matches: []gatewayv1.HTTPRouteMatch{{Path: &gatewayv1.HTTPPathMatch{Type: &pt, Value: &prefix}}},
 		BackendRefs: []gatewayv1.HTTPBackendRef{{BackendRef: gatewayv1.BackendRef{
@@ -123,7 +130,7 @@ func hostRoute(name, ns, host, svc string, port int32, prefix string, rewrite bo
 				Path: &gatewayv1.HTTPPathModifier{Type: mt, ReplacePrefixMatch: &rp},
 			}}}
 	}
-	r := gatewayv1.HTTPRoute{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns}}
+	r := gatewayv1.HTTPRoute{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: routeNS}}
 	r.Spec.Hostnames = []gatewayv1.Hostname{gatewayv1.Hostname(host)}
 	r.Spec.Rules = []gatewayv1.HTTPRouteRule{rule}
 	// Add a parentRef so routeScheme can attempt resolution.
@@ -131,7 +138,7 @@ func hostRoute(name, ns, host, svc string, port int32, prefix string, rewrite bo
 	return r
 }
 
-func wsAgent(name, ns string) *omniav1alpha1.AgentRuntime {
+func wsAgent(name string) *omniav1alpha1.AgentRuntime {
 	a := &omniav1alpha1.AgentRuntime{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns}}
 	a.Spec.Facade = omniav1alpha1.FacadeConfig{Type: omniav1alpha1.FacadeType("websocket"), Port: ptrI32(8080)}
 	return a
@@ -144,8 +151,8 @@ func resolverFor(g *gatewayv1.Gateway) GatewayResolver {
 // --- BuildFacadeEndpoints tests ---
 
 func TestBuildFacadeEndpoints_HostBasedSecure(t *testing.T) {
-	agent := wsAgent("my-agent", "default")
-	routes := []gatewayv1.HTTPRoute{hostRoute("r", "default", "agents.example.com", "my-agent", 8080, "/", false)}
+	agent := wsAgent("my-agent")
+	routes := []gatewayv1.HTTPRoute{hostRoute("r", ns, "agents.example.com", "my-agent", 8080, "/", false)}
 	eps := BuildFacadeEndpoints(agent, routes, resolverFor(gw(true)))
 	if len(eps) != 1 {
 		t.Fatalf("want 1 endpoint, got %d", len(eps))
@@ -157,8 +164,8 @@ func TestBuildFacadeEndpoints_HostBasedSecure(t *testing.T) {
 }
 
 func TestBuildFacadeEndpoints_PathPrefixWithoutRewriteInvalid(t *testing.T) {
-	agent := wsAgent("my-agent", "default")
-	routes := []gatewayv1.HTTPRoute{hostRoute("r", "default", "h", "my-agent", 8080, "/my-agent", false)}
+	agent := wsAgent("my-agent")
+	routes := []gatewayv1.HTTPRoute{hostRoute("r", ns, "h", "my-agent", 8080, "/my-agent", false)}
 	eps := BuildFacadeEndpoints(agent, routes, resolverFor(gw(false)))
 	if len(eps) != 1 || eps[0].Valid {
 		t.Fatalf("want 1 invalid endpoint, got %+v", eps)
@@ -169,8 +176,8 @@ func TestBuildFacadeEndpoints_PathPrefixWithoutRewriteInvalid(t *testing.T) {
 }
 
 func TestBuildFacadeEndpoints_PathPrefixWithRewriteValid(t *testing.T) {
-	agent := wsAgent("my-agent", "default")
-	routes := []gatewayv1.HTTPRoute{hostRoute("r", "default", "h", "my-agent", 8080, "/my-agent", true)}
+	agent := wsAgent("my-agent")
+	routes := []gatewayv1.HTTPRoute{hostRoute("r", ns, "h", "my-agent", 8080, "/my-agent", true)}
 	eps := BuildFacadeEndpoints(agent, routes, resolverFor(gw(true)))
 	if len(eps) != 1 || !eps[0].Valid {
 		t.Fatalf("want 1 valid endpoint, got %+v", eps)
@@ -178,16 +185,16 @@ func TestBuildFacadeEndpoints_PathPrefixWithRewriteValid(t *testing.T) {
 }
 
 func TestBuildFacadeEndpoints_NoMatchingBackend(t *testing.T) {
-	agent := wsAgent("my-agent", "default")
-	routes := []gatewayv1.HTTPRoute{hostRoute("r", "default", "h", "other-svc", 8080, "/", false)}
+	agent := wsAgent("my-agent")
+	routes := []gatewayv1.HTTPRoute{hostRoute("r", ns, "h", "other-svc", 8080, "/", false)}
 	if eps := BuildFacadeEndpoints(agent, routes, resolverFor(gw(false))); len(eps) != 0 {
 		t.Fatalf("want 0 endpoints, got %d", len(eps))
 	}
 }
 
 func TestBuildFacadeEndpoints_GatewayUnresolvable(t *testing.T) {
-	agent := wsAgent("my-agent", "default")
-	routes := []gatewayv1.HTTPRoute{hostRoute("r", "default", "h", "my-agent", 8080, "/", false)}
+	agent := wsAgent("my-agent")
+	routes := []gatewayv1.HTTPRoute{hostRoute("r", ns, "h", "my-agent", 8080, "/", false)}
 	noResolve := GatewayResolver(func(_ gatewayv1.ParentReference, _ string) (*gatewayv1.Gateway, bool) { return nil, false })
 	if eps := BuildFacadeEndpoints(agent, routes, noResolve); len(eps) != 0 {
 		t.Fatalf("unresolvable gateway should skip, got %d", len(eps))
@@ -196,7 +203,7 @@ func TestBuildFacadeEndpoints_GatewayUnresolvable(t *testing.T) {
 
 // --- multi-protocol + multi-host coverage ---
 
-func multiProtoAgent(name, ns string) *omniav1alpha1.AgentRuntime {
+func multiProtoAgent(name string) *omniav1alpha1.AgentRuntime {
 	a := &omniav1alpha1.AgentRuntime{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns}}
 	a.Spec.Facade = omniav1alpha1.FacadeConfig{
 		Type: omniav1alpha1.FacadeType("websocket"),
@@ -207,16 +214,16 @@ func multiProtoAgent(name, ns string) *omniav1alpha1.AgentRuntime {
 	return a
 }
 
-func makeFacadeRoute(name, ns, host, svc string, port int32, prefix string) gatewayv1.HTTPRoute {
+func makeFacadeRoute(name, host, svc string, port int32, prefix string) gatewayv1.HTTPRoute {
 	return hostRoute(name, ns, host, svc, port, prefix, false)
 }
 
 func TestBuildFacadeEndpoints_MultiProtocol(t *testing.T) {
-	agent := multiProtoAgent("my-agent", "default")
+	agent := multiProtoAgent("my-agent")
 	routes := []gatewayv1.HTTPRoute{
-		makeFacadeRoute("r-ws", "default", "agents.example.com", "my-agent", 8080, "/"),
-		makeFacadeRoute("r-a2a", "default", "agents.example.com", "my-agent", 9999, "/"),
-		makeFacadeRoute("r-mcp", "default", "agents.example.com", "my-agent", 9998, "/"),
+		makeFacadeRoute("r-ws", "agents.example.com", "my-agent", 8080, "/"),
+		makeFacadeRoute("r-a2a", "agents.example.com", "my-agent", 9999, "/"),
+		makeFacadeRoute("r-mcp", "agents.example.com", "my-agent", 9998, "/"),
 	}
 	eps := BuildFacadeEndpoints(agent, routes, resolverFor(gw(true)))
 	if len(eps) != 3 {
@@ -237,11 +244,11 @@ func TestBuildFacadeEndpoints_MultiProtocol(t *testing.T) {
 }
 
 func TestBuildFacadeEndpoints_MultiHostname(t *testing.T) {
-	agent := wsAgent("my-agent", "default")
+	agent := wsAgent("my-agent")
 
 	pt := gatewayv1.PathMatchPathPrefix
 	prefix := "/"
-	port := gatewayv1.PortNumber(int32(8080))
+	port := gatewayv1.PortNumber(8080)
 	rule := gatewayv1.HTTPRouteRule{
 		Matches: []gatewayv1.HTTPRouteMatch{{Path: &gatewayv1.HTTPPathMatch{Type: &pt, Value: &prefix}}},
 		BackendRefs: []gatewayv1.HTTPBackendRef{{BackendRef: gatewayv1.BackendRef{
@@ -249,7 +256,7 @@ func TestBuildFacadeEndpoints_MultiHostname(t *testing.T) {
 				Name: gatewayv1.ObjectName("my-agent"), Port: &port,
 			}}}},
 	}
-	r := gatewayv1.HTTPRoute{ObjectMeta: metav1.ObjectMeta{Name: "r", Namespace: "default"}}
+	r := gatewayv1.HTTPRoute{ObjectMeta: metav1.ObjectMeta{Name: "r", Namespace: ns}}
 	r.Spec.Hostnames = []gatewayv1.Hostname{"alpha.example.com", "beta.example.com"}
 	r.Spec.Rules = []gatewayv1.HTTPRouteRule{rule}
 	r.Spec.ParentRefs = []gatewayv1.ParentReference{{Name: "gw"}}
@@ -265,10 +272,10 @@ func TestBuildFacadeEndpoints_MultiHostname(t *testing.T) {
 }
 
 func TestBuildFacadeEndpoints_DeterministicOrder(t *testing.T) {
-	agent := wsAgent("my-agent", "default")
+	agent := wsAgent("my-agent")
 	routes := []gatewayv1.HTTPRoute{
-		makeFacadeRoute("r-z", "default", "z.example.com", "my-agent", 8080, "/"),
-		makeFacadeRoute("r-a", "default", "a.example.com", "my-agent", 8080, "/"),
+		makeFacadeRoute("r-z", "z.example.com", "my-agent", 8080, "/"),
+		makeFacadeRoute("r-a", "a.example.com", "my-agent", 8080, "/"),
 	}
 	eps := BuildFacadeEndpoints(agent, routes, resolverFor(gw(true)))
 	if len(eps) != 2 {

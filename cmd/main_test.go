@@ -19,6 +19,7 @@ package main
 import (
 	"testing"
 
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	"github.com/altairalabs/omnia/internal/controller"
@@ -92,10 +93,11 @@ func TestSplitAndTrim(t *testing.T) {
 }
 
 func TestSchemeKnowsGatewayAPI(t *testing.T) {
-	if !scheme.Recognizes(gatewayv1.SchemeGroupVersion.WithKind("HTTPRoute")) {
+	gvBase := schema.GroupVersion{Group: gatewayv1.GroupVersion.Group, Version: gatewayv1.GroupVersion.Version}
+	if !scheme.Recognizes(gvBase.WithKind("HTTPRoute")) {
 		t.Fatal("scheme does not recognize HTTPRoute")
 	}
-	if !scheme.Recognizes(gatewayv1.SchemeGroupVersion.WithKind("Gateway")) {
+	if !scheme.Recognizes(gvBase.WithKind("Gateway")) {
 		t.Fatal("scheme does not recognize Gateway")
 	}
 }

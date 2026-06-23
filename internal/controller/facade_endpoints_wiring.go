@@ -20,6 +20,7 @@ import (
 	"context"
 
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -36,7 +37,7 @@ import (
 // disabled until the operator is restarted with the CRDs present.
 func gatewayAPIAvailable(mapper apimeta.RESTMapper) bool {
 	_, err := mapper.RESTMapping(
-		gatewayv1.SchemeGroupVersion.WithKind("HTTPRoute").GroupKind(),
+		schema.GroupKind{Group: gatewayv1.GroupVersion.Group, Kind: "HTTPRoute"},
 		gatewayv1.GroupVersion.Version,
 	)
 	return err == nil
