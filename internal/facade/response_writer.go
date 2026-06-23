@@ -62,6 +62,11 @@ func (w *connResponseWriter) WriteError(code, message string) error {
 	return w.server.sendMessage(w.conn, NewErrorMessage(w.sessionID, code, message))
 }
 
+// WriteInterrupt tells the client to clear buffered audio (duplex barge-in).
+func (w *connResponseWriter) WriteInterrupt() error {
+	return w.server.sendMessage(w.conn, NewInterruptMessage(w.sessionID))
+}
+
 // WriteUploadReady sends upload URL information to the client.
 func (w *connResponseWriter) WriteUploadReady(uploadReady *UploadReadyInfo) error {
 	return w.server.sendMessage(w.conn, NewUploadReadyMessage(w.sessionID, uploadReady))

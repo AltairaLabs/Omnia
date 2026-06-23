@@ -652,6 +652,26 @@ type AudioRequirements struct {
 	// supportsSegmentSelection indicates if the provider supports selecting audio segments.
 	// +optional
 	SupportsSegmentSelection bool `json:"supportsSegmentSelection,omitempty"`
+
+	// channels is the audio channel count the client should capture/play (1=mono).
+	Channels *int32 `json:"channels,omitempty"`
+
+	// format is the PCM sample format the client should send, e.g. "pcm16".
+	Format string `json:"format,omitempty"`
+}
+
+// DuplexConfig declares that an agent supports realtime bidirectional
+// (duplex) media. The dashboard renders the voice "call" console instead of
+// the text composer when Enabled is true. Mode reserves video for the future.
+type DuplexConfig struct {
+	// enabled turns on the realtime voice console for this agent.
+	Enabled bool `json:"enabled,omitempty"`
+
+	// mode is the duplex modality. "audio" (default) streams voice only;
+	// "audiovideo" additionally streams the browser camera (not yet implemented).
+	// +kubebuilder:validation:Enum=audio;audiovideo
+	// +kubebuilder:default=audio
+	Mode string `json:"mode,omitempty"`
 }
 
 // DocumentRequirements defines requirements for document media.
@@ -1263,6 +1283,10 @@ type AgentRuntimeSpec struct {
 	// Use this to customize allowed file attachment types and size limits.
 	// +optional
 	Console *ConsoleConfig `json:"console,omitempty"`
+
+	// duplex configures the realtime voice/duplex console for this agent.
+	// +optional
+	Duplex *DuplexConfig `json:"duplex,omitempty"`
 
 	// a2a configures the A2A (Agent-to-Agent) protocol.
 	//

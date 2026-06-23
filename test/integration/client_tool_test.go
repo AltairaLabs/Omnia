@@ -77,6 +77,10 @@ func (m *concurrentMockWriter) WriteBinaryMediaChunk(_ [facade.MediaIDSize]byte,
 	return nil
 }
 
+func (m *concurrentMockWriter) WriteInterrupt() error {
+	return nil
+}
+
 func (m *concurrentMockWriter) getToolCalls() []*facade.ToolCallInfo {
 	m.mu.Lock()
 	defer m.mu.Unlock()

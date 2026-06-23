@@ -293,6 +293,11 @@ func (w *recordingResponseWriter) WriteBinaryMediaChunk(mediaID [MediaIDSize]byt
 	return w.inner.WriteBinaryMediaChunk(mediaID, sequence, isLast, mimeType, payload)
 }
 
+// WriteInterrupt delegates to inner without recording.
+func (w *recordingResponseWriter) WriteInterrupt() error {
+	return w.inner.WriteInterrupt()
+}
+
 // SupportsBinary delegates to inner.
 func (w *recordingResponseWriter) SupportsBinary() bool {
 	return w.inner.SupportsBinary()

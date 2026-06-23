@@ -113,6 +113,8 @@ const (
 	MessageTypeUploadReady    MessageType = "upload_ready"
 	MessageTypeUploadComplete MessageType = "upload_complete"
 	MessageTypeMediaChunk     MessageType = "media_chunk"
+	// MessageTypeInterrupt tells the client to clear buffered audio (barge-in).
+	MessageTypeInterrupt MessageType = "interrupt"
 )
 
 // ToolCallAckInfo contains acknowledgement of a client-side tool call.
@@ -428,6 +430,11 @@ func NewUploadCompleteMessage(sessionID string, uploadComplete *UploadCompleteIn
 		UploadComplete: uploadComplete,
 		Timestamp:      time.Now(),
 	}
+}
+
+// NewInterruptMessage builds an interrupt control message (duplex barge-in).
+func NewInterruptMessage(sessionID string) *ServerMessage {
+	return &ServerMessage{Type: MessageTypeInterrupt, SessionID: sessionID, Timestamp: time.Now()}
 }
 
 // NewMediaChunkMessage creates a new media chunk message for streaming media responses.

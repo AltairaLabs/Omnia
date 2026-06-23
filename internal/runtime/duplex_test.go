@@ -384,3 +384,20 @@ func TestForwardDuplexChunk_TextDelta(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, testDelta, chunk.Chunk.Content)
 }
+
+// TestForwardDuplexChunk_EmitsInterruption verifies that a barge-in chunk
+// (Interrupted=true) emits exactly one ServerMessage_Interruption before any
+// other message type, and that no other messages are sent.
+func TestForwardDuplexChunk_EmitsInterruption(t *testing.T) {
+	s := NewServer(WithLogger(logr.Discard()))
+	fake := &fakeConverseServer{
+		ctx:  context.Background(),
+		recv: make(chan *runtimev1.ClientMessage, 1),
+		sent: make(chan *runtimev1.ServerMessage, 4),
+	}
+	err := s.forwardDuplexChunk(fake, providers.StreamChunk{Interrupted: true})
+	require.NoError(t, err)
+	require.Len(t, fake.sent, 1)
+	_, ok := (<-fake.sent).Message.(*runtimev1.ServerMessage_Interruption)
+	require.True(t, ok, "expected ServerMessage_Interruption")
+}

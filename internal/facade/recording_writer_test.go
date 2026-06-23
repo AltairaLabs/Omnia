@@ -150,6 +150,13 @@ func (m *mockResponseWriter) WriteBinaryMediaChunk(_ [MediaIDSize]byte, _ uint32
 	return nil
 }
 
+func (m *mockResponseWriter) WriteInterrupt() error {
+	if m.writeErr != nil {
+		return m.writeErr
+	}
+	return nil
+}
+
 func (m *mockResponseWriter) SupportsBinary() bool {
 	return m.supportsBinary
 }

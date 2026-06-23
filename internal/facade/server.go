@@ -148,6 +148,8 @@ type ResponseWriter interface {
 	WriteToolResult(result *ToolResultInfo) error
 	// WriteError sends an error message.
 	WriteError(code, message string) error
+	// WriteInterrupt tells the client to clear buffered audio (duplex barge-in).
+	WriteInterrupt() error
 	// WriteUploadReady sends upload URL information to the client.
 	WriteUploadReady(uploadReady *UploadReadyInfo) error
 	// WriteUploadComplete notifies the client that an upload is complete.

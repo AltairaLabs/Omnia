@@ -133,6 +133,10 @@ export const MessageTypeUploadReady: MessageType = "upload_ready";
 export const MessageTypeUploadComplete: MessageType = "upload_complete";
 export const MessageTypeMediaChunk: MessageType = "media_chunk";
 /**
+ * MessageTypeInterrupt tells the client to clear buffered audio (barge-in).
+ */
+export const MessageTypeInterrupt: MessageType = "interrupt";
+/**
  * ToolCallAckInfo contains acknowledgement of a client-side tool call.
  * Sent by the client to indicate it received the tool call and is working on it.
  */

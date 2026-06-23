@@ -26,9 +26,10 @@
   - `tool_call` — client-side tool call (server-side tool calls are filtered)
   - `error` — error response
   - `media_chunk` — streaming audio/video (also used for duplex audio output)
+  - `interruption` — barge-in signal; relayed to the browser as an `interrupt` WebSocket message
 
 ## Outputs
-- **WebSocket** to browser/dashboard: ServerMessage (chunk, done, tool_call, error, connected, media_chunk, upload_ready, upload_complete)
+- **WebSocket** to browser/dashboard: ServerMessage (chunk, done, tool_call, error, connected, media_chunk, upload_ready, upload_complete, **interrupt** — signals barge-in; client should clear buffered audio)
 - **gRPC** to Runtime: ClientMessage (user message, client tool result, `DuplexStart` to open a duplex audio session, `AudioInputChunk` per audio frame)
 - **HTTP** to Session API: session create, message append, TTL refresh, `GET /api/v1/privacy-policy` (at connection time, cached 60s per WebSocket session)
 

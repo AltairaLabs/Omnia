@@ -151,6 +151,10 @@ export interface AgentRuntimeSpec {
     mediaRequirements?: {
       /** audio defines requirements for audio files. */
       audio?: {
+        /** channels is the audio channel count the client should capture/play (1=mono). */
+        channels?: number;
+        /** format is the PCM sample format the client should send, e.g. "pcm16". */
+        format?: string;
         /** maxDurationSeconds is the maximum audio duration. */
         maxDurationSeconds?: number;
         /** recommendedSampleRate is the optimal sample rate in Hz. */
@@ -204,6 +208,14 @@ export interface AgentRuntimeSpec {
         supportsSegmentSelection?: boolean;
       };
     };
+  };
+  /** duplex configures the realtime voice/duplex console for this agent. */
+  duplex?: {
+    /** enabled turns on the realtime voice console for this agent. */
+    enabled?: boolean;
+    /** mode is the duplex modality. "audio" (default) streams voice only;
+     * "audiovideo" additionally streams the browser camera (not yet implemented). */
+    mode?: "audio" | "audiovideo";
   };
   /** evals configures realtime eval execution for this agent's sessions. */
   evals?: {

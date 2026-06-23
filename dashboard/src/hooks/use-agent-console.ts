@@ -26,6 +26,8 @@ interface UseAgentConsoleReturn extends ConsoleState {
   clearMessages: () => void;
   approveToolCall: (callId: string, result: unknown) => void;
   rejectToolCall: (callId: string, reason: string) => void;
+  /** Inbound server-message handler — also wired to VoiceCallBar for duplex agents. */
+  handleMessage: (message: ServerMessage) => void;
 }
 
 /**
@@ -421,5 +423,6 @@ export function useAgentConsole({
     clearMessages,
     approveToolCall,
     rejectToolCall,
+    handleMessage,
   };
 }

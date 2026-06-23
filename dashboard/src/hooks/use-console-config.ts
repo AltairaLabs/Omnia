@@ -28,6 +28,8 @@ export interface ConsoleConfigResult {
   error: Error | null;
   /** Raw console config from agent spec (for debugging) */
   rawConfig: ConsoleConfig | undefined;
+  /** Realtime duplex config from the agent spec (drives the voice console). */
+  duplex?: { enabled: boolean; mode: "audio" | "audiovideo" };
 }
 
 /**
@@ -68,6 +70,11 @@ export function useConsoleConfig(
     );
   }, [providerType, agent?.spec?.console?.mediaRequirements]);
 
+  // Derive duplex config from agent spec
+  const duplex = agent?.spec?.duplex
+    ? { enabled: !!agent.spec.duplex.enabled, mode: (agent.spec.duplex.mode ?? "audio") as "audio" | "audiovideo" }
+    : undefined;
+
   return {
     config: attachmentConfig,
     mediaRequirements,
@@ -75,5 +82,6 @@ export function useConsoleConfig(
     isLoading: agentLoading || providerLoading,
     error: agentError,
     rawConfig: agent?.spec?.console,
+    duplex,
   };
 }

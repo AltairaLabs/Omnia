@@ -51,6 +51,7 @@ import { SessionApiService } from "./session-api-service";
 import { MemoryApiService } from "./memory-api-service";
 import { getWsProxyUrl } from "@/lib/config";
 import { getDeviceId } from "@/lib/device-id";
+import { encodeOmniMediaFrame, decodeOmniFrame, OMNI_MEDIA_CHUNK } from "./omni-binary";
 
 /**
  * Live agent connection using real WebSocket.
@@ -71,6 +72,8 @@ export class LiveAgentConnection implements AgentConnection {
   private reconnectDelay: number = RECONNECT_BASE_DELAY_MS;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private intentionalDisconnect = false;
+  private binaryMode = false;
+  private readonly binaryHandlers: Array<(payload: ArrayBuffer, sequence: number, isLast: boolean, sampleRate?: number) => void> = [];
 
   constructor(
     private readonly namespace: string,
@@ -126,7 +129,13 @@ export class LiveAgentConnection implements AgentConnection {
         wsUrl += `${sep}device_id=${encodeURIComponent(deviceId)}`;
       }
 
+      if (this.binaryMode) {
+        const sep = wsUrl.includes("?") ? "&" : "?";
+        wsUrl += `${sep}binary=true`;
+      }
+
       this.ws = new WebSocket(wsUrl);
+      this.ws.binaryType = "arraybuffer";
 
       this.ws.onopen = () => {
         this.reconnectDelay = RECONNECT_BASE_DELAY_MS;
@@ -134,13 +143,17 @@ export class LiveAgentConnection implements AgentConnection {
       };
 
       this.ws.onmessage = async (event) => {
+        if (event.data instanceof ArrayBuffer) {
+          this.handleBinary(event.data);
+          return;
+        }
         try {
           // Handle both string and Blob data
           let data: string;
           if (event.data instanceof Blob) {
             data = await event.data.text();
           } else {
-            data = event.data;
+            data = event.data as string;
           }
 
           const message: ServerMessage = JSON.parse(data);
@@ -251,6 +264,39 @@ export class LiveAgentConnection implements AgentConnection {
     this.ws.send(JSON.stringify(message));
   }
 
+  sendBinary(
+    payload: ArrayBuffer,
+    opts: { sequence: number; isLast: boolean; sampleRate: number; channels: number },
+  ): void {
+    if (this.ws?.readyState !== WebSocket.OPEN || !this.sessionId) return;
+    const frame = encodeOmniMediaFrame({
+      sessionId: this.sessionId,
+      sequence: opts.sequence,
+      isLast: opts.isLast,
+      mimeType: "audio/pcm",
+      sampleRate: opts.sampleRate,
+      channels: opts.channels,
+      codec: "pcm",
+      payload,
+    });
+    this.ws.send(frame);
+  }
+
+  onBinaryMedia(
+    handler: (payload: ArrayBuffer, sequence: number, isLast: boolean, sampleRate?: number) => void,
+  ): () => void {
+    this.binaryHandlers.push(handler);
+    return () => {
+      const i = this.binaryHandlers.indexOf(handler);
+      if (i !== -1) this.binaryHandlers.splice(i, 1);
+    };
+  }
+
+  startAudioSession(): void {
+    this.binaryMode = true;
+    this.connect();
+  }
+
   onMessage(handler: (message: ServerMessage) => void): () => void {
     this.messageHandlers.push(handler);
     return () => {
@@ -277,6 +323,13 @@ export class LiveAgentConnection implements AgentConnection {
 
   getMaxPayloadSize(): number | null {
     return this.maxPayloadSize;
+  }
+
+  private handleBinary(buf: ArrayBuffer): void {
+    const f = decodeOmniFrame(buf);
+    if (f.messageType !== OMNI_MEDIA_CHUNK) return;
+    const rate = typeof f.metadata.sample_rate === "number" ? f.metadata.sample_rate : undefined;
+    for (const h of this.binaryHandlers) h(f.payload, f.sequence, f.isLast, rate);
   }
 
   private setStatus(status: ConnectionStatus, error?: string): void {
