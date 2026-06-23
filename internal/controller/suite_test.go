@@ -24,8 +24,6 @@ import (
 	"strings"
 	"testing"
 
-	"golang.org/x/mod/modfile"
-
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
@@ -60,62 +58,24 @@ var (
 )
 
 // gatewayAPICRDDir resolves the sigs.k8s.io/gateway-api standard CRD directory
-// inside the local module cache. The module version is read from the repo's
-// go.mod (build info is empty for `go test` binaries) and the cache root from
-// `go env GOMODCACHE`. Returns "" when it can't be located so the dependent
-// specs can skip rather than fail the whole suite.
+// by asking the Go toolchain for the module's on-disk location via
+// `go list -m -f '{{.Dir}}' sigs.k8s.io/gateway-api`. Returns "" when the
+// directory cannot be located so dependent specs can skip rather than fail the
+// whole suite.
 func gatewayAPICRDDir() string {
-	const modPath = "sigs.k8s.io/gateway-api"
-	version := gatewayAPIModuleVersion()
-	if version == "" {
+	out, err := exec.Command("go", "list", "-m", "-f", "{{.Dir}}", "sigs.k8s.io/gateway-api").Output()
+	if err != nil {
 		return ""
 	}
-	modCache := goModCache()
-	if modCache == "" {
+	moduleDir := strings.TrimSpace(string(out))
+	if moduleDir == "" {
 		return ""
 	}
-	dir := filepath.Join(modCache, modPath+"@"+version, "config", "crd", "standard")
+	dir := filepath.Join(moduleDir, "config", "crd", "standard")
 	if _, err := os.Stat(dir); err != nil {
 		return ""
 	}
 	return dir
-}
-
-// gatewayAPIModuleVersion reads the pinned sigs.k8s.io/gateway-api version from
-// the repo's go.mod (../../go.mod relative to the controller package).
-func gatewayAPIModuleVersion() string {
-	data, err := os.ReadFile(filepath.Join("..", "..", "go.mod"))
-	if err != nil {
-		return ""
-	}
-	f, err := modfile.Parse("go.mod", data, nil)
-	if err != nil {
-		return ""
-	}
-	for _, req := range f.Require {
-		if req.Mod.Path == "sigs.k8s.io/gateway-api" {
-			return req.Mod.Version
-		}
-	}
-	return ""
-}
-
-// goModCache returns the module cache root via `go env GOMODCACHE` (the env var
-// is not set in the test process), falling back to $GOPATH/pkg/mod or
-// ~/go/pkg/mod.
-func goModCache() string {
-	if out, err := exec.Command("go", "env", "GOMODCACHE").Output(); err == nil {
-		if dir := strings.TrimSpace(string(out)); dir != "" {
-			return dir
-		}
-	}
-	if gp := os.Getenv("GOPATH"); gp != "" {
-		return filepath.Join(gp, "pkg", "mod")
-	}
-	if home, err := os.UserHomeDir(); err == nil {
-		return filepath.Join(home, "go", "pkg", "mod")
-	}
-	return ""
 }
 
 func TestControllers(t *testing.T) {
