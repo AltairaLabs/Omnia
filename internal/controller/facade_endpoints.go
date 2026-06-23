@@ -12,6 +12,11 @@ const (
 	defaultFacadePort = int32(8080)
 	defaultA2APort    = int32(9999)
 	defaultMCPPort    = int32(9998)
+
+	// URL scheme constants for facade endpoints.
+	schemeHTTPS = "https"
+	schemeWS    = "ws"
+	schemeWSS   = "wss"
 )
 
 // facadePortProtocols maps each externally-exposed Service port to its facade
@@ -254,14 +259,14 @@ func schemeFor(protocol string, secure bool) string {
 	switch protocol {
 	case omniav1alpha1.FacadeProtocolWebSocket:
 		if secure {
-			return "wss"
+			return schemeWSS
 		}
-		return "ws"
+		return schemeWS
 	default:
 		if secure {
-			return "https"
+			return schemeHTTPS
 		}
-		return "http"
+		return appProtocolHTTP
 	}
 }
 

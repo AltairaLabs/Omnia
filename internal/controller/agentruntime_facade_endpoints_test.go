@@ -39,7 +39,10 @@ import (
 // the wiring (reconcileFacadeEndpoints reads the cluster and the degradation
 // gate works).
 var _ = Describe("AgentRuntime facade endpoints", func() {
-	const ns = "default"
+	const (
+		ns              = "default"
+		testMappedAgent = "mapped-agent"
+	)
 
 	Context("when the Gateway API is present", func() {
 		BeforeEach(func() {
@@ -79,7 +82,7 @@ var _ = Describe("AgentRuntime facade endpoints", func() {
 						}},
 						BackendRefs: []gatewayv1.HTTPBackendRef{{BackendRef: gatewayv1.BackendRef{
 							BackendObjectReference: gatewayv1.BackendObjectReference{
-								Name: "my-agent",
+								Name: testFacadeAgentName,
 								Port: &pn,
 							},
 						}}},
@@ -90,7 +93,7 @@ var _ = Describe("AgentRuntime facade endpoints", func() {
 			DeferCleanup(func() { _ = k8sClient.Delete(ctx, route) })
 
 			r := &AgentRuntimeReconciler{Client: k8sClient, gatewayAPIPresent: true}
-			agent := wsAgent("my-agent")
+			agent := wsAgent(testFacadeAgentName)
 
 			Eventually(func(g Gomega) {
 				agent.Status.Facade = nil
@@ -111,7 +114,7 @@ var _ = Describe("AgentRuntime facade endpoints", func() {
 				Spec: gatewayv1.GatewaySpec{
 					GatewayClassName: "external",
 					Listeners: []gatewayv1.Listener{{
-						Name: "http", Port: 80, Protocol: gatewayv1.HTTPProtocolType,
+						Name: appProtocolHTTP, Port: 80, Protocol: gatewayv1.HTTPProtocolType,
 					}},
 				},
 			}
@@ -156,10 +159,10 @@ var _ = Describe("AgentRuntime facade endpoints", func() {
 
 			port := int32(8080)
 			agent := &omniav1alpha1.AgentRuntime{
-				ObjectMeta: metav1.ObjectMeta{Name: "mapped-agent", Namespace: mapNS.Name},
+				ObjectMeta: metav1.ObjectMeta{Name: testMappedAgent, Namespace: mapNS.Name},
 				Spec: omniav1alpha1.AgentRuntimeSpec{
 					PromptPackRef: omniav1alpha1.PromptPackRef{Name: "dummy"},
-					Facade:        omniav1alpha1.FacadeConfig{Type: omniav1alpha1.FacadeType("websocket"), Port: &port},
+					Facade:        omniav1alpha1.FacadeConfig{Type: omniav1alpha1.FacadeType(omniav1alpha1.FacadeProtocolWebSocket), Port: &port},
 				},
 			}
 			Expect(k8sClient.Create(ctx, agent)).To(Succeed())
@@ -172,7 +175,7 @@ var _ = Describe("AgentRuntime facade endpoints", func() {
 					Rules: []gatewayv1.HTTPRouteRule{{
 						BackendRefs: []gatewayv1.HTTPBackendRef{{BackendRef: gatewayv1.BackendRef{
 							BackendObjectReference: gatewayv1.BackendObjectReference{
-								Name: "mapped-agent", Port: &pn,
+								Name: testMappedAgent, Port: &pn,
 							},
 						}}},
 					}},
@@ -182,7 +185,7 @@ var _ = Describe("AgentRuntime facade endpoints", func() {
 
 			reqs := r.findAgentRuntimesForHTTPRoute(ctx, route)
 			Expect(reqs).To(ConsistOf(reconcile.Request{
-				NamespacedName: types.NamespacedName{Name: "mapped-agent", Namespace: mapNS.Name},
+				NamespacedName: types.NamespacedName{Name: testMappedAgent, Namespace: mapNS.Name},
 			}))
 
 			// A non-HTTPRoute object yields no requests (type-guard branch).
@@ -191,7 +194,7 @@ var _ = Describe("AgentRuntime facade endpoints", func() {
 			// A Gateway change enqueues all AgentRuntimes; the mapped agent is
 			// included.
 			Expect(r.findAgentRuntimesForGateway(ctx, &gatewayv1.Gateway{})).To(ContainElement(reconcile.Request{
-				NamespacedName: types.NamespacedName{Name: "mapped-agent", Namespace: mapNS.Name},
+				NamespacedName: types.NamespacedName{Name: testMappedAgent, Namespace: mapNS.Name},
 			}))
 		})
 	})

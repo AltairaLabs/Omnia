@@ -9,16 +9,17 @@ import (
 )
 
 const (
-	ns          = "default"
-	testPathWS  = "/ws"
-	testPathA2A = "/a2a"
-	testPathMCP = "/mcp"
+	ns                  = "default"
+	testPathWS          = "/ws"
+	testPathA2A         = "/a2a"
+	testPathMCP         = "/mcp"
+	testFacadeAgentName = "my-agent"
 )
 
 func ptrI32(v int32) *int32 { return &v }
 
 func TestFacadePortProtocols(t *testing.T) {
-	ws := omniav1alpha1.FacadeType("websocket")
+	ws := omniav1alpha1.FacadeType(omniav1alpha1.FacadeProtocolWebSocket)
 	agent := &omniav1alpha1.AgentRuntime{}
 	agent.Spec.Facade = omniav1alpha1.FacadeConfig{
 		Type: ws, Port: ptrI32(8080),
@@ -26,7 +27,11 @@ func TestFacadePortProtocols(t *testing.T) {
 		MCP: &omniav1alpha1.MCPConfig{Enabled: true, Port: ptrI32(9998)},
 	}
 	got := facadePortProtocols(agent)
-	want := map[int32]string{8080: "websocket", 9999: "a2a", 9998: "mcp"}
+	want := map[int32]string{
+		8080: omniav1alpha1.FacadeProtocolWebSocket,
+		9999: omniav1alpha1.FacadeProtocolA2A,
+		9998: omniav1alpha1.FacadeProtocolMCP,
+	}
 	if len(got) != len(want) {
 		t.Fatalf("got %v want %v", got, want)
 	}
@@ -71,7 +76,11 @@ func TestFacadePortProtocolsDefaultPorts(t *testing.T) {
 		MCP: &omniav1alpha1.MCPConfig{Enabled: true},
 	}
 	got := facadePortProtocols(agent)
-	want := map[int32]string{8080: "websocket", 9999: "a2a", 9998: "mcp"}
+	want := map[int32]string{
+		8080: omniav1alpha1.FacadeProtocolWebSocket,
+		9999: omniav1alpha1.FacadeProtocolA2A,
+		9998: omniav1alpha1.FacadeProtocolMCP,
+	}
 	if len(got) != len(want) {
 		t.Fatalf("got %v want %v", got, want)
 	}
@@ -111,7 +120,7 @@ func gw(secure bool) *gatewayv1.Gateway {
 	return g
 }
 
-func hostRoute(name, routeNS, host, svc string, port int32, prefix string, rewrite bool) gatewayv1.HTTPRoute {
+func hostRoute(name, host, svc string, port int32, prefix string, rewrite bool) gatewayv1.HTTPRoute {
 	pt := gatewayv1.PathMatchPathPrefix
 	pn := port
 	rule := gatewayv1.HTTPRouteRule{
@@ -130,7 +139,7 @@ func hostRoute(name, routeNS, host, svc string, port int32, prefix string, rewri
 				Path: &gatewayv1.HTTPPathModifier{Type: mt, ReplacePrefixMatch: &rp},
 			}}}
 	}
-	r := gatewayv1.HTTPRoute{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: routeNS}}
+	r := gatewayv1.HTTPRoute{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns}}
 	r.Spec.Hostnames = []gatewayv1.Hostname{gatewayv1.Hostname(host)}
 	r.Spec.Rules = []gatewayv1.HTTPRouteRule{rule}
 	// Add a parentRef so routeScheme can attempt resolution.
@@ -140,7 +149,7 @@ func hostRoute(name, routeNS, host, svc string, port int32, prefix string, rewri
 
 func wsAgent(name string) *omniav1alpha1.AgentRuntime {
 	a := &omniav1alpha1.AgentRuntime{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns}}
-	a.Spec.Facade = omniav1alpha1.FacadeConfig{Type: omniav1alpha1.FacadeType("websocket"), Port: ptrI32(8080)}
+	a.Spec.Facade = omniav1alpha1.FacadeConfig{Type: omniav1alpha1.FacadeType(omniav1alpha1.FacadeProtocolWebSocket), Port: ptrI32(8080)}
 	return a
 }
 
@@ -151,21 +160,21 @@ func resolverFor(g *gatewayv1.Gateway) GatewayResolver {
 // --- BuildFacadeEndpoints tests ---
 
 func TestBuildFacadeEndpoints_HostBasedSecure(t *testing.T) {
-	agent := wsAgent("my-agent")
-	routes := []gatewayv1.HTTPRoute{hostRoute("r", ns, "agents.example.com", "my-agent", 8080, "/", false)}
+	agent := wsAgent(testFacadeAgentName)
+	routes := []gatewayv1.HTTPRoute{hostRoute("r", "agents.example.com", testFacadeAgentName, 8080, "/", false)}
 	eps := BuildFacadeEndpoints(agent, routes, resolverFor(gw(true)))
 	if len(eps) != 1 {
 		t.Fatalf("want 1 endpoint, got %d", len(eps))
 	}
 	e := eps[0]
-	if e.URL != "wss://agents.example.com/ws" || e.Scheme != "wss" || e.Protocol != "websocket" || !e.Valid {
+	if e.URL != "wss://agents.example.com/ws" || e.Scheme != "wss" || e.Protocol != omniav1alpha1.FacadeProtocolWebSocket || !e.Valid {
 		t.Fatalf("unexpected endpoint: %+v", e)
 	}
 }
 
 func TestBuildFacadeEndpoints_PathPrefixWithoutRewriteInvalid(t *testing.T) {
-	agent := wsAgent("my-agent")
-	routes := []gatewayv1.HTTPRoute{hostRoute("r", ns, "h", "my-agent", 8080, "/my-agent", false)}
+	agent := wsAgent(testFacadeAgentName)
+	routes := []gatewayv1.HTTPRoute{hostRoute("r", "h", testFacadeAgentName, 8080, "/my-agent", false)}
 	eps := BuildFacadeEndpoints(agent, routes, resolverFor(gw(false)))
 	if len(eps) != 1 || eps[0].Valid {
 		t.Fatalf("want 1 invalid endpoint, got %+v", eps)
@@ -176,8 +185,8 @@ func TestBuildFacadeEndpoints_PathPrefixWithoutRewriteInvalid(t *testing.T) {
 }
 
 func TestBuildFacadeEndpoints_PathPrefixWithRewriteValid(t *testing.T) {
-	agent := wsAgent("my-agent")
-	routes := []gatewayv1.HTTPRoute{hostRoute("r", ns, "h", "my-agent", 8080, "/my-agent", true)}
+	agent := wsAgent(testFacadeAgentName)
+	routes := []gatewayv1.HTTPRoute{hostRoute("r", "h", testFacadeAgentName, 8080, "/my-agent", true)}
 	eps := BuildFacadeEndpoints(agent, routes, resolverFor(gw(true)))
 	if len(eps) != 1 || !eps[0].Valid {
 		t.Fatalf("want 1 valid endpoint, got %+v", eps)
@@ -185,16 +194,16 @@ func TestBuildFacadeEndpoints_PathPrefixWithRewriteValid(t *testing.T) {
 }
 
 func TestBuildFacadeEndpoints_NoMatchingBackend(t *testing.T) {
-	agent := wsAgent("my-agent")
-	routes := []gatewayv1.HTTPRoute{hostRoute("r", ns, "h", "other-svc", 8080, "/", false)}
+	agent := wsAgent(testFacadeAgentName)
+	routes := []gatewayv1.HTTPRoute{hostRoute("r", "h", "other-svc", 8080, "/", false)}
 	if eps := BuildFacadeEndpoints(agent, routes, resolverFor(gw(false))); len(eps) != 0 {
 		t.Fatalf("want 0 endpoints, got %d", len(eps))
 	}
 }
 
 func TestBuildFacadeEndpoints_GatewayUnresolvable(t *testing.T) {
-	agent := wsAgent("my-agent")
-	routes := []gatewayv1.HTTPRoute{hostRoute("r", ns, "h", "my-agent", 8080, "/", false)}
+	agent := wsAgent(testFacadeAgentName)
+	routes := []gatewayv1.HTTPRoute{hostRoute("r", "h", testFacadeAgentName, 8080, "/", false)}
 	noResolve := GatewayResolver(func(_ gatewayv1.ParentReference, _ string) (*gatewayv1.Gateway, bool) { return nil, false })
 	if eps := BuildFacadeEndpoints(agent, routes, noResolve); len(eps) != 0 {
 		t.Fatalf("unresolvable gateway should skip, got %d", len(eps))
@@ -206,7 +215,7 @@ func TestBuildFacadeEndpoints_GatewayUnresolvable(t *testing.T) {
 func multiProtoAgent(name string) *omniav1alpha1.AgentRuntime {
 	a := &omniav1alpha1.AgentRuntime{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns}}
 	a.Spec.Facade = omniav1alpha1.FacadeConfig{
-		Type: omniav1alpha1.FacadeType("websocket"),
+		Type: omniav1alpha1.FacadeType(omniav1alpha1.FacadeProtocolWebSocket),
 		Port: ptrI32(8080),
 		A2A:  &omniav1alpha1.A2AConfig{Enabled: true, Port: ptrI32(9999)},
 		MCP:  &omniav1alpha1.MCPConfig{Enabled: true, Port: ptrI32(9998)},
@@ -214,16 +223,16 @@ func multiProtoAgent(name string) *omniav1alpha1.AgentRuntime {
 	return a
 }
 
-func makeFacadeRoute(name, host, svc string, port int32, prefix string) gatewayv1.HTTPRoute {
-	return hostRoute(name, ns, host, svc, port, prefix, false)
+func makeFacadeRoute(name, host string, port int32) gatewayv1.HTTPRoute {
+	return hostRoute(name, host, testFacadeAgentName, port, "/", false)
 }
 
 func TestBuildFacadeEndpoints_MultiProtocol(t *testing.T) {
-	agent := multiProtoAgent("my-agent")
+	agent := multiProtoAgent(testFacadeAgentName)
 	routes := []gatewayv1.HTTPRoute{
-		makeFacadeRoute("r-ws", "agents.example.com", "my-agent", 8080, "/"),
-		makeFacadeRoute("r-a2a", "agents.example.com", "my-agent", 9999, "/"),
-		makeFacadeRoute("r-mcp", "agents.example.com", "my-agent", 9998, "/"),
+		makeFacadeRoute("r-ws", "agents.example.com", 8080),
+		makeFacadeRoute("r-a2a", "agents.example.com", 9999),
+		makeFacadeRoute("r-mcp", "agents.example.com", 9998),
 	}
 	eps := BuildFacadeEndpoints(agent, routes, resolverFor(gw(true)))
 	if len(eps) != 3 {
@@ -236,7 +245,7 @@ func TestBuildFacadeEndpoints_MultiProtocol(t *testing.T) {
 			t.Errorf("endpoint %s should be valid: %+v", e.Protocol, e)
 		}
 	}
-	for _, p := range []string{"websocket", "a2a", "mcp"} {
+	for _, p := range []string{omniav1alpha1.FacadeProtocolWebSocket, omniav1alpha1.FacadeProtocolA2A, omniav1alpha1.FacadeProtocolMCP} {
 		if !protos[p] {
 			t.Errorf("missing protocol %s", p)
 		}
@@ -244,7 +253,7 @@ func TestBuildFacadeEndpoints_MultiProtocol(t *testing.T) {
 }
 
 func TestBuildFacadeEndpoints_MultiHostname(t *testing.T) {
-	agent := wsAgent("my-agent")
+	agent := wsAgent(testFacadeAgentName)
 
 	pt := gatewayv1.PathMatchPathPrefix
 	prefix := "/"
@@ -253,7 +262,7 @@ func TestBuildFacadeEndpoints_MultiHostname(t *testing.T) {
 		Matches: []gatewayv1.HTTPRouteMatch{{Path: &gatewayv1.HTTPPathMatch{Type: &pt, Value: &prefix}}},
 		BackendRefs: []gatewayv1.HTTPBackendRef{{BackendRef: gatewayv1.BackendRef{
 			BackendObjectReference: gatewayv1.BackendObjectReference{
-				Name: gatewayv1.ObjectName("my-agent"), Port: &port,
+				Name: gatewayv1.ObjectName(testFacadeAgentName), Port: &port,
 			}}}},
 	}
 	r := gatewayv1.HTTPRoute{ObjectMeta: metav1.ObjectMeta{Name: "r", Namespace: ns}}
@@ -272,10 +281,10 @@ func TestBuildFacadeEndpoints_MultiHostname(t *testing.T) {
 }
 
 func TestBuildFacadeEndpoints_DeterministicOrder(t *testing.T) {
-	agent := wsAgent("my-agent")
+	agent := wsAgent(testFacadeAgentName)
 	routes := []gatewayv1.HTTPRoute{
-		makeFacadeRoute("r-z", "z.example.com", "my-agent", 8080, "/"),
-		makeFacadeRoute("r-a", "a.example.com", "my-agent", 8080, "/"),
+		makeFacadeRoute("r-z", "z.example.com", 8080),
+		makeFacadeRoute("r-a", "a.example.com", 8080),
 	}
 	eps := BuildFacadeEndpoints(agent, routes, resolverFor(gw(true)))
 	if len(eps) != 2 {
