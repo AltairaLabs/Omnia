@@ -166,6 +166,8 @@ export interface AudioRequirements {
   maxDurationSeconds?: number;
   /** Optimal sample rate in Hz */
   recommendedSampleRate?: number;
+  /** Number of audio channels (1 = mono, 2 = stereo) */
+  channels?: number;
   /** Whether the provider supports selecting audio segments */
   supportsSegmentSelection?: boolean;
 }
@@ -209,6 +211,14 @@ export interface ConsoleConfig {
  * tagged "function". */
 export type AgentRuntimeMode = "agent" | "function";
 
+/** Realtime duplex (voice / bidirectional streaming) configuration. */
+export interface DuplexConfig {
+  /** Whether duplex mode is enabled for this agent. */
+  enabled?: boolean;
+  /** Transport mode — "audio" (default) or future variants. */
+  mode?: string;
+}
+
 // Spec
 export interface AgentRuntimeSpec {
   /** mode selects the runtime shape. Defaults to "agent" when unset. */
@@ -223,6 +233,8 @@ export interface AgentRuntimeSpec {
   runtime?: RuntimeConfig;
   providers?: NamedProviderRef[];
   console?: ConsoleConfig;
+  /** Realtime duplex (voice) configuration. When enabled, the console renders VoiceCallBar. */
+  duplex?: DuplexConfig;
   evals?: EvalConfig;
   /** Progressive-delivery (canary) configuration. Present declares a rollout. */
   rollout?: RolloutConfig;

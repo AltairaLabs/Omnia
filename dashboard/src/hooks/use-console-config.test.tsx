@@ -317,6 +317,29 @@ describe("useConsoleConfig", () => {
     expect(result.current.mediaRequirements.image?.maxSizeBytes).toBe(50 * 1024 * 1024);
   });
 
+  it("exposes duplex config from the agent spec", async () => {
+    mockUseAgent.mockReturnValue({
+      data: { spec: { duplex: { enabled: true, mode: "audio" } } },
+      isLoading: false,
+      error: null,
+    });
+    const { result } = renderHook(() => useConsoleConfig("default", "voicebot"), { wrapper: TestWrapper });
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.duplex?.enabled).toBe(true);
+    expect(result.current.duplex?.mode).toBe("audio");
+  });
+
+  it("returns undefined duplex when agent has no duplex spec", async () => {
+    mockUseAgent.mockReturnValue({
+      data: mockAgentWithoutConsoleConfig,
+      isLoading: false,
+      error: null,
+    });
+    const { result } = renderHook(() => useConsoleConfig("default", "simple-agent"), { wrapper: TestWrapper });
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.duplex).toBeUndefined();
+  });
+
   it("should merge partial overrides with provider defaults", async () => {
     // Only override video, let other fields fall back to provider defaults
     const mockAgentWithPartialOverrides = {
