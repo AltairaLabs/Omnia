@@ -19,6 +19,8 @@ package main
 import (
 	"testing"
 
+	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
+
 	"github.com/altairalabs/omnia/internal/controller"
 )
 
@@ -86,5 +88,14 @@ func TestSplitAndTrim(t *testing.T) {
 				t.Fatalf("splitAndTrim(%q)[%d] = %q, want %q", c.in, i, got[i], c.want[i])
 			}
 		}
+	}
+}
+
+func TestSchemeKnowsGatewayAPI(t *testing.T) {
+	if !scheme.Recognizes(gatewayv1.SchemeGroupVersion.WithKind("HTTPRoute")) {
+		t.Fatal("scheme does not recognize HTTPRoute")
+	}
+	if !scheme.Recognizes(gatewayv1.SchemeGroupVersion.WithKind("Gateway")) {
+		t.Fatal("scheme does not recognize Gateway")
 	}
 }
