@@ -67,6 +67,7 @@ export class MemoryApiKeyStore implements ApiKeyStore {
       expiresAt,
       createdAt: now,
       lastUsedAt: null,
+      workspaces: options.workspaces,
     };
 
     this.keys.set(apiKey.id, apiKey);
