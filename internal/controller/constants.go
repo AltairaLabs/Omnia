@@ -126,6 +126,26 @@ const (
 	EnvMgmtPlaneJWKSURL = "OMNIA_MGMT_PLANE_JWKS_URL"
 )
 
+// Deployment-builder string constants. Extracted so the builder helper files
+// reference named values instead of repeated literals (goconst / SonarCloud
+// S1192). Values are unchanged from the inline literals they replace.
+const (
+	// portNameFacade is the container port name for the primary facade port.
+	portNameFacade = "facade"
+	// readyzPath is the path for readiness probes.
+	readyzPath = "/readyz"
+	// capabilityAll is the Linux capability set dropped by hardened containers.
+	capabilityAll = "ALL"
+	// promptNameDefault is the default prompt name injected into the runtime.
+	promptNameDefault = "default"
+	// envValueTrue is the string value for boolean-true environment variables.
+	envValueTrue = "true"
+	// envOmniaAgentName is the env var carrying the agent name (downward API).
+	envOmniaAgentName = "OMNIA_AGENT_NAME"
+	// envOmniaNamespace is the env var carrying the namespace (downward API).
+	envOmniaNamespace = "OMNIA_NAMESPACE"
+)
+
 // Eval-related constants.
 const (
 	// DefaultEvalWorkerImage is the default image for the arena-eval-worker container.
