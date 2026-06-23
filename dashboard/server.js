@@ -21,6 +21,7 @@ const next = require("next");
 const { WebSocket, WebSocketServer } = require("ws");
 const { checkAnonymousAuthGuard } = require("./lib/auth-boot-guard");
 const { loadSigningKey, mintToken } = require("./lib/mgmt-plane-token");
+const { resolveWorkspaceName } = require("./lib/workspace-resolver");
 const { serveJwks, JWKS_PATH } = require("./lib/jwks");
 const {
   SERVICE_TOKEN_PATH,
@@ -147,6 +148,36 @@ async function resolveEndUserId(req) {
     console.error(`[WS Proxy] end-user identity resolve failed: ${err.message}`);
     return null;
   }
+}
+
+// resolveAgentWorkspace computes the workspace NAME the facade expects in the
+// mgmt-plane JWT's `workspace` claim — the AgentRuntime's
+// `omnia.altairalabs.ai/workspace` label, falling back to the namespace's
+// label (mirrors Go pkg/k8s ResolveWorkspaceName). Returns the resolved name
+// (possibly "" when nothing is labelled, which the facade computes too) or
+// `undefined` on a lookup failure, so the caller can fall back to the
+// namespace as a best-effort last resort rather than dropping the upgrade.
+// Minting with the namespace (the old #1552 bug) 401s whenever name !=
+// namespace, so this resolution is required before minting.
+async function resolveAgentWorkspace(namespace, name) {
+  try {
+    return await resolveWorkspaceName(namespace, name);
+  } catch (err) {
+    console.error(
+      `[WS Proxy] workspace resolve failed for ${namespace}/${name}: ${err.message}`,
+    );
+    return undefined;
+  }
+}
+
+// workspaceClaimForRequest returns the workspace name stashed on the request
+// pre-upgrade. A resolved string (even "") is authoritative; an absent value
+// (resolution failed) falls back to the namespace.
+function workspaceClaimForRequest(req, namespace) {
+  if (req && typeof req.omniaWorkspace === "string") {
+    return req.omniaWorkspace;
+  }
+  return namespace;
 }
 
 // OMNIA_MGMT_PLANE_TOKEN_TTL_SECONDS overrides the mgmt-plane JWT TTL
@@ -326,7 +357,7 @@ function proxyWebSocket(clientSocket, namespace, name, clientParams = {}, req = 
         key: mgmtPlaneSigningKey,
         subject: mgmtPlaneSubjectForRequest(req),
         agent: name,
-        workspace: namespace,
+        workspace: workspaceClaimForRequest(req, namespace),
         ttlSeconds: MGMT_PLANE_TTL_SECONDS,
       });
       upstreamHeaders.Authorization = `Bearer ${token}`;
@@ -804,11 +835,20 @@ app.prepare().then(() => {
 
     if (agent) {
       console.log(`[WS Upgrade] Parsed agent: namespace=${agent.namespace}, name=${agent.name}`);
-      // Resolve the authenticated end-user id BEFORE completing the
-      // upgrade (no WebSocket exists yet, so no client message can be
-      // missed while we await) and stash it on req for proxyWebSocket.
-      resolveEndUserId(req).then((endUserId) => {
+      // Resolve the authenticated end-user id AND the workspace name BEFORE
+      // completing the upgrade (no WebSocket exists yet, so no client message
+      // can be missed while we await) and stash both on req for
+      // proxyWebSocket. Workspace resolution never rejects (resolveAgentWorkspace
+      // swallows lookup errors), so only an identity-resolve failure drops the
+      // upgrade — the workspace claim degrades to the namespace fallback.
+      Promise.all([
+        resolveEndUserId(req),
+        resolveAgentWorkspace(agent.namespace, agent.name),
+      ]).then(([endUserId, workspace]) => {
         req.omniaEndUserId = endUserId;
+        if (typeof workspace === "string") {
+          req.omniaWorkspace = workspace;
+        }
         wss.handleUpgrade(req, socket, head, (ws) => {
           wss.emit("connection", ws, req);
         });
