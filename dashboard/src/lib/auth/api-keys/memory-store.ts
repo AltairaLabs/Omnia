@@ -18,7 +18,7 @@ import {
   type CreateApiKeyOptions,
   type NewApiKey,
 } from "./types";
-import { generateKey, generateId, keyPrefix } from "./key-utils";
+import { generateKey, generateId, keyPrefixOf, BCRYPT_ROUNDS } from "./key-utils";
 
 /**
  * In-memory API key store.
@@ -31,8 +31,8 @@ export class MemoryApiKeyStore implements ApiKeyStore {
     options: CreateApiKeyOptions
   ): Promise<NewApiKey> {
     const key = generateKey();
-    const keyHash = await bcrypt.hash(key, 10);
-    const kp = keyPrefix(key);
+    const keyHash = await bcrypt.hash(key, BCRYPT_ROUNDS);
+    const kp = keyPrefixOf(key);
 
     const now = new Date();
     const expiresAt = options.expiresInDays

@@ -4,7 +4,10 @@
  * Stores API keys in a PostgreSQL database for durable, multi-replica deployments.
  * Keys are stored as bcrypt hashes — the plaintext key is never persisted.
  *
- * Schema (created via migration; this file only performs CRUD):
+ * The store self-initializes lazily: getApiKeyStore() is synchronous, so the
+ * table + indexes are created on first use via a memoized ensureInitialized().
+ *
+ * Schema:
  *
  *   CREATE TABLE api_keys (
  *     id          TEXT PRIMARY KEY,
@@ -20,7 +23,7 @@
  *   );
  */
 
-import type { Pool } from "pg";
+import { Pool } from "pg";
 import bcrypt from "bcryptjs";
 import {
   API_KEY_PREFIX,
@@ -31,7 +34,7 @@ import {
   type CreateApiKeyOptions,
   type NewApiKey,
 } from "./types";
-import { generateKey, generateId, keyPrefix, hashKey } from "./key-utils";
+import { generateKey, generateId, keyPrefixOf, BCRYPT_ROUNDS } from "./key-utils";
 
 /**
  * A single row as returned by Postgres.
@@ -69,17 +72,72 @@ function rowToApiKey(row: ApiKeyRow): ApiKey {
 
 /**
  * PostgreSQL API key store.
+ *
+ * Construct with a connection string (production) or pass a poolOverride
+ * (tests, e.g. pg-mem). The store lazily creates its schema on first use.
  */
 export class PostgresApiKeyStore implements ApiKeyStore {
-  constructor(private readonly pool: Pool) {}
+  private readonly pool: Pool;
+  private initPromise: Promise<void> | null = null;
+
+  constructor(connectionString: string, poolOverride?: Pool) {
+    this.pool =
+      poolOverride ??
+      new Pool({
+        connectionString,
+        max: 20,
+        idleTimeoutMillis: 30000,
+        connectionTimeoutMillis: 2000,
+      });
+  }
+
+  /**
+   * Create the api_keys table and its indexes if they do not exist.
+   * Safe to call repeatedly.
+   */
+  async initialize(): Promise<void> {
+    await this.pool.query(`
+      CREATE TABLE IF NOT EXISTS api_keys (
+        id           TEXT PRIMARY KEY,
+        user_id      TEXT        NOT NULL,
+        name         TEXT        NOT NULL,
+        key_prefix   TEXT        NOT NULL,
+        key_hash     TEXT        NOT NULL,
+        role         TEXT        NOT NULL,
+        expires_at   TIMESTAMPTZ,
+        created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+        last_used_at TIMESTAMPTZ,
+        workspaces   TEXT[]
+      )
+    `);
+    await this.pool.query(
+      `CREATE INDEX IF NOT EXISTS idx_api_keys_user ON api_keys(user_id)`
+    );
+    await this.pool.query(
+      `CREATE INDEX IF NOT EXISTS idx_api_keys_prefix ON api_keys(key_prefix)`
+    );
+  }
+
+  /**
+   * Run initialize() exactly once. Memoizes the init promise so concurrent
+   * callers share a single schema-creation pass.
+   */
+  private ensureInitialized(): Promise<void> {
+    if (!this.initPromise) {
+      this.initPromise = this.initialize();
+    }
+    return this.initPromise;
+  }
 
   async create(
     userId: string,
     options: CreateApiKeyOptions
   ): Promise<NewApiKey> {
+    await this.ensureInitialized();
+
     const key = generateKey();
-    const kp = keyPrefix(key);
-    const keyHash = await hashKey(key);
+    const kp = keyPrefixOf(key);
+    const keyHash = await bcrypt.hash(key, BCRYPT_ROUNDS);
     const id = generateId();
 
     const now = new Date();
@@ -105,6 +163,8 @@ export class PostgresApiKeyStore implements ApiKeyStore {
   }
 
   async listByUser(userId: string): Promise<ApiKeyInfo[]> {
+    await this.ensureInitialized();
+
     const result = await this.pool.query<ApiKeyRow>(
       `SELECT * FROM api_keys WHERE user_id = $1 ORDER BY created_at DESC`,
       [userId]
@@ -113,12 +173,13 @@ export class PostgresApiKeyStore implements ApiKeyStore {
   }
 
   async findByKey(key: string): Promise<ApiKey | null> {
+    await this.ensureInitialized();
+
     if (!key.startsWith(API_KEY_PREFIX)) {
       return null;
     }
 
     // Fetch all non-expired keys; bcrypt comparison happens in-process.
-    // In a high-traffic deployment you'd index on key_prefix and pre-filter.
     const result = await this.pool.query<ApiKeyRow>(
       `SELECT * FROM api_keys
        WHERE (expires_at IS NULL OR expires_at > now())`
@@ -135,6 +196,8 @@ export class PostgresApiKeyStore implements ApiKeyStore {
   }
 
   async delete(keyId: string, userId: string): Promise<boolean> {
+    await this.ensureInitialized();
+
     const result = await this.pool.query(
       `DELETE FROM api_keys WHERE id = $1 AND user_id = $2`,
       [keyId, userId]
@@ -143,6 +206,8 @@ export class PostgresApiKeyStore implements ApiKeyStore {
   }
 
   async updateLastUsed(keyId: string): Promise<void> {
+    await this.ensureInitialized();
+
     await this.pool.query(
       `UPDATE api_keys SET last_used_at = now() WHERE id = $1`,
       [keyId]
@@ -150,28 +215,36 @@ export class PostgresApiKeyStore implements ApiKeyStore {
   }
 
   async deleteExpired(): Promise<number> {
+    await this.ensureInitialized();
+
     const result = await this.pool.query(
       `DELETE FROM api_keys WHERE expires_at IS NOT NULL AND expires_at < now()`
     );
     return result.rowCount ?? 0;
   }
+
+  /**
+   * Close the underlying connection pool.
+   */
+  async close(): Promise<void> {
+    await this.pool.end();
+  }
 }
 
+// Singleton instance (recreated when the connection string changes).
+let store: PostgresApiKeyStore | null = null;
+let storeConnectionString: string | null = null;
+
 /**
- * The DDL to create the api_keys table.
- * Run once at startup or via a migration tool.
+ * Get the singleton Postgres store instance for the given connection string.
+ * A new instance is created if the connection string changes.
  */
-export const CREATE_API_KEYS_TABLE_SQL = `
-CREATE TABLE IF NOT EXISTS api_keys (
-  id           TEXT PRIMARY KEY,
-  user_id      TEXT        NOT NULL,
-  name         TEXT        NOT NULL,
-  key_prefix   TEXT        NOT NULL,
-  key_hash     TEXT        NOT NULL,
-  role         TEXT        NOT NULL,
-  expires_at   TIMESTAMPTZ,
-  created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
-  last_used_at TIMESTAMPTZ,
-  workspaces   TEXT[]
-)
-`.trim();
+export function getPostgresApiKeyStore(
+  connectionString: string
+): PostgresApiKeyStore {
+  if (!store || storeConnectionString !== connectionString) {
+    store = new PostgresApiKeyStore(connectionString);
+    storeConnectionString = connectionString;
+  }
+  return store;
+}

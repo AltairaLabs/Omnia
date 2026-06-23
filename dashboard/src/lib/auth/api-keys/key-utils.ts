@@ -1,13 +1,13 @@
 /**
- * Shared utilities for API key generation and hashing.
+ * Shared utilities for API key generation.
  * Used by both the memory store and the Postgres store.
  */
 
 import { randomBytes } from "node:crypto";
-import bcrypt from "bcryptjs";
 import { API_KEY_PREFIX } from "./types";
 
-const BCRYPT_ROUNDS = 10;
+/** bcrypt cost factor used when hashing API keys. */
+export const BCRYPT_ROUNDS = 10;
 const KEY_LENGTH = 32; // 256 bits
 
 /**
@@ -26,15 +26,8 @@ export function generateId(): string {
 }
 
 /**
- * Hash an API key with bcrypt.
- */
-export async function hashKey(key: string): Promise<string> {
-  return bcrypt.hash(key, BCRYPT_ROUNDS);
-}
-
-/**
  * Compute the display prefix for an API key (first N chars + "...").
  */
-export function keyPrefix(key: string): string {
+export function keyPrefixOf(key: string): string {
   return key.substring(0, API_KEY_PREFIX.length + 8) + "...";
 }
