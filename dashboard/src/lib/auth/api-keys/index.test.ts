@@ -26,6 +26,13 @@ describe("getApiKeyConfig", () => {
     process.env.OMNIA_BUILTIN_POSTGRES_URL = "postgres://builtin/users";
     expect(getApiKeyConfig().postgresUrl).toBe("postgres://builtin/users");
   });
+  it("allows key creation for memory and postgres, but not file", () => {
+    expect(getApiKeyConfig().allowCreate).toBe(true); // default memory
+    process.env.OMNIA_AUTH_API_KEYS_STORE = "postgres";
+    expect(getApiKeyConfig().allowCreate).toBe(true);
+    process.env.OMNIA_AUTH_API_KEYS_STORE = "file";
+    expect(getApiKeyConfig().allowCreate).toBe(false);
+  });
 });
 
 describe("getApiKeyStore dispatch", () => {

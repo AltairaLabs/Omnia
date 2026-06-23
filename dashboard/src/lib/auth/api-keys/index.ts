@@ -84,8 +84,8 @@ export function getApiKeyConfig(): ApiKeyConfig {
       process.env.OMNIA_AUTH_API_KEYS_DEFAULT_EXPIRATION || "90",
       10
     ),
-    // File store is read-only
-    allowCreate: storeType === "memory",
+    // Only the file store is read-only; memory and postgres support creation
+    allowCreate: storeType !== "file",
   };
 }
 
