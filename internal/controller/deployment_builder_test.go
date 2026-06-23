@@ -586,7 +586,7 @@ func TestBuildA2AConfigEnvVars_FullConfig(t *testing.T) {
 	taskTTL := "1h"
 	convTTL := "30m"
 	secretRef := &corev1.LocalObjectReference{Name: "auth-secret"}
-	redisSecretRef := &corev1.LocalObjectReference{Name: "redis-secret"}
+	redisSecretRef := &corev1.LocalObjectReference{Name: testRedisSecretName}
 
 	a2a := &omniav1alpha1.A2AConfig{
 		TaskTTL:         &taskTTL,
@@ -669,7 +669,7 @@ func countRedisURLEnvVars(envVars []corev1.EnvVar) int {
 }
 
 func TestBuildA2AConfigEnvVars_RedisURL_BothSet(t *testing.T) {
-	redisSecretRef := &corev1.LocalObjectReference{Name: "redis-secret"}
+	redisSecretRef := &corev1.LocalObjectReference{Name: testRedisSecretName}
 	a2a := &omniav1alpha1.A2AConfig{
 		TaskStore: &omniav1alpha1.A2ATaskStoreConfig{
 			Type:           omniav1alpha1.A2ATaskStoreRedis,
@@ -689,15 +689,15 @@ func TestBuildA2AConfigEnvVars_RedisURL_BothSet(t *testing.T) {
 			if ev.ValueFrom == nil || ev.ValueFrom.SecretKeyRef == nil {
 				t.Error("expected OMNIA_A2A_REDIS_URL from secret ref, got plain value")
 			}
-			if ev.ValueFrom != nil && ev.ValueFrom.SecretKeyRef.Name != "redis-secret" {
-				t.Errorf("secret name = %q, want %q", ev.ValueFrom.SecretKeyRef.Name, "redis-secret")
+			if ev.ValueFrom != nil && ev.ValueFrom.SecretKeyRef.Name != testRedisSecretName {
+				t.Errorf("secret name = %q, want %q", ev.ValueFrom.SecretKeyRef.Name, testRedisSecretName)
 			}
 		}
 	}
 }
 
 func TestBuildA2AConfigEnvVars_RedisURL_OnlySecretRef(t *testing.T) {
-	redisSecretRef := &corev1.LocalObjectReference{Name: "redis-secret"}
+	redisSecretRef := &corev1.LocalObjectReference{Name: testRedisSecretName}
 	a2a := &omniav1alpha1.A2AConfig{
 		TaskStore: &omniav1alpha1.A2ATaskStoreConfig{
 			Type:           omniav1alpha1.A2ATaskStoreRedis,
@@ -743,7 +743,7 @@ func TestBuildA2AConfigEnvVars_RedisURL_OnlyPlainURL(t *testing.T) {
 
 func TestBuildA2ADualProtocolEnvVars_RedisURL_BothSet(t *testing.T) {
 	r := &AgentRuntimeReconciler{}
-	redisSecretRef := &corev1.LocalObjectReference{Name: "redis-secret"}
+	redisSecretRef := &corev1.LocalObjectReference{Name: testRedisSecretName}
 	ar := &omniav1alpha1.AgentRuntime{}
 	ar.Spec.A2A = &omniav1alpha1.A2AConfig{
 		TaskStore: &omniav1alpha1.A2ATaskStoreConfig{
@@ -769,7 +769,7 @@ func TestBuildA2ADualProtocolEnvVars_RedisURL_BothSet(t *testing.T) {
 
 func TestBuildA2ADualProtocolEnvVars_RedisURL_OnlySecretRef(t *testing.T) {
 	r := &AgentRuntimeReconciler{}
-	redisSecretRef := &corev1.LocalObjectReference{Name: "redis-secret"}
+	redisSecretRef := &corev1.LocalObjectReference{Name: testRedisSecretName}
 	ar := &omniav1alpha1.AgentRuntime{}
 	ar.Spec.A2A = &omniav1alpha1.A2AConfig{
 		TaskStore: &omniav1alpha1.A2ATaskStoreConfig{

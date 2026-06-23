@@ -28,10 +28,11 @@ import (
 )
 
 const (
-	testRedisSecretKey = "url"
-	testEvalAgentName  = "agent"
-	testStaleGroup     = "gone"
-	testWISA           = "omnia-runtime-wi"
+	testRedisSecretKey  = "url"
+	testRedisSecretName = "redis-secret"
+	testEvalAgentName   = "agent"
+	testStaleGroup      = "gone"
+	testWISA            = "omnia-runtime-wi"
 )
 
 func newEvalWorkerTestReconciler() *AgentRuntimeReconciler {

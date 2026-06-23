@@ -10,6 +10,21 @@ or `api/proto/`, add an entry below with the date, affected API, and reason.
 
 ## Unreleased
 
+### Added (WebSocket: realtime blip-resume — `resume` query param + `connected.resumed` field)
+
+- **`?resume=<session_id>` WebSocket connect query parameter**: clients that experience
+  a transient network disconnect can re-attach to a parked realtime session by appending
+  `?resume=<session_id>` to the WebSocket connect URL. The facade looks up the parked
+  session and re-attaches the client without starting a new session. If the session is not
+  found or has already expired, the facade falls back to opening a fresh session (identical
+  to a cold connect).
+- **`connected.resumed` boolean** (`internal/facade/protocol.go: ConnectedInfo`): new
+  optional field on the server→client `connected` message. Set to `true` when the
+  connection successfully re-attached to a parked realtime session via `?resume=`; absent
+  or `false` on a normal cold connect. Clients should use this flag to decide whether to
+  restore in-flight UI state (e.g. keep the audio buffer, preserve sequence counters) or
+  reset to a fresh-session baseline.
+
 ### Added (WebSocket: `interrupt` server message + gRPC `Interruption` — realtime voice barge-in)
 
 - **gRPC `Interruption` ServerMessage** (`pkg/runtime/v1`): new oneof variant emitted by the runtime when a barge-in is detected during a duplex audio session. The facade's `relayOut` loop handles it.

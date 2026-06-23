@@ -113,7 +113,7 @@ func (s *Server) processMessage(ctx context.Context, c *Connection, msg *ClientM
 
 	// Send connected message if this is a new session
 	if msg.SessionID == "" {
-		if err := s.sendConnected(c, sessionID); err != nil {
+		if err := s.sendConnected(c, sessionID, false); err != nil {
 			return err
 		}
 	}

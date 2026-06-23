@@ -62,13 +62,22 @@ const RECONNECT_BASE_DELAY_MS = 1000;
 /** Maximum reconnection delay in milliseconds */
 const RECONNECT_MAX_DELAY_MS = 30000;
 
+/** Info delivered to onConnected callbacks */
+export interface ConnectedEventInfo {
+  sessionId: string;
+  resumed: boolean;
+}
+
 export class LiveAgentConnection implements AgentConnection {
   private status: ConnectionStatus = "disconnected";
   private sessionId: string | null = null;
+  /** Last session id seen from a connected message; survives the close so resume= can be sent. */
+  private lastSessionId: string | null = null;
   private maxPayloadSize: number | null = null;
   private ws: WebSocket | null = null;
   private readonly messageHandlers: Array<(message: ServerMessage) => void> = [];
   private readonly statusHandlers: Array<(status: ConnectionStatus, error?: string) => void> = [];
+  private readonly connectedHandlers: Array<(info: ConnectedEventInfo) => void> = [];
   private reconnectDelay: number = RECONNECT_BASE_DELAY_MS;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private intentionalDisconnect = false;
@@ -96,10 +105,45 @@ export class LiveAgentConnection implements AgentConnection {
     });
   }
 
+  /**
+   * Assembles the WebSocket URL from a resolved proxy URL and connection mode flags.
+   * Extracted so URL assembly (including resume= injection) is unit-testable.
+   */
+  private buildWsUrl(opts: { proxy: string | null; direct: boolean }): string {
+    const protocol = typeof globalThis !== "undefined" && globalThis.location?.protocol === "https:" ? "wss:" : "ws:";
+    const { proxy, direct } = opts;
+
+    let wsUrl: string;
+    if (proxy && direct) {
+      wsUrl = `${proxy}/ws?agent=${encodeURIComponent(this.agentName)}&namespace=${encodeURIComponent(this.namespace)}`;
+    } else if (proxy) {
+      wsUrl = `${proxy}/api/agents/${this.namespace}/${this.agentName}/ws`;
+    } else {
+      const wsHost = typeof globalThis !== "undefined" && globalThis.location ? globalThis.location.host : "localhost:3002";
+      wsUrl = `${protocol}//${wsHost}/api/agents/${this.namespace}/${this.agentName}/ws`;
+    }
+
+    const deviceId = getDeviceId();
+    if (deviceId) {
+      const sep = wsUrl.includes("?") ? "&" : "?";
+      wsUrl += `${sep}device_id=${encodeURIComponent(deviceId)}`;
+    }
+
+    if (this.binaryMode) {
+      const sep = wsUrl.includes("?") ? "&" : "?";
+      wsUrl += `${sep}binary=true`;
+    }
+
+    if (this.binaryMode && this.lastSessionId) {
+      const sep = wsUrl.includes("?") ? "&" : "?";
+      wsUrl += `${sep}resume=${encodeURIComponent(this.lastSessionId)}`;
+    }
+
+    return wsUrl;
+  }
+
   private async initializeConnection(): Promise<void> {
     try {
-      const protocol = typeof globalThis !== "undefined" && globalThis.location?.protocol === "https:" ? "wss:" : "ws:";
-
       // Check build-time env var first, then fall back to runtime config
       let wsProxyUrl = process.env.NEXT_PUBLIC_WS_PROXY_URL;
       if (!wsProxyUrl) {
@@ -108,31 +152,7 @@ export class LiveAgentConnection implements AgentConnection {
       }
       const wsDirectMode = process.env.NEXT_PUBLIC_WS_DIRECT_MODE === "true";
 
-      const deviceId = getDeviceId();
-
-      let wsUrl: string;
-      if (wsProxyUrl && wsDirectMode) {
-        // Direct mode: connect directly to the agent's /ws endpoint (for E2E testing)
-        // Include agent and namespace as query params (required by facade server)
-        wsUrl = `${wsProxyUrl}/ws?agent=${encodeURIComponent(this.agentName)}&namespace=${encodeURIComponent(this.namespace)}`;
-      } else if (wsProxyUrl) {
-        // Configured proxy URL (dev mode or edge case without ingress)
-        wsUrl = `${wsProxyUrl}/api/agents/${this.namespace}/${this.agentName}/ws`;
-      } else {
-        // Use relative URL - works with gateway/ingress routing in production
-        const wsHost = typeof globalThis !== "undefined" && globalThis.location ? globalThis.location.host : "localhost:3002";
-        wsUrl = `${protocol}//${wsHost}/api/agents/${this.namespace}/${this.agentName}/ws`;
-      }
-
-      if (deviceId) {
-        const sep = wsUrl.includes("?") ? "&" : "?";
-        wsUrl += `${sep}device_id=${encodeURIComponent(deviceId)}`;
-      }
-
-      if (this.binaryMode) {
-        const sep = wsUrl.includes("?") ? "&" : "?";
-        wsUrl += `${sep}binary=true`;
-      }
+      const wsUrl = this.buildWsUrl({ proxy: wsProxyUrl ?? null, direct: wsDirectMode });
 
       this.ws = new WebSocket(wsUrl);
       this.ws.binaryType = "arraybuffer";
@@ -162,11 +182,16 @@ export class LiveAgentConnection implements AgentConnection {
           if (message.type === "connected") {
             if (message.session_id) {
               this.sessionId = message.session_id;
+              this.lastSessionId = message.session_id;
             }
             // Extract max payload size from server capabilities
             if (message.connected?.capabilities?.max_payload_size) {
               this.maxPayloadSize = message.connected.capabilities.max_payload_size;
             }
+            // Emit connected event with resumed flag
+            const resumed = message.connected?.resumed === true;
+            const sessionId = message.session_id ?? "";
+            this.emitConnected({ sessionId, resumed });
           }
 
           this.emitMessage(message);
@@ -186,6 +211,8 @@ export class LiveAgentConnection implements AgentConnection {
         this.ws = null;
         this.sessionId = null;
         this.maxPayloadSize = null;
+        // NOTE: lastSessionId is intentionally preserved here so that the next
+        // reconnect dial can append resume=<lastSessionId> in binary mode.
         // If we got a close code indicating an error, preserve error status
         if (event.code === 1011 || event.code >= 4000) {
           this.setStatus("error", event.reason || "Connection closed unexpectedly");
@@ -207,10 +234,12 @@ export class LiveAgentConnection implements AgentConnection {
       this.ws = null;
     }
     this.sessionId = null;
+    this.lastSessionId = null;
     this.maxPayloadSize = null;
     this.setStatus("disconnected");
     this.messageHandlers.length = 0;
     this.statusHandlers.length = 0;
+    this.connectedHandlers.length = 0;
   }
 
   send(content: string, options?: { sessionId?: string; parts?: ContentPart[] }): void {
@@ -313,6 +342,33 @@ export class LiveAgentConnection implements AgentConnection {
     };
   }
 
+  /**
+   * Register a callback invoked each time a `connected` server message arrives.
+   * The callback receives the session id and whether the session was resumed.
+   * Returns an unsubscribe function.
+   */
+  onConnected(handler: (info: ConnectedEventInfo) => void): () => void {
+    this.connectedHandlers.push(handler);
+    return () => {
+      const index = this.connectedHandlers.indexOf(handler);
+      if (index !== -1) this.connectedHandlers.splice(index, 1);
+    };
+  }
+
+  /**
+   * Send a hangup control message to the facade so it knows the client is
+   * intentionally ending the session (not a transient blip). The facade will
+   * NOT park the session on receiving this message.
+   */
+  sendHangup(): void {
+    if (this.ws?.readyState !== WebSocket.OPEN) {
+      return;
+    }
+    this.ws.send(
+      JSON.stringify({ type: "hangup", session_id: this.sessionId ?? undefined }),
+    );
+  }
+
   getStatus(): ConnectionStatus {
     return this.status;
   }
@@ -339,6 +395,10 @@ export class LiveAgentConnection implements AgentConnection {
 
   private emitMessage(message: ServerMessage): void {
     this.messageHandlers.forEach((h) => h(message));
+  }
+
+  private emitConnected(info: ConnectedEventInfo): void {
+    this.connectedHandlers.forEach((h) => h(info));
   }
 
   private scheduleReconnect(): void {

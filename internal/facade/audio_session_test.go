@@ -19,6 +19,7 @@ package facade
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -33,6 +34,7 @@ import (
 type fakeDuplexSink struct {
 	audio      chan []byte
 	startCalls int
+	mu         sync.Mutex // guards closeCalls
 	closeCalls int
 	startErr   error
 	sendErr    error
@@ -54,8 +56,18 @@ func (f *fakeDuplexSink) SendAudio(data []byte, _ uint32, _ bool) error {
 }
 
 func (f *fakeDuplexSink) Close() error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.closeCalls++
 	return nil
+}
+
+// closeCount returns the number of times Close has been called. Safe for
+// concurrent use — use this instead of reading closeCalls directly.
+func (f *fakeDuplexSink) closeCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.closeCalls
 }
 
 // captureWriter captures WriteBinaryMediaChunk calls for test assertion.
@@ -136,7 +148,7 @@ func TestAudioSession_Close(t *testing.T) {
 	as := newAudioSession("sess-1", fc, w)
 
 	require.NoError(t, as.close())
-	assert.Equal(t, 1, fc.closeCalls)
+	assert.Equal(t, 1, fc.closeCount())
 }
 
 // TestAudioSession_HandleInboundFrame maps a BinaryFrame to pushAudio.
@@ -226,7 +238,7 @@ func TestAudioSession_CleanedUpOnDisconnect(t *testing.T) {
 
 	// Simulate cleanup calling close
 	require.NoError(t, as.close())
-	assert.Equal(t, 1, fc.closeCalls, "sink Close should be called on cleanup")
+	assert.Equal(t, 1, fc.closeCount(), "sink Close should be called on cleanup")
 }
 
 // TestEnsureAudioSession_ReturnsExistingSession verifies that a second call
@@ -304,7 +316,7 @@ func TestEnsureAudioSession_DoubleCheckRace(t *testing.T) {
 	as := conn.audioSession
 	conn.mu.Unlock()
 	assert.NotNil(t, as)
-	assert.Equal(t, 1, fc2.closeCalls, "discarded sink should be closed")
+	assert.Equal(t, 1, fc2.closeCount(), "discarded sink should be closed")
 }
 
 // TestHandleBinaryMessage_SinkStartError verifies that when the factory's sink

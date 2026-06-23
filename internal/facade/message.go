@@ -81,6 +81,16 @@ func (s *Server) handleClientMessage(ctx context.Context, c *Connection, message
 	if s.handleToolMessage(ctx, c, &clientMsg, log) {
 		return
 	}
+
+	// Hangup signals an intentional client-initiated session end. Mark the
+	// connection so cleanupConnection does not park the realtime audio session.
+	if clientMsg.Type == MessageTypeHangup {
+		c.mu.Lock()
+		c.intentionalClose = true
+		c.mu.Unlock()
+		return
+	}
+
 	if !c.tryAcquireInFlightMessage() {
 		log.V(1).Info("in-flight message limit exceeded")
 		s.sendError(c, c.sessionID, ErrorCodeRateLimited, "too many in-flight requests")

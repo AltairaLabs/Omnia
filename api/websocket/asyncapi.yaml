@@ -24,6 +24,15 @@ channels:
       Requires `?agent=<name>` query parameter.
       Optional: `?namespace=<ns>`, `?binary=true`
 
+      ## Reconnect / blip-resume
+
+      To re-attach to a parked realtime session after a transient network
+      disconnect, add `?resume=<session_id>` to the connect URL. The facade
+      looks up the parked session, re-attaches the client, and sends a
+      `connected` message with `connected.resumed = true`. If the session is
+      not found or has already expired the facade falls back to opening a new
+      session (same as a cold connect) and `connected.resumed` will be `false`.
+
       ## Binary frames (WebSocket opcode 0x2)
 
       Binary WebSocket messages use the OMNI framing format defined in
@@ -589,6 +598,13 @@ components:
       properties:
         capabilities:
           $ref: "#/components/schemas/ConnectionCapabilities"
+        resumed:
+          type: boolean
+          description: >
+            true when this connection re-attached to a parked realtime session
+            rather than starting fresh (i.e. the client supplied a valid
+            `?resume=<session_id>` query parameter and the session was found).
+            false (or absent) on a normal cold connect.
 
     ConnectionCapabilities:
       type: object

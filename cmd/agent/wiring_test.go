@@ -235,9 +235,9 @@ func TestBuildWebSocketServer_WiresMediaStorage(t *testing.T) {
 	store := session.NewMemoryStore()
 	t.Cleanup(func() { _ = store.Close() })
 
-	cfg := &agent.Config{AgentName: "probe", Namespace: "ns"}
+	cfg := &agent.Config{AgentName: probeAgentName, Namespace: "ns"}
 	metrics := agent.NewMetrics(cfg.AgentName, cfg.Namespace)
-	handler := &captureHandler{name: "probe"}
+	handler := &captureHandler{name: probeAgentName}
 
 	// With nil media storage: facade reports none wired.
 	nilServer, _ := mustBuildWS(t, cfg, store, handler, metrics, nil)
@@ -268,9 +268,9 @@ func TestBuildWebSocketServer_RegistersWebSocketRoutes(t *testing.T) {
 	store := session.NewMemoryStore()
 	t.Cleanup(func() { _ = store.Close() })
 
-	cfg := &agent.Config{AgentName: "probe", Namespace: "ns"}
+	cfg := &agent.Config{AgentName: probeAgentName, Namespace: "ns"}
 	metrics := agent.NewMetrics(cfg.AgentName, cfg.Namespace)
-	handler := &captureHandler{name: "probe"}
+	handler := &captureHandler{name: probeAgentName}
 
 	_, mux := mustBuildWS(t, cfg, store, handler, metrics, nil)
 
