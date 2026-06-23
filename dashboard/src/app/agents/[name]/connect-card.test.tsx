@@ -147,6 +147,7 @@ describe("ConnectCard", () => {
       render(<ConnectCard agent={agent} />);
       const link = screen.getByRole("link", { name: /expose agents externally/i });
       expect(link).toBeInTheDocument();
+      expect(link).toHaveAttribute("href", "https://omnia.altairalabs.ai/how-to/expose-agents/");
     });
   });
 

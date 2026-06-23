@@ -89,7 +89,7 @@ function EmptyState() {
         No external endpoints — this agent is reachable only inside the cluster.
       </p>
       <a
-        href="https://docs.omnia.altairalabs.ai/expose-agents"
+        href="https://omnia.altairalabs.ai/how-to/expose-agents/"
         target="_blank"
         rel="noopener noreferrer"
         className="flex items-center gap-1 text-xs text-primary hover:underline"
