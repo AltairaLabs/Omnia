@@ -12,7 +12,7 @@
 862 dashboard/src/components/arena/project-editor.tsx
 510 dashboard/src/components/arena/source-dialog.tsx
 588 dashboard/src/components/arena/template-wizard.tsx
-587 dashboard/src/components/console/agent-console.tsx
+606 dashboard/src/components/console/agent-console.tsx
 655 dashboard/src/components/credentials/credentials-section.tsx
 559 dashboard/src/components/file-browser/content-explorer.tsx
 529 dashboard/src/components/memories/memory-galaxy.tsx
@@ -24,10 +24,8 @@
 672 dashboard/src/lib/k8s/crd-operations.ts
 1573 dashboard/src/lib/mock-data.ts
 917 dashboard/src/types/arena.ts
-1289 ee/cmd/arena-worker/worker.go
 896 ee/pkg/arena/queue/redis.go
 829 ee/pkg/evals/worker.go
-1099 internal/controller/deployment_builder.go
 946 internal/memory/api/handler.go
 1032 internal/memory/api/service.go
 1030 internal/session/api/handler.go
