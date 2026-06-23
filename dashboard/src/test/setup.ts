@@ -47,8 +47,17 @@ class FakeAudioWorkletNode {
 class FakeAudioContext {
   audioWorklet = { addModule: vi.fn().mockResolvedValue(undefined) };
   createMediaStreamSource = vi.fn().mockReturnValue({ connect: vi.fn(), disconnect: vi.fn() });
-  createBuffer = vi.fn();
-  createBufferSource = vi.fn();
+  createBuffer = vi.fn().mockImplementation((_channels: number, length: number, rate: number) => ({
+    getChannelData: () => new Float32Array(length),
+    duration: length / rate,
+  }));
+  createBufferSource = vi.fn().mockImplementation(() => ({
+    buffer: null as AudioBuffer | null,
+    connect: vi.fn(),
+    start: vi.fn(),
+    stop: vi.fn(),
+    onended: null as (() => void) | null,
+  }));
   close = vi.fn().mockResolvedValue(undefined);
   destination = {};
   sampleRate = 24000;
