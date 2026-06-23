@@ -873,6 +873,16 @@ dashboard:
   apiKeys:
     # -- Enable API key authentication
     enabled: true
+    # -- Store backend: memory (ephemeral, dev only), file (read-only K8s Secret, GitOps), or postgres (durable)
+    store: memory
+    # -- File store: path the keys Secret is mounted at (when store=file)
+    filePath: /etc/omnia/api-keys/keys.json
+    # -- File store: name of an existing Secret holding keys.json (when store=file)
+    keysSecret: ""
+    # -- Postgres store: connection URL (when store=postgres). Falls back to builtin.postgresUrl when empty. Use existingPostgresSecret in production.
+    postgresUrl: ""
+    # -- Postgres store: existing Secret with an OMNIA_AUTH_API_KEYS_POSTGRES_URL key (when store=postgres)
+    existingPostgresSecret: ""
     # -- Maximum keys per user
     maxPerUser: 10
     # -- Default expiration in days (0 = never)
