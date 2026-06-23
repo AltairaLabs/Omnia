@@ -25,7 +25,6 @@
 1573 dashboard/src/lib/mock-data.ts
 917 dashboard/src/types/arena.ts
 1289 ee/cmd/arena-worker/worker.go
-1701 ee/internal/controller/arenajob_controller.go
 896 ee/pkg/arena/queue/redis.go
 829 ee/pkg/evals/worker.go
 1099 internal/controller/deployment_builder.go
