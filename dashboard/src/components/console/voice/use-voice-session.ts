@@ -40,7 +40,7 @@ export function useVoiceSession(opts: UseVoiceSessionOptions) {
   });
 
   useEffect(() => {
-    const offBin = conn.onBinaryMedia((payload) => playback.enqueue(payload));
+    const offBin = conn.onBinaryMedia((payload, _seq, _isLast, rate) => playback.enqueue(payload, rate));
     const offMsg = conn.onMessage((m: ServerMessage) => {
       if (m.type === MessageTypeInterrupt) {
         playback.flush();
@@ -70,7 +70,7 @@ export function useVoiceSession(opts: UseVoiceSessionOptions) {
         setState("connecting");
         conn.startAudioSession();
       })
-      .catch(() => setState("error"));
+      .catch(() => { mic.stop(); setState("error"); });
   }, [conn, mic]);
 
   const hangup = useCallback(() => {

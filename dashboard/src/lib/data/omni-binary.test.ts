@@ -34,4 +34,24 @@ describe("omni-binary", () => {
     });
     expect(decodeOmniFrame(frame).isLast).toBe(false);
   });
+
+  it("throws on bad magic bytes", () => {
+    const frame = encodeOmniMediaFrame({
+      sessionId: "s", sequence: 0, isLast: false, mimeType: "audio/pcm",
+      sampleRate: 24000, channels: 1, codec: "pcm", payload: new ArrayBuffer(0),
+    });
+    // Corrupt the magic bytes
+    new Uint8Array(frame).set([0x42, 0x41, 0x44, 0x21]); // "BAD!"
+    expect(() => decodeOmniFrame(frame)).toThrow(/invalid magic/);
+  });
+
+  it("throws on unsupported version", () => {
+    const frame = encodeOmniMediaFrame({
+      sessionId: "s", sequence: 0, isLast: false, mimeType: "audio/pcm",
+      sampleRate: 24000, channels: 1, codec: "pcm", payload: new ArrayBuffer(0),
+    });
+    // Patch version byte (offset 4) to 2
+    new DataView(frame).setUint8(4, 2);
+    expect(() => decodeOmniFrame(frame)).toThrow(/unsupported version/);
+  });
 });

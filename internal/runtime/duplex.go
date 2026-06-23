@@ -201,7 +201,11 @@ func (s *Server) pumpDuplexInput(ctx context.Context, stream runtimev1.RuntimeSe
 }
 
 // forwardDuplexChunk converts a providers.StreamChunk into a gRPC ServerMessage
-// and writes it to the stream. It handles both audio (MediaChunk) and text (Chunk) output.
+// and writes it to the stream. It handles audio (MediaChunk), text (Chunk) output,
+// and interruption (barge-in) signals (Interruption).
+//
+// When chunk.Interrupted is true an Interruption message is forwarded to the client,
+// which signals it to discard any buffered audio and stop playback immediately.
 //
 // MediaChunk.IsLast is intentionally always false here: duplex audio output is a
 // continuous stream and no consumer (grpcDuplexSink.relayOut) relies on it for

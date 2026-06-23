@@ -80,4 +80,19 @@ describe("useStreamingPlayback", () => {
 
     expect(fakeCtx.close).toHaveBeenCalledTimes(1);
   });
+
+  it("enqueue(pcm, frameRate) calls createBuffer with the per-frame rate", () => {
+    const { result } = renderHook(() => useStreamingPlayback({ sampleRate: 24000 }));
+
+    act(() => {
+      result.current.enqueue(new Int16Array([0, 1000]).buffer, 16000);
+    });
+
+    const fakeCtx = vi.mocked(AudioContext).mock.results[0].value as {
+      createBuffer: ReturnType<typeof vi.fn>;
+    };
+
+    // createBuffer should be called with 16000 (per-frame rate), not 24000 (construction rate)
+    expect(fakeCtx.createBuffer).toHaveBeenCalledWith(1, 2, 16000);
+  });
 });

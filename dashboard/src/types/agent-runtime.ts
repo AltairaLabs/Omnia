@@ -170,6 +170,8 @@ export interface AudioRequirements {
   channels?: number;
   /** Whether the provider supports selecting audio segments */
   supportsSegmentSelection?: boolean;
+  /** Audio format (e.g., "pcm", "opus") */
+  format?: string;
 }
 
 /** Requirements for document media */
@@ -215,8 +217,8 @@ export type AgentRuntimeMode = "agent" | "function";
 export interface DuplexConfig {
   /** Whether duplex mode is enabled for this agent. */
   enabled?: boolean;
-  /** Transport mode — "audio" (default) or future variants. */
-  mode?: string;
+  /** Transport mode — "audio" (default) or "audiovideo". */
+  mode?: "audio" | "audiovideo";
 }
 
 // Spec

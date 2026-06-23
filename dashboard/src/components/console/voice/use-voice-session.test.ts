@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, act, waitFor } from "@testing-library/react";
+import { MessageTypeInterrupt } from "../../../types/generated/websocket";
 
 const startMic = vi.fn().mockResolvedValue(undefined);
 const stopMic = vi.fn();
@@ -58,15 +59,30 @@ describe("useVoiceSession", () => {
     await waitFor(() => expect(result.current.state).toBe("idle"));
   });
 
-  it("an interrupt server message flushes playback", async () => {
-    renderHook(() =>
+  it("call() sets error state and stops the mic when mic.start() rejects", async () => {
+    startMic.mockRejectedValueOnce(new Error("mic denied"));
+    const { result } = renderHook(() =>
       useVoiceSession({ namespace: "default", agentName: "v", sampleRate: 24000, channels: 1 }),
+    );
+    await act(async () => {
+      result.current.call();
+    });
+    await waitFor(() => expect(result.current.state).toBe("error"));
+    expect(stopMic).toHaveBeenCalled();
+    expect(conn.startAudioSession).not.toHaveBeenCalled();
+  });
+
+  it("an interrupt server message flushes playback and is not forwarded to onServerMessage", async () => {
+    const onServerMessage = vi.fn();
+    renderHook(() =>
+      useVoiceSession({ namespace: "default", agentName: "v", sampleRate: 24000, channels: 1, onServerMessage }),
     );
     // Pull the onMessage handler registered by the hook
     const onMessageHandler = conn.onMessage.mock.calls[0][0] as (m: { type: string }) => void;
     act(() => {
-      onMessageHandler({ type: "interrupt" });
+      onMessageHandler({ type: MessageTypeInterrupt });
     });
     expect(flush).toHaveBeenCalled();
+    expect(onServerMessage).not.toHaveBeenCalled();
   });
 });

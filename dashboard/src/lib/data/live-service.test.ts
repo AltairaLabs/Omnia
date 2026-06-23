@@ -221,9 +221,9 @@ describe("LiveAgentConnection — binary audio transport", () => {
 
   it("decodes inbound binary frames to onBinaryMedia handlers", async () => {
     const conn = new LiveAgentConnection("ns", "agent1");
-    const received: Array<{ payload: ArrayBuffer; sequence: number; isLast: boolean }> = [];
-    conn.onBinaryMedia((payload, sequence, isLast) => {
-      received.push({ payload, sequence, isLast });
+    const received: Array<{ payload: ArrayBuffer; sequence: number; isLast: boolean; sampleRate?: number }> = [];
+    conn.onBinaryMedia((payload, sequence, isLast, sampleRate) => {
+      received.push({ payload, sequence, isLast, sampleRate });
     });
     conn.startAudioSession();
     await Promise.resolve();
@@ -238,7 +238,7 @@ describe("LiveAgentConnection — binary audio transport", () => {
       sequence: 5,
       isLast: true,
       mimeType: "audio/pcm",
-      sampleRate: 24000,
+      sampleRate: 16000,
       channels: 1,
       codec: "pcm",
       payload: inboundPayload,
@@ -249,6 +249,8 @@ describe("LiveAgentConnection — binary audio transport", () => {
     expect(received[0].sequence).toBe(5);
     expect(received[0].isLast).toBe(true);
     expect(new Uint8Array(received[0].payload)).toEqual(new Uint8Array([10, 20, 30]));
+    // The per-frame sample rate from metadata must be forwarded to the handler
+    expect(received[0].sampleRate).toBe(16000);
   });
 
   it("onBinaryMedia returns an unsubscriber that removes the handler", async () => {

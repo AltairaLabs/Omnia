@@ -73,7 +73,7 @@ export class LiveAgentConnection implements AgentConnection {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private intentionalDisconnect = false;
   private binaryMode = false;
-  private readonly binaryHandlers: Array<(payload: ArrayBuffer, sequence: number, isLast: boolean) => void> = [];
+  private readonly binaryHandlers: Array<(payload: ArrayBuffer, sequence: number, isLast: boolean, sampleRate?: number) => void> = [];
 
   constructor(
     private readonly namespace: string,
@@ -283,7 +283,7 @@ export class LiveAgentConnection implements AgentConnection {
   }
 
   onBinaryMedia(
-    handler: (payload: ArrayBuffer, sequence: number, isLast: boolean) => void,
+    handler: (payload: ArrayBuffer, sequence: number, isLast: boolean, sampleRate?: number) => void,
   ): () => void {
     this.binaryHandlers.push(handler);
     return () => {
@@ -328,7 +328,8 @@ export class LiveAgentConnection implements AgentConnection {
   private handleBinary(buf: ArrayBuffer): void {
     const f = decodeOmniFrame(buf);
     if (f.messageType !== OMNI_MEDIA_CHUNK) return;
-    for (const h of this.binaryHandlers) h(f.payload, f.sequence, f.isLast);
+    const rate = typeof f.metadata.sample_rate === "number" ? f.metadata.sample_rate : undefined;
+    for (const h of this.binaryHandlers) h(f.payload, f.sequence, f.isLast, rate);
   }
 
   private setStatus(status: ConnectionStatus, error?: string): void {

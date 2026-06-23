@@ -29,7 +29,7 @@ export interface ConsoleConfigResult {
   /** Raw console config from agent spec (for debugging) */
   rawConfig: ConsoleConfig | undefined;
   /** Realtime duplex config from the agent spec (drives the voice console). */
-  duplex?: { enabled: boolean; mode: string };
+  duplex?: { enabled: boolean; mode: "audio" | "audiovideo" };
 }
 
 /**
@@ -72,7 +72,7 @@ export function useConsoleConfig(
 
   // Derive duplex config from agent spec
   const duplex = agent?.spec?.duplex
-    ? { enabled: !!agent.spec.duplex.enabled, mode: agent.spec.duplex.mode ?? "audio" }
+    ? { enabled: !!agent.spec.duplex.enabled, mode: (agent.spec.duplex.mode ?? "audio") as "audio" | "audiovideo" }
     : undefined;
 
   return {

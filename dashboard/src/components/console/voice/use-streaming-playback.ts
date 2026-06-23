@@ -18,10 +18,11 @@ export function useStreamingPlayback({ sampleRate }: UseStreamingPlaybackOptions
   }, [sampleRate]);
 
   const enqueue = useCallback(
-    (pcm: ArrayBuffer) => {
+    (pcm: ArrayBuffer, frameRate?: number) => {
       const c = ctx();
       const int16 = new Int16Array(pcm);
-      const buffer = c.createBuffer(1, int16.length, sampleRate);
+      const rate = frameRate ?? sampleRate;
+      const buffer = c.createBuffer(1, int16.length, rate);
       const channel = buffer.getChannelData(0);
       for (let i = 0; i < int16.length; i++) channel[i] = int16[i] / 0x8000;
       const source = c.createBufferSource();

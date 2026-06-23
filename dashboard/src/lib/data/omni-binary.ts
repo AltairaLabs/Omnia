@@ -53,6 +53,15 @@ export interface DecodedFrame {
 
 export function decodeOmniFrame(buf: ArrayBuffer): DecodedFrame {
   const view = new DataView(buf);
+  const bytes = new Uint8Array(buf);
+  const magic = String.fromCharCode(bytes[0], bytes[1], bytes[2], bytes[3]);
+  if (magic !== "OMNI") {
+    throw new Error(`decodeOmniFrame: invalid magic "${magic}", expected "OMNI"`);
+  }
+  const version = view.getUint8(4);
+  if (version !== 1) {
+    throw new Error(`decodeOmniFrame: unsupported version ${version}, expected 1`);
+  }
   const flags = view.getUint8(5);
   const messageType = view.getUint16(6, false);
   const metadataLen = view.getUint32(8, false);
