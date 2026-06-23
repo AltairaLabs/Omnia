@@ -532,6 +532,30 @@ Include this from every template that renders when dashboard.enabled=true.
 {{- end }}
 
 {{/*
+Render-time guard: dashboard.apiKeys.store=postgres requires a Postgres URL
+(inline or via existingSecret), and store=file requires a keysSecret.
+Include this from every template that renders when dashboard.enabled=true.
+*/}}
+{{- define "omnia.validateApiKeyStore" -}}
+{{- if .Values.dashboard.enabled -}}
+{{- $ak := .Values.dashboard.apiKeys -}}
+{{- if eq (default "memory" $ak.store) "postgres" -}}
+{{- $hasUrl := or $ak.postgresUrl $ak.existingPostgresSecret -}}
+{{- $builtin := .Values.dashboard.builtin -}}
+{{- $hasBuiltin := and (eq .Values.dashboard.auth.mode "builtin") (or $builtin.postgresUrl $builtin.existingPostgresSecret) -}}
+{{- if not (or $hasUrl $hasBuiltin) -}}
+{{- fail "dashboard.apiKeys.store=postgres requires dashboard.apiKeys.postgresUrl or dashboard.apiKeys.existingPostgresSecret (or builtin postgres config to fall back to)." -}}
+{{- end -}}
+{{- end -}}
+{{- if eq (default "memory" $ak.store) "file" -}}
+{{- if not $ak.keysSecret -}}
+{{- fail "dashboard.apiKeys.store=file requires dashboard.apiKeys.keysSecret (the Secret holding keys.json)." -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end }}
+
+{{/*
 Render-time guard: enterprise Arena queue requires durable Redis when
 type=redis (which is the default). The in-memory queue mode is only
 useful in dev / E2E; production Arena needs jobs to survive controller
