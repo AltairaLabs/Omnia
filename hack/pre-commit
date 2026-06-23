@@ -241,6 +241,20 @@ else
 fi
 
 #
+# 5b. File length guardrail — staged files must not exceed the length
+#     threshold (ratchet via hack/file-length-baseline.txt). See issue #1325.
+#
+if [ -n "$STAGED_GO_FILES" ] || [ -n "$STAGED_DASHBOARD_FILES" ]; then
+	print_header "Checking File Length"
+	if bash "$REPO_ROOT/hack/check-file-length.sh" --staged; then
+		print_success "File length guardrail passed"
+	else
+		print_error "File length guardrail failed (see issue #1325)"
+		CHECKS_FAILED=1
+	fi
+fi
+
+#
 # 6. go build — catches type errors fast
 #
 print_header "Building"
