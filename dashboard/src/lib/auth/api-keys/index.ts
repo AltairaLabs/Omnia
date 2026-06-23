@@ -24,6 +24,7 @@
 export * from "./types";
 export { getMemoryApiKeyStore } from "./memory-store";
 export { getFileApiKeyStore, FileApiKeyStore } from "./file-store";
+export { PostgresApiKeyStore, CREATE_API_KEYS_TABLE_SQL } from "./postgres-store";
 
 import { headers } from "next/headers";
 import type { ApiKeyStore, ApiKey } from "./types";
