@@ -57,6 +57,27 @@ describe("ExportDeployProfile", () => {
     expect(URL.createObjectURL).toHaveBeenCalled();
   });
 
+  it("scopes the minted token to the exporting workspace (#1561 P3)", async () => {
+    let postBody: string | undefined;
+    mockFetch({
+      "/api/settings/api-keys": (init) => {
+        if (init?.method === "POST") {
+          postBody = init.body as string;
+          return { json: async () => ({ key: { key: "omnia_sk_LIVE" } }), status: 201 };
+        }
+        return { json: async () => ({ config: { allowCreate: true }, keys: [] }) };
+      },
+      "/deploy-profile": () => ({ json: async () => discovery }),
+    });
+    render(<ExportDeployProfile workspace="team-acme" />);
+    await userEvent.click(await screen.findByRole("button", { name: /export deploy profile/i }));
+    await screen.findByTestId("deploy-profile-output");
+    expect(JSON.parse(postBody as string)).toMatchObject({
+      name: "deploy-team-acme",
+      workspaces: ["team-acme"],
+    });
+  });
+
   it("shows a degraded note when the key store is read-only", async () => {
     mockFetch({
       "/api/settings/api-keys": () => ({ json: async () => ({ config: { allowCreate: false }, keys: [] }) }),

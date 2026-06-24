@@ -19,8 +19,9 @@ This generates a ready-to-paste `config:` block containing:
 
 - `api_endpoint` — your dashboard's external URL.
 - `workspace` — the target workspace name.
-- `api_token` — a freshly minted, **show-once** `omnia_sk_` token scoped to
-  your permissions in this workspace.
+- `api_token` — a freshly minted, **show-once** `omnia_sk_` token **scoped to
+  this workspace**: it can only deploy here (not to any other workspace you can
+  access), and it acts with your own role in this workspace.
 - a **discovery menu** of the Providers (with their roles) and SkillSources that
   actually exist in the workspace, so `providers` / `skills` are pre-filled with
   real names instead of guessed ones.
@@ -43,8 +44,8 @@ config:
 
 :::caution[The token is a real credential]
 The minted `api_token` is shown once. Store it securely and revoke it from
-**Settings → API keys** when you no longer need it. Anyone holding it can act
-with your permissions in the workspace.
+**Settings → API keys** when you no longer need it. It is confined to this
+workspace, but anyone holding it can act with your role here.
 :::
 
 If your deployment uses a read-only API-key store, the dashboard still exports

@@ -36,12 +36,16 @@ async function fetchMintAvailability(): Promise<boolean> {
   return data?.config?.allowCreate ?? false;
 }
 
-/** Mint a fresh named omnia_sk_ token for this workspace. */
+/**
+ * Mint a fresh named omnia_sk_ token scoped to this workspace (#1561 P3):
+ * the `workspaces` allowlist confines the downloadable credential so it can
+ * only deploy to the workspace it was exported for — least privilege per #1519.
+ */
 async function mintToken(workspace: string): Promise<string> {
   const res = await fetch("/api/settings/api-keys", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name: `deploy-${workspace}` }),
+    body: JSON.stringify({ name: `deploy-${workspace}`, workspaces: [workspace] }),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
