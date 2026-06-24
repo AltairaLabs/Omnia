@@ -1635,8 +1635,9 @@ func TestDeployment_GracePeriodDefaultWhenUnset(t *testing.T) {
 
 	require.NotNil(t, dep.Spec.Template.Spec.TerminationGracePeriodSeconds)
 	got := *dep.Spec.Template.Spec.TerminationGracePeriodSeconds
-	if got != 45 {
-		t.Fatalf("TerminationGracePeriodSeconds = %d, want 45", got)
+	want := int64(defaultDrainTimeoutSeconds + drainGraceBufferSeconds)
+	if got != want {
+		t.Fatalf("TerminationGracePeriodSeconds = %d, want %d", got, want)
 	}
 }
 
@@ -1656,7 +1657,31 @@ func TestDeployment_GracePeriodDefaultWhenSubSecond(t *testing.T) {
 
 	require.NotNil(t, dep.Spec.Template.Spec.TerminationGracePeriodSeconds)
 	got := *dep.Spec.Template.Spec.TerminationGracePeriodSeconds
-	if got != 45 {
-		t.Fatalf("TerminationGracePeriodSeconds = %d, want 45 (sub-second drainTimeout must fall to default)", got)
+	want := int64(defaultDrainTimeoutSeconds + drainGraceBufferSeconds)
+	if got != want {
+		t.Fatalf("TerminationGracePeriodSeconds = %d, want %d (sub-second drainTimeout must fall to default)", got, want)
+	}
+}
+
+func TestDeployment_GracePeriodClampedAtMax(t *testing.T) {
+	r := &AgentRuntimeReconciler{}
+	ar := &omniav1alpha1.AgentRuntime{}
+	ar.Name = "drain-clamp-test"
+	ar.Namespace = "ns"
+	ar.Spec.Facade.Type = omniav1alpha1.FacadeTypeWebSocket
+	ar.Spec.PromptPackRef.Name = "p"
+	// A misconfigured huge drainTimeout must not stall teardown: the drain
+	// window is clamped to maxDrainTimeoutSeconds before adding the buffer.
+	d := "1h"
+	ar.Spec.Facade.DrainTimeout = &d
+
+	dep := &appsv1.Deployment{}
+	r.buildDeploymentSpec(context.Background(), dep, ar, newTestPromptPack(), nil, "", nil)
+
+	require.NotNil(t, dep.Spec.Template.Spec.TerminationGracePeriodSeconds)
+	got := *dep.Spec.Template.Spec.TerminationGracePeriodSeconds
+	want := int64(maxDrainTimeoutSeconds + drainGraceBufferSeconds)
+	if got != want {
+		t.Fatalf("TerminationGracePeriodSeconds = %d, want %d (1h drainTimeout must clamp to max)", got, want)
 	}
 }

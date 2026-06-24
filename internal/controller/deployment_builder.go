@@ -35,21 +35,34 @@ import (
 // Annotation key for config hash - changes to this trigger pod rollouts
 const annotationConfigHash = "omnia.altairalabs.ai/config-hash"
 
-// drainGraceBufferSeconds is added to the DrainTimeout to give the pre-stop
-// hook and OS process cleanup headroom after the drain window closes.
-const drainGraceBufferSeconds = 15
+// drainGraceBufferSeconds is added to the effective drain timeout to size the
+// pod's TerminationGracePeriodSeconds. It must cover the facade's post-drain
+// graceful Shutdown (cmd/agent shutdownTimeout, 30s) plus OS process cleanup,
+// so a pod that drains for its full window is not SIGKILLed mid-Shutdown.
+const drainGraceBufferSeconds = 30
 
-// gracePeriodFor returns the pod TerminationGracePeriodSeconds for ar.
-// When ar.Spec.Facade.DrainTimeout is set to a parseable positive duration,
-// the grace period is that duration plus drainGraceBufferSeconds.
-// Otherwise the default of 45 seconds is returned.
+// defaultDrainTimeoutSeconds mirrors facade DefaultServerConfig().DrainTimeout
+// (30s); used when spec.facade.drainTimeout is unset or unparseable.
+const defaultDrainTimeoutSeconds = 30
+
+// maxDrainTimeoutSeconds caps the drain window so a misconfigured large
+// drainTimeout cannot stall rollout/teardown indefinitely (10 minutes).
+const maxDrainTimeoutSeconds = 600
+
+// gracePeriodFor returns the pod TerminationGracePeriodSeconds for ar: the
+// effective drain timeout (spec.facade.drainTimeout, or the 30s default,
+// clamped to maxDrainTimeoutSeconds) plus drainGraceBufferSeconds.
 func gracePeriodFor(ar *omniav1alpha1.AgentRuntime) int64 {
+	drainSecs := int64(defaultDrainTimeoutSeconds)
 	if ar.Spec.Facade.DrainTimeout != nil {
 		if d, err := time.ParseDuration(*ar.Spec.Facade.DrainTimeout); err == nil && d >= time.Second {
-			return int64(d.Seconds()) + drainGraceBufferSeconds
+			drainSecs = int64(d.Seconds())
 		}
 	}
-	return 45
+	if drainSecs > maxDrainTimeoutSeconds {
+		drainSecs = maxDrainTimeoutSeconds
+	}
+	return drainSecs + drainGraceBufferSeconds
 }
 
 // agentPodUserID is the uid/gid used by the facade and runtime container images
