@@ -296,15 +296,21 @@ func (r *AgentRuntimeReconciler) buildDeploymentSpec(
 		podAnnotations[key] = value
 	}
 
-	// Apply user-supplied PodOverrides. Pod-level fields merge onto podSpec +
-	// podAnnotations here; container-level fields are applied per-container
-	// below to exclude the operator-injected policy-proxy sidecar.
-	if agentRuntime.Spec.PodOverrides != nil {
+	// Apply pod-level PodOverrides. The Workspace runtime defaults (cloud
+	// workload-identity SA + pod labels) are layered UNDER the agent's own
+	// podOverrides, so agents provisioned via the deploy API — which carry no
+	// podOverrides — still inherit the workspace's keyless-provider identity
+	// (#1598). An agent that sets its own SA opts out of the workspace identity
+	// as a unit. Container-level fields come only from the agent's own overrides
+	// (the workspace supplies none) and are applied per-container below to
+	// exclude the operator-injected policy-proxy sidecar.
+	if effOverrides := r.effectivePodOverridesForAgent(agentRuntime); effOverrides != nil {
 		podMeta := metav1.ObjectMeta{Labels: labels, Annotations: podAnnotations}
-		podoverrides.ApplyPod(&podSpec, &podMeta, agentRuntime.Spec.PodOverrides)
+		podoverrides.ApplyPod(&podSpec, &podMeta, effOverrides)
 		labels = podMeta.Labels
 		podAnnotations = podMeta.Annotations
-
+	}
+	if agentRuntime.Spec.PodOverrides != nil {
 		for i := range podSpec.Containers {
 			if podSpec.Containers[i].Name == PolicyProxyContainerName {
 				continue

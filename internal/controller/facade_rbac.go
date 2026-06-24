@@ -37,19 +37,14 @@ func facadeServiceAccountName(agentRuntime *omniav1alpha1.AgentRuntime) string {
 	return agentRuntime.Name + facadeServiceAccountSuffix
 }
 
-// effectiveFacadeServiceAccountName returns the ServiceAccount the facade pod
-// actually runs as. spec.podOverrides.serviceAccountName replaces the
-// operator-default SA on the pod (see internal/podoverrides.ApplyPod), so RBAC
-// must target that SA — otherwise an overridden pod SA (e.g. an Azure Workload
-// Identity SA) never receives the workspace-reader binding, service discovery's
-// `list workspaces` is denied, and the facade silently falls back to the
-// in-memory session store with no recording (issue #1223).
-func effectiveFacadeServiceAccountName(agentRuntime *omniav1alpha1.AgentRuntime) string {
-	if agentRuntime.Spec.PodOverrides != nil && agentRuntime.Spec.PodOverrides.ServiceAccountName != "" {
-		return agentRuntime.Spec.PodOverrides.ServiceAccountName
-	}
-	return facadeServiceAccountName(agentRuntime)
-}
+// The SA the facade pod actually runs as is resolved by
+// r.effectiveFacadeServiceAccountName (see workspace_runtime_identity.go): the
+// agent's own podOverrides SA, else the Workspace runtime-default SA, else the
+// operator-created <name>-facade SA. RBAC must target that SA — otherwise an
+// overridden/inherited pod SA (e.g. an Azure Workload Identity SA) never
+// receives the workspace-reader binding, service discovery's `list workspaces`
+// is denied, and the facade silently falls back to the in-memory session store
+// with no recording (issue #1223).
 
 // reconcileFacadeRBAC creates the ServiceAccount, Role, and RoleBinding for facade CRD reading.
 func (r *AgentRuntimeReconciler) reconcileFacadeRBAC(
@@ -109,7 +104,7 @@ func (r *AgentRuntimeReconciler) reconcileWorkspaceReaderBinding(
 		crb.Subjects = []rbacv1.Subject{
 			{
 				Kind:      "ServiceAccount",
-				Name:      effectiveFacadeServiceAccountName(agentRuntime),
+				Name:      r.effectiveFacadeServiceAccountName(agentRuntime),
 				Namespace: agentRuntime.Namespace,
 			},
 		}
@@ -260,7 +255,7 @@ func (r *AgentRuntimeReconciler) reconcileRoleBinding(
 		rb.Subjects = []rbacv1.Subject{
 			{
 				Kind:      "ServiceAccount",
-				Name:      effectiveFacadeServiceAccountName(agentRuntime),
+				Name:      r.effectiveFacadeServiceAccountName(agentRuntime),
 				Namespace: agentRuntime.Namespace,
 			},
 		}

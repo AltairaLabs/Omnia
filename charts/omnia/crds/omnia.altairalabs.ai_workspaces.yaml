@@ -448,6 +448,39 @@ spec:
                   - role
                   type: object
                 type: array
+              runtime:
+                description: |-
+                  runtime are workspace-wide pod defaults applied to every AgentRuntime in
+                  this workspace — primarily the cloud workload-identity SA + pod labels so
+                  agents (including those provisioned via the deploy API, which can't carry
+                  cloud-specific SA names) authenticate to keyless providers. Per-agent
+                  spec.podOverrides.serviceAccountName overrides this as a unit. See
+                  RuntimeDefaults.
+                properties:
+                  podAnnotations:
+                    additionalProperties:
+                      type: string
+                    description: |-
+                      podAnnotations are added to every agent runtime pod. Reserved for parity
+                      with podLabels; rarely needed. Opaque to Omnia.
+                    type: object
+                  podLabels:
+                    additionalProperties:
+                      type: string
+                    description: |-
+                      podLabels are added to every agent runtime pod, e.g.
+                      {azure.workload.identity/use: "true"} to opt into the Azure webhook.
+                      AWS IRSA and GKE WLI need none. Opaque to Omnia.
+                    type: object
+                  serviceAccountName:
+                    description: |-
+                      serviceAccountName is the ServiceAccount every agent runtime pod in this
+                      workspace runs as. Provisioned out of band (IaC) with the cloud identity
+                      annotations (e.g. azure.workload.identity/client-id,
+                      eks.amazonaws.com/role-arn, iam.gke.io/gcp-service-account). Empty = no
+                      default; agents fall back to the operator-created per-agent SA.
+                    type: string
+                type: object
               services:
                 description: |-
                   services defines per-workspace service groups for session-api and memory-api.
