@@ -64,7 +64,7 @@ func TestBuildFacadeEnvVars_SetsRouteRedisURLFromContextStoreRef(t *testing.T) {
 
 	got := findEnvVar(envs, "OMNIA_ROUTE_REDIS_URL")
 	if got == nil {
-		t.Fatalf("expected OMNIA_ROUTE_REDIS_URL env var when session.type=redis and storeRef is set")
+		t.Fatalf("expected OMNIA_ROUTE_REDIS_URL env var when context.type=redis and storeRef is set")
 	}
 	if got.ValueFrom == nil || got.ValueFrom.SecretKeyRef == nil {
 		t.Fatalf("OMNIA_ROUTE_REDIS_URL must use SecretKeyRef, got ValueFrom=%+v", got.ValueFrom)
@@ -106,6 +106,6 @@ func TestBuildFacadeEnvVars_OmitsRouteRedisURLWhenMemoryStore(t *testing.T) {
 	envs := r.buildFacadeEnvVars(ar)
 
 	if got := findEnvVar(envs, "OMNIA_ROUTE_REDIS_URL"); got != nil {
-		t.Errorf("expected no OMNIA_ROUTE_REDIS_URL when session.type=memory, got %+v", got)
+		t.Errorf("expected no OMNIA_ROUTE_REDIS_URL when context.type=memory, got %+v", got)
 	}
 }
