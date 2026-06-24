@@ -22,3 +22,15 @@ describe("MemoryApiKeyStore workspaces round-trip", () => {
     expect(found?.workspaces).toBeUndefined();
   });
 });
+
+describe("MemoryApiKeyStore owner snapshot round-trip", () => {
+  it("persists ownerEmail + ownerGroups", async () => {
+    const store = new MemoryApiKeyStore();
+    const created = await store.create("u1", {
+      name: "ci", ownerEmail: "alice@example.com", ownerGroups: ["devs"],
+    });
+    const found = await store.findByKey(created.key);
+    expect(found?.ownerEmail).toBe("alice@example.com");
+    expect(found?.ownerGroups).toEqual(["devs"]);
+  });
+});

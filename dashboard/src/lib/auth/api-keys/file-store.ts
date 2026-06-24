@@ -47,6 +47,8 @@ interface StoredKey {
   createdAt: string;
   lastUsedAt?: string | null;
   workspaces?: string[];
+  ownerEmail?: string;
+  ownerGroups?: string[];
 }
 
 interface KeysFile {
@@ -68,6 +70,8 @@ function parseStoredKey(stored: StoredKey): ApiKey {
     createdAt: new Date(stored.createdAt),
     lastUsedAt: stored.lastUsedAt ? new Date(stored.lastUsedAt) : null,
     workspaces: stored.workspaces,
+    ownerEmail: stored.ownerEmail,
+    ownerGroups: stored.ownerGroups,
   };
 }
 
