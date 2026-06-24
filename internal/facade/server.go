@@ -903,6 +903,13 @@ func (s *Server) HasMediaStorage() bool {
 	return s.mediaStorage != nil
 }
 
+// DrainTimeoutForShutdown returns the configured drain timeout so that
+// cmd/agent shutdownAll can scope the drain context without reaching into
+// unexported config.
+func (s *Server) DrainTimeoutForShutdown() time.Duration {
+	return s.config.DrainTimeout
+}
+
 // HasRouteStore reports whether a real RouteStore (not the no-op) is configured.
 // Used by wiring tests to assert that cmd/agent wires the Redis RouteStore
 // when OMNIA_ROUTE_REDIS_URL is set.

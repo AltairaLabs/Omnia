@@ -86,7 +86,7 @@ func runWebSocketFacade(cfg *agent.Config, log logr.Logger, tracingProvider *tra
 	}
 
 	facadeServer := newFacadeHTTPServer(cfg, mux)
-	healthServer := newHealthHTTPServer(cfg, store, handler)
+	healthServer := newHealthHTTPServer(cfg, store, handler, wsServer)
 
 	// Dual-protocol: optionally start A2A server alongside WebSocket.
 	var a2aSrv *facadea2a.Server
@@ -119,6 +119,11 @@ func buildWebSocketServer(
 	wsConfig.PromptPackName = cfg.PromptPackName
 	wsConfig.PromptPackVersion = cfg.PromptPackVersion
 	wsConfig.WorkspaceName = cfg.WorkspaceName
+	// Only override when the CRD field is explicitly set; zero means "unset"
+	// and must not clobber the 30s default from DefaultServerConfig.
+	if cfg.DrainTimeout > 0 {
+		wsConfig.DrainTimeout = cfg.DrainTimeout
+	}
 	recordingPool := facade.NewRecordingPool(
 		facade.DefaultRecordingPoolSize,
 		facade.DefaultRecordingQueueSize,
@@ -219,8 +224,11 @@ func newFacadeHTTPServer(cfg *agent.Config, handler http.Handler) *http.Server {
 }
 
 // newHealthHTTPServer creates the health check HTTP server.
-func newHealthHTTPServer(cfg *agent.Config, store session.Store, handler facade.MessageHandler) *http.Server {
-	return newHealthServer(cfg, readyzHandler(store, handler))
+func newHealthHTTPServer(
+	cfg *agent.Config, store session.Store,
+	handler facade.MessageHandler, wsServer *facade.Server,
+) *http.Server {
+	return newHealthServer(cfg, readyzHandler(store, handler, wsServer))
 }
 
 // startAndServe starts all servers and blocks until shutdown signal or error.
@@ -280,6 +288,15 @@ func shutdownAll(
 	a2aCleanup func(),
 ) {
 	log.Info("shutting down...")
+
+	// Drain active realtime sessions before closing connections. This gives
+	// in-progress calls up to DrainTimeout to finish naturally; the load
+	// balancer already sees 503 on /readyz (IsDraining flipped by Drain).
+	drainCtx, drainCancel := context.WithTimeout(context.Background(), wsServer.DrainTimeoutForShutdown())
+	defer drainCancel()
+	remaining := wsServer.Drain(drainCtx)
+	log.Info("facade drained before shutdown", "remaining", remaining)
+
 	ctx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
 
