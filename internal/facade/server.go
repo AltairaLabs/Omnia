@@ -546,14 +546,6 @@ func (s *Server) authenticateRequest(r *http.Request) (*policy.AuthenticatedIden
 	}
 }
 
-// markDraining puts the server into drain mode: new upgrades are rejected and
-// /readyz reports not-ready, but active connections keep being served.
-// Idempotent — calling it multiple times is safe.
-func (s *Server) markDraining() { s.draining.Store(true) }
-
-// IsDraining reports whether the server has entered drain mode.
-func (s *Server) IsDraining() bool { return s.draining.Load() }
-
 // ServeHTTP handles WebSocket upgrade requests.
 // mgmtPlaneUserID resolves the memory-scoping identity for a management-
 // plane WebSocket connection, in order of precedence:
@@ -853,65 +845,6 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	return nil
 }
 
-// liveRealtimeSessions returns the total number of active (in-flight) plus
-// parked realtime sessions on this pod.
-func (s *Server) liveRealtimeSessions() int {
-	return int(s.activeAudioSessions.Load()) + s.parked.len()
-}
-
-// drainReasonAllDrained is the drain completion reason when all sessions finished gracefully.
-const drainReasonAllDrained = "all_drained"
-
-// drainReasonDeadline is the drain completion reason when the drain timeout elapsed.
-const drainReasonDeadline = "deadline"
-
-// drainReasonCtxCanceled is the drain completion reason when the context was canceled.
-const drainReasonCtxCanceled = "ctx_canceled"
-
-// Drain marks the server draining and blocks until there are no active or
-// parked realtime sessions, or DrainTimeout elapses (whichever first). Returns
-// the number of sessions still live at return (0 = fully drained). Safe to call
-// once; subsequent calls return immediately.
-func (s *Server) Drain(ctx context.Context) int {
-	s.markDraining()
-	s.metrics.RealtimeDrainStarted()
-	drainStart := time.Now()
-	initialSessions := s.liveRealtimeSessions()
-
-	finishDrain := func(reason string, remaining int) int {
-		elapsed := time.Since(drainStart).Seconds()
-		drained := initialSessions - remaining
-		if drained < 0 {
-			drained = 0
-		}
-		s.metrics.RealtimeDrainCompleted(reason, elapsed, drained, remaining)
-		return remaining
-	}
-
-	deadline := time.NewTimer(s.config.DrainTimeout)
-	defer deadline.Stop()
-	ticker := time.NewTicker(250 * time.Millisecond)
-	defer ticker.Stop()
-	s.log.Info("facade draining started",
-		"drainTimeout", s.config.DrainTimeout,
-		"liveSessions", initialSessions)
-	for {
-		if n := s.liveRealtimeSessions(); n == 0 {
-			s.log.Info("facade drain complete", "reason", drainReasonAllDrained)
-			return finishDrain(drainReasonAllDrained, 0)
-		}
-		select {
-		case <-deadline.C:
-			n := s.liveRealtimeSessions()
-			s.log.Info("facade drain complete", "reason", drainReasonDeadline, "remaining", n)
-			return finishDrain(drainReasonDeadline, n)
-		case <-ctx.Done():
-			return finishDrain(drainReasonCtxCanceled, s.liveRealtimeSessions())
-		case <-ticker.C:
-		}
-	}
-}
-
 // ConnectionCount returns the number of active connections.
 func (s *Server) ConnectionCount() int {
 	s.mu.RLock()
@@ -925,13 +858,6 @@ func (s *Server) ConnectionCount() int {
 // (otherwise the WebSocket upload_request flow fails with mediaStorage==nil).
 func (s *Server) HasMediaStorage() bool {
 	return s.mediaStorage != nil
-}
-
-// DrainTimeoutForShutdown returns the configured drain timeout so that
-// cmd/agent shutdownAll can scope the drain context without reaching into
-// unexported config.
-func (s *Server) DrainTimeoutForShutdown() time.Duration {
-	return s.config.DrainTimeout
 }
 
 // HasRouteStore reports whether a real RouteStore (not the no-op) is configured.
