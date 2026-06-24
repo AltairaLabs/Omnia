@@ -215,6 +215,12 @@ type Server struct {
 	// holding a broad lock.
 	activeAudioSessions atomic.Int64
 
+	// draining is set by markDraining when the facade enters drain mode.
+	// New WebSocket upgrade requests are rejected with 503 while this is true;
+	// already-established connections keep being served until they finish or
+	// Shutdown is called.
+	draining atomic.Bool
+
 	// routeStore is used by parked to persist/remove pod-address route hints.
 	// Defaults to noopRouteStore{} when not configured.
 	routeStore RouteStore
@@ -540,6 +546,14 @@ func (s *Server) authenticateRequest(r *http.Request) (*policy.AuthenticatedIden
 	}
 }
 
+// markDraining puts the server into drain mode: new upgrades are rejected and
+// /readyz reports not-ready, but active connections keep being served.
+// Idempotent — calling it multiple times is safe.
+func (s *Server) markDraining() { s.draining.Store(true) }
+
+// IsDraining reports whether the server has entered drain mode.
+func (s *Server) IsDraining() bool { return s.draining.Load() }
+
 // ServeHTTP handles WebSocket upgrade requests.
 // mgmtPlaneUserID resolves the memory-scoping identity for a management-
 // plane WebSocket connection, in order of precedence:
@@ -702,6 +716,13 @@ func (s *Server) buildConnectionContext(
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// Reject new upgrade requests immediately while draining.
+	// Already-established connections are not affected.
+	if s.IsDraining() {
+		http.Error(w, "server draining", http.StatusServiceUnavailable)
+		return
+	}
+
 	s.mu.RLock()
 	if s.shutdown {
 		s.mu.RUnlock()
