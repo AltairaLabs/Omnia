@@ -18,7 +18,7 @@ import {
   type CreateApiKeyOptions,
   type NewApiKey,
 } from "./types";
-import { generateKey, generateId, keyPrefixOf, BCRYPT_ROUNDS } from "./key-utils";
+import { generateKey, generateId, keyPrefixOf, BCRYPT_ROUNDS, computeExpiresAt } from "./key-utils";
 
 /**
  * In-memory API key store.
@@ -35,9 +35,7 @@ export class MemoryApiKeyStore implements ApiKeyStore {
     const kp = keyPrefixOf(key);
 
     const now = new Date();
-    const expiresAt = options.expiresInDays
-      ? new Date(now.getTime() + options.expiresInDays * 24 * 60 * 60 * 1000)
-      : null;
+    const expiresAt = computeExpiresAt(now, options);
 
     const apiKey: ApiKey = {
       id: generateId(),

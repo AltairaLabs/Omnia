@@ -76,6 +76,8 @@ export interface CreateApiKeyOptions {
   role?: UserRole;
   /** Expiration in days (null = never) */
   expiresInDays?: number | null;
+  /** Expiration in seconds. When set and > 0, takes precedence over expiresInDays. */
+  expiresInSeconds?: number;
   /** Confine the key to this set of workspace names; omit for unrestricted. */
   workspaces?: string[];
   /** Owner identity snapshot (set by the create route from the session user). */

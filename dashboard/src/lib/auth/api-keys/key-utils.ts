@@ -4,7 +4,7 @@
  */
 
 import { randomBytes } from "node:crypto";
-import { API_KEY_PREFIX } from "./types";
+import { API_KEY_PREFIX, type CreateApiKeyOptions } from "./types";
 
 /** bcrypt cost factor used when hashing API keys. */
 export const BCRYPT_ROUNDS = 10;
@@ -30,4 +30,18 @@ export function generateId(): string {
  */
 export function keyPrefixOf(key: string): string {
   return key.substring(0, API_KEY_PREFIX.length + 8) + "...";
+}
+
+/**
+ * Compute a key's expiry. expiresInSeconds (when > 0) takes precedence over
+ * expiresInDays; null means "never expires".
+ */
+export function computeExpiresAt(now: Date, options: CreateApiKeyOptions): Date | null {
+  if (options.expiresInSeconds && options.expiresInSeconds > 0) {
+    return new Date(now.getTime() + options.expiresInSeconds * 1000);
+  }
+  if (options.expiresInDays) {
+    return new Date(now.getTime() + options.expiresInDays * 24 * 60 * 60 * 1000);
+  }
+  return null;
 }

@@ -34,3 +34,26 @@ describe("MemoryApiKeyStore owner snapshot round-trip", () => {
     expect(found?.ownerGroups).toEqual(["devs"]);
   });
 });
+
+describe("expiresInSeconds", () => {
+  it("sets a sub-day expiry and takes precedence over expiresInDays", async () => {
+    const store = new MemoryApiKeyStore();
+    const before = Date.now();
+    const created = await store.create("u1", {
+      name: "cli",
+      expiresInSeconds: 3600,
+      expiresInDays: 90, // must be ignored when seconds is set
+    });
+    const ms = created.expiresAt!.getTime() - before;
+    expect(ms).toBeGreaterThan(3500 * 1000);
+    expect(ms).toBeLessThan(3700 * 1000);
+  });
+
+  it("ignores a non-positive expiresInSeconds and falls back to days", async () => {
+    const store = new MemoryApiKeyStore();
+    const created = await store.create("u1", { name: "x", expiresInSeconds: 0, expiresInDays: 1 });
+    const hours = (created.expiresAt!.getTime() - Date.now()) / 3_600_000;
+    expect(hours).toBeGreaterThan(23);
+    expect(hours).toBeLessThan(25);
+  });
+});
