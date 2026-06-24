@@ -106,6 +106,22 @@ type Metrics struct {
 	// RealtimeParkExpiredTotal is the total number of parked realtime sessions
 	// that expired without a client reconnecting within the grace window.
 	RealtimeParkExpiredTotal prometheus.Counter
+
+	// Realtime drain metrics
+
+	// RealtimeDraining is 1 while the facade is in drain mode, 0 otherwise.
+	RealtimeDraining prometheus.Gauge
+
+	// RealtimeDrainDuration is the histogram of drain durations in seconds.
+	RealtimeDrainDuration *prometheus.HistogramVec
+
+	// RealtimeCallsDrainedTotal is the total number of realtime calls that
+	// completed gracefully during a drain.
+	RealtimeCallsDrainedTotal prometheus.Counter
+
+	// RealtimeCallsForceEndedTotal is the total number of realtime calls that
+	// were still live when the drain timeout or context cancellation fired.
+	RealtimeCallsForceEndedTotal prometheus.Counter
 }
 
 // NewMetrics creates and registers all Prometheus metrics.
@@ -252,6 +268,32 @@ func NewMetrics(agentName, namespace string) *Metrics {
 		RealtimeParkExpiredTotal: promauto.NewCounter(prometheus.CounterOpts{
 			Name:        "omnia_facade_realtime_park_expired_total",
 			Help:        "Total number of parked realtime sessions that expired without reconnect",
+			ConstLabels: labels,
+		}),
+
+		// Realtime drain metrics
+		RealtimeDraining: promauto.NewGauge(prometheus.GaugeOpts{
+			Name:        "omnia_facade_realtime_draining",
+			Help:        "1 while the facade is in drain mode, 0 otherwise",
+			ConstLabels: labels,
+		}),
+
+		RealtimeDrainDuration: promauto.NewHistogramVec(prometheus.HistogramOpts{
+			Name:        "omnia_facade_realtime_drain_duration_seconds",
+			Help:        "Duration of realtime drain operations in seconds",
+			ConstLabels: labels,
+			Buckets:     []float64{1, 5, 10, 15, 20, 30, 45, 60},
+		}, []string{"reason"}),
+
+		RealtimeCallsDrainedTotal: promauto.NewCounter(prometheus.CounterOpts{
+			Name:        "omnia_facade_realtime_calls_drained_total",
+			Help:        "Total number of realtime calls that completed gracefully during drain",
+			ConstLabels: labels,
+		}),
+
+		RealtimeCallsForceEndedTotal: promauto.NewCounter(prometheus.CounterOpts{
+			Name:        "omnia_facade_realtime_calls_force_ended_total",
+			Help:        "Total number of realtime calls still live when drain timeout or context cancellation fired",
 			ConstLabels: labels,
 		}),
 	}
@@ -439,4 +481,25 @@ func (m *Metrics) RealtimeSessionReattached() {
 // without a client reconnecting within the grace window.
 func (m *Metrics) RealtimeSessionParkExpired() {
 	m.RealtimeParkExpiredTotal.Inc()
+}
+
+// RealtimeDrainStarted records that the facade has entered drain mode.
+func (m *Metrics) RealtimeDrainStarted() {
+	m.RealtimeDraining.Set(1)
+}
+
+// RealtimeDrainCompleted records the outcome of a drain operation.
+// reason is one of "all_drained", "deadline", or "ctx_canceled".
+// durationSeconds is the elapsed time since drain started.
+// drained is the count of sessions that completed gracefully;
+// forceEnded is the count still live at drain exit.
+func (m *Metrics) RealtimeDrainCompleted(reason string, durationSeconds float64, drained, forceEnded int) {
+	m.RealtimeDraining.Set(0)
+	m.RealtimeDrainDuration.WithLabelValues(reason).Observe(durationSeconds)
+	if drained > 0 {
+		m.RealtimeCallsDrainedTotal.Add(float64(drained))
+	}
+	if forceEnded > 0 {
+		m.RealtimeCallsForceEndedTotal.Add(float64(forceEnded))
+	}
 }

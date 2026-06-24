@@ -858,31 +858,54 @@ func (s *Server) liveRealtimeSessions() int {
 	return int(s.activeAudioSessions.Load()) + s.parked.len()
 }
 
+// drainReasonAllDrained is the drain completion reason when all sessions finished gracefully.
+const drainReasonAllDrained = "all_drained"
+
+// drainReasonDeadline is the drain completion reason when the drain timeout elapsed.
+const drainReasonDeadline = "deadline"
+
+// drainReasonCtxCanceled is the drain completion reason when the context was canceled.
+const drainReasonCtxCanceled = "ctx_canceled"
+
 // Drain marks the server draining and blocks until there are no active or
 // parked realtime sessions, or DrainTimeout elapses (whichever first). Returns
 // the number of sessions still live at return (0 = fully drained). Safe to call
 // once; subsequent calls return immediately.
 func (s *Server) Drain(ctx context.Context) int {
 	s.markDraining()
+	s.metrics.RealtimeDrainStarted()
+	drainStart := time.Now()
+	initialSessions := s.liveRealtimeSessions()
+
+	finishDrain := func(reason string, remaining int) int {
+		elapsed := time.Since(drainStart).Seconds()
+		drained := initialSessions - remaining
+		if drained < 0 {
+			drained = 0
+		}
+		s.metrics.RealtimeDrainCompleted(reason, elapsed, drained, remaining)
+		return remaining
+	}
+
 	deadline := time.NewTimer(s.config.DrainTimeout)
 	defer deadline.Stop()
 	ticker := time.NewTicker(250 * time.Millisecond)
 	defer ticker.Stop()
 	s.log.Info("facade draining started",
 		"drainTimeout", s.config.DrainTimeout,
-		"liveSessions", s.liveRealtimeSessions())
+		"liveSessions", initialSessions)
 	for {
 		if n := s.liveRealtimeSessions(); n == 0 {
-			s.log.Info("facade drain complete", "reason", "all_drained")
-			return 0
+			s.log.Info("facade drain complete", "reason", drainReasonAllDrained)
+			return finishDrain(drainReasonAllDrained, 0)
 		}
 		select {
 		case <-deadline.C:
 			n := s.liveRealtimeSessions()
-			s.log.Info("facade drain complete", "reason", "deadline", "remaining", n)
-			return n
+			s.log.Info("facade drain complete", "reason", drainReasonDeadline, "remaining", n)
+			return finishDrain(drainReasonDeadline, n)
 		case <-ctx.Done():
-			return s.liveRealtimeSessions()
+			return finishDrain(drainReasonCtxCanceled, s.liveRealtimeSessions())
 		case <-ticker.C:
 		}
 	}
