@@ -17,9 +17,11 @@ limitations under the License.
 package facade
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/go-logr/logr"
 )
@@ -44,5 +46,30 @@ func TestMarkDraining_IsIdempotent(t *testing.T) {
 	s.markDraining() // second call must not panic
 	if !s.IsDraining() {
 		t.Fatal("IsDraining should be true after repeated markDraining calls")
+	}
+}
+
+func TestDrain_ReturnsWhenSessionsZero(t *testing.T) {
+	cfg := DefaultServerConfig()
+	cfg.DrainTimeout = time.Second
+	s := NewServer(cfg, nil, nil, logr.Discard())
+	// No active or parked sessions → drains immediately.
+	if left := s.Drain(context.Background()); left != 0 {
+		t.Fatalf("want 0 left, got %d", left)
+	}
+	if !s.IsDraining() {
+		t.Fatal("Drain must mark draining")
+	}
+}
+
+func TestDrain_DeadlineReturnsRemaining(t *testing.T) {
+	cfg := DefaultServerConfig()
+	cfg.DrainTimeout = 20 * time.Millisecond
+	s := NewServer(cfg, nil, nil, logr.Discard())
+	// Park one session so the count stays > 0 for the whole window.
+	s.parked.park(context.Background(), "sid", "u", newAudioSession("sid", &fakeDuplexSink{audio: make(chan []byte, 1)}, nil))
+	left := s.Drain(context.Background())
+	if left < 1 {
+		t.Fatalf("want >=1 remaining at deadline, got %d", left)
 	}
 }

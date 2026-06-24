@@ -852,6 +852,42 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	return nil
 }
 
+// liveRealtimeSessions returns the total number of active (in-flight) plus
+// parked realtime sessions on this pod.
+func (s *Server) liveRealtimeSessions() int {
+	return int(s.activeAudioSessions.Load()) + s.parked.len()
+}
+
+// Drain marks the server draining and blocks until there are no active or
+// parked realtime sessions, or DrainTimeout elapses (whichever first). Returns
+// the number of sessions still live at return (0 = fully drained). Safe to call
+// once; subsequent calls return immediately.
+func (s *Server) Drain(ctx context.Context) int {
+	s.markDraining()
+	deadline := time.NewTimer(s.config.DrainTimeout)
+	defer deadline.Stop()
+	ticker := time.NewTicker(250 * time.Millisecond)
+	defer ticker.Stop()
+	s.log.Info("facade draining started",
+		"drainTimeout", s.config.DrainTimeout,
+		"liveSessions", s.liveRealtimeSessions())
+	for {
+		if n := s.liveRealtimeSessions(); n == 0 {
+			s.log.Info("facade drain complete", "reason", "all_drained")
+			return 0
+		}
+		select {
+		case <-deadline.C:
+			n := s.liveRealtimeSessions()
+			s.log.Info("facade drain complete", "reason", "deadline", "remaining", n)
+			return n
+		case <-ctx.Done():
+			return s.liveRealtimeSessions()
+		case <-ticker.C:
+		}
+	}
+}
+
 // ConnectionCount returns the number of active connections.
 func (s *Server) ConnectionCount() int {
 	s.mu.RLock()
