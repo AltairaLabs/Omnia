@@ -372,3 +372,103 @@ describe("ApiKeysSection workspace scope (#1561 P2)", () => {
     });
   });
 });
+
+describe("ApiKeysSection dialog actions", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockUsePermissions.mockReturnValue(
+      createMockPermissions(() => true, [Permission.API_KEYS_VIEW_OWN, Permission.API_KEYS_MANAGE_OWN])
+    );
+  });
+
+  it("issues a DELETE when the user confirms revocation", async () => {
+    const fetchFn = vi.fn((_url: string, init?: RequestInit) => {
+      if (init?.method === "DELETE") {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve(mockApiKeysResponse) });
+    });
+    global.fetch = fetchFn as never;
+
+    render(<ApiKeysSection />, { wrapper: createWrapper() });
+    await waitFor(() => expect(screen.getByText("Test Key 1")).toBeInTheDocument());
+
+    const trash = screen
+      .getAllByRole("button")
+      .find((b) => b.querySelector("svg.lucide-trash-2"));
+    fireEvent.click(trash!);
+
+    await waitFor(() => expect(screen.getByText("Revoke API Key?")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: /Revoke Key/i }));
+
+    await waitFor(() => {
+      const del = fetchFn.mock.calls.find((c) => (c[1] as RequestInit)?.method === "DELETE");
+      expect(del).toBeTruthy();
+      expect(del![0]).toContain("/api/settings/api-keys/key-1");
+    });
+  });
+
+  it("copies the new key to the clipboard from the success dialog", async () => {
+    const writeText = vi.fn();
+    Object.assign(navigator, { clipboard: { writeText } });
+
+    const newKey = {
+      id: "k1",
+      name: "ci",
+      key: "omnia_sk_secret_value",
+      keyPrefix: "omnia_sk_...",
+      role: "editor",
+      expiresAt: null,
+      createdAt: new Date().toISOString(),
+      lastUsedAt: null,
+      isExpired: false,
+    };
+    const fetchFn = vi.fn((_url: string, init?: RequestInit) => {
+      if (init?.method === "POST") {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ key: newKey }) });
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve(mockApiKeysResponse) });
+    });
+    global.fetch = fetchFn as never;
+
+    render(<ApiKeysSection />, { wrapper: createWrapper() });
+    await waitFor(() => expect(screen.getByRole("button", { name: /Create Key/i })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: /Create Key/i }));
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "ci" } });
+    const createButtons = screen.getAllByRole("button", { name: /Create Key/i });
+    fireEvent.click(createButtons[createButtons.length - 1]);
+
+    await waitFor(() => expect(screen.getByText("API Key Created")).toBeInTheDocument());
+
+    const copyBtn = screen
+      .getAllByRole("button")
+      .find((b) => b.querySelector("svg.lucide-copy"));
+    fireEvent.click(copyBtn!);
+
+    expect(writeText).toHaveBeenCalledWith("omnia_sk_secret_value");
+    await waitFor(() => expect(screen.getByText("Done")).toBeInTheDocument());
+
+    // Closing the success dialog resets its state (onOpenChange close path).
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+    await waitFor(() => expect(screen.queryByText("API Key Created")).not.toBeInTheDocument());
+  });
+
+  it("surfaces an error message when key creation fails", async () => {
+    const fetchFn = vi.fn((_url: string, init?: RequestInit) => {
+      if (init?.method === "POST") {
+        return Promise.resolve({ ok: false, json: () => Promise.resolve({ error: "max keys reached" }) });
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve(mockApiKeysResponse) });
+    });
+    global.fetch = fetchFn as never;
+
+    render(<ApiKeysSection />, { wrapper: createWrapper() });
+    await waitFor(() => expect(screen.getByRole("button", { name: /Create Key/i })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: /Create Key/i }));
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "overflow" } });
+    const createButtons = screen.getAllByRole("button", { name: /Create Key/i });
+    fireEvent.click(createButtons[createButtons.length - 1]);
+
+    await waitFor(() => expect(screen.getByText("max keys reached")).toBeInTheDocument());
+  });
+});
