@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -33,6 +34,23 @@ import (
 
 // Annotation key for config hash - changes to this trigger pod rollouts
 const annotationConfigHash = "omnia.altairalabs.ai/config-hash"
+
+// drainGraceBufferSeconds is added to the DrainTimeout to give the pre-stop
+// hook and OS process cleanup headroom after the drain window closes.
+const drainGraceBufferSeconds = 15
+
+// gracePeriodFor returns the pod TerminationGracePeriodSeconds for ar.
+// When ar.Spec.Facade.DrainTimeout is set to a parseable positive duration,
+// the grace period is that duration plus drainGraceBufferSeconds.
+// Otherwise the default of 45 seconds is returned.
+func gracePeriodFor(ar *omniav1alpha1.AgentRuntime) int64 {
+	if ar.Spec.Facade.DrainTimeout != nil {
+		if d, err := time.ParseDuration(*ar.Spec.Facade.DrainTimeout); err == nil && d > 0 {
+			return int64(d.Seconds()) + drainGraceBufferSeconds
+		}
+	}
+	return 45
+}
 
 // agentPodUserID is the uid/gid used by the facade and runtime container images
 // (both Dockerfile.agent and Dockerfile.runtime declare USER 65532:65532 on a
@@ -200,9 +218,10 @@ func (r *AgentRuntimeReconciler) buildDeploymentSpec(
 	// SA token and point the path env at it. No-op when disabled.
 	r.ServiceAuth.applyCallerToken(&podSpec)
 
-	// Termination grace period: 45s allows the 30s shutdown timeout to complete
-	// plus headroom for the pre-stop hook and connection draining.
-	podSpec.TerminationGracePeriodSeconds = ptr.To(int64(45))
+	// Termination grace period: computed from DrainTimeout when set, otherwise
+	// 45s (allows the 30s shutdown timeout plus headroom for the pre-stop hook
+	// and connection draining).
+	podSpec.TerminationGracePeriodSeconds = ptr.To(gracePeriodFor(agentRuntime))
 
 	// Add scheduling constraints if specified
 	if agentRuntime.Spec.Runtime != nil {
