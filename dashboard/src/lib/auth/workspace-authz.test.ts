@@ -837,3 +837,69 @@ describe("checkWorkspaceAccess platform-admin override", () => {
     expect(result).toHaveLength(0);
   });
 });
+
+describe("API-key workspace scope (#1561)", () => {
+  const mockWorkspace: Workspace = {
+    apiVersion: "omnia.altairalabs.ai/v1alpha1",
+    kind: "Workspace",
+    metadata: { name: "test-workspace", creationTimestamp: "2024-01-15T10:00:00Z" },
+    spec: {
+      displayName: "Test Workspace",
+      description: "A test workspace",
+      environment: "development",
+      namespace: { name: "test-ns", create: true },
+      roleBindings: [
+        { groups: ["developers@example.com"], role: "editor" },
+      ],
+      directGrants: [],
+    },
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    clearAuthzCache();
+    (getWorkspace as Mock).mockResolvedValue(mockWorkspace);
+    (listWorkspaces as Mock).mockResolvedValue([mockWorkspace]);
+  });
+
+  const keyUser = (over: Partial<User>): User => ({
+    id: "u1", username: "apikey:ci", email: "alice@example.com",
+    groups: ["developers@example.com"], role: "editor", provider: "proxy", ...over,
+  });
+
+  it("grants the owner's role when the workspace is in the allowlist", async () => {
+    (getUser as Mock).mockResolvedValue(keyUser({ apiKeyScope: { workspaces: ["test-workspace"] } }));
+    const access = await checkWorkspaceAccess("test-workspace");
+    expect(access.granted).toBe(true);
+    expect(access.role).toBe("editor");
+  });
+
+  it("denies a workspace outside the allowlist even if the role would match", async () => {
+    (getUser as Mock).mockResolvedValue(keyUser({ apiKeyScope: { workspaces: ["other-ws"] } }));
+    const access = await checkWorkspaceAccess("test-workspace");
+    expect(access.granted).toBe(false);
+  });
+
+  it("is unrestricted when the allowlist is empty/undefined", async () => {
+    (getUser as Mock).mockResolvedValue(keyUser({ apiKeyScope: { workspaces: undefined } }));
+    const access = await checkWorkspaceAccess("test-workspace");
+    expect(access.granted).toBe(true);
+    expect(access.role).toBe("editor");
+  });
+
+  it("suppresses platform-admin for a scoped admin key", async () => {
+    (getUser as Mock).mockResolvedValue(keyUser({
+      role: "admin", groups: [], email: "admin-key", apiKeyScope: { workspaces: ["test-workspace"] },
+    }));
+    const access = await checkWorkspaceAccess("test-workspace");
+    expect(access.granted).toBe(false); // no group/grant match + platform-admin suppressed
+  });
+
+  it("keeps platform-admin for an unscoped admin key", async () => {
+    (getUser as Mock).mockResolvedValue(keyUser({
+      role: "admin", groups: [], email: "admin-key", apiKeyScope: { workspaces: undefined },
+    }));
+    const access = await checkWorkspaceAccess("test-workspace");
+    expect(access.granted).toBe(true); // platform admin manage-only (no requiredRole)
+  });
+});

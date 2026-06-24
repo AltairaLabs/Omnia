@@ -191,6 +191,13 @@ export async function checkWorkspaceAccess(
   const user = await getUser();
   const identity = userIdentity(user);
 
+  // Workspace-scoped API keys: a non-empty allowlist confines the key. A
+  // request for a workspace outside the allowlist is denied up front (#1561).
+  const scopeWorkspaces = user.apiKeyScope?.workspaces;
+  if (scopeWorkspaces && scopeWorkspaces.length > 0 && !scopeWorkspaces.includes(workspaceName)) {
+    return DENIED_ACCESS;
+  }
+
   // For anonymous users, check the workspace's anonymousAccess configuration
   if (user.provider === "anonymous" || !identity) {
     // Check if workspace exists
@@ -246,7 +253,10 @@ export async function checkWorkspaceAccess(
   // self-grant a role), but hold NO data role until they do — a data
   // requiredRole therefore still denies them. Not cached: it derives from the
   // global role, not workspace state, and is cheap to recompute.
-  if (!role && isPlatformAdmin(user)) {
+  // A scoped key (non-empty allowlist) must never gain platform-admin — that
+  // would span all workspaces and defeat least-privilege (#1561).
+  const isScopedKey = !!(scopeWorkspaces && scopeWorkspaces.length > 0);
+  if (!role && isPlatformAdmin(user) && !isScopedKey) {
     return {
       granted: !requiredRole,
       role: null,
