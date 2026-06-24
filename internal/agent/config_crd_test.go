@@ -63,8 +63,8 @@ func TestLoadFromCRD_HappyPath(t *testing.T) {
 			Type: v1alpha1.FacadeTypeWebSocket,
 			Port: ptr.To(int32(9090)),
 		},
-		Session: &v1alpha1.SessionConfig{
-			Type: v1alpha1.SessionStoreTypeRedis,
+		Context: &v1alpha1.ContextConfig{
+			Type: v1alpha1.ContextStoreTypeRedis,
 			TTL:  ptr.To("2h"),
 		},
 		ToolRegistryRef: &v1alpha1.ToolRegistryRef{
@@ -179,8 +179,8 @@ func TestLoadFromCRD_InvalidSessionTTL(t *testing.T) {
 	ar := newFakeAgentRuntime("agent", "ns", v1alpha1.AgentRuntimeSpec{
 		PromptPackRef: v1alpha1.PromptPackRef{Name: "pack"},
 		Facade:        v1alpha1.FacadeConfig{Type: v1alpha1.FacadeTypeWebSocket},
-		Session: &v1alpha1.SessionConfig{
-			Type: v1alpha1.SessionStoreTypeMemory,
+		Context: &v1alpha1.ContextConfig{
+			Type: v1alpha1.ContextStoreTypeMemory,
 			TTL:  ptr.To("not-a-duration"),
 		},
 	})
@@ -215,8 +215,8 @@ func TestLoadFromCRD_SessionTTLNil(t *testing.T) {
 	ar := newFakeAgentRuntime("agent", "ns", v1alpha1.AgentRuntimeSpec{
 		PromptPackRef: v1alpha1.PromptPackRef{Name: "pack"},
 		Facade:        v1alpha1.FacadeConfig{Type: v1alpha1.FacadeTypeWebSocket},
-		Session: &v1alpha1.SessionConfig{
-			Type: v1alpha1.SessionStoreTypeMemory,
+		Context: &v1alpha1.ContextConfig{
+			Type: v1alpha1.ContextStoreTypeMemory,
 			// TTL is nil — should default
 		},
 	})

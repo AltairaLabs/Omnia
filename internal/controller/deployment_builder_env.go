@@ -136,17 +136,17 @@ func (r *AgentRuntimeReconciler) buildFacadeEnvVars(
 	})
 
 	// OMNIA_ROUTE_REDIS_URL — the Redis URL used by the facade's blip-resume
-	// route store. Sourced from the same secret as the session store when a
-	// Redis-backed session store is configured; omitted otherwise so the facade
+	// route store. Sourced from the same secret as the context store when a
+	// Redis-backed context store is configured; omitted otherwise so the facade
 	// falls back to the noop route store silently.
-	if agentRuntime.Spec.Session != nil &&
-		agentRuntime.Spec.Session.Type == omniav1alpha1.SessionStoreTypeRedis &&
-		agentRuntime.Spec.Session.StoreRef != nil {
+	if agentRuntime.Spec.Context != nil &&
+		agentRuntime.Spec.Context.Type == omniav1alpha1.ContextStoreTypeRedis &&
+		agentRuntime.Spec.Context.StoreRef != nil {
 		envVars = append(envVars, corev1.EnvVar{
 			Name: "OMNIA_ROUTE_REDIS_URL",
 			ValueFrom: &corev1.EnvVarSource{
 				SecretKeyRef: &corev1.SecretKeySelector{
-					LocalObjectReference: *agentRuntime.Spec.Session.StoreRef,
+					LocalObjectReference: *agentRuntime.Spec.Context.StoreRef,
 					Key:                  secretKeyRedisURL,
 				},
 			},
@@ -262,6 +262,24 @@ func (r *AgentRuntimeReconciler) buildRuntimeEnvVars(
 		envVars = append(envVars, corev1.EnvVar{
 			Name:  "OMNIA_PROMPTPACK_MANIFEST_PATH",
 			Value: path,
+		})
+	}
+
+	// OMNIA_CONTEXT_URL — the Redis URL used by the runtime's durable context
+	// store (statestore.NewRedisStore). Sourced from the storeRef secret when a
+	// Redis-backed context store is configured; omitted otherwise so the runtime
+	// falls back to the in-process memory store.
+	if agentRuntime.Spec.Context != nil &&
+		agentRuntime.Spec.Context.Type == omniav1alpha1.ContextStoreTypeRedis &&
+		agentRuntime.Spec.Context.StoreRef != nil {
+		envVars = append(envVars, corev1.EnvVar{
+			Name: "OMNIA_CONTEXT_URL",
+			ValueFrom: &corev1.EnvVarSource{
+				SecretKeyRef: &corev1.SecretKeySelector{
+					LocalObjectReference: *agentRuntime.Spec.Context.StoreRef,
+					Key:                  secretKeyRedisURL,
+				},
+			},
 		})
 	}
 

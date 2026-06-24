@@ -17,6 +17,7 @@
 559 dashboard/src/components/file-browser/content-explorer.tsx
 529 dashboard/src/components/memories/memory-galaxy.tsx
 1395 dashboard/src/components/providers/provider-dialog.tsx
+515 dashboard/src/components/settings/api-keys-section.tsx
 522 dashboard/src/components/skills/skill-source-dialog.tsx
 769 dashboard/src/components/tools/tool-test-panel.tsx
 1045 dashboard/src/lib/data/mock-service.ts

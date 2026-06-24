@@ -17,8 +17,8 @@ spec:
   # Optional tool registry reference
   toolRegistryRef:
     name: support-tools
-  # Session configuration using Redis
-  session:
+  # Context store configuration using Redis
+  context:
     type: redis
     storeRef:
       name: redis-credentials

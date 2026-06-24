@@ -3,7 +3,7 @@
 /**
  * AgentTopology — the agent Overview architecture diagram.
  *
- * Renders facade(s) sitting in front of the runtime, with PromptPack, Session
+ * Renders facade(s) sitting in front of the runtime, with PromptPack, Context
  * and Memory nested inside the runtime. Built on @xyflow/react (same stack as
  * topology/ and workload-graph/) but locked down to a static diagram: no drag,
  * no pan, no zoom, fitView only — so it reads as a diagram, not a canvas.
@@ -23,7 +23,7 @@ interface AgentTopologyProps {
   facades: AgentTopologyFacade[];
   framework?: { type?: string; version?: string };
   promptPack?: { name?: string; version?: string };
-  session?: { type?: string; ttl?: string };
+  context?: { type?: string; ttl?: string };
   memoryEnabled?: boolean;
 }
 
@@ -32,7 +32,7 @@ export function AgentTopology({
   facades,
   framework,
   promptPack,
-  session,
+  context,
   memoryEnabled,
 }: Readonly<AgentTopologyProps>) {
   const { nodes, edges } = useMemo(
@@ -42,10 +42,10 @@ export function AgentTopology({
         facades,
         framework,
         promptPack,
-        session,
+        context,
         memoryEnabled,
       }),
-    [agentName, facades, framework, promptPack, session, memoryEnabled],
+    [agentName, facades, framework, promptPack, context, memoryEnabled],
   );
 
   return (

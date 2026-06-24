@@ -149,7 +149,7 @@ spec:
   facade:
     type: websocket
     port: 8080
-  session:
+  context:
     type: memory
     ttl: "1h"
   runtime:
@@ -220,7 +220,7 @@ spec:
     type: websocket
     port: 8080
     handler: demo
-  session:
+  context:
     type: memory
     ttl: "1h"
   runtime:

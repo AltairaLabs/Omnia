@@ -480,7 +480,7 @@ export interface components {
             toolRegistryRef?: components["schemas"]["LocalObjectReference"];
             providers?: components["schemas"]["NamedProviderRef"][];
             facade?: components["schemas"]["FacadeConfig"];
-            session?: components["schemas"]["SessionConfig"];
+            context?: components["schemas"]["ContextConfig"];
             runtime?: components["schemas"]["RuntimeConfig"];
             console?: components["schemas"]["ConsoleConfig"];
             rollout?: components["schemas"]["RolloutConfig"];
@@ -499,7 +499,7 @@ export interface components {
             port?: number;
             handler?: string;
         };
-        SessionConfig: {
+        ContextConfig: {
             /** @enum {string} */
             type?: "memory" | "redis";
             ttl?: string;

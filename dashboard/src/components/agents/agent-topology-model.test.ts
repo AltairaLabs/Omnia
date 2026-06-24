@@ -5,7 +5,7 @@ const base = {
   facades: [{ type: "websocket", port: 8080 }],
   framework: { type: "promptkit", version: "1.4.14" },
   promptPack: { name: "echo", version: "v3" },
-  session: { type: "memory", ttl: "1h" },
+  context: { type: "memory", ttl: "1h" },
   memoryEnabled: true,
 };
 
@@ -16,14 +16,14 @@ describe("buildAgentTopologyGraph", () => {
     expect(types).toContain("agentFacade");
     expect(types).toContain("agentRuntime");
     expect(types).toContain("agentPromptPack");
-    expect(types).toContain("agentSession");
+    expect(types).toContain("agentContext");
     expect(types).toContain("agentMemory");
   });
 
-  it("nests promptpack, session and memory inside the runtime node", () => {
+  it("nests promptpack, context and memory inside the runtime node", () => {
     const { nodes } = buildAgentTopologyGraph(base);
     const children = nodes.filter((n) =>
-      ["agentPromptPack", "agentSession", "agentMemory"].includes(n.type ?? ""),
+      ["agentPromptPack", "agentContext", "agentMemory"].includes(n.type ?? ""),
     );
     expect(children).toHaveLength(3);
     for (const c of children) {
@@ -59,14 +59,14 @@ describe("buildAgentTopologyGraph", () => {
     expect(off.nodes.find((n) => n.type === "agentMemory")?.data).toMatchObject({ enabled: false });
   });
 
-  it("carries promptpack and session details into their node data", () => {
+  it("carries promptpack and context details into their node data", () => {
     const { nodes } = buildAgentTopologyGraph(base);
     expect(nodes.find((n) => n.type === "agentPromptPack")?.data).toMatchObject({
       name: "echo",
       version: "v3",
     });
-    expect(nodes.find((n) => n.type === "agentSession")?.data).toMatchObject({
-      sessionType: "memory",
+    expect(nodes.find((n) => n.type === "agentContext")?.data).toMatchObject({
+      contextType: "memory",
       ttl: "1h",
     });
   });

@@ -1,23 +1,23 @@
 ---
-title: "Configure Session Storage"
-description: "Set up session persistence for agent conversations"
+title: "Configure Context Store"
+description: "Set up context persistence for agent conversations"
 sidebar:
   order: 2
 ---
 
 
-This guide explains how to configure session storage for maintaining conversation state across connections.
+This guide explains how to configure the context store for maintaining conversation state across connections.
 
-## Session Storage Options
+## Context Store Options
 
-Omnia supports two session storage backends:
+Omnia supports two context store backends:
 
 | Backend | Use Case | Persistence |
 |---------|----------|-------------|
 | Memory | Development, testing | Pod lifetime only |
 | Redis | Production, multi-replica | Persistent |
 
-## Using In-Memory Sessions
+## Using In-Memory Context Store
 
 In-memory storage is the default and requires no additional configuration:
 
@@ -28,14 +28,14 @@ metadata:
   name: my-agent
 spec:
   # ... other config
-  session:
+  context:
     type: memory
     ttl: 1h
 ```
 
-> **Note**: Sessions are lost when the pod restarts. Not suitable for production with multiple replicas.
+> **Note**: Context is lost when the pod restarts. Not suitable for production with multiple replicas.
 
-## Using Redis Sessions
+## Using Redis Context Store
 
 For production deployments, use Redis:
 
@@ -68,7 +68,7 @@ metadata:
   name: my-agent
 spec:
   # ... other config
-  session:
+  context:
     type: redis
     ttl: 24h
     storeRef:
@@ -76,13 +76,13 @@ spec:
       key: url
 ```
 
-## Session TTL
+## Context TTL
 
-The `ttl` field controls how long sessions remain valid after the last activity:
+The `ttl` field controls how long context remains valid after the last activity:
 
 ```yaml
-session:
-  ttl: 1h    # Sessions expire after 1 hour of inactivity
+context:
+  ttl: 1h    # Context expires after 1 hour of inactivity
 ```
 
 Supported formats:

@@ -44,16 +44,16 @@ func TestBuildFacadeEnvVars_SetsPODIP(t *testing.T) {
 	}
 }
 
-// TestBuildFacadeEnvVars_SetsRouteRedisURLFromSessionStoreRef verifies that
-// when spec.session is configured with a Redis store and a storeRef secret,
+// TestBuildFacadeEnvVars_SetsRouteRedisURLFromContextStoreRef verifies that
+// when spec.context is configured with a Redis store and a storeRef secret,
 // buildFacadeEnvVars injects OMNIA_ROUTE_REDIS_URL from the same secret so
 // the facade's blip-resume route store can connect to Redis.
-func TestBuildFacadeEnvVars_SetsRouteRedisURLFromSessionStoreRef(t *testing.T) {
+func TestBuildFacadeEnvVars_SetsRouteRedisURLFromContextStoreRef(t *testing.T) {
 	r := &AgentRuntimeReconciler{}
 	ar := &omniav1alpha1.AgentRuntime{
 		Spec: omniav1alpha1.AgentRuntimeSpec{
-			Session: &omniav1alpha1.SessionConfig{
-				Type: omniav1alpha1.SessionStoreTypeRedis,
+			Context: &omniav1alpha1.ContextConfig{
+				Type: omniav1alpha1.ContextStoreTypeRedis,
 				StoreRef: &corev1.LocalObjectReference{
 					Name: testRedisSecretName,
 				},
@@ -64,7 +64,7 @@ func TestBuildFacadeEnvVars_SetsRouteRedisURLFromSessionStoreRef(t *testing.T) {
 
 	got := findEnvVar(envs, "OMNIA_ROUTE_REDIS_URL")
 	if got == nil {
-		t.Fatalf("expected OMNIA_ROUTE_REDIS_URL env var when session.type=redis and storeRef is set")
+		t.Fatalf("expected OMNIA_ROUTE_REDIS_URL env var when context.type=redis and storeRef is set")
 	}
 	if got.ValueFrom == nil || got.ValueFrom.SecretKeyRef == nil {
 		t.Fatalf("OMNIA_ROUTE_REDIS_URL must use SecretKeyRef, got ValueFrom=%+v", got.ValueFrom)
@@ -77,11 +77,11 @@ func TestBuildFacadeEnvVars_SetsRouteRedisURLFromSessionStoreRef(t *testing.T) {
 	}
 }
 
-// TestBuildFacadeEnvVars_OmitsRouteRedisURLWhenNoSession verifies that when
-// spec.session is nil, OMNIA_ROUTE_REDIS_URL is not injected. The facade will
-// use the noop route store — correct for text-only agents without a session
+// TestBuildFacadeEnvVars_OmitsRouteRedisURLWhenNoContext verifies that when
+// spec.context is nil, OMNIA_ROUTE_REDIS_URL is not injected. The facade will
+// use the noop route store — correct for text-only agents without a context
 // Redis secret.
-func TestBuildFacadeEnvVars_OmitsRouteRedisURLWhenNoSession(t *testing.T) {
+func TestBuildFacadeEnvVars_OmitsRouteRedisURLWhenNoContext(t *testing.T) {
 	r := &AgentRuntimeReconciler{}
 	ar := &omniav1alpha1.AgentRuntime{}
 	envs := r.buildFacadeEnvVars(ar)
@@ -92,20 +92,20 @@ func TestBuildFacadeEnvVars_OmitsRouteRedisURLWhenNoSession(t *testing.T) {
 }
 
 // TestBuildFacadeEnvVars_OmitsRouteRedisURLWhenMemoryStore verifies that a
-// memory-backed session store does not inject OMNIA_ROUTE_REDIS_URL. There is
+// memory-backed context store does not inject OMNIA_ROUTE_REDIS_URL. There is
 // no Redis to connect to in that configuration.
 func TestBuildFacadeEnvVars_OmitsRouteRedisURLWhenMemoryStore(t *testing.T) {
 	r := &AgentRuntimeReconciler{}
 	ar := &omniav1alpha1.AgentRuntime{
 		Spec: omniav1alpha1.AgentRuntimeSpec{
-			Session: &omniav1alpha1.SessionConfig{
-				Type: omniav1alpha1.SessionStoreTypeMemory,
+			Context: &omniav1alpha1.ContextConfig{
+				Type: omniav1alpha1.ContextStoreTypeMemory,
 			},
 		},
 	}
 	envs := r.buildFacadeEnvVars(ar)
 
 	if got := findEnvVar(envs, "OMNIA_ROUTE_REDIS_URL"); got != nil {
-		t.Errorf("expected no OMNIA_ROUTE_REDIS_URL when session.type=memory, got %+v", got)
+		t.Errorf("expected no OMNIA_ROUTE_REDIS_URL when context.type=memory, got %+v", got)
 	}
 }

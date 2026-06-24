@@ -157,32 +157,35 @@ type ToolRegistryRef struct {
 	Namespace *string `json:"namespace,omitempty"`
 }
 
-// SessionStoreType defines the type of session store.
-// +kubebuilder:validation:Enum=memory;redis;postgres
-type SessionStoreType string
+// ContextStoreType defines the type of context store. The runtime context is
+// the working LLM context (turns concatenated into each provider call); a
+// durable backend lets a fresh pod resume it via sdk.Resume. Only fast/instant
+// stores are supported here — NOT a relational DB. (Long-term conversation
+// archival is a separate concern owned by session-api, not this field.)
+// +kubebuilder:validation:Enum=memory;redis
+type ContextStoreType string
 
 const (
-	// SessionStoreTypeMemory uses in-memory storage (not recommended for production).
-	SessionStoreTypeMemory SessionStoreType = "memory"
-	// SessionStoreTypeRedis uses Redis for session storage.
-	SessionStoreTypeRedis SessionStoreType = "redis"
-	// SessionStoreTypePostgres uses PostgreSQL for session storage.
-	SessionStoreTypePostgres SessionStoreType = "postgres"
+	// ContextStoreTypeMemory uses in-memory storage (ephemeral; lost on pod restart).
+	ContextStoreTypeMemory ContextStoreType = "memory"
+	// ContextStoreTypeRedis uses Redis for durable, cross-pod-resumable context storage.
+	ContextStoreTypeRedis ContextStoreType = "redis"
 )
 
-// SessionConfig defines the configuration for session management.
-type SessionConfig struct {
-	// type specifies the session store backend.
+// ContextConfig defines the configuration for the runtime context store.
+// +kubebuilder:validation:XValidation:rule="self.type == 'memory' || has(self.storeRef)",message="spec.context.storeRef is required when context.type is 'redis'"
+type ContextConfig struct {
+	// type specifies the context store backend.
 	// +kubebuilder:validation:Required
 	// +kubebuilder:default="memory"
-	Type SessionStoreType `json:"type"`
+	Type ContextStoreType `json:"type"`
 
-	// storeRef references a secret containing connection details for the session store.
-	// Required for redis and postgres store types.
+	// storeRef references a secret containing connection details for the context store.
+	// Required for the redis store type (the secret must hold a "url" key).
 	// +optional
 	StoreRef *corev1.LocalObjectReference `json:"storeRef,omitempty"`
 
-	// ttl is the time-to-live for sessions in duration format (e.g., "24h", "30m").
+	// ttl is the time-to-live for context entries in duration format (e.g., "24h", "30m").
 	// +kubebuilder:default="24h"
 	// +optional
 	TTL *string `json:"ttl,omitempty"`
@@ -1262,9 +1265,9 @@ type AgentRuntimeSpec struct {
 	// +optional
 	ToolRegistryRef *ToolRegistryRef `json:"toolRegistryRef,omitempty"`
 
-	// session configures session management and storage.
+	// context configures the runtime context store.
 	// +optional
-	Session *SessionConfig `json:"session,omitempty"`
+	Context *ContextConfig `json:"context,omitempty"`
 
 	// runtime configures deployment settings like replicas and resources.
 	// +optional
