@@ -83,6 +83,7 @@ export default defineConfig({
         "src/app/settings/**/page.tsx", // Settings pages (require full context)
         "src/app/toolregistries/**/page.tsx", // Tool registry pages (require full context)
         "src/app/workspaces/**/page.tsx", // Workspace pages (require full context)
+        "src/app/cli/**/page.tsx", // CLI login picker (server component, requires live auth/session/K8s)
         "src/middleware.ts",
 
         // Auth API routes - require NextAuth server infrastructure
