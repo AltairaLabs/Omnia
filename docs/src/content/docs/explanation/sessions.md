@@ -223,7 +223,7 @@ With one replica, in-memory sessions work fine. But:
 With multiple replicas, you must use Redis:
 
 1. Install Redis in your cluster
-2. Configure `session.type: redis`
+2. Configure `context.type: redis`
 3. All replicas share session state
 
 ### Session Affinity Alternative

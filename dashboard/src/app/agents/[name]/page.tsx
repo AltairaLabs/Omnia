@@ -175,7 +175,7 @@ export default function AgentDetailPage({ params }: Readonly<AgentDetailPageProp
                 name: spec.promptPackRef?.name,
                 version: promptPack?.spec?.version || spec.promptPackRef?.version,
               }}
-              session={spec.session}
+              session={spec.context}
               memoryEnabled={spec.memory?.enabled}
             />
 

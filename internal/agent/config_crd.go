@@ -97,7 +97,7 @@ func LoadFromCRD(ctx context.Context, c client.Client, name, namespace string) (
 	}
 	cfg.HealthPort = healthPort
 
-	if err := loadSessionConfigFromCRD(cfg, ar, namespace); err != nil {
+	if err := loadContextConfigFromCRD(cfg, ar, namespace); err != nil {
 		return nil, err
 	}
 	loadMediaConfigFromCRD(cfg, ar)
@@ -192,8 +192,8 @@ func loadA2ATaskStoreFromCRD(cfg *Config, a2a *v1alpha1.A2AConfig) {
 	}
 }
 
-// loadSessionConfigFromCRD populates session-related config fields from the AgentRuntime CRD.
-func loadSessionConfigFromCRD(cfg *Config, ar *v1alpha1.AgentRuntime, namespace string) error {
+// loadContextConfigFromCRD populates context-store-related config fields from the AgentRuntime CRD.
+func loadContextConfigFromCRD(cfg *Config, ar *v1alpha1.AgentRuntime, namespace string) error {
 	if ar.Spec.Context != nil && ar.Spec.Context.TTL != nil {
 		ttl, err := time.ParseDuration(*ar.Spec.Context.TTL)
 		if err != nil {

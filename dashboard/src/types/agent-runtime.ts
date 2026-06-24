@@ -6,7 +6,7 @@ import { ObjectMeta, Condition, LocalObjectReference, SecretKeyRef } from "./com
 export type AgentRuntimePhase = "Pending" | "Running" | "Failed";
 export type FacadeType = "websocket" | "grpc" | "a2a" | "rest";
 export type HandlerMode = "echo" | "demo" | "runtime";
-export type SessionStoreType = "memory" | "redis" | "postgres";
+export type ContextStoreType = "memory" | "redis";
 export type ProviderType = "claude" | "openai" | "gemini" | "ollama" | "mock";
 export type AutoscalerType = "hpa" | "keda";
 export type FrameworkType = "promptkit" | "langchain" | "autogen" | "custom";
@@ -34,8 +34,8 @@ export interface ToolRegistryRef {
   namespace?: string;
 }
 
-export interface SessionConfig {
-  type: SessionStoreType;
+export interface ContextConfig {
+  type: ContextStoreType;
   storeRef?: LocalObjectReference;
   ttl?: string;
 }
@@ -229,7 +229,7 @@ export interface AgentRuntimeSpec {
   promptPackRef: PromptPackRef;
   facade: FacadeConfig;
   toolRegistryRef?: ToolRegistryRef;
-  session?: SessionConfig;
+  context?: ContextConfig;
   /** memory configures cross-session memory for this agent. */
   memory?: MemoryConfig;
   runtime?: RuntimeConfig;

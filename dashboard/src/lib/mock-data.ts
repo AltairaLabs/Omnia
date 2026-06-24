@@ -36,7 +36,7 @@ export const mockAgentRuntimes: AgentRuntime[] = [
       promptPackRef: { name: "support-prompts", version: "1.2.0" },
       facade: { type: "websocket", port: 8080, handler: "runtime" },
       providers: [{ name: "default", providerRef: { name: "claude-production" } }],
-      session: { type: "redis", ttl: "24h" },
+      context: { type: "redis", ttl: "24h" },
       runtime: {
         replicas: 3,
         autoscaling: {
@@ -78,7 +78,7 @@ export const mockAgentRuntimes: AgentRuntime[] = [
       promptPackRef: { name: "code-prompts" },
       facade: { type: "websocket", port: 8080, handler: "runtime" },
       providers: [{ name: "default", providerRef: { name: "claude-production" } }],
-      session: { type: "redis", ttl: "1h" },
+      context: { type: "redis", ttl: "1h" },
       runtime: { replicas: 2 },
     },
     status: {
@@ -114,7 +114,7 @@ export const mockAgentRuntimes: AgentRuntime[] = [
       facade: { type: "websocket", port: 8080, handler: "runtime" },
       providers: [{ name: "default", providerRef: { name: "openai-production" } }],
       toolRegistryRef: { name: "data-tools" },
-      session: { type: "redis", ttl: "2h" },
+      context: { type: "redis", ttl: "2h" },
       runtime: { replicas: 2 },
     },
     status: {
@@ -148,7 +148,7 @@ export const mockAgentRuntimes: AgentRuntime[] = [
       promptPackRef: { name: "onboarding-prompts", version: "0.9.0" },
       facade: { type: "websocket", port: 8080, handler: "runtime" },
       providers: [{ name: "default", providerRef: { name: "claude-production" } }],
-      session: { type: "memory", ttl: "30m" },
+      context: { type: "memory", ttl: "30m" },
       runtime: { replicas: 1 },
     },
     status: {
@@ -183,7 +183,7 @@ export const mockAgentRuntimes: AgentRuntime[] = [
       facade: { type: "grpc", port: 9090, handler: "runtime" },
       providers: [{ name: "default", providerRef: { name: "openai-production" } }],
       toolRegistryRef: { name: "crm-tools" },
-      session: { type: "redis", ttl: "4h" },
+      context: { type: "redis", ttl: "4h" },
       runtime: { replicas: 2 },
     },
     status: {
@@ -224,7 +224,7 @@ export const mockAgentRuntimes: AgentRuntime[] = [
       promptPackRef: { name: "legacy-prompts", version: "0.5.0" },
       facade: { type: "websocket", port: 8080, handler: "demo" },
       providers: [{ name: "default", providerRef: { name: "openai-staging" } }],
-      session: { type: "memory", ttl: "1h" },
+      context: { type: "memory", ttl: "1h" },
       runtime: { replicas: 1 },
     },
     status: {
@@ -260,7 +260,7 @@ export const mockAgentRuntimes: AgentRuntime[] = [
       promptPackRef: { name: "e2e-test-promptpack", version: "1.0.0" },
       facade: { type: "websocket", port: 8080, handler: "demo" },
       providers: [{ name: "default", providerRef: { name: "claude-production" } }],
-      session: { type: "memory", ttl: "1h" },
+      context: { type: "memory", ttl: "1h" },
       runtime: { replicas: 1 },
     },
     status: {
