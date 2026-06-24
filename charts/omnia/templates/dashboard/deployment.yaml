@@ -126,7 +126,7 @@ spec:
               value: {{ .Values.dashboard.builtin.admin.password | quote }}
             {{- end }}
             {{- end }}
-            {{- if eq .Values.dashboard.apiKeys.store "postgres" }}
+            {{- if eq (include "omnia.dashboard.apiKeyStore" .) "postgres" }}
             {{- if .Values.dashboard.apiKeys.existingPostgresSecret }}
             - name: OMNIA_AUTH_API_KEYS_POSTGRES_URL
               valueFrom:

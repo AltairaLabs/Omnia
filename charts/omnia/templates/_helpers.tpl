@@ -556,6 +556,24 @@ Include this from every template that renders when dashboard.enabled=true.
 {{- end }}
 
 {{/*
+Effective api-key store. A wired postgres secret/URL with the store left at the
+"memory" default is almost always a misconfig: in-memory keys are lost on every
+dashboard restart, silently breaking saved credentials (e.g. deploy-profile
+tokens). Promote memory -> postgres when a postgres secret/URL is configured so
+a durable backend isn't silently ignored (#1582). Explicit store=file/postgres
+is honoured as-is. Used by both the dashboard configmap (OMNIA_AUTH_API_KEYS_STORE)
+and deployment (postgres URL env) so they never disagree.
+*/}}
+{{- define "omnia.dashboard.apiKeyStore" -}}
+{{- $ak := .Values.dashboard.apiKeys -}}
+{{- $store := default "memory" $ak.store -}}
+{{- if and (eq $store "memory") (or $ak.postgresUrl $ak.existingPostgresSecret) -}}
+{{- $store = "postgres" -}}
+{{- end -}}
+{{- $store -}}
+{{- end }}
+
+{{/*
 Render-time guard: enterprise Arena queue requires durable Redis when
 type=redis (which is the default). The in-memory queue mode is only
 useful in dev / E2E; production Arena needs jobs to survive controller

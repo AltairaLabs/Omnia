@@ -156,8 +156,9 @@ data:
 
   # API keys
   OMNIA_AUTH_API_KEYS_ENABLED: {{ .Values.dashboard.apiKeys.enabled | quote }}
-  OMNIA_AUTH_API_KEYS_STORE: {{ .Values.dashboard.apiKeys.store | quote }}
-  {{- if eq .Values.dashboard.apiKeys.store "file" }}
+  {{- $apiKeyStore := include "omnia.dashboard.apiKeyStore" . }}
+  OMNIA_AUTH_API_KEYS_STORE: {{ $apiKeyStore | quote }}
+  {{- if eq $apiKeyStore "file" }}
   OMNIA_AUTH_API_KEYS_FILE_PATH: {{ .Values.dashboard.apiKeys.filePath | quote }}
   {{- end }}
   OMNIA_AUTH_API_KEYS_MAX_PER_USER: {{ .Values.dashboard.apiKeys.maxPerUser | quote }}
