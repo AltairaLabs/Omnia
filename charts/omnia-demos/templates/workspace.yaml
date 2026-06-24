@@ -29,6 +29,17 @@ spec:
       istio.io/dataplane-mode: ambient
       istio.io/use-waypoint: waypoint
     {{- end }}
+  {{- if .Values.sharepointHero.azure.enabled }}
+  # Workspace-wide runtime identity (#1598). Every agent in this workspace —
+  # including those provisioned via the deploy API, which carry no podOverrides —
+  # runs as the Azure workload-identity SA + use-label, so keyless Azure OpenAI
+  # calls authenticate without a secret. Per-agent
+  # spec.podOverrides.serviceAccountName overrides this as a unit.
+  runtime:
+    serviceAccountName: {{ .Values.sharepointHero.azure.workloadIdentity.serviceAccountName }}
+    podLabels:
+      azure.workload.identity/use: "true"
+  {{- end }}
   roleBindings: []
   {{- if .Values.workspace.anonymousAccess.enabled }}
   # Anonymous access configuration
