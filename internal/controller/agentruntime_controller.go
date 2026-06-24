@@ -277,9 +277,16 @@ func (r *AgentRuntimeReconciler) fetchAndValidateProvider(
 		r.handleRefError(ctx, log, agentRuntime, ConditionTypeProviderReady, "ProviderNotFound", err)
 		return nil, ctrl.Result{}, err
 	}
-	if provider.Status.Phase == omniav1alpha1.ProviderPhaseError {
+	// A provider with a SET phase that isn't Ready is not usable. Previously
+	// this gated only on == Error, so an Unavailable (unreachable) or Pending
+	// provider sailed through and the AgentRuntime reported Ready while
+	// referencing a provider it can't use. An empty phase is still treated as
+	// ready — that's the brief optimistic window before the provider
+	// controller writes status, and blocking it would stall every fresh agent.
+	// The 10s requeue lets a recovering provider clear this without a spec edit.
+	if provider.Status.Phase != "" && provider.Status.Phase != omniav1alpha1.ProviderPhaseReady {
 		SetCondition(&agentRuntime.Status.Conditions, agentRuntime.Generation, ConditionTypeProviderReady, metav1.ConditionFalse,
-			"ProviderNotReady", fmt.Sprintf("Provider %s is in %s phase", provider.Name, provider.Status.Phase))
+			"ProviderNotReady", fmt.Sprintf("Provider %s is not ready (phase: %q)", provider.Name, provider.Status.Phase))
 		agentRuntime.Status.Phase = omniav1alpha1.AgentRuntimePhasePending
 		if statusErr := r.Status().Update(ctx, agentRuntime); statusErr != nil {
 			log.Error(statusErr, logMsgFailedToUpdateStatus)
