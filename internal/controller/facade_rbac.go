@@ -157,6 +157,19 @@ func (r *AgentRuntimeReconciler) reconcileServiceAccount(
 	return nil
 }
 
+// facadeSecretVerbs returns the Secret verbs the facade Role needs. sharedToken
+// and oidc read a single named Secret (get), but externalAuth.apiKeys backs its
+// validator with a label-selected Secret List at startup — which needs
+// list/watch, or the facade crash-loops on RBAC once api-key auth is set
+// (#1591). RBAC can't scope a list by label, so this widens to a namespace-wide
+// secrets read, granted only when api-key auth is actually configured.
+func facadeSecretVerbs(agentRuntime *omniav1alpha1.AgentRuntime) []string {
+	if ea := agentRuntime.Spec.ExternalAuth; ea != nil && ea.APIKeys != nil {
+		return []string{verbGet, verbList, "watch"}
+	}
+	return []string{verbGet}
+}
+
 // reconcileRole creates/updates the facade Role with read access to CRDs and secrets.
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=roles,verbs=get;list;watch;create;update;patch;delete
 func (r *AgentRuntimeReconciler) reconcileRole(
@@ -196,7 +209,7 @@ func (r *AgentRuntimeReconciler) reconcileRole(
 			{
 				APIGroups: []string{""},
 				Resources: []string{"secrets"},
-				Verbs:     []string{"get"},
+				Verbs:     facadeSecretVerbs(agentRuntime),
 			},
 			{
 				APIGroups: []string{""},
