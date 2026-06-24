@@ -200,3 +200,14 @@ describe("PostgresApiKeyStore — workspaces round-trip", () => {
     expect(created.workspaces).toBeUndefined();
   });
 });
+
+describe("PostgresApiKeyStore — owner snapshot round-trip", () => {
+  it("round-trips ownerEmail + ownerGroups", async () => {
+    const created = await store.create("u1", {
+      name: "scoped", ownerEmail: "alice@example.com", ownerGroups: ["devs", "ops"],
+    });
+    const found = await store.findByKey(created.key);
+    expect(found?.ownerEmail).toBe("alice@example.com");
+    expect(found?.ownerGroups).toEqual(["devs", "ops"]);
+  });
+});

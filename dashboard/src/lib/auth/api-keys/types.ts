@@ -33,6 +33,11 @@ export interface ApiKey {
   lastUsedAt: Date | null;
   /** Workspace allowlist; null/undefined or empty = unrestricted (all of the user's workspaces). Enforcement is deferred (#1554 §G). */
   workspaces?: string[];
+  /** Snapshot of the minting user's identity (email or username) — lets the key
+   *  resolve the owner's per-workspace role without a live session (#1561). */
+  ownerEmail?: string;
+  /** Snapshot of the minting user's groups at creation time. */
+  ownerGroups?: string[];
 }
 
 /**
@@ -73,6 +78,10 @@ export interface CreateApiKeyOptions {
   expiresInDays?: number | null;
   /** Confine the key to this set of workspace names; omit for unrestricted. */
   workspaces?: string[];
+  /** Owner identity snapshot (set by the create route from the session user). */
+  ownerEmail?: string;
+  /** Owner groups snapshot. */
+  ownerGroups?: string[];
 }
 
 /**

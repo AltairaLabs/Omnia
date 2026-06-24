@@ -50,6 +50,8 @@ export class MemoryApiKeyStore implements ApiKeyStore {
       createdAt: now,
       lastUsedAt: null,
       workspaces: options.workspaces,
+      ownerEmail: options.ownerEmail,
+      ownerGroups: options.ownerGroups,
     };
 
     this.keys.set(apiKey.id, apiKey);

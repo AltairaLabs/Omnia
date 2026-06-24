@@ -31,3 +31,24 @@ describe("FileApiKeyStore workspaces", () => {
     expect(found?.workspaces).toEqual(["demo"]);
   });
 });
+
+describe("FileApiKeyStore owner snapshot", () => {
+  it("parses ownerEmail + ownerGroups from the file", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "omnia-keys-owner-"));
+    const file = join(dir, "keys.json");
+    const KEY = "omnia_sk_ownertest_abcdefghijklmnopqrstuvwxyz0123";
+    const keyHash = await bcrypt.hash(KEY, 10);
+    writeFileSync(file, JSON.stringify({ keys: [{
+      id: "k1", userId: "u1", name: "scoped", keyPrefix: "omnia_sk_ownerte...",
+      keyHash, role: "editor", expiresAt: null, createdAt: "2026-01-01T00:00:00Z",
+      ownerEmail: "alice@example.com", ownerGroups: ["devs"],
+    }] }));
+    try {
+      const found = await new FileApiKeyStore(file, { watch: false }).findByKey(KEY);
+      expect(found?.ownerEmail).toBe("alice@example.com");
+      expect(found?.ownerGroups).toEqual(["devs"]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
