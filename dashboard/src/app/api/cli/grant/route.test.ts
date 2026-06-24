@@ -78,4 +78,26 @@ describe("POST /api/cli/grant", () => {
     );
     expect(store.consumeCliFlow).toHaveBeenCalledWith("f1");
   });
+
+  it("parses JSON body and mints a code with 303 redirect", async () => {
+    await arrange();
+    const { POST } = await import("./route");
+    const jsonReq = new NextRequest("https://omnia.example.com/api/cli/grant", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-forwarded-host": "omnia.example.com" },
+      body: JSON.stringify({ flow: "f1", workspace: "team-acme" }),
+    });
+    const res = await POST(jsonReq);
+    expect(res.status).toBe(303);
+    const loc = new URL(res.headers.get("location")!);
+    expect(loc.origin).toBe("http://127.0.0.1:5000");
+    expect(loc.searchParams.get("state")).toBe("abcd1234");
+    expect(loc.searchParams.get("code")).toBeTruthy();
+    expect(store.putCliCode).toHaveBeenCalledWith(
+      loc.searchParams.get("code"),
+      expect.objectContaining({ userId: "u1", workspace: "team-acme", userRole: "editor", workspaceRole: "editor" }),
+      60
+    );
+    expect(store.consumeCliFlow).toHaveBeenCalledWith("f1");
+  });
 });
