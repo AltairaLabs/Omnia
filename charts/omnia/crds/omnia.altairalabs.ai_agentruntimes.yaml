@@ -481,6 +481,44 @@ spec:
                         type: object
                     type: object
                 type: object
+              context:
+                description: context configures the runtime context store.
+                properties:
+                  storeRef:
+                    description: |-
+                      storeRef references a secret containing connection details for the context store.
+                      Required for the redis store type (the secret must hold a "url" key).
+                    properties:
+                      name:
+                        default: ""
+                        description: |-
+                          Name of the referent.
+                          This field is effectively required, but due to backwards compatibility is
+                          allowed to be empty. Instances of this type with an empty value here are
+                          almost certainly wrong.
+                          More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                        type: string
+                    type: object
+                    x-kubernetes-map-type: atomic
+                  ttl:
+                    default: 24h
+                    description: ttl is the time-to-live for context entries in duration
+                      format (e.g., "24h", "30m").
+                    type: string
+                  type:
+                    default: memory
+                    description: type specifies the context store backend.
+                    enum:
+                    - memory
+                    - redis
+                    type: string
+                required:
+                - type
+                type: object
+                x-kubernetes-validations:
+                - message: spec.context.storeRef is required when context.type is
+                    'redis'
+                  rule: self.type == 'memory' || has(self.storeRef)
               duplex:
                 description: duplex configures the realtime voice/duplex console for
                   this agent.
@@ -11909,41 +11947,6 @@ spec:
                 maxLength: 63
                 pattern: ^[a-z0-9]([a-z0-9-]*[a-z0-9])?$
                 type: string
-              session:
-                description: session configures session management and storage.
-                properties:
-                  storeRef:
-                    description: |-
-                      storeRef references a secret containing connection details for the session store.
-                      Required for redis and postgres store types.
-                    properties:
-                      name:
-                        default: ""
-                        description: |-
-                          Name of the referent.
-                          This field is effectively required, but due to backwards compatibility is
-                          allowed to be empty. Instances of this type with an empty value here are
-                          almost certainly wrong.
-                          More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
-                        type: string
-                    type: object
-                    x-kubernetes-map-type: atomic
-                  ttl:
-                    default: 24h
-                    description: ttl is the time-to-live for sessions in duration
-                      format (e.g., "24h", "30m").
-                    type: string
-                  type:
-                    default: memory
-                    description: type specifies the session store backend.
-                    enum:
-                    - memory
-                    - redis
-                    - postgres
-                    type: string
-                required:
-                - type
-                type: object
               toolRegistryRef:
                 description: toolRegistryRef optionally references a ToolRegistry
                   for available tools.

@@ -207,7 +207,7 @@ spec:
     type: websocket
     port: 8080
     handler: demo  # Use "demo" for testing without an API key
-  session:
+  context:
     type: memory
     ttl: "1h"
 ```
@@ -217,7 +217,7 @@ spec:
 > - `demo` — simulated streaming responses for demos without an API key.
 > - `echo` — echoes the input back; useful for testing connectivity.
 >
-> Session store types are `memory` (single-pod dev only), `redis`, and `postgres`. Redis and Postgres require a `storeRef` pointing at a Secret with connection details.
+> Context store types are `memory` (single-pod dev only), `redis`, and `postgres`. Redis and Postgres require a `storeRef` pointing at a Secret with connection details.
 
 ```bash
 kubectl apply -f agentruntime.yaml

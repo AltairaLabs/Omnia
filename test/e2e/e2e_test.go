@@ -950,7 +950,7 @@ spec:
     extraEnv:
       - name: OMNIA_FACADE_ALLOW_UNAUTHENTICATED
         value: "true"
-  session:
+  context:
     type: memory
     ttl: "1h"
   runtime:
@@ -1729,7 +1729,7 @@ spec:
     extraEnv:
       - name: OMNIA_FACADE_ALLOW_UNAUTHENTICATED
         value: "true"
-  session:
+  context:
     type: memory
     ttl: "1h"
   runtime:
@@ -1848,7 +1848,7 @@ spec:
   framework:
     type: custom
     image: %s
-  session:
+  context:
     type: memory
     ttl: "1h"
   runtime:
@@ -1928,7 +1928,7 @@ spec:
     extraEnv:
       - name: OMNIA_FACADE_ALLOW_UNAUTHENTICATED
         value: "true"
-  session:
+  context:
     type: memory
     ttl: "1h"
   runtime:
@@ -2004,7 +2004,7 @@ spec:
     extraEnv:
       - name: OMNIA_FACADE_ALLOW_UNAUTHENTICATED
         value: "true"
-  session:
+  context:
     type: memory
     ttl: "1h"
   runtime:
@@ -2078,7 +2078,7 @@ spec:
     extraEnv:
       - name: OMNIA_FACADE_ALLOW_UNAUTHENTICATED
         value: "true"
-  session:
+  context:
     type: memory
     ttl: "1h"
   runtime:
@@ -2398,7 +2398,7 @@ spec:
     extraEnv:
       - name: OMNIA_FACADE_ALLOW_UNAUTHENTICATED
         value: "true"
-  session:
+  context:
     type: memory
     ttl: "1h"
   runtime:

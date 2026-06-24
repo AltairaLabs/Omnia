@@ -99,8 +99,8 @@ func TestLoadFromCRD_NamedProviders(t *testing.T) {
 			},
 			Evals: &v1alpha1.EvalConfig{Enabled: true},
 			Media: &v1alpha1.MediaConfig{BasePath: "/custom/media"},
-			Session: &v1alpha1.SessionConfig{
-				Type: v1alpha1.SessionStoreTypeMemory,
+			Context: &v1alpha1.ContextConfig{
+				Type: v1alpha1.ContextStoreTypeMemory,
 				TTL:  strPtr("2h"),
 			},
 		},
@@ -123,7 +123,7 @@ func TestLoadFromCRD_NamedProviders(t *testing.T) {
 	assert.Equal(t, "sliding", cfg.TruncationStrategy)
 	assert.True(t, cfg.EvalEnabled)
 	assert.Equal(t, "/custom/media", cfg.MediaBasePath)
-	assert.Equal(t, "memory", cfg.SessionType)
+	assert.Equal(t, "memory", cfg.ContextType)
 
 	// Verify API key env var was set
 	assert.Equal(t, "sk-ant-test-key", os.Getenv("ANTHROPIC_API_KEY"))

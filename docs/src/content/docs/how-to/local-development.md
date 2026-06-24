@@ -267,7 +267,7 @@ spec:
   facade:
     type: websocket
     handler: demo  # Use 'echo' for simple connectivity testing
-  session:
+  context:
     type: memory
 ```
 

@@ -900,6 +900,55 @@ func TestBuildRuntimeEnvVars_MemoryDisabled(t *testing.T) {
 	}
 }
 
+// TestRuntimeEnv_ContextURLFromStoreRef verifies that when spec.context is
+// configured with a Redis store and a storeRef secret, buildRuntimeEnvVars
+// injects OMNIA_CONTEXT_URL sourced from that secret so the runtime can
+// connect to Redis for durable context state.
+func TestRuntimeEnv_ContextURLFromStoreRef(t *testing.T) {
+	r := &AgentRuntimeReconciler{}
+	ar := &omniav1alpha1.AgentRuntime{
+		Spec: omniav1alpha1.AgentRuntimeSpec{
+			Context: &omniav1alpha1.ContextConfig{
+				Type: omniav1alpha1.ContextStoreTypeRedis,
+				StoreRef: &corev1.LocalObjectReference{
+					Name: testRedisSecretName,
+				},
+			},
+		},
+	}
+	env := r.buildRuntimeEnvVars(ar, nil)
+
+	e := findEnvVar(env, "OMNIA_CONTEXT_URL")
+	if e == nil || e.ValueFrom == nil || e.ValueFrom.SecretKeyRef == nil {
+		t.Fatalf("OMNIA_CONTEXT_URL not sourced from secret: %+v", e)
+	}
+	if e.ValueFrom.SecretKeyRef.Name != testRedisSecretName {
+		t.Fatalf("wrong secret: got %q, want %q",
+			e.ValueFrom.SecretKeyRef.Name, testRedisSecretName)
+	}
+	if e.ValueFrom.SecretKeyRef.Key != testRedisSecretKey {
+		t.Fatalf("wrong secret key: got %q, want %q",
+			e.ValueFrom.SecretKeyRef.Key, testRedisSecretKey)
+	}
+}
+
+// TestRuntimeEnv_NoContextURLForMemory verifies that a memory-backed context
+// store does not inject OMNIA_CONTEXT_URL — there is no Redis to connect to.
+func TestRuntimeEnv_NoContextURLForMemory(t *testing.T) {
+	r := &AgentRuntimeReconciler{}
+	ar := &omniav1alpha1.AgentRuntime{
+		Spec: omniav1alpha1.AgentRuntimeSpec{
+			Context: &omniav1alpha1.ContextConfig{
+				Type: omniav1alpha1.ContextStoreTypeMemory,
+			},
+		},
+	}
+	env := r.buildRuntimeEnvVars(ar, nil)
+	if findEnvVar(env, "OMNIA_CONTEXT_URL") != nil {
+		t.Fatal("OMNIA_CONTEXT_URL must not be set for memory store")
+	}
+}
+
 func TestResolveSessionURLForWorkspace(t *testing.T) {
 	sc := runtime.NewScheme()
 	require.NoError(t, omniav1alpha1.AddToScheme(sc))

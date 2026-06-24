@@ -40,7 +40,7 @@ interface DeployWizardProps {
 
 type FrameworkType = "promptkit" | "langchain" | "autogen" | "custom";
 type FacadeType = "websocket" | "grpc" | "rest";
-type SessionType = "memory" | "redis";
+type ContextStoreType = "memory" | "redis";
 type AgentMode = "agent" | "function";
 
 /** Default placeholder shown in the schema editors when mode=function
@@ -73,11 +73,11 @@ interface WizardFormData {
   promptPackTrack: string;
   // Step 4: Provider
   providerRefName: string;
-  // Step 5: Tools & Session
+  // Step 5: Tools & Context
   toolRegistryName: string;
   toolRegistryNamespace: string;
-  sessionType: SessionType;
-  sessionTtl: string;
+  contextType: ContextStoreType;
+  contextTtl: string;
   // Step 6: Runtime
   replicas: number;
   cpuRequest: string;
@@ -117,8 +117,8 @@ const INITIAL_FORM_DATA: WizardFormData = {
   providerRefName: "",
   toolRegistryName: "",
   toolRegistryNamespace: "",
-  sessionType: "memory",
-  sessionTtl: "24h",
+  contextType: "memory",
+  contextTtl: "24h",
   replicas: 1,
   cpuRequest: "100m",
   cpuLimit: "500m",
@@ -133,7 +133,7 @@ const STEPS = [
   { title: "Framework", description: "Agent framework" },
   { title: "PromptPack", description: "Select prompts" },
   { title: "Provider", description: "LLM configuration" },
-  { title: "Options", description: "Tools & session" },
+  { title: "Options", description: "Tools & context" },
   { title: "Runtime", description: "Resources & scaling" },
   { title: "Review", description: "Deploy agent" },
 ];
@@ -258,8 +258,8 @@ export function composeAgentYaml(
     };
   }
 
-  if (formData.sessionType !== "memory" || formData.sessionTtl !== "24h") {
-    spec.session = { type: formData.sessionType, ttl: formData.sessionTtl };
+  if (formData.contextType !== "memory" || formData.contextTtl !== "24h") {
+    spec.context = { type: formData.contextType, ttl: formData.contextTtl };
   }
 
   const runtime: Record<string, unknown> = {};
@@ -779,28 +779,28 @@ export function DeployWizard({ open, onOpenChange }: Readonly<DeployWizardProps>
             </div>
 
             <div className="space-y-4 border-t pt-4">
-              <Label className="text-base">Session Storage</Label>
+              <Label className="text-base">Context Store</Label>
               <RadioGroup
-                value={formData.sessionType}
-                onValueChange={(v) => updateField("sessionType", v as SessionType)}
+                value={formData.contextType}
+                onValueChange={(v) => updateField("contextType", v as ContextStoreType)}
                 className="flex gap-4"
               >
                 <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="memory" id="session-memory" />
-                  <Label htmlFor="session-memory" className="cursor-pointer">In-Memory</Label>
+                  <RadioGroupItem value="memory" id="context-memory" />
+                  <Label htmlFor="context-memory" className="cursor-pointer">In-Memory</Label>
                 </div>
                 <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="redis" id="session-redis" />
-                  <Label htmlFor="session-redis" className="cursor-pointer">Redis</Label>
+                  <RadioGroupItem value="redis" id="context-redis" />
+                  <Label htmlFor="context-redis" className="cursor-pointer">Redis</Label>
                 </div>
               </RadioGroup>
 
               <div className="space-y-2">
-                <Label htmlFor="sessionTtl">Session TTL</Label>
+                <Label htmlFor="contextTtl">Context TTL</Label>
                 <Input
-                  id="sessionTtl"
-                  value={formData.sessionTtl}
-                  onChange={(e) => updateField("sessionTtl", e.target.value)}
+                  id="contextTtl"
+                  value={formData.contextTtl}
+                  onChange={(e) => updateField("contextTtl", e.target.value)}
                   placeholder="24h"
                 />
               </div>

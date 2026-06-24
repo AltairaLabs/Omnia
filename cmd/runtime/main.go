@@ -158,13 +158,13 @@ func main() {
 
 	// Create state store for conversation persistence
 	var store statestore.Store
-	switch cfg.SessionType {
-	case pkruntime.SessionTypeMemory:
+	switch cfg.ContextType {
+	case pkruntime.ContextTypeMemory:
 		store = statestore.NewMemoryStore()
 		log.Info("using in-memory state store")
-	case pkruntime.SessionTypeRedis:
+	case pkruntime.ContextTypeRedis:
 		// Parse Redis URL
-		opts, err := redis.ParseURL(cfg.SessionURL)
+		opts, err := redis.ParseURL(cfg.ContextURL)
 		if err != nil {
 			log.Error(err, "failed to parse Redis URL")
 			os.Exit(1)
@@ -184,7 +184,7 @@ func main() {
 		cancel()
 
 		store = statestore.NewRedisStore(client)
-		log.Info("using Redis state store", "url", cfg.SessionURL)
+		log.Info("using Redis state store", "url", cfg.ContextURL)
 	}
 
 	// Initialize tracing if enabled
