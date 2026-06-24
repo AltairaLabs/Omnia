@@ -900,6 +900,55 @@ func TestBuildRuntimeEnvVars_MemoryDisabled(t *testing.T) {
 	}
 }
 
+// TestRuntimeEnv_SessionURLFromStoreRef verifies that when spec.session is
+// configured with a Redis store and a storeRef secret, buildRuntimeEnvVars
+// injects OMNIA_SESSION_URL sourced from that secret so the runtime can
+// connect to Redis for durable session state (T3 Task 2).
+func TestRuntimeEnv_SessionURLFromStoreRef(t *testing.T) {
+	r := &AgentRuntimeReconciler{}
+	ar := &omniav1alpha1.AgentRuntime{
+		Spec: omniav1alpha1.AgentRuntimeSpec{
+			Session: &omniav1alpha1.SessionConfig{
+				Type: omniav1alpha1.SessionStoreTypeRedis,
+				StoreRef: &corev1.LocalObjectReference{
+					Name: testRedisSecretName,
+				},
+			},
+		},
+	}
+	env := r.buildRuntimeEnvVars(ar, nil)
+
+	e := findEnvVar(env, "OMNIA_SESSION_URL")
+	if e == nil || e.ValueFrom == nil || e.ValueFrom.SecretKeyRef == nil {
+		t.Fatalf("OMNIA_SESSION_URL not sourced from secret: %+v", e)
+	}
+	if e.ValueFrom.SecretKeyRef.LocalObjectReference.Name != testRedisSecretName {
+		t.Fatalf("wrong secret: got %q, want %q",
+			e.ValueFrom.SecretKeyRef.LocalObjectReference.Name, testRedisSecretName)
+	}
+	if e.ValueFrom.SecretKeyRef.Key != testRedisSecretKey {
+		t.Fatalf("wrong secret key: got %q, want %q",
+			e.ValueFrom.SecretKeyRef.Key, testRedisSecretKey)
+	}
+}
+
+// TestRuntimeEnv_NoSessionURLForMemory verifies that a memory-backed session
+// store does not inject OMNIA_SESSION_URL — there is no Redis to connect to.
+func TestRuntimeEnv_NoSessionURLForMemory(t *testing.T) {
+	r := &AgentRuntimeReconciler{}
+	ar := &omniav1alpha1.AgentRuntime{
+		Spec: omniav1alpha1.AgentRuntimeSpec{
+			Session: &omniav1alpha1.SessionConfig{
+				Type: omniav1alpha1.SessionStoreTypeMemory,
+			},
+		},
+	}
+	env := r.buildRuntimeEnvVars(ar, nil)
+	if findEnvVar(env, "OMNIA_SESSION_URL") != nil {
+		t.Fatal("OMNIA_SESSION_URL must not be set for memory store")
+	}
+}
+
 func TestResolveSessionURLForWorkspace(t *testing.T) {
 	sc := runtime.NewScheme()
 	require.NoError(t, omniav1alpha1.AddToScheme(sc))

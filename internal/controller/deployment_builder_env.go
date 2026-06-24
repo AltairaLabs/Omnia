@@ -265,6 +265,24 @@ func (r *AgentRuntimeReconciler) buildRuntimeEnvVars(
 		})
 	}
 
+	// OMNIA_SESSION_URL — the Redis URL used by the runtime's durable session
+	// store (statestore.NewRedisStore). Sourced from the storeRef secret when a
+	// Redis-backed session store is configured; omitted otherwise so the runtime
+	// falls back to the in-process memory store.
+	if agentRuntime.Spec.Session != nil &&
+		agentRuntime.Spec.Session.Type == omniav1alpha1.SessionStoreTypeRedis &&
+		agentRuntime.Spec.Session.StoreRef != nil {
+		envVars = append(envVars, corev1.EnvVar{
+			Name: "OMNIA_SESSION_URL",
+			ValueFrom: &corev1.EnvVarSource{
+				SecretKeyRef: &corev1.SecretKeySelector{
+					LocalObjectReference: *agentRuntime.Spec.Session.StoreRef,
+					Key:                  secretKeyRedisURL,
+				},
+			},
+		})
+	}
+
 	// Add extra env vars from CRD
 	if agentRuntime.Spec.Runtime != nil && agentRuntime.Spec.Runtime.ExtraEnv != nil {
 		envVars = append(envVars, agentRuntime.Spec.Runtime.ExtraEnv...)
