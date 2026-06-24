@@ -268,7 +268,7 @@ var _ = Describe("AgentRuntime Controller", func() {
 
 			By("verifying termination grace period")
 			Expect(deployment.Spec.Template.Spec.TerminationGracePeriodSeconds).NotTo(BeNil())
-			Expect(*deployment.Spec.Template.Spec.TerminationGracePeriodSeconds).To(Equal(int64(45)))
+			Expect(*deployment.Spec.Template.Spec.TerminationGracePeriodSeconds).To(Equal(int64(defaultDrainTimeoutSeconds + drainGraceBufferSeconds)))
 
 			By("verifying the Service was created")
 			service := &corev1.Service{}
