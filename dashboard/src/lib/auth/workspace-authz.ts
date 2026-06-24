@@ -172,12 +172,14 @@ function getAnonymousAccess(
  *
  * Authorization flow:
  * 1. Get current user from session/proxy headers
- * 2. Check cache for existing authorization decision
- * 3. Fetch workspace from K8s API
- * 4. Check roleBindings for group membership
- * 5. Check directGrants for individual user access
- * 6. Use highest-privilege role found
- * 7. Cache and return result
+ * 2. Enforce the API-key workspace allowlist FIRST — a scoped key requesting a
+ *    workspace outside its allowlist is denied before the cache is consulted
+ * 3. Check cache for existing authorization decision
+ * 4. Fetch workspace from K8s API
+ * 5. Check roleBindings for group membership
+ * 6. Check directGrants for individual user access
+ * 7. Use highest-privilege role found
+ * 8. Cache and return result
  *
  * @param workspaceName - The workspace to check access for
  * @param requiredRole - Optional minimum role required (access denied if user has lower role)
@@ -286,6 +288,11 @@ export async function getAccessibleWorkspaces(
   const user = await getUser();
   const identity = userIdentity(user);
 
+  // Workspace-scoped API keys: a non-empty allowlist confines the listing to
+  // its allowed workspaces and forbids the platform-admin shortcut (#1561).
+  const scopeWorkspaces = user.apiKeyScope?.workspaces;
+  const isScopedKey = !!(scopeWorkspaces && scopeWorkspaces.length > 0);
+
   // For anonymous users, check each workspace's anonymousAccess configuration
   if (user.provider === "anonymous" || !identity) {
     const workspaces = await listWorkspaces();
@@ -306,6 +313,11 @@ export async function getAccessibleWorkspaces(
   const accessible: Array<{ workspace: Workspace; access: WorkspaceAccess }> = [];
 
   for (const workspace of workspaces) {
+    // A scoped key only ever sees workspaces in its allowlist (#1561).
+    if (scopeWorkspaces && scopeWorkspaces.length > 0 && !scopeWorkspaces.includes(workspace.metadata.name)) {
+      continue;
+    }
+
     // Compute the highest role from roleBindings + directGrants
     const role = computeWorkspaceRole(
       {
@@ -322,7 +334,8 @@ export async function getAccessibleWorkspaces(
       // Platform admins see every workspace (manage-only) so they can
       // self-grant. Only for the unfiltered listing — a data minimumRole
       // excludes manage-only, since the admin holds no data role yet.
-      if (!minimumRole && isPlatformAdmin(user)) {
+      // Suppressed for scoped keys, which must never gain platform-admin.
+      if (!minimumRole && isPlatformAdmin(user) && !isScopedKey) {
         accessible.push({
           workspace,
           access: { granted: true, role: null, permissions: MANAGE_ONLY_PERMISSIONS },

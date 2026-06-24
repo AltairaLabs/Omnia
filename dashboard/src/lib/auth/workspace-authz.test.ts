@@ -902,4 +902,38 @@ describe("API-key workspace scope (#1561)", () => {
     const access = await checkWorkspaceAccess("test-workspace");
     expect(access.granted).toBe(true); // platform admin manage-only (no requiredRole)
   });
+
+  it("treats an empty allowlist as unrestricted in checkWorkspaceAccess", async () => {
+    (getUser as Mock).mockResolvedValue(keyUser({ apiKeyScope: { workspaces: [] } }));
+    const access = await checkWorkspaceAccess("test-workspace");
+    expect(access.granted).toBe(true);
+    expect(access.role).toBe("editor");
+  });
+
+  describe("getAccessibleWorkspaces", () => {
+    it("excludes workspaces outside the allowlist when listing", async () => {
+      (getUser as Mock).mockResolvedValue(keyUser({ apiKeyScope: { workspaces: ["other-ws"] } }));
+      const result = await getAccessibleWorkspaces();
+      expect(result).toHaveLength(0);
+    });
+
+    it("lists an allowed workspace with the owner's role", async () => {
+      (getUser as Mock).mockResolvedValue(keyUser({ apiKeyScope: { workspaces: ["test-workspace"] } }));
+      const result = await getAccessibleWorkspaces();
+      expect(result).toHaveLength(1);
+      expect(result[0].workspace.metadata.name).toBe("test-workspace");
+      expect(result[0].access.role).toBe("editor");
+    });
+
+    it("does not grant a scoped admin key manage-only via the platform-admin shortcut", async () => {
+      (getUser as Mock).mockResolvedValue(keyUser({
+        role: "admin", groups: [], email: "admin-key", apiKeyScope: { workspaces: ["test-workspace"] },
+      }));
+      const result = await getAccessibleWorkspaces();
+      // The scoped admin key holds no group/grant role in test-workspace, and
+      // the platform-admin manage-only shortcut is suppressed for scoped keys.
+      const testWs = result.find(r => r.workspace.metadata.name === "test-workspace");
+      expect(testWs).toBeUndefined();
+    });
+  });
 });
