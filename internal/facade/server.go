@@ -716,13 +716,6 @@ func (s *Server) buildConnectionContext(
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	// Reject new upgrade requests immediately while draining.
-	// Already-established connections are not affected.
-	if s.IsDraining() {
-		http.Error(w, "server draining", http.StatusServiceUnavailable)
-		return
-	}
-
 	s.mu.RLock()
 	if s.shutdown {
 		s.mu.RUnlock()
@@ -739,6 +732,14 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	agentCtx, err := s.resolveAgentContext(r)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// While draining, reject NEW upgrades but allow realtime resume
+	// reattach requests through to tryReattach, so T1-parked sessions can
+	// be reclaimed and completed before teardown.
+	if s.IsDraining() && agentCtx.resumeID == "" {
+		http.Error(w, "server draining", http.StatusServiceUnavailable)
 		return
 	}
 

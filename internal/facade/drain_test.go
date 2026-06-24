@@ -40,6 +40,23 @@ func TestServeHTTP_RejectsNewUpgradesWhenDraining(t *testing.T) {
 	}
 }
 
+func TestServeHTTP_AllowsResumeUpgradeWhenDraining(t *testing.T) {
+	// A request with ?resume=<sid> must NOT be rejected with 503 by the drain
+	// gate — resume/reattach requests need to reach tryReattach so that
+	// T1-parked sessions can be reclaimed and completed before teardown.
+	// httptest.ResponseRecorder cannot complete a real WebSocket upgrade, so
+	// the request will fail later (upgrade error), but we assert it is NOT a
+	// 503 from the drain gate.
+	s := NewServer(DefaultServerConfig(), nil, nil, logr.Discard())
+	s.markDraining()
+	r := httptest.NewRequest(http.MethodGet, "/ws?agent=a&namespace=n&resume=some-session-id", nil)
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, r)
+	if w.Code == http.StatusServiceUnavailable {
+		t.Fatalf("resume upgrade must not be rejected with 503 during drain, got %d", w.Code)
+	}
+}
+
 func TestMarkDraining_IsIdempotent(t *testing.T) {
 	s := NewServer(DefaultServerConfig(), nil, nil, logr.Discard())
 	s.markDraining()
