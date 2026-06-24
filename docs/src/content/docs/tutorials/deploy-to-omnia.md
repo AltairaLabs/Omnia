@@ -39,7 +39,7 @@ config:
     - { name: default,  ref: claude-sonnet, role: llm }
     - { name: embedder, ref: text-embed-3,  role: embedding }
   skills:
-    - docs-search
+    - source: docs-search
 ```
 
 :::caution[The token is a real credential]

@@ -14,7 +14,7 @@ const profile: DeployProfile = {
 };
 
 describe("assembleDeployConfig", () => {
-  it("builds a config block with connection, provider refs, and skill names", () => {
+  it("builds a config block with connection, provider refs, and skill bindings", () => {
     const { json } = assembleDeployConfig(profile, "omnia_sk_TEST");
     const parsed = JSON.parse(json);
     expect(parsed.config.api_endpoint).toBe("https://omnia.example.com");
@@ -24,7 +24,9 @@ describe("assembleDeployConfig", () => {
       { name: "default", ref: "default", role: "llm" },
       { name: "embedder", ref: "embedder", role: "embedding" },
     ]);
-    expect(parsed.config.skills).toEqual(["docs-search"]);
+    // The adapter consumes skills as SkillBinding objects ({source}), not
+    // bare names — must match internal/omnia/config.go's schema (#1519).
+    expect(parsed.config.skills).toEqual([{ source: "docs-search" }]);
   });
 
   it("produces valid YAML that round-trips to the same object", () => {

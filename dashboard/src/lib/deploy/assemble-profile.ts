@@ -12,7 +12,7 @@ interface DeployConfigBlock {
     workspace: string;
     api_token: string;
     providers: { name: string; ref: string; role: string }[];
-    skills: string[];
+    skills: { source: string }[];
   };
 }
 
@@ -30,7 +30,10 @@ export function assembleDeployConfig(
         ref: p.name,
         role: p.role,
       })),
-      skills: profile.skills.map((s) => s.name),
+      // The adapter's config schema models `skills` as a list of SkillBinding
+      // objects ({source, ...}), NOT bare names — emit `{ source }` so the
+      // profile validates against the omnia adapter's validate_config (#1519).
+      skills: profile.skills.map((s) => ({ source: s.name })),
     },
   };
   return {
