@@ -922,9 +922,9 @@ func TestRuntimeEnv_SessionURLFromStoreRef(t *testing.T) {
 	if e == nil || e.ValueFrom == nil || e.ValueFrom.SecretKeyRef == nil {
 		t.Fatalf("OMNIA_SESSION_URL not sourced from secret: %+v", e)
 	}
-	if e.ValueFrom.SecretKeyRef.LocalObjectReference.Name != testRedisSecretName {
+	if e.ValueFrom.SecretKeyRef.Name != testRedisSecretName {
 		t.Fatalf("wrong secret: got %q, want %q",
-			e.ValueFrom.SecretKeyRef.LocalObjectReference.Name, testRedisSecretName)
+			e.ValueFrom.SecretKeyRef.Name, testRedisSecretName)
 	}
 	if e.ValueFrom.SecretKeyRef.Key != testRedisSecretKey {
 		t.Fatalf("wrong secret key: got %q, want %q",
