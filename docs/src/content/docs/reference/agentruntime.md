@@ -694,7 +694,7 @@ spec:
     port: 8080
     handler: runtime
 
-  session:
+  context:
     type: redis
     ttl: 24h
     storeRef:

@@ -112,21 +112,21 @@ spec:
 
 When using multiple replicas, ensure session affinity:
 
-### With Redis Sessions (Recommended)
+### With Redis Context Store (Recommended)
 
-Redis-backed sessions work seamlessly with any replica:
+Redis-backed context store works seamlessly with any replica:
 
 ```yaml
 spec:
-  session:
+  context:
     type: redis
     storeRef:
       name: redis-credentials
 ```
 
-### With Memory Sessions
+### With Memory Context Store
 
-If using memory sessions (not recommended for production), configure service affinity:
+If using memory context store (not recommended for production), configure service affinity:
 
 ```yaml
 apiVersion: v1
