@@ -159,6 +159,14 @@ type AgentRuntimeReconciler struct {
 	// to session-api via httpclient) and eval-worker pods get an audience-bound
 	// projected SA token + SESSION_API_TOKEN_PATH. Zero value = disabled.
 	ServiceAuth ServiceAuthConfig
+
+	// gatewayAPIPresent records whether the Gateway API CRDs
+	// (gateway.networking.k8s.io) are served by the cluster, detected once at
+	// SetupWithManager time. When false, the HTTPRoute/Gateway watches are not
+	// registered and reconcileFacadeEndpoints clears status.facade rather than
+	// listing absent CRDs. Installing the CRDs requires an operator restart to
+	// re-detect.
+	gatewayAPIPresent bool
 }
 
 // +kubebuilder:rbac:groups=omnia.altairalabs.ai,resources=agentruntimes,verbs=get;list;watch;create;update;patch;delete
@@ -178,6 +186,8 @@ type AgentRuntimeReconciler struct {
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=clusterrolebindings,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=policy,resources=poddisruptionbudgets,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=keda.sh,resources=scaledobjects,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=gateway.networking.k8s.io,resources=httproutes,verbs=get;list;watch
+// +kubebuilder:rbac:groups=gateway.networking.k8s.io,resources=gateways,verbs=get;list;watch
 
 // reconcileReferences fetches and validates all referenced resources.
 // Returns promptPack (required), toolRegistry (optional), providers map, and any error.
@@ -553,6 +563,12 @@ func (r *AgentRuntimeReconciler) Reconcile(ctx context.Context, req ctrl.Request
 			"RuntimeNotReady", "Waiting for pods to be ready")
 	}
 
+	// Publish externally-reachable facade endpoints derived from observed
+	// HTTPRoutes/Gateways into status.facade. No-op when the Gateway API is not
+	// installed. Done just before the status write so it persists in the same
+	// Status().Update below — do not add a second status write.
+	r.reconcileFacadeEndpoints(ctx, agentRuntime)
+
 	// observedGeneration is already set at the top of Reconcile.
 	if err := r.Status().Update(ctx, agentRuntime); err != nil {
 		return ctrl.Result{}, err
@@ -831,7 +847,9 @@ func (r *AgentRuntimeReconciler) reconcileA2AStatus(
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *AgentRuntimeReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	return ctrl.NewControllerManagedBy(mgr).
+	r.gatewayAPIPresent = gatewayAPIAvailable(mgr.GetRESTMapper())
+
+	b := ctrl.NewControllerManagedBy(mgr).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 3}).
 		For(&omniav1alpha1.AgentRuntime{}).
 		Owns(&appsv1.Deployment{}).
@@ -858,7 +876,9 @@ func (r *AgentRuntimeReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Watches(
 			&corev1.Secret{},
 			handler.EnqueueRequestsFromMapFunc(r.findAgentRuntimesForSecret),
-		).
-		Named("agentruntime").
-		Complete(r)
+		)
+
+	b = r.registerFacadeWatches(b)
+
+	return b.Named("agentruntime").Complete(r)
 }

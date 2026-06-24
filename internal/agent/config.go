@@ -197,6 +197,12 @@ type Config struct {
 	// Zero means "use RuntimeHandler default".
 	ClientToolTimeout time.Duration
 
+	// DrainTimeout is how long the facade keeps serving active realtime calls
+	// after SIGTERM before tearing down remaining connections.
+	// Sourced from AgentRuntime.spec.facade.drainTimeout. Zero means "use
+	// facade.DefaultServerConfig default (30s)".
+	DrainTimeout time.Duration
+
 	// Media storage configuration.
 	MediaStorageType MediaStorageType
 	MediaStoragePath string

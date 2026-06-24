@@ -223,41 +223,63 @@ type pinger interface {
 	Ping(ctx context.Context) error
 }
 
-func readyzHandler(store session.Store, handler facade.MessageHandler) http.HandlerFunc {
+// checkStoreReady returns a non-nil error when the session store is unhealthy.
+// It prefers Ping when the store implements pinger; otherwise falls back to a
+// dummy GetSession which succeeds even for not-found.
+func checkStoreReady(ctx context.Context, store session.Store) error {
+	if store == nil {
+		return nil
+	}
+	if p, ok := store.(pinger); ok {
+		return p.Ping(ctx)
+	}
+	_, err := store.GetSession(ctx, "00000000-0000-0000-0000-000000000000")
+	if err != nil && err != session.ErrSessionNotFound {
+		return err
+	}
+	return nil
+}
+
+// checkRuntimeReady returns a non-nil error when the runtime handler is
+// unhealthy. Returns nil when handler is not a *agent.RuntimeHandler.
+func checkRuntimeReady(ctx context.Context, handler facade.MessageHandler) error {
+	rh, ok := handler.(*agent.RuntimeHandler)
+	if !ok {
+		return nil
+	}
+	resp, err := rh.Client().Health(ctx)
+	if err != nil {
+		return fmt.Errorf("runtime unavailable: %w", err)
+	}
+	if !resp.Healthy {
+		return fmt.Errorf("runtime unhealthy: %s", resp.Status)
+	}
+	return nil
+}
+
+func readyzHandler(store session.Store, handler facade.MessageHandler, wsServer *facade.Server) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		// Report not-ready as soon as the facade enters drain mode so that
+		// the load balancer stops sending new traffic before we tear down.
+		if wsServer != nil && wsServer.IsDraining() {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte("draining"))
+			return
+		}
+
 		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 		defer cancel()
 
-		// Prefer lightweight Ping if the store supports it (e.g. httpclient);
-		// fall back to a dummy GetSession for stores that don't.
-		if p, ok := store.(pinger); ok {
-			if err := p.Ping(ctx); err != nil {
-				w.WriteHeader(http.StatusServiceUnavailable)
-				_, _ = fmt.Fprintf(w, "session store unavailable: %v", err)
-				return
-			}
-		} else {
-			_, err := store.GetSession(ctx, "00000000-0000-0000-0000-000000000000")
-			if err != nil && err != session.ErrSessionNotFound {
-				w.WriteHeader(http.StatusServiceUnavailable)
-				_, _ = fmt.Fprintf(w, "session store unavailable: %v", err)
-				return
-			}
+		if err := checkStoreReady(ctx, store); err != nil {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = fmt.Fprintf(w, "session store unavailable: %v", err)
+			return
 		}
 
-		// Check runtime health if using runtime handler
-		if runtimeHandler, ok := handler.(*agent.RuntimeHandler); ok {
-			resp, err := runtimeHandler.Client().Health(ctx)
-			if err != nil {
-				w.WriteHeader(http.StatusServiceUnavailable)
-				_, _ = fmt.Fprintf(w, "runtime unavailable: %v", err)
-				return
-			}
-			if !resp.Healthy {
-				w.WriteHeader(http.StatusServiceUnavailable)
-				_, _ = fmt.Fprintf(w, "runtime unhealthy: %s", resp.Status)
-				return
-			}
+		if err := checkRuntimeReady(ctx, handler); err != nil {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = fmt.Fprint(w, err.Error())
+			return
 		}
 
 		w.WriteHeader(http.StatusOK)

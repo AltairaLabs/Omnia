@@ -389,6 +389,19 @@
             },
             "redis": { "$ref": "#/$defs/redisConsumer" }
           }
+        },
+        "apiKeys": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "store": { "type": "string", "enum": ["memory", "file", "postgres"] },
+            "filePath": { "type": "string" },
+            "keysSecret": { "type": "string" },
+            "postgresUrl": { "type": "string" },
+            "existingPostgresSecret": { "type": "string" },
+            "maxPerUser": { "type": "integer" },
+            "defaultExpiration": { "type": "integer" }
+          }
         }
       }
     },

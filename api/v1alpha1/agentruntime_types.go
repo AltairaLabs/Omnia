@@ -96,6 +96,13 @@ type FacadeConfig struct {
 	// +optional
 	Port *int32 `json:"port,omitempty"`
 
+	// drainTimeout is how long the facade keeps serving active realtime calls
+	// after receiving SIGTERM (rollout/drain/scale-down) before cleanly tearing
+	// down the remainder. Duration format (e.g. "30s", "2m"). New calls stop
+	// immediately on drain regardless. Defaults to 30s when unset.
+	// +optional
+	DrainTimeout *string `json:"drainTimeout,omitempty"`
+
 	// handler specifies the message handler mode.
 	// "echo" returns input messages back (for testing connectivity).
 	// "demo" provides streaming responses with simulated tool calls (for demos).
@@ -1401,6 +1408,11 @@ type AgentRuntimeStatus struct {
 	// +optional
 	A2A *A2AStatus `json:"a2a,omitempty"`
 
+	// facade reports externally-reachable endpoints derived from observed
+	// Gateway API HTTPRoutes. Empty => the agent is reachable only in-cluster.
+	// +optional
+	Facade *FacadeStatus `json:"facade,omitempty"`
+
 	// rollout reports the current state of an active rollout, if any.
 	// +optional
 	Rollout *RolloutStatus `json:"rollout,omitempty"`
@@ -1414,6 +1426,57 @@ type AgentRuntimeStatus struct {
 	// observedGeneration is the most recent generation observed by the controller.
 	// +optional
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
+}
+
+// Facade protocol values for FacadeEndpoint.Protocol.
+const (
+	FacadeProtocolWebSocket = "websocket"
+	FacadeProtocolA2A       = "a2a"
+	FacadeProtocolMCP       = "mcp"
+	FacadeProtocolREST      = "rest"
+)
+
+// FacadeEndpointReasonPrefixNotStripped is set on Valid=false endpoints whose
+// route uses a non-root PathPrefix without a URLRewrite ReplacePrefixMatch filter.
+const FacadeEndpointReasonPrefixNotStripped = "path prefix not stripped before facade"
+
+// FacadeStatus holds externally-reachable endpoints derived from observed
+// Gateway API HTTPRoutes. An empty Endpoints list means the agent is reachable
+// only inside the cluster.
+type FacadeStatus struct {
+	// endpoints are the external URLs derived from HTTPRoutes that target this
+	// agent's facade Service. Empty => cluster-internal only.
+	// +optional
+	Endpoints []FacadeEndpoint `json:"endpoints,omitempty"`
+}
+
+// FacadeEndpoint is one externally-reachable URL for the agent's facade,
+// derived from an observed HTTPRoute. Auth is NOT included here; it is read
+// from spec.externalAuth (agent-global) by consumers.
+type FacadeEndpoint struct {
+	// protocol is the facade protocol this endpoint serves.
+	// +kubebuilder:validation:Enum=websocket;a2a;mcp;rest
+	Protocol string `json:"protocol"`
+	// url is the client-facing connection URL, e.g. wss://agents.example.com/my-agent/ws
+	URL string `json:"url"`
+	// scheme is the URL scheme: ws, wss, http, or https.
+	Scheme string `json:"scheme"`
+	// host is the route hostname.
+	Host string `json:"host"`
+	// path is the external path including the protocol's canonical suffix.
+	Path string `json:"path"`
+	// port is the Service backend port the route targets.
+	Port int32 `json:"port"`
+	// routeName is the name of the HTTPRoute this endpoint was derived from.
+	RouteName string `json:"routeName"`
+	// routeNamespace is the namespace of that HTTPRoute.
+	RouteNamespace string `json:"routeNamespace"`
+	// valid is false when the endpoint is advertised but will not actually
+	// connect (e.g. a path prefix that is not stripped before the facade).
+	Valid bool `json:"valid"`
+	// reason explains why valid is false.
+	// +optional
+	Reason string `json:"reason,omitempty"`
 }
 
 // +kubebuilder:object:root=true

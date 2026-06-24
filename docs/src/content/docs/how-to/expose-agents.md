@@ -72,6 +72,59 @@ spec:
           port: 8080
 ```
 
+## Finding Your Agent's URL
+
+After creating an HTTPRoute, the resulting external URL is published to the agent's status:
+
+### View URLs via kubectl
+
+```bash
+kubectl get agentruntime <name> -o jsonpath='{.status.facade.endpoints}'
+```
+
+This displays all discovered external endpoints derived from HTTPRoutes targeting the agent's facade Service.
+
+### View URLs in the Dashboard
+
+The agent's detail page displays the external URL in the **Connect** card (under the "External" tab). This mirrors the same `status.facade.endpoints` data.
+
+### URL Validity
+
+If an endpoint shows `valid: false`, the URL is advertised but will not connect. This typically occurs with path-prefix routes that lack a `URLRewrite` filter:
+
+```yaml
+# This route will be marked valid: false
+rules:
+  - matches:
+      - path:
+          type: PathPrefix
+          value: /my-agent
+    backendRefs:
+      - name: my-agent
+        port: 8080
+```
+
+**Solution**: Either use host-based routing (recommended), or add a `URLRewrite` filter with `ReplacePrefixMatch`:
+
+```yaml
+rules:
+  - matches:
+      - path:
+          type: PathPrefix
+          value: /my-agent
+    filters:
+      - type: URLRewrite
+        urlRewrite:
+          replacePrefixMatch: /
+    backendRefs:
+      - name: my-agent
+        port: 8080
+```
+
+### Authentication
+
+External authentication is governed by the agent's `spec.externalAuth` setting (sharedToken, apiKeys, OIDC, or edge trust), not the dashboard's management-plane token. Configure external auth on the AgentRuntime to control how clients authenticate to the external endpoint.
+
 ## Access Your Agent
 
 ### Get the Gateway IP

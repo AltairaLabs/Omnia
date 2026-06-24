@@ -2454,6 +2454,11 @@ export interface AgentRuntimeSpec {
     /** clientToolTimeout is the max time to wait for client tool responses per turn.
      * Defaults to 60s. */
     clientToolTimeout?: string;
+    /** drainTimeout is how long the facade keeps serving active realtime calls
+     * after receiving SIGTERM (rollout/drain/scale-down) before cleanly tearing
+     * down the remainder. Duration format (e.g. "30s", "2m"). New calls stop
+     * immediately on drain regardless. Defaults to 30s when unset. */
+    drainTimeout?: string;
     /** extraEnv defines additional environment variables for the facade container.
      * Use this for debugging (e.g., LOG_LEVEL=debug) or custom configuration. */
     extraEnv?: {
@@ -6620,6 +6625,35 @@ export interface AgentRuntimeStatus {
     /** type of condition in CamelCase or in foo.example.com/CamelCase. */
     type: string;
   }[];
+  /** facade reports externally-reachable endpoints derived from observed
+   * Gateway API HTTPRoutes. Empty => the agent is reachable only in-cluster. */
+  facade?: {
+    /** endpoints are the external URLs derived from HTTPRoutes that target this
+     * agent's facade Service. Empty => cluster-internal only. */
+    endpoints?: {
+      /** host is the route hostname. */
+      host: string;
+      /** path is the external path including the protocol's canonical suffix. */
+      path: string;
+      /** port is the Service backend port the route targets. */
+      port: number;
+      /** protocol is the facade protocol this endpoint serves. */
+      protocol: "websocket" | "a2a" | "mcp" | "rest";
+      /** reason explains why valid is false. */
+      reason?: string;
+      /** routeName is the name of the HTTPRoute this endpoint was derived from. */
+      routeName: string;
+      /** routeNamespace is the namespace of that HTTPRoute. */
+      routeNamespace: string;
+      /** scheme is the URL scheme: ws, wss, http, or https. */
+      scheme: string;
+      /** url is the client-facing connection URL, e.g. wss://agents.example.com/my-agent/ws */
+      url: string;
+      /** valid is false when the endpoint is advertised but will not actually
+       * connect (e.g. a path prefix that is not stripped before the facade). */
+      valid: boolean;
+    }[];
+  };
   /** observedGeneration is the most recent generation observed by the controller. */
   observedGeneration?: number;
   /** phase represents the current lifecycle phase of the AgentRuntime. */

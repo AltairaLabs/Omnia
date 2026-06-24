@@ -63,14 +63,8 @@ func LoadFromCRD(ctx context.Context, c client.Client, name, namespace string) (
 	cfg.PromptPackPath = getEnvOrDefault(EnvPromptPackMountPath, DefaultPromptPackMountPath)
 
 	// Facade config from CRD
-	cfg.FacadeType = FacadeType(ar.Spec.Facade.Type)
-	if ar.Spec.Facade.Port != nil {
-		cfg.FacadePort = int(*ar.Spec.Facade.Port)
-	} else {
-		cfg.FacadePort = DefaultFacadePort
-	}
-	if ar.Spec.Facade.ClientToolTimeout != nil {
-		cfg.ClientToolTimeout = ar.Spec.Facade.ClientToolTimeout.Duration
+	if err := loadFacadeConfigFromCRD(cfg, ar); err != nil {
+		return nil, err
 	}
 
 	// Mode + Function-specific config (Functions Phase 1, #1102 / #1103).
@@ -190,6 +184,27 @@ func loadA2ATaskStoreFromCRD(cfg *Config, a2a *v1alpha1.A2AConfig) {
 		cfg.A2ATaskStoreType = getEnvOrDefault(EnvA2ATaskStoreType, "memory")
 		cfg.A2ARedisURL = os.Getenv(EnvA2ARedisURL)
 	}
+}
+
+// loadFacadeConfigFromCRD populates facade-related config fields from the AgentRuntime CRD.
+func loadFacadeConfigFromCRD(cfg *Config, ar *v1alpha1.AgentRuntime) error {
+	cfg.FacadeType = FacadeType(ar.Spec.Facade.Type)
+	if ar.Spec.Facade.Port != nil {
+		cfg.FacadePort = int(*ar.Spec.Facade.Port)
+	} else {
+		cfg.FacadePort = DefaultFacadePort
+	}
+	if ar.Spec.Facade.ClientToolTimeout != nil {
+		cfg.ClientToolTimeout = ar.Spec.Facade.ClientToolTimeout.Duration
+	}
+	if ar.Spec.Facade.DrainTimeout != nil {
+		d, err := time.ParseDuration(*ar.Spec.Facade.DrainTimeout)
+		if err != nil {
+			return fmt.Errorf("invalid drain timeout %q: %w", *ar.Spec.Facade.DrainTimeout, err)
+		}
+		cfg.DrainTimeout = d
+	}
+	return nil
 }
 
 // loadContextConfigFromCRD populates context-store-related config fields from the AgentRuntime CRD.

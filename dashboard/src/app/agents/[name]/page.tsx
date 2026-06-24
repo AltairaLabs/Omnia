@@ -11,6 +11,7 @@ import { SystemPackBadge } from "@/components/agents/system-pack-badge";
 import { AgentWorkloadTab } from "@/components/workload-graph/agent-workload-tab";
 import { AgentConsole } from "@/components/console";
 import { LogViewer } from "@/components/logs";
+import { ConnectCard } from "./connect-card";
 import { useDataService } from "@/lib/data";
 import { useWorkspace } from "@/contexts/workspace-context";
 import { Button } from "@/components/ui/button";
@@ -211,6 +212,9 @@ export default function AgentDetailPage({ params }: Readonly<AgentDetailPageProp
               workerGroups={spec.evals?.worker?.groups}
               promptPackName={spec.promptPackRef?.name}
             />
+
+            {/* External connection endpoints from Gateway API HTTPRoutes. */}
+            <ConnectCard agent={agent} />
 
             {/* Conditions — full table, compact, at the bottom as reference. */}
             <AgentConditions conditions={status?.conditions} />
