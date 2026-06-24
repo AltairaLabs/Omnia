@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { getApiKeyConfig, getApiKeyStore } from "./index";
+import { getApiKeyConfig, getApiKeyStore, createUserFromApiKey } from "./index";
+import type { ApiKey } from "./types";
 import { PostgresApiKeyStore } from "./postgres-store";
 import { FileApiKeyStore } from "./file-store";
 import { MemoryApiKeyStore } from "./memory-store";
@@ -48,5 +49,32 @@ describe("getApiKeyStore dispatch", () => {
     process.env.OMNIA_AUTH_API_KEYS_STORE = "postgres";
     process.env.OMNIA_AUTH_API_KEYS_POSTGRES_URL = "postgres://api/keys";
     expect(getApiKeyStore()).toBeInstanceOf(PostgresApiKeyStore);
+  });
+});
+
+describe("createUserFromApiKey owner snapshot", () => {
+  const base: ApiKey = {
+    id: "k1", userId: "u1", name: "ci", keyPrefix: "omnia_sk_x...",
+    keyHash: "h", role: "editor", expiresAt: null, createdAt: new Date(), lastUsedAt: null,
+  };
+
+  it("carries the owner snapshot + workspace scope onto the User", () => {
+    const u = createUserFromApiKey({
+      ...base,
+      ownerEmail: "alice@example.com",
+      ownerGroups: ["devs@example.com"],
+      workspaces: ["demo"],
+    });
+    expect(u.email).toBe("alice@example.com");
+    expect(u.groups).toEqual(["devs@example.com"]);
+    expect(u.apiKeyScope).toEqual({ workspaces: ["demo"] });
+    expect(u.provider).toBe("proxy");
+  });
+
+  it("is backward compatible for a key with no snapshot", () => {
+    const u = createUserFromApiKey(base);
+    expect(u.email).toBeUndefined();
+    expect(u.groups).toEqual([]);
+    expect(u.apiKeyScope).toEqual({ workspaces: undefined });
   });
 });

@@ -172,15 +172,19 @@ export async function authenticateApiKey(): Promise<User | null> {
 }
 
 /**
- * Create a User object from an API key.
+ * Build a User from an API key. Carries the owner's snapshot identity/groups
+ * (so per-workspace role resolves as if the owner called) and the key's
+ * workspace allowlist. Exported for testing.
  */
-function createUserFromApiKey(apiKey: ApiKey): User {
+export function createUserFromApiKey(apiKey: ApiKey): User {
   return {
     id: apiKey.userId,
     username: `apikey:${apiKey.name}`,
-    groups: [],
+    email: apiKey.ownerEmail,
+    groups: apiKey.ownerGroups ?? [],
     role: apiKey.role,
     provider: "proxy", // Treat API keys like proxy auth
+    apiKeyScope: { workspaces: apiKey.workspaces },
   };
 }
 
