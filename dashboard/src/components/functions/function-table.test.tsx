@@ -1,9 +1,13 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { FunctionTable } from "./function-table";
+import { useAgentCost } from "@/hooks/agents";
 import type { AgentRuntime } from "@/types";
 
 vi.mock("@/hooks/agents", () => ({ useAgentCost: vi.fn(() => ({ data: null })) }));
+vi.mock("@/contexts/workspace-context", () => ({
+  useWorkspace: vi.fn(() => ({ currentWorkspace: { name: "demo" } })),
+}));
 vi.mock("@/hooks/resources", () => ({
   useProvider: vi.fn(() => ({ data: { spec: { type: "anthropic", model: "claude-opus-4-8" } } })),
 }));
@@ -41,6 +45,12 @@ describe("FunctionTable", () => {
     render(<FunctionTable functions={[mkFn("summarizer", "ns-a")]} />);
     expect(screen.getByText("2 fields")).toBeInTheDocument();
     expect(screen.getByText("1 field")).toBeInTheDocument();
+  });
+
+  it("queries cost by workspace name, not the function namespace (#1572)", () => {
+    render(<FunctionTable functions={[mkFn("summarizer", "ns-a")]} />);
+    // currentWorkspace.name = "demo" (mocked); must be the cost key, not "ns-a".
+    expect(vi.mocked(useAgentCost)).toHaveBeenCalledWith("demo", "summarizer");
   });
 
   it("renders one row per function", () => {

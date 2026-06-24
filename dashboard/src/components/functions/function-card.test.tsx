@@ -21,6 +21,9 @@ vi.mock("next/link", () => ({
 }));
 
 // Cost is read from the same Prometheus-backed hook the agent cards use.
+vi.mock("@/contexts/workspace-context", () => ({
+  useWorkspace: vi.fn(() => ({ currentWorkspace: { name: "demo" } })),
+}));
 vi.mock("@/hooks/agents", () => ({
   useAgentCost: vi.fn(() => ({ data: { totalCost: 0, timeSeries: [] } })),
 }));

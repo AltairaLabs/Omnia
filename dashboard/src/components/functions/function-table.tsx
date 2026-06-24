@@ -24,6 +24,7 @@ import { FrameworkBadge } from "@/components/agents/framework-badge";
 import { CostBadge } from "@/components/cost";
 import { useAgentCost } from "@/hooks/agents";
 import { useProvider } from "@/hooks/resources";
+import { useWorkspace } from "@/contexts/workspace-context";
 import { getDefaultProviderRef } from "@/types/agent-runtime";
 import type { AgentRuntime } from "@/types";
 import { schemaFieldCount } from "./function-card";
@@ -56,9 +57,12 @@ function fieldsLabel(n: number): string {
   return `${n} field${n === 1 ? "" : "s"}`;
 }
 
-/** Cost cell, reusing the Prometheus-backed agent cost hook. */
-function FunctionCostCell({ namespace, name }: Readonly<{ namespace: string; name: string }>) {
-  const { data: costData } = useAgentCost(namespace, name);
+/** Cost cell, reusing the Prometheus-backed agent cost hook. Cost is keyed by
+ * workspace NAME (the API resolves the backing namespace); the page is
+ * workspace-scoped, so the current workspace applies to every row (#1572). */
+function FunctionCostCell({ name }: Readonly<{ name: string }>) {
+  const { currentWorkspace } = useWorkspace();
+  const { data: costData } = useAgentCost(currentWorkspace?.name ?? "", name);
   if (!costData?.available) {
     return <span className="text-muted-foreground">-</span>;
   }
@@ -118,10 +122,7 @@ export function FunctionTable({ functions }: Readonly<FunctionTableProps>) {
                   />
                 </TableCell>
                 <TableCell>
-                  <FunctionCostCell
-                    namespace={fn.metadata.namespace || "default"}
-                    name={fn.metadata.name || ""}
-                  />
+                  <FunctionCostCell name={fn.metadata.name || ""} />
                 </TableCell>
                 <TableCell className="text-muted-foreground">
                   {formatAge(fn.metadata.creationTimestamp)}

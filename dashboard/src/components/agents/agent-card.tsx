@@ -14,6 +14,7 @@ import { useAgentCost } from "@/hooks/agents";
 import { useProvider } from "@/hooks/resources";
 import type { AgentRuntime } from "@/types";
 import { getDefaultProviderRef } from "@/types/agent-runtime";
+import { useWorkspace } from "@/contexts/workspace-context";
 
 interface AgentCardProps {
   agent: AgentRuntime;
@@ -25,10 +26,12 @@ export function AgentCard({ agent }: Readonly<AgentCardProps>) {
   const dataService = useDataService();
   const defaultProviderRef = getDefaultProviderRef(spec);
   const { data: provider } = useProvider(defaultProviderRef?.name, metadata.namespace || "default");
+  const { currentWorkspace } = useWorkspace();
 
-  // Fetch real cost data from Prometheus
+  // Cost is keyed by workspace NAME (the API resolves the backing namespace);
+  // passing metadata.namespace 404s when namespace != workspace name (#1572).
   const { data: costData } = useAgentCost(
-    metadata.namespace || "default",
+    currentWorkspace?.name ?? "",
     metadata.name
   );
 

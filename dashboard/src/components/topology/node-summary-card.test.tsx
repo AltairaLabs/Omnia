@@ -4,6 +4,9 @@ import { NodeSummaryCard, type SelectedNode } from "./node-summary-card";
 import type { AgentRuntime, PromptPack, ToolRegistry, Provider } from "@/types";
 
 // Mock hooks
+vi.mock("@/contexts/workspace-context", () => ({
+  useWorkspace: vi.fn(() => ({ currentWorkspace: { name: "demo" } })),
+}));
 vi.mock("@/hooks/agents", () => ({
   useAgentCost: vi.fn(() => ({ data: null })),
 }));
