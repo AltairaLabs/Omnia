@@ -90,6 +90,10 @@ type ServerConfig struct {
 	// When a new session would exceed this cap the request is shed with
 	// ErrorCodeRateLimited. 0 applies the conservative default (8).
 	MaxAudioSessions int
+	// DrainTimeout is how long the facade keeps serving active realtime calls
+	// after receiving SIGTERM before tearing down remaining connections.
+	// New calls are shed immediately on drain. Defaults to 30s.
+	DrainTimeout time.Duration
 }
 
 // DefaultServerConfig returns a ServerConfig with default values.
@@ -110,6 +114,7 @@ func DefaultServerConfig() ServerConfig {
 		MaxInFlightMessagesPerConnection: 1,
 		// Conservative audio session cap. Overridden via ServerConfig.MaxAudioSessions.
 		MaxAudioSessions: 8,
+		DrainTimeout:     30 * time.Second,
 	}
 }
 

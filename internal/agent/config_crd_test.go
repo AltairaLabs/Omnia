@@ -231,6 +231,20 @@ func TestLoadFromCRD_SessionTTLNil(t *testing.T) {
 	}
 }
 
+func TestLoadConfigFromCRD_DrainTimeout(t *testing.T) {
+	d := "2m"
+	ar := &v1alpha1.AgentRuntime{Spec: v1alpha1.AgentRuntimeSpec{
+		Facade: v1alpha1.FacadeConfig{Type: v1alpha1.FacadeTypeWebSocket, DrainTimeout: &d},
+	}}
+	cfg := &Config{}
+	if err := loadFacadeConfigFromCRD(cfg, ar); err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.DrainTimeout != 2*time.Minute {
+		t.Fatalf("DrainTimeout = %v, want 2m", cfg.DrainTimeout)
+	}
+}
+
 func TestLoadFromCRD_ToolRegistryNoNamespace(t *testing.T) {
 	ar := newFakeAgentRuntime("agent", "mynamespace", v1alpha1.AgentRuntimeSpec{
 		PromptPackRef: v1alpha1.PromptPackRef{Name: "pack"},
