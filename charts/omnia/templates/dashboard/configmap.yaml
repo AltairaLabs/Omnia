@@ -90,6 +90,7 @@ data:
   OMNIA_SESSION_COOKIE_NAME: {{ .Values.dashboard.auth.cookieName | quote }}
   OMNIA_SESSION_TTL: {{ .Values.dashboard.auth.ttl | quote }}
   OMNIA_AUTH_ANONYMOUS_ROLE: {{ .Values.dashboard.auth.anonymousRole | quote }}
+  OMNIA_AUTH_CLI_TOKEN_TTL_SECONDS: {{ .Values.dashboard.auth.cliTokenTtlSeconds | quote }}
 
   # Role mapping
   {{- if .Values.dashboard.auth.roleMapping.adminGroups }}
