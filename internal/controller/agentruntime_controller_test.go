@@ -1316,8 +1316,8 @@ var _ = Describe("AgentRuntime Controller", func() {
 					Facade: omniav1alpha1.FacadeConfig{
 						Type: omniav1alpha1.FacadeTypeWebSocket,
 					},
-					Session: &omniav1alpha1.SessionConfig{
-						Type: omniav1alpha1.SessionStoreTypeRedis,
+					Context: &omniav1alpha1.ContextConfig{
+						Type: omniav1alpha1.ContextStoreTypeRedis,
 						TTL:  &sessionTTL,
 						StoreRef: &corev1.LocalObjectReference{
 							Name: testRedisSecretName,
@@ -4245,87 +4245,87 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 			})
 		})
 
-		Context("session storeRef validation (API server enforcement)", func() {
-			var sessionCtx context.Context
+		Context("context storeRef validation (API server enforcement)", func() {
+			var contextCtx context.Context
 
 			BeforeEach(func() {
-				sessionCtx = context.Background()
+				contextCtx = context.Background()
 			})
 
-			It("rejects redis session type without storeRef", func() {
+			It("rejects redis context type without storeRef", func() {
 				ar := &omniav1alpha1.AgentRuntime{
 					ObjectMeta: metav1.ObjectMeta{
-						Name:      "session-redis-no-storeref",
+						Name:      "context-redis-no-storeref",
 						Namespace: "default",
 					},
 					Spec: omniav1alpha1.AgentRuntimeSpec{
 						PromptPackRef: omniav1alpha1.PromptPackRef{Name: "dummy"},
 						Facade:        omniav1alpha1.FacadeConfig{Type: omniav1alpha1.FacadeTypeWebSocket},
-						Session: &omniav1alpha1.SessionConfig{
-							Type: omniav1alpha1.SessionStoreTypeRedis,
+						Context: &omniav1alpha1.ContextConfig{
+							Type: omniav1alpha1.ContextStoreTypeRedis,
 						},
 					},
 				}
-				Expect(k8sClient.Create(sessionCtx, ar)).To(MatchError(ContainSubstring("storeRef")))
+				Expect(k8sClient.Create(contextCtx, ar)).To(MatchError(ContainSubstring("storeRef")))
 			})
 
-			It("rejects postgres as an unsupported session type", func() {
-				// postgres is NOT a supported runtime session backend (only fast
+			It("rejects postgres as an unsupported context store type", func() {
+				// postgres is NOT a supported runtime context backend (only fast
 				// instant stores: memory|redis). Long-term conversation storage is
-				// session-api's concern, not spec.session. Selecting postgres must
+				// session-api's concern, not spec.context. Selecting postgres must
 				// fail at admission on the enum, not silently fall back to memory.
 				ar := &omniav1alpha1.AgentRuntime{
 					ObjectMeta: metav1.ObjectMeta{
-						Name:      "session-postgres-unsupported",
+						Name:      "context-postgres-unsupported",
 						Namespace: "default",
 					},
 					Spec: omniav1alpha1.AgentRuntimeSpec{
 						PromptPackRef: omniav1alpha1.PromptPackRef{Name: "dummy"},
 						Facade:        omniav1alpha1.FacadeConfig{Type: omniav1alpha1.FacadeTypeWebSocket},
-						Session: &omniav1alpha1.SessionConfig{
-							Type:     omniav1alpha1.SessionStoreType("postgres"),
+						Context: &omniav1alpha1.ContextConfig{
+							Type:     omniav1alpha1.ContextStoreType("postgres"),
 							StoreRef: &corev1.LocalObjectReference{Name: "pg-secret"},
 						},
 					},
 				}
-				Expect(k8sClient.Create(sessionCtx, ar)).To(MatchError(ContainSubstring("Unsupported value")))
+				Expect(k8sClient.Create(contextCtx, ar)).To(MatchError(ContainSubstring("Unsupported value")))
 			})
 
-			It("accepts redis session type with storeRef", func() {
+			It("accepts redis context type with storeRef", func() {
 				ar := &omniav1alpha1.AgentRuntime{
 					ObjectMeta: metav1.ObjectMeta{
-						Name:      "session-redis-with-storeref",
+						Name:      "context-redis-with-storeref",
 						Namespace: "default",
 					},
 					Spec: omniav1alpha1.AgentRuntimeSpec{
 						PromptPackRef: omniav1alpha1.PromptPackRef{Name: "dummy"},
 						Facade:        omniav1alpha1.FacadeConfig{Type: omniav1alpha1.FacadeTypeWebSocket},
-						Session: &omniav1alpha1.SessionConfig{
-							Type:     omniav1alpha1.SessionStoreTypeRedis,
+						Context: &omniav1alpha1.ContextConfig{
+							Type:     omniav1alpha1.ContextStoreTypeRedis,
 							StoreRef: &corev1.LocalObjectReference{Name: "my-redis-secret"},
 						},
 					},
 				}
-				Expect(k8sClient.Create(sessionCtx, ar)).To(Succeed())
-				defer func() { _ = k8sClient.Delete(sessionCtx, ar) }()
+				Expect(k8sClient.Create(contextCtx, ar)).To(Succeed())
+				defer func() { _ = k8sClient.Delete(contextCtx, ar) }()
 			})
 
-			It("accepts memory session type without storeRef", func() {
+			It("accepts memory context type without storeRef", func() {
 				ar := &omniav1alpha1.AgentRuntime{
 					ObjectMeta: metav1.ObjectMeta{
-						Name:      "session-memory-no-storeref",
+						Name:      "context-memory-no-storeref",
 						Namespace: "default",
 					},
 					Spec: omniav1alpha1.AgentRuntimeSpec{
 						PromptPackRef: omniav1alpha1.PromptPackRef{Name: "dummy"},
 						Facade:        omniav1alpha1.FacadeConfig{Type: omniav1alpha1.FacadeTypeWebSocket},
-						Session: &omniav1alpha1.SessionConfig{
-							Type: omniav1alpha1.SessionStoreTypeMemory,
+						Context: &omniav1alpha1.ContextConfig{
+							Type: omniav1alpha1.ContextStoreTypeMemory,
 						},
 					},
 				}
-				Expect(k8sClient.Create(sessionCtx, ar)).To(Succeed())
-				defer func() { _ = k8sClient.Delete(sessionCtx, ar) }()
+				Expect(k8sClient.Create(contextCtx, ar)).To(Succeed())
+				defer func() { _ = k8sClient.Delete(contextCtx, ar) }()
 			})
 		})
 	})

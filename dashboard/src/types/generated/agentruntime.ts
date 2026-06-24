@@ -209,6 +209,23 @@ export interface AgentRuntimeSpec {
       };
     };
   };
+  /** context configures the runtime context store. */
+  context?: {
+    /** storeRef references a secret containing connection details for the context store.
+     * Required for the redis store type (the secret must hold a "url" key). */
+    storeRef?: {
+      /** Name of the referent.
+       * This field is effectively required, but due to backwards compatibility is
+       * allowed to be empty. Instances of this type with an empty value here are
+       * almost certainly wrong.
+       * More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names */
+      name?: string;
+    };
+    /** ttl is the time-to-live for context entries in duration format (e.g., "24h", "30m"). */
+    ttl?: string;
+    /** type specifies the context store backend. */
+    type: "memory" | "redis";
+  };
   /** duplex configures the realtime voice/duplex console for this agent. */
   duplex?: {
     /** enabled turns on the realtime voice console for this agent. */
@@ -6549,23 +6566,6 @@ export interface AgentRuntimeSpec {
    * The controller resolves the session-api and memory-api endpoints from that group.
    * Defaults to "default". */
   serviceGroup?: string;
-  /** session configures session management and storage. */
-  session?: {
-    /** storeRef references a secret containing connection details for the session store.
-     * Required for the redis store type (the secret must hold a "url" key). */
-    storeRef?: {
-      /** Name of the referent.
-       * This field is effectively required, but due to backwards compatibility is
-       * allowed to be empty. Instances of this type with an empty value here are
-       * almost certainly wrong.
-       * More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names */
-      name?: string;
-    };
-    /** ttl is the time-to-live for sessions in duration format (e.g., "24h", "30m"). */
-    ttl?: string;
-    /** type specifies the session store backend. */
-    type: "memory" | "redis";
-  };
   /** toolRegistryRef optionally references a ToolRegistry for available tools. */
   toolRegistryRef?: {
     /** name is the name of the ToolRegistry resource. */

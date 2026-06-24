@@ -65,20 +65,20 @@ func TestFacadeTypeConstants(t *testing.T) {
 	}
 }
 
-func TestSessionStoreTypeConstants(t *testing.T) {
+func TestContextStoreTypeConstants(t *testing.T) {
 	tests := []struct {
 		name     string
-		got      SessionStoreType
+		got      ContextStoreType
 		expected string
 	}{
-		{"Memory", SessionStoreTypeMemory, "memory"},
-		{"Redis", SessionStoreTypeRedis, "redis"},
+		{"Memory", ContextStoreTypeMemory, "memory"},
+		{"Redis", ContextStoreTypeRedis, "redis"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if string(tt.got) != tt.expected {
-				t.Errorf("SessionStoreType %s = %q, want %q", tt.name, tt.got, tt.expected)
+				t.Errorf("ContextStoreType %s = %q, want %q", tt.name, tt.got, tt.expected)
 			}
 		})
 	}
@@ -135,8 +135,8 @@ func TestAgentRuntimeCreation(t *testing.T) {
 				Name:      "my-tools",
 				Namespace: &namespace,
 			},
-			Session: &SessionConfig{
-				Type: SessionStoreTypeRedis,
+			Context: &ContextConfig{
+				Type: ContextStoreTypeRedis,
 				StoreRef: &corev1.LocalObjectReference{
 					Name: "redis-secret",
 				},
@@ -183,11 +183,11 @@ func TestAgentRuntimeCreation(t *testing.T) {
 	if *ar.Spec.ToolRegistryRef.Namespace != "tools" {
 		t.Errorf("ToolRegistryRef.Namespace = %q, want %q", *ar.Spec.ToolRegistryRef.Namespace, "tools")
 	}
-	if ar.Spec.Session.Type != SessionStoreTypeRedis {
-		t.Errorf("Session.Type = %q, want %q", ar.Spec.Session.Type, SessionStoreTypeRedis)
+	if ar.Spec.Context.Type != ContextStoreTypeRedis {
+		t.Errorf("Context.Type = %q, want %q", ar.Spec.Context.Type, ContextStoreTypeRedis)
 	}
-	if ar.Spec.Session.StoreRef.Name != "redis-secret" {
-		t.Errorf("Session.StoreRef.Name = %q, want %q", ar.Spec.Session.StoreRef.Name, "redis-secret")
+	if ar.Spec.Context.StoreRef.Name != "redis-secret" {
+		t.Errorf("Context.StoreRef.Name = %q, want %q", ar.Spec.Context.StoreRef.Name, "redis-secret")
 	}
 	if *ar.Spec.Runtime.Replicas != 3 {
 		t.Errorf("Runtime.Replicas = %d, want %d", *ar.Spec.Runtime.Replicas, 3)
@@ -330,8 +330,8 @@ func TestMinimalAgentRuntime(t *testing.T) {
 	if ar.Spec.ToolRegistryRef != nil {
 		t.Error("ToolRegistryRef should be nil")
 	}
-	if ar.Spec.Session != nil {
-		t.Error("Session should be nil")
+	if ar.Spec.Context != nil {
+		t.Error("Context should be nil")
 	}
 	if ar.Spec.Runtime != nil {
 		t.Error("Runtime should be nil")
@@ -353,15 +353,15 @@ func TestFacadeConfigWithGRPC(t *testing.T) {
 	}
 }
 
-func TestSessionConfigMemory(t *testing.T) {
+func TestContextConfigMemory(t *testing.T) {
 	ttl := "1h"
-	config := SessionConfig{
-		Type: SessionStoreTypeMemory,
+	config := ContextConfig{
+		Type: ContextStoreTypeMemory,
 		TTL:  &ttl,
 	}
 
-	if config.Type != SessionStoreTypeMemory {
-		t.Errorf("Type = %q, want %q", config.Type, SessionStoreTypeMemory)
+	if config.Type != ContextStoreTypeMemory {
+		t.Errorf("Type = %q, want %q", config.Type, ContextStoreTypeMemory)
 	}
 	if config.StoreRef != nil {
 		t.Error("StoreRef should be nil for memory store")
@@ -371,18 +371,18 @@ func TestSessionConfigMemory(t *testing.T) {
 	}
 }
 
-func TestSessionConfigRedis(t *testing.T) {
+func TestContextConfigRedis(t *testing.T) {
 	ttl := "48h"
-	config := SessionConfig{
-		Type: SessionStoreTypeRedis,
+	config := ContextConfig{
+		Type: ContextStoreTypeRedis,
 		StoreRef: &corev1.LocalObjectReference{
 			Name: "redis-connection",
 		},
 		TTL: &ttl,
 	}
 
-	if config.Type != SessionStoreTypeRedis {
-		t.Errorf("Type = %q, want %q", config.Type, SessionStoreTypeRedis)
+	if config.Type != ContextStoreTypeRedis {
+		t.Errorf("Type = %q, want %q", config.Type, ContextStoreTypeRedis)
 	}
 	if config.StoreRef.Name != "redis-connection" {
 		t.Errorf("StoreRef.Name = %q, want %q", config.StoreRef.Name, "redis-connection")
@@ -670,8 +670,8 @@ func TestAgentRuntimeSpecDeepCopy(t *testing.T) {
 			Type: FacadeTypeWebSocket,
 			Port: &port,
 		},
-		Session: &SessionConfig{
-			Type: SessionStoreTypeRedis,
+		Context: &ContextConfig{
+			Type: ContextStoreTypeRedis,
 			TTL:  &ttl,
 		},
 		Providers: []NamedProviderRef{

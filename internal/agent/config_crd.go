@@ -194,10 +194,10 @@ func loadA2ATaskStoreFromCRD(cfg *Config, a2a *v1alpha1.A2AConfig) {
 
 // loadSessionConfigFromCRD populates session-related config fields from the AgentRuntime CRD.
 func loadSessionConfigFromCRD(cfg *Config, ar *v1alpha1.AgentRuntime, namespace string) error {
-	if ar.Spec.Session != nil && ar.Spec.Session.TTL != nil {
-		ttl, err := time.ParseDuration(*ar.Spec.Session.TTL)
+	if ar.Spec.Context != nil && ar.Spec.Context.TTL != nil {
+		ttl, err := time.ParseDuration(*ar.Spec.Context.TTL)
 		if err != nil {
-			return fmt.Errorf("invalid session TTL %q: %w", *ar.Spec.Session.TTL, err)
+			return fmt.Errorf("invalid context TTL %q: %w", *ar.Spec.Context.TTL, err)
 		}
 		cfg.SessionTTL = ttl
 	} else {

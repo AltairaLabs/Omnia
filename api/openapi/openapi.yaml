@@ -846,8 +846,8 @@ components:
             $ref: '#/components/schemas/NamedProviderRef'
         facade:
           $ref: '#/components/schemas/FacadeConfig'
-        session:
-          $ref: '#/components/schemas/SessionConfig'
+        context:
+          $ref: '#/components/schemas/ContextConfig'
         runtime:
           $ref: '#/components/schemas/RuntimeConfig'
         console:
@@ -883,7 +883,7 @@ components:
         handler:
           type: string
 
-    SessionConfig:
+    ContextConfig:
       type: object
       properties:
         type:
