@@ -164,6 +164,7 @@ const (
 )
 
 // SessionConfig defines the configuration for session management.
+// +kubebuilder:validation:XValidation:rule="self.type == 'memory' || has(self.storeRef)",message="spec.session.storeRef is required when session.type is 'redis' or 'postgres'"
 type SessionConfig struct {
 	// type specifies the session store backend.
 	// +kubebuilder:validation:Required

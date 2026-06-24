@@ -11937,6 +11937,10 @@ spec:
                 required:
                 - type
                 type: object
+                x-kubernetes-validations:
+                - message: spec.session.storeRef is required when session.type is
+                    'redis' or 'postgres'
+                  rule: self.type == 'memory' || has(self.storeRef)
               toolRegistryRef:
                 description: toolRegistryRef optionally references a ToolRegistry
                   for available tools.
