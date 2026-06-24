@@ -63,7 +63,7 @@ func LoadFromCRD(ctx context.Context, c client.Client, name, namespace string) (
 		PromptName:     getEnvOrDefault(envPromptName, defaultPromptName),
 		GRPCPort:       defaultGRPCPort,
 		HealthPort:     defaultHealthPort,
-		ContextTTL:     defaultSessionTTL,
+		ContextTTL:     defaultContextTTL,
 		MediaBasePath:  defaultMediaBasePath,
 	}
 

@@ -161,7 +161,7 @@ const (
 	envPromptPackPath    = "OMNIA_PROMPTPACK_PATH"
 	envPromptName        = "OMNIA_PROMPT_NAME"
 	envContextURL        = "OMNIA_CONTEXT_URL"
-	envSessionTTL        = "OMNIA_SESSION_TTL"
+	envContextTTL        = "OMNIA_CONTEXT_TTL"
 	envTracingEnabled    = "OMNIA_TRACING_ENABLED"
 	envTracingEndpoint   = "OMNIA_TRACING_ENDPOINT"
 	envTracingSampleRate = "OMNIA_TRACING_SAMPLE_RATE"
@@ -178,7 +178,7 @@ const (
 	defaultPromptPackPath     = "/etc/omnia/pack/pack.json"
 	defaultPromptName         = "default"
 	defaultContextType        = "memory"
-	defaultSessionTTL         = 24 * time.Hour
+	defaultContextTTL         = 24 * time.Hour
 	defaultMediaBasePath      = "/etc/omnia/media"
 	defaultToolsMountPath     = "/etc/omnia/tools"
 	defaultToolsConfigFile    = "tools.yaml"
@@ -247,15 +247,17 @@ func (cfg *Config) parsePorts() error {
 	return nil
 }
 
-// parseContextTTL parses the context TTL from environment.
+// parseContextTTL parses the context store TTL from the OMNIA_CONTEXT_TTL
+// environment variable. (Distinct from the dashboard's OMNIA_SESSION_TTL auth
+// cookie TTL, which is an unrelated concern and never set on the runtime pod.)
 func (cfg *Config) parseContextTTL() error {
-	ttl := os.Getenv(envSessionTTL)
+	ttl := os.Getenv(envContextTTL)
 	if ttl == "" {
 		return nil
 	}
 	d, err := time.ParseDuration(ttl)
 	if err != nil {
-		return fmt.Errorf(errFmtInvalidEnvVar, envSessionTTL, err)
+		return fmt.Errorf(errFmtInvalidEnvVar, envContextTTL, err)
 	}
 	cfg.ContextTTL = d
 	return nil
