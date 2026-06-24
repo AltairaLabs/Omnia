@@ -14,7 +14,7 @@ const profile: DeployProfile = {
 };
 
 describe("assembleDeployConfig", () => {
-  it("builds a config block with connection, provider refs, and skill names", () => {
+  it("builds a config block with connection, provider refs, and skill bindings", () => {
     const { json } = assembleDeployConfig(profile, "omnia_sk_TEST");
     const parsed = JSON.parse(json);
     expect(parsed.config.api_endpoint).toBe("https://omnia.example.com");
@@ -24,7 +24,9 @@ describe("assembleDeployConfig", () => {
       { name: "default", ref: "default", role: "llm" },
       { name: "embedder", ref: "embedder", role: "embedding" },
     ]);
-    expect(parsed.config.skills).toEqual(["docs-search"]);
+    // The adapter consumes skills as SkillBinding objects ({source}), not bare
+    // names — must match internal/omnia/config.go's schema (#1519).
+    expect(parsed.config.skills).toEqual([{ source: "docs-search" }]);
   });
 
   it("produces valid YAML that round-trips to the same object", () => {
@@ -43,5 +45,61 @@ describe("assembleDeployConfig", () => {
     const parsed = JSON.parse(json);
     expect(parsed.config.providers).toEqual([]);
     expect(parsed.config.skills).toEqual([]);
+  });
+
+  // The AgentRuntime requires a provider bound under the "default" name (its
+  // primary LLM). When none of the discovered providers is literally named
+  // "default", one LLM must be promoted, or every deployment breaks. (#1519)
+  const noDefault: DeployProfile = {
+    api_endpoint: "https://o",
+    workspace: "w",
+    providers: [
+      { name: "rag-hero-baseline", role: "llm", type: "claude" },
+      { name: "rag-hero-candidate", role: "llm", type: "claude" },
+      { name: "rag-hero-embeddings", role: "embedding", type: "openai" },
+    ],
+    skills: [],
+  };
+
+  it("promotes the explicitly chosen LLM to the default binding", () => {
+    const { json } = assembleDeployConfig(noDefault, "t", "rag-hero-candidate");
+    const parsed = JSON.parse(json);
+    expect(parsed.config.providers).toEqual([
+      { name: "rag-hero-baseline", ref: "rag-hero-baseline", role: "llm" },
+      { name: "default", ref: "rag-hero-candidate", role: "llm" },
+      { name: "rag-hero-embeddings", ref: "rag-hero-embeddings", role: "embedding" },
+    ]);
+  });
+
+  it("falls back to the first LLM when no default is chosen", () => {
+    const { json } = assembleDeployConfig(noDefault, "t");
+    const parsed = JSON.parse(json);
+    const def = parsed.config.providers.find(
+      (p: { name: string }) => p.name === "default"
+    );
+    expect(def).toEqual({ name: "default", ref: "rag-hero-baseline", role: "llm" });
+    // exactly one default
+    expect(
+      parsed.config.providers.filter((p: { name: string }) => p.name === "default")
+    ).toHaveLength(1);
+  });
+
+  it("ignores a chosen provider that isn't an LLM and uses the first LLM", () => {
+    const { json } = assembleDeployConfig(noDefault, "t", "rag-hero-embeddings");
+    const parsed = JSON.parse(json);
+    const def = parsed.config.providers.find(
+      (p: { name: string }) => p.name === "default"
+    );
+    expect(def.ref).toBe("rag-hero-baseline");
+  });
+
+  it("leaves a provider already named default as the default", () => {
+    const { json } = assembleDeployConfig(profile, "t");
+    const parsed = JSON.parse(json);
+    expect(parsed.config.providers[0]).toEqual({
+      name: "default",
+      ref: "default",
+      role: "llm",
+    });
   });
 });

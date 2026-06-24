@@ -79,17 +79,19 @@ describe("GET /api/workspaces/[name]/deploy-profile", () => {
     expect(res.status).toBe(403);
   });
 
+  const ready = { status: { phase: "Ready" } };
+
   it("returns discovery shape mapped from Provider/SkillSource CRDs", async () => {
     await setupAuthorized();
     const { listCrd } = await import("@/lib/k8s/crd-operations");
     vi.mocked(listCrd)
       .mockResolvedValueOnce([
-        { metadata: { name: "default" }, spec: { type: "claude", role: "llm", model: "claude-sonnet-4" } },
-        { metadata: { name: "embedder" }, spec: { type: "openai", role: "embedding", model: "text-embed-3" } },
-        { metadata: { name: "legacy" }, spec: { type: "claude" } },
+        { metadata: { name: "default" }, spec: { type: "claude", role: "llm", model: "claude-sonnet-4" }, ...ready },
+        { metadata: { name: "embedder" }, spec: { type: "openai", role: "embedding", model: "text-embed-3" }, ...ready },
+        { metadata: { name: "legacy" }, spec: { type: "claude" }, ...ready },
       ] as never)
       .mockResolvedValueOnce([
-        { metadata: { name: "docs-search" }, spec: { type: "git" } },
+        { metadata: { name: "docs-search" }, spec: { type: "git" }, ...ready },
       ] as never);
     const { GET } = await import("./route");
     const res = await GET(
@@ -106,6 +108,26 @@ describe("GET /api/workspaces/[name]/deploy-profile", () => {
       { name: "legacy", role: "llm", type: "claude" },
     ]);
     expect(body.skills).toEqual([{ name: "docs-search", type: "git" }]);
+  });
+
+  it("excludes Providers/SkillSources that are not Ready (#1519)", async () => {
+    await setupAuthorized();
+    const { listCrd } = await import("@/lib/k8s/crd-operations");
+    vi.mocked(listCrd)
+      .mockResolvedValueOnce([
+        { metadata: { name: "ready-llm" }, spec: { type: "claude", role: "llm" }, ...ready },
+        { metadata: { name: "down-llm" }, spec: { type: "claude", role: "llm" }, status: { phase: "Unavailable" } },
+        { metadata: { name: "no-status" }, spec: { type: "claude", role: "llm" } },
+      ] as never)
+      .mockResolvedValueOnce([
+        { metadata: { name: "ready-skill" }, spec: { type: "git" }, ...ready },
+        { metadata: { name: "erroring-skill" }, spec: { type: "git" }, status: { phase: "Error" } },
+      ] as never);
+    const { GET } = await import("./route");
+    const res = await GET(req({ "x-forwarded-host": "omnia.example.com" }), ctx());
+    const body = await res.json();
+    expect(body.providers.map((p: { name: string }) => p.name)).toEqual(["ready-llm"]);
+    expect(body.skills.map((s: { name: string }) => s.name)).toEqual(["ready-skill"]);
   });
 
   it("returns empty arrays for an empty workspace", async () => {

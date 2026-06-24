@@ -19,15 +19,22 @@ This generates a ready-to-paste `config:` block containing:
 
 - `api_endpoint` — your dashboard's external URL.
 - `workspace` — the target workspace name.
-- `api_token` — a freshly minted, **show-once** `omnia_sk_` token **scoped to
-  this workspace**: it can only deploy here (not to any other workspace you can
-  access), and it acts with your own role in this workspace.
-- a **discovery menu** of the Providers (with their roles) and SkillSources that
-  actually exist in the workspace, so `providers` / `skills` are pre-filled with
-  real names instead of guessed ones.
+- `api_token` — a **show-once** `omnia_sk_` token **scoped to this workspace**:
+  it can only deploy here (not to any other workspace you can access), and it
+  acts with your own role in this workspace. The first export mints the
+  `deploy-<workspace>` key. On a later export, if that key still exists the
+  dialog asks whether to **regenerate** it (revokes the old key and mints a
+  fresh token — any previously downloaded profile for this workspace stops
+  working) or **reuse** the token you saved, so re-exporting doesn't pile up
+  duplicate keys.
+- a **configure step** listing the **Ready** Providers (with their roles) and
+  SkillSources in the workspace — non-Ready resources (Unavailable, Error, still
+  syncing) are excluded, since a deployment that references one fails. You check
+  which to include and pick **one LLM as the `default`** provider; the runtime
+  requires a provider bound under `default` as its primary, so the export marks
+  your choice as `name: default` (with `ref` pointing at the real Provider).
 
-Pick the providers you need, bind each to a role, and paste the block into your
-arena deploy config:
+Paste the generated block into your arena deploy config:
 
 ```yaml
 config:
