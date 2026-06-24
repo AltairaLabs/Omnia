@@ -6,7 +6,7 @@ import {
   AgentFacadeNode,
   AgentRuntimeNode,
   AgentPromptPackNode,
-  AgentSessionNode,
+  AgentContextNode,
   AgentMemoryNode,
 } from "./agent-topology-nodes";
 
@@ -37,8 +37,8 @@ describe("agent topology nodes", () => {
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
   });
 
-  it("session node shows type and ttl", () => {
-    wrap(<AgentSessionNode data={{ sessionType: "memory", ttl: "1h" }} />);
+  it("context node shows type and ttl", () => {
+    wrap(<AgentContextNode data={{ contextType: "memory", ttl: "1h" }} />);
     expect(screen.getByText(/memory/)).toBeInTheDocument();
     expect(screen.getByText(/1h/)).toBeInTheDocument();
   });

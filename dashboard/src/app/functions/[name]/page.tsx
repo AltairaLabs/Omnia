@@ -181,7 +181,7 @@ export default function FunctionDetailPage() {
               facades={[{ type: spec.facade?.type ?? "websocket", port: spec.facade?.port }]}
               framework={spec.framework}
               promptPack={{ name: spec.promptPackRef?.name, version: spec.promptPackRef?.version }}
-              session={spec.context}
+              context={spec.context}
               memoryEnabled={spec.memory?.enabled}
             />
 
