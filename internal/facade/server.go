@@ -90,6 +90,10 @@ type ServerConfig struct {
 	// When a new session would exceed this cap the request is shed with
 	// ErrorCodeRateLimited. 0 applies the conservative default (8).
 	MaxAudioSessions int
+	// DrainTimeout is how long the facade keeps serving active realtime calls
+	// after receiving SIGTERM before tearing down remaining connections.
+	// New calls are shed immediately on drain. Defaults to 30s.
+	DrainTimeout time.Duration
 }
 
 // DefaultServerConfig returns a ServerConfig with default values.
@@ -110,6 +114,7 @@ func DefaultServerConfig() ServerConfig {
 		MaxInFlightMessagesPerConnection: 1,
 		// Conservative audio session cap. Overridden via ServerConfig.MaxAudioSessions.
 		MaxAudioSessions: 8,
+		DrainTimeout:     30 * time.Second,
 	}
 }
 
@@ -209,6 +214,12 @@ type Server struct {
 	// Manipulated via sync/atomic so ensureAudioSession can read/CAS without
 	// holding a broad lock.
 	activeAudioSessions atomic.Int64
+
+	// draining is set by markDraining when the facade enters drain mode.
+	// New WebSocket upgrade requests are rejected with 503 while this is true;
+	// already-established connections keep being served until they finish or
+	// Shutdown is called.
+	draining atomic.Bool
 
 	// routeStore is used by parked to persist/remove pod-address route hints.
 	// Defaults to noopRouteStore{} when not configured.
@@ -713,6 +724,14 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	agentCtx, err := s.resolveAgentContext(r)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// While draining, reject NEW upgrades but allow realtime resume
+	// reattach requests through to tryReattach, so T1-parked sessions can
+	// be reclaimed and completed before teardown.
+	if s.IsDraining() && agentCtx.resumeID == "" {
+		http.Error(w, "server draining", http.StatusServiceUnavailable)
 		return
 	}
 
