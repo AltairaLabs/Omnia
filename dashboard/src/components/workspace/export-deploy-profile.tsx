@@ -1,19 +1,18 @@
 "use client";
 
 /**
- * Export deploy profile action. Fetches the workspace discovery menu, supplies
- * an omnia_sk_ token, assembles the promptarena-deploy-omnia config: block, and
- * shows it once. Issue #1519.
+ * Export deploy profile action. Fetches the workspace discovery menu (Ready
+ * Providers/SkillSources only), lets the user pick which to include and which
+ * LLM is the `default` primary, supplies an omnia_sk_ token, assembles the
+ * promptarena-deploy-omnia config: block, and shows it once. Issue #1519.
  *
  * Token handling avoids minting a duplicate on every export: keys are
  * show-once, so a deterministic `deploy-<workspace>` key is used. When one
- * already exists the dialog asks whether to regenerate (revoke + re-mint) or
- * reuse a saved token, instead of silently piling up keys.
+ * already exists the user chooses regenerate (revoke + re-mint) or reuse.
  */
 
 import { useState } from "react";
 import { Copy, Download } from "lucide-react";
-import { formatDistanceToNow } from "date-fns";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -26,6 +25,7 @@ import {
 import { WorkspaceApiService } from "@/lib/data/workspace-api-service";
 import { assembleDeployConfig } from "@/lib/deploy/assemble-profile";
 import type { DeployProfile } from "@/types/deploy-profile";
+import { DeployConfigForm, type TokenAction } from "./deploy-config-form";
 
 const READ_ONLY_NOTE =
   "Token minting is unavailable in this deployment (read-only key store). Paste a token you mint manually.";
@@ -37,7 +37,7 @@ const REUSE_NOTE =
 const service = new WorkspaceApiService();
 
 /** A key as returned by the list endpoint (subset the export needs). */
-interface KeyInfo {
+export interface KeyInfo {
   id: string;
   name: string;
   createdAt: string;
@@ -67,11 +67,7 @@ async function fetchKeyListing(): Promise<{ allowCreate: boolean; keys: KeyInfo[
   };
 }
 
-/**
- * Mint a fresh named omnia_sk_ token scoped to this workspace (#1561 P3):
- * the `workspaces` allowlist confines the downloadable credential so it can
- * only deploy to the workspace it was exported for — least privilege per #1519.
- */
+/** Mint a fresh omnia_sk_ token scoped to this workspace (#1561 P3). */
 async function mintToken(workspace: string): Promise<string> {
   const res = await fetch("/api/settings/api-keys", {
     method: "POST",
@@ -95,13 +91,6 @@ async function deleteKey(id: string): Promise<void> {
   }
 }
 
-function lastUsedLabel(lastUsedAt: string | null): string {
-  return lastUsedAt
-    ? `last used ${formatDistanceToNow(new Date(lastUsedAt), { addSuffix: true })}`
-    : "never used";
-}
-
-type Phase = "choice" | "output";
 type TokenSource = "minted" | "reuse" | "readonly";
 
 function noteFor(source: TokenSource): string {
@@ -110,47 +99,60 @@ function noteFor(source: TokenSource): string {
   return MINTED_NOTE;
 }
 
+/** Resolve the token to embed, applying the chosen token action. */
+async function resolveToken(args: {
+  workspace: string;
+  allowCreate: boolean;
+  existingKey: KeyInfo | null;
+  action: TokenAction;
+}): Promise<{ token: string; source: TokenSource }> {
+  const { workspace, allowCreate, existingKey, action } = args;
+  if (!allowCreate) return { token: readOnlyPlaceholder(), source: "readonly" };
+  if (existingKey && action === "reuse") {
+    return { token: reusePlaceholder(workspace), source: "reuse" };
+  }
+  if (existingKey) await deleteKey(existingKey.id);
+  return { token: await mintToken(workspace), source: "minted" };
+}
+
+function firstLlm(profile: DeployProfile): string {
+  return profile.providers.find((p) => p.role === "llm")?.name ?? "";
+}
+
+type Phase = "configure" | "output";
+
 export default function ExportDeployProfile({ workspace }: { workspace: string }) {
   const [open, setOpen] = useState(false);
-  const [phase, setPhase] = useState<Phase>("output");
+  const [phase, setPhase] = useState<Phase>("configure");
+  const [profile, setProfile] = useState<DeployProfile | null>(null);
+  const [includedProviders, setIncludedProviders] = useState<Set<string>>(new Set());
+  const [includedSkills, setIncludedSkills] = useState<Set<string>>(new Set());
+  const [defaultProvider, setDefaultProvider] = useState("");
+  const [existingKey, setExistingKey] = useState<KeyInfo | null>(null);
+  const [allowCreate, setAllowCreate] = useState(false);
+  const [tokenAction, setTokenAction] = useState<TokenAction>("regenerate");
   const [output, setOutput] = useState("");
   const [tokenSource, setTokenSource] = useState<TokenSource>("minted");
-  const [existing, setExisting] = useState<KeyInfo | null>(null);
-  const [profile, setProfile] = useState<DeployProfile | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
-
-  function showOutput(p: DeployProfile, token: string, source: TokenSource) {
-    setOutput(assembleDeployConfig(p, token).yaml);
-    setTokenSource(source);
-    setPhase("output");
-    setOpen(true);
-  }
 
   async function handleExport() {
     setLoading(true);
     setError(null);
     setCopied(false);
     try {
-      const { allowCreate, keys } = await fetchKeyListing();
+      const { allowCreate: canCreate, keys } = await fetchKeyListing();
       const p = await service.getDeployProfile(workspace);
       setProfile(p);
-
-      if (!allowCreate) {
-        showOutput(p, readOnlyPlaceholder(), "readonly");
-        return;
-      }
-
-      const match = keys.find((k) => k.name === deployKeyName(workspace)) ?? null;
-      if (match) {
-        // A deploy key already exists — ask rather than mint a duplicate.
-        setExisting(match);
-        setPhase("choice");
-        setOpen(true);
-      } else {
-        showOutput(p, await mintToken(workspace), "minted");
-      }
+      setIncludedProviders(new Set(p.providers.map((x) => x.name)));
+      setIncludedSkills(new Set(p.skills.map((x) => x.name)));
+      setDefaultProvider(firstLlm(p));
+      setAllowCreate(canCreate);
+      setExistingKey(keys.find((k) => k.name === deployKeyName(workspace)) ?? null);
+      setTokenAction("regenerate");
+      setPhase("configure");
+      setOpen(true);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Export failed");
     } finally {
@@ -158,23 +160,48 @@ export default function ExportDeployProfile({ workspace }: { workspace: string }
     }
   }
 
-  async function handleRegenerate() {
-    if (!profile || !existing) return;
+  function toggle(set: Set<string>, name: string): Set<string> {
+    const next = new Set(set);
+    if (next.has(name)) {
+      next.delete(name);
+    } else {
+      next.add(name);
+    }
+    return next;
+  }
+
+  function toggleProvider(name: string) {
+    setIncludedProviders((s) => toggle(s, name));
+  }
+
+  function toggleSkill(name: string) {
+    setIncludedSkills((s) => toggle(s, name));
+  }
+
+  async function handleGenerate() {
+    if (!profile) return;
     setLoading(true);
     setError(null);
     try {
-      await deleteKey(existing.id);
-      showOutput(profile, await mintToken(workspace), "minted");
+      const subset: DeployProfile = {
+        ...profile,
+        providers: profile.providers.filter((p) => includedProviders.has(p.name)),
+        skills: profile.skills.filter((s) => includedSkills.has(s.name)),
+      };
+      const { token, source } = await resolveToken({
+        workspace,
+        allowCreate,
+        existingKey,
+        action: tokenAction,
+      });
+      setOutput(assembleDeployConfig(subset, token, defaultProvider).yaml);
+      setTokenSource(source);
+      setPhase("output");
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to regenerate token");
+      setError(e instanceof Error ? e.message : "Failed to generate profile");
     } finally {
       setLoading(false);
     }
-  }
-
-  function handleReuse() {
-    if (!profile) return;
-    showOutput(profile, reusePlaceholder(workspace), "reuse");
   }
 
   function handleCopy() {
@@ -192,34 +219,45 @@ export default function ExportDeployProfile({ workspace }: { workspace: string }
     URL.revokeObjectURL(url);
   }
 
-  const note = noteFor(tokenSource);
+  // A deploy needs exactly one included LLM marked default; gate Generate on it.
+  const defaultIsValid =
+    !!defaultProvider &&
+    includedProviders.has(defaultProvider) &&
+    !!profile?.providers.find((p) => p.name === defaultProvider && p.role === "llm");
 
   return (
     <div className="space-y-3">
-      <Button onClick={handleExport} disabled={loading}>
-        {loading ? "Generating…" : "Export deploy profile"}
+      <Button onClick={handleExport} disabled={loading && phase === "configure"}>
+        {loading && !open ? "Loading…" : "Export deploy profile"}
       </Button>
       {error && <p className="text-sm text-destructive">{error}</p>}
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="max-w-2xl">
-          {phase === "choice" && existing ? (
+          {phase === "configure" && profile ? (
             <>
               <DialogHeader>
-                <DialogTitle>A deploy key already exists</DialogTitle>
+                <DialogTitle>Configure deploy profile</DialogTitle>
                 <DialogDescription>
-                  <span className="font-mono">{existing.name}</span> was created{" "}
-                  {formatDistanceToNow(new Date(existing.createdAt), { addSuffix: true })} (
-                  {lastUsedLabel(existing.lastUsedAt)}). Keys are shown only once, so we
-                  can&apos;t show its token again — regenerate a fresh one (revokes the old
-                  key) or reuse the token you saved.
+                  Pick the providers and skills to include, and which LLM is the
+                  default. Only Ready resources are shown.
                 </DialogDescription>
               </DialogHeader>
+              <DeployConfigForm
+                profile={profile}
+                includedProviders={includedProviders}
+                includedSkills={includedSkills}
+                defaultProvider={defaultProvider}
+                onToggleProvider={toggleProvider}
+                onToggleSkill={toggleSkill}
+                onSetDefault={setDefaultProvider}
+                allowCreate={allowCreate}
+                existingKey={existingKey}
+                tokenAction={tokenAction}
+                onTokenAction={setTokenAction}
+              />
               <DialogFooter>
-                <Button variant="outline" onClick={handleReuse} disabled={loading}>
-                  Use saved token
-                </Button>
-                <Button onClick={handleRegenerate} disabled={loading}>
-                  {loading ? "Regenerating…" : "Regenerate token"}
+                <Button onClick={handleGenerate} disabled={loading || !defaultIsValid}>
+                  {loading ? "Generating…" : "Generate"}
                 </Button>
               </DialogFooter>
             </>
@@ -228,7 +266,7 @@ export default function ExportDeployProfile({ workspace }: { workspace: string }
               <DialogHeader>
                 <DialogTitle>Deploy profile</DialogTitle>
                 <DialogDescription>
-                  Paste this into your arena deploy config. {note}
+                  Paste this into your arena deploy config. {noteFor(tokenSource)}
                 </DialogDescription>
               </DialogHeader>
               <pre

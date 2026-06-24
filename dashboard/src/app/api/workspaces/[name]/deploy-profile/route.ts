@@ -48,6 +48,22 @@ function resolveApiEndpoint(request: NextRequest): string {
   return process.env.OMNIA_DASHBOARD_EXTERNAL_URL || "";
 }
 
+const PHASE_READY = "Ready";
+
+/**
+ * Only Ready resources belong in a deploy profile: a deployment that
+ * references a Provider/SkillSource that isn't Ready (Unavailable, Error,
+ * still syncing) fails. Filtering here keeps the discovery menu to things the
+ * agent can actually bind to. (#1519)
+ */
+function isProviderReady(p: Provider): boolean {
+  return p.status?.phase === PHASE_READY;
+}
+
+function isSkillReady(s: SkillSource): boolean {
+  return s.status?.phase === PHASE_READY;
+}
+
 function toProfileProvider(p: Provider): DeployProfileProvider {
   const out: DeployProfileProvider = {
     name: p.metadata.name,
@@ -92,8 +108,8 @@ export const GET = withWorkspaceAccess<{ name: string }>(
       const profile: DeployProfile = {
         api_endpoint: resolveApiEndpoint(request),
         workspace: name,
-        providers: providers.map(toProfileProvider),
-        skills: skills.map(toProfileSkill),
+        providers: providers.filter(isProviderReady).map(toProfileProvider),
+        skills: skills.filter(isSkillReady).map(toProfileSkill),
       };
 
       auditSuccess(auditCtx, "get", name, {

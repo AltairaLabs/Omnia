@@ -27,12 +27,14 @@ This generates a ready-to-paste `config:` block containing:
   fresh token — any previously downloaded profile for this workspace stops
   working) or **reuse** the token you saved, so re-exporting doesn't pile up
   duplicate keys.
-- a **discovery menu** of the Providers (with their roles) and SkillSources that
-  actually exist in the workspace, so `providers` / `skills` are pre-filled with
-  real names instead of guessed ones.
+- a **configure step** listing the **Ready** Providers (with their roles) and
+  SkillSources in the workspace — non-Ready resources (Unavailable, Error, still
+  syncing) are excluded, since a deployment that references one fails. You check
+  which to include and pick **one LLM as the `default`** provider; the runtime
+  requires a provider bound under `default` as its primary, so the export marks
+  your choice as `name: default` (with `ref` pointing at the real Provider).
 
-Pick the providers you need, bind each to a role, and paste the block into your
-arena deploy config:
+Paste the generated block into your arena deploy config:
 
 ```yaml
 config:
