@@ -42,17 +42,22 @@ conversation state across turns.
 
 | Field | Value | Effect |
 |-------|-------|--------|
-| `spec.session.type` | `memory` (default) | In-process store; state is lost when the pod restarts |
-| `spec.session.type` | `redis` | Durable store; conversation state survives pod restarts and cross-pod resume |
-| `spec.session.type` | `postgres` | Reserved/CEL-validated, but **not yet wired end-to-end**: the operator currently projects `OMNIA_SESSION_URL` for `redis` only and the runtime has no PostgreSQL state store, so `postgres` falls back to the in-process memory store until a later step adds it. |
-| `spec.session.storeRef` | `name: <secret-name>` | Required when `type` is `redis` or `postgres`. References a Kubernetes Secret in the same namespace. The secret **must** contain a `url` key holding the connection URL (e.g. `redis://…` for Redis). |
+| `spec.session.type` | `memory` (default) | In-process store; the runtime session (working LLM context) is ephemeral and lost when the pod restarts |
+| `spec.session.type` | `redis` | Durable, fast store; the runtime session survives pod restarts and is resumable cross-pod via `sdk.Resume` |
+| `spec.session.storeRef` | `name: <secret-name>` | Required when `type` is `redis`. References a Kubernetes Secret in the same namespace. The secret **must** contain a `url` key holding the connection URL (e.g. `redis://…`). |
 | `spec.session.ttl` | duration string (default `"24h"`) | How long idle conversation state is retained in the store. |
 
+Only fast/instant stores back the **runtime session** (the working LLM context
+concatenated into each provider call) — `memory` or `redis`. This is distinct
+from **session-api**, which owns long-term archival of the full conversation in
+its own database; the two are separate stores with separate purposes and the
+runtime cannot rebuild its state from session-api.
+
 CEL validation on the CRD enforces that `storeRef` is present whenever
-`type` is `redis` or `postgres`:
+`type` is `redis`:
 
 ```
-spec.session.storeRef is required when session.type is 'redis' or 'postgres'
+spec.session.storeRef is required when session.type is 'redis'
 ```
 
 ### How the operator projects session config

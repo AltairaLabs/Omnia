@@ -11908,7 +11908,7 @@ spec:
                   storeRef:
                     description: |-
                       storeRef references a secret containing connection details for the session store.
-                      Required for redis and postgres store types.
+                      Required for the redis store type (the secret must hold a "url" key).
                     properties:
                       name:
                         default: ""
@@ -11932,14 +11932,13 @@ spec:
                     enum:
                     - memory
                     - redis
-                    - postgres
                     type: string
                 required:
                 - type
                 type: object
                 x-kubernetes-validations:
                 - message: spec.session.storeRef is required when session.type is
-                    'redis' or 'postgres'
+                    'redis'
                   rule: self.type == 'memory' || has(self.storeRef)
               toolRegistryRef:
                 description: toolRegistryRef optionally references a ToolRegistry

@@ -6552,7 +6552,7 @@ export interface AgentRuntimeSpec {
   /** session configures session management and storage. */
   session?: {
     /** storeRef references a secret containing connection details for the session store.
-     * Required for redis and postgres store types. */
+     * Required for the redis store type (the secret must hold a "url" key). */
     storeRef?: {
       /** Name of the referent.
        * This field is effectively required, but due to backwards compatibility is
@@ -6564,7 +6564,7 @@ export interface AgentRuntimeSpec {
     /** ttl is the time-to-live for sessions in duration format (e.g., "24h", "30m"). */
     ttl?: string;
     /** type specifies the session store backend. */
-    type: "memory" | "redis" | "postgres";
+    type: "memory" | "redis";
   };
   /** toolRegistryRef optionally references a ToolRegistry for available tools. */
   toolRegistryRef?: {

@@ -150,21 +150,23 @@ type ToolRegistryRef struct {
 	Namespace *string `json:"namespace,omitempty"`
 }
 
-// SessionStoreType defines the type of session store.
-// +kubebuilder:validation:Enum=memory;redis;postgres
+// SessionStoreType defines the type of session store. The runtime session is
+// the working LLM context (turns concatenated into each provider call); a
+// durable backend lets a fresh pod resume it via sdk.Resume. Only fast/instant
+// stores are supported here — NOT a relational DB. (Long-term conversation
+// archival is a separate concern owned by session-api, not this field.)
+// +kubebuilder:validation:Enum=memory;redis
 type SessionStoreType string
 
 const (
-	// SessionStoreTypeMemory uses in-memory storage (not recommended for production).
+	// SessionStoreTypeMemory uses in-memory storage (ephemeral; lost on pod restart).
 	SessionStoreTypeMemory SessionStoreType = "memory"
-	// SessionStoreTypeRedis uses Redis for session storage.
+	// SessionStoreTypeRedis uses Redis for durable, cross-pod-resumable session storage.
 	SessionStoreTypeRedis SessionStoreType = "redis"
-	// SessionStoreTypePostgres uses PostgreSQL for session storage.
-	SessionStoreTypePostgres SessionStoreType = "postgres"
 )
 
 // SessionConfig defines the configuration for session management.
-// +kubebuilder:validation:XValidation:rule="self.type == 'memory' || has(self.storeRef)",message="spec.session.storeRef is required when session.type is 'redis' or 'postgres'"
+// +kubebuilder:validation:XValidation:rule="self.type == 'memory' || has(self.storeRef)",message="spec.session.storeRef is required when session.type is 'redis'"
 type SessionConfig struct {
 	// type specifies the session store backend.
 	// +kubebuilder:validation:Required
@@ -172,7 +174,7 @@ type SessionConfig struct {
 	Type SessionStoreType `json:"type"`
 
 	// storeRef references a secret containing connection details for the session store.
-	// Required for redis and postgres store types.
+	// Required for the redis store type (the secret must hold a "url" key).
 	// +optional
 	StoreRef *corev1.LocalObjectReference `json:"storeRef,omitempty"`
 

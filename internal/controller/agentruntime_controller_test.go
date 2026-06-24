@@ -4269,21 +4269,26 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 				Expect(k8sClient.Create(sessionCtx, ar)).To(MatchError(ContainSubstring("storeRef")))
 			})
 
-			It("rejects postgres session type without storeRef", func() {
+			It("rejects postgres as an unsupported session type", func() {
+				// postgres is NOT a supported runtime session backend (only fast
+				// instant stores: memory|redis). Long-term conversation storage is
+				// session-api's concern, not spec.session. Selecting postgres must
+				// fail at admission on the enum, not silently fall back to memory.
 				ar := &omniav1alpha1.AgentRuntime{
 					ObjectMeta: metav1.ObjectMeta{
-						Name:      "session-postgres-no-storeref",
+						Name:      "session-postgres-unsupported",
 						Namespace: "default",
 					},
 					Spec: omniav1alpha1.AgentRuntimeSpec{
 						PromptPackRef: omniav1alpha1.PromptPackRef{Name: "dummy"},
 						Facade:        omniav1alpha1.FacadeConfig{Type: omniav1alpha1.FacadeTypeWebSocket},
 						Session: &omniav1alpha1.SessionConfig{
-							Type: omniav1alpha1.SessionStoreTypePostgres,
+							Type:     omniav1alpha1.SessionStoreType("postgres"),
+							StoreRef: &corev1.LocalObjectReference{Name: "pg-secret"},
 						},
 					},
 				}
-				Expect(k8sClient.Create(sessionCtx, ar)).To(MatchError(ContainSubstring("storeRef")))
+				Expect(k8sClient.Create(sessionCtx, ar)).To(MatchError(ContainSubstring("Unsupported value")))
 			})
 
 			It("accepts redis session type with storeRef", func() {

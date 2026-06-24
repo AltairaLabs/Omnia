@@ -73,7 +73,6 @@ func TestSessionStoreTypeConstants(t *testing.T) {
 	}{
 		{"Memory", SessionStoreTypeMemory, "memory"},
 		{"Redis", SessionStoreTypeRedis, "redis"},
-		{"Postgres", SessionStoreTypePostgres, "postgres"},
 	}
 
 	for _, tt := range tests {
@@ -372,21 +371,21 @@ func TestSessionConfigMemory(t *testing.T) {
 	}
 }
 
-func TestSessionConfigPostgres(t *testing.T) {
+func TestSessionConfigRedis(t *testing.T) {
 	ttl := "48h"
 	config := SessionConfig{
-		Type: SessionStoreTypePostgres,
+		Type: SessionStoreTypeRedis,
 		StoreRef: &corev1.LocalObjectReference{
-			Name: "postgres-connection",
+			Name: "redis-connection",
 		},
 		TTL: &ttl,
 	}
 
-	if config.Type != SessionStoreTypePostgres {
-		t.Errorf("Type = %q, want %q", config.Type, SessionStoreTypePostgres)
+	if config.Type != SessionStoreTypeRedis {
+		t.Errorf("Type = %q, want %q", config.Type, SessionStoreTypeRedis)
 	}
-	if config.StoreRef.Name != "postgres-connection" {
-		t.Errorf("StoreRef.Name = %q, want %q", config.StoreRef.Name, "postgres-connection")
+	if config.StoreRef.Name != "redis-connection" {
+		t.Errorf("StoreRef.Name = %q, want %q", config.StoreRef.Name, "redis-connection")
 	}
 }
 
