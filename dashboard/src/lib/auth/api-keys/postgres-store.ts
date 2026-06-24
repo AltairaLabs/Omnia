@@ -50,6 +50,8 @@ interface ApiKeyRow {
   created_at: Date;
   last_used_at: Date | null;
   workspaces: string[] | null;
+  owner_email: string | null;
+  owner_groups: string[] | null;
 }
 
 /**
@@ -67,6 +69,8 @@ function rowToApiKey(row: ApiKeyRow): ApiKey {
     createdAt: row.created_at,
     lastUsedAt: row.last_used_at,
     workspaces: row.workspaces ?? undefined,
+    ownerEmail: row.owner_email ?? undefined,
+    ownerGroups: row.owner_groups ?? undefined,
   };
 }
 
@@ -107,9 +111,17 @@ export class PostgresApiKeyStore implements ApiKeyStore {
         expires_at   TIMESTAMPTZ,
         created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
         last_used_at TIMESTAMPTZ,
-        workspaces   TEXT[]
+        workspaces   TEXT[],
+        owner_email  TEXT,
+        owner_groups TEXT[]
       )
     `);
+    await this.pool.query(
+      `ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS owner_email TEXT`
+    );
+    await this.pool.query(
+      `ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS owner_groups TEXT[]`
+    );
     await this.pool.query(
       `CREATE INDEX IF NOT EXISTS idx_api_keys_user ON api_keys(user_id)`
     );
@@ -152,10 +164,10 @@ export class PostgresApiKeyStore implements ApiKeyStore {
 
     const result = await this.pool.query<ApiKeyRow>(
       `INSERT INTO api_keys
-         (id, user_id, name, key_prefix, key_hash, role, expires_at, created_at, last_used_at, workspaces)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NULL, $9)
+         (id, user_id, name, key_prefix, key_hash, role, expires_at, created_at, last_used_at, workspaces, owner_email, owner_groups)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NULL, $9, $10, $11)
        RETURNING *`,
-      [id, userId, options.name, kp, keyHash, options.role ?? "viewer", expiresAt, now, workspaces]
+      [id, userId, options.name, kp, keyHash, options.role ?? "viewer", expiresAt, now, workspaces, options.ownerEmail ?? null, options.ownerGroups ?? null]
     );
 
     const apiKey = rowToApiKey(result.rows[0]);
