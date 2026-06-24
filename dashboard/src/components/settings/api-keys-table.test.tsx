@@ -8,7 +8,12 @@
 
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
-import { KeyExpiration, ApiKeysContent, type ApiKeyInfo } from "./api-keys-table";
+import {
+  KeyExpiration,
+  KeyScope,
+  ApiKeysContent,
+  type ApiKeyInfo,
+} from "./api-keys-table";
 
 function makeKey(overrides: Partial<ApiKeyInfo> = {}): ApiKeyInfo {
   return {
@@ -42,12 +47,48 @@ describe("KeyExpiration", () => {
   });
 });
 
+describe("KeyScope", () => {
+  it("renders 'All workspaces' when the key is unrestricted (no allowlist)", () => {
+    render(<KeyScope />);
+    expect(screen.getByText("All workspaces")).toBeInTheDocument();
+  });
+
+  it("renders 'All workspaces' for an empty allowlist", () => {
+    render(<KeyScope workspaces={[]} />);
+    expect(screen.getByText("All workspaces")).toBeInTheDocument();
+  });
+
+  it("renders a badge per allowed workspace", () => {
+    render(<KeyScope workspaces={["demo", "prod"]} />);
+    expect(screen.getByText("demo")).toBeInTheDocument();
+    expect(screen.getByText("prod")).toBeInTheDocument();
+    expect(screen.queryByText("All workspaces")).not.toBeInTheDocument();
+  });
+});
+
 describe("ApiKeysContent", () => {
   const base = {
     canCreateDelete: true,
     isFileMode: false,
     onDeleteKey: vi.fn(),
   };
+
+  it("renders a key's workspace scope in the table", () => {
+    render(
+      <ApiKeysContent
+        {...base}
+        isLoading={false}
+        error={null}
+        keys={[
+          makeKey({ id: "scoped", name: "Scoped", workspaces: ["demo"] }),
+          makeKey({ id: "global", name: "Global" }),
+        ]}
+      />
+    );
+    expect(screen.getByText("Workspaces")).toBeInTheDocument(); // column header
+    expect(screen.getByText("demo")).toBeInTheDocument(); // scoped key badge
+    expect(screen.getByText("All workspaces")).toBeInTheDocument(); // unrestricted key
+  });
 
   it("renders skeletons while loading", () => {
     const { container } = render(

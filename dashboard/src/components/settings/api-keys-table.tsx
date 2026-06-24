@@ -23,6 +23,29 @@ export interface ApiKeyInfo {
   createdAt: string;
   lastUsedAt: string | null;
   isExpired: boolean;
+  /** Workspace allowlist confining the key; empty/absent = all workspaces. */
+  workspaces?: string[];
+}
+
+/**
+ * Renders a key's workspace scope — the allowlist it's confined to, or
+ * "All workspaces" when unrestricted. This is the key's effective reach:
+ * a scoped key only works in these workspaces (acting with the owner's role
+ * in each).
+ */
+export function KeyScope({ workspaces }: Readonly<{ workspaces?: string[] }>) {
+  if (!workspaces || workspaces.length === 0) {
+    return <span className="text-sm text-muted-foreground">All workspaces</span>;
+  }
+  return (
+    <div className="flex flex-wrap gap-1">
+      {workspaces.map((ws) => (
+        <Badge key={ws} variant="secondary">
+          {ws}
+        </Badge>
+      ))}
+    </div>
+  );
 }
 
 /** Renders the expiration status for an API key */
@@ -104,6 +127,7 @@ export function ApiKeysContent({
           <TableHead>Name</TableHead>
           <TableHead>Key</TableHead>
           <TableHead>Role</TableHead>
+          <TableHead>Workspaces</TableHead>
           <TableHead>Created</TableHead>
           <TableHead>Last Used</TableHead>
           <TableHead>Expires</TableHead>
@@ -121,6 +145,9 @@ export function ApiKeysContent({
             </TableCell>
             <TableCell>
               <Badge variant="outline">{key.role}</Badge>
+            </TableCell>
+            <TableCell>
+              <KeyScope workspaces={key.workspaces} />
             </TableCell>
             <TableCell className="text-muted-foreground text-sm">
               {formatDistanceToNow(new Date(key.createdAt), {

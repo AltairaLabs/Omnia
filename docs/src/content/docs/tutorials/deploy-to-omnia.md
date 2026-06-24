@@ -19,9 +19,14 @@ This generates a ready-to-paste `config:` block containing:
 
 - `api_endpoint` — your dashboard's external URL.
 - `workspace` — the target workspace name.
-- `api_token` — a freshly minted, **show-once** `omnia_sk_` token **scoped to
-  this workspace**: it can only deploy here (not to any other workspace you can
-  access), and it acts with your own role in this workspace.
+- `api_token` — a **show-once** `omnia_sk_` token **scoped to this workspace**:
+  it can only deploy here (not to any other workspace you can access), and it
+  acts with your own role in this workspace. The first export mints the
+  `deploy-<workspace>` key. On a later export, if that key still exists the
+  dialog asks whether to **regenerate** it (revokes the old key and mints a
+  fresh token — any previously downloaded profile for this workspace stops
+  working) or **reuse** the token you saved, so re-exporting doesn't pile up
+  duplicate keys.
 - a **discovery menu** of the Providers (with their roles) and SkillSources that
   actually exist in the workspace, so `providers` / `skills` are pre-filled with
   real names instead of guessed ones.

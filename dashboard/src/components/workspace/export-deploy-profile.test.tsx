@@ -110,4 +110,103 @@ describe("ExportDeployProfile", () => {
     await userEvent.click(await screen.findByRole("button", { name: /export deploy profile/i }));
     await waitFor(() => expect(screen.getByText(/failed to fetch deploy profile/i)).toBeInTheDocument());
   });
+
+  const existingKey = {
+    id: "key-deploy",
+    name: "deploy-team-acme",
+    createdAt: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString(),
+    lastUsedAt: null,
+  };
+
+  it("asks instead of minting when a deploy key already exists", async () => {
+    const calls: { method?: string }[] = [];
+    mockFetch({
+      "/api/settings/api-keys": (init) => {
+        calls.push({ method: init?.method });
+        return { json: async () => ({ config: { allowCreate: true }, keys: [existingKey] }) };
+      },
+      "/deploy-profile": () => ({ json: async () => discovery }),
+    });
+    render(<ExportDeployProfile workspace="team-acme" />);
+    await userEvent.click(await screen.findByRole("button", { name: /export deploy profile/i }));
+
+    // The choice dialog appears; no POST (mint) was issued.
+    await screen.findByText(/a deploy key already exists/i);
+    expect(screen.getByRole("button", { name: /regenerate token/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /use saved token/i })).toBeInTheDocument();
+    expect(calls.some((c) => c.method === "POST")).toBe(false);
+  });
+
+  it("regenerate revokes the old key, mints a new one, and shows the fresh token", async () => {
+    let deleted = false;
+    let posted = false;
+    mockFetch({
+      "/api/settings/api-keys": (init) => {
+        if (init?.method === "DELETE") {
+          deleted = true;
+          return { json: async () => ({}) };
+        }
+        if (init?.method === "POST") {
+          posted = true;
+          return { json: async () => ({ key: { key: "omnia_sk_FRESH" } }), status: 201 };
+        }
+        return { json: async () => ({ config: { allowCreate: true }, keys: [existingKey] }) };
+      },
+      "/deploy-profile": () => ({ json: async () => discovery }),
+    });
+    render(<ExportDeployProfile workspace="team-acme" />);
+    await userEvent.click(await screen.findByRole("button", { name: /export deploy profile/i }));
+    await userEvent.click(await screen.findByRole("button", { name: /regenerate token/i }));
+
+    const output = await screen.findByTestId("deploy-profile-output");
+    await waitFor(() => expect(output.textContent).toContain("api_token: omnia_sk_FRESH"));
+    expect(deleted).toBe(true);
+    expect(posted).toBe(true);
+  });
+
+  it("use-saved-token shows a placeholder without revoking or minting", async () => {
+    let mutated = false;
+    mockFetch({
+      "/api/settings/api-keys": (init) => {
+        if (init?.method === "DELETE" || init?.method === "POST") mutated = true;
+        return { json: async () => ({ config: { allowCreate: true }, keys: [existingKey] }) };
+      },
+      "/deploy-profile": () => ({ json: async () => discovery }),
+    });
+    render(<ExportDeployProfile workspace="team-acme" />);
+    await userEvent.click(await screen.findByRole("button", { name: /export deploy profile/i }));
+    await userEvent.click(await screen.findByRole("button", { name: /use saved token/i }));
+
+    const output = await screen.findByTestId("deploy-profile-output");
+    await waitFor(() =>
+      expect(output.textContent).toContain("paste your saved deploy-team-acme token")
+    );
+    expect(mutated).toBe(false);
+  });
+
+  it("surfaces an error when regenerate fails to revoke the old key", async () => {
+    mockFetch({
+      "/api/settings/api-keys": (init) => {
+        if (init?.method === "DELETE") {
+          return { ok: false, json: async () => ({ error: "revoke failed" }) };
+        }
+        return { json: async () => ({ config: { allowCreate: true }, keys: [existingKey] }) };
+      },
+      "/deploy-profile": () => ({ json: async () => discovery }),
+    });
+    render(<ExportDeployProfile workspace="team-acme" />);
+    await userEvent.click(await screen.findByRole("button", { name: /export deploy profile/i }));
+    await userEvent.click(await screen.findByRole("button", { name: /regenerate token/i }));
+    await waitFor(() => expect(screen.getByText(/revoke failed/i)).toBeInTheDocument());
+  });
+
+  it("treats an unreadable key listing as a read-only store", async () => {
+    mockFetch({
+      "/api/settings/api-keys": () => ({ ok: false, status: 500 }),
+      "/deploy-profile": () => ({ json: async () => discovery }),
+    });
+    render(<ExportDeployProfile workspace="team-acme" />);
+    await userEvent.click(await screen.findByRole("button", { name: /export deploy profile/i }));
+    await waitFor(() => expect(screen.getByText(/minting is unavailable/i)).toBeInTheDocument());
+  });
 });
