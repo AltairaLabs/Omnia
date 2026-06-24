@@ -18,6 +18,7 @@ package agent
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -242,6 +243,21 @@ func TestLoadConfigFromCRD_DrainTimeout(t *testing.T) {
 	}
 	if cfg.DrainTimeout != 2*time.Minute {
 		t.Fatalf("DrainTimeout = %v, want 2m", cfg.DrainTimeout)
+	}
+}
+
+func TestLoadConfigFromCRD_DrainTimeout_Invalid(t *testing.T) {
+	d := "bad-duration"
+	ar := &v1alpha1.AgentRuntime{Spec: v1alpha1.AgentRuntimeSpec{
+		Facade: v1alpha1.FacadeConfig{Type: v1alpha1.FacadeTypeWebSocket, DrainTimeout: &d},
+	}}
+	cfg := &Config{}
+	err := loadFacadeConfigFromCRD(cfg, ar)
+	if err == nil {
+		t.Fatal("expected error for invalid drain timeout")
+	}
+	if got := err.Error(); !strings.Contains(got, "invalid drain timeout") {
+		t.Errorf("error = %q, want it to contain %q", got, "invalid drain timeout")
 	}
 }
 
