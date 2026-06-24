@@ -35,6 +35,71 @@
   - Eval results (inline eval scores with explanation, source="runtime-inline"; worker-written rows use source="worker")
   - Session stats (token counts, message counts)
 
+## Session configuration
+
+`spec.session` on the AgentRuntime CRD controls how the runtime persists
+conversation state across turns.
+
+| Field | Value | Effect |
+|-------|-------|--------|
+| `spec.session.type` | `memory` (default) | In-process store; state is lost when the pod restarts |
+| `spec.session.type` | `redis` | Durable store; conversation state survives pod restarts and cross-pod resume |
+| `spec.session.type` | `postgres` | Reserved/CEL-validated, but **not yet wired end-to-end**: the operator currently projects `OMNIA_SESSION_URL` for `redis` only and the runtime has no PostgreSQL state store, so `postgres` falls back to the in-process memory store until a later step adds it. |
+| `spec.session.storeRef` | `name: <secret-name>` | Required when `type` is `redis` or `postgres`. References a Kubernetes Secret in the same namespace. The secret **must** contain a `url` key holding the connection URL (e.g. `redis://…` for Redis). |
+| `spec.session.ttl` | duration string (default `"24h"`) | How long idle conversation state is retained in the store. |
+
+CEL validation on the CRD enforces that `storeRef` is present whenever
+`type` is `redis` or `postgres`:
+
+```
+spec.session.storeRef is required when session.type is 'redis' or 'postgres'
+```
+
+### How the operator projects session config
+
+When `type: redis` and `storeRef` is set, the operator injects
+`OMNIA_SESSION_URL` into the runtime container sourced from the secret's `url`
+key. The runtime reads this at startup to create a `statestore.RedisStore`
+(PromptKit SDK). When the env var is absent the runtime falls back to the
+in-process memory store.
+
+```yaml
+# Example AgentRuntime with durable Redis session store
+spec:
+  session:
+    type: redis
+    storeRef:
+      name: my-agent-redis   # Secret must have a 'url' key
+    ttl: "48h"
+```
+
+```yaml
+# Corresponding Secret
+apiVersion: v1
+kind: Secret
+metadata:
+  name: my-agent-redis
+  namespace: <agent-namespace>
+stringData:
+  url: "redis://:password@redis.example.com:6379/0"
+```
+
+### Text resume via sdk.Resume
+
+When a Redis store is configured, each conversation turn is persisted before
+the response streams back. On the next connection (new pod, pod restart,
+reconnect after eviction) the facade sends the existing `sessionID` to the
+runtime's gRPC `Converse` stream. The runtime calls `sdk.Resume(sessionID, …)`
+which replays the stored conversation history from Redis and continues the
+exchange — no client-visible interruption for text sessions.
+
+### Duplex (voice) durable resume
+
+Durable resume for duplex audio sessions (those opened via `DuplexStart`) is a
+**later T3 step** gated on PromptKit issue #1459. This foundation ships durable
+state for text conversations only. Voice sessions continue to use the
+in-process store regardless of `spec.session.type`.
+
 ## Does NOT Own
 - WebSocket protocol (Facade's job)
 - Client consent UI (Dashboard's job)
@@ -67,8 +132,14 @@
 - LLM provider endpoints (configured via environment or CRD)
 - Session API HTTP endpoint (optional, for event recording)
 - Memory API HTTP endpoint (optional, for cross-session memory retrieval)
-- Redis (optional, for conversation state)
+- Redis (optional, for durable conversation state; required when `spec.session.type: redis`)
 - K8s API (optional, reads ToolRegistry CRD for metadata)
+
+### Environment variables (injected by operator)
+
+| Variable | Source | Purpose |
+|----------|--------|---------|
+| `OMNIA_SESSION_URL` | `spec.session.storeRef` secret → `url` key | Redis connection URL for the durable state store. Absent when `spec.session.type: memory` (default). |
 
 ## Memory retrieval
 
