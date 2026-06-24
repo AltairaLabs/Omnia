@@ -17,6 +17,8 @@ limitations under the License.
 package runtime
 
 import (
+	"os"
+
 	pkgconfig "github.com/AltairaLabs/PromptKit/pkg/config"
 	"github.com/AltairaLabs/PromptKit/sdk"
 	"github.com/go-logr/logr"
@@ -61,30 +63,51 @@ func credentialEnvVar(p *v1alpha1.Provider) string {
 }
 
 // extraProviderOptions maps each resolved non-default provider to its role's
-// SDK option. Unhandled roles are skipped with a debug log.
+// SDK option. A provider whose credential isn't present in the runtime is
+// skipped with a loud warning rather than wired: wiring it would make sdk.Open
+// fail and take the whole pack down, even though the agent may not use that
+// role (e.g. an embedding provider the export bundled in but no OPENAI_API_KEY
+// was projected). Skipping keeps the LLM serving and surfaces the misconfig
+// instead of making it fatal. Unhandled roles are skipped with a debug log.
 func (s *Server) extraProviderOptions(log logr.Logger) []sdk.Option {
 	opts := make([]sdk.Option, 0, len(s.extraProviders))
 	for _, rp := range s.extraProviders {
 		if rp.Provider.Spec.Platform != nil {
 			log.V(0).Info("platform-hosted non-llm provider not yet supported via spec.providers[]; skipping credential",
 				"name", rp.Provider.Name, "role", rp.Role)
+		} else if env := credentialEnvVar(rp.Provider); env != "" && os.Getenv(env) == "" {
+			log.V(0).Info("skipping extra provider: credential not set in runtime",
+				"name", rp.Provider.Name, "role", rp.Role, "envVar", env,
+				"impact", "this role is unavailable; the agent still serves its default LLM")
+			continue
 		}
-		spec := providerToSDKSpec(rp.Provider)
-		switch rp.Role {
-		case v1alpha1.ProviderRoleInference:
-			opts = append(opts, sdk.WithInferenceProvider(spec))
-		case v1alpha1.ProviderRoleEmbedding:
-			opts = append(opts, sdk.WithEmbeddingProvider(spec))
-		case v1alpha1.ProviderRoleTTS:
-			opts = append(opts, sdk.WithTTSProvider(spec))
-		case v1alpha1.ProviderRoleSTT:
-			opts = append(opts, sdk.WithSTTProvider(spec))
-		case v1alpha1.ProviderRoleImage:
-			opts = append(opts, sdk.WithImageProvider(spec))
-		default:
+		opt, ok := extraProviderOption(rp.Role, providerToSDKSpec(rp.Provider))
+		if !ok {
 			log.V(1).Info("skipping provider with unhandled role",
 				"name", rp.Provider.Name, "role", rp.Role)
+			continue
 		}
+		opts = append(opts, opt)
 	}
 	return opts
+}
+
+// extraProviderOption returns the SDK option for a non-default provider role,
+// and false when the role has no mapping. Pure; exported-for-test via the
+// package test.
+func extraProviderOption(role v1alpha1.ProviderRole, spec sdk.ProviderSpec) (sdk.Option, bool) {
+	switch role {
+	case v1alpha1.ProviderRoleInference:
+		return sdk.WithInferenceProvider(spec), true
+	case v1alpha1.ProviderRoleEmbedding:
+		return sdk.WithEmbeddingProvider(spec), true
+	case v1alpha1.ProviderRoleTTS:
+		return sdk.WithTTSProvider(spec), true
+	case v1alpha1.ProviderRoleSTT:
+		return sdk.WithSTTProvider(spec), true
+	case v1alpha1.ProviderRoleImage:
+		return sdk.WithImageProvider(spec), true
+	default:
+		return nil, false
+	}
 }

@@ -2778,6 +2778,61 @@ var _ = Describe("AgentRuntime Controller", func() {
 			Expect(condition.Reason).To(Equal("ProviderFound"))
 		})
 
+		// Regression: an Unavailable (unreachable) provider used to slip through
+		// because the gate only rejected Error, so the AgentRuntime reported
+		// Ready while referencing a provider it can't use.
+		It("should reject a provider in Unavailable phase", func() {
+			By("creating a Provider in Unavailable phase")
+			providerUnavail := &omniav1alpha1.Provider{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "provider-unavailable",
+					Namespace: "default",
+				},
+				Spec: omniav1alpha1.ProviderSpec{
+					Type:    omniav1alpha1.ProviderTypeOllama,
+					Model:   "llama3",
+					BaseURL: "http://ollama:11434",
+				},
+			}
+			Expect(k8sClient.Create(ctx, providerUnavail)).To(Succeed())
+			providerUnavail.Status.Phase = omniav1alpha1.ProviderPhaseUnavailable
+			Expect(k8sClient.Status().Update(ctx, providerUnavail)).To(Succeed())
+			defer func() { _ = k8sClient.Delete(ctx, providerUnavail) }()
+
+			ref := omniav1alpha1.ProviderRef{Name: "provider-unavailable"}
+			agentRuntime := &omniav1alpha1.AgentRuntime{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "agent-unavailable-provider",
+					Namespace: "default",
+				},
+				Spec: omniav1alpha1.AgentRuntimeSpec{
+					PromptPackRef: omniav1alpha1.PromptPackRef{Name: "test-pack"},
+					Facade:        omniav1alpha1.FacadeConfig{Type: omniav1alpha1.FacadeTypeWebSocket},
+					Providers: []omniav1alpha1.NamedProviderRef{
+						{Name: "default", ProviderRef: ref},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, agentRuntime)).To(Succeed())
+			defer func() { _ = k8sClient.Delete(ctx, agentRuntime) }()
+
+			By("calling fetchAndValidateProvider")
+			log := logf.FromContext(ctx)
+			fetchedProvider, result, err := reconciler.fetchAndValidateProvider(ctx, log, agentRuntime, agentRuntime.Spec.Providers[0])
+
+			By("verifying it requeues and does not return the provider")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result.RequeueAfter).To(Equal(10 * time.Second))
+			Expect(fetchedProvider).To(BeNil())
+
+			By("verifying ProviderReady is False (ProviderNotReady)")
+			condition := meta.FindStatusCondition(agentRuntime.Status.Conditions, ConditionTypeProviderReady)
+			Expect(condition).NotTo(BeNil())
+			Expect(condition.Status).To(Equal(metav1.ConditionFalse))
+			Expect(condition.Reason).To(Equal("ProviderNotReady"))
+			Expect(condition.Message).To(ContainSubstring("Unavailable"))
+		})
+
 		It("should reject a provider missing required capabilities", func() {
 			By("creating a Provider with limited capabilities")
 			provider := &omniav1alpha1.Provider{
