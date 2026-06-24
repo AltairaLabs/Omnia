@@ -13,7 +13,7 @@ vi.mock("@/lib/auth/api-keys", () => ({
   getApiKeyStore: () => ({ create, listByUser }),
 }));
 
-import { POST } from "./route";
+import { GET, POST } from "./route";
 import { getUser } from "@/lib/auth";
 
 beforeEach(() => {
@@ -42,5 +42,28 @@ describe("POST /api/settings/api-keys owner snapshot", () => {
   it("omits workspaces when not provided (unrestricted)", async () => {
     await POST(postReq({ name: "global" }) as never);
     expect(create).toHaveBeenCalledWith("u1", expect.objectContaining({ workspaces: undefined }));
+  });
+
+  it("falls back to username for ownerEmail when the user has no email", async () => {
+    (getUser as ReturnType<typeof vi.fn>).mockResolvedValue({
+      id: "u2", username: "bob", groups: [], role: "viewer", provider: "oauth",
+    });
+    await POST(postReq({ name: "k" }) as never);
+    expect(create).toHaveBeenCalledWith("u2", expect.objectContaining({
+      ownerEmail: "bob", ownerGroups: [],
+    }));
+  });
+});
+
+describe("GET /api/settings/api-keys", () => {
+  it("returns the user's keys and the store config", async () => {
+    const res = await GET();
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.keys).toEqual([]);
+    expect(body.config).toMatchObject({
+      storeType: "postgres", allowCreate: true, maxKeysPerUser: 10, defaultExpirationDays: 90,
+    });
+    expect(listByUser).toHaveBeenCalledWith("u1");
   });
 });
