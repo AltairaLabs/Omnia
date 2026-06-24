@@ -39,6 +39,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
 import {
   Select,
@@ -49,6 +50,7 @@ import {
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { usePermissions, Permission } from "@/hooks";
+import { useWorkspaces } from "@/hooks/use-workspaces";
 import { formatDistanceToNow } from "date-fns";
 
 interface ApiKeyInfo {
@@ -87,6 +89,7 @@ async function fetchApiKeys(): Promise<ApiKeysResponse> {
 async function createApiKey(data: {
   name: string;
   expiresInDays: number | null;
+  workspaces?: string[];
 }): Promise<{ key: NewApiKey }> {
   const response = await fetch("/api/settings/api-keys", {
     method: "POST",
@@ -249,6 +252,8 @@ export function ApiKeysSection() {
 
   const [keyName, setKeyName] = useState("");
   const [expiration, setExpiration] = useState("90");
+  const [selectedWorkspaces, setSelectedWorkspaces] = useState<string[]>([]);
+  const { data: workspaceOptions } = useWorkspaces();
 
   const canManageKeys = can(Permission.API_KEYS_MANAGE_OWN);
 
@@ -275,6 +280,7 @@ export function ApiKeysSection() {
       setShowNewKeyDialog(true);
       setKeyName("");
       setExpiration("90");
+      setSelectedWorkspaces([]);
     },
   });
 
@@ -296,8 +302,18 @@ export function ApiKeysSection() {
 
   const handleCreateKey = useCallback(() => {
     const expiresInDays = expiration === "never" ? null : Number.parseInt(expiration, 10);
-    createMutation.mutate({ name: keyName, expiresInDays });
-  }, [keyName, expiration, createMutation]);
+    createMutation.mutate({
+      name: keyName,
+      expiresInDays,
+      workspaces: selectedWorkspaces.length > 0 ? selectedWorkspaces : undefined,
+    });
+  }, [keyName, expiration, selectedWorkspaces, createMutation]);
+
+  const toggleWorkspace = useCallback((name: string) => {
+    setSelectedWorkspaces((prev) =>
+      prev.includes(name) ? prev.filter((w) => w !== name) : [...prev, name]
+    );
+  }, []);
 
   if (!can(Permission.API_KEYS_VIEW_OWN)) {
     return null;
@@ -399,6 +415,30 @@ export function ApiKeysSection() {
                 </SelectContent>
               </Select>
             </div>
+
+            {workspaceOptions && workspaceOptions.length > 0 && (
+              <div className="space-y-2">
+                <Label>Restrict to workspaces (optional)</Label>
+                <div className="max-h-40 overflow-y-auto space-y-2 rounded-md border p-3">
+                  {workspaceOptions.map((ws) => (
+                    <div key={ws.name} className="flex items-center space-x-2">
+                      <Checkbox
+                        id={`ws-${ws.name}`}
+                        checked={selectedWorkspaces.includes(ws.name)}
+                        onCheckedChange={() => toggleWorkspace(ws.name)}
+                      />
+                      <Label htmlFor={`ws-${ws.name}`} className="text-sm font-normal cursor-pointer">
+                        {ws.displayName}
+                      </Label>
+                    </div>
+                  ))}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Leave all unchecked to allow every workspace you can access. The key
+                  always acts with your own role in each workspace.
+                </p>
+              </div>
+            )}
           </div>
 
           <DialogFooter>
