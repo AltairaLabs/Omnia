@@ -17,6 +17,17 @@ vi.mock("@/hooks", async (importOriginal) => {
   };
 });
 
+vi.mock("@/hooks/use-workspaces", () => ({
+  useWorkspaces: vi.fn(() => ({
+    data: [
+      { name: "demo", displayName: "Demo", environment: "development", namespace: "demo", role: "editor", permissions: {} },
+      { name: "prod", displayName: "Production", environment: "production", namespace: "prod", role: "viewer", permissions: {} },
+    ],
+    isLoading: false,
+    error: null,
+  })),
+}));
+
 const mockUsePermissions = vi.mocked(usePermissions);
 
 function createWrapper() {
@@ -293,6 +304,71 @@ describe("ApiKeysSection", () => {
 
     await waitFor(() => {
       expect(screen.getByText("2 of 5 keys used")).toBeInTheDocument();
+    });
+  });
+});
+
+describe("ApiKeysSection workspace scope (#1561 P2)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockUsePermissions.mockReturnValue(
+      createMockPermissions(() => true, [Permission.API_KEYS_VIEW_OWN, Permission.API_KEYS_MANAGE_OWN])
+    );
+  });
+
+  function fetchMock() {
+    return vi.fn((url: string, init?: RequestInit) => {
+      if (init?.method === "POST") {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ key: { id: "k1", name: "ci", key: "omnia_sk_x", keyPrefix: "omnia_sk_x...", role: "editor", expiresAt: null, createdAt: new Date().toISOString(), lastUsedAt: null, isExpired: false } }) });
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve(mockApiKeysResponse) });
+    });
+  }
+
+  it("renders a workspace checkbox per accessible workspace in the create dialog", async () => {
+    global.fetch = fetchMock() as never;
+    render(<ApiKeysSection />, { wrapper: createWrapper() });
+    await waitFor(() => expect(screen.getByRole("button", { name: /Create Key/i })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: /Create Key/i }));
+    expect(screen.getByLabelText("Demo")).toBeInTheDocument();
+    expect(screen.getByLabelText("Production")).toBeInTheDocument();
+  });
+
+  it("POSTs selected workspace names; omits workspaces when none selected", async () => {
+    const fetchFn = fetchMock();
+    global.fetch = fetchFn as never;
+    render(<ApiKeysSection />, { wrapper: createWrapper() });
+    await waitFor(() => expect(screen.getByRole("button", { name: /Create Key/i })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: /Create Key/i }));
+
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "ci" } });
+    fireEvent.click(screen.getByLabelText("Demo")); // select one workspace
+    // Click the dialog submit button (second "Create Key" button — card button + dialog submit)
+    const createKeyButtons = screen.getAllByRole("button", { name: /Create Key/i });
+    fireEvent.click(createKeyButtons[createKeyButtons.length - 1]);
+
+    await waitFor(() => {
+      const postCall = fetchFn.mock.calls.find((c) => (c[1] as RequestInit)?.method === "POST");
+      expect(postCall).toBeTruthy();
+      const body = JSON.parse((postCall![1] as RequestInit).body as string);
+      expect(body.workspaces).toEqual(["demo"]);
+    });
+  });
+
+  it("omits workspaces from the POST body when none are selected", async () => {
+    const fetchFn = fetchMock();
+    global.fetch = fetchFn as never;
+    render(<ApiKeysSection />, { wrapper: createWrapper() });
+    await waitFor(() => expect(screen.getByRole("button", { name: /Create Key/i })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: /Create Key/i }));
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "global" } });
+    // Click the dialog submit button (last "Create Key" button)
+    const createKeyButtons = screen.getAllByRole("button", { name: /Create Key/i });
+    fireEvent.click(createKeyButtons[createKeyButtons.length - 1]);
+    await waitFor(() => {
+      const postCall = fetchFn.mock.calls.find((c) => (c[1] as RequestInit)?.method === "POST");
+      const body = JSON.parse((postCall![1] as RequestInit).body as string);
+      expect(body.workspaces).toBeUndefined();
     });
   });
 });
