@@ -1590,3 +1590,24 @@ func TestDeployment_GracePeriodDefaultWhenUnset(t *testing.T) {
 		t.Fatalf("TerminationGracePeriodSeconds = %d, want 45", got)
 	}
 }
+
+func TestDeployment_GracePeriodDefaultWhenSubSecond(t *testing.T) {
+	r := &AgentRuntimeReconciler{}
+	ar := &omniav1alpha1.AgentRuntime{}
+	ar.Name = "drain-subsecond-test"
+	ar.Namespace = "ns"
+	ar.Spec.Facade.Type = omniav1alpha1.FacadeTypeWebSocket
+	ar.Spec.PromptPackRef.Name = "p"
+	// Sub-second drain timeout: positive but truncates to 0 seconds — must fall to default.
+	d := "500ms"
+	ar.Spec.Facade.DrainTimeout = &d
+
+	dep := &appsv1.Deployment{}
+	r.buildDeploymentSpec(context.Background(), dep, ar, newTestPromptPack(), nil, "", nil)
+
+	require.NotNil(t, dep.Spec.Template.Spec.TerminationGracePeriodSeconds)
+	got := *dep.Spec.Template.Spec.TerminationGracePeriodSeconds
+	if got != 45 {
+		t.Fatalf("TerminationGracePeriodSeconds = %d, want 45 (sub-second drainTimeout must fall to default)", got)
+	}
+}

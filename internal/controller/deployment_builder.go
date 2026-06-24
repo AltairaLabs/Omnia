@@ -45,7 +45,7 @@ const drainGraceBufferSeconds = 15
 // Otherwise the default of 45 seconds is returned.
 func gracePeriodFor(ar *omniav1alpha1.AgentRuntime) int64 {
 	if ar.Spec.Facade.DrainTimeout != nil {
-		if d, err := time.ParseDuration(*ar.Spec.Facade.DrainTimeout); err == nil && d > 0 {
+		if d, err := time.ParseDuration(*ar.Spec.Facade.DrainTimeout); err == nil && d >= time.Second {
 			return int64(d.Seconds()) + drainGraceBufferSeconds
 		}
 	}
