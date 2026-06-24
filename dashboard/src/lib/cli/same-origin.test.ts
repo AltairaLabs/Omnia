@@ -19,4 +19,10 @@ describe("isSameOrigin", () => {
   it("rejects a cross-origin host", () => {
     expect(isSameOrigin(reqWith({ origin: "https://evil.example.com", "x-forwarded-host": "omnia.example.com" }))).toBe(false);
   });
+  it("returns false for a malformed Origin header that cannot be parsed as a URL", () => {
+    expect(isSameOrigin(reqWith({ origin: "::::not a url", host: "localhost:3000" }))).toBe(false);
+  });
+  it("returns false when Origin is valid but no host headers are present", () => {
+    expect(isSameOrigin(reqWith({ origin: "https://example.com" }))).toBe(false);
+  });
 });
