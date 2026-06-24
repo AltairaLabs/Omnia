@@ -873,7 +873,7 @@ dashboard:
   apiKeys:
     # -- Enable API key authentication
     enabled: true
-    # -- Store backend: memory (ephemeral, dev only), file (read-only K8s Secret, GitOps), or postgres (durable)
+    # -- Store backend: memory (ephemeral, dev only), file (read-only K8s Secret, GitOps), or postgres (durable). Left at "memory" while a postgresUrl/existingPostgresSecret is set, it is auto-promoted to postgres so a wired durable backend is not silently ignored (#1582).
     store: memory
     # -- File store: path the keys Secret is mounted at (when store=file)
     filePath: /etc/omnia/api-keys/keys.json

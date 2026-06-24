@@ -72,3 +72,45 @@ tests:
     asserts:
       - failedTemplate:
           errorPattern: "store=file requires"
+
+  - it: auto-promotes memory->postgres in the configmap when a postgres URL is wired (#1582)
+    template: templates/dashboard/configmap.yaml
+    set:
+      dashboard.enabled: true
+      # store left at the "memory" default
+      dashboard.apiKeys.postgresUrl: postgres://x
+    asserts:
+      - equal:
+          path: data.OMNIA_AUTH_API_KEYS_STORE
+          value: "postgres"
+
+  - it: auto-promotes memory->postgres when an existing postgres secret is wired (#1582)
+    template: templates/dashboard/configmap.yaml
+    set:
+      dashboard.enabled: true
+      dashboard.apiKeys.existingPostgresSecret: omnia-apikeys-postgres
+    asserts:
+      - equal:
+          path: data.OMNIA_AUTH_API_KEYS_STORE
+          value: "postgres"
+
+  - it: wires the postgres URL env under auto-promotion (store left at memory) (#1582)
+    template: templates/dashboard/deployment.yaml
+    set:
+      dashboard.enabled: true
+      dashboard.apiKeys.postgresUrl: postgres://x
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: OMNIA_AUTH_API_KEYS_POSTGRES_URL
+            value: postgres://x
+
+  - it: leaves the store at memory when no postgres backend is wired (#1582)
+    template: templates/dashboard/configmap.yaml
+    set:
+      dashboard.enabled: true
+    asserts:
+      - equal:
+          path: data.OMNIA_AUTH_API_KEYS_STORE
+          value: "memory"
