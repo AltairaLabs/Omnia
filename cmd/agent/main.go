@@ -28,6 +28,8 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/propagation"
 	k8sruntime "k8s.io/apimachinery/pkg/runtime"
+	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -189,13 +191,25 @@ func buildK8sClient() client.Client {
 	if err != nil {
 		return nil // Not in cluster
 	}
-	scheme := k8sruntime.NewScheme()
-	_ = omniav1alpha1.AddToScheme(scheme)
-	c, err := client.New(cfg, client.Options{Scheme: scheme})
+	c, err := client.New(cfg, client.Options{Scheme: newFacadeScheme()})
 	if err != nil {
 		return nil
 	}
 	return c
+}
+
+// newFacadeScheme builds the scheme for the facade's k8s client. It MUST
+// register the client-go built-in types (core/v1 in particular) alongside the
+// omnia CRD types: the auth chain Lists *corev1.SecretList (api-key store) and
+// Gets *corev1.Secret (sharedToken / oidc JWKS). Without core/v1 those calls
+// fail with "no kind is registered for the type v1.SecretList" and the facade
+// crash-loops whenever spec.externalAuth is set (#1571). Mirrors the operator's
+// scheme wiring in cmd/main.go.
+func newFacadeScheme() *k8sruntime.Scheme {
+	scheme := k8sruntime.NewScheme()
+	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+	utilruntime.Must(omniav1alpha1.AddToScheme(scheme))
+	return scheme
 }
 
 func resolveServiceGroup() string {
