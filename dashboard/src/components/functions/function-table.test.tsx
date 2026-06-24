@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { FunctionTable } from "./function-table";
 import { useAgentCost } from "@/hooks/agents";
+import { useWorkspace } from "@/contexts/workspace-context";
 import type { AgentRuntime } from "@/types";
 
 vi.mock("@/hooks/agents", () => ({ useAgentCost: vi.fn(() => ({ data: null })) }));
@@ -51,6 +52,13 @@ describe("FunctionTable", () => {
     render(<FunctionTable functions={[mkFn("summarizer", "ns-a")]} />);
     // currentWorkspace.name = "demo" (mocked); must be the cost key, not "ns-a".
     expect(vi.mocked(useAgentCost)).toHaveBeenCalledWith("demo", "summarizer");
+  });
+
+  it("falls back to an empty cost key when no workspace is selected (#1572)", () => {
+    vi.mocked(useWorkspace).mockReturnValueOnce({ currentWorkspace: null } as never);
+    render(<FunctionTable functions={[mkFn("summarizer", "ns-a")]} />);
+    // currentWorkspace null → `currentWorkspace?.name ?? ""` → "" (query disabled).
+    expect(vi.mocked(useAgentCost)).toHaveBeenCalledWith("", "summarizer");
   });
 
   it("renders one row per function", () => {
