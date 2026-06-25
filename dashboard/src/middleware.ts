@@ -38,6 +38,7 @@ const PUBLIC_PATH_PREFIXES: readonly string[] = [
   "/api/auth/callback",
   "/api/auth/logout",
   "/api/auth/refresh",
+  "/api/auth/session", // session liveness probe — intentionally unauthenticated so expiry is detectable
   "/api/auth/builtin/", // signup / forgot-password / reset-password / verify-email
   "/api/health",
   "/api/config", // needed by the login page to pick the provider button

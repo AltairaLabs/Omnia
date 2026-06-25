@@ -55,6 +55,8 @@ describe("config", () => {
         tempoEnabled: false,
         enterpriseEnabled: false,
         hideEnterprise: false,
+        authMode: "anonymous",
+        sessionPollIntervalSeconds: 60,
       });
     });
 
@@ -79,6 +81,8 @@ describe("config", () => {
         tempoEnabled: false,
         enterpriseEnabled: false,
         hideEnterprise: false,
+        authMode: "anonymous",
+        sessionPollIntervalSeconds: 60,
       });
     });
 
