@@ -497,8 +497,13 @@ type ProviderList struct {
 }
 
 // providerSecretKeyAPIKey is the common secret key name for API keys.
-// Matches the controller's secretKeyAPIKey constant (kept in sync).
-const providerSecretKeyAPIKey = "api-key"
+// Credential secret key names. Matches the controller's constants (kept in sync).
+const (
+	providerSecretKeyAPIKey  = "api-key"
+	secretKeyAnthropicAPIKey = "ANTHROPIC_API_KEY"
+	secretKeyOpenAIAPIKey    = "OPENAI_API_KEY"
+	secretKeyGeminiAPIKey    = "GEMINI_API_KEY"
+)
 
 // ExpectedKeysForProvider returns the credential secret keys a Provider of the
 // given role/type accepts when credential.secretRef.key is omitted, in priority
@@ -510,15 +515,15 @@ func ExpectedKeysForProvider(role ProviderRole, t ProviderType) []string {
 	_ = role
 	switch t {
 	case ProviderTypeClaude:
-		return []string{"ANTHROPIC_API_KEY", "CLAUDE_API_KEY", providerSecretKeyAPIKey}
+		return []string{secretKeyAnthropicAPIKey, "CLAUDE_API_KEY", providerSecretKeyAPIKey}
 	case ProviderTypeOpenAI:
-		return []string{"OPENAI_API_KEY", "OPENAI_TOKEN", providerSecretKeyAPIKey}
+		return []string{secretKeyOpenAIAPIKey, "OPENAI_TOKEN", providerSecretKeyAPIKey}
 	case ProviderTypeGemini:
-		return []string{"GEMINI_API_KEY", "GOOGLE_API_KEY", providerSecretKeyAPIKey}
+		return []string{secretKeyGeminiAPIKey, "GOOGLE_API_KEY", providerSecretKeyAPIKey}
 	case ProviderTypeVoyageAI:
 		return []string{"VOYAGE_API_KEY", providerSecretKeyAPIKey}
 	default:
-		return []string{providerSecretKeyAPIKey, "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY"}
+		return []string{providerSecretKeyAPIKey, secretKeyAnthropicAPIKey, secretKeyOpenAIAPIKey, secretKeyGeminiAPIKey}
 	}
 }
 

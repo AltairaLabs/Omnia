@@ -18,11 +18,11 @@ func TestExpectedKeysForProvider(t *testing.T) {
 		typ  ProviderType
 		want []string
 	}{
-		{"claude", ProviderTypeClaude, []string{"ANTHROPIC_API_KEY", "CLAUDE_API_KEY", "api-key"}},
-		{"openai", ProviderTypeOpenAI, []string{"OPENAI_API_KEY", "OPENAI_TOKEN", "api-key"}},
-		{"gemini", ProviderTypeGemini, []string{"GEMINI_API_KEY", "GOOGLE_API_KEY", "api-key"}},
-		{"voyageai", ProviderTypeVoyageAI, []string{"VOYAGE_API_KEY", "api-key"}},
-		{"default/unknown", ProviderType("ollama"), []string{"api-key", "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY"}},
+		{"claude", ProviderTypeClaude, []string{secretKeyAnthropicAPIKey, "CLAUDE_API_KEY", providerSecretKeyAPIKey}},
+		{"openai", ProviderTypeOpenAI, []string{secretKeyOpenAIAPIKey, "OPENAI_TOKEN", providerSecretKeyAPIKey}},
+		{"gemini", ProviderTypeGemini, []string{secretKeyGeminiAPIKey, "GOOGLE_API_KEY", providerSecretKeyAPIKey}},
+		{"voyageai", ProviderTypeVoyageAI, []string{"VOYAGE_API_KEY", providerSecretKeyAPIKey}},
+		{"default/unknown", ProviderType("ollama"), []string{providerSecretKeyAPIKey, secretKeyAnthropicAPIKey, secretKeyOpenAIAPIKey, secretKeyGeminiAPIKey}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
