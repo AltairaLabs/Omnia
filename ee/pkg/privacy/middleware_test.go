@@ -522,7 +522,7 @@ func TestPrivacyMiddleware_RichDataDisabled_AllowsUserMessage(t *testing.T) {
 	assert.True(t, called, "user messages must pass through even when RichData=false")
 }
 
-func TestPrivacyMiddleware_RichDataDisabled_BlocksToolCallEndpoint(t *testing.T) {
+func TestPrivacyMiddleware_RuntimeDataDisabled_AllowsToolCallEndpoint(t *testing.T) {
 	mw := newRichDataDisabledMiddleware()
 	called := false
 	next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) { called = true })
@@ -533,8 +533,10 @@ func TestPrivacyMiddleware_RichDataDisabled_BlocksToolCallEndpoint(t *testing.T)
 
 	mw.Wrap(next).ServeHTTP(rec, req)
 
-	assert.Equal(t, http.StatusNoContent, rec.Code)
-	assert.False(t, called)
+	// Tool calls are structured records, not message content — recorded
+	// regardless of runtimeData (only /messages is content-gated).
+	assert.True(t, called, "tool calls must be recorded even when runtimeData=false")
+	assert.NotEqual(t, http.StatusNoContent, rec.Code)
 }
 
 func TestPrivacyMiddleware_RichDataDisabled_AllowsStatusUpdate(t *testing.T) {

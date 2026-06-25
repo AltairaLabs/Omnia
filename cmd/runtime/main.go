@@ -52,6 +52,7 @@ import (
 	pkruntime "github.com/altairalabs/omnia/internal/runtime"
 	"github.com/altairalabs/omnia/internal/runtime/tools"
 	"github.com/altairalabs/omnia/internal/schema"
+	"github.com/altairalabs/omnia/internal/session"
 	"github.com/altairalabs/omnia/internal/session/httpclient"
 	"github.com/altairalabs/omnia/internal/tracing"
 	"github.com/altairalabs/omnia/pkg/k8s"
@@ -257,7 +258,7 @@ func main() {
 	}
 	// Wire session recording via session-api when URL is configured
 	if cfg.SessionAPIURL != "" {
-		sessionStore := httpclient.NewStore(cfg.SessionAPIURL, log)
+		sessionStore := httpclient.NewStore(cfg.SessionAPIURL, log, httpclient.WithSource(session.SourceRuntime))
 		serverOpts = append(serverOpts, pkruntime.WithSessionStore(sessionStore))
 		log.Info("session recording enabled", "sessionAPIURL", cfg.SessionAPIURL)
 	}

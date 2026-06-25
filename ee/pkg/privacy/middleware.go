@@ -22,18 +22,20 @@ import (
 
 	"github.com/altairalabs/omnia/ee/pkg/audit"
 	"github.com/altairalabs/omnia/ee/pkg/redaction"
+	"github.com/altairalabs/omnia/internal/session"
 	"github.com/altairalabs/omnia/internal/session/api"
 )
 
 // Drop reasons, used as the "reason" label on writesDropped and in the warning.
 const (
 	dropReasonRecordingDisabled = "recording-disabled"
-	dropReasonRichDataDisabled  = "rich-data-disabled"
+	dropReasonRuntimeData       = "runtime-data-disabled"
 	dropReasonUserOptedOut      = "user-opted-out"
 	dropReasonRedactionFailed   = "redaction-failed"
 
-	remediationRecording = "recording.enabled is false in the effective SessionPrivacyPolicy"
-	remediationRichData  = "recording.richData is false; set richData:true or attach a privacyPolicyRef that enables it"
+	remediationRecording   = "recording.enabled is false in the effective SessionPrivacyPolicy"
+	remediationRuntimeData = "recording.runtimeData is false; set runtimeData:true " +
+		"(or attach a privacyPolicyRef) to record assistant message content"
 )
 
 // writesDropped counts session-api write requests dropped by the privacy
@@ -57,20 +59,10 @@ const UserIDHeader = "X-Omnia-User-ID"
 // sessionIDPattern extracts the session ID from write endpoint paths.
 var sessionIDPattern = regexp.MustCompile(`/api/v1/sessions/([^/]+)`)
 
-var (
-	messageEndpointRe  = regexp.MustCompile(`/api/v1/sessions/[^/]+/messages$`)
-	toolCallEndpointRe = regexp.MustCompile(`/api/v1/sessions/[^/]+/tool-calls$`)
-	runtimeEventRe     = regexp.MustCompile(`/api/v1/sessions/[^/]+/events$`)
-	providerCallRe     = regexp.MustCompile(`/api/v1/sessions/[^/]+/provider-calls$`)
-)
-
-// isRichDataEndpoint returns true for paths that always carry rich content
-// (tool call payloads, runtime event data, provider call data).
-func isRichDataEndpoint(path string) bool {
-	return toolCallEndpointRe.MatchString(path) ||
-		runtimeEventRe.MatchString(path) ||
-		providerCallRe.MatchString(path)
-}
+// messageEndpointRe matches the only endpoint carrying conversation content.
+// Metering (provider calls), tool calls, runtime events and eval results are
+// recorded whenever recording is enabled — only message content is gated.
+var messageEndpointRe = regexp.MustCompile(`/api/v1/sessions/[^/]+/messages$`)
 
 // reportPolicyDrop increments the drop metric and emits the warning once per
 // namespace/agent + reason, so a silently-dropped write is visible without
@@ -85,8 +77,11 @@ func (m *PrivacyMiddleware) reportPolicyDrop(sessionID, ns, agent, path, reason,
 		"endpoint", path, "sessionID", sessionID, "remediation", remediation)
 }
 
-// checkRecordingPolicy enforces Recording.Enabled and RichData flags.
-// Returns true if the request was blocked (response already written).
+// checkRecordingPolicy enforces recording for the write. Returns true if the
+// request was blocked (response already written). Only message CONTENT is gated
+// by runtimeData; provider-call metering, tool calls, runtime events and eval
+// results are recorded whenever recording is enabled — they carry no
+// conversation content.
 func (m *PrivacyMiddleware) checkRecordingPolicy(
 	w http.ResponseWriter, r *http.Request, policy *EffectivePolicy, ns, agent, sessionID string,
 ) bool {
@@ -95,21 +90,32 @@ func (m *PrivacyMiddleware) checkRecordingPolicy(
 		w.WriteHeader(http.StatusNoContent)
 		return true
 	}
-	if policy.Recording.RichData {
+	// Non-message records are never gated by content flags.
+	if !messageEndpointRe.MatchString(r.URL.Path) {
 		return false
 	}
-	// RichData disabled: block rich content endpoints.
-	if isRichDataEndpoint(r.URL.Path) {
-		m.reportPolicyDrop(sessionID, ns, agent, r.URL.Path, dropReasonRichDataDisabled, remediationRichData)
-		w.WriteHeader(http.StatusNoContent)
-		return true
+	if m.messageContentAllowed(r, policy) {
+		return false
 	}
-	if messageEndpointRe.MatchString(r.URL.Path) && isRichMessage(r) {
-		m.reportPolicyDrop(sessionID, ns, agent, r.URL.Path, dropReasonRichDataDisabled, remediationRichData)
-		w.WriteHeader(http.StatusNoContent)
+	m.reportPolicyDrop(sessionID, ns, agent, r.URL.Path, dropReasonRuntimeData, remediationRuntimeData)
+	w.WriteHeader(http.StatusNoContent)
+	return true
+}
+
+// messageContentAllowed reports whether a /messages write may be recorded.
+// Facade-emitted content (user turns; the facade is Omnia-controlled) is always
+// allowed; runtime-emitted content (assistant turns) requires runtimeData. When
+// the writer doesn't set X-Omnia-Source (pre-source-header build), fall back to
+// the legacy role heuristic so rollout is seamless.
+func (m *PrivacyMiddleware) messageContentAllowed(r *http.Request, policy *EffectivePolicy) bool {
+	switch r.Header.Get(session.SourceHeader) {
+	case session.SourceFacade:
 		return true
+	case session.SourceRuntime:
+		return policy.Recording.RuntimeData
+	default:
+		return !isRichMessage(r) || policy.Recording.RuntimeData
 	}
-	return false
 }
 
 // isRichMessage peeks at the request body to determine if a message is

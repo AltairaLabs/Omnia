@@ -94,6 +94,15 @@ func WithHTTPClient(c *http.Client) StoreOption {
 	}
 }
 
+// WithSource sets the emitting component (session.SourceFacade or
+// session.SourceRuntime) sent as the X-Omnia-Source header on writes, so the
+// privacy middleware can gate runtime content separately from facade content.
+func WithSource(source string) StoreOption {
+	return func(s *Store) {
+		s.source = source
+	}
+}
+
 // WithBufferCapacity sets the write buffer capacity. Set to 0 to disable
 // buffering entirely (failed writes return errors immediately). Defaults to 1000.
 func WithBufferCapacity(n int) StoreOption {
@@ -130,6 +139,7 @@ type Store struct {
 	cb           *gobreaker.CircuitBreaker[*http.Response]
 	log          logr.Logger
 	tokenSource  *serviceauth.TokenSource // SA token for session-api auth; no-op when token file absent
+	source       string                   // emitting component (facade/runtime) sent as X-Omnia-Source
 
 	// Write buffer for transient failures.
 	buf           *writeBuffer
@@ -730,6 +740,9 @@ func (s *Store) doRequest(ctx context.Context, method, path string, body []byte)
 	req.Header.Set("Content-Type", "application/json")
 	if uid := UserIDFromContext(ctx); uid != "" {
 		req.Header.Set("X-Omnia-User-ID", uid)
+	}
+	if s.source != "" {
+		req.Header.Set(session.SourceHeader, s.source)
 	}
 	if err := s.tokenSource.Authorize(req); err != nil {
 		return nil, fmt.Errorf("authorize request: %w", err)

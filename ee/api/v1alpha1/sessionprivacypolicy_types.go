@@ -81,11 +81,23 @@ type RecordingConfig struct {
 	// enabled specifies whether session recording is active.
 	Enabled bool `json:"enabled"`
 
-	// facadeData enables recording of facade-layer session data (summaries, metadata).
+	// facadeData enables recording of facade-emitted session data (the facade is
+	// always Omnia-controlled).
 	// +optional
 	FacadeData bool `json:"facadeData,omitempty"`
 
-	// richData enables recording of full session content (messages, tool calls, artifacts).
+	// runtimeData enables recording of runtime-emitted message content (assistant
+	// messages). This gates conversation content ONLY — metering (tokens/cost via
+	// provider calls), tool calls, runtime events and eval results are always
+	// recorded when enabled. The runtime may be customer-supplied, so content
+	// recording is opt-in. Renamed from richData.
+	// +optional
+	RuntimeData bool `json:"runtimeData,omitempty"`
+
+	// richData is the deprecated alias for runtimeData; when set it is treated as
+	// runtimeData=true. Prefer runtimeData.
+	//
+	// Deprecated: use runtimeData.
 	// +optional
 	RichData bool `json:"richData,omitempty"`
 
