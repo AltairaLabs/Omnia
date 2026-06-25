@@ -34,7 +34,7 @@ import {
   type CreateApiKeyOptions,
   type NewApiKey,
 } from "./types";
-import { generateKey, generateId, keyPrefixOf, BCRYPT_ROUNDS } from "./key-utils";
+import { generateKey, generateId, keyPrefixOf, BCRYPT_ROUNDS, computeExpiresAt } from "./key-utils";
 
 /**
  * A single row as returned by Postgres.
@@ -153,9 +153,7 @@ export class PostgresApiKeyStore implements ApiKeyStore {
     const id = generateId();
 
     const now = new Date();
-    const expiresAt = options.expiresInDays
-      ? new Date(now.getTime() + options.expiresInDays * 24 * 60 * 60 * 1000)
-      : null;
+    const expiresAt = computeExpiresAt(now, options);
 
     const workspaces =
       options.workspaces && options.workspaces.length > 0

@@ -211,3 +211,13 @@ describe("PostgresApiKeyStore — owner snapshot round-trip", () => {
     expect(found?.ownerGroups).toEqual(["devs", "ops"]);
   });
 });
+
+describe("PostgresApiKeyStore — expiresInSeconds", () => {
+  it("honors expiresInSeconds over expiresInDays", async () => {
+    const before = Date.now();
+    const created = await store.create("u1", { name: "cli", expiresInSeconds: 3600, expiresInDays: 90 });
+    const ms = created.expiresAt!.getTime() - before;
+    expect(ms).toBeGreaterThan(3500 * 1000);
+    expect(ms).toBeLessThan(3700 * 1000);
+  });
+});

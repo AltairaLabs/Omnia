@@ -789,6 +789,9 @@ dashboard:
     ttl: 86400
     # -- Default role for anonymous users
     anonymousRole: viewer
+    # -- TTL (seconds) for CLI deploy-login tokens minted via /api/cli/token.
+    # Short-lived by design; the deploy CLI re-logs in when it expires.
+    cliTokenTtlSeconds: 3600
     # -- Role mapping from groups
     roleMapping:
       # -- Groups that get admin role

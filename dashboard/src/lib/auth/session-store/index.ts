@@ -35,6 +35,6 @@ export function __resetSessionStoreForTests(): void {
   cached = null;
 }
 
-export type { SessionStore, SessionRecord, PkceRecord } from "./types";
+export type { SessionStore, SessionRecord, PkceRecord, CliFlowRecord, CliCodeRecord } from "./types";
 export { MemorySessionStore } from "./memory-store";
 export { RedisSessionStore } from "./redis-store";

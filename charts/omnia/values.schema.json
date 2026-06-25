@@ -321,7 +321,8 @@
             "anonymousRole": {
               "type": "string",
               "enum": ["viewer", "editor", "owner", "admin"]
-            }
+            },
+            "cliTokenTtlSeconds": { "type": "integer", "minimum": 1 }
           }
         },
         "oauth": {
