@@ -145,8 +145,11 @@ export default function ExportDeployProfile({ workspace }: { workspace: string }
       const { allowCreate: canCreate, keys } = await fetchKeyListing();
       const p = await service.getDeployProfile(workspace);
       setProfile(p);
+      // Providers are all llm-role (discovery filters non-llm), so include them
+      // all by default. Skills are opt-in: a SkillSource the agent doesn't mount
+      // breaks pack-open, so start them unchecked rather than auto-bundling (#1596).
       setIncludedProviders(new Set(p.providers.map((x) => x.name)));
-      setIncludedSkills(new Set(p.skills.map((x) => x.name)));
+      setIncludedSkills(new Set());
       setDefaultProvider(firstLlm(p));
       setAllowCreate(canCreate);
       setExistingKey(keys.find((k) => k.name === deployKeyName(workspace)) ?? null);

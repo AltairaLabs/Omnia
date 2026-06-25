@@ -20,13 +20,23 @@ describe("assembleDeployConfig", () => {
     expect(parsed.config.api_endpoint).toBe("https://omnia.example.com");
     expect(parsed.config.workspace).toBe("team-acme");
     expect(parsed.config.api_token).toBe("omnia_sk_TEST");
+    // Only the llm-role provider is emitted; the embedding provider is dropped
+    // (non-llm providers aren't deployable into spec.providers — #1596).
     expect(parsed.config.providers).toEqual([
       { name: "default", ref: "default", role: "llm" },
-      { name: "embedder", ref: "embedder", role: "embedding" },
     ]);
     // The adapter consumes skills as SkillBinding objects ({source}), not bare
     // names — must match internal/omnia/config.go's schema (#1519).
     expect(parsed.config.skills).toEqual([{ source: "docs-search" }]);
+  });
+
+  it("drops non-llm-role providers (#1596 regression)", () => {
+    const { json } = assembleDeployConfig(profile, "t");
+    const roles = JSON.parse(json).config.providers.map(
+      (p: { role: string }) => p.role
+    );
+    expect(roles).toEqual(["llm"]);
+    expect(roles).not.toContain("embedding");
   });
 
   it("produces valid YAML that round-trips to the same object", () => {
@@ -67,8 +77,7 @@ describe("assembleDeployConfig", () => {
     expect(parsed.config.providers).toEqual([
       { name: "rag-hero-baseline", ref: "rag-hero-baseline", role: "llm" },
       { name: "default", ref: "rag-hero-candidate", role: "llm" },
-      { name: "rag-hero-embeddings", ref: "rag-hero-embeddings", role: "embedding" },
-    ]);
+    ]); // rag-hero-embeddings (embedding role) dropped (#1596)
   });
 
   it("falls back to the first LLM when no default is chosen", () => {

@@ -53,14 +53,19 @@ export function assembleDeployConfig(
       api_endpoint: profile.api_endpoint,
       workspace: profile.workspace,
       api_token: apiToken,
+      // Only llm-role providers are deployable into spec.providers; drop any
+      // embedding/tts/stt/image provider that reached here so it can never break
+      // pack-open (#1596 — defence in depth; discovery already filters these).
       // Mark the chosen LLM as the "default" binding (the runtime's primary);
       // every other provider keeps its CRD name. `ref` is always the real
       // Provider CRD name. (#1519)
-      providers: profile.providers.map((p) => ({
-        name: p.name === primary ? DEFAULT_BINDING : p.name,
-        ref: p.name,
-        role: p.role,
-      })),
+      providers: profile.providers
+        .filter((p) => p.role === ROLE_LLM)
+        .map((p) => ({
+          name: p.name === primary ? DEFAULT_BINDING : p.name,
+          ref: p.name,
+          role: p.role,
+        })),
       // The adapter models `skills` as SkillBinding objects ({source}), not
       // bare names — must match internal/omnia/config.go's schema (#1519).
       skills: profile.skills.map((s) => ({ source: s.name })),
