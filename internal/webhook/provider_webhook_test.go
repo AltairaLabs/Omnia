@@ -87,9 +87,9 @@ func newWebhookScheme(t *testing.T) *runtime.Scheme {
 }
 
 // claudeProvider returns a Provider with spec.credential.secretRef set.
-func claudeProvider(ns, secretName string, key *string) *corev1alpha1.Provider {
+func claudeProvider(secretName string, key *string) *corev1alpha1.Provider {
 	p := &corev1alpha1.Provider{
-		ObjectMeta: metav1.ObjectMeta{Name: "claude", Namespace: ns},
+		ObjectMeta: metav1.ObjectMeta{Name: "claude", Namespace: "ns"},
 		Spec: corev1alpha1.ProviderSpec{
 			Type: corev1alpha1.ProviderTypeClaude,
 			Credential: &corev1alpha1.CredentialConfig{
@@ -121,7 +121,7 @@ func TestProviderValidator_WarnsOnMissingSecret(t *testing.T) {
 	scheme := newWebhookScheme(t)
 	cl := fake.NewClientBuilder().WithScheme(scheme).Build()
 	v := &ProviderValidator{Client: cl}
-	p := claudeProvider("ns", "missing-secret", nil)
+	p := claudeProvider("missing-secret", nil)
 
 	warns, err := v.ValidateCreate(context.Background(), p)
 	require.NoError(t, err)
@@ -134,7 +134,7 @@ func TestProviderValidator_WarnsOnMissingSecretUpdate(t *testing.T) {
 	scheme := newWebhookScheme(t)
 	cl := fake.NewClientBuilder().WithScheme(scheme).Build()
 	v := &ProviderValidator{Client: cl}
-	p := claudeProvider("ns", "missing-secret", nil)
+	p := claudeProvider("missing-secret", nil)
 
 	warns, err := v.ValidateUpdate(context.Background(), p, p)
 	require.NoError(t, err)
@@ -151,7 +151,7 @@ func TestProviderValidator_WarnsOnMissingExplicitKey(t *testing.T) {
 	}
 	cl := fake.NewClientBuilder().WithScheme(scheme).WithObjects(secret).Build()
 	v := &ProviderValidator{Client: cl}
-	p := claudeProvider("ns", "my-secret", strPtr("MISSING_KEY"))
+	p := claudeProvider("my-secret", strPtr("MISSING_KEY"))
 
 	warns, err := v.ValidateCreate(context.Background(), p)
 	require.NoError(t, err)
@@ -168,7 +168,7 @@ func TestProviderValidator_NoWarnWhenDefaultKeyPresent(t *testing.T) {
 	}
 	cl := fake.NewClientBuilder().WithScheme(scheme).WithObjects(secret).Build()
 	v := &ProviderValidator{Client: cl}
-	p := claudeProvider("ns", "my-secret", nil)
+	p := claudeProvider("my-secret", nil)
 
 	warns, err := v.ValidateCreate(context.Background(), p)
 	require.NoError(t, err)
@@ -184,7 +184,7 @@ func TestProviderValidator_NoWarnWhenExplicitKeyPresent(t *testing.T) {
 	}
 	cl := fake.NewClientBuilder().WithScheme(scheme).WithObjects(secret).Build()
 	v := &ProviderValidator{Client: cl}
-	p := claudeProvider("ns", "my-secret", strPtr("MY_CUSTOM_KEY"))
+	p := claudeProvider("my-secret", strPtr("MY_CUSTOM_KEY"))
 
 	warns, err := v.ValidateCreate(context.Background(), p)
 	require.NoError(t, err)
@@ -207,7 +207,7 @@ func TestProviderValidator_WarnsOnMissingAuthSecret(t *testing.T) {
 // TestProviderValidator_NoWarnNilClient: nil client is safe (no-op).
 func TestProviderValidator_NoWarnNilClient(t *testing.T) {
 	v := &ProviderValidator{Client: nil}
-	p := claudeProvider("ns", "some-secret", nil)
+	p := claudeProvider("some-secret", nil)
 
 	warns, err := v.ValidateCreate(context.Background(), p)
 	require.NoError(t, err)
