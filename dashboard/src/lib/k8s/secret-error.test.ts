@@ -25,4 +25,22 @@ describe("secretErrorResponse", () => {
     expect(res.status).toBe(500);
     expect((await res.json()).error).toContain("boom");
   });
+
+  it("uses error.message when body is absent", async () => {
+    const err = new Error("plain error message");
+    const res = secretErrorResponse(err, "Fallback");
+    expect(res.status).toBe(500);
+    expect((await res.json()).error).toContain("plain error message");
+  });
+
+  it("extracts message from object body", async () => {
+    const err = new Error("HTTP request failed");
+    (err as unknown as { statusCode: number }).statusCode = 403;
+    (err as unknown as { body: Record<string, unknown> }).body = {
+      message: "secrets is forbidden: user does not have permission",
+    };
+    const res = secretErrorResponse(err, "Failed");
+    expect(res.status).toBe(403);
+    expect((await res.json()).error).toContain("forbidden");
+  });
 });
