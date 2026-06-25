@@ -80,7 +80,10 @@ describe("ExportDeployProfile", () => {
     // first llm (rag-baseline) promoted to the "default" binding
     expect(output.textContent).toContain("name: default");
     expect(output.textContent).toContain("ref: rag-baseline");
-    expect(output.textContent).toContain("docs-search");
+    // #1596: skills are opt-in (default off) and the embedding provider is
+    // dropped — neither is bundled into the exported config by default.
+    expect(output.textContent).not.toContain("docs-search");
+    expect(output.textContent).not.toContain("embedder");
     // token scoped to the workspace
     expect(JSON.parse(postBody as string)).toMatchObject({
       name: "deploy-team-acme",
@@ -91,6 +94,22 @@ describe("ExportDeployProfile", () => {
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith(output.textContent);
     await userEvent.click(screen.getByRole("button", { name: /download/i }));
     expect(URL.createObjectURL).toHaveBeenCalled();
+  });
+
+  it("includes a skill only when explicitly checked (opt-in, #1596)", async () => {
+    mockFetch({
+      "/api/settings/api-keys": (init) =>
+        init?.method === "POST"
+          ? { json: async () => ({ key: { key: "omnia_sk_LIVE" } }), status: 201 }
+          : listing(true),
+      "/deploy-profile": () => ({ json: async () => discovery }),
+    });
+    await openConfigure();
+    await userEvent.click(screen.getByRole("checkbox", { name: "docs-search" }));
+    await userEvent.click(screen.getByRole("button", { name: /^generate$/i }));
+
+    const output = await screen.findByTestId("deploy-profile-output");
+    await waitFor(() => expect(output.textContent).toContain("docs-search"));
   });
 
   it("lets the user choose a different default LLM", async () => {

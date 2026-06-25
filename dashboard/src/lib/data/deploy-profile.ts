@@ -16,6 +16,12 @@ const PHASE_READY = "Ready";
 function isProviderReady(p: Provider): boolean {
   return p.status?.phase === PHASE_READY;
 }
+// Only llm-role providers are deployable into an AgentRuntime's spec.providers.
+// embedding/tts/stt/image providers are workspace-level (memory-api) or unsupported
+// as per-agent extras — bundling them breaks pack-open at first request (#1596).
+function isLlmProvider(p: Provider): boolean {
+  return (p.spec?.role || DEFAULT_ROLE) === DEFAULT_ROLE;
+}
 function isSkillReady(s: SkillSource): boolean {
   return s.status?.phase === PHASE_READY;
 }
@@ -42,7 +48,8 @@ export function resolveApiEndpoint(request: NextRequest): string {
   return process.env.OMNIA_DASHBOARD_EXTERNAL_URL || "";
 }
 
-/** Assemble the deploy profile (Ready providers/skills only) for a workspace. */
+/** Assemble the deploy profile for a workspace: Ready llm-role providers (the
+ * only ones deployable into spec.providers) + Ready skills. (#1519, #1596) */
 export async function buildDeployProfile(
   clientOptions: Parameters<typeof listCrd>[0],
   name: string,
@@ -55,7 +62,10 @@ export async function buildDeployProfile(
   return {
     api_endpoint: apiEndpoint,
     workspace: name,
-    providers: providers.filter(isProviderReady).map(toProfileProvider),
+    providers: providers
+      .filter(isProviderReady)
+      .filter(isLlmProvider)
+      .map(toProfileProvider),
     skills: skills.filter(isSkillReady).map(toProfileSkill),
   };
 }
