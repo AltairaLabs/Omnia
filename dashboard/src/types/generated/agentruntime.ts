@@ -2459,6 +2459,24 @@ export interface AgentRuntimeSpec {
      * down the remainder. Duration format (e.g. "30s", "2m"). New calls stop
      * immediately on drain regardless. Defaults to 30s when unset. */
     drainTimeout?: string;
+    /** expose opts this agent into operator-provisioned external exposure.
+     * Opt-in: an agent is never externally reachable unless this is set AND the
+     * platform has a default-exposure Gateway configured (Helm
+     * `defaultExposure`). When both hold, the operator creates a host-based
+     * HTTPRoute targeting this agent's facade Service, surfaced via
+     * status.facade.endpoints (#1553). Exposure does NOT add authentication —
+     * spec.externalAuth is still the gate; an exposed agent with no externalAuth
+     * validators is management-plane-only at the facade. */
+    expose?: {
+      /** enabled creates an external HTTPRoute for this agent. Requires the platform
+       * to have a default-exposure Gateway configured (Helm `defaultExposure`);
+       * when no Gateway is configured this is a no-op. Defaults to false. */
+      enabled?: boolean;
+      /** host overrides the generated hostname (`{name}.{namespace}.{baseDomain}`).
+       * Set for a custom domain on an individual agent. Must be a hostname the
+       * configured Gateway's listener accepts (e.g. covered by its TLS cert). */
+      host?: string;
+    };
     /** extraEnv defines additional environment variables for the facade container.
      * Use this for debugging (e.g., LOG_LEVEL=debug) or custom configuration. */
     extraEnv?: {

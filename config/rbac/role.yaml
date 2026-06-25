@@ -81,10 +81,21 @@ rules:
   - gateway.networking.k8s.io
   resources:
   - gateways
-  - httproutes
   verbs:
   - get
   - list
+  - watch
+- apiGroups:
+  - gateway.networking.k8s.io
+  resources:
+  - httproutes
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
   - watch
 - apiGroups:
   - keda.sh
