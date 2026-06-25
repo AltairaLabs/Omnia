@@ -781,12 +781,191 @@ func TestAppendMessage_WriteThroughToHotCache(t *testing.T) {
 	err := svc.AppendMessage(context.Background(), "s1", msg)
 	require.NoError(t, err)
 
+	// AppendMessage write-through is fire-and-forget; it appends the message to
+	// the cached list and refreshes the session blob, so assert via polling
+	// rather than relying on goroutine ordering.
+	require.Eventually(t, func() bool {
+		hot.mu.Lock()
+		defer hot.mu.Unlock()
+		return len(hot.appendCalls) == 1
+	}, time.Second, 5*time.Millisecond)
+	hot.mu.Lock()
+	defer hot.mu.Unlock()
+	assert.Equal(t, "s1", hot.appendCalls[0].sessionID)
+	assert.Equal(t, "m1", hot.appendCalls[0].msg.ID)
+}
+
+func TestAppendMessage_RefreshesHotCacheAggregates(t *testing.T) {
+	hot := newTrackingHotCache()
+	warm := newMockWarmStore()
+	// Simulate the warm store's authoritative aggregates after the append
+	// (postgres increments message_count in AppendMessage).
+	warm.sessions["s1"] = &session.Session{ID: "s1", MessageCount: 8}
+	registry := providers.NewRegistry()
+	registry.SetHotCache(hot)
+	registry.SetWarmStore(warm)
+	svc := newServiceWithRegistry(registry, nil)
+
+	msg := &session.Message{ID: "m1", Role: session.RoleUser, Content: "hello"}
+	err := svc.AppendMessage(context.Background(), "s1", msg)
+	require.NoError(t, err)
+
+	require.Eventually(t, func() bool {
+		hot.mu.Lock()
+		defer hot.mu.Unlock()
+		return len(hot.setCalls) == 1
+	}, time.Second, 5*time.Millisecond)
+	hot.mu.Lock()
+	defer hot.mu.Unlock()
+	assert.Equal(t, "s1", hot.setCalls[0].ID)
+	assert.Equal(t, int32(8), hot.setCalls[0].MessageCount)
+}
+
+func TestRecordProviderCall_RefreshesHotCacheAggregates(t *testing.T) {
+	hot := newTrackingHotCache()
+	warm := newMockWarmStore()
+	// Simulate the warm store's authoritative aggregates after the provider call
+	// (postgres increments token/cost counters in RecordProviderCall).
+	warm.sessions["s1"] = &session.Session{
+		ID:                "s1",
+		TotalInputTokens:  1856,
+		TotalOutputTokens: 180,
+		EstimatedCostUSD:  0.01508,
+	}
+	registry := providers.NewRegistry()
+	registry.SetHotCache(hot)
+	registry.SetWarmStore(warm)
+	svc := newServiceWithRegistry(registry, nil)
+
+	err := svc.RecordProviderCall(context.Background(), "s1", &session.ProviderCall{
+		InputTokens:  1856,
+		OutputTokens: 180,
+	})
+	require.NoError(t, err)
+
+	require.Eventually(t, func() bool {
+		hot.mu.Lock()
+		defer hot.mu.Unlock()
+		return len(hot.setCalls) == 1
+	}, time.Second, 5*time.Millisecond)
+	hot.mu.Lock()
+	defer hot.mu.Unlock()
+	assert.Equal(t, "s1", hot.setCalls[0].ID)
+	assert.Equal(t, int64(1856), hot.setCalls[0].TotalInputTokens)
+	assert.Equal(t, int64(180), hot.setCalls[0].TotalOutputTokens)
+	assert.InDelta(t, 0.01508, hot.setCalls[0].EstimatedCostUSD, 1e-9)
+}
+
+func TestRecordToolCall_RefreshesHotCacheAggregates(t *testing.T) {
+	hot := newTrackingHotCache()
+	warm := newMockWarmStore()
+	// Simulate the warm store's authoritative aggregates after the tool call
+	// (postgres increments tool_call_count in RecordToolCall).
+	warm.sessions["s1"] = &session.Session{ID: "s1", ToolCallCount: 2}
+	registry := providers.NewRegistry()
+	registry.SetHotCache(hot)
+	registry.SetWarmStore(warm)
+	svc := newServiceWithRegistry(registry, nil)
+
+	err := svc.RecordToolCall(context.Background(), "s1", &session.ToolCall{ID: "tc-refresh", Name: "search"})
+	require.NoError(t, err)
+
+	require.Eventually(t, func() bool {
+		hot.mu.Lock()
+		defer hot.mu.Unlock()
+		return len(hot.setCalls) == 1
+	}, time.Second, 5*time.Millisecond)
+	hot.mu.Lock()
+	defer hot.mu.Unlock()
+	assert.Equal(t, "s1", hot.setCalls[0].ID)
+	assert.Equal(t, int32(2), hot.setCalls[0].ToolCallCount)
+}
+
+// signalingWarmStore signals on a channel whenever GetSession is called, so a
+// test can deterministically observe the fire-and-forget refresh goroutine
+// reaching the warm read even when no hot write follows.
+type signalingWarmStore struct {
+	mockWarmStore
+	getCalled chan struct{}
+}
+
+func (s *signalingWarmStore) GetSession(ctx context.Context, id string) (*session.Session, error) {
+	defer func() { s.getCalled <- struct{}{} }()
+	return s.mockWarmStore.GetSession(ctx, id)
+}
+
+func TestRefreshHotCacheSession_NoWarmStore(t *testing.T) {
+	hot := newTrackingHotCache()
+	registry := providers.NewRegistry()
+	registry.SetHotCache(hot)
+	svc := newServiceWithRegistry(registry, nil)
+
+	// No warm store configured: the refresh returns before spawning any hot
+	// write, so no SetSession is attempted.
+	svc.refreshHotCacheSession("s1")
+
+	hot.mu.Lock()
+	defer hot.mu.Unlock()
+	assert.Empty(t, hot.setCalls)
+}
+
+func TestRefreshHotCacheSession_WarmGetError(t *testing.T) {
+	hot := newTrackingHotCache()
+	warm := &signalingWarmStore{
+		mockWarmStore: *newMockWarmStore(),
+		getCalled:     make(chan struct{}, 1),
+	}
+	// Session absent from warm → GetSession errors → no hot write.
+	registry := providers.NewRegistry()
+	registry.SetHotCache(hot)
+	registry.SetWarmStore(warm)
+	svc := newServiceWithRegistry(registry, nil)
+
+	svc.refreshHotCacheSession("missing")
+
+	<-warm.getCalled
+	hot.mu.Lock()
+	defer hot.mu.Unlock()
+	assert.Empty(t, hot.setCalls)
+}
+
+func TestRefreshHotCacheSession_SetError(t *testing.T) {
+	hot := newTrackingHotCache()
+	hot.setErr = assert.AnError
+	warm := newMockWarmStore()
+	warm.sessions["s1"] = &session.Session{ID: "s1", MessageCount: 3}
+	registry := providers.NewRegistry()
+	registry.SetHotCache(hot)
+	registry.SetWarmStore(warm)
+	svc := newServiceWithRegistry(registry, nil)
+
+	// SetSession returns an error; the refresh logs and does not panic.
+	svc.refreshHotCacheSession("s1")
+
 	hot.waitOne()
 	hot.mu.Lock()
 	defer hot.mu.Unlock()
-	require.Len(t, hot.appendCalls, 1)
-	assert.Equal(t, "s1", hot.appendCalls[0].sessionID)
-	assert.Equal(t, "m1", hot.appendCalls[0].msg.ID)
+	require.Len(t, hot.setCalls, 1)
+}
+
+func TestRecordProviderCall_WarmError(t *testing.T) {
+	warm := newMockWarmStore() // session absent → warm write errors
+	registry := providers.NewRegistry()
+	registry.SetWarmStore(warm)
+	svc := newServiceWithRegistry(registry, nil)
+
+	err := svc.RecordProviderCall(context.Background(), "missing", &session.ProviderCall{})
+	require.Error(t, err)
+}
+
+func TestRecordToolCall_WarmError(t *testing.T) {
+	warm := newMockWarmStore() // session absent → warm write errors
+	registry := providers.NewRegistry()
+	registry.SetWarmStore(warm)
+	svc := newServiceWithRegistry(registry, nil)
+
+	err := svc.RecordToolCall(context.Background(), "missing", &session.ToolCall{})
+	require.Error(t, err)
 }
 
 func TestUpdateSessionStatus_RefreshesTTLInHotCache(t *testing.T) {
