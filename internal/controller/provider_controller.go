@@ -557,16 +557,7 @@ func (r *ProviderReconciler) validatePlatformCredentialsSecret(
 // auth.credentialsSecretRef secret for each supported platform/auth combo.
 // workloadIdentity combos do not use a secret and are not listed here.
 func expectedPlatformSecretKeys(platform omniav1alpha1.PlatformType, auth omniav1alpha1.AuthMethod) []string {
-	switch {
-	case platform == omniav1alpha1.PlatformTypeBedrock && auth == omniav1alpha1.AuthMethodAccessKey:
-		return []string{"AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"}
-	case platform == omniav1alpha1.PlatformTypeVertex && auth == omniav1alpha1.AuthMethodServiceAccount:
-		return []string{"credentials.json"}
-	case platform == omniav1alpha1.PlatformTypeAzure && auth == omniav1alpha1.AuthMethodServicePrincipal:
-		return []string{"AZURE_TENANT_ID", "AZURE_CLIENT_ID", "AZURE_CLIENT_SECRET"}
-	default:
-		return nil
-	}
+	return omniav1alpha1.ExpectedPlatformSecretKeys(platform, auth)
 }
 
 // providerRequiresCredentials returns whether the given provider requires an
@@ -604,26 +595,10 @@ func (r *ProviderReconciler) emitWarningEvent(provider *omniav1alpha1.Provider, 
 }
 
 // getExpectedKeysForProvider returns the expected secret keys for a
-// (role, type) pair. Most vendors use the same API key across roles
-// (e.g. OPENAI_API_KEY is good for inference, embedding, TTS, and STT);
-// the role parameter is wired in now for future vendors that ship
-// role-specific credentials.
-//
-//nolint:revive,unparam // role parameter is forward-looking (see comment); kept for symmetry with providerRequiresCredentials.
+// (role, type) pair. Delegates to the exported api/v1alpha1 function so that
+// the webhook and controller share a single definition.
 func getExpectedKeysForProvider(role omniav1alpha1.ProviderRole, providerType omniav1alpha1.ProviderType) []string {
-	_ = role
-	switch providerType {
-	case omniav1alpha1.ProviderTypeClaude:
-		return []string{"ANTHROPIC_API_KEY", "CLAUDE_API_KEY", secretKeyAPIKey}
-	case omniav1alpha1.ProviderTypeOpenAI:
-		return []string{"OPENAI_API_KEY", "OPENAI_TOKEN", secretKeyAPIKey}
-	case omniav1alpha1.ProviderTypeGemini:
-		return []string{"GEMINI_API_KEY", "GOOGLE_API_KEY", secretKeyAPIKey}
-	case omniav1alpha1.ProviderTypeVoyageAI:
-		return []string{"VOYAGE_API_KEY", secretKeyAPIKey}
-	default:
-		return []string{secretKeyAPIKey, "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY"}
-	}
+	return omniav1alpha1.ExpectedKeysForProvider(role, providerType)
 }
 
 // findProvidersForSecret maps a Secret to Providers that reference it.

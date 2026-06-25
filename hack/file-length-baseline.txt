@@ -13,7 +13,6 @@
 510 dashboard/src/components/arena/source-dialog.tsx
 588 dashboard/src/components/arena/template-wizard.tsx
 606 dashboard/src/components/console/agent-console.tsx
-655 dashboard/src/components/credentials/credentials-section.tsx
 559 dashboard/src/components/file-browser/content-explorer.tsx
 529 dashboard/src/components/memories/memory-galaxy.tsx
 1395 dashboard/src/components/providers/provider-dialog.tsx

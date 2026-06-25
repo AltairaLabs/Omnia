@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useProviderMutations } from "@/hooks/resources";
+import { useWorkspace } from "@/contexts/workspace-context";
 import {
   Dialog,
   DialogContent,
@@ -30,6 +31,8 @@ import {
 } from "@/components/ui/collapsible";
 import { AlertCircle, Loader2, ChevronDown, Plus, Trash2 } from "lucide-react";
 import type { Provider, ProviderSpec } from "@/types/generated/provider";
+import { SecretKeySelect } from "./secret-key-select";
+import { AddCredentialSecretDialog } from "@/components/credentials/add-credential-secret-dialog";
 
 // --- Types ---
 
@@ -371,12 +374,24 @@ function validateName(name: string): string | null {
   return null;
 }
 
+const ENV_VAR_NAME_RE = /^[A-Za-z_]\w*$/;
+function envVarError(value: string): string | null {
+  if (!value) return null;
+  return ENV_VAR_NAME_RE.test(value)
+    ? null
+    : "Enter a variable NAME (e.g. ANTHROPIC_API_KEY), not a key=value or a secret value.";
+}
+
 function validateCredentialFields(form: FormState): string | null {
   if (form.credentialSource === "secret" && !form.credentialSecretName.trim()) {
     return "Secret name is required";
   }
-  if (form.credentialSource === "envVar" && !form.credentialEnvVar.trim()) {
-    return "Environment variable name is required";
+  if (form.credentialSource === "envVar") {
+    if (!form.credentialEnvVar.trim()) {
+      return "Environment variable name is required";
+    }
+    const envErr = envVarError(form.credentialEnvVar);
+    if (envErr) return envErr;
   }
   if (form.credentialSource === "filePath" && !form.credentialFilePath.trim()) {
     return "File path is required";
@@ -601,10 +616,15 @@ function buildSpec(form: FormState): ProviderSpec {
 function CredentialFields({
   form,
   updateForm,
+  namespace,
+  onAddSecret,
 }: Readonly<{
   form: FormState;
   updateForm: <K extends keyof FormState>(key: K, value: FormState[K]) => void;
+  namespace?: string;
+  onAddSecret?: () => void;
 }>) {
+  const envErr = envVarError(form.credentialEnvVar);
   return (
     <div className="space-y-4">
       <Label>Credential Source</Label>
@@ -628,37 +648,32 @@ function CredentialFields({
       </RadioGroup>
 
       {form.credentialSource === "secret" && (
-        <div className="grid grid-cols-2 gap-4">
-          <div className="space-y-2">
-            <Label htmlFor="cred-secret-name">Secret Name</Label>
-            <Input
-              id="cred-secret-name"
-              placeholder="my-api-key"
-              value={form.credentialSecretName}
-              onChange={(e) => updateForm("credentialSecretName", e.target.value)}
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="cred-secret-key">Key (optional)</Label>
-            <Input
-              id="cred-secret-key"
-              placeholder="ANTHROPIC_API_KEY"
-              value={form.credentialSecretKey}
-              onChange={(e) => updateForm("credentialSecretKey", e.target.value)}
-            />
-          </div>
-        </div>
+        <SecretKeySelect
+          idPrefix="cred"
+          namespace={namespace}
+          secretName={form.credentialSecretName}
+          secretKey={form.credentialSecretKey}
+          onSecretNameChange={(v) => updateForm("credentialSecretName", v)}
+          onSecretKeyChange={(v) => updateForm("credentialSecretKey", v)}
+          onAddSecret={onAddSecret}
+        />
       )}
 
       {form.credentialSource === "envVar" && (
         <div className="space-y-2">
-          <Label htmlFor="cred-env-var">Environment Variable</Label>
+          <Label htmlFor="cred-env-var">Environment variable name</Label>
           <Input
             id="cred-env-var"
             placeholder="ANTHROPIC_API_KEY"
             value={form.credentialEnvVar}
             onChange={(e) => updateForm("credentialEnvVar", e.target.value)}
           />
+          <p className="text-xs text-muted-foreground">
+            The name of an env var already present in the runtime — not a key=value or the secret itself.
+          </p>
+          {envErr && (
+            <p className="text-xs text-destructive">{envErr}</p>
+          )}
         </div>
       )}
 
@@ -889,9 +904,11 @@ function HeadersFields({
 function PlatformFields({
   form,
   updateForm,
+  namespace,
 }: Readonly<{
   form: FormState;
   updateForm: <K extends keyof FormState>(key: K, value: FormState[K]) => void;
+  namespace?: string;
 }>) {
   const authOptions =
     form.platformType ? AUTH_BY_PLATFORM[form.platformType] : [];
@@ -1033,26 +1050,14 @@ function PlatformFields({
           )}
 
           {form.authType && form.authType !== "workloadIdentity" && (
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="auth-secret-name">Credentials Secret Name</Label>
-                <Input
-                  id="auth-secret-name"
-                  placeholder="my-cloud-credentials"
-                  value={form.authSecretName}
-                  onChange={(e) => updateForm("authSecretName", e.target.value)}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="auth-secret-key">Key (optional)</Label>
-                <Input
-                  id="auth-secret-key"
-                  placeholder=""
-                  value={form.authSecretKey}
-                  onChange={(e) => updateForm("authSecretKey", e.target.value)}
-                />
-              </div>
-            </div>
+            <SecretKeySelect
+              idPrefix="auth"
+              namespace={namespace}
+              secretName={form.authSecretName}
+              secretKey={form.authSecretKey}
+              onSecretNameChange={(v) => updateForm("authSecretName", v)}
+              onSecretKeyChange={(v) => updateForm("authSecretKey", v)}
+            />
           )}
         </>
       )}
@@ -1305,8 +1310,12 @@ function ProviderDialogForm({
   onSuccess,
   onOpenChange,
 }: Readonly<ProviderDialogFormProps>) {
+  const { currentWorkspace } = useWorkspace();
   const [formState, setFormState] = useState<FormState>(() => getInitialFormState(provider));
   const [error, setError] = useState<string | null>(null);
+  const [showAddSecret, setShowAddSecret] = useState(false);
+
+  const namespace = currentWorkspace?.namespace;
 
   const updateForm = <K extends keyof FormState>(key: K, value: FormState[K]) => {
     setFormState((prev) => ({ ...prev, [key]: value }));
@@ -1478,7 +1487,7 @@ function ProviderDialogForm({
             />
           </div>
 
-          {showPlatform && <PlatformFields form={formState} updateForm={updateForm} />}
+          {showPlatform && <PlatformFields form={formState} updateForm={updateForm} namespace={namespace} />}
 
           {/* Role-specific config blocks (CEL-gated; at most one of tts/stt/embedding) */}
           {formState.role === "tts" && <TTSFields form={formState} updateForm={updateForm} />}
@@ -1491,7 +1500,20 @@ function ProviderDialogForm({
           {showCredential && (
             <div className="border rounded-lg p-4 space-y-4">
               <Label className="text-base font-semibold">Credentials</Label>
-              <CredentialFields form={formState} updateForm={updateForm} />
+              <CredentialFields
+                form={formState}
+                updateForm={updateForm}
+                namespace={namespace}
+                onAddSecret={() => setShowAddSecret(true)}
+              />
+              <a
+                href="https://omnia.altairalabs.ai/docs/how-to/manage-credentials"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-xs text-primary hover:underline"
+              >
+                How to add credentials
+              </a>
             </div>
           )}
 
@@ -1518,6 +1540,16 @@ function ProviderDialogForm({
           {isEditing ? "Save Changes" : "Create Provider"}
         </Button>
       </DialogFooter>
+
+      <AddCredentialSecretDialog
+        open={showAddSecret}
+        onOpenChange={setShowAddSecret}
+        namespace={namespace}
+        onCreated={(name) => {
+          updateForm("credentialSecretName", name);
+          setShowAddSecret(false);
+        }}
+      />
     </DialogContent>
   );
 }
