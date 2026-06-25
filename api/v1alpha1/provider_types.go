@@ -496,6 +496,32 @@ type ProviderList struct {
 	Items           []Provider `json:"items"`
 }
 
+// providerSecretKeyAPIKey is the common secret key name for API keys.
+// Matches the controller's secretKeyAPIKey constant (kept in sync).
+const providerSecretKeyAPIKey = "api-key"
+
+// ExpectedKeysForProvider returns the credential secret keys a Provider of the
+// given role/type accepts when credential.secretRef.key is omitted, in priority
+// order. Shared by the controller (credential extraction) and the validating
+// webhook (admission warnings).
+//
+//nolint:revive,unparam // role parameter is forward-looking; kept for symmetry with providerRequiresCredentials.
+func ExpectedKeysForProvider(role ProviderRole, t ProviderType) []string {
+	_ = role
+	switch t {
+	case ProviderTypeClaude:
+		return []string{"ANTHROPIC_API_KEY", "CLAUDE_API_KEY", providerSecretKeyAPIKey}
+	case ProviderTypeOpenAI:
+		return []string{"OPENAI_API_KEY", "OPENAI_TOKEN", providerSecretKeyAPIKey}
+	case ProviderTypeGemini:
+		return []string{"GEMINI_API_KEY", "GOOGLE_API_KEY", providerSecretKeyAPIKey}
+	case ProviderTypeVoyageAI:
+		return []string{"VOYAGE_API_KEY", providerSecretKeyAPIKey}
+	default:
+		return []string{providerSecretKeyAPIKey, "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY"}
+	}
+}
+
 func init() {
 	SchemeBuilder.Register(&Provider{}, &ProviderList{})
 }
