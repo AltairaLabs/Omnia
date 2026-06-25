@@ -187,6 +187,45 @@ describe("workspace-route-helpers", () => {
       // Verify logging was called
       expect(mockLogError).toHaveBeenCalled();
     });
+
+    it("maps a 409 conflict to status 409 with the API message", async () => {
+      vi.mocked(isForbiddenError).mockReturnValue(false);
+      const error = Object.assign(new Error("the object has been modified"), { statusCode: 409 });
+
+      const response = handleK8sError(error, "update this test item");
+
+      expect(response.status).toBe(409);
+      const json = await response.json();
+      expect(json.message).toContain("modified");
+    });
+
+    it("maps a 422 validation error to status 422 with the API message", async () => {
+      vi.mocked(isForbiddenError).mockReturnValue(false);
+      const error = Object.assign(
+        new Error("spec.handlers[0].type: Unsupported value"),
+        { statusCode: 422 }
+      );
+
+      const response = handleK8sError(error, "update this test item");
+
+      expect(response.status).toBe(422);
+      const json = await response.json();
+      expect(json.message).toContain("Unsupported value");
+    });
+
+    it("maps a 400 admission denial to status 400 with the webhook message", async () => {
+      vi.mocked(isForbiddenError).mockReturnValue(false);
+      const error = Object.assign(
+        new Error("admission webhook denied the request"),
+        { statusCode: 400 }
+      );
+
+      const response = handleK8sError(error, "update this test item");
+
+      expect(response.status).toBe(400);
+      const json = await response.json();
+      expect(json.message).toContain("admission webhook denied");
+    });
   });
 
   describe("buildCrdResource", () => {

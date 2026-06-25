@@ -12,6 +12,7 @@ import { getWorkspace } from "./workspace-client";
 // Re-export getWorkspace for use by content API routes
 export { getWorkspace };
 import { extractK8sErrorMessage, isForbiddenError } from "./crd-operations";
+import { extractStatusCode } from "./k8s-errors";
 import { getUser } from "@/lib/auth";
 import {
   logCrdSuccess,
@@ -129,11 +130,21 @@ export async function requireAuth(): Promise<AuthResult> {
 
 /**
  * Handle K8s API errors with appropriate HTTP responses.
- * Returns a 403 for permission errors, 500 for others.
+ *
+ * Surfaces 400 (admission deny), 403 (forbidden), 409 (conflict) and 422
+ * (schema/CEL validation) with the API server's real message so callers can
+ * show why a write was rejected; everything else is a 500.
  */
 export function handleK8sError(error: unknown, context: string): NextResponse {
   if (isForbiddenError(error)) {
     return forbiddenResponse(`Insufficient permissions to ${context}`);
+  }
+  const status = extractStatusCode(error);
+  if (status === 400 || status === 409 || status === 422) {
+    return NextResponse.json(
+      { error: "Request rejected", message: extractK8sErrorMessage(error) },
+      { status }
+    );
   }
   return serverErrorResponse(error, `Failed to ${context}`);
 }
