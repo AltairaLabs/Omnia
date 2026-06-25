@@ -94,9 +94,11 @@ export function useToolRegistryMutations(): UseToolRegistryMutationsResult {
 
         if (!response.ok) {
           const data = await response.json().catch(() => ({}));
+          // handleK8sError surfaces the real K8s message under `error` (422/409/400);
+          // fall back to `message` for other shapes.
           throw new ResourceUpdateError(
             response.status,
-            data.message || "Failed to update tool registry"
+            data.error || data.message || "Failed to update tool registry"
           );
         }
 

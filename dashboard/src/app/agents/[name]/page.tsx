@@ -214,7 +214,7 @@ export default function AgentDetailPage({ params }: Readonly<AgentDetailPageProp
             />
 
             {/* External connection endpoints from Gateway API HTTPRoutes. */}
-            <ConnectCard agent={agent} />
+            <ConnectCard agent={agent} workspace={workspace} onExposeChange={refetchAgent} />
 
             {/* Conditions — full table, compact, at the bottom as reference. */}
             <AgentConditions conditions={status?.conditions} />

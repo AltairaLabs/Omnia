@@ -188,43 +188,42 @@ describe("workspace-route-helpers", () => {
       expect(mockLogError).toHaveBeenCalled();
     });
 
-    it("maps a 409 conflict to status 409 with the API message", async () => {
-      vi.mocked(isForbiddenError).mockReturnValue(false);
-      const error = Object.assign(new Error("the object has been modified"), { statusCode: 409 });
-
-      const response = handleK8sError(error, "update this test item");
-
-      expect(response.status).toBe(409);
-      const json = await response.json();
-      expect(json.message).toContain("modified");
-    });
-
-    it("maps a 422 validation error to status 422 with the API message", async () => {
+    it("surfaces a 422 validation error with the real message (#1600 follow-up)", async () => {
       vi.mocked(isForbiddenError).mockReturnValue(false);
       const error = Object.assign(
-        new Error("spec.handlers[0].type: Unsupported value"),
-        { statusCode: 422 }
+        new Error("HTTP-Code: 422\nMessage: Unknown API Status Code!"),
+        {
+          body: JSON.stringify({
+            message:
+              'ToolRegistry "x" is invalid: spec.handlers[0].name: Invalid value: "Api": should match ...',
+            reason: "Invalid",
+            code: 422,
+          }),
+        }
       );
 
-      const response = handleK8sError(error, "update this test item");
+      const response = handleK8sError(error, "create tool registry");
 
       expect(response.status).toBe(422);
       const json = await response.json();
-      expect(json.message).toContain("Unsupported value");
+      expect(json.error).toContain("spec.handlers[0].name");
+      expect(json.error).not.toContain("Unknown API Status Code");
     });
 
-    it("maps a 400 admission denial to status 400 with the webhook message", async () => {
+    it("surfaces a 409 AlreadyExists conflict at 409", async () => {
       vi.mocked(isForbiddenError).mockReturnValue(false);
-      const error = Object.assign(
-        new Error("admission webhook denied the request"),
-        { statusCode: 400 }
-      );
+      const error = Object.assign(new Error("HTTP-Code: 409"), {
+        body: JSON.stringify({
+          message: 'toolregistries.omnia.altairalabs.ai "x" already exists',
+          reason: "AlreadyExists",
+          code: 409,
+        }),
+      });
 
-      const response = handleK8sError(error, "update this test item");
+      const response = handleK8sError(error, "create tool registry");
 
-      expect(response.status).toBe(400);
-      const json = await response.json();
-      expect(json.message).toContain("admission webhook denied");
+      expect(response.status).toBe(409);
+      expect((await response.json()).error).toContain("already exists");
     });
   });
 

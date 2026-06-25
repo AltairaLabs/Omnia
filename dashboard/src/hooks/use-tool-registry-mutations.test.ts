@@ -79,10 +79,11 @@ describe("useToolRegistryMutations", () => {
   });
 
   it("updateToolRegistry throws ResourceUpdateError carrying status and API message", async () => {
+    // handleK8sError surfaces the real K8s Status.message under `error`.
     const fetchMock = vi.fn().mockResolvedValue({
       ok: false,
       status: 409,
-      json: async () => ({ error: "Request rejected", message: "the object has been modified" }),
+      json: async () => ({ error: "the object has been modified" }),
     });
     vi.stubGlobal("fetch", fetchMock);
 

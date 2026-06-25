@@ -16,6 +16,9 @@ const defaultConfig: RuntimeConfig = {
   tempoEnabled: process.env.NEXT_PUBLIC_TEMPO_ENABLED === "true",
   enterpriseEnabled: process.env.NEXT_PUBLIC_ENTERPRISE_ENABLED === "true",
   hideEnterprise: process.env.NEXT_PUBLIC_HIDE_ENTERPRISE === "true",
+  // Default to anonymous so SessionWatcher is inactive until config loads
+  authMode: "anonymous",
+  sessionPollIntervalSeconds: 60,
 };
 
 // Track if config has been fetched to avoid duplicate requests

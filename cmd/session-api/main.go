@@ -398,8 +398,12 @@ func shutdownServers(log logr.Logger, apiSrv, healthSrv, metricsSrv *http.Server
 
 // Pool configuration defaults.
 const (
-	defaultMaxConns        = 50
-	defaultMinConns        = 5
+	// Low defaults: session-api is deployed per-workspace, so total DB
+	// connections scale with workspace count. 50×N exhausted a small
+	// (Azure B1ms, max_connections=50) instance. Override per busy
+	// workspace with PG_MAX_CONNS.
+	defaultMaxConns        = 8
+	defaultMinConns        = 2
 	defaultMaxConnLifetime = time.Hour
 	defaultMaxConnIdleTime = 30 * time.Minute
 )
@@ -407,7 +411,7 @@ const (
 // initPool creates and returns a pgxpool connection pool with configured limits.
 // Pool settings are read from environment variables with sensible defaults:
 //
-//	PG_MAX_CONNS (default 50), PG_MIN_CONNS (default 5),
+//	PG_MAX_CONNS (default 8), PG_MIN_CONNS (default 2),
 //	PG_MAX_CONN_LIFETIME (default 1h), PG_MAX_CONN_IDLE_TIME (default 30m).
 func initPool(ctx context.Context, connStr string) (*pgxpool.Pool, error) {
 	poolCfg, err := pgxpool.ParseConfig(connStr)

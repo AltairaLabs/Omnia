@@ -59,3 +59,39 @@ export function extractStatusCode(error: unknown): number | null {
 export function isAuthError(error: unknown): boolean {
   return extractStatusCode(error) === 401;
 }
+
+/**
+ * Extract the Kubernetes Status `message` from a client error's response body
+ * (a JSON string or object), falling back to the error's own message, then to
+ * `fallback`. This is what turns an opaque ApiException ("HTTP-Code: 409 …
+ * Unknown API Status Code!") into the real, user-actionable reason (e.g. a CRD
+ * validation message or "… already exists").
+ */
+// messageFromBody pulls a non-empty `message` from a k8s error body that is
+// either a JSON string or an already-parsed object. Returns null when absent.
+function messageFromBody(body: unknown): string | null {
+  if (typeof body === "string") {
+    try {
+      const parsed = JSON.parse(body) as { message?: unknown };
+      return typeof parsed.message === "string" && parsed.message ? parsed.message : null;
+    } catch {
+      return null;
+    }
+  }
+  if (body && typeof (body as { message?: unknown }).message === "string") {
+    return (body as { message: string }).message || null;
+  }
+  return null;
+}
+
+export function extractStatusMessage(error: unknown, fallback: string): string {
+  if (typeof error !== "object" || error === null) {
+    return fallback;
+  }
+  const fromBody = messageFromBody((error as { body?: unknown }).body);
+  if (fromBody) {
+    return fromBody;
+  }
+  const msg = (error as { message?: unknown }).message;
+  return typeof msg === "string" && msg ? msg : fallback;
+}
