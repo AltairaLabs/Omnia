@@ -949,6 +949,20 @@ func buildAzureObjectStoreClient(f *flags, log logr.Logger) (*privacy.AzureObjec
 	return privacy.NewAzureObjectStoreClient(client, log), nil
 }
 
+// newPrivacyWatcherScheme builds the scheme for the privacy PolicyWatcher's
+// client. The watcher lists THREE cluster-scoped kinds: SessionPrivacyPolicy
+// (EE api) plus Workspace and AgentRuntime (core api). Registering only the EE
+// api left WorkspaceList/AgentRuntimeList unknown, so the watcher failed to
+// start with "no kind is registered for the type v1alpha1.WorkspaceList" even
+// after its RBAC was granted (#1567; sibling of the facade scheme fix #1573).
+func newPrivacyWatcherScheme() *k8sruntime.Scheme {
+	scheme := k8sruntime.NewScheme()
+	utilruntime.Must(omniav1alpha1.AddToScheme(scheme))     // EE: SessionPrivacyPolicy
+	utilruntime.Must(coreomniav1alpha1.AddToScheme(scheme)) // core: Workspace, AgentRuntime
+	utilruntime.Must(corev1.AddToScheme(scheme))
+	return scheme
+}
+
 // wrapPrivacyMiddleware creates and returns the privacy middleware handler
 // alongside the PolicyWatcher and the Kubernetes client used to build it.
 // The watcher is returned so callers can wire it into the session handler's
@@ -970,10 +984,7 @@ func wrapPrivacyMiddleware(
 		return next, nil, nil
 	}
 
-	scheme := k8sruntime.NewScheme()
-	utilruntime.Must(omniav1alpha1.AddToScheme(scheme))
-	utilruntime.Must(corev1.AddToScheme(scheme))
-	k8sClient, err := client.New(kubeConfig, client.Options{Scheme: scheme})
+	k8sClient, err := client.New(kubeConfig, client.Options{Scheme: newPrivacyWatcherScheme()})
 	if err != nil {
 		log.Error(err, "privacy middleware skipped", "reason", "k8s client creation failed")
 		return next, nil, nil
