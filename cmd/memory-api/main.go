@@ -1512,8 +1512,12 @@ func shutdownServers(log logr.Logger, servers ...*http.Server) {
 
 // Pool configuration defaults.
 const (
-	defaultMaxConns        = 50
-	defaultMinConns        = 5
+	// Low defaults: memory-api is deployed per-workspace (API + background
+	// workers share this pool), so total DB connections scale with workspace
+	// count. 50×N exhausted a small (Azure B1ms, max_connections=50)
+	// instance. Override per busy workspace with PG_MAX_CONNS.
+	defaultMaxConns        = 8
+	defaultMinConns        = 2
 	defaultMaxConnLifetime = time.Hour
 	defaultMaxConnIdleTime = 30 * time.Minute
 )

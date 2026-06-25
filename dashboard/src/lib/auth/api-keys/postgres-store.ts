@@ -89,7 +89,9 @@ export class PostgresApiKeyStore implements ApiKeyStore {
       poolOverride ??
       new Pool({
         connectionString,
-        max: 20,
+        // Small pool: API-key auth is low-concurrency and shares a small
+        // (Azure B1ms) Postgres with the per-workspace session/memory pools.
+        max: 5,
         idleTimeoutMillis: 30000,
         connectionTimeoutMillis: 2000,
       });
