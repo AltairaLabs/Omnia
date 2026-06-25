@@ -103,6 +103,20 @@ describe("useToolRegistryMutations", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("createToolRegistry wraps a non-Error rejection in an Error", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue("network blip"));
+    const { result } = renderHook(() => useToolRegistryMutations());
+    await expect(result.current.createToolRegistry("r1", SPEC)).rejects.toThrow("network blip");
+  });
+
+  it("updateToolRegistry wraps a non-Error rejection in an Error", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue("network blip"));
+    const { result } = renderHook(() => useToolRegistryMutations());
+    await expect(
+      result.current.updateToolRegistry("gh", { metadata: {}, spec: {} })
+    ).rejects.toThrow("network blip");
+  });
+
   it("ResourceUpdateError is an Error subclass with a status", () => {
     const err = new ResourceUpdateError(422, "bad");
     expect(err).toBeInstanceOf(Error);
