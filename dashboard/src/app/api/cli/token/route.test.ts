@@ -11,6 +11,7 @@ vi.mock("@/lib/data/deploy-profile", () => ({
   buildDeployProfile: vi.fn(),
   resolveApiEndpoint: vi.fn().mockReturnValue("https://omnia.example.com"),
 }));
+vi.mock("@/lib/audit/logger", () => ({ logCrdSuccess: vi.fn() }));
 
 const codeRec = {
   userId: "u1", email: "u@e.com", groups: ["g"], userRole: "editor",
@@ -40,7 +41,12 @@ async function arrange(opts: { code?: unknown; ws?: unknown } = {}) {
   vi.mocked(validateWorkspace).mockResolvedValue(
     (opts.ws ?? { ok: true, workspace: {}, clientOptions: { workspace: "team-acme", namespace: "ns", role: "editor" } }) as never
   );
-  apiKeyStore.create.mockResolvedValue({ key: "omnia_sk_secret" });
+  apiKeyStore.create.mockResolvedValue({
+    key: "omnia_sk_secret",
+    keyPrefix: "omnia_sk_abc12345",
+    name: "cli-deploy-team-acme-deadbeef",
+    expiresAt: new Date("2026-06-25T10:00:00Z"),
+  });
   vi.mocked(buildDeployProfile).mockResolvedValue(profile as never);
 }
 
@@ -81,6 +87,35 @@ describe("POST /api/cli/token", () => {
     );
     expect((apiKeyStore.create.mock.calls[0][1] as { name: string }).name).toMatch(/^cli-deploy-team-acme-/);
     vi.unstubAllEnvs();
+  });
+
+  it("emits an audit event on mint without leaking the token", async () => {
+    await arrange();
+    const { logCrdSuccess } = await import("@/lib/audit/logger");
+    const { POST } = await import("./route");
+    await POST(jsonReq({ code: "c1" }));
+    expect(logCrdSuccess).toHaveBeenCalledTimes(1);
+    expect(logCrdSuccess).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "create",
+        resourceType: "CliDeployToken",
+        workspace: "team-acme",
+        namespace: "ns",
+        user: "u@e.com",
+        role: "editor",
+      })
+    );
+    // The minted token secret must never appear in the audit payload.
+    const auditArg = vi.mocked(logCrdSuccess).mock.calls[0][0];
+    expect(JSON.stringify(auditArg)).not.toContain("omnia_sk_secret");
+  });
+
+  it("does not audit when the code is invalid", async () => {
+    await arrange({ code: null });
+    const { logCrdSuccess } = await import("@/lib/audit/logger");
+    const { POST } = await import("./route");
+    await POST(jsonReq({ code: "nope" }));
+    expect(logCrdSuccess).not.toHaveBeenCalled();
   });
 
   it("returns the workspace-not-found response from validateWorkspace", async () => {

@@ -15,6 +15,9 @@ import { validateWorkspace } from "@/lib/k8s/workspace-route-helpers";
 import { buildDeployProfile, resolveApiEndpoint } from "@/lib/data/deploy-profile";
 import { cliTokenTtlSeconds } from "@/lib/cli/config";
 import { shortSuffix } from "@/lib/cli/ids";
+import { logCrdSuccess } from "@/lib/audit/logger";
+
+const RESOURCE_TYPE = "CliDeployToken";
 
 function invalidCode(): NextResponse {
   return NextResponse.json({ error: "invalid_or_expired_code" }, { status: 400 });
@@ -42,6 +45,23 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     expiresInSeconds: cliTokenTtlSeconds(),
     ownerEmail: record.email,
     ownerGroups: record.groups,
+  });
+
+  // Audit the mint of a workspace-scoped deploy credential. Never log the
+  // token itself — only its non-secret prefix, expiry, and scope.
+  logCrdSuccess({
+    action: "create",
+    resourceType: RESOURCE_TYPE,
+    resourceName: newKey.name,
+    workspace: record.workspace,
+    namespace: result.clientOptions.namespace,
+    user: record.email,
+    role: record.userRole,
+    metadata: {
+      keyPrefix: newKey.keyPrefix,
+      expiresAt: newKey.expiresAt,
+      workspaces: [record.workspace],
+    },
   });
 
   const profile = await buildDeployProfile(
