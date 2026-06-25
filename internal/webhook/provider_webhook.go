@@ -83,18 +83,33 @@ func (v *ProviderValidator) secretRefWarnings(ctx context.Context, p *corev1alph
 	var warns admission.Warnings
 	if p.Spec.Credential != nil && p.Spec.Credential.SecretRef != nil {
 		warns = append(warns, v.checkRef(ctx, p, p.Spec.Credential.SecretRef,
-			corev1alpha1.ExpectedKeysForProvider(p.EffectiveRole(), p.Spec.Type))...)
+			corev1alpha1.ExpectedKeysForProvider(p.EffectiveRole(), p.Spec.Type), false)...)
 	}
 	if p.Spec.Auth != nil && p.Spec.Auth.CredentialsSecretRef != nil {
-		warns = append(warns, v.checkRef(ctx, p, p.Spec.Auth.CredentialsSecretRef, nil)...)
+		platformKeys := corev1alpha1.ExpectedPlatformSecretKeys(providerPlatformType(p), p.Spec.Auth.Type)
+		warns = append(warns, v.checkRef(ctx, p, p.Spec.Auth.CredentialsSecretRef, platformKeys, true)...)
 	}
 	return warns
+}
+
+// providerPlatformType returns the platform type from a Provider, guarding
+// against a nil spec.platform.
+func providerPlatformType(p *corev1alpha1.Provider) corev1alpha1.PlatformType {
+	if p.Spec.Platform == nil {
+		return ""
+	}
+	return p.Spec.Platform.Type
 }
 
 // checkRef looks up a single SecretKeyRef in the cluster. Missing secret or
 // missing key produces a warning; transient errors are silently swallowed so
 // RBAC gaps or apiserver hiccups never block admission.
-func (v *ProviderValidator) checkRef(ctx context.Context, p *corev1alpha1.Provider, ref *corev1alpha1.SecretKeyRef, defaultKeys []string) admission.Warnings {
+//
+// When allRequired is false (credential secrets), a warning is emitted only
+// when none of the defaultKeys are present — the keys are alternatives.
+// When allRequired is true (platform auth secrets), a warning is emitted for
+// any key that is missing — all keys must be present.
+func (v *ProviderValidator) checkRef(ctx context.Context, p *corev1alpha1.Provider, ref *corev1alpha1.SecretKeyRef, defaultKeys []string, allRequired bool) admission.Warnings {
 	if v.Client == nil || ref.Name == "" {
 		return nil
 	}
@@ -109,18 +124,45 @@ func (v *ProviderValidator) checkRef(ctx context.Context, p *corev1alpha1.Provid
 		return nil // transient/RBAC: stay advisory, don't block
 	}
 	if ref.Key != nil {
-		if _, ok := secret.Data[*ref.Key]; !ok {
-			return admission.Warnings{fmt.Sprintf("Secret %q has no key %q", ref.Name, *ref.Key)}
-		}
-		return nil
+		return checkExplicitKey(secret, ref.Name, *ref.Key)
 	}
-	for _, k := range defaultKeys {
+	if allRequired {
+		return checkAllRequiredKeys(secret, ref.Name, defaultKeys)
+	}
+	return checkAnyDefaultKey(secret, ref.Name, defaultKeys)
+}
+
+// checkExplicitKey warns when a named key is absent from the Secret.
+func checkExplicitKey(secret *corev1.Secret, secretName, key string) admission.Warnings {
+	if _, ok := secret.Data[key]; !ok {
+		return admission.Warnings{fmt.Sprintf("Secret %q has no key %q", secretName, key)}
+	}
+	return nil
+}
+
+// checkAllRequiredKeys warns when any of the required keys is absent (platform auth secrets).
+func checkAllRequiredKeys(secret *corev1.Secret, secretName string, keys []string) admission.Warnings {
+	var missing []string
+	for _, k := range keys {
+		if _, ok := secret.Data[k]; !ok {
+			missing = append(missing, k)
+		}
+	}
+	if len(missing) > 0 {
+		return admission.Warnings{fmt.Sprintf("Secret %q is missing required keys %v", secretName, missing)}
+	}
+	return nil
+}
+
+// checkAnyDefaultKey warns when none of the alternative default keys are present (credential secrets).
+func checkAnyDefaultKey(secret *corev1.Secret, secretName string, keys []string) admission.Warnings {
+	for _, k := range keys {
 		if _, ok := secret.Data[k]; ok {
 			return nil
 		}
 	}
-	if len(defaultKeys) > 0 {
-		return admission.Warnings{fmt.Sprintf("Secret %q has none of the expected keys %v", ref.Name, defaultKeys)}
+	if len(keys) > 0 {
+		return admission.Warnings{fmt.Sprintf("Secret %q has none of the expected keys %v", secretName, keys)}
 	}
 	return nil
 }

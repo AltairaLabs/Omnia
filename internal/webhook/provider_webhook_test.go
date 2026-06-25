@@ -262,3 +262,77 @@ func TestProviderValidator_UpdateBothEmbeddingAndSecretWarns(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, warns, 2)
 }
+
+// authProviderWithPlatform returns a Provider with spec.platform and spec.auth.credentialsSecretRef set.
+func authProviderWithPlatform(ns, secretName string, platform corev1alpha1.PlatformType, auth corev1alpha1.AuthMethod) *corev1alpha1.Provider {
+	return &corev1alpha1.Provider{
+		ObjectMeta: metav1.ObjectMeta{Name: "bedrock-claude", Namespace: ns},
+		Spec: corev1alpha1.ProviderSpec{
+			Type: corev1alpha1.ProviderTypeClaude,
+			Platform: &corev1alpha1.PlatformConfig{
+				Type: platform,
+			},
+			Auth: &corev1alpha1.AuthConfig{
+				Type:                 auth,
+				CredentialsSecretRef: &corev1alpha1.SecretKeyRef{Name: secretName},
+			},
+		},
+	}
+}
+
+// TestProviderValidator_WarnsOnMissingPlatformAuthKey: auth secret exists but is missing required keys.
+func TestProviderValidator_WarnsOnMissingPlatformAuthKey(t *testing.T) {
+	scheme := newWebhookScheme(t)
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "aws-creds", Namespace: "ns"},
+		Data:       map[string][]byte{"WRONG_KEY": []byte("val")},
+	}
+	cl := fake.NewClientBuilder().WithScheme(scheme).WithObjects(secret).Build()
+	v := &ProviderValidator{Client: cl}
+	p := authProviderWithPlatform("ns", "aws-creds", corev1alpha1.PlatformTypeBedrock, corev1alpha1.AuthMethodAccessKey)
+
+	warns, err := v.ValidateCreate(context.Background(), p)
+	require.NoError(t, err)
+	require.Len(t, warns, 1)
+	assert.Contains(t, warns[0], "AWS_ACCESS_KEY_ID")
+}
+
+// TestProviderValidator_NoWarnWhenPlatformAuthKeysPresent: auth secret has all required keys.
+func TestProviderValidator_NoWarnWhenPlatformAuthKeysPresent(t *testing.T) {
+	scheme := newWebhookScheme(t)
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "aws-creds", Namespace: "ns"},
+		Data: map[string][]byte{
+			"AWS_ACCESS_KEY_ID":     []byte("AKIA..."),
+			"AWS_SECRET_ACCESS_KEY": []byte("secret"),
+		},
+	}
+	cl := fake.NewClientBuilder().WithScheme(scheme).WithObjects(secret).Build()
+	v := &ProviderValidator{Client: cl}
+	p := authProviderWithPlatform("ns", "aws-creds", corev1alpha1.PlatformTypeBedrock, corev1alpha1.AuthMethodAccessKey)
+
+	warns, err := v.ValidateCreate(context.Background(), p)
+	require.NoError(t, err)
+	assert.Empty(t, warns)
+}
+
+// TestProviderValidator_AzurePlatformWarnsOnMissingKey: azure service principal secret missing required key.
+func TestProviderValidator_AzurePlatformWarnsOnMissingKey(t *testing.T) {
+	scheme := newWebhookScheme(t)
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "azure-creds", Namespace: "ns"},
+		Data: map[string][]byte{
+			"AZURE_TENANT_ID": []byte("tenant"),
+			"AZURE_CLIENT_ID": []byte("client"),
+			// Missing AZURE_CLIENT_SECRET
+		},
+	}
+	cl := fake.NewClientBuilder().WithScheme(scheme).WithObjects(secret).Build()
+	v := &ProviderValidator{Client: cl}
+	p := authProviderWithPlatform("ns", "azure-creds", corev1alpha1.PlatformTypeAzure, corev1alpha1.AuthMethodServicePrincipal)
+
+	warns, err := v.ValidateCreate(context.Background(), p)
+	require.NoError(t, err)
+	require.Len(t, warns, 1)
+	assert.Contains(t, warns[0], "AZURE_CLIENT_SECRET")
+}

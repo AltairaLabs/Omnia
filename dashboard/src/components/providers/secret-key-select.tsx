@@ -44,6 +44,7 @@ export function SecretKeySelect({
   }
 
   const selected = list.find((s) => s.name === secretName);
+  const secretMissing = secretName !== "" && selected === undefined;
   const keyValue = secretKey === "" ? USE_PROVIDER_DEFAULT : secretKey;
 
   return (
@@ -58,6 +59,9 @@ export function SecretKeySelect({
             {list.map((s) => (
               <SelectItem key={s.name} value={s.name}>{s.name}</SelectItem>
             ))}
+            {secretMissing && (
+              <SelectItem value={secretName}>{secretName} (not found)</SelectItem>
+            )}
           </SelectContent>
         </Select>
         {onAddSecret && (
@@ -77,9 +81,12 @@ export function SecretKeySelect({
           </SelectTrigger>
           <SelectContent>
             <SelectItem value={USE_PROVIDER_DEFAULT}>Use provider default (recommended)</SelectItem>
-            {(selected?.keys ?? []).map((k) => (
+            {selected !== undefined && selected.keys.map((k) => (
               <SelectItem key={k} value={k}>{k}</SelectItem>
             ))}
+            {secretMissing && secretKey !== "" && (
+              <SelectItem value={secretKey}>{secretKey}</SelectItem>
+            )}
           </SelectContent>
         </Select>
       </div>

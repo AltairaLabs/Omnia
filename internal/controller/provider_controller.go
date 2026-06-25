@@ -557,16 +557,7 @@ func (r *ProviderReconciler) validatePlatformCredentialsSecret(
 // auth.credentialsSecretRef secret for each supported platform/auth combo.
 // workloadIdentity combos do not use a secret and are not listed here.
 func expectedPlatformSecretKeys(platform omniav1alpha1.PlatformType, auth omniav1alpha1.AuthMethod) []string {
-	switch {
-	case platform == omniav1alpha1.PlatformTypeBedrock && auth == omniav1alpha1.AuthMethodAccessKey:
-		return []string{"AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"}
-	case platform == omniav1alpha1.PlatformTypeVertex && auth == omniav1alpha1.AuthMethodServiceAccount:
-		return []string{"credentials.json"}
-	case platform == omniav1alpha1.PlatformTypeAzure && auth == omniav1alpha1.AuthMethodServicePrincipal:
-		return []string{"AZURE_TENANT_ID", "AZURE_CLIENT_ID", "AZURE_CLIENT_SECRET"}
-	default:
-		return nil
-	}
+	return omniav1alpha1.ExpectedPlatformSecretKeys(platform, auth)
 }
 
 // providerRequiresCredentials returns whether the given provider requires an

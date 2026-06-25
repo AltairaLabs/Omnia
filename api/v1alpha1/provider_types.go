@@ -522,6 +522,24 @@ func ExpectedKeysForProvider(role ProviderRole, t ProviderType) []string {
 	}
 }
 
+// ExpectedPlatformSecretKeys returns the keys that must be present in the
+// auth.credentialsSecretRef secret for each supported platform/auth combo.
+// workloadIdentity combos do not use a secret and are not listed here.
+// Shared by the controller (auth validation) and the validating webhook
+// (admission warnings).
+func ExpectedPlatformSecretKeys(platform PlatformType, auth AuthMethod) []string {
+	switch {
+	case platform == PlatformTypeBedrock && auth == AuthMethodAccessKey:
+		return []string{"AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"}
+	case platform == PlatformTypeVertex && auth == AuthMethodServiceAccount:
+		return []string{"credentials.json"}
+	case platform == PlatformTypeAzure && auth == AuthMethodServicePrincipal:
+		return []string{"AZURE_TENANT_ID", "AZURE_CLIENT_ID", "AZURE_CLIENT_SECRET"}
+	default:
+		return nil
+	}
+}
+
 func init() {
 	SchemeBuilder.Register(&Provider{}, &ProviderList{})
 }

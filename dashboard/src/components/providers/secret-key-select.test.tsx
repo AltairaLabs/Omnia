@@ -99,4 +99,28 @@ describe("SecretKeySelect", () => {
     addButton.click();
     expect(onAdd).toHaveBeenCalled();
   });
+
+  it("shows '<name> (not found)' when secretName is set but not in list", () => {
+    setSecrets([{ name: "other-secret", namespace: "ns", keys: ["KEY"] }]);
+    render(
+      <SecretKeySelect
+        namespace="ns" secretName="missing-secret" secretKey=""
+        onSecretNameChange={() => {}} onSecretKeyChange={() => {}} idPrefix="cred"
+      />
+    );
+    expect(screen.getByText("missing-secret (not found)")).toBeTruthy();
+  });
+
+  it("shows current secretKey as selectable option when secret not in list and key is set", async () => {
+    setSecrets([{ name: "other-secret", namespace: "ns", keys: ["KEY"] }]);
+    render(
+      <SecretKeySelect
+        namespace="ns" secretName="missing-secret" secretKey="MY_KEY"
+        onSecretNameChange={() => {}} onSecretKeyChange={() => {}} idPrefix="cred"
+      />
+    );
+    const keySelect = screen.getByTestId("cred-key-select");
+    fireEvent.click(keySelect);
+    expect(await screen.findByRole("option", { name: "MY_KEY" })).toBeTruthy();
+  });
 });
