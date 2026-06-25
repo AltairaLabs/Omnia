@@ -1,15 +1,23 @@
 "use client";
 
+import { useState } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { AlertTriangle, Copy, ExternalLink } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { facadeAuthHint } from "@/lib/agents/facade-auth-hint";
+import { useWorkspacePermissions } from "@/hooks/use-workspace-permissions";
+import { useSetAgentExpose } from "@/hooks/use-set-agent-expose";
 import type { AgentRuntime, FacadeEndpoint } from "@/types/agent-runtime";
 
 interface ConnectCardProps {
   agent: AgentRuntime;
+  workspace: string;
+  onExposeChange?: () => void;
 }
 
 interface EndpointRowProps {
@@ -102,13 +110,102 @@ function EmptyState() {
 }
 
 /**
+ * ExposeControl is the opt-in toggle for operator-provisioned external exposure
+ * (#1611). It PATCHes spec.facade.expose; the operator creates/removes the
+ * HTTPRoute (#1553) and #1559 surfaces the resulting URL above. Editor-gated;
+ * warns that exposure ≠ auth.
+ */
+function ExposeControl({ agent, workspace, onExposeChange }: Readonly<ConnectCardProps>) {
+  const { isEditor } = useWorkspacePermissions();
+  const { save, saving, error } = useSetAgentExpose(workspace, agent.metadata.name);
+
+  const current = agent.spec.facade?.expose;
+  const currentEnabled = current?.enabled ?? false;
+  const currentHost = current?.host ?? "";
+  const [enabled, setEnabled] = useState(currentEnabled);
+  const [host, setHost] = useState(currentHost);
+
+  const dirty = enabled !== currentEnabled || host.trim() !== currentHost;
+  const hasExternalAuth = Boolean(agent.spec.externalAuth);
+  const hasEndpoints = (agent.status?.facade?.endpoints ?? []).length > 0;
+
+  async function onSave() {
+    if (await save(enabled, host)) onExposeChange?.();
+  }
+
+  return (
+    <div className="rounded-md border p-3 space-y-3">
+      <div className="flex items-center justify-between gap-3">
+        <div className="space-y-0.5">
+          <p className="text-sm font-medium">Expose externally</p>
+          <p className="text-xs text-muted-foreground">
+            Create an external route so apps outside the cluster can reach this agent.
+          </p>
+        </div>
+        <Switch
+          checked={enabled}
+          onCheckedChange={setEnabled}
+          disabled={!isEditor || saving}
+          aria-label="Expose externally"
+        />
+      </div>
+
+      {enabled && (
+        <div className="space-y-1">
+          <Label htmlFor="expose-host" className="text-xs">
+            Host override (optional)
+          </Label>
+          <Input
+            id="expose-host"
+            value={host}
+            onChange={(e) => setHost(e.target.value)}
+            placeholder="agent.example.com"
+            disabled={!isEditor || saving}
+            className="h-7 text-xs"
+          />
+        </div>
+      )}
+
+      {enabled && !hasExternalAuth && (
+        <p className="flex items-start gap-1.5 text-xs text-amber-700 dark:text-amber-400">
+          <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+          Exposing this agent does not authenticate it — anyone who can reach the URL
+          can use it. Set spec.externalAuth to require a token.
+        </p>
+      )}
+
+      {currentEnabled && !hasEndpoints && (
+        <p className="text-xs text-muted-foreground">
+          Waiting for the external route — the URL appears here once provisioned
+          (requires a default-exposure Gateway configured by the platform).
+        </p>
+      )}
+
+      {error && <p className="text-xs text-destructive">{error}</p>}
+
+      {!isEditor && (
+        <p className="text-xs text-muted-foreground">
+          Editor access is required to change exposure.
+        </p>
+      )}
+      {isEditor && dirty && (
+        <Button size="sm" onClick={onSave} disabled={saving}>
+          {saving ? "Saving…" : "Save"}
+        </Button>
+      )}
+    </div>
+  );
+}
+
+/**
  * ConnectCard surfaces the externally-reachable facade endpoints from
- * status.facade.endpoints, with an auth hint derived from spec.externalAuth.
+ * status.facade.endpoints, with an auth hint derived from spec.externalAuth, and
+ * the opt-in external-exposure toggle (#1611).
  *
  * Distinct from the Console tab, which connects via the dashboard's internal
  * management-plane proxy — this card shows the URLs a customer app would use.
  */
-export function ConnectCard({ agent }: Readonly<ConnectCardProps>) {
+export function ConnectCard({ agent, workspace, onExposeChange }: Readonly<ConnectCardProps>) {
   const endpoints = agent.status?.facade?.endpoints ?? [];
   const hint = facadeAuthHint(agent.spec.externalAuth);
 
@@ -121,7 +218,8 @@ export function ConnectCard({ agent }: Readonly<ConnectCardProps>) {
           the Console tab, which connects via the dashboard&apos;s internal proxy.
         </CardDescription>
       </CardHeader>
-      <CardContent>
+      <CardContent className="space-y-3">
+        <ExposeControl agent={agent} workspace={workspace} onExposeChange={onExposeChange} />
         {endpoints.length === 0 ? (
           <EmptyState />
         ) : (

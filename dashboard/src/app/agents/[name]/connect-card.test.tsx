@@ -1,7 +1,18 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { ConnectCard } from "./connect-card";
 import type { AgentRuntime, FacadeEndpoint } from "@/types/agent-runtime";
+
+const mockIsEditor = vi.fn(() => true);
+vi.mock("@/hooks/use-workspace-permissions", () => ({
+  useWorkspacePermissions: () => ({ isEditor: mockIsEditor() }),
+}));
+
+const mockSave = vi.fn(async () => true);
+vi.mock("@/hooks/use-set-agent-expose", () => ({
+  useSetAgentExpose: () => ({ save: mockSave, saving: false, error: null }),
+}));
 
 // Mock navigator.clipboard
 const mockWriteText = vi.fn();
@@ -58,6 +69,46 @@ const invalidEndpoint: FacadeEndpoint = {
 describe("ConnectCard", () => {
   beforeEach(() => {
     mockWriteText.mockReset();
+    mockSave.mockReset();
+    mockSave.mockResolvedValue(true);
+    mockIsEditor.mockReturnValue(true);
+  });
+
+  describe("expose toggle (#1611)", () => {
+    it("reflects spec.facade.expose.enabled and saves a toggle", async () => {
+      const onExposeChange = vi.fn();
+      const agent = makeAgent({
+        spec: { promptPackRef: { name: "p" }, facade: { type: "websocket", expose: { enabled: false } } },
+      });
+      render(<ConnectCard agent={agent} workspace="ws1" onExposeChange={onExposeChange} />);
+
+      const toggle = screen.getByRole("switch", { name: /expose externally/i });
+      expect(toggle).not.toBeChecked();
+      await userEvent.click(toggle);
+      await userEvent.click(screen.getByRole("button", { name: /save/i }));
+
+      expect(mockSave).toHaveBeenCalledWith(true, "");
+      expect(onExposeChange).toHaveBeenCalled();
+    });
+
+    it("warns that exposure is unauthenticated when there is no externalAuth", async () => {
+      const agent = makeAgent({
+        spec: { promptPackRef: { name: "p" }, facade: { type: "websocket" } },
+      });
+      render(<ConnectCard agent={agent} workspace="ws1" />);
+      await userEvent.click(screen.getByRole("switch", { name: /expose externally/i }));
+      expect(screen.getByText(/does not authenticate it/i)).toBeInTheDocument();
+    });
+
+    it("disables the toggle for non-editors", () => {
+      mockIsEditor.mockReturnValue(false);
+      const agent = makeAgent({
+        spec: { promptPackRef: { name: "p" }, facade: { type: "websocket", expose: { enabled: true } } },
+      });
+      render(<ConnectCard agent={agent} workspace="ws1" />);
+      expect(screen.getByRole("switch", { name: /expose externally/i })).toBeDisabled();
+      expect(screen.getByText(/editor access is required/i)).toBeInTheDocument();
+    });
   });
 
   describe("(a) valid websocket endpoint", () => {
@@ -65,7 +116,7 @@ describe("ConnectCard", () => {
       const agent = makeAgent({
         status: { facade: { endpoints: [validWssEndpoint] } },
       });
-      render(<ConnectCard agent={agent} />);
+      render(<ConnectCard agent={agent} workspace="ws1" />);
       expect(screen.getByText("wss://agents.example.com/test-agent/ws")).toBeInTheDocument();
     });
 
@@ -73,7 +124,7 @@ describe("ConnectCard", () => {
       const agent = makeAgent({
         status: { facade: { endpoints: [validWssEndpoint] } },
       });
-      render(<ConnectCard agent={agent} />);
+      render(<ConnectCard agent={agent} workspace="ws1" />);
       const btn = screen.getByRole("button", { name: /copy url/i });
       expect(btn).toBeInTheDocument();
     });
@@ -82,7 +133,7 @@ describe("ConnectCard", () => {
       const agent = makeAgent({
         status: { facade: { endpoints: [validWssEndpoint] } },
       });
-      render(<ConnectCard agent={agent} />);
+      render(<ConnectCard agent={agent} workspace="ws1" />);
       expect(screen.getByText("WSS")).toBeInTheDocument();
     });
 
@@ -90,7 +141,7 @@ describe("ConnectCard", () => {
       const agent = makeAgent({
         status: { facade: { endpoints: [validWssEndpoint] } },
       });
-      render(<ConnectCard agent={agent} />);
+      render(<ConnectCard agent={agent} workspace="ws1" />);
       expect(screen.getByText("websocket")).toBeInTheDocument();
     });
   });
@@ -100,7 +151,7 @@ describe("ConnectCard", () => {
       const agent = makeAgent({
         status: { facade: { endpoints: [invalidEndpoint] } },
       });
-      render(<ConnectCard agent={agent} />);
+      render(<ConnectCard agent={agent} workspace="ws1" />);
       expect(screen.getByText("Not connectable")).toBeInTheDocument();
     });
 
@@ -108,7 +159,7 @@ describe("ConnectCard", () => {
       const agent = makeAgent({
         status: { facade: { endpoints: [invalidEndpoint] } },
       });
-      render(<ConnectCard agent={agent} />);
+      render(<ConnectCard agent={agent} workspace="ws1" />);
       expect(
         screen.getByText("path prefix is not stripped before the facade"),
       ).toBeInTheDocument();
@@ -120,7 +171,7 @@ describe("ConnectCard", () => {
       const agent = makeAgent({
         status: { facade: { endpoints: [] } },
       });
-      render(<ConnectCard agent={agent} />);
+      render(<ConnectCard agent={agent} workspace="ws1" />);
       expect(
         screen.getByText(/no external endpoints/i),
       ).toBeInTheDocument();
@@ -128,7 +179,7 @@ describe("ConnectCard", () => {
 
     it("renders internal-only empty state when facade is undefined", () => {
       const agent = makeAgent({ status: {} });
-      render(<ConnectCard agent={agent} />);
+      render(<ConnectCard agent={agent} workspace="ws1" />);
       expect(
         screen.getByText(/no external endpoints/i),
       ).toBeInTheDocument();
@@ -136,7 +187,7 @@ describe("ConnectCard", () => {
 
     it("renders internal-only empty state when status is undefined", () => {
       const agent = makeAgent({ status: undefined });
-      render(<ConnectCard agent={agent} />);
+      render(<ConnectCard agent={agent} workspace="ws1" />);
       expect(
         screen.getByText(/no external endpoints/i),
       ).toBeInTheDocument();
@@ -144,7 +195,7 @@ describe("ConnectCard", () => {
 
     it("renders a link to expose-agents docs", () => {
       const agent = makeAgent({ status: {} });
-      render(<ConnectCard agent={agent} />);
+      render(<ConnectCard agent={agent} workspace="ws1" />);
       const link = screen.getByRole("link", { name: /expose agents externally/i });
       expect(link).toBeInTheDocument();
       expect(link).toHaveAttribute("href", "https://omnia.altairalabs.ai/how-to/expose-agents/");
@@ -163,7 +214,7 @@ describe("ConnectCard", () => {
         },
         status: { facade: { endpoints: [validWssEndpoint] } },
       });
-      render(<ConnectCard agent={agent} />);
+      render(<ConnectCard agent={agent} workspace="ws1" />);
       expect(screen.getByText("Bearer token")).toBeInTheDocument();
       expect(screen.getByText("Secret `my-agent-token`")).toBeInTheDocument();
     });
@@ -179,7 +230,7 @@ describe("ConnectCard", () => {
         },
         status: { facade: { endpoints: [validWssEndpoint] } },
       });
-      render(<ConnectCard agent={agent} />);
+      render(<ConnectCard agent={agent} workspace="ws1" />);
       expect(screen.getByText("OIDC")).toBeInTheDocument();
       expect(screen.getByText("https://auth.example.com")).toBeInTheDocument();
     });
@@ -188,7 +239,7 @@ describe("ConnectCard", () => {
       const agent = makeAgent({
         status: { facade: { endpoints: [validWssEndpoint] } },
       });
-      render(<ConnectCard agent={agent} />);
+      render(<ConnectCard agent={agent} workspace="ws1" />);
       expect(screen.getByText("Management-plane only")).toBeInTheDocument();
     });
   });
