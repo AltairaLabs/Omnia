@@ -187,6 +187,44 @@ describe("workspace-route-helpers", () => {
       // Verify logging was called
       expect(mockLogError).toHaveBeenCalled();
     });
+
+    it("surfaces a 422 validation error with the real message (#1600 follow-up)", async () => {
+      vi.mocked(isForbiddenError).mockReturnValue(false);
+      const error = Object.assign(
+        new Error("HTTP-Code: 422\nMessage: Unknown API Status Code!"),
+        {
+          body: JSON.stringify({
+            message:
+              'ToolRegistry "x" is invalid: spec.handlers[0].name: Invalid value: "Api": should match ...',
+            reason: "Invalid",
+            code: 422,
+          }),
+        }
+      );
+
+      const response = handleK8sError(error, "create tool registry");
+
+      expect(response.status).toBe(422);
+      const json = await response.json();
+      expect(json.error).toContain("spec.handlers[0].name");
+      expect(json.error).not.toContain("Unknown API Status Code");
+    });
+
+    it("surfaces a 409 AlreadyExists conflict at 409", async () => {
+      vi.mocked(isForbiddenError).mockReturnValue(false);
+      const error = Object.assign(new Error("HTTP-Code: 409"), {
+        body: JSON.stringify({
+          message: 'toolregistries.omnia.altairalabs.ai "x" already exists',
+          reason: "AlreadyExists",
+          code: 409,
+        }),
+      });
+
+      const response = handleK8sError(error, "create tool registry");
+
+      expect(response.status).toBe(409);
+      expect((await response.json()).error).toContain("already exists");
+    });
   });
 
   describe("buildCrdResource", () => {
