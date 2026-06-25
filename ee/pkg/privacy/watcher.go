@@ -287,6 +287,11 @@ func (w *PolicyWatcher) toEffective(p *omniav1alpha1.SessionPrivacyPolicy) *Effe
 		Recording:  p.Spec.Recording,
 		UserOptOut: p.Spec.UserOptOut,
 	}
+	// richData is the deprecated alias for runtimeData; honor it so existing
+	// policies keep working after the rename.
+	if eff.Recording.RichData { //nolint:staticcheck // intentional: honor the deprecated alias
+		eff.Recording.RuntimeData = true
+	}
 	if p.Spec.Encryption != nil {
 		eff.Encryption = *p.Spec.Encryption
 	}

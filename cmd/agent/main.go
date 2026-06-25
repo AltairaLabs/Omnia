@@ -183,7 +183,8 @@ func sessionStoreFromResolver(
 		return session.NewMemoryStore(), agent.SessionStoreModeMemory, nil
 	}
 	log.Info("using session-api HTTP store", "url", urls.SessionURL)
-	return httpclient.NewStore(urls.SessionURL, log), agent.SessionStoreModeHTTPClient, nil
+	return httpclient.NewStore(urls.SessionURL, log, httpclient.WithSource(session.SourceFacade)),
+		agent.SessionStoreModeHTTPClient, nil
 }
 
 func buildK8sClient() client.Client {

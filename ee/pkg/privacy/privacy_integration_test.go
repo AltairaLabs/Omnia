@@ -970,12 +970,12 @@ func TestIntegration_RichDataDisabled_AllowsUserMessage(t *testing.T) {
 	assert.True(t, *called)
 }
 
-func TestIntegration_RichDataDisabled_BlocksToolCallEndpoint(t *testing.T) {
+func TestIntegration_RuntimeDataDisabled_AllowsToolCallEndpoint(t *testing.T) {
 	spec := omniav1alpha1.SessionPrivacyPolicySpec{
 
 		Recording: omniav1alpha1.RecordingConfig{
-			Enabled:  true,
-			RichData: false,
+			Enabled:     true,
+			RuntimeData: false,
 		},
 	}
 	handler, called := integrationBuildMiddleware(t, spec)
@@ -985,9 +985,11 @@ func TestIntegration_RichDataDisabled_BlocksToolCallEndpoint(t *testing.T) {
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
-	assert.Equal(t, http.StatusNoContent, rec.Code,
-		"tool-call endpoint is always rich content; must be blocked when RichData=false")
-	assert.False(t, *called)
+	// Tool calls are structured records, not message content — recorded
+	// regardless of runtimeData (only /messages is content-gated).
+	assert.NotEqual(t, http.StatusNoContent, rec.Code,
+		"tool-call endpoint is a structured record; recorded even when runtimeData=false")
+	assert.True(t, *called)
 }
 
 func TestPrivacyIntegration_UnknownSessionPassesThrough(t *testing.T) {
