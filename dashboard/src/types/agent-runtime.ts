@@ -27,6 +27,15 @@ export interface FacadeConfig {
   port?: number;
   handler?: HandlerMode;
   mcp?: MCPConfig;
+  /** expose opts the agent into operator-provisioned external exposure (#1553/#1611). */
+  expose?: FacadeExposeConfig;
+}
+
+/** FacadeExposeConfig opts an agent into operator-provisioned external exposure. */
+export interface FacadeExposeConfig {
+  enabled?: boolean;
+  /** host overrides the generated {name}.{namespace}.{baseDomain} hostname. */
+  host?: string;
 }
 
 export interface ToolRegistryRef {
