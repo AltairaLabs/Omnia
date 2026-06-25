@@ -10,6 +10,7 @@ vi.mock("@/lib/auth", () => ({
 }));
 
 vi.mock("@/lib/k8s/crd-operations", () => ({
+  isForbiddenError: vi.fn(() => false),
   listSharedCrd: vi.fn(),
   extractK8sErrorMessage: vi.fn((error: unknown) =>
     error instanceof Error ? error.message : String(error)
