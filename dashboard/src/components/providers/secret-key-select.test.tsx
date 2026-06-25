@@ -44,4 +44,59 @@ describe("SecretKeySelect", () => {
     screen.getByRole("button", { name: /add credential secret/i }).click();
     expect(onAdd).toHaveBeenCalled();
   });
+
+  it("calls onSecretKeyChange with empty string when selecting the default sentinel", async () => {
+    setSecrets([{ name: "anthropic-creds", namespace: "ns", keys: ["ANTHROPIC_API_KEY", "alt"] }]);
+    const onKeyChange = vi.fn();
+    render(
+      <SecretKeySelect
+        namespace="ns" secretName="anthropic-creds" secretKey="ANTHROPIC_API_KEY"
+        onSecretNameChange={() => {}} onSecretKeyChange={onKeyChange} idPrefix="cred"
+      />
+    );
+    // Open the key dropdown
+    const keySelect = screen.getByTestId("cred-key-select");
+    fireEvent.click(keySelect);
+    // Click the default sentinel option
+    const defaultOption = await screen.findByRole("option", { name: /use provider default/i });
+    fireEvent.click(defaultOption);
+    // Should call with "" (empty string), not the sentinel
+    expect(onKeyChange).toHaveBeenCalledWith("");
+  });
+
+  it("calls onSecretKeyChange with the key value when selecting a real key", async () => {
+    setSecrets([{ name: "anthropic-creds", namespace: "ns", keys: ["ANTHROPIC_API_KEY", "alt"] }]);
+    const onKeyChange = vi.fn();
+    render(
+      <SecretKeySelect
+        namespace="ns" secretName="anthropic-creds" secretKey=""
+        onSecretNameChange={() => {}} onSecretKeyChange={onKeyChange} idPrefix="cred"
+      />
+    );
+    // Open the key dropdown
+    const keySelect = screen.getByTestId("cred-key-select");
+    fireEvent.click(keySelect);
+    // Click a real key option
+    const keyOption = await screen.findByRole("option", { name: "ANTHROPIC_API_KEY" });
+    fireEvent.click(keyOption);
+    // Should call with the key value
+    expect(onKeyChange).toHaveBeenCalledWith("ANTHROPIC_API_KEY");
+  });
+
+  it("shows add-secret button in the non-empty state and calls onAddSecret when clicked", () => {
+    setSecrets([{ name: "anthropic-creds", namespace: "ns", keys: ["ANTHROPIC_API_KEY", "alt"] }]);
+    const onAdd = vi.fn();
+    render(
+      <SecretKeySelect
+        namespace="ns" secretName="anthropic-creds" secretKey="ANTHROPIC_API_KEY"
+        onSecretNameChange={() => {}} onSecretKeyChange={() => {}} idPrefix="cred" onAddSecret={onAdd}
+      />
+    );
+    // Add-secret button should be present in the non-empty state (secret selection area)
+    const addButton = screen.getByRole("button", { name: /add credential secret/i });
+    expect(addButton).toBeTruthy();
+    // Click it
+    addButton.click();
+    expect(onAdd).toHaveBeenCalled();
+  });
 });
