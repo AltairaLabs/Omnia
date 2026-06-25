@@ -87,6 +87,12 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Resolve the pack's entry point from the pack itself (workflow.entry /
+	// agents.entry / sole prompt) rather than relying on a hardcoded prompt name.
+	// A pack whose entry isn't literally "default" then serves without renaming
+	// (#1595); multi-prompt plain packs still fall back to cfg.PromptName.
+	cfg.PromptName = pkruntime.ResolvePackEntry(cfg.PromptPackPath, cfg.PromptName, log)
+
 	log.Info("starting runtime",
 		"agent", cfg.AgentName,
 		"namespace", cfg.Namespace,
