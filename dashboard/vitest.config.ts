@@ -82,6 +82,7 @@ export default defineConfig({
         "src/app/providers/**/page.tsx", // Provider pages (require full context)
         "src/app/settings/**/page.tsx", // Settings pages (require full context)
         "src/app/toolregistries/**/page.tsx", // Tool registry pages (require full context)
+        "src/app/tools/**/page.tsx", // Tool detail pages (require full context)
         "src/app/workspaces/**/page.tsx", // Workspace pages (require full context)
         "src/app/cli/**/page.tsx", // CLI login picker (server component, requires live auth/session/K8s)
         "src/middleware.ts",

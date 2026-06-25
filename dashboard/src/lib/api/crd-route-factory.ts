@@ -46,6 +46,7 @@ interface CrdMetadata {
   namespace?: string;
   labels?: Record<string, string>;
   annotations?: Record<string, string>;
+  resourceVersion?: string;
 }
 
 /**
@@ -357,6 +358,8 @@ export function createItemRoutes<T extends CrdResource>(config: ItemRouteConfig)
           ...result.resource.metadata?.annotations,
           ...body.metadata?.annotations,
         },
+        resourceVersion:
+          body.metadata?.resourceVersion ?? result.resource.metadata?.resourceVersion,
       },
       spec: body.spec || result.resource.spec,
     };

@@ -26,7 +26,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
-import { YamlBlock } from "@/components/ui/yaml-block";
+import { ToolRegistryConfigTab } from "@/components/tools/tool-registry-config-tab";
 import {
   Accordion,
   AccordionContent,
@@ -523,7 +523,7 @@ export default function ToolDetailPage({ params }: Readonly<PageProps>) {
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                <YamlBlock data={registry} />
+                <ToolRegistryConfigTab registry={registry} />
               </CardContent>
             </Card>
           </TabsContent>
