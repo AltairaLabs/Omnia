@@ -102,9 +102,10 @@ describe("GET /api/workspaces/[name]/deploy-profile", () => {
     const body = await res.json();
     expect(body.api_endpoint).toBe("https://omnia.example.com");
     expect(body.workspace).toBe("test-ws");
+    // Non-llm providers (embedder) are filtered out — only llm-role providers
+    // are deployable into spec.providers (#1596; missed in #1606's route test).
     expect(body.providers).toEqual([
       { name: "default", role: "llm", type: "claude", model: "claude-sonnet-4" },
-      { name: "embedder", role: "embedding", type: "openai", model: "text-embed-3" },
       { name: "legacy", role: "llm", type: "claude" },
     ]);
     expect(body.skills).toEqual([{ name: "docs-search", type: "git" }]);

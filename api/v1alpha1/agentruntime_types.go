@@ -142,6 +142,33 @@ type FacadeConfig struct {
 	// HTTP route on facade.port.
 	// +optional
 	MCP *MCPConfig `json:"mcp,omitempty"`
+
+	// expose opts this agent into operator-provisioned external exposure.
+	// Opt-in: an agent is never externally reachable unless this is set AND the
+	// platform has a default-exposure Gateway configured (Helm
+	// `defaultExposure`). When both hold, the operator creates a host-based
+	// HTTPRoute targeting this agent's facade Service, surfaced via
+	// status.facade.endpoints (#1553). Exposure does NOT add authentication —
+	// spec.externalAuth is still the gate; an exposed agent with no externalAuth
+	// validators is management-plane-only at the facade.
+	// +optional
+	Expose *FacadeExposeConfig `json:"expose,omitempty"`
+}
+
+// FacadeExposeConfig opts an agent into operator-provisioned external exposure
+// (#1553). See FacadeConfig.expose.
+type FacadeExposeConfig struct {
+	// enabled creates an external HTTPRoute for this agent. Requires the platform
+	// to have a default-exposure Gateway configured (Helm `defaultExposure`);
+	// when no Gateway is configured this is a no-op. Defaults to false.
+	// +optional
+	Enabled bool `json:"enabled,omitempty"`
+
+	// host overrides the generated hostname (`{name}.{namespace}.{baseDomain}`).
+	// Set for a custom domain on an individual agent. Must be a hostname the
+	// configured Gateway's listener accepts (e.g. covered by its TLS cert).
+	// +optional
+	Host string `json:"host,omitempty"`
 }
 
 // ToolRegistryRef references a ToolRegistry resource.

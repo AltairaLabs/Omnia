@@ -114,6 +114,8 @@ type AgentRuntimeReconciler struct {
 	// AgentWorkspaceReaderClusterRole is the name of the ClusterRole that grants
 	// agent pods read access to Workspace CRDs (for service URL resolution).
 	AgentWorkspaceReaderClusterRole string
+	// DefaultExposure configures external exposure (#1553). See DefaultExposureConfig.
+	DefaultExposure DefaultExposureConfig
 	// PolicyProxyImage is the container image for the ToolPolicy enforcement
 	// sidecar. When a ToolPolicy exists in the agent's namespace, this sidecar
 	// is injected into the agent pod to evaluate CEL rules before tool execution.
@@ -186,7 +188,7 @@ type AgentRuntimeReconciler struct {
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=clusterrolebindings,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=policy,resources=poddisruptionbudgets,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=keda.sh,resources=scaledobjects,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=gateway.networking.k8s.io,resources=httproutes,verbs=get;list;watch
+// +kubebuilder:rbac:groups=gateway.networking.k8s.io,resources=httproutes,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=gateway.networking.k8s.io,resources=gateways,verbs=get;list;watch
 
 // reconcileReferences fetches and validates all referenced resources.
@@ -402,6 +404,11 @@ func (r *AgentRuntimeReconciler) reconcileResources(
 	if err := r.reconcileFacadeRBAC(ctx, agentRuntime); err != nil {
 		log.Error(err, "Failed to reconcile facade RBAC")
 		// Don't fail the reconciliation for RBAC errors, just log
+	}
+
+	// Reconcile operator-provisioned external exposure (#1553); best-effort.
+	if err := r.reconcileFacadeRoute(ctx, agentRuntime); err != nil {
+		log.Error(err, "Failed to reconcile facade HTTPRoute")
 	}
 
 	// Reconcile tools ConfigMap
