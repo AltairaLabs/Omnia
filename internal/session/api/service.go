@@ -347,6 +347,9 @@ func (s *SessionService) AppendMessage(ctx context.Context, sessionID string, ms
 			s.log.V(2).Info("hot cache append skipped", "sessionID", sessionID, "reason", err.Error())
 		}
 	})
+	// Refresh the cached session blob so its message_count aggregate stays in
+	// sync with the warm store's increment.
+	s.refreshHotCacheSession(sessionID)
 	if msg.Role == session.RoleAssistant {
 		s.publishMessageEvent(ctx, sessionID, msg)
 	}
@@ -445,15 +448,6 @@ func (s *SessionService) updateStatusFallback(ctx context.Context, sessionID str
 	return nil
 }
 
-// refreshHotCacheTTL extends the hot cache TTL for an active session.
-func (s *SessionService) refreshHotCacheTTL(sessionID string) {
-	s.pushToHotCache(func(ctx context.Context, hot providers.HotCacheProvider) {
-		if err := hot.RefreshTTL(ctx, sessionID, s.cacheTTL); err != nil {
-			s.log.V(2).Info("hot cache TTL refresh skipped", "sessionID", sessionID, "reason", err.Error())
-		}
-	})
-}
-
 // RefreshTTL extends the expiry of a session.
 func (s *SessionService) RefreshTTL(ctx context.Context, sessionID string, ttl time.Duration) error {
 	if sessionID == "" {
@@ -477,7 +471,13 @@ func (s *SessionService) RecordToolCall(ctx context.Context, sessionID string, t
 	if err != nil {
 		return ErrWarmStoreRequired
 	}
-	return warm.RecordToolCall(ctx, sessionID, tc)
+	if err := warm.RecordToolCall(ctx, sessionID, tc); err != nil {
+		return err
+	}
+	// Refresh the cached session blob so its tool_call_count aggregate stays in
+	// sync with the warm store's increment.
+	s.refreshHotCacheSession(sessionID)
+	return nil
 }
 
 // RecordProviderCall records a provider call via the warm store.
@@ -489,7 +489,13 @@ func (s *SessionService) RecordProviderCall(ctx context.Context, sessionID strin
 	if err != nil {
 		return ErrWarmStoreRequired
 	}
-	return warm.RecordProviderCall(ctx, sessionID, pc)
+	if err := warm.RecordProviderCall(ctx, sessionID, pc); err != nil {
+		return err
+	}
+	// Refresh the cached session blob so its token/cost aggregates stay in sync
+	// with the warm store's increment.
+	s.refreshHotCacheSession(sessionID)
+	return nil
 }
 
 // GetToolCalls retrieves tool calls for a session via the warm store.
@@ -538,67 +544,6 @@ func (s *SessionService) GetRuntimeEvents(ctx context.Context, sessionID string,
 		return nil, ErrWarmStoreRequired
 	}
 	return warm.GetRuntimeEvents(ctx, sessionID, opts)
-}
-
-// getFromHot attempts to retrieve a session from the hot cache.
-func (s *SessionService) getFromHot(ctx context.Context, sessionID string) (*session.Session, error) {
-	hot, err := s.registry.HotCache()
-	if err != nil {
-		return nil, err
-	}
-	return hot.GetSession(ctx, sessionID)
-}
-
-// getFromWarm attempts to retrieve a session from the warm store.
-func (s *SessionService) getFromWarm(ctx context.Context, sessionID string) (*session.Session, error) {
-	warm, err := s.registry.WarmStore()
-	if err != nil {
-		return nil, err
-	}
-	return warm.GetSession(ctx, sessionID)
-}
-
-// getFromCold attempts to retrieve a session from the cold archive.
-func (s *SessionService) getFromCold(ctx context.Context, sessionID string) (*session.Session, error) {
-	cold, err := s.registry.ColdArchive()
-	if err != nil {
-		return nil, err
-	}
-	return cold.GetSession(ctx, sessionID)
-}
-
-// populateHotCache stores a session in the hot cache on a best-effort basis.
-func (s *SessionService) populateHotCache(ctx context.Context, sess *session.Session) {
-	hot, err := s.registry.HotCache()
-	if err != nil {
-		s.requestLog(ctx).V(1).Info("hot cache unavailable, skipping populate", "error", err.Error())
-		return
-	}
-	if err := hot.SetSession(ctx, sess, s.cacheTTL); err != nil {
-		s.requestLog(ctx).Error(err, "failed to populate hot cache", "sessionID", sess.ID)
-		return
-	}
-	s.requestLog(ctx).V(2).Info("hot cache populated", "sessionID", sess.ID)
-}
-
-// pushToHotCache runs a hot-cache write operation in a bounded goroutine.
-// If no hot cache is configured or the concurrency limit is reached, the call is dropped.
-func (s *SessionService) pushToHotCache(fn func(ctx context.Context, hot providers.HotCacheProvider)) {
-	hot, err := s.registry.HotCache()
-	if err != nil {
-		return // Hot cache not configured — no-op.
-	}
-	select {
-	case s.hotCacheSem <- struct{}{}:
-		go func() {
-			defer func() { <-s.hotCacheSem }()
-			ctx, cancel := context.WithTimeout(context.Background(), hotCacheTimeout)
-			defer cancel()
-			fn(ctx, hot)
-		}()
-	default:
-		s.log.V(1).Info("hot cache push dropped", "reason", "backpressure")
-	}
 }
 
 // isHotEligible returns true if the query can be served from the hot cache.
