@@ -965,7 +965,8 @@ describe("ProviderDialog", () => {
       fireEvent.click(screen.getByLabelText("Auth"));
       fireEvent.click(await screen.findByRole("option", { name: "servicePrincipal" }));
 
-      await user.type(screen.getByLabelText("Credentials Secret Name"), "azure-creds");
+      fireEvent.click(document.getElementById("auth-secret-select")!);
+      fireEvent.click(await screen.findByRole("option", { name: "azure-creds" }));
 
       fireEvent.click(screen.getByRole("button", { name: /create provider/i }));
 
@@ -1048,6 +1049,31 @@ describe("ProviderDialog", () => {
       expect(screen.getByRole("option", { name: "accessKey" })).toBeInTheDocument();
       expect(screen.queryByRole("option", { name: "serviceAccount" })).not.toBeInTheDocument();
       expect(screen.queryByRole("option", { name: "servicePrincipal" })).not.toBeInTheDocument();
+    });
+
+    it("renders secret dropdowns (auth-secret-select / auth-key-select) for auth ref, not free-text inputs", async () => {
+      setMockSecrets([
+        { name: "azure-creds", namespace: "test-namespace", keys: ["CLIENT_SECRET"] },
+      ]);
+
+      render(
+        <TestWrapper>
+          <ProviderDialog open={true} onOpenChange={vi.fn()} />
+        </TestWrapper>
+      );
+
+      fireEvent.click(screen.getByLabelText("Platform"));
+      fireEvent.click(await screen.findByRole("option", { name: /Azure AI Foundry/i }));
+
+      fireEvent.click(screen.getByLabelText("Auth"));
+      fireEvent.click(await screen.findByRole("option", { name: "servicePrincipal" }));
+
+      // Dropdowns must be present
+      expect(document.getElementById("auth-secret-select")).toBeTruthy();
+      expect(document.getElementById("auth-key-select")).toBeTruthy();
+      // Old free-text inputs must NOT be present
+      expect(document.getElementById("auth-secret-name")).toBeNull();
+      expect(document.getElementById("auth-secret-key")).toBeNull();
     });
 
   });

@@ -900,9 +900,11 @@ function HeadersFields({
 function PlatformFields({
   form,
   updateForm,
+  namespace,
 }: Readonly<{
   form: FormState;
   updateForm: <K extends keyof FormState>(key: K, value: FormState[K]) => void;
+  namespace?: string;
 }>) {
   const authOptions =
     form.platformType ? AUTH_BY_PLATFORM[form.platformType] : [];
@@ -1044,26 +1046,14 @@ function PlatformFields({
           )}
 
           {form.authType && form.authType !== "workloadIdentity" && (
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="auth-secret-name">Credentials Secret Name</Label>
-                <Input
-                  id="auth-secret-name"
-                  placeholder="my-cloud-credentials"
-                  value={form.authSecretName}
-                  onChange={(e) => updateForm("authSecretName", e.target.value)}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="auth-secret-key">Key (optional)</Label>
-                <Input
-                  id="auth-secret-key"
-                  placeholder=""
-                  value={form.authSecretKey}
-                  onChange={(e) => updateForm("authSecretKey", e.target.value)}
-                />
-              </div>
-            </div>
+            <SecretKeySelect
+              idPrefix="auth"
+              namespace={namespace}
+              secretName={form.authSecretName}
+              secretKey={form.authSecretKey}
+              onSecretNameChange={(v) => updateForm("authSecretName", v)}
+              onSecretKeyChange={(v) => updateForm("authSecretKey", v)}
+            />
           )}
         </>
       )}
@@ -1490,7 +1480,7 @@ function ProviderDialogForm({
             />
           </div>
 
-          {showPlatform && <PlatformFields form={formState} updateForm={updateForm} />}
+          {showPlatform && <PlatformFields form={formState} updateForm={updateForm} namespace={currentWorkspace?.namespace} />}
 
           {/* Role-specific config blocks (CEL-gated; at most one of tts/stt/embedding) */}
           {formState.role === "tts" && <TTSFields form={formState} updateForm={updateForm} />}
