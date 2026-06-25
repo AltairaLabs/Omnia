@@ -32,6 +32,7 @@ import {
 import { AlertCircle, Loader2, ChevronDown, Plus, Trash2 } from "lucide-react";
 import type { Provider, ProviderSpec } from "@/types/generated/provider";
 import { SecretKeySelect } from "./secret-key-select";
+import { AddCredentialSecretDialog } from "@/components/credentials/add-credential-secret-dialog";
 
 // --- Types ---
 
@@ -616,10 +617,12 @@ function CredentialFields({
   form,
   updateForm,
   namespace,
+  onAddSecret,
 }: Readonly<{
   form: FormState;
   updateForm: <K extends keyof FormState>(key: K, value: FormState[K]) => void;
   namespace?: string;
+  onAddSecret?: () => void;
 }>) {
   const envErr = envVarError(form.credentialEnvVar);
   return (
@@ -652,6 +655,7 @@ function CredentialFields({
           secretKey={form.credentialSecretKey}
           onSecretNameChange={(v) => updateForm("credentialSecretName", v)}
           onSecretKeyChange={(v) => updateForm("credentialSecretKey", v)}
+          onAddSecret={onAddSecret}
         />
       )}
 
@@ -1309,6 +1313,9 @@ function ProviderDialogForm({
   const { currentWorkspace } = useWorkspace();
   const [formState, setFormState] = useState<FormState>(() => getInitialFormState(provider));
   const [error, setError] = useState<string | null>(null);
+  const [showAddSecret, setShowAddSecret] = useState(false);
+
+  const namespace = currentWorkspace?.namespace;
 
   const updateForm = <K extends keyof FormState>(key: K, value: FormState[K]) => {
     setFormState((prev) => ({ ...prev, [key]: value }));
@@ -1480,7 +1487,7 @@ function ProviderDialogForm({
             />
           </div>
 
-          {showPlatform && <PlatformFields form={formState} updateForm={updateForm} namespace={currentWorkspace?.namespace} />}
+          {showPlatform && <PlatformFields form={formState} updateForm={updateForm} namespace={namespace} />}
 
           {/* Role-specific config blocks (CEL-gated; at most one of tts/stt/embedding) */}
           {formState.role === "tts" && <TTSFields form={formState} updateForm={updateForm} />}
@@ -1494,10 +1501,19 @@ function ProviderDialogForm({
             <div className="border rounded-lg p-4 space-y-4">
               <Label className="text-base font-semibold">Credentials</Label>
               <CredentialFields
-            form={formState}
-            updateForm={updateForm}
-            namespace={currentWorkspace?.namespace}
-          />
+                form={formState}
+                updateForm={updateForm}
+                namespace={namespace}
+                onAddSecret={() => setShowAddSecret(true)}
+              />
+              <a
+                href="https://omnia.altairalabs.ai/docs/how-to/manage-credentials"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-xs text-primary hover:underline"
+              >
+                How to add credentials
+              </a>
             </div>
           )}
 
@@ -1524,6 +1540,16 @@ function ProviderDialogForm({
           {isEditing ? "Save Changes" : "Create Provider"}
         </Button>
       </DialogFooter>
+
+      <AddCredentialSecretDialog
+        open={showAddSecret}
+        onOpenChange={setShowAddSecret}
+        namespace={namespace}
+        onCreated={(name) => {
+          updateForm("credentialSecretName", name);
+          setShowAddSecret(false);
+        }}
+      />
     </DialogContent>
   );
 }

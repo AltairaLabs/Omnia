@@ -8,12 +8,15 @@ import type { Provider } from "@/types/generated/provider";
 // Mock @/hooks/resources — must be hoisted before importing the component.
 // provider-dialog.tsx imports useProviderMutations from @/hooks/resources.
 // SecretKeySelect imports useSecrets from @/hooks/resources.
+// AddCredentialSecretDialog uses useCreateSecret from @/hooks/resources.
 vi.mock("@/hooks/resources", () => ({
   useSecrets: vi.fn(),
   useProviderMutations: vi.fn(),
+  useCreateSecret: vi.fn(),
+  useNamespaces: vi.fn(),
 }));
 
-import { useSecrets, useProviderMutations } from "@/hooks/resources";
+import { useSecrets, useProviderMutations, useCreateSecret, useNamespaces } from "@/hooks/resources";
 
 // Default secrets list used by most tests
 const DEFAULT_TEST_SECRETS = [
@@ -63,6 +66,15 @@ function setMockMutations() {
   });
 }
 
+function setDefaultResourceMocks() {
+  vi.mocked(useNamespaces).mockReturnValue({ data: ["default", "test-namespace"] } as never);
+  vi.mocked(useCreateSecret).mockReturnValue({
+    mutateAsync: vi.fn().mockResolvedValue({}),
+    isPending: false,
+    error: null,
+  } as never);
+}
+
 // Helper to create a mock Provider
 function createMockProvider(overrides?: Partial<Provider>): Provider {
   return {
@@ -102,6 +114,7 @@ describe("ProviderDialog", () => {
     vi.clearAllMocks();
     setMockSecrets();
     setMockMutations();
+    setDefaultResourceMocks();
     mockCreateProvider.mockResolvedValue(createMockProvider());
     mockUpdateProvider.mockResolvedValue(createMockProvider());
   });
@@ -1584,6 +1597,99 @@ describe("ProviderDialog", () => {
           })
         );
       });
+    });
+  });
+
+  describe("inline add-secret (Task 6)", () => {
+    it("shows 'Add credential secret' button when no secrets exist and clicking it opens the add dialog", async () => {
+      vi.useRealTimers();
+
+      // Return empty secrets so SecretKeySelect renders the empty state
+      vi.mocked(useSecrets).mockReturnValue({ data: [], isLoading: false, error: null } as never);
+
+      render(
+        <TestWrapper>
+          <ProviderDialog open={true} onOpenChange={vi.fn()} />
+        </TestWrapper>
+      );
+
+      // The empty-state button from SecretKeySelect
+      const addBtn = screen.getByRole("button", { name: /add credential secret/i });
+      expect(addBtn).toBeInTheDocument();
+
+      // Clicking opens the AddCredentialSecretDialog
+      fireEvent.click(addBtn);
+
+      // The dialog title should appear
+      await waitFor(() => {
+        expect(screen.getByRole("heading", { name: /add provider credentials/i })).toBeInTheDocument();
+      });
+    });
+
+    it("on create, the new secret name becomes credentialSecretName and the add dialog closes", async () => {
+      vi.useRealTimers();
+      const user = userEvent.setup();
+
+      // Start with no secrets so the empty-state trigger renders
+      vi.mocked(useSecrets).mockReturnValue({ data: [], isLoading: false, error: null } as never);
+
+      const mockMutateAsync = vi.fn().mockResolvedValue({});
+      vi.mocked(useCreateSecret).mockReturnValue({
+        mutateAsync: mockMutateAsync,
+        isPending: false,
+        error: null,
+      } as never);
+
+      render(
+        <TestWrapper>
+          <ProviderDialog open={true} onOpenChange={vi.fn()} />
+        </TestWrapper>
+      );
+
+      // Open the add-secret dialog
+      fireEvent.click(screen.getByRole("button", { name: /add credential secret/i }));
+
+      await waitFor(() => {
+        expect(screen.getByRole("heading", { name: /add provider credentials/i })).toBeInTheDocument();
+      });
+
+      // Fill in the secret name
+      const secretNameInput = screen.getByPlaceholderText(/e\.g\., anthropic-credentials/i);
+      await user.type(secretNameInput, "my-new-secret");
+
+      // Fill in a key-value pair
+      const keyInput = screen.getByPlaceholderText(/key.*openai_api_key/i);
+      await user.type(keyInput, "ANTHROPIC_API_KEY");
+
+      const valueInput = screen.getByPlaceholderText(/value/i);
+      await user.type(valueInput, "sk-test-key");
+
+      // Submit the create dialog
+      fireEvent.click(screen.getByRole("button", { name: /^create$/i }));
+
+      await waitFor(() => {
+        expect(mockMutateAsync).toHaveBeenCalledWith(
+          expect.objectContaining({ name: "my-new-secret" })
+        );
+      });
+
+      // After creation, the add dialog should close
+      await waitFor(() => {
+        expect(screen.queryByRole("heading", { name: /add provider credentials/i })).not.toBeInTheDocument();
+      });
+    });
+
+    it("renders the 'How to add credentials' docs link", () => {
+      render(
+        <TestWrapper>
+          <ProviderDialog open={true} onOpenChange={vi.fn()} />
+        </TestWrapper>
+      );
+
+      const link = screen.getByRole("link", { name: /how to add credentials/i });
+      expect(link).toBeInTheDocument();
+      expect(link).toHaveAttribute("href", "https://omnia.altairalabs.ai/docs/how-to/manage-credentials");
+      expect(link).toHaveAttribute("target", "_blank");
     });
   });
 });
