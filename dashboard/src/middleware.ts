@@ -40,6 +40,13 @@ const PUBLIC_PATH_PREFIXES: readonly string[] = [
   "/api/auth/refresh",
   "/api/auth/session", // session liveness probe — intentionally unauthenticated so expiry is detectable
   "/api/auth/builtin/", // signup / forgot-password / reset-password / verify-email
+  // CLI browser-login entry points — both self-authenticate, so they must run
+  // unauthenticated rather than be 401'd by the middleware. authorize validates
+  // the loopback callback + CLI state and redirects to login itself; token
+  // consumes a one-time exchange code (no session). grant is NOT public — it
+  // requires the browser session and does its own same-origin + auth checks.
+  "/api/cli/authorize",
+  "/api/cli/token",
   "/api/health",
   "/api/config", // needed by the login page to pick the provider button
   "/api/license",
