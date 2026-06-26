@@ -805,7 +805,11 @@ type PrivacyPolicyResponse struct {
 	Recording struct {
 		Enabled    bool `json:"enabled"`
 		FacadeData bool `json:"facadeData"`
-		RichData   bool `json:"richData"`
+		// RuntimeData gates runtime-emitted message content (assistant turns).
+		RuntimeData bool `json:"runtimeData"`
+		// RichData is the deprecated alias for RuntimeData; the facade treats
+		// either being true as "record runtime content".
+		RichData bool `json:"richData"`
 	} `json:"recording"`
 }
 
