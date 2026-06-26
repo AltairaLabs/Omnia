@@ -2,8 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { Lock, AlertTriangle } from "lucide-react";
-import { usePermissions } from "@/hooks/use-permissions";
-import type { PermissionType } from "@/lib/auth/permissions";
+import { useWorkspacePermissions } from "@/hooks/use-workspace-permissions";
 import { useReadOnly } from "@/hooks/use-read-only";
 import { YamlBlock } from "@/components/ui/yaml-block";
 import { YamlEditor } from "@/components/arena/yaml-editor";
@@ -36,7 +35,6 @@ export interface EditableConfigPanelProps {
   readonly kind: string;
   readonly name: string;
   readonly resource: EditableResource;
-  readonly editPermission: PermissionType;
   readonly onSave: (body: UpdateResourceBody) => Promise<EditableResource>;
 }
 
@@ -54,10 +52,13 @@ export function EditableConfigPanel({
   kind,
   name,
   resource,
-  editPermission,
   onSave,
 }: EditableConfigPanelProps) {
-  const { can } = usePermissions();
+  // Edit rights are workspace-scoped: a ToolRegistry (and the other CRDs this
+  // panel serves) lives in a workspace, so the user's role *in that workspace*
+  // governs edit — not their global role. Gating on the global usePermissions()
+  // wrongly blocked workspace editors.
+  const { canWrite } = useWorkspacePermissions();
   const { isReadOnly, message } = useReadOnly();
 
   const initialYaml = useMemo(() => sanitizeResourceForEditor(resource), [resource]);
@@ -66,7 +67,7 @@ export function EditableConfigPanel({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const editable = can(editPermission) && !isReadOnly;
+  const editable = canWrite && !isReadOnly;
   const dirty = value !== initialYaml;
   const valid = isEditableYaml(value);
 

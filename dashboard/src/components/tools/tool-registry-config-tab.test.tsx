@@ -25,13 +25,12 @@ vi.mock("@/components/resources/editable-config-panel", () => ({
 vi.mock("@/hooks/use-permissions", () => ({ Permission: { TOOLS_EDIT: "tools:edit" } }));
 
 describe("ToolRegistryConfigTab", () => {
-  it("mounts EditableConfigPanel with ToolRegistry kind, name and edit permission", () => {
+  it("mounts EditableConfigPanel with the ToolRegistry kind and name", () => {
     const registry = { metadata: { name: "gh" }, spec: { handlers: [] } } as never;
     render(<ToolRegistryConfigTab registry={registry} />);
     expect(screen.getByTestId("panel")).toBeInTheDocument();
     expect(panelProps.kind).toBe("ToolRegistry");
     expect(panelProps.name).toBe("gh");
-    expect(panelProps.editPermission).toBe("tools:edit");
   });
 
   it("falls back to an empty name when metadata.name is missing", () => {
