@@ -7,6 +7,7 @@ import * as yaml from "js-yaml";
 import { cn } from "@/lib/utils";
 import { Loader2, AlertTriangle, CheckCircle } from "lucide-react";
 import type { FileType } from "@/types/arena-project";
+import { yamlMonarchLanguage } from "@/lib/lsp/yaml-monarch";
 
 interface YamlEditorProps {
   readonly value: string;
@@ -133,6 +134,24 @@ export function YamlEditor({
 
       // Configure YAML-specific settings
       if (isYaml) {
+        // The @codingame editor-api (monaco-editor alias, used since the
+        // monaco-languageclient v8 migration) ships a stripped editor without
+        // the basic languages, so "yaml" isn't registered the way it is in
+        // vanilla monaco-editor. Register it (with a tokenizer for colouring)
+        // before configuring it, otherwise setLanguageConfiguration throws
+        // "Cannot set configuration for unknown language yaml" and the pane
+        // crashes. Mirrors lsp-yaml-editor.tsx.
+        const yamlRegistered = monaco.languages
+          .getLanguages()
+          .some((lang) => lang.id === "yaml");
+        if (!yamlRegistered) {
+          monaco.languages.register({
+            id: "yaml",
+            extensions: [".yaml", ".yml"],
+            aliases: ["YAML", "yaml"],
+          });
+          monaco.languages.setMonarchTokensProvider("yaml", yamlMonarchLanguage);
+        }
         monaco.languages.setLanguageConfiguration("yaml", {
           comments: { lineComment: "#" },
           brackets: [
