@@ -41,7 +41,7 @@ const MOCK_WORKSPACES = [
     environment: "production" as const,
     namespace: "production",
     role: "editor" as WorkspaceRole,
-    permissions: { view: true, create: true, edit: true, delete: false, scale: true },
+    permissions: ROLE_PERMISSIONS.editor,
     createdAt: new Date(Date.now() - 60 * 24 * 60 * 60 * 1000).toISOString(),
   },
   {
@@ -51,7 +51,7 @@ const MOCK_WORKSPACES = [
     environment: "staging" as const,
     namespace: "staging",
     role: "viewer" as WorkspaceRole,
-    permissions: { view: true, create: false, edit: false, delete: false, scale: false },
+    permissions: ROLE_PERMISSIONS.viewer,
     createdAt: new Date(Date.now() - 45 * 24 * 60 * 60 * 1000).toISOString(),
   },
 ];
