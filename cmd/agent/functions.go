@@ -111,21 +111,22 @@ func runFunctionsFacade(cfg *agent.Config, log logr.Logger, tracingProvider *tra
 	startFunctionsAndServe(log, facadeServer, healthServer, mcpServer, internalMCPServer)
 }
 
-// buildFunctionAuthChain loads the mgmt-plane + data-plane validator
-// chain. Failures are fatal — silent downgrade to no-auth would mask
-// a real misconfig. Returns the external chain (data-plane + mgmt-plane) and
-// the mgmt-plane validator separately so the internal MCP twin can run a
-// mgmt-plane-only chain.
+// buildFunctionAuthChain loads the external (data-plane-only) validator chain
+// for the public function HTTP route + external MCP listener, plus the
+// mgmt-plane validator separately so the internal MCP twin can run a
+// mgmt-plane-only chain. Failures are fatal — silent downgrade to no-auth would
+// mask a real misconfig. The management plane is fully isolated onto the
+// internal listener, so the external chain no longer carries the mgmt validator.
 func buildFunctionAuthChain(cfg *agent.Config, log logr.Logger) (auth.Chain, auth.Validator) {
 	mgmtPlane, err := loadMgmtPlaneValidator(log, cfg.AgentName, cfg.WorkspaceName)
 	if err != nil {
 		log.Error(err, "mgmt-plane validator load failed")
 		os.Exit(1)
 	}
-	chain, err := buildAuthChain(context.Background(), buildK8sClient(), log,
-		cfg.AgentName, cfg.Namespace, mgmtPlane)
+	chain, err := buildExternalChain(context.Background(), buildK8sClient(), log,
+		cfg.AgentName, cfg.Namespace)
 	if err != nil {
-		log.Error(err, "auth chain build failed")
+		log.Error(err, "external auth chain build failed")
 		os.Exit(1)
 	}
 	return chain, mgmtPlane

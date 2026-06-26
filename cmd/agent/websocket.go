@@ -245,13 +245,13 @@ func buildWebSocketServer(
 	}
 	k8sClient := buildK8sClient()
 
-	// External listener: data-plane validators followed by the mgmt-plane
-	// validator. Milestone A keeps mgmt on the external chain (additive, no
-	// breakage); Milestone C swaps buildAuthChain → buildExternalChain to drop
-	// it once callers have moved to the internal listener.
-	externalChain, err := buildAuthChain(context.Background(), k8sClient, log, cfg.AgentName, cfg.Namespace, mgmtPlane)
+	// External listener: data-plane validators only. The management plane is
+	// fully isolated onto the internal twin listener (mgmt-plane callers — the
+	// dashboard and Doctor — dial the internal port), so the external chain no
+	// longer carries the mgmt-plane validator.
+	externalChain, err := buildExternalChain(context.Background(), k8sClient, log, cfg.AgentName, cfg.Namespace)
 	if err != nil {
-		return nil, fmt.Errorf("auth chain build failed: %w", err)
+		return nil, fmt.Errorf("external auth chain build failed: %w", err)
 	}
 	extOpts := cloneFacadeOpts(serverOpts)
 	if len(externalChain) > 0 {
@@ -439,10 +439,10 @@ func startA2AServer(
 		log.Error(mgmtErr, "mgmt-plane validator load failed")
 		os.Exit(1)
 	}
-	a2aChain, chainErr := buildAuthChain(
-		context.Background(), buildK8sClient(), log, cfg.AgentName, cfg.Namespace, mgmtPlane)
+	a2aChain, chainErr := buildExternalChain(
+		context.Background(), buildK8sClient(), log, cfg.AgentName, cfg.Namespace)
 	if chainErr != nil {
-		log.Error(chainErr, "auth chain build failed")
+		log.Error(chainErr, "external auth chain build failed")
 		os.Exit(1)
 	}
 
