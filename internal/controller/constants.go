@@ -209,4 +209,21 @@ const (
 	// any callers. Always emitted so operators can assert on it from
 	// kubectl describe / helm unittest.
 	ConditionTypeExternalAuth = "ExternalAuth"
+
+	// ConditionTypeAutoscalingReady surfaces whether the agent's effective
+	// autoscaling policy (its own spec.runtime.autoscaling, or the inherited
+	// WorkspaceServiceGroup.autoscaling default) is in effect. True/Scaling
+	// means an HPA or KEDA ScaledObject is reconciled; True/Disabled means no
+	// policy applies and the agent uses static replicas; False/KEDANotInstalled
+	// means the policy requested type "keda" but the KEDA CRDs are absent — the
+	// agent stays at static replicas (non-blocking).
+	ConditionTypeAutoscalingReady = "AutoscalingReady"
+)
+
+// Autoscaling condition reasons.
+const (
+	reasonAutoscalingScaling     = "Scaling"
+	reasonAutoscalingDisabled    = "Disabled"
+	reasonAutoscalingError       = "Error"
+	reasonAutoscalingKEDAMissing = "KEDANotInstalled"
 )

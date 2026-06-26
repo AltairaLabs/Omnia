@@ -3374,7 +3374,7 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 				},
 			}
 
-			triggers := reconciler.buildKEDATriggers(agentRuntime)
+			triggers := reconciler.buildKEDATriggers(agentRuntime, agentRuntime.Spec.Runtime.Autoscaling)
 
 			Expect(triggers).To(HaveLen(1))
 			trigger := triggers[0].(map[string]interface{})
@@ -3406,7 +3406,7 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 				},
 			}
 
-			triggers := reconciler.buildKEDATriggers(agentRuntime)
+			triggers := reconciler.buildKEDATriggers(agentRuntime, agentRuntime.Spec.Runtime.Autoscaling)
 
 			Expect(triggers).To(HaveLen(1))
 			trigger := triggers[0].(map[string]interface{})
@@ -3433,7 +3433,7 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 				},
 			}
 
-			triggers := reconciler.buildKEDATriggers(agentRuntime)
+			triggers := reconciler.buildKEDATriggers(agentRuntime, agentRuntime.Spec.Runtime.Autoscaling)
 
 			Expect(triggers).To(HaveLen(1))
 			trigger := triggers[0].(map[string]interface{})
@@ -3475,7 +3475,7 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 				},
 			}
 
-			triggers := reconciler.buildKEDATriggers(agentRuntime)
+			triggers := reconciler.buildKEDATriggers(agentRuntime, agentRuntime.Spec.Runtime.Autoscaling)
 
 			Expect(triggers).To(HaveLen(2))
 
@@ -3524,7 +3524,7 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 				},
 			}
 
-			triggers := reconciler.buildKEDATriggers(agentRuntime)
+			triggers := reconciler.buildKEDATriggers(agentRuntime, agentRuntime.Spec.Runtime.Autoscaling)
 
 			// Should use custom trigger, not default
 			Expect(triggers).To(HaveLen(1))
@@ -3552,7 +3552,7 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 				},
 			}
 
-			triggers := reconciler.buildKEDATriggers(agentRuntime)
+			triggers := reconciler.buildKEDATriggers(agentRuntime, agentRuntime.Spec.Runtime.Autoscaling)
 
 			// Should fall back to default prometheus trigger
 			Expect(triggers).To(HaveLen(1))
