@@ -1,6 +1,24 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, type Mock } from "vitest";
 import { render, screen } from "@testing-library/react";
+import Editor from "@monaco-editor/react";
 import { YamlEditor, YamlEditorEmptyState } from "./yaml-editor";
+
+// Build a fake monaco namespace whose languages registry can be pre-seeded.
+function fakeMonaco(registered: string[] = []) {
+  const languages = {
+    getLanguages: vi.fn(() => registered.map((id) => ({ id }))),
+    register: vi.fn(),
+    setMonarchTokensProvider: vi.fn(),
+    setLanguageConfiguration: vi.fn(),
+  };
+  return { monaco: { KeyMod: { CtrlCmd: 1 }, KeyCode: { KeyS: 1 }, languages }, languages };
+}
+
+// Drive the editor's onMount (the prop the mocked Editor received this render).
+function mountEditor(monaco: unknown) {
+  const props = (Editor as unknown as Mock).mock.calls[0][0];
+  props.onMount({ addCommand: vi.fn() }, monaco);
+}
 
 // Mock Monaco Editor
 vi.mock("@monaco-editor/react", () => ({
@@ -28,6 +46,33 @@ describe("YamlEditor", () => {
     render(<YamlEditor value="" loading={true} />);
 
     expect(screen.getByText(/loading file/i)).toBeInTheDocument();
+  });
+
+  it("registers the yaml language before configuring it (fixes the 'unknown language yaml' crash)", () => {
+    render(<YamlEditor value="a: 1" fileType="yaml" />);
+    const { monaco, languages } = fakeMonaco([]); // yaml not yet registered
+    mountEditor(monaco);
+    expect(languages.register).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "yaml" }),
+    );
+    expect(languages.setMonarchTokensProvider).toHaveBeenCalledWith("yaml", expect.anything());
+    expect(languages.setLanguageConfiguration).toHaveBeenCalledWith("yaml", expect.anything());
+  });
+
+  it("does not re-register yaml when it is already present", () => {
+    render(<YamlEditor value="a: 1" fileType="yaml" />);
+    const { monaco, languages } = fakeMonaco(["yaml"]);
+    mountEditor(monaco);
+    expect(languages.register).not.toHaveBeenCalled();
+    expect(languages.setLanguageConfiguration).toHaveBeenCalledWith("yaml", expect.anything());
+  });
+
+  it("does not touch language config for non-yaml files", () => {
+    render(<YamlEditor value="{}" fileType="json" />);
+    const { monaco, languages } = fakeMonaco([]);
+    mountEditor(monaco);
+    expect(languages.register).not.toHaveBeenCalled();
+    expect(languages.setLanguageConfiguration).not.toHaveBeenCalled();
   });
 
   it("should render Monaco editor when not loading", () => {

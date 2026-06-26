@@ -3,7 +3,6 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { EditableConfigPanel } from "@/components/resources/editable-config-panel";
 import { useToolRegistryMutations } from "@/hooks/use-tool-registry-mutations";
-import { Permission } from "@/hooks/use-permissions";
 import type {
   EditableResource,
   UpdateResourceBody,
@@ -26,7 +25,6 @@ export function ToolRegistryConfigTab({ registry }: { readonly registry: ToolReg
       kind="ToolRegistry"
       name={name}
       resource={registry as unknown as EditableResource}
-      editPermission={Permission.TOOLS_EDIT}
       onSave={onSave}
     />
   );

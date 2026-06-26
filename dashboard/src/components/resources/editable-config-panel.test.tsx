@@ -3,10 +3,9 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { EditableConfigPanel } from "./editable-config-panel";
 import { ResourceUpdateError } from "@/hooks/use-tool-registry-mutations";
 
-const can = vi.fn();
-vi.mock("@/hooks/use-permissions", () => ({
-  usePermissions: () => ({ can }),
-  Permission: { TOOLS_EDIT: "tools:edit" },
+const perms = { canWrite: false };
+vi.mock("@/hooks/use-workspace-permissions", () => ({
+  useWorkspacePermissions: () => perms,
 }));
 
 const readOnly = { isReadOnly: false, message: "GitOps read-only" };
@@ -34,7 +33,6 @@ function renderPanel(onSave = vi.fn().mockResolvedValue(RESOURCE)) {
       kind="ToolRegistry"
       name="gh"
       resource={RESOURCE}
-      editPermission={"tools:edit" as never}
       onSave={onSave}
     />
   );
@@ -42,19 +40,19 @@ function renderPanel(onSave = vi.fn().mockResolvedValue(RESOURCE)) {
 
 describe("EditableConfigPanel", () => {
   beforeEach(() => {
-    can.mockReset();
+    perms.canWrite = false;
     readOnly.isReadOnly = false;
   });
 
   it("renders read-only (no editor, no Save) when the user lacks the permission", () => {
-    can.mockReturnValue(false);
+    perms.canWrite = false;
     renderPanel();
     expect(screen.queryByLabelText("yaml")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /save/i })).not.toBeInTheDocument();
   });
 
   it("renders read-only when global read-only mode is on, even for editors", () => {
-    can.mockReturnValue(true);
+    perms.canWrite = true;
     readOnly.isReadOnly = true;
     renderPanel();
     expect(screen.queryByLabelText("yaml")).not.toBeInTheDocument();
@@ -62,7 +60,7 @@ describe("EditableConfigPanel", () => {
   });
 
   it("renders the editor with Save disabled until a valid edit is made", () => {
-    can.mockReturnValue(true);
+    perms.canWrite = true;
     renderPanel();
     const save = screen.getByRole("button", { name: /save/i });
     expect(save).toBeDisabled();
@@ -74,14 +72,14 @@ describe("EditableConfigPanel", () => {
   });
 
   it("disables Save when the edited YAML is invalid", () => {
-    can.mockReturnValue(true);
+    perms.canWrite = true;
     renderPanel();
     fireEvent.change(screen.getByLabelText("yaml"), { target: { value: "spec:\n  - : :\nbad" } });
     expect(screen.getByRole("button", { name: /save/i })).toBeDisabled();
   });
 
   it("opens a confirm dialog and calls onSave with resourceVersion on confirm", async () => {
-    can.mockReturnValue(true);
+    perms.canWrite = true;
     const onSave = vi.fn().mockResolvedValue(RESOURCE);
     renderPanel(onSave);
 
@@ -98,7 +96,7 @@ describe("EditableConfigPanel", () => {
   });
 
   it("shows the conflict message on a 409 ResourceUpdateError", async () => {
-    can.mockReturnValue(true);
+    perms.canWrite = true;
     const onSave = vi.fn().mockRejectedValue(new ResourceUpdateError(409, "modified"));
     renderPanel(onSave);
 
@@ -112,7 +110,7 @@ describe("EditableConfigPanel", () => {
   });
 
   it("shows the validation message on a 422 ResourceUpdateError", async () => {
-    can.mockReturnValue(true);
+    perms.canWrite = true;
     const onSave = vi
       .fn()
       .mockRejectedValue(new ResourceUpdateError(422, "spec.handlers[0].type: Unsupported value"));
