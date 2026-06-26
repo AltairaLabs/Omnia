@@ -39,6 +39,88 @@ func denseProjInputs(n int) []memory.ProjectionInput {
 	return out
 }
 
+// sensitiveContent is the preview text given only to sensitive entities, so a
+// test can prove it never appears in the serialized response.
+const sensitiveContent = "SENSITIVE-health-diagnosis-text"
+
+// sensitiveProjInputs returns n dense inputs where every 3rd entity is a
+// sensitive (health) category with distinct content, the rest non-sensitive.
+func sensitiveProjInputs(n int) []memory.ProjectionInput {
+	out := denseProjInputs(n)
+	for i := range out {
+		if i%3 == 0 {
+			out[i].Category = "memory:health"
+			out[i].Content = sensitiveContent
+		} else {
+			out[i].Category = "memory:context"
+		}
+	}
+	return out
+}
+
+func assertMaskingApplied(t *testing.T, inputs []memory.ProjectionInput, body []byte) {
+	t.Helper()
+	var resp ProjectionResult
+	require.NoError(t, json.Unmarshal(body, &resp))
+	require.Len(t, resp.Points, len(inputs))
+	var masked, clear int
+	for _, p := range resp.Points {
+		if p.Masked {
+			masked++
+			assert.Empty(t, p.ID, "masked point must drop id")
+			assert.Empty(t, p.Preview, "masked point must drop preview")
+			assert.Empty(t, p.UserRef, "masked point must drop userRef")
+			assert.Empty(t, p.Category, "masked point must drop category")
+		} else {
+			clear++
+			assert.NotEmpty(t, p.ID, "clear point keeps id")
+		}
+	}
+	assert.Positive(t, masked, "some points should be masked")
+	assert.Positive(t, clear, "some points should be clear")
+	// Strip-before-serialize: the sensitive preview content never reaches the wire,
+	// while non-sensitive previews still do.
+	assert.NotContains(t, string(body), sensitiveContent)
+	assert.Contains(t, string(body), "some memory content here")
+}
+
+// On-demand compute path masks sensitive points before serialization.
+func TestHandleProjection_MasksSensitive_Computed(t *testing.T) {
+	inputs := sensitiveProjInputs(40)
+	store := &mockStore{projFingerprint: "40:123", projInputs: inputs}
+	h := newTestHandler(store)
+	mux := setupMux(h)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/memories/projection?workspace=ws1", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	require.Equal(t, http.StatusOK, rr.Code)
+	assertMaskingApplied(t, inputs, rr.Body.Bytes())
+}
+
+// Cached (serveStored) path also masks — masking is read-time, not baked into the cache.
+func TestHandleProjection_MasksSensitive_Stored(t *testing.T) {
+	inputs := sensitiveProjInputs(40)
+	layout := make(map[string][2]float64, len(inputs))
+	for i, in := range inputs {
+		layout[in.EntityID] = [2]float64{float64(i) * 0.01, float64(i) * -0.01}
+	}
+	store := &mockStore{
+		projFingerprint: "40:123",
+		projInputs:      inputs,
+		projStored: &memory.StoredProjection{
+			Fingerprint: "40:123", Layout: layout, Model: "tsne", Basis: "dense",
+			ComputedAt: time.Date(2026, 6, 14, 10, 0, 0, 0, time.UTC),
+		},
+	}
+	h := newTestHandler(store)
+	mux := setupMux(h)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/memories/projection?workspace=ws1", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	require.Equal(t, http.StatusOK, rr.Code)
+	assertMaskingApplied(t, inputs, rr.Body.Bytes())
+}
+
 func TestHandleProjection_MissingWorkspace(t *testing.T) {
 	h := newTestHandler(&mockStore{})
 	mux := setupMux(h)
