@@ -114,6 +114,27 @@ describe("middleware", () => {
     expect(body.error).toBe("unauthenticated");
   });
 
+  // CLI browser-login entry points self-authenticate, so the middleware must let
+  // them run unauthenticated rather than 401 before the route (otherwise
+  // authorize never writes the flow record → grant fails invalid_or_expired_flow).
+  it("lets /api/cli/authorize through unauthenticated (self-authenticating)", async () => {
+    const { middleware } = await import("./middleware");
+    const res = await middleware(await reqWithSid(null, "/api/cli/authorize"));
+    expect(res.status).toBe(200);
+  });
+
+  it("lets /api/cli/token through unauthenticated (one-time code, no session)", async () => {
+    const { middleware } = await import("./middleware");
+    const res = await middleware(await reqWithSid(null, "/api/cli/token"));
+    expect(res.status).toBe(200);
+  });
+
+  it("still 401s /api/cli/grant unauthenticated (requires the browser session)", async () => {
+    const { middleware } = await import("./middleware");
+    const res = await middleware(await reqWithSid(null, "/api/cli/grant"));
+    expect(res.status).toBe(401);
+  });
+
   // #1556 — programmatic clients authenticate with an API key, not a session
   // cookie. The middleware must let them past the cookie gate so the route
   // handlers (getUser -> authenticateApiKey) can validate + authorize them.
