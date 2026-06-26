@@ -121,9 +121,10 @@ func HashToken(raw string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// Validate implements Validator. ErrNoCredential when no Bearer header;
-// ErrInvalidCredential when the hash isn't in the store; ErrExpired
-// when a matching key has lapsed.
+// Validate implements Validator. ErrNoCredential when no Bearer header, or
+// when the bearer isn't a known key (an unknown opaque bearer isn't an
+// api-key-style credential, so the chain falls through); ErrExpired when a
+// matching key has lapsed.
 func (v *APIKeyValidator) Validate(_ context.Context, r *http.Request) (*policy.AuthenticatedIdentity, error) {
 	tokenString, err := extractBearer(r)
 	if err != nil {
@@ -133,13 +134,17 @@ func (v *APIKeyValidator) Validate(_ context.Context, r *http.Request) (*policy.
 	candidate := HashToken(tokenString)
 	key, found := v.store.Lookup(candidate)
 	if !found {
-		return nil, ErrInvalidCredential
+		// Not one of our keys. An opaque-bearer validator can't tell a wrong
+		// API key from a credential of another style (e.g. a mgmt-plane JWT),
+		// so fall through rather than short-circuit the chain — otherwise a
+		// later validator (mgmt-plane) never gets a chance. See #1620.
+		return nil, ErrNoCredential
 	}
 	// Hash collisions on sha256 are not a thing in practice; the
 	// constant-time compare is defence-in-depth against any future
 	// store implementation that does prefix-matching or similar.
 	if subtle.ConstantTimeCompare([]byte(candidate), []byte(key.HashHex)) != 1 {
-		return nil, ErrInvalidCredential
+		return nil, ErrNoCredential
 	}
 	if !key.ExpiresAt.IsZero() && !v.now().Before(key.ExpiresAt) {
 		return nil, ErrExpired

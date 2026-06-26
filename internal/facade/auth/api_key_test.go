@@ -95,13 +95,31 @@ func TestAPIKeyValidator_AdmitsKnownKey(t *testing.T) {
 	}
 }
 
-func TestAPIKeyValidator_RejectsUnknownKey(t *testing.T) {
+func TestAPIKeyValidator_UnknownKeyFallsThrough(t *testing.T) {
 	t.Parallel()
 	store := newAPIKeyStore(t)
 	v := auth.NewAPIKeyValidator(store)
 	_, err := v.Validate(context.Background(), reqWithBearer("unknown-key-value"))
-	if !errors.Is(err, auth.ErrInvalidCredential) {
-		t.Errorf("err = %v, want ErrInvalidCredential", err)
+	if !errors.Is(err, auth.ErrNoCredential) {
+		t.Errorf("err = %v, want ErrNoCredential (unknown bearer is not an api-key-style credential)", err)
+	}
+}
+
+func TestAPIKeyValidator_ChainFallsThroughToLaterValidator(t *testing.T) {
+	t.Parallel()
+	store := newAPIKeyStore(t) // contains a known key, but we present a different bearer
+	admit := &stubValidator{id: &policy.AuthenticatedIdentity{Origin: policy.OriginManagementPlane, Subject: "admin"}}
+	chain := auth.Chain{auth.NewAPIKeyValidator(store), admit}
+
+	id, err := chain.Run(context.Background(), reqWithBearer("a-mgmt-plane-jwt-shaped-bearer"))
+	if err != nil {
+		t.Fatalf("Run err = %v, want nil (apiKeys must fall through to the admitting validator)", err)
+	}
+	if id == nil || id.Subject != "admin" {
+		t.Errorf("identity = %+v, want admitted by the later validator", id)
+	}
+	if admit.called != 1 {
+		t.Errorf("later validator called %d times, want 1 (apiKeys short-circuited the chain)", admit.called)
 	}
 }
 
