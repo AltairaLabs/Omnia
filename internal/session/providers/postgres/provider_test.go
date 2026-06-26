@@ -418,6 +418,34 @@ func TestDecorateSession_NotFound(t *testing.T) {
 	assert.ErrorIs(t, err, session.ErrSessionNotFound)
 }
 
+// TestAppendMessage_EmptyIDGenerated verifies the warm store generates a UUID
+// when the caller omits the message ID. The facade bus recorder relies on this;
+// binding an empty string to the NOT NULL uuid id column would otherwise fail
+// with "invalid input syntax for type uuid" (the in-cluster "0 messages
+// persisted" regression).
+func TestAppendMessage_EmptyIDGenerated(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	p := newProvider(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Microsecond)
+
+	s := makeSession("c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11", now)
+	require.NoError(t, p.CreateSession(ctx, s))
+
+	msg := makeMessage("d0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11", 1, now)
+	msg.ID = "" // caller omits the ID — the store must generate one, not fail
+	require.NoError(t, p.AppendMessage(ctx, s.ID, msg),
+		"empty message ID must be generated, not fail the uuid INSERT")
+
+	msgs, err := p.GetMessages(ctx, s.ID, providers.MessageQueryOpts{})
+	require.NoError(t, err)
+	require.Len(t, msgs, 1)
+	assert.NotEmpty(t, msgs[0].ID, "stored message must have a generated ID")
+}
+
 func TestDeleteSession(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")

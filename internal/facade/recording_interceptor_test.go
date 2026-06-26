@@ -144,6 +144,15 @@ func TestBusRecorder_Converse_RecordsBothTurns(t *testing.T) {
 	assert.Equal(t, int32(5), s.Messages[1].OutputTokens)
 }
 
+// Recorded messages must carry a non-empty ID: the postgres warm store binds it
+// into a NOT NULL uuid column, so an empty ID fails the INSERT (the MemoryStore
+// used elsewhere in these tests masks that by generating one). Regression guard
+// for the in-cluster "0 messages persisted" failure.
+func TestBusRecorder_MessagesCarryID(t *testing.T) {
+	assert.NotEmpty(t, userMessage("hi").ID, "user message must carry an ID")
+	assert.NotEmpty(t, assistantMessage("yo", nil).ID, "assistant message must carry an ID")
+}
+
 // facadeData:false gates the user turn but keeps the assistant (runtimeData).
 func TestBusRecorder_Converse_FacadeDataFalse_DropsUserOnly(t *testing.T) {
 	rc, store := newRecordingClient(t, policyResp(true, false, true))

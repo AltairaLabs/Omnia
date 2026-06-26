@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	"github.com/google/uuid"
 	"google.golang.org/grpc"
 
 	"github.com/altairalabs/omnia/internal/session"
@@ -111,11 +112,11 @@ func runtimeAllowed(p *httpclient.PrivacyPolicyResponse) bool {
 }
 
 func userMessage(content string) session.Message {
-	return session.Message{Role: session.RoleUser, Content: content, Timestamp: time.Now()}
+	return session.Message{ID: uuid.New().String(), Role: session.RoleUser, Content: content, Timestamp: time.Now()}
 }
 
 func assistantMessage(content string, usage *runtimev1.Usage) session.Message {
-	msg := session.Message{Role: session.RoleAssistant, Content: content, Timestamp: time.Now()}
+	msg := session.Message{ID: uuid.New().String(), Role: session.RoleAssistant, Content: content, Timestamp: time.Now()}
 	if usage != nil {
 		msg.InputTokens = usage.GetInputTokens()
 		msg.OutputTokens = usage.GetOutputTokens()
