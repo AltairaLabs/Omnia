@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils";
 import { Loader2, AlertTriangle, CheckCircle } from "lucide-react";
 import type { FileType } from "@/types/arena-project";
 import { yamlMonarchLanguage } from "@/lib/lsp/yaml-monarch";
+import { useTheme } from "next-themes";
 
 interface YamlEditorProps {
   readonly value: string;
@@ -96,6 +97,9 @@ export function YamlEditor({
   const lastRevealNonce = useRef<number | undefined>(undefined);
   const monacoLanguage = language || getLanguage(fileType);
   const isYaml = monacoLanguage === "yaml";
+  // Follow the app's light/dark theme (next-themes) rather than always dark.
+  const { resolvedTheme } = useTheme();
+  const editorTheme = resolvedTheme === "light" ? "vs" : "vs-dark";
 
   // Jump to a requested line once the editor is mounted. Deferred a frame so
   // Monaco has applied the latest model content before we scroll.
@@ -200,7 +204,7 @@ export function YamlEditor({
           value={value}
           onChange={handleChange}
           onMount={handleEditorDidMount}
-          theme="vs-dark"
+          theme={editorTheme}
           options={{
             readOnly,
             minimap: { enabled: false },

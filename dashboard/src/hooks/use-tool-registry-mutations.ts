@@ -82,6 +82,18 @@ export function useToolRegistryMutations(): UseToolRegistryMutationsResult {
         throw new Error(NO_WORKSPACE_ERROR);
       }
 
+      // Demo mode mocks reads only; there's no cluster to PUT to (the real route
+      // would 404). Echo the edit back as applied so the save UX — success toast,
+      // refreshed editor — works end to end.
+      if (process.env.NEXT_PUBLIC_DEMO_MODE === "true") {
+        return {
+          apiVersion: "omnia.altairalabs.ai/v1alpha1",
+          kind: "ToolRegistry",
+          metadata: { name, ...body.metadata },
+          spec: body.spec,
+        } as ToolRegistry;
+      }
+
       setLoading(true);
       setError(null);
 
