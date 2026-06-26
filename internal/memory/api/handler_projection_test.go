@@ -22,6 +22,9 @@ import (
 
 const projTierUser = "user"
 
+// projFP40 is the fingerprint for a 40-entity scope, shared across projection tests.
+const projFP40 = "40:123"
+
 func denseProjInputs(n int) []memory.ProjectionInput {
 	out := make([]memory.ProjectionInput, n)
 	for i := 0; i < n; i++ {
@@ -49,10 +52,10 @@ func sensitiveProjInputs(n int) []memory.ProjectionInput {
 	out := denseProjInputs(n)
 	for i := range out {
 		if i%3 == 0 {
-			out[i].Category = "memory:health"
+			out[i].Category = catHealth
 			out[i].Content = sensitiveContent
 		} else {
-			out[i].Category = "memory:context"
+			out[i].Category = catContext
 		}
 	}
 	return out
@@ -87,7 +90,7 @@ func assertMaskingApplied(t *testing.T, inputs []memory.ProjectionInput, body []
 // On-demand compute path masks sensitive points before serialization.
 func TestHandleProjection_MasksSensitive_Computed(t *testing.T) {
 	inputs := sensitiveProjInputs(40)
-	store := &mockStore{projFingerprint: "40:123", projInputs: inputs}
+	store := &mockStore{projFingerprint: projFP40, projInputs: inputs}
 	h := newTestHandler(store)
 	mux := setupMux(h)
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/memories/projection?workspace=ws1", nil)
@@ -105,10 +108,10 @@ func TestHandleProjection_MasksSensitive_Stored(t *testing.T) {
 		layout[in.EntityID] = [2]float64{float64(i) * 0.01, float64(i) * -0.01}
 	}
 	store := &mockStore{
-		projFingerprint: "40:123",
+		projFingerprint: projFP40,
 		projInputs:      inputs,
 		projStored: &memory.StoredProjection{
-			Fingerprint: "40:123", Layout: layout, Model: "tsne", Basis: "dense",
+			Fingerprint: projFP40, Layout: layout, Model: "tsne", Basis: "dense",
 			ComputedAt: time.Date(2026, 6, 14, 10, 0, 0, 0, time.UTC),
 		},
 	}
@@ -191,7 +194,7 @@ func TestHandleProjection_LargeScopePending(t *testing.T) {
 }
 
 func TestHandleProjection_SmallScopeReady(t *testing.T) {
-	store := &mockStore{projFingerprint: "40:123", projInputs: denseProjInputs(40)}
+	store := &mockStore{projFingerprint: projFP40, projInputs: denseProjInputs(40)}
 	h := newTestHandler(store)
 	mux := setupMux(h)
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/memories/projection?workspace=ws1", nil)
@@ -228,10 +231,10 @@ func TestHandleProjection_ServesFreshStored(t *testing.T) {
 	}
 	computedAt := time.Date(2026, 6, 14, 10, 0, 0, 0, time.UTC)
 	store := &mockStore{
-		projFingerprint: "40:123",
+		projFingerprint: projFP40,
 		projInputs:      inputs,
 		projStored: &memory.StoredProjection{
-			Fingerprint: "40:123",
+			Fingerprint: projFP40,
 			Layout:      layout,
 			Model:       "tsne",
 			Basis:       "dense",
