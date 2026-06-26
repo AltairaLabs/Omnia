@@ -33,6 +33,7 @@ import (
 	"github.com/altairalabs/omnia/internal/agent"
 	"github.com/altairalabs/omnia/internal/facade"
 	facadea2a "github.com/altairalabs/omnia/internal/facade/a2a"
+	"github.com/altairalabs/omnia/internal/facade/auth"
 	"github.com/altairalabs/omnia/internal/media"
 	"github.com/altairalabs/omnia/internal/session"
 	"github.com/altairalabs/omnia/internal/tracing"
@@ -101,7 +102,7 @@ func runWebSocketFacade(cfg *agent.Config, log logr.Logger, tracingProvider *tra
 
 	// Dual-protocol: optionally start A2A server alongside WebSocket.
 	if cfg.A2AEnabled {
-		set.a2aSrv, set.a2aHTTPServer, set.a2aCleanup = startA2AServer(cfg, log, tracingProvider)
+		set.a2aSrv, set.a2aHTTPServer, set.internalA2AHTTPServer, set.a2aCleanup = startA2AServer(cfg, log, tracingProvider)
 	}
 
 	startAndServe(log, set)
@@ -123,14 +124,15 @@ type webSocketServers struct {
 // start/shutdown signatures. The internal* fields are nil when no internal
 // management-plane listener is configured.
 type facadeServerSet struct {
-	wsServer             *facade.Server
-	facadeServer         *http.Server
-	internalWSServer     *facade.Server
-	internalFacadeServer *http.Server
-	healthServer         *http.Server
-	a2aSrv               *facadea2a.Server
-	a2aHTTPServer        *http.Server
-	a2aCleanup           func()
+	wsServer              *facade.Server
+	facadeServer          *http.Server
+	internalWSServer      *facade.Server
+	internalFacadeServer  *http.Server
+	healthServer          *http.Server
+	a2aSrv                *facadea2a.Server
+	a2aHTTPServer         *http.Server
+	internalA2AHTTPServer *http.Server
+	a2aCleanup            func()
 }
 
 // newWSMux mounts the WebSocket routes onto a fresh mux for a facade server.
@@ -315,7 +317,7 @@ func newHealthHTTPServer(
 
 // startAndServe starts all servers and blocks until shutdown signal or error.
 func startAndServe(log logr.Logger, set *facadeServerSet) {
-	errChan := make(chan error, 4)
+	errChan := make(chan error, 6)
 
 	go serveHTTP(log, set.facadeServer, "facade server", errChan)
 	go serveHTTP(log, set.healthServer, "health server", errChan)
@@ -324,6 +326,9 @@ func startAndServe(log logr.Logger, set *facadeServerSet) {
 	}
 	if set.a2aHTTPServer != nil {
 		go serveHTTP(log, set.a2aHTTPServer, "a2a server", errChan)
+	}
+	if set.internalA2AHTTPServer != nil {
+		go serveHTTP(log, set.internalA2AHTTPServer, "internal a2a server", errChan)
 	}
 
 	sigChan := make(chan os.Signal, 1)
@@ -379,6 +384,7 @@ func shutdownAll(log logr.Logger, set *facadeServerSet) {
 		set.a2aCleanup()
 	}
 	shutdownHTTP(ctx, log, set.a2aHTTPServer, "A2A HTTP server")
+	shutdownHTTP(ctx, log, set.internalA2AHTTPServer, "internal A2A HTTP server")
 	shutdownHTTP(ctx, log, set.facadeServer, "facade server")
 	shutdownHTTP(ctx, log, set.internalFacadeServer, "internal facade server")
 	shutdownHTTP(ctx, log, set.healthServer, "health server")
@@ -404,7 +410,7 @@ func startA2AServer(
 	cfg *agent.Config,
 	log logr.Logger,
 	tracingProvider *tracing.Provider,
-) (*facadea2a.Server, *http.Server, func()) {
+) (*facadea2a.Server, *http.Server, *http.Server, func()) {
 	log.Info("dual-protocol mode: starting A2A alongside WebSocket",
 		"a2aPort", cfg.A2APort,
 		"taskTTL", cfg.A2ATaskTTL,
@@ -457,24 +463,46 @@ func startA2AServer(
 		Log:             log,
 	})
 
-	// Create A2A metrics.
+	// Create A2A metrics (shared by both the external and internal listeners —
+	// metrics are per-agent, not per-listener).
 	a2aMetrics := facadea2a.NewMetrics(cfg.AgentName, cfg.Namespace)
+	inner := a2aSrv.Handler()
 
-	// Wrap with auth + metrics + (optional) tracing middleware. Shared
-	// with standalone mode via buildA2AHandler so both paths get tracing
-	// spans when OMNIA_TRACING_ENABLED=true and the same auth chain as
-	// the WebSocket upgrade path.
-	a2aHandler := buildA2AHandler(a2aSrv.Handler(), a2aMetrics, tracingProvider, a2aChain, log)
+	// External listener: data-plane validators + mgmt-plane (Milestone A keeps
+	// mgmt on the external chain). buildA2AHandler is shared with standalone
+	// mode so both paths get the same auth + metrics + tracing wrapping.
+	a2aHTTPServer := newA2AHTTPServer(fmt.Sprintf(":%d", cfg.A2APort),
+		inner, a2aMetrics, tracingProvider, a2aChain, log)
 
-	a2aHTTPServer := &http.Server{
-		Addr:         fmt.Sprintf(":%d", cfg.A2APort),
-		Handler:      a2aHandler,
+	// Internal twin listener: management-plane-only chain on the internal port.
+	// Built only when the controller has allocated an internal A2A port.
+	var internalA2AHTTPServer *http.Server
+	if cfg.InternalA2APort != 0 {
+		internalA2AHTTPServer = newA2AHTTPServer(fmt.Sprintf(":%d", cfg.InternalA2APort),
+			inner, a2aMetrics, tracingProvider, buildMgmtChain(mgmtPlane), log)
+	}
+
+	return a2aSrv, a2aHTTPServer, internalA2AHTTPServer, storeCleanup
+}
+
+// newA2AHTTPServer wraps the A2A handler with the given auth chain (plus metrics
+// and tracing) and returns an HTTP server bound to addr. Shared by the external
+// and internal twin listeners so they differ only in chain + address.
+func newA2AHTTPServer(
+	addr string,
+	inner http.Handler,
+	metrics *facadea2a.Metrics,
+	tracingProvider *tracing.Provider,
+	chain auth.Chain,
+	log logr.Logger,
+) *http.Server {
+	return &http.Server{
+		Addr:         addr,
+		Handler:      buildA2AHandler(inner, metrics, tracingProvider, chain, log),
 		ReadTimeout:  readTimeout,
 		WriteTimeout: writeTimeout,
 		IdleTimeout:  idleTimeout,
 	}
-
-	return a2aSrv, a2aHTTPServer, storeCleanup
 }
 
 // graceWindowDuration converts an integer number of seconds to a time.Duration.
