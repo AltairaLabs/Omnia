@@ -74,10 +74,6 @@ type Connection struct {
 	// Nil when disabled.
 	inFlightMessages chan struct{}
 
-	// policyCache caches the effective recording policy for this connection.
-	// Nil when no PolicyFetcher is configured (memory store, test mode).
-	policyCache *RecordingPolicyCache
-
 	// audioSession is the persistent duplex audio stream for this connection.
 	// Created lazily on the first inbound BinaryMessageTypeMediaChunk frame
 	// via Server.ensureAudioSession. Nil until the first media chunk arrives
@@ -136,11 +132,6 @@ func (s *Server) handleConnection(ctx context.Context, c *Connection) {
 			log.Error(err, "failed to send connected message")
 			return
 		}
-	}
-
-	// Initialize recording policy cache for this connection when a fetcher is available.
-	if s.policyFetcher != nil && c.namespace != "" && c.agentName != "" {
-		c.policyCache = NewRecordingPolicyCache(s.policyFetcher, c.namespace, c.agentName, 60*time.Second, log)
 	}
 
 	// Start ping ticker

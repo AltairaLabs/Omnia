@@ -181,7 +181,6 @@ type Server struct {
 	tracingProvider *tracing.Provider
 	recordingPool   *RecordingPool
 	allowedOrigins  []string
-	policyFetcher   PolicyFetcher
 	// authChain, when non-empty, runs every configured Validator against
 	// the upgrade request in order and admits on the first match. On
 	// admit the identity flows into PropagationFields.Identity and the
@@ -280,14 +279,6 @@ func WithRecordingPool(p *RecordingPool) ServerOption {
 func WithAllowedOrigins(origins []string) ServerOption {
 	return func(s *Server) {
 		s.allowedOrigins = origins
-	}
-}
-
-// WithPolicyFetcher sets the policy fetcher used to retrieve the effective
-// recording policy per connection. When nil, all recording is enabled (default).
-func WithPolicyFetcher(f PolicyFetcher) ServerOption {
-	return func(s *Server) {
-		s.policyFetcher = f
 	}
 }
 

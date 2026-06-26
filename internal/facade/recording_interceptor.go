@@ -67,6 +67,7 @@ func (r *busRecorder) recordAssistant(ctx context.Context, sessionID, content st
 	if usage != nil {
 		msg.InputTokens = usage.GetInputTokens()
 		msg.OutputTokens = usage.GetOutputTokens()
+		msg.CostUSD = float64(usage.GetCostUsd())
 	}
 	r.submit(ctx, sessionID, msg)
 }

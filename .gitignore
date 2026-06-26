@@ -1,6 +1,8 @@
 # Go
 bin/
+/agent
 /runtime
+/session-api
 *.exe
 *.test
 *.out

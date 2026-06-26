@@ -1652,45 +1652,12 @@ func TestSessionStats_ClientToolCallFlow(t *testing.T) {
 	// Actually the same handler will fire again — it always issues a tool call.
 	// So let's just do turn 1 and verify.
 
-	// Close connection cleanly
+	// Close connection cleanly. Conversation-message recording moved off the
+	// facade WS path onto the RuntimeClient gRPC interceptor (see
+	// recording_interceptor_test.go); a mock handler does not go through it, so
+	// this test only asserts the WS tool-call flow above, not recorded messages.
 	_ = ws.WriteMessage(websocket.CloseMessage,
 		websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
-	// Give async recording pool time to drain
-	time.Sleep(200 * time.Millisecond)
-
-	// Verify session stats
-	sess, err := store.GetSession(context.Background(), sessionID)
-	require.NoError(t, err)
-
-	// Expected: 1 user message + 1 assistant done = 2 messages
-	// Tool calls and tool results don't count as messages.
-	// tool_call_count is derived from RecordToolCall (runtime path), NOT
-	// from AppendMessage, so it stays 0 in this facade-only test.
-	assert.Equal(t, int32(2), sess.MessageCount, "messageCount: 1 user + 1 assistant")
-	assert.Equal(t, int32(0), sess.ToolCallCount, "toolCallCount: derived from RecordToolCall, not AppendMessage")
-
-	// Verify actual messages in store
-	msgs, err := store.GetMessages(context.Background(), sessionID)
-	require.NoError(t, err)
-
-	var userMsgs, assistantMsgs, toolCalls, toolResults int
-	for _, m := range msgs {
-		switch {
-		case m.Metadata["type"] == "tool_call":
-			toolCalls++
-		case m.Metadata["type"] == "tool_result":
-			toolResults++
-		case m.Role == session.RoleUser:
-			userMsgs++
-		case m.Role == session.RoleAssistant:
-			assistantMsgs++
-		}
-	}
-
-	assert.Equal(t, 1, userMsgs, "should have 1 user message")
-	assert.Equal(t, 1, assistantMsgs, "should have 1 assistant message")
-	assert.Equal(t, 1, toolCalls, "should have 1 tool_call")
-	assert.Equal(t, 1, toolResults, "should have 1 tool_result")
 }
 
 func TestServerWithAllowedOrigins(t *testing.T) {

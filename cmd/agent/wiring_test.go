@@ -96,7 +96,7 @@ func mustBuildWS(
 	handler facade.MessageHandler, metrics *agent.Metrics, ms media.Storage,
 ) (*facade.Server, *http.ServeMux) {
 	t.Helper()
-	srv, mux, err := buildWebSocketServer(cfg, logr.Discard(), store, handler, metrics, nil, ms)
+	srv, mux, err := buildWebSocketServer(cfg, logr.Discard(), store, handler, metrics, nil, nil, ms)
 	if err != nil {
 		t.Fatalf("buildWebSocketServer: %v", err)
 	}

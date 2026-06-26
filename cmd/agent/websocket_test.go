@@ -80,7 +80,7 @@ func TestBuildWebSocketServer_PropagatesDrainTimeout(t *testing.T) {
 	metrics := agent.NewMetrics(cfg.AgentName, cfg.Namespace)
 	handler := &captureHandler{name: probeAgentName}
 
-	srv, _, err := buildWebSocketServer(cfg, logr.Discard(), store, handler, metrics, nil, nil)
+	srv, _, err := buildWebSocketServer(cfg, logr.Discard(), store, handler, metrics, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("buildWebSocketServer: %v", err)
 	}
@@ -109,7 +109,7 @@ func TestBuildWebSocketServer_DefaultDrainTimeoutWhenCRDUnset(t *testing.T) {
 	metrics := agent.NewMetrics(cfg.AgentName, cfg.Namespace)
 	handler := &captureHandler{name: "probe-drain-zero"}
 
-	srv, _, err := buildWebSocketServer(cfg, logr.Discard(), store, handler, metrics, nil, nil)
+	srv, _, err := buildWebSocketServer(cfg, logr.Discard(), store, handler, metrics, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("buildWebSocketServer: %v", err)
 	}
