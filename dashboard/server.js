@@ -21,7 +21,7 @@ const next = require("next");
 const { WebSocket, WebSocketServer } = require("ws");
 const { checkAnonymousAuthGuard } = require("./lib/auth-boot-guard");
 const { loadSigningKey, mintToken } = require("./lib/mgmt-plane-token");
-const { resolveWorkspaceName } = require("./lib/workspace-resolver");
+const { resolveWorkspaceName, resolveAgentMgmtWsPort } = require("./lib/workspace-resolver");
 const { serveJwks, JWKS_PATH } = require("./lib/jwks");
 const {
   SERVICE_TOKEN_PATH,
@@ -367,9 +367,17 @@ function sendError(clientSocket, message, code = "CONNECTION_ERROR") {
  * @param {{ host: string, port: number }|null} podTarget - direct pod IP from
  *   route hint (Task 9). When set, the proxy dials this host:port first; on
  *   any connect error it retries against the Service target (stale-hint guard).
+ * @param {number|null} mgmtWsPort - the agent's internal management-plane WS
+ *   port (from status.managementEndpoints.ws). When set (and no podTarget),
+ *   the proxy dials this mgmt-plane-only listener; on a connect error before
+ *   the upstream opens it falls back once to the external facade port (skew
+ *   with an agent that predates the internal listener). Null => dial the
+ *   external port directly.
  */
-function proxyWebSocket(clientSocket, namespace, name, clientParams = {}, req = null, podTarget = null) {
-  const serviceUrl = getAgentWsUrl(namespace, name, clientParams);
+function proxyWebSocket(clientSocket, namespace, name, clientParams = {}, req = null, podTarget = null, mgmtWsPort = null) {
+  // Dial the internal management-plane port when known; otherwise the external
+  // facade port. The pod-target (resume route hint) path keeps its own port.
+  const serviceUrl = getAgentWsUrl(namespace, name, clientParams, mgmtWsPort || DEFAULT_FACADE_PORT);
 
   // When a pod target is supplied (resume + route hint), dial the pod IP
   // directly. Build an equivalent ws:// URL for that pod using the same
@@ -474,7 +482,19 @@ function proxyWebSocket(clientSocket, namespace, name, clientParams = {}, req = 
       if (podTarget && !upstreamConnected) {
         console.warn(`[WS Proxy] Stale route hint for ${namespace}/${name} — retrying via Service`);
         // Re-run the whole proxy logic against the Service (podTarget=null).
-        proxyWebSocket(clientSocket, namespace, name, clientParams, req, null);
+        proxyWebSocket(clientSocket, namespace, name, clientParams, req, null, mgmtWsPort);
+        return;
+      }
+
+      // Internal mgmt-plane port unreachable before the upstream opened — the
+      // agent pod predates the internal listener (version skew) or it isn't
+      // serving the mgmt plane. Fall back once to the external facade port,
+      // which still accepts the mgmt-plane JWT in this milestone.
+      if (mgmtWsPort && !podTarget && !upstreamConnected) {
+        console.warn(
+          `[WS Proxy] internal mgmt port ${mgmtWsPort} unreachable for ${namespace}/${name} — falling back to external facade port`,
+        );
+        proxyWebSocket(clientSocket, namespace, name, clientParams, req, null, null);
         return;
       }
 
@@ -863,7 +883,7 @@ app.prepare().then(() => {
       const clientParams = parseQueryParams(req.url);
       // omniaRouteTarget is set by the upgrade handler when a resume lookup
       // resolves to a pod IP (Task 9). Falls back to null → Service target.
-      proxyWebSocket(ws, agent.namespace, agent.name, clientParams, req, req.omniaRouteTarget || null);
+      proxyWebSocket(ws, agent.namespace, agent.name, clientParams, req, req.omniaRouteTarget || null, req.omniaMgmtWsPort || null);
     } else if (isLspPath(pathname)) {
       // Parse query params for LSP context
       const params = parseQueryParams(req.url);
@@ -907,8 +927,13 @@ app.prepare().then(() => {
           routeRedis,
           { timeoutMs: 200 },
         ),
-      ]).then(([endUserId, workspace, routeTarget]) => {
+        // Discover the agent's internal management-plane WS port (fails soft to
+        // null → dial the external port). The proxy dials the internal listener
+        // and falls back to external on connect failure (agent-pod skew).
+        resolveAgentMgmtWsPort(agent.namespace, agent.name),
+      ]).then(([endUserId, workspace, routeTarget, mgmtWsPort]) => {
         req.omniaEndUserId = endUserId;
+        req.omniaMgmtWsPort = mgmtWsPort;
         if (typeof workspace === "string") {
           req.omniaWorkspace = workspace;
         }
