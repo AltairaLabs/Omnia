@@ -80,10 +80,11 @@ func TestBuildWebSocketServer_PropagatesDrainTimeout(t *testing.T) {
 	metrics := agent.NewMetrics(cfg.AgentName, cfg.Namespace)
 	handler := &captureHandler{name: probeAgentName}
 
-	srv, _, err := buildWebSocketServer(cfg, logr.Discard(), store, handler, metrics, nil, nil)
+	servers, err := buildWebSocketServer(cfg, logr.Discard(), store, handler, metrics, nil, nil)
 	if err != nil {
 		t.Fatalf("buildWebSocketServer: %v", err)
 	}
+	srv := servers.external
 
 	if got := srv.DrainTimeoutForShutdown(); got != want {
 		t.Errorf("DrainTimeoutForShutdown() = %v, want %v — "+
@@ -109,10 +110,11 @@ func TestBuildWebSocketServer_DefaultDrainTimeoutWhenCRDUnset(t *testing.T) {
 	metrics := agent.NewMetrics(cfg.AgentName, cfg.Namespace)
 	handler := &captureHandler{name: "probe-drain-zero"}
 
-	srv, _, err := buildWebSocketServer(cfg, logr.Discard(), store, handler, metrics, nil, nil)
+	servers, err := buildWebSocketServer(cfg, logr.Discard(), store, handler, metrics, nil, nil)
 	if err != nil {
 		t.Fatalf("buildWebSocketServer: %v", err)
 	}
+	srv := servers.external
 
 	const defaultDrainTimeout = 30 * time.Second
 	if got := srv.DrainTimeoutForShutdown(); got != defaultDrainTimeout {

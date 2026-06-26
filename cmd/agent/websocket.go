@@ -73,7 +73,7 @@ func runWebSocketFacade(cfg *agent.Config, log logr.Logger, tracingProvider *tra
 		defer mediaCleanup()
 	}
 
-	wsServer, mux, err := buildWebSocketServer(cfg, log, store, handler, metrics, tracingProvider, mediaStorage)
+	servers, err := buildWebSocketServer(cfg, log, store, handler, metrics, tracingProvider, mediaStorage)
 	if err != nil {
 		log.Error(err, "failed to build websocket server")
 		os.Exit(1)
@@ -81,25 +81,76 @@ func runWebSocketFacade(cfg *agent.Config, log logr.Logger, tracingProvider *tra
 
 	if mediaStorage != nil {
 		mediaHandler := media.NewHandler(mediaStorage, log, media.WithHandlerMetrics(metrics))
-		mediaHandler.RegisterRoutes(mux)
+		mediaHandler.RegisterRoutes(servers.externalMux)
+		if servers.internalMux != nil {
+			mediaHandler.RegisterRoutes(servers.internalMux)
+		}
 		log.Info("media storage enabled", "type", cfg.MediaStorageType, "path", cfg.MediaStoragePath)
 	}
 
-	facadeServer := newFacadeHTTPServer(cfg, mux)
-	healthServer := newHealthHTTPServer(cfg, store, handler, wsServer)
-
-	// Dual-protocol: optionally start A2A server alongside WebSocket.
-	var a2aSrv *facadea2a.Server
-	var a2aHTTPServer *http.Server
-	var a2aCleanup func()
-	if cfg.A2AEnabled {
-		a2aSrv, a2aHTTPServer, a2aCleanup = startA2AServer(cfg, log, tracingProvider)
+	set := &facadeServerSet{
+		wsServer:     servers.external,
+		facadeServer: newFacadeHTTPServer(cfg, servers.externalMux),
+		healthServer: newHealthHTTPServer(cfg, store, handler, servers.external),
+	}
+	if servers.internal != nil {
+		set.internalWSServer = servers.internal
+		set.internalFacadeServer = newInternalFacadeHTTPServer(cfg, servers.internalMux)
+		log.Info("management-plane internal listener enabled", "port", cfg.InternalFacadePort)
 	}
 
-	startAndServe(log, wsServer, facadeServer, healthServer, a2aSrv, a2aHTTPServer, a2aCleanup)
+	// Dual-protocol: optionally start A2A server alongside WebSocket.
+	if cfg.A2AEnabled {
+		set.a2aSrv, set.a2aHTTPServer, set.a2aCleanup = startA2AServer(cfg, log, tracingProvider)
+	}
+
+	startAndServe(log, set)
 }
 
-// buildWebSocketServer creates the WebSocket server and HTTP mux.
+// webSocketServers holds the external facade server and its optional internal
+// management-plane twin (and their muxes). The internal pair is nil when no
+// internal listener is configured (cfg.InternalFacadePort == 0, i.e.
+// allowManagementPlane disabled).
+type webSocketServers struct {
+	external    *facade.Server
+	externalMux *http.ServeMux
+	internal    *facade.Server
+	internalMux *http.ServeMux
+}
+
+// facadeServerSet groups every long-lived server for startup/shutdown so the
+// internal twin listener can be threaded through without exploding the
+// start/shutdown signatures. The internal* fields are nil when no internal
+// management-plane listener is configured.
+type facadeServerSet struct {
+	wsServer             *facade.Server
+	facadeServer         *http.Server
+	internalWSServer     *facade.Server
+	internalFacadeServer *http.Server
+	healthServer         *http.Server
+	a2aSrv               *facadea2a.Server
+	a2aHTTPServer        *http.Server
+	a2aCleanup           func()
+}
+
+// newWSMux mounts the WebSocket routes onto a fresh mux for a facade server.
+func newWSMux(server *facade.Server) *http.ServeMux {
+	mux := http.NewServeMux()
+	mux.Handle("/ws", server)
+	mux.Handle("/api/agents/", server)
+	return mux
+}
+
+// cloneFacadeOpts copies a ServerOption slice so the external and internal
+// servers can extend the same base opts without aliasing each other's backing
+// array.
+func cloneFacadeOpts(opts []facade.ServerOption) []facade.ServerOption {
+	return append([]facade.ServerOption(nil), opts...)
+}
+
+// buildWebSocketServer creates the external WebSocket server (and, when an
+// internal management-plane port is configured, its internal twin) plus their
+// HTTP muxes.
 //
 // mediaStorage may be nil; if non-nil it is passed to facade.NewServer via
 // WithMediaStorage so the WebSocket upload_request flow can resolve
@@ -113,7 +164,7 @@ func buildWebSocketServer(
 	metrics *agent.Metrics,
 	tracingProvider *tracing.Provider,
 	mediaStorage media.Storage,
-) (*facade.Server, *http.ServeMux, error) {
+) (*webSocketServers, error) {
 	wsConfig := facade.DefaultServerConfig()
 	wsConfig.SessionTTL = cfg.SessionTTL
 	wsConfig.PromptPackName = cfg.PromptPackName
@@ -172,7 +223,7 @@ func buildWebSocketServer(
 	if routeURL := os.Getenv("OMNIA_ROUTE_REDIS_URL"); routeURL != "" {
 		ropts, parseErr := redis.ParseURL(routeURL)
 		if parseErr != nil {
-			return nil, nil, fmt.Errorf("parse route redis url: %w", parseErr)
+			return nil, fmt.Errorf("parse route redis url: %w", parseErr)
 		}
 		serverOpts = append(serverOpts, facade.WithRouteStore(agent.NewRedisRouteStore(redis.NewClient(ropts))))
 	}
@@ -184,14 +235,21 @@ func buildWebSocketServer(
 	// would mask real operator misconfig.
 	mgmtPlane, err := loadMgmtPlaneValidator(log, cfg.AgentName, cfg.WorkspaceName)
 	if err != nil {
-		return nil, nil, fmt.Errorf("mgmt-plane validator load failed: %w", err)
+		return nil, fmt.Errorf("mgmt-plane validator load failed: %w", err)
 	}
-	chain, err := buildAuthChain(context.Background(), buildK8sClient(), log, cfg.AgentName, cfg.Namespace, mgmtPlane)
+	k8sClient := buildK8sClient()
+
+	// External listener: data-plane validators followed by the mgmt-plane
+	// validator. Milestone A keeps mgmt on the external chain (additive, no
+	// breakage); Milestone C swaps buildAuthChain → buildExternalChain to drop
+	// it once callers have moved to the internal listener.
+	externalChain, err := buildAuthChain(context.Background(), k8sClient, log, cfg.AgentName, cfg.Namespace, mgmtPlane)
 	if err != nil {
-		return nil, nil, fmt.Errorf("auth chain build failed: %w", err)
+		return nil, fmt.Errorf("auth chain build failed: %w", err)
 	}
-	if len(chain) > 0 {
-		serverOpts = append(serverOpts, facade.WithAuthChain(chain))
+	extOpts := cloneFacadeOpts(serverOpts)
+	if len(externalChain) > 0 {
+		extOpts = append(extOpts, facade.WithAuthChain(externalChain))
 	}
 	// Strict by default. When the chain is empty (no externalAuth
 	// configured AND mgmt-plane pubkey unreadable — typically a boot race
@@ -200,15 +258,28 @@ func buildWebSocketServer(
 	// C-3 bypass that PR 3's WithAllowUnauthenticated default preserved
 	// for back-compat. Set OMNIA_FACADE_ALLOW_UNAUTHENTICATED=true only
 	// in dev/CI.
-	serverOpts = append(serverOpts,
+	extOpts = append(extOpts,
 		facade.WithAllowUnauthenticated(allowUnauthenticatedFallback(log)))
-	wsServer := facade.NewServer(wsConfig, store, handler, log, serverOpts...)
+	external := facade.NewServer(wsConfig, store, handler, log, extOpts...)
 
-	mux := http.NewServeMux()
-	mux.Handle("/ws", wsServer)
-	mux.Handle("/api/agents/", wsServer)
+	servers := &webSocketServers{external: external, externalMux: newWSMux(external)}
 
-	return wsServer, mux, nil
+	// Internal twin listener: management-plane-only chain. Started only when the
+	// controller has allocated an internal port (allowManagementPlane enabled).
+	// It never permits unauthenticated upgrades — it exists solely for
+	// mgmt-plane callers, which always present a dashboard-minted JWT.
+	if cfg.InternalFacadePort != 0 {
+		intOpts := cloneFacadeOpts(serverOpts)
+		if mgmtChain := buildMgmtChain(mgmtPlane); len(mgmtChain) > 0 {
+			intOpts = append(intOpts, facade.WithAuthChain(mgmtChain))
+		}
+		intOpts = append(intOpts, facade.WithAllowUnauthenticated(false))
+		internal := facade.NewServer(wsConfig, store, handler, log, intOpts...)
+		servers.internal = internal
+		servers.internalMux = newWSMux(internal)
+	}
+
+	return servers, nil
 }
 
 // newFacadeHTTPServer creates the facade HTTP server.
@@ -217,6 +288,17 @@ func buildWebSocketServer(
 func newFacadeHTTPServer(cfg *agent.Config, handler http.Handler) *http.Server {
 	return &http.Server{
 		Addr:        fmt.Sprintf(":%d", cfg.FacadePort),
+		Handler:     handler,
+		ReadTimeout: readTimeout,
+		IdleTimeout: idleTimeout,
+	}
+}
+
+// newInternalFacadeHTTPServer creates the internal management-plane facade HTTP
+// server on cfg.InternalFacadePort. Same timeouts as the external listener.
+func newInternalFacadeHTTPServer(cfg *agent.Config, handler http.Handler) *http.Server {
+	return &http.Server{
+		Addr:        fmt.Sprintf(":%d", cfg.InternalFacadePort),
 		Handler:     handler,
 		ReadTimeout: readTimeout,
 		IdleTimeout: idleTimeout,
@@ -232,37 +314,16 @@ func newHealthHTTPServer(
 }
 
 // startAndServe starts all servers and blocks until shutdown signal or error.
-func startAndServe(
-	log logr.Logger,
-	wsServer *facade.Server,
-	facadeServer, healthServer *http.Server,
-	a2aSrv *facadea2a.Server,
-	a2aHTTPServer *http.Server,
-	a2aCleanup func(),
-) {
-	errChan := make(chan error, 3)
+func startAndServe(log logr.Logger, set *facadeServerSet) {
+	errChan := make(chan error, 4)
 
-	go func() {
-		log.Info("starting facade server", "addr", facadeServer.Addr)
-		if err := facadeServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			errChan <- fmt.Errorf("facade server error: %w", err)
-		}
-	}()
-
-	go func() {
-		log.Info("starting health server", "addr", healthServer.Addr)
-		if err := healthServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			errChan <- fmt.Errorf("health server error: %w", err)
-		}
-	}()
-
-	if a2aHTTPServer != nil {
-		go func() {
-			log.Info("starting A2A server (dual-protocol)", "addr", a2aHTTPServer.Addr)
-			if err := a2aHTTPServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-				errChan <- fmt.Errorf("a2a server error: %w", err)
-			}
-		}()
+	go serveHTTP(log, set.facadeServer, "facade server", errChan)
+	go serveHTTP(log, set.healthServer, "health server", errChan)
+	if set.internalFacadeServer != nil {
+		go serveHTTP(log, set.internalFacadeServer, "internal facade server", errChan)
+	}
+	if set.a2aHTTPServer != nil {
+		go serveHTTP(log, set.a2aHTTPServer, "a2a server", errChan)
 	}
 
 	sigChan := make(chan os.Signal, 1)
@@ -275,55 +336,66 @@ func startAndServe(
 		log.Error(err, "server error")
 	}
 
-	shutdownAll(log, wsServer, facadeServer, healthServer, a2aSrv, a2aHTTPServer, a2aCleanup)
+	shutdownAll(log, set)
+}
+
+// serveHTTP runs srv.ListenAndServe and reports a non-graceful error on errChan.
+func serveHTTP(log logr.Logger, srv *http.Server, name string, errChan chan<- error) {
+	log.Info("starting "+name, "addr", srv.Addr)
+	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		errChan <- fmt.Errorf("%s error: %w", name, err)
+	}
 }
 
 // shutdownAll gracefully shuts down all servers.
-func shutdownAll(
-	log logr.Logger,
-	wsServer *facade.Server,
-	facadeServer, healthServer *http.Server,
-	a2aSrv *facadea2a.Server,
-	a2aHTTPServer *http.Server,
-	a2aCleanup func(),
-) {
+func shutdownAll(log logr.Logger, set *facadeServerSet) {
 	log.Info("shutting down...")
 
 	// Drain active realtime sessions before closing connections. This gives
 	// in-progress calls up to DrainTimeout to finish naturally; the load
 	// balancer already sees 503 on /readyz (IsDraining flipped by Drain).
-	drainCtx, drainCancel := context.WithTimeout(context.Background(), wsServer.DrainTimeoutForShutdown())
+	drainCtx, drainCancel := context.WithTimeout(context.Background(), set.wsServer.DrainTimeoutForShutdown())
 	defer drainCancel()
-	remaining := wsServer.Drain(drainCtx)
+	remaining := set.wsServer.Drain(drainCtx)
 	log.Info("facade drained before shutdown", "remaining", remaining)
 
 	ctx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
 
-	if err := wsServer.Shutdown(ctx); err != nil {
+	if err := set.wsServer.Shutdown(ctx); err != nil {
 		log.Error(err, "error shutting down websocket server")
 	}
-	if a2aSrv != nil {
-		if err := a2aSrv.Shutdown(ctx); err != nil {
+	if set.internalWSServer != nil {
+		if err := set.internalWSServer.Shutdown(ctx); err != nil {
+			log.Error(err, "error shutting down internal websocket server")
+		}
+	}
+	if set.a2aSrv != nil {
+		if err := set.a2aSrv.Shutdown(ctx); err != nil {
 			log.Error(err, "error shutting down A2A server")
 		}
 	}
-	if a2aHTTPServer != nil {
-		if err := a2aHTTPServer.Shutdown(ctx); err != nil {
-			log.Error(err, "error shutting down A2A HTTP server")
-		}
+	if set.a2aCleanup != nil {
+		set.a2aCleanup()
 	}
-	if a2aCleanup != nil {
-		a2aCleanup()
-	}
-	if err := facadeServer.Shutdown(ctx); err != nil {
-		log.Error(err, "error shutting down facade server")
-	}
-	if err := healthServer.Shutdown(ctx); err != nil {
-		log.Error(err, "error shutting down health server")
-	}
+	shutdownHTTP(ctx, log, set.a2aHTTPServer, "A2A HTTP server")
+	shutdownHTTP(ctx, log, set.facadeServer, "facade server")
+	shutdownHTTP(ctx, log, set.internalFacadeServer, "internal facade server")
+	shutdownHTTP(ctx, log, set.healthServer, "health server")
 
 	log.Info("shutdown complete")
+}
+
+// shutdownHTTP gracefully shuts down a possibly-nil HTTP server, logging any
+// error. No-op when srv is nil so optional listeners (internal twin, A2A) don't
+// need a guard at each call site.
+func shutdownHTTP(ctx context.Context, log logr.Logger, srv *http.Server, name string) {
+	if srv == nil {
+		return
+	}
+	if err := srv.Shutdown(ctx); err != nil {
+		log.Error(err, "error shutting down "+name)
+	}
 }
 
 // startA2AServer creates and configures the A2A server for dual-protocol mode.
