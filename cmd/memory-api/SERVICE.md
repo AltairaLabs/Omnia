@@ -135,6 +135,30 @@ in this mode.
 The validator is gated by `--enterprise`; OSS deployments are unaffected
 and `consent_category` stays `NULL` (binary opt-out is the only gate).
 
+### Memory Galaxy projection — consent stance
+
+`GET /api/v1/memories/projection` is a clustering overview that aggregates
+memories across users for an operator/demo view. Every memory contributes a
+point so cluster shape is faithful, but points whose consent category is
+PII-sensitive (`memory:identity`, `memory:location`, `memory:health`) are
+**masked**: their identifying and content fields (`id`, `title`, `preview`,
+`user`, `userRef`, `category`, `type`) are stripped **server-side before
+serialization**, leaving an anonymous, non-interactive dot (`x`, `y`, `tier`,
+`confidence`, timestamps, `masked:true`). Dropping `id` is the security
+boundary — a masked dot cannot be clicked through to the full memory via
+`GET /api/v1/memories/{id}`. Full sensitive content is only available through
+the dedicated memory detail/list API with its own access control, never the
+galaxy.
+
+Masking is **read-time** (applied on every serve, including the cached coords
+path) and **scope-independent** (it applies even with a `user_id` filter, so an
+operator cannot enumerate users to defeat it).
+
+**Not yet covered:** retroactive opt-out masking (hiding memories whose user has
+since opted out) is deferred to #1642 — the consent table keys on a raw user id
+while projection points key on a pseudonym, so the correlation can't be made
+reliable until the id contract is unified.
+
 ### Metrics
 
 - `omnia_memory_classify_overrides_total{from,to,source}` — how often

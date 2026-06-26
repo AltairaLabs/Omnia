@@ -67,6 +67,7 @@ func (s *MemoryService) Project(ctx context.Context, scope map[string]string) (P
 	}
 	out := ProjectionResult{Result: res, Status: "ready", ComputedAt: computedAt}
 	s.enrichEmbeddingMeta(&out)
+	s.applyConsentMasking(&out)
 	return out, nil
 }
 
@@ -81,7 +82,20 @@ func (s *MemoryService) serveStored(ctx context.Context, ps memory.ProjectionSto
 	res.Model, res.Basis = stored.Model, stored.Basis
 	out := ProjectionResult{Result: res, Status: "ready", ComputedAt: stored.ComputedAt}
 	s.enrichEmbeddingMeta(&out)
+	s.applyConsentMasking(&out)
 	return out, nil
+}
+
+// applyConsentMasking strips identifying/content fields from every projection
+// point that consent policy says must not be surfaced in the cross-user galaxy
+// (sensitive category). Done server-side before serialization. Masking layers on
+// read; the memory_projections coords cache is never consent-aware.
+func (s *MemoryService) applyConsentMasking(out *ProjectionResult) {
+	for i := range out.Points {
+		if pointMustBeMasked(out.Points[i]) {
+			maskPoint(&out.Points[i])
+		}
+	}
 }
 
 // projectionCount parses the entity count from a "<count>:<nanos>" fingerprint;
