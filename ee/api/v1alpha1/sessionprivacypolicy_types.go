@@ -90,16 +90,9 @@ type RecordingConfig struct {
 	// messages). This gates conversation content ONLY — metering (tokens/cost via
 	// provider calls), tool calls, runtime events and eval results are always
 	// recorded when enabled. The runtime may be customer-supplied, so content
-	// recording is opt-in. Renamed from richData.
+	// recording is opt-in.
 	// +optional
 	RuntimeData bool `json:"runtimeData,omitempty"`
-
-	// richData is the deprecated alias for runtimeData; when set it is treated as
-	// runtimeData=true. Prefer runtimeData.
-	//
-	// Deprecated: use runtimeData.
-	// +optional
-	RichData bool `json:"richData,omitempty"`
 
 	// pii configures PII handling within recorded session data.
 	// +optional

@@ -87,8 +87,8 @@ func TestGetPreset_CCPA(t *testing.T) {
 	assertRetentionWarmDays(t, spec, 30)
 	assertRetentionColdDays(t, spec, 30)
 
-	if spec.Recording.RichData {
-		t.Error("CCPA preset should not enable rich data recording")
+	if spec.Recording.RuntimeData {
+		t.Error("CCPA preset should not enable runtime data recording")
 	}
 
 	if spec.Recording.PII.Encrypt {

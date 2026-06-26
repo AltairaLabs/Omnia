@@ -63,12 +63,11 @@ type staticPolicy struct {
 
 func (s staticPolicy) Get(context.Context) *httpclient.PrivacyPolicyResponse { return s.p }
 
-func policyResp(enabled, facadeData, runtimeData, richData bool) *httpclient.PrivacyPolicyResponse {
+func policyResp(enabled, facadeData, runtimeData bool) *httpclient.PrivacyPolicyResponse {
 	p := &httpclient.PrivacyPolicyResponse{}
 	p.Recording.Enabled = enabled
 	p.Recording.FacadeData = facadeData
 	p.Recording.RuntimeData = runtimeData
-	p.Recording.RichData = richData
 	return p
 }
 
@@ -132,7 +131,7 @@ func doConverseTurn(t *testing.T, rc *RuntimeClient) {
 
 // Full recording: user (facadeData) + assistant (runtimeData) both land, once each.
 func TestBusRecorder_Converse_RecordsBothTurns(t *testing.T) {
-	rc, store := newRecordingClient(t, policyResp(true, true, true, false))
+	rc, store := newRecordingClient(t, policyResp(true, true, true))
 	doConverseTurn(t, rc)
 
 	require.Eventually(t, func() bool { return len(recordedRoles(t, store)) == 2 },
@@ -147,7 +146,7 @@ func TestBusRecorder_Converse_RecordsBothTurns(t *testing.T) {
 
 // facadeData:false gates the user turn but keeps the assistant (runtimeData).
 func TestBusRecorder_Converse_FacadeDataFalse_DropsUserOnly(t *testing.T) {
-	rc, store := newRecordingClient(t, policyResp(true, false, true, false))
+	rc, store := newRecordingClient(t, policyResp(true, false, true))
 	doConverseTurn(t, rc)
 
 	require.Eventually(t, func() bool { return len(recordedRoles(t, store)) >= 1 },
@@ -158,7 +157,7 @@ func TestBusRecorder_Converse_FacadeDataFalse_DropsUserOnly(t *testing.T) {
 
 // runtimeData:false gates the assistant content but keeps the user turn (facadeData).
 func TestBusRecorder_Converse_RuntimeDataFalse_DropsAssistantOnly(t *testing.T) {
-	rc, store := newRecordingClient(t, policyResp(true, true, false, false))
+	rc, store := newRecordingClient(t, policyResp(true, true, false))
 	doConverseTurn(t, rc)
 
 	require.Eventually(t, func() bool { return len(recordedRoles(t, store)) >= 1 },
@@ -167,19 +166,9 @@ func TestBusRecorder_Converse_RuntimeDataFalse_DropsAssistantOnly(t *testing.T) 
 	assert.Equal(t, []session.MessageRole{session.RoleUser}, recordedRoles(t, store))
 }
 
-// richData is honored as the deprecated alias for runtimeData.
-func TestBusRecorder_Converse_RichDataAliasRecordsAssistant(t *testing.T) {
-	rc, store := newRecordingClient(t, policyResp(true, true, false, true))
-	doConverseTurn(t, rc)
-
-	require.Eventually(t, func() bool { return len(recordedRoles(t, store)) == 2 },
-		2*time.Second, 10*time.Millisecond)
-	assert.Contains(t, recordedRoles(t, store), session.RoleAssistant)
-}
-
 // recording.enabled:false drops everything.
 func TestBusRecorder_Converse_RecordingDisabled_DropsAll(t *testing.T) {
-	rc, store := newRecordingClient(t, policyResp(false, true, true, false))
+	rc, store := newRecordingClient(t, policyResp(false, true, true))
 	doConverseTurn(t, rc)
 
 	time.Sleep(150 * time.Millisecond)
@@ -188,7 +177,7 @@ func TestBusRecorder_Converse_RecordingDisabled_DropsAll(t *testing.T) {
 
 // Unary Invoke (Functions facade) records the input + output as messages.
 func TestBusRecorder_Invoke_RecordsInputAndOutput(t *testing.T) {
-	rc, store := newRecordingClient(t, policyResp(true, true, true, false))
+	rc, store := newRecordingClient(t, policyResp(true, true, true))
 	_, err := rc.Invoke(context.Background(),
 		&runtimev1.InvocationRequest{InvocationId: recTestSessionID, InputJson: `{"q":"hi"}`})
 	require.NoError(t, err)

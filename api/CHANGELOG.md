@@ -10,6 +10,16 @@ or `api/proto/`, add an entry below with the date, affected API, and reason.
 
 ## Unreleased
 
+### Removed (session-api + CRD: `recording.richData` deprecated alias)
+
+- **`GET /api/v1/privacy-policy`** no longer returns `recording.richData`; it was the
+  deprecated alias for `recording.runtimeData`. Clients must read `recording.runtimeData`
+  (gates runtime-emitted assistant message content only).
+- The `SessionPrivacyPolicy` CRD's `recording.richData` field is removed — existing
+  policies must use `recording.runtimeData`. (The unrelated `retention.richData` tier is
+  unaffected.) Facade recording also moved onto a RuntimeClient gRPC bus interceptor, so
+  the gate is read off `runtimeData` directly with no alias.
+
 ### Added (WebSocket: realtime blip-resume — `resume` query param + `connected.resumed` field)
 
 - **`?resume=<session_id>` WebSocket connect query parameter**: clients that experience

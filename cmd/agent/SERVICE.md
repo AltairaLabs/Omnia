@@ -10,7 +10,7 @@
 - Media upload URL negotiation (S3/GCS/Azure/local)
 - Client-side tool result routing to active handler
 - Session recording via HTTP client to Session API
-- Recording-policy gating — on each WebSocket connection, fetches the effective `SessionPrivacyPolicy` from session-api (`GET /api/v1/privacy-policy`) and caches it for 60s. `recordingResponseWriter` skips recording when `Recording.Enabled=false` or restricts writes when `RichData=false`. Fails open (records) on fetch errors so data is never silently dropped.
+- Recording-policy gating — fetches the effective `SessionPrivacyPolicy` from session-api (`GET /api/v1/privacy-policy`) and caches it per agent for 60s. Conversation messages are recorded by the RuntimeClient gRPC bus interceptor (protocol- and runtime-agnostic): it skips recording when `Recording.Enabled=false` and drops assistant content when `runtimeData=false`. Fails open (records) on fetch errors so data is never silently dropped.
 - **Realtime session park-and-resume**: On unintentional WebSocket close during an active realtime duplex session, the facade parks the session (provider socket, state, and timer) in an in-memory registry with a configurable grace period. A reconnecting client that presents `resume=<session_id>` is reattached if ownership is verified and the parked session has not expired. The parked session is immediately closed on an intentional `{"type":"hangup"}` client message. A best-effort Redis route table (`rt:route:<session_id>`→podIP) with TTL equal to the grace period enables the dashboard proxy to route a reconnect to the correct pod (single-replica deployments work without Redis). Expired parked sessions are cleaned up automatically.
 
 ## Inputs

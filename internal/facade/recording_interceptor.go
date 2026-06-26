@@ -2,6 +2,7 @@ package facade
 
 import (
 	"context"
+	"time"
 
 	"github.com/go-logr/logr"
 	"google.golang.org/grpc"
@@ -42,47 +43,85 @@ func newBusRecorder(store session.Store, pool *RecordingPool, policy recordingPo
 // recordUser records an outbound user message, gated by recording.facadeData
 // (the facade is Omnia-controlled, so user turns are facade-sourced).
 func (r *busRecorder) recordUser(ctx context.Context, sessionID, content string) {
-	if r == nil || sessionID == "" || content == "" {
+	if r == nil || sessionID == "" || content == "" || !facadeAllowed(r.policy.Get(ctx)) {
 		return
 	}
-	p := r.policy.Get(ctx)
-	if p != nil && (!p.Recording.Enabled || !p.Recording.FacadeData) {
-		return
-	}
-	r.submit(ctx, sessionID, session.Message{Role: session.RoleUser, Content: content})
+	r.submit(ctx, sessionID, userMessage(content))
 }
 
 // recordAssistant records an inbound assistant message (with aggregate usage),
-// gated by recording.runtimeData (richData kept as deprecated alias). The
-// content is runtime-emitted, so it's opt-in.
+// gated by recording.runtimeData. The content is runtime-emitted, so it's
+// opt-in.
 func (r *busRecorder) recordAssistant(ctx context.Context, sessionID, content string, usage *runtimev1.Usage) {
-	if r == nil || sessionID == "" || content == "" {
+	if r == nil || sessionID == "" || content == "" || !runtimeAllowed(r.policy.Get(ctx)) {
+		return
+	}
+	r.submit(ctx, sessionID, assistantMessage(content, usage))
+}
+
+// recordExchange records a user turn then an assistant turn as a SINGLE ordered
+// pool task, so the user message is always persisted before the assistant
+// message. Used by the unary Invoke path, where both turns are observed at once
+// — the streaming path is naturally ordered by the runtime round-trip, and the
+// store assigns sequence numbers at write time.
+func (r *busRecorder) recordExchange(ctx context.Context, sessionID, userContent, assistantContent string, usage *runtimev1.Usage) {
+	if r == nil || sessionID == "" {
 		return
 	}
 	p := r.policy.Get(ctx)
-	if p != nil && (!p.Recording.Enabled || (!p.Recording.RuntimeData && !p.Recording.RichData)) {
+	var msgs []session.Message
+	if userContent != "" && facadeAllowed(p) {
+		msgs = append(msgs, userMessage(userContent))
+	}
+	if assistantContent != "" && runtimeAllowed(p) {
+		msgs = append(msgs, assistantMessage(assistantContent, usage))
+	}
+	r.submit(ctx, sessionID, msgs...)
+}
+
+// submit records messages asynchronously via the pool, in order, within a single
+// task (preserving their relative order). The request context is detached from
+// cancellation (the stream may close before the write runs) while keeping values
+// such as the propagated user identity for X-Omnia-User-ID.
+func (r *busRecorder) submit(ctx context.Context, sessionID string, msgs ...session.Message) {
+	if len(msgs) == 0 {
 		return
 	}
-	msg := session.Message{Role: session.RoleAssistant, Content: content}
+	recCtx := context.WithoutCancel(ctx)
+	r.pool.Submit(func() {
+		for i := range msgs {
+			if err := r.store.AppendMessage(recCtx, sessionID, msgs[i]); err != nil {
+				r.log.V(1).Info("bus message record failed",
+					"sessionID", sessionID, "role", string(msgs[i].Role), "error", err.Error())
+			}
+		}
+	})
+}
+
+// facadeAllowed reports whether facade-sourced content (user turns) may be
+// recorded under the policy. A nil policy records (fail-open).
+func facadeAllowed(p *httpclient.PrivacyPolicyResponse) bool {
+	return p == nil || (p.Recording.Enabled && p.Recording.FacadeData)
+}
+
+// runtimeAllowed reports whether runtime-sourced content (assistant turns) may be
+// recorded under the policy. A nil policy records (fail-open).
+func runtimeAllowed(p *httpclient.PrivacyPolicyResponse) bool {
+	return p == nil || (p.Recording.Enabled && p.Recording.RuntimeData)
+}
+
+func userMessage(content string) session.Message {
+	return session.Message{Role: session.RoleUser, Content: content, Timestamp: time.Now()}
+}
+
+func assistantMessage(content string, usage *runtimev1.Usage) session.Message {
+	msg := session.Message{Role: session.RoleAssistant, Content: content, Timestamp: time.Now()}
 	if usage != nil {
 		msg.InputTokens = usage.GetInputTokens()
 		msg.OutputTokens = usage.GetOutputTokens()
 		msg.CostUSD = float64(usage.GetCostUsd())
 	}
-	r.submit(ctx, sessionID, msg)
-}
-
-// submit records asynchronously via the pool. The request context is detached
-// from cancellation (the stream may close before the write runs) while keeping
-// values such as the propagated user identity for X-Omnia-User-ID.
-func (r *busRecorder) submit(ctx context.Context, sessionID string, msg session.Message) {
-	recCtx := context.WithoutCancel(ctx)
-	r.pool.Submit(func() {
-		if err := r.store.AppendMessage(recCtx, sessionID, msg); err != nil {
-			r.log.V(1).Info("bus message record failed",
-				"sessionID", sessionID, "role", string(msg.Role), "error", err.Error())
-		}
-	})
+	return msg
 }
 
 // recordingStreamInterceptor wraps the Converse bidi stream to record the user
@@ -115,9 +154,7 @@ func (r *busRecorder) recordingUnaryInterceptor() grpc.UnaryClientInterceptor {
 		ireq, _ := req.(*runtimev1.InvocationRequest)
 		iresp, _ := reply.(*runtimev1.InvocationResponse)
 		if ireq != nil && iresp != nil {
-			sid := ireq.GetInvocationId()
-			r.recordUser(ctx, sid, ireq.GetInputJson())
-			r.recordAssistant(ctx, sid, iresp.GetOutputJson(), iresp.GetUsage())
+			r.recordExchange(ctx, ireq.GetInvocationId(), ireq.GetInputJson(), iresp.GetOutputJson(), iresp.GetUsage())
 		}
 		return nil
 	}

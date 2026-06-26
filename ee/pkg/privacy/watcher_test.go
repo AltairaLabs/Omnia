@@ -128,7 +128,7 @@ func TestGetEffectivePolicy_NamedServiceGroup(t *testing.T) {
 	w := &PolicyWatcher{log: logr.Discard()}
 
 	storePolicy(w, "prod", "analytics-policy", omniav1alpha1.SessionPrivacyPolicySpec{
-		Recording: omniav1alpha1.RecordingConfig{Enabled: true, RichData: true},
+		Recording: omniav1alpha1.RecordingConfig{Enabled: true, RuntimeData: true},
 	})
 
 	storeWorkspace(w, "prod-ws", "prod",
@@ -143,7 +143,7 @@ func TestGetEffectivePolicy_NamedServiceGroup(t *testing.T) {
 
 	result := w.GetEffectivePolicy("prod", "analytics-agent")
 	require.NotNil(t, result)
-	assert.True(t, result.Recording.RichData, "named service group policy should apply")
+	assert.True(t, result.Recording.RuntimeData, "named service group policy should apply")
 }
 
 func TestGetEffectivePolicy_GlobalDefaultFallback(t *testing.T) {

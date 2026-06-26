@@ -166,8 +166,8 @@ func globalPIIPolicy(patterns []string) *omniav1alpha1.SessionPrivacyPolicySpec 
 	return &omniav1alpha1.SessionPrivacyPolicySpec{
 
 		Recording: omniav1alpha1.RecordingConfig{
-			Enabled:  true,
-			RichData: true,
+			Enabled:     true,
+			RuntimeData: true,
 			PII: &omniav1alpha1.PIIConfig{
 				Redact:   true,
 				Patterns: patterns,
@@ -180,8 +180,8 @@ func workspacePIIPolicy(patterns []string) *omniav1alpha1.SessionPrivacyPolicySp
 	return &omniav1alpha1.SessionPrivacyPolicySpec{
 
 		Recording: omniav1alpha1.RecordingConfig{
-			Enabled:  true,
-			RichData: true,
+			Enabled:     true,
+			RuntimeData: true,
 			PII: &omniav1alpha1.PIIConfig{
 				Redact:   true,
 				Patterns: patterns,
@@ -194,8 +194,8 @@ func optOutPolicy() *omniav1alpha1.SessionPrivacyPolicySpec {
 	return &omniav1alpha1.SessionPrivacyPolicySpec{
 
 		Recording: omniav1alpha1.RecordingConfig{
-			Enabled:  true,
-			RichData: true,
+			Enabled:     true,
+			RuntimeData: true,
 		},
 		UserOptOut: &omniav1alpha1.UserOptOutConfig{
 			Enabled: true,
@@ -505,8 +505,8 @@ func TestPrivacyIntegration_WorkspacePolicyOverridesGlobal(t *testing.T) {
 	globalSpec := &omniav1alpha1.SessionPrivacyPolicySpec{
 
 		Recording: omniav1alpha1.RecordingConfig{
-			Enabled:  true,
-			RichData: true,
+			Enabled:     true,
+			RuntimeData: true,
 			PII: &omniav1alpha1.PIIConfig{
 				Redact: false,
 			},
@@ -738,8 +738,8 @@ func TestPrivacyIntegration_AgentPolicyOverridesWorkspace(t *testing.T) {
 	wsSpec := &omniav1alpha1.SessionPrivacyPolicySpec{
 
 		Recording: omniav1alpha1.RecordingConfig{
-			Enabled:  true,
-			RichData: true,
+			Enabled:     true,
+			RuntimeData: true,
 			PII: &omniav1alpha1.PIIConfig{
 				Redact: false,
 			},
@@ -751,8 +751,8 @@ func TestPrivacyIntegration_AgentPolicyOverridesWorkspace(t *testing.T) {
 	agentSpec := &omniav1alpha1.SessionPrivacyPolicySpec{
 
 		Recording: omniav1alpha1.RecordingConfig{
-			Enabled:  true,
-			RichData: true,
+			Enabled:     true,
+			RuntimeData: true,
 			PII: &omniav1alpha1.PIIConfig{
 				Redact:   true,
 				Patterns: []string{"email"},
@@ -790,8 +790,8 @@ func TestPrivacyIntegration_OptOutCombinedWithRedaction(t *testing.T) {
 	spec := &omniav1alpha1.SessionPrivacyPolicySpec{
 
 		Recording: omniav1alpha1.RecordingConfig{
-			Enabled:  true,
-			RichData: true,
+			Enabled:     true,
+			RuntimeData: true,
 			PII: &omniav1alpha1.PIIConfig{
 				Redact:   true,
 				Patterns: []string{"ssn"},
@@ -863,7 +863,7 @@ func TestPrivacyIntegration_EmptyBodyPassesThrough(t *testing.T) {
 //
 // These tests exercise the REAL PrivacyMiddleware (not the local shim
 // privacyMiddleware helper above) to verify that Recording.Enabled=false
-// and RichData=false are enforced end-to-end against the middleware's
+// and RuntimeData=false are enforced end-to-end against the middleware's
 // http.Handler contract.
 // ============================================================================
 
@@ -930,12 +930,12 @@ func TestIntegration_RecordingDisabled_BlocksToolCalls(t *testing.T) {
 	assert.False(t, *called)
 }
 
-func TestIntegration_RichDataDisabled_BlocksAssistantMessage(t *testing.T) {
+func TestIntegration_RuntimeDataDisabled_BlocksAssistantMessage(t *testing.T) {
 	spec := omniav1alpha1.SessionPrivacyPolicySpec{
 
 		Recording: omniav1alpha1.RecordingConfig{
-			Enabled:  true,
-			RichData: false,
+			Enabled:     true,
+			RuntimeData: false,
 		},
 	}
 	handler, called := integrationBuildMiddleware(t, spec)
@@ -946,16 +946,16 @@ func TestIntegration_RichDataDisabled_BlocksAssistantMessage(t *testing.T) {
 	handler.ServeHTTP(rec, req)
 
 	assert.Equal(t, http.StatusNoContent, rec.Code,
-		"assistant messages are rich content and must be dropped when RichData=false")
+		"assistant messages are rich content and must be dropped when RuntimeData=false")
 	assert.False(t, *called)
 }
 
-func TestIntegration_RichDataDisabled_AllowsUserMessage(t *testing.T) {
+func TestIntegration_RuntimeDataDisabled_AllowsUserMessage(t *testing.T) {
 	spec := omniav1alpha1.SessionPrivacyPolicySpec{
 
 		Recording: omniav1alpha1.RecordingConfig{
-			Enabled:  true,
-			RichData: false,
+			Enabled:     true,
+			RuntimeData: false,
 		},
 	}
 	handler, called := integrationBuildMiddleware(t, spec)
@@ -966,7 +966,7 @@ func TestIntegration_RichDataDisabled_AllowsUserMessage(t *testing.T) {
 	handler.ServeHTTP(rec, req)
 
 	assert.Equal(t, http.StatusCreated, rec.Code,
-		"user messages must pass through even when RichData=false")
+		"user messages must pass through even when RuntimeData=false")
 	assert.True(t, *called)
 }
 

@@ -66,9 +66,9 @@ func ListPresets() []PresetName {
 func gdprPreset() *eev1alpha1.SessionPrivacyPolicySpec {
 	return &eev1alpha1.SessionPrivacyPolicySpec{
 		Recording: eev1alpha1.RecordingConfig{
-			Enabled:    true,
-			FacadeData: true,
-			RichData:   true,
+			Enabled:     true,
+			FacadeData:  true,
+			RuntimeData: true,
 			PII: &eev1alpha1.PIIConfig{
 				Redact:   true,
 				Encrypt:  true,
@@ -97,9 +97,9 @@ func gdprPreset() *eev1alpha1.SessionPrivacyPolicySpec {
 func hipaaPreset() *eev1alpha1.SessionPrivacyPolicySpec {
 	return &eev1alpha1.SessionPrivacyPolicySpec{
 		Recording: eev1alpha1.RecordingConfig{
-			Enabled:    true,
-			FacadeData: true,
-			RichData:   true,
+			Enabled:     true,
+			FacadeData:  true,
+			RuntimeData: true,
 			PII: &eev1alpha1.PIIConfig{
 				Redact:   true,
 				Encrypt:  true,
@@ -131,9 +131,9 @@ func hipaaPreset() *eev1alpha1.SessionPrivacyPolicySpec {
 func ccpaPreset() *eev1alpha1.SessionPrivacyPolicySpec {
 	return &eev1alpha1.SessionPrivacyPolicySpec{
 		Recording: eev1alpha1.RecordingConfig{
-			Enabled:    true,
-			FacadeData: true,
-			RichData:   false,
+			Enabled:     true,
+			FacadeData:  true,
+			RuntimeData: false,
 			PII: &eev1alpha1.PIIConfig{
 				Redact:   true,
 				Encrypt:  false,
