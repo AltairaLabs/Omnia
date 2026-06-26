@@ -25,7 +25,7 @@ import (
 // EffectivePolicy contains the computed privacy policy fields relevant to
 // the session-api's redaction and opt-out logic.
 type EffectivePolicy struct {
-	// Recording holds the effective recording config (PII, facadeData, richData).
+	// Recording holds the effective recording config (PII, facadeData, runtimeData).
 	Recording omniav1alpha1.RecordingConfig
 	// UserOptOut holds the effective user opt-out config.
 	UserOptOut *omniav1alpha1.UserOptOutConfig
@@ -286,11 +286,6 @@ func (w *PolicyWatcher) toEffective(p *omniav1alpha1.SessionPrivacyPolicy) *Effe
 	eff := &EffectivePolicy{
 		Recording:  p.Spec.Recording,
 		UserOptOut: p.Spec.UserOptOut,
-	}
-	// richData is the deprecated alias for runtimeData; honor it so existing
-	// policies keep working after the rename.
-	if eff.Recording.RichData { //nolint:staticcheck // intentional: honor the deprecated alias
-		eff.Recording.RuntimeData = true
 	}
 	if p.Spec.Encryption != nil {
 		eff.Encryption = *p.Spec.Encryption

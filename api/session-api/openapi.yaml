@@ -1135,7 +1135,7 @@ components:
 
     PrivacyRecordingFlags:
       type: object
-      required: [enabled, facadeData, richData]
+      required: [enabled, facadeData, runtimeData]
       properties:
         enabled:
           type: boolean
@@ -1143,9 +1143,9 @@ components:
         facadeData:
           type: boolean
           description: When false, facade skips recording at the edge.
-        richData:
+        runtimeData:
           type: boolean
           description: |
-            When false, assistant messages, tool calls, runtime events, and
-            provider calls are dropped; user messages, status updates, and
-            TTL refreshes are still accepted.
+            When false, runtime-emitted assistant message content is dropped;
+            user messages, tool calls, provider calls (metering), runtime
+            events, status updates, and TTL refreshes are still accepted.

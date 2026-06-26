@@ -96,7 +96,7 @@ func mustBuildWS(
 	handler facade.MessageHandler, metrics *agent.Metrics, ms media.Storage,
 ) (*facade.Server, *http.ServeMux) {
 	t.Helper()
-	servers, err := buildWebSocketServer(cfg, logr.Discard(), store, handler, metrics, nil, ms)
+	servers, err := buildWebSocketServer(cfg, logr.Discard(), store, handler, metrics, nil, nil, ms)
 	if err != nil {
 		t.Fatalf("buildWebSocketServer: %v", err)
 	}
@@ -303,7 +303,7 @@ func TestBuildWebSocketServer_InternalTwinEnabled(t *testing.T) {
 	metrics := agent.NewMetrics(cfg.AgentName, cfg.Namespace)
 	handler := &captureHandler{name: probeAgentName}
 
-	servers, err := buildWebSocketServer(cfg, logr.Discard(), store, handler, metrics, nil, nil)
+	servers, err := buildWebSocketServer(cfg, logr.Discard(), store, handler, metrics, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("buildWebSocketServer: %v", err)
 	}
@@ -330,7 +330,7 @@ func TestBuildWebSocketServer_InternalTwinDisabled(t *testing.T) {
 	metrics := agent.NewMetrics(cfg.AgentName, cfg.Namespace)
 	handler := &captureHandler{name: probeAgentName}
 
-	servers, err := buildWebSocketServer(cfg, logr.Discard(), store, handler, metrics, nil, nil)
+	servers, err := buildWebSocketServer(cfg, logr.Discard(), store, handler, metrics, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("buildWebSocketServer: %v", err)
 	}

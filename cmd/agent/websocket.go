@@ -53,17 +53,28 @@ func runWebSocketFacade(cfg *agent.Config, log logr.Logger, tracingProvider *tra
 	}
 	defer closeStore(store, log)
 
-	// Create message handler based on mode
-	handler, handlerCleanup := createHandler(cfg, log, tracingProvider)
-	if handlerCleanup != nil {
-		defer handlerCleanup()
-	}
-
 	// Create Prometheus metrics
 	metrics := agent.NewMetrics(cfg.AgentName, cfg.Namespace)
 	// Surface the active session-store mode so a silent in-memory fallback
 	// (no session-api recording) is observable/alertable (issue #1223).
 	metrics.SetSessionStoreMode(storeMode)
+
+	// Recording infrastructure, created before the handler so it can be injected
+	// into the RuntimeClient's bus recorder (records conversation messages off
+	// the gRPC bus) and shared with the server's session-completion writer.
+	recordingPool := facade.NewRecordingPool(
+		facade.DefaultRecordingPoolSize, facade.DefaultRecordingQueueSize, log, metrics)
+	var recordingPolicy *facade.RecordingPolicyCache
+	if pf, ok := store.(facade.PolicyFetcher); ok {
+		recordingPolicy = facade.NewRecordingPolicyCache(
+			pf, cfg.Namespace, cfg.AgentName, 60*time.Second, log)
+	}
+
+	// Create message handler based on mode
+	handler, handlerCleanup := createHandler(cfg, log, tracingProvider, store, recordingPool, recordingPolicy)
+	if handlerCleanup != nil {
+		defer handlerCleanup()
+	}
 
 	// Initialize media storage BEFORE building the WS server so it can be
 	// threaded into the facade via WithMediaStorage. Without this, the facade
@@ -74,7 +85,8 @@ func runWebSocketFacade(cfg *agent.Config, log logr.Logger, tracingProvider *tra
 		defer mediaCleanup()
 	}
 
-	servers, err := buildWebSocketServer(cfg, log, store, handler, metrics, tracingProvider, mediaStorage)
+	servers, err := buildWebSocketServer(
+		cfg, log, store, handler, metrics, recordingPool, tracingProvider, mediaStorage)
 	if err != nil {
 		log.Error(err, "failed to build websocket server")
 		os.Exit(1)
@@ -164,6 +176,7 @@ func buildWebSocketServer(
 	store session.Store,
 	handler facade.MessageHandler,
 	metrics *agent.Metrics,
+	recordingPool *facade.RecordingPool,
 	tracingProvider *tracing.Provider,
 	mediaStorage media.Storage,
 ) (*webSocketServers, error) {
@@ -177,12 +190,6 @@ func buildWebSocketServer(
 	if cfg.DrainTimeout > 0 {
 		wsConfig.DrainTimeout = cfg.DrainTimeout
 	}
-	recordingPool := facade.NewRecordingPool(
-		facade.DefaultRecordingPoolSize,
-		facade.DefaultRecordingQueueSize,
-		log,
-		metrics,
-	)
 	serverOpts := []facade.ServerOption{
 		facade.WithMetrics(metrics),
 		facade.WithRecordingPool(recordingPool),
@@ -192,9 +199,6 @@ func buildWebSocketServer(
 	}
 	if mediaStorage != nil {
 		serverOpts = append(serverOpts, facade.WithMediaStorage(mediaStorage))
-	}
-	if pf, ok := store.(facade.PolicyFetcher); ok {
-		serverOpts = append(serverOpts, facade.WithPolicyFetcher(pf))
 	}
 	// Wire the duplex sink factory if the handler is a RuntimeHandler — that
 	// means a runtime gRPC client is available and audio duplex is supported.

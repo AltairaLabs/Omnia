@@ -29,6 +29,7 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/stats"
 
+	"github.com/altairalabs/omnia/internal/session"
 	runtimev1 "github.com/altairalabs/omnia/pkg/runtime/v1"
 
 	"github.com/altairalabs/omnia/pkg/policy"
@@ -54,6 +55,13 @@ type RuntimeClientConfig struct {
 	Log logr.Logger
 	// TracerProvider is an optional tracer provider for distributed tracing.
 	TracerProvider trace.TracerProvider
+
+	// SessionStore, RecordingPool and RecordingPolicy enable the bus recorder —
+	// the protocol-agnostic recording of conversation messages off the bus. When
+	// any is nil the recording interceptors are no-ops (e.g. doctor/tests).
+	SessionStore    session.Store
+	RecordingPool   *RecordingPool
+	RecordingPolicy recordingPolicyGetter
 }
 
 // NewRuntimeClient creates a new RuntimeClient connected to the runtime sidecar.
@@ -62,6 +70,22 @@ func NewRuntimeClient(cfg RuntimeClientConfig) (*RuntimeClient, error) {
 	maxMsgSize := cfg.MaxMessageSize
 	if maxMsgSize == 0 {
 		maxMsgSize = 16 * 1024 * 1024 // 16MB default
+	}
+
+	log := cfg.Log
+	if log.GetSink() == nil {
+		log = logr.Discard()
+	}
+
+	// Chain the outbound policy-propagation interceptors with the bus recorder
+	// (records conversation messages off the bus; no-op when recording deps are
+	// not wired). Covers both Invoke (unary) and Converse (stream).
+	rec := newBusRecorder(cfg.SessionStore, cfg.RecordingPool, cfg.RecordingPolicy, log)
+	unaryInts := []grpc.UnaryClientInterceptor{policyUnaryClientInterceptor()}
+	streamInts := []grpc.StreamClientInterceptor{policyStreamClientInterceptor()}
+	if rec != nil {
+		unaryInts = append(unaryInts, rec.recordingUnaryInterceptor())
+		streamInts = append(streamInts, rec.recordingStreamInterceptor())
 	}
 
 	// Use insecure credentials for localhost sidecar communication.
@@ -73,8 +97,8 @@ func NewRuntimeClient(cfg RuntimeClientConfig) (*RuntimeClient, error) {
 			grpc.MaxCallRecvMsgSize(maxMsgSize),
 			grpc.MaxCallSendMsgSize(maxMsgSize),
 		),
-		grpc.WithUnaryInterceptor(policyUnaryClientInterceptor()),
-		grpc.WithStreamInterceptor(policyStreamClientInterceptor()),
+		grpc.WithChainUnaryInterceptor(unaryInts...),
+		grpc.WithChainStreamInterceptor(streamInts...),
 	)
 	if cfg.TracerProvider != nil {
 		dialOpts = append(dialOpts, grpc.WithStatsHandler(otelgrpc.NewClientHandler(
@@ -85,11 +109,6 @@ func NewRuntimeClient(cfg RuntimeClientConfig) (*RuntimeClient, error) {
 	conn, err := grpc.NewClient(cfg.Address, dialOpts...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create runtime client for %s: %w", cfg.Address, err)
-	}
-
-	log := cfg.Log
-	if log.GetSink() == nil {
-		log = logr.Discard()
 	}
 
 	client := &RuntimeClient{

@@ -58,7 +58,7 @@ func TestBuildWebSocketServer_WiresRedisRouteStore(t *testing.T) {
 	metrics := agent.NewMetrics(cfg.AgentName, cfg.Namespace)
 	handler := &captureHandler{name: probeAgentName}
 
-	servers, err := buildWebSocketServer(cfg, logr.Discard(), store, handler, metrics, nil, nil)
+	servers, err := buildWebSocketServer(cfg, logr.Discard(), store, handler, metrics, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("buildWebSocketServer: %v", err)
 	}
@@ -93,7 +93,7 @@ func TestBuildWebSocketServer_NoopRouteStoreWhenEnvUnset(t *testing.T) {
 	metrics := agent.NewMetrics(cfg.AgentName, cfg.Namespace)
 	handler := &captureHandler{name: "probe-no-redis"}
 
-	servers, err := buildWebSocketServer(cfg, logr.Discard(), store, handler, metrics, nil, nil)
+	servers, err := buildWebSocketServer(cfg, logr.Discard(), store, handler, metrics, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("buildWebSocketServer: %v", err)
 	}

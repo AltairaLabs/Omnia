@@ -1556,7 +1556,7 @@ func TestStore_GetPrivacyPolicy_Success(t *testing.T) {
 		assert.Equal(t, "default", r.URL.Query().Get("namespace"))
 		assert.Equal(t, "my-agent", r.URL.Query().Get("agent"))
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"recording":{"enabled":true,"facadeData":true,"richData":false}}`))
+		_, _ = w.Write([]byte(`{"recording":{"enabled":true,"facadeData":true,"runtimeData":false}}`))
 	}))
 	defer srv.Close()
 
@@ -1568,7 +1568,7 @@ func TestStore_GetPrivacyPolicy_Success(t *testing.T) {
 	require.NotNil(t, policy)
 	assert.True(t, policy.Recording.Enabled)
 	assert.True(t, policy.Recording.FacadeData)
-	assert.False(t, policy.Recording.RichData)
+	assert.False(t, policy.Recording.RuntimeData)
 }
 
 func TestStore_GetPrivacyPolicy_NoPolicy(t *testing.T) {
@@ -1622,7 +1622,7 @@ func TestStore_GetPrivacyPolicy_BypassesCircuitBreaker(t *testing.T) {
 		sessionAttempts.Add(1)
 		if strings.HasPrefix(r.URL.Path, "/api/v1/privacy-policy") {
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"recording":{"enabled":true,"facadeData":false,"richData":false}}`))
+			_, _ = w.Write([]byte(`{"recording":{"enabled":true,"facadeData":false,"runtimeData":false}}`))
 			return
 		}
 		w.WriteHeader(http.StatusBadGateway)

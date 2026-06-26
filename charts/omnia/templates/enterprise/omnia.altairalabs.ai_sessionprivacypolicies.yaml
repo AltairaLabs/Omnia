@@ -175,20 +175,13 @@ spec:
                         - mask
                         type: string
                     type: object
-                  richData:
-                    description: |-
-                      richData is the deprecated alias for runtimeData; when set it is treated as
-                      runtimeData=true. Prefer runtimeData.
-
-                      Deprecated: use runtimeData.
-                    type: boolean
                   runtimeData:
                     description: |-
                       runtimeData enables recording of runtime-emitted message content (assistant
                       messages). This gates conversation content ONLY — metering (tokens/cost via
                       provider calls), tool calls, runtime events and eval results are always
                       recorded when enabled. The runtime may be customer-supplied, so content
-                      recording is opt-in. Renamed from richData.
+                      recording is opt-in.
                     type: boolean
                 required:
                 - enabled

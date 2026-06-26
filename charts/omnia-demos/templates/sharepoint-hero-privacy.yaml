@@ -11,7 +11,7 @@ spec:
   recording:
     enabled: true
     facadeData: true
-    richData: true
+    runtimeData: true
     pii:
       redact: true
       strategy: replace

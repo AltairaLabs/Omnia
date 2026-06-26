@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
 	"github.com/altairalabs/omnia/internal/pgutil"
@@ -146,6 +147,15 @@ func (p *Provider) DeleteSessionsByScope(ctx context.Context, scope providers.Se
 }
 
 func (p *Provider) AppendMessage(ctx context.Context, sessionID string, msg *session.Message) error {
+	// Generate the message ID when the caller omits it. The id column is a
+	// NOT NULL uuid; binding an empty string fails with "invalid input syntax
+	// for type uuid" (the column DEFAULT only applies when omitted, not when an
+	// empty value is bound). MemoryStore does the same, so both store
+	// implementations share one contract.
+	if msg.ID == "" {
+		msg.ID = uuid.New().String()
+	}
+
 	// Default the partition-key timestamp to now() when zero, so a zero-value
 	// (0001-01-01) doesn't fall outside every partition and trip
 	// "no partition of relation found for row".

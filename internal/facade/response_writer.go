@@ -17,7 +17,13 @@ limitations under the License.
 package facade
 
 import (
+	"context"
 	"encoding/base64"
+	"fmt"
+	"time"
+
+	"github.com/altairalabs/omnia/internal/session"
+	"github.com/google/uuid"
 )
 
 // connResponseWriter implements ResponseWriter for a connection.
@@ -57,9 +63,41 @@ func (w *connResponseWriter) WriteToolResult(result *ToolResultInfo) error {
 	return w.server.sendMessage(w.conn, NewToolResultMessage(w.sessionID, result))
 }
 
-// WriteError sends an error message.
+// WriteError sends an error message and marks the session errored. The status
+// update matters: it must run even though the bus interceptor handles normal
+// message recording, so a later clean disconnect does not overwrite the status
+// to "completed". Recorded async via the recording pool.
 func (w *connResponseWriter) WriteError(code, message string) error {
-	return w.server.sendMessage(w.conn, NewErrorMessage(w.sessionID, code, message))
+	err := w.server.sendMessage(w.conn, NewErrorMessage(w.sessionID, code, message))
+	w.server.recordError(w.sessionID, code, message)
+	return err
+}
+
+// recordError persists an error message and sets the session status to error.
+func (s *Server) recordError(sessionID, code, message string) {
+	if sessionID == "" {
+		return
+	}
+	s.submitCompletion(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		msg := session.Message{
+			ID:        uuid.New().String(),
+			Role:      session.RoleSystem,
+			Content:   fmt.Sprintf("%s: %s", code, message),
+			Timestamp: time.Now(),
+			Metadata:  map[string]string{"type": "error"},
+		}
+		if err := s.sessionStore.AppendMessage(ctx, sessionID, msg); err != nil {
+			s.log.Error(err, "failed to record error message", "sessionID", sessionID)
+		}
+		if err := s.sessionStore.UpdateSessionStatus(ctx, sessionID, session.SessionStatusUpdate{
+			SetStatus:  session.SessionStatusError,
+			SetEndedAt: time.Now(),
+		}); err != nil {
+			s.log.Error(err, "failed to update session status for error", "sessionID", sessionID)
+		}
+	})
 }
 
 // WriteInterrupt tells the client to clear buffered audio (duplex barge-in).

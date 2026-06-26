@@ -304,7 +304,10 @@ func readyzHandler(store session.Store, handler facade.MessageHandler, wsServer 
 
 // createHandler creates the appropriate message handler based on configuration.
 // Returns the handler and an optional cleanup function.
-func createHandler(cfg *agent.Config, log logr.Logger, tp *tracing.Provider) (facade.MessageHandler, func()) {
+func createHandler(
+	cfg *agent.Config, log logr.Logger, tp *tracing.Provider,
+	store session.Store, pool *facade.RecordingPool, policy *facade.RecordingPolicyCache,
+) (facade.MessageHandler, func()) {
 	switch cfg.HandlerMode {
 	case agent.HandlerModeEcho:
 		log.Info("using echo handler mode")
@@ -317,60 +320,77 @@ func createHandler(cfg *agent.Config, log logr.Logger, tp *tracing.Provider) (fa
 		}
 		return agent.NewDemoHandler(demoOpts...), nil
 	case agent.HandlerModeRuntime:
-		log.Info("using runtime handler mode", "address", cfg.RuntimeAddress)
-
-		// Retry connection with exponential backoff (runtime container may still be starting)
-		var client *facade.RuntimeClient
-		var err error
-		maxRetries := 10
-		backoff := 500 * time.Millisecond
-
-		// Build RuntimeClient config with optional tracing
-		runtimeCfg := facade.RuntimeClientConfig{
-			Address:     cfg.RuntimeAddress,
-			DialTimeout: 5 * time.Second,
-			Log:         log,
-		}
-		if tp != nil {
-			runtimeCfg.TracerProvider = tp.TracerProvider()
-		}
-
-		for i := 0; i < maxRetries; i++ {
-			client, err = facade.NewRuntimeClient(runtimeCfg)
-			if err == nil {
-				log.Info("connected to runtime", "address", cfg.RuntimeAddress, "attempt", i+1)
-				break
-			}
-
-			log.Info("waiting for runtime to be ready", "address", cfg.RuntimeAddress, "attempt", i+1, "error", err.Error())
-			time.Sleep(backoff)
-			backoff = min(backoff*2, 5*time.Second) // Cap at 5 seconds
-		}
-
-		if err != nil {
-			log.Error(err, "failed to connect to runtime after retries, falling back to nil handler")
-			return nil, nil
-		}
-
-		handler := agent.NewRuntimeHandler(client)
-		// Apply CRD-driven client tool timeout. The config struct is populated
-		// from AgentRuntime.spec.facade.clientToolTimeout by agent.LoadFromCRD.
-		// Without this, the handler always used defaultClientToolTimeout (60s)
-		// and the CRD field was dead.
-		if cfg.ClientToolTimeout > 0 {
-			handler.SetClientToolTimeout(cfg.ClientToolTimeout)
-			log.V(1).Info("client tool timeout override applied", "timeout", cfg.ClientToolTimeout)
-		}
-		cleanup := func() {
-			if err := client.Close(); err != nil {
-				log.Error(err, "error closing runtime client")
-			}
-		}
-		return handler, cleanup
+		return createRuntimeHandler(cfg, log, tp, store, pool, policy)
 	default:
 		log.Info("unknown handler mode, using nil handler", "mode", cfg.HandlerMode)
 		return nil, nil
 	}
+}
+
+// createRuntimeHandler dials the runtime gRPC sidecar (with retry/backoff) and
+// wraps it in a RuntimeHandler. store/pool/policy enable the RuntimeClient bus
+// recorder — recording conversation messages off the gRPC bus, protocol- and
+// runtime-agnostically. Returns (nil, nil) if the runtime never becomes ready.
+func createRuntimeHandler(
+	cfg *agent.Config, log logr.Logger, tp *tracing.Provider,
+	store session.Store, pool *facade.RecordingPool, policy *facade.RecordingPolicyCache,
+) (facade.MessageHandler, func()) {
+	log.Info("using runtime handler mode", "address", cfg.RuntimeAddress)
+
+	// Build RuntimeClient config with optional tracing. policy is guarded to
+	// avoid wrapping a typed-nil in the interface field (which would defeat the
+	// nil check in the recorder).
+	runtimeCfg := facade.RuntimeClientConfig{
+		Address:       cfg.RuntimeAddress,
+		DialTimeout:   5 * time.Second,
+		Log:           log,
+		SessionStore:  store,
+		RecordingPool: pool,
+	}
+	if policy != nil {
+		runtimeCfg.RecordingPolicy = policy
+	}
+	if tp != nil {
+		runtimeCfg.TracerProvider = tp.TracerProvider()
+	}
+
+	rc := dialRuntimeWithRetry(runtimeCfg, log)
+	if rc == nil {
+		log.Error(nil, "failed to connect to runtime after retries, falling back to nil handler")
+		return nil, nil
+	}
+
+	handler := agent.NewRuntimeHandler(rc)
+	// Apply CRD-driven client tool timeout, populated from
+	// AgentRuntime.spec.facade.clientToolTimeout by agent.LoadFromCRD.
+	if cfg.ClientToolTimeout > 0 {
+		handler.SetClientToolTimeout(cfg.ClientToolTimeout)
+		log.V(1).Info("client tool timeout override applied", "timeout", cfg.ClientToolTimeout)
+	}
+	cleanup := func() {
+		if err := rc.Close(); err != nil {
+			log.Error(err, "error closing runtime client")
+		}
+	}
+	return handler, cleanup
+}
+
+// dialRuntimeWithRetry connects to the runtime sidecar with exponential backoff
+// (the runtime container may still be starting). Returns nil after maxRetries.
+func dialRuntimeWithRetry(runtimeCfg facade.RuntimeClientConfig, log logr.Logger) *facade.RuntimeClient {
+	const maxRetries = 10
+	backoff := 500 * time.Millisecond
+	for i := 0; i < maxRetries; i++ {
+		rc, err := facade.NewRuntimeClient(runtimeCfg)
+		if err == nil {
+			log.Info("connected to runtime", "address", runtimeCfg.Address, "attempt", i+1)
+			return rc
+		}
+		log.Info("waiting for runtime to be ready", "address", runtimeCfg.Address, "attempt", i+1, "error", err.Error())
+		time.Sleep(backoff)
+		backoff = min(backoff*2, 5*time.Second) // Cap at 5 seconds
+	}
+	return nil
 }
 
 // initMediaStorage creates the appropriate media storage backend based on configuration.
