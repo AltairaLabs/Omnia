@@ -6672,6 +6672,20 @@ export interface AgentRuntimeStatus {
       valid: boolean;
     }[];
   };
+  /** managementEndpoints reports the internal (management-plane) listener ports
+   * the facade serves when externalAuth.allowManagementPlane is enabled. A nil
+   * value means the management plane is disabled and no internal listener
+   * exists. The dashboard and in-cluster callers read these to dial the agent
+   * over the management plane — they never compute the port from the external
+   * port. */
+  managementEndpoints?: {
+    /** a2a is the internal A2A management-plane port (dual-protocol agents). */
+    a2a?: number;
+    /** mcp is the internal MCP management-plane port (function-mode agents). */
+    mcp?: number;
+    /** ws is the internal WebSocket management-plane port. */
+    ws?: number;
+  };
   /** observedGeneration is the most recent generation observed by the controller. */
   observedGeneration?: number;
   /** phase represents the current lifecycle phase of the AgentRuntime. */

@@ -69,6 +69,20 @@ const (
 	// portNameMCP is the container/service port name for the MCP endpoint.
 	portNameMCP = "mcp"
 
+	// Internal management-plane twin-listener ports. The facade serves each
+	// surface a second time on these ports behind a mgmt-plane-only auth chain
+	// when externalAuth.allowManagementPlane is enabled. Independently declared
+	// (not an offset of the external port); must match the agent package's
+	// Default Internal*Port constants.
+	DefaultInternalFacadePort = 18080
+	DefaultInternalA2APort    = 19999
+	DefaultInternalMCPPort    = 19998
+	// portNameFacadeMgmt / portNameA2AMgmt / portNameMCPMgmt are the
+	// container/service port names for the internal management-plane listeners.
+	portNameFacadeMgmt = "facade-mgmt"
+	portNameA2AMgmt    = "a2a-mgmt"
+	portNameMCPMgmt    = "mcp-mgmt"
+
 	// appProtocolHTTP / appProtocolGRPC are Istio Service-port appProtocol values.
 	// Setting appProtocol is what lets an Istio waypoint (or sidecar) do L7 on a
 	// port — required for mode=mesh weighted routing AND for the facade's
