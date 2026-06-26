@@ -48,6 +48,33 @@ async function resolveWorkspaceName(namespace, name, opts = {}) {
   return namespaceLabel(namespace);
 }
 
+/**
+ * resolveAgentMgmtWsPort returns the agent's internal management-plane WebSocket
+ * port from `status.managementEndpoints.ws`, or null when absent — the
+ * management plane is disabled, or the agent predates the field / hasn't been
+ * reconciled yet. The proxy dials this mgmt-plane-only listener and falls back
+ * to the external facade port when null (or when the dial is refused). The port
+ * is read explicitly from status — never computed from the external port.
+ *
+ * Lookup injectable for testing:
+ *   opts.agentRuntimeMgmtWsPort(namespace, name) -> Promise<number|null>
+ *
+ * Fails soft: a lookup error returns null (fall back to the external port)
+ * rather than dropping the upgrade.
+ */
+async function resolveAgentMgmtWsPort(namespace, name, opts = {}) {
+  const lookup = opts.agentRuntimeMgmtWsPort || defaultAgentRuntimeMgmtWsPort;
+  try {
+    const port = await lookup(namespace, name);
+    return Number.isInteger(port) && port > 0 ? port : null;
+  } catch (err) {
+    console.error(
+      `[WS Proxy] mgmt-port resolve failed for ${namespace}/${name}: ${err.message}`,
+    );
+    return null;
+  }
+}
+
 // k8sGetJSON performs an authenticated in-cluster GET against the kube API
 // using the mounted service-account token + CA bundle, returning the parsed
 // JSON body. Mirrors lib/service-token.js's request shape.
@@ -123,11 +150,23 @@ async function defaultNamespaceLabel(namespace) {
   const obj = await k8sGetJSON(path);
   return (obj && obj.metadata && obj.metadata.labels && obj.metadata.labels[WORKSPACE_LABEL]) || "";
 }
+
+// defaultAgentRuntimeMgmtWsPort reads status.managementEndpoints.ws off the
+// named AgentRuntime. Returns null when the field is absent.
+async function defaultAgentRuntimeMgmtWsPort(namespace, name) {
+  const path = `/apis/omnia.altairalabs.ai/v1alpha1/namespaces/${encodeURIComponent(namespace)}/agentruntimes/${encodeURIComponent(name)}`;
+  const obj = await k8sGetJSON(path);
+  const ws =
+    obj && obj.status && obj.status.managementEndpoints && obj.status.managementEndpoints.ws;
+  return Number.isInteger(ws) ? ws : null;
+}
 /* c8 ignore stop */
 
 module.exports = {
   resolveWorkspaceName,
+  resolveAgentMgmtWsPort,
   WORKSPACE_LABEL,
   defaultAgentRuntimeLabel,
   defaultNamespaceLabel,
+  defaultAgentRuntimeMgmtWsPort,
 };

@@ -13,12 +13,13 @@ import { describe, it, expect, vi } from "vitest";
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
-const { resolveWorkspaceName, WORKSPACE_LABEL } = require("./workspace-resolver.js");
+const { resolveWorkspaceName, resolveAgentMgmtWsPort, WORKSPACE_LABEL } = require("./workspace-resolver.js");
 
 // Namespace != workspace name — the whole point of the resolver (#1552).
 const NS = "omnia-demo";
 const AGENT = "rag-hero";
 const WS_NAME = "demo";
+const APISERVER_DOWN = "apiserver down";
 
 describe("resolveWorkspaceName", () => {
   it("uses the AgentRuntime's workspace label when present", async () => {
@@ -52,7 +53,7 @@ describe("resolveWorkspaceName", () => {
     await expect(
       resolveWorkspaceName(NS, AGENT, {
         agentRuntimeLabel: async () => {
-          throw new Error("apiserver down");
+          throw new Error(APISERVER_DOWN);
         },
         namespaceLabel: async () => WS_NAME,
       }),
@@ -73,6 +74,54 @@ describe("resolveWorkspaceName", () => {
       await expect(resolveWorkspaceName(NS, AGENT)).rejects.toThrow(
         /in-cluster API server/,
       );
+    } finally {
+      if (saved !== undefined) {
+        process.env.KUBERNETES_SERVICE_HOST = saved;
+      }
+    }
+  });
+});
+
+describe("resolveAgentMgmtWsPort", () => {
+  it("returns the port from status.managementEndpoints.ws", async () => {
+    const port = await resolveAgentMgmtWsPort(NS, AGENT, {
+      agentRuntimeMgmtWsPort: async () => 18080,
+    });
+    expect(port).toBe(18080);
+  });
+
+  it("returns null when the management plane is disabled (no port)", async () => {
+    const port = await resolveAgentMgmtWsPort(NS, AGENT, {
+      agentRuntimeMgmtWsPort: async () => null,
+    });
+    expect(port).toBeNull();
+  });
+
+  it("returns null for a non-positive or non-integer port", async () => {
+    expect(
+      await resolveAgentMgmtWsPort(NS, AGENT, { agentRuntimeMgmtWsPort: async () => 0 }),
+    ).toBeNull();
+    expect(
+      await resolveAgentMgmtWsPort(NS, AGENT, { agentRuntimeMgmtWsPort: async () => "18080" }),
+    ).toBeNull();
+  });
+
+  it("fails soft to null on a lookup error (falls back to external port)", async () => {
+    const port = await resolveAgentMgmtWsPort(NS, AGENT, {
+      agentRuntimeMgmtWsPort: async () => {
+        throw new Error(APISERVER_DOWN);
+      },
+    });
+    expect(port).toBeNull();
+  });
+
+  it("defaults to the in-cluster lookup when none is injected", async () => {
+    const saved = process.env.KUBERNETES_SERVICE_HOST;
+    delete process.env.KUBERNETES_SERVICE_HOST;
+    try {
+      // The real lookup rejects outside a cluster; resolveAgentMgmtWsPort fails
+      // soft to null rather than propagating, proving the default is wired.
+      expect(await resolveAgentMgmtWsPort(NS, AGENT)).toBeNull();
     } finally {
       if (saved !== undefined) {
         process.env.KUBERNETES_SERVICE_HOST = saved;
