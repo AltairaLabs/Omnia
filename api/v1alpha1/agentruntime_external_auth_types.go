@@ -87,6 +87,19 @@ type AgentExternalAuth struct {
 	EdgeTrust *EdgeTrustAuth `json:"edgeTrust,omitempty"`
 }
 
+// ManagementPlaneAllowed reports whether dashboard-minted management-plane
+// tokens are accepted for this agent. Defaults to true — a nil receiver (the
+// whole externalAuth block omitted) or a nil AllowManagementPlane field both
+// mean the permissive default; only an explicit allowManagementPlane:false
+// opts out. Centralizes the nil-as-true convention so the controller and the
+// facade config loader agree on a single source of truth.
+func (e *AgentExternalAuth) ManagementPlaneAllowed() bool {
+	if e == nil || e.AllowManagementPlane == nil {
+		return true
+	}
+	return *e.AllowManagementPlane
+}
+
 // SharedTokenAuth validates a single bearer token shared by all callers.
 type SharedTokenAuth struct {
 	// secretRef references a Secret with key "token" holding the bearer

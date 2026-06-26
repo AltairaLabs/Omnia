@@ -106,7 +106,48 @@ func LoadFromCRD(ctx context.Context, c client.Client, name, namespace string) (
 
 	loadMCPConfigFromCRD(cfg, ar)
 
+	applyManagementPlanePorts(cfg, ar.Spec.ExternalAuth)
+
 	return cfg, nil
+}
+
+// applyManagementPlanePorts sets the internal twin-listener ports the facade
+// serves behind the mgmt-plane-only chain. They are infrastructure constants
+// (not CRD fields), gated on externalAuth.allowManagementPlane and on whether
+// each surface is enabled. When the management plane is disabled the ports stay
+// zero and no internal listener is started.
+func applyManagementPlanePorts(cfg *Config, ext *v1alpha1.AgentExternalAuth) {
+	if !ext.ManagementPlaneAllowed() {
+		return
+	}
+	cfg.InternalFacadePort = DefaultInternalFacadePort
+	if cfg.A2AEnabled {
+		cfg.InternalA2APort = DefaultInternalA2APort
+	}
+	if cfg.MCPEnabled {
+		cfg.InternalMCPPort = DefaultInternalMCPPort
+	}
+}
+
+// loadInternalPortsFromEnv reads the internal twin-listener ports from the
+// environment (demo/E2E fallback path, where there is no CRD to derive them
+// from). Unset means zero — no internal listener for that surface.
+func loadInternalPortsFromEnv(cfg *Config) error {
+	for _, p := range []struct {
+		env string
+		dst *int
+	}{
+		{EnvInternalFacadePort, &cfg.InternalFacadePort},
+		{EnvInternalA2APort, &cfg.InternalA2APort},
+		{EnvInternalMCPPort, &cfg.InternalMCPPort},
+	} {
+		v, err := getEnvAsInt(p.env, 0)
+		if err != nil {
+			return fmt.Errorf(errFmtInvalidEnv, p.env, err)
+		}
+		*p.dst = v
+	}
+	return nil
 }
 
 // loadA2AConfigFromCRD populates A2A-related config fields from the AgentRuntime CRD.
@@ -326,6 +367,10 @@ func loadFromEnvFallback(name, namespace string) (*Config, error) {
 	}
 
 	if err := loadMCPConfigFromEnv(cfg); err != nil {
+		return nil, err
+	}
+
+	if err := loadInternalPortsFromEnv(cfg); err != nil {
 		return nil, err
 	}
 

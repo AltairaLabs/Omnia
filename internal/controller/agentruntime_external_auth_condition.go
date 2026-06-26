@@ -50,11 +50,7 @@ func evaluateExternalAuthCondition(ar *omniav1alpha1.AgentRuntime) metav1.Condit
 		ext.EdgeTrust != nil
 
 	// allowManagementPlane defaults to true per the CRD's +kubebuilder:default.
-	// Treat nil as true so users who omit the field get the permissive default.
-	mgmtPlaneAllowed := true
-	if ext.AllowManagementPlane != nil {
-		mgmtPlaneAllowed = *ext.AllowManagementPlane
-	}
+	mgmtPlaneAllowed := ext.ManagementPlaneAllowed()
 
 	if hasDataPlane {
 		return metav1.Condition{
