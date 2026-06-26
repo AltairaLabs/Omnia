@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { AgentConsole } from "./agent-console";
+import type { ConsoleConfigResult } from "@/hooks/use-console-config";
 
 // Mock auth and memory hooks (needed by MemorySidebar)
 vi.mock("@/hooks/use-auth", () => ({
@@ -13,6 +14,44 @@ vi.mock("@/contexts/workspace-context", () => ({
   useWorkspace: () => ({ currentWorkspace: { name: "test-ws" }, workspaces: [], setCurrentWorkspace: vi.fn(), isLoading: false, error: null, refetch: vi.fn() }),
 }));
 
+// Mock VoiceCallBar to avoid Web Audio / WebSocket setup in unit tests
+vi.mock("./voice/voice-call-bar", () => ({
+  VoiceCallBar: () => <button data-testid="voice-call-button">Call</button>,
+}));
+
+const defaultAttachmentConfig = {
+  allowedMimeTypes: [
+    "image/png", "image/jpeg", "image/gif", "image/webp",
+    "audio/mpeg", "audio/wav", "audio/ogg",
+    "application/pdf", "text/plain", "text/markdown",
+    "text/javascript", "application/javascript",
+    "text/x-python", "text/csv", "application/json",
+  ],
+  allowedExtensions: [
+    ".png", ".jpg", ".jpeg", ".gif", ".webp",
+    ".mp3", ".wav", ".ogg",
+    ".pdf", ".txt", ".md",
+    ".js", ".ts", ".jsx", ".tsx", ".py",
+    ".csv", ".json",
+  ],
+  maxFileSize: 10 * 1024 * 1024,
+  maxFiles: 5,
+  acceptString: "image/png,image/jpeg,image/gif,image/webp,audio/mpeg,audio/wav,audio/ogg,application/pdf,text/plain,text/markdown,text/javascript,application/javascript,text/x-python,text/csv,application/json,.png,.jpg,.jpeg,.gif,.webp,.mp3,.wav,.ogg,.pdf,.txt,.md,.js,.ts,.jsx,.tsx,.py,.csv,.json",
+};
+
+const defaultConsoleConfigResult: ConsoleConfigResult = {
+  config: defaultAttachmentConfig,
+  mediaRequirements: { audio: { recommendedSampleRate: 24000, channels: 1 } },
+  providerType: "openai" as const,
+  isLoading: false,
+  error: null,
+  rawConfig: undefined,
+  duplex: undefined,
+};
+
+// useConsoleConfig is per-test overridable
+const mockUseConsoleConfig = vi.fn((_ns: string, _name: string): ConsoleConfigResult => defaultConsoleConfigResult);
+
 // Mock the hooks
 vi.mock("@/hooks/console", () => ({
   useAgentConsole: () => ({
@@ -24,31 +63,9 @@ vi.mock("@/hooks/console", () => ({
     connect: vi.fn(),
     disconnect: vi.fn(),
     clearMessages: vi.fn(),
+    handleMessage: vi.fn(),
   }),
-  useConsoleConfig: () => ({
-    config: {
-      allowedMimeTypes: [
-        "image/png", "image/jpeg", "image/gif", "image/webp",
-        "audio/mpeg", "audio/wav", "audio/ogg",
-        "application/pdf", "text/plain", "text/markdown",
-        "text/javascript", "application/javascript",
-        "text/x-python", "text/csv", "application/json",
-      ],
-      allowedExtensions: [
-        ".png", ".jpg", ".jpeg", ".gif", ".webp",
-        ".mp3", ".wav", ".ogg",
-        ".pdf", ".txt", ".md",
-        ".js", ".ts", ".jsx", ".tsx", ".py",
-        ".csv", ".json",
-      ],
-      maxFileSize: 10 * 1024 * 1024, // 10MB
-      maxFiles: 5,
-      acceptString: "image/png,image/jpeg,image/gif,image/webp,audio/mpeg,audio/wav,audio/ogg,application/pdf,text/plain,text/markdown,text/javascript,application/javascript,text/x-python,text/csv,application/json,.png,.jpg,.jpeg,.gif,.webp,.mp3,.wav,.ogg,.pdf,.txt,.md,.js,.ts,.jsx,.tsx,.py,.csv,.json",
-    },
-    isLoading: false,
-    error: null,
-    rawConfig: undefined,
-  }),
+  useConsoleConfig: (ns: string, name: string) => mockUseConsoleConfig(ns, name),
 }));
 
 // Mock crypto.randomUUID
@@ -59,10 +76,33 @@ vi.stubGlobal("crypto", {
 describe("AgentConsole", () => {
   beforeEach(() => {
     vi.useFakeTimers();
+    mockUseConsoleConfig.mockReturnValue(defaultConsoleConfigResult);
   });
 
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  describe("duplex / voice mode", () => {
+    it("renders the voice call bar (not the text composer) for a duplex agent", () => {
+      mockUseConsoleConfig.mockReturnValue({
+        ...defaultConsoleConfigResult,
+        duplex: { enabled: true, mode: "audio" },
+      });
+      render(<AgentConsole agentName="voicebot" namespace="default" />);
+      expect(screen.queryByTestId("console-input")).not.toBeInTheDocument();
+      expect(screen.getByTestId("voice-call-button")).toBeInTheDocument();
+    });
+
+    it("renders the text composer (not the voice call bar) for a non-duplex agent", () => {
+      mockUseConsoleConfig.mockReturnValue({
+        ...defaultConsoleConfigResult,
+        duplex: undefined,
+      });
+      render(<AgentConsole agentName="textbot" namespace="default" />);
+      expect(screen.getByTestId("console-input")).toBeInTheDocument();
+      expect(screen.queryByTestId("voice-call-button")).not.toBeInTheDocument();
+    });
   });
 
   describe("paste handling", () => {

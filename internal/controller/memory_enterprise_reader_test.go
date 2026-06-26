@@ -35,7 +35,7 @@ func TestMemoryEnterpriseReaderBinding_NoClusterRoleNameIsNoop(t *testing.T) {
 	r := newAuthReconciler(t, ServiceAuthConfig{Enabled: true})
 	r.MemoryEnterpriseReaderClusterRole = ""
 
-	g.Expect(r.reconcileMemoryEnterpriseReaderBinding(context.Background(), testAuthNS, testMemorySAName)).To(Succeed())
+	g.Expect(r.reconcileEnterpriseReaderBinding(context.Background(), testAuthNS, testMemorySAName)).To(Succeed())
 	assertNoMemoryEnterpriseReaderBinding(t, r.Client)
 }
 
@@ -45,7 +45,7 @@ func TestMemoryEnterpriseReaderBinding_CreatesClusterRoleBinding(t *testing.T) {
 	r.MemoryEnterpriseReaderClusterRole = testMemoryEnterpriseReaderRole
 	ctx := context.Background()
 
-	g.Expect(r.reconcileMemoryEnterpriseReaderBinding(ctx, testAuthNS, testMemorySAName)).To(Succeed())
+	g.Expect(r.reconcileEnterpriseReaderBinding(ctx, testAuthNS, testMemorySAName)).To(Succeed())
 
 	crb := &rbacv1.ClusterRoleBinding{}
 	g.Expect(r.Get(ctx, types.NamespacedName{Name: testMemoryEnterpriseReaderCRBName}, crb)).To(Succeed())
@@ -57,7 +57,29 @@ func TestMemoryEnterpriseReaderBinding_CreatesClusterRoleBinding(t *testing.T) {
 	g.Expect(crb.Subjects[0].Namespace).To(Equal(testAuthNS))
 
 	// Idempotent: second call must not error (binding already exists).
-	g.Expect(r.reconcileMemoryEnterpriseReaderBinding(ctx, testAuthNS, testMemorySAName)).To(Succeed())
+	g.Expect(r.reconcileEnterpriseReaderBinding(ctx, testAuthNS, testMemorySAName)).To(Succeed())
+}
+
+// TestEnterpriseReaderBinding_BindsSessionAPISA is the #1567 regression: the
+// session-api SA runs the same privacy watcher as memory-api, so it must also
+// be bound to the enterprise reader ClusterRole. A separate, uniquely-named
+// CRB is created for it (the binding is per-SA, not per-workspace).
+func TestEnterpriseReaderBinding_BindsSessionAPISA(t *testing.T) {
+	g := NewWithT(t)
+	r := newAuthReconciler(t, ServiceAuthConfig{Enabled: false})
+	r.MemoryEnterpriseReaderClusterRole = testMemoryEnterpriseReaderRole
+	ctx := context.Background()
+
+	const sessionSA = "session-acme-default"
+	g.Expect(r.reconcileEnterpriseReaderBinding(ctx, testAuthNS, sessionSA)).To(Succeed())
+
+	crb := &rbacv1.ClusterRoleBinding{}
+	crbName := "memory-enterprise-reader-" + testAuthNS + "-" + sessionSA
+	g.Expect(r.Get(ctx, types.NamespacedName{Name: crbName}, crb)).To(Succeed())
+	g.Expect(crb.RoleRef.Name).To(Equal(testMemoryEnterpriseReaderRole))
+	g.Expect(crb.Subjects).To(HaveLen(1))
+	g.Expect(crb.Subjects[0].Name).To(Equal(sessionSA))
+	g.Expect(crb.Subjects[0].Namespace).To(Equal(testAuthNS))
 }
 
 func assertNoMemoryEnterpriseReaderBinding(t *testing.T, cl client.Client) {

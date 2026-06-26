@@ -74,23 +74,41 @@ func TestSharedTokenValidator_AdmitsCorrectToken(t *testing.T) {
 	}
 }
 
-func TestSharedTokenValidator_RejectsWrongToken(t *testing.T) {
+func TestSharedTokenValidator_WrongTokenFallsThrough(t *testing.T) {
 	t.Parallel()
 	v, _ := auth.NewSharedTokenValidator(validToken)
 	_, err := v.Validate(context.Background(), newRequestWithBearer("other-token"))
-	if !errors.Is(err, auth.ErrInvalidCredential) {
-		t.Errorf("err = %v, want ErrInvalidCredential", err)
+	if !errors.Is(err, auth.ErrNoCredential) {
+		t.Errorf("err = %v, want ErrNoCredential (non-matching bearer is not our shared token)", err)
 	}
 }
 
-func TestSharedTokenValidator_RejectsLengthMismatch(t *testing.T) {
+func TestSharedTokenValidator_LengthMismatchFallsThrough(t *testing.T) {
 	t.Parallel()
 	v, _ := auth.NewSharedTokenValidator(validToken)
-	// Different length should also be rejected without leaking which
-	// candidate is longer.
+	// A different length is also not our token; fall through without leaking
+	// which candidate is longer (constant-time compare handles the timing).
 	_, err := v.Validate(context.Background(), newRequestWithBearer("short"))
-	if !errors.Is(err, auth.ErrInvalidCredential) {
-		t.Errorf("err = %v, want ErrInvalidCredential", err)
+	if !errors.Is(err, auth.ErrNoCredential) {
+		t.Errorf("err = %v, want ErrNoCredential", err)
+	}
+}
+
+func TestSharedTokenThenAPIKey_ValidAPIKeyAdmitted(t *testing.T) {
+	t.Parallel()
+	const rawKey = "valid-api-key-value"
+	store := auth.NewStaticKeyStore(map[string]auth.APIKey{
+		auth.HashToken(rawKey): {ID: "k1", HashHex: auth.HashToken(rawKey), Role: policy.RoleViewer},
+	})
+	shared, _ := auth.NewSharedTokenValidator(validToken) // a different secret
+	chain := auth.Chain{shared, auth.NewAPIKeyValidator(store)}
+
+	id, err := chain.Run(context.Background(), newRequestWithBearer(rawKey))
+	if err != nil {
+		t.Fatalf("Run err = %v, want nil (sharedToken must fall through to api-keys)", err)
+	}
+	if id == nil || id.Subject != "k1" {
+		t.Errorf("identity = %+v, want admitted by api-keys", id)
 	}
 }
 

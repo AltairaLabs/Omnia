@@ -66,6 +66,30 @@ type ServerMetrics interface {
 	// AudioIngestLatency records the facade-receive-to-sink-send latency for
 	// an inbound audio frame, in seconds.
 	AudioIngestLatency(seconds float64)
+
+	// Realtime blip-resume metrics
+
+	// RealtimeSessionParked records that a realtime session was parked after
+	// a client disconnect, awaiting reconnect within the grace window.
+	RealtimeSessionParked()
+	// RealtimeSessionReattached records that a client successfully reattached
+	// to a parked realtime session.
+	RealtimeSessionReattached()
+	// RealtimeSessionParkExpired records that a parked realtime session expired
+	// without a client reconnecting within the grace window.
+	RealtimeSessionParkExpired()
+
+	// Realtime drain metrics
+
+	// RealtimeDrainStarted records that the facade has entered drain mode,
+	// rejecting new realtime sessions while waiting for active ones to finish.
+	RealtimeDrainStarted()
+	// RealtimeDrainCompleted records the outcome of a drain operation.
+	// reason is one of "all_drained", "deadline", or "ctx_canceled".
+	// durationSeconds is the elapsed time since drain started.
+	// drained is the count of sessions that completed gracefully.
+	// forceEnded is the count of sessions still live at drain exit.
+	RealtimeDrainCompleted(reason string, durationSeconds float64, drained, forceEnded int)
 }
 
 // NoOpMetrics is a no-op implementation of ServerMetrics for when metrics are disabled.
@@ -129,3 +153,19 @@ func (n *NoOpMetrics) AudioSessionEnded() { /* no-op: null object pattern */ }
 
 // AudioIngestLatency is a no-op - metrics are disabled.
 func (n *NoOpMetrics) AudioIngestLatency(float64) { /* no-op: null object pattern */ }
+
+// RealtimeSessionParked is a no-op - metrics are disabled.
+func (n *NoOpMetrics) RealtimeSessionParked() { /* no-op: null object pattern */ }
+
+// RealtimeSessionReattached is a no-op - metrics are disabled.
+func (n *NoOpMetrics) RealtimeSessionReattached() { /* no-op: null object pattern */ }
+
+// RealtimeSessionParkExpired is a no-op - metrics are disabled.
+func (n *NoOpMetrics) RealtimeSessionParkExpired() { /* no-op: null object pattern */ }
+
+// RealtimeDrainStarted is a no-op - metrics are disabled.
+func (n *NoOpMetrics) RealtimeDrainStarted() { /* no-op: null object pattern */ }
+
+// RealtimeDrainCompleted is a no-op - metrics are disabled.
+func (n *NoOpMetrics) RealtimeDrainCompleted(string, float64, int, int) { /* no-op: null object pattern */
+}

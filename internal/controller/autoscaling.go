@@ -35,37 +35,99 @@ import (
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 )
 
+// resolveEffectiveAutoscaling returns the autoscaling policy in effect for the
+// agent: its own spec.runtime.autoscaling when set (explicit wins as a unit),
+// otherwise the default declared on its WorkspaceServiceGroup
+// (spec.services[group].autoscaling). Returns nil when neither is set.
+func (r *AgentRuntimeReconciler) resolveEffectiveAutoscaling(
+	ctx context.Context,
+	agentRuntime *omniav1alpha1.AgentRuntime,
+) *omniav1alpha1.AutoscalingConfig {
+	if agentRuntime.Spec.Runtime != nil && agentRuntime.Spec.Runtime.Autoscaling != nil {
+		return agentRuntime.Spec.Runtime.Autoscaling
+	}
+
+	group := agentRuntime.Spec.ServiceGroup
+	if group == "" {
+		group = defaultSvcGroupName
+	}
+	if sg, found := r.findServiceGroup(ctx, agentRuntime.Namespace, group); found {
+		return sg.Autoscaling
+	}
+	return nil
+}
+
+// autoscalingCondition builds an AutoscalingReady condition with the given
+// status/reason/message. The generation and timestamps are applied by
+// SetCondition at the call site.
+func autoscalingCondition(status metav1.ConditionStatus, reason, message string) metav1.Condition {
+	return metav1.Condition{
+		Type:    ConditionTypeAutoscalingReady,
+		Status:  status,
+		Reason:  reason,
+		Message: message,
+	}
+}
+
+// reconcileAutoscaling resolves the agent's effective autoscaling policy (its
+// own spec.runtime.autoscaling, or the inherited WorkspaceServiceGroup default)
+// and reconciles the matching HPA / KEDA ScaledObject. It returns an
+// AutoscalingReady condition describing the outcome. KEDA-not-installed is
+// surfaced via the condition and is NOT returned as an error so the caller can
+// keep treating autoscaling as non-blocking.
 func (r *AgentRuntimeReconciler) reconcileAutoscaling(
 	ctx context.Context,
 	agentRuntime *omniav1alpha1.AgentRuntime,
-) error {
-	// Check if autoscaling is enabled and what type
-	if agentRuntime.Spec.Runtime == nil ||
-		agentRuntime.Spec.Runtime.Autoscaling == nil ||
-		!agentRuntime.Spec.Runtime.Autoscaling.Enabled {
-		// Autoscaling disabled - clean up any autoscalers
+) (metav1.Condition, error) {
+	autoscaling := r.resolveEffectiveAutoscaling(ctx, agentRuntime)
+
+	// No policy (or disabled) - clean up any autoscalers and report Disabled.
+	if autoscaling == nil || !autoscaling.Enabled {
 		if err := r.cleanupHPA(ctx, agentRuntime); err != nil {
-			return err
+			return autoscalingCondition(metav1.ConditionFalse, reasonAutoscalingError,
+				fmt.Sprintf("failed to clean up HPA: %v", err)), err
 		}
-		return r.cleanupKEDA(ctx, agentRuntime)
+		if err := r.cleanupKEDA(ctx, agentRuntime); err != nil {
+			return autoscalingCondition(metav1.ConditionFalse, reasonAutoscalingError,
+				fmt.Sprintf("failed to clean up KEDA ScaledObject: %v", err)), err
+		}
+		return autoscalingCondition(metav1.ConditionTrue, reasonAutoscalingDisabled,
+			"autoscaling not enabled; using static replicas"), nil
 	}
 
-	autoscaling := agentRuntime.Spec.Runtime.Autoscaling
-
-	// Route based on autoscaler type
+	// Route based on autoscaler type.
 	if autoscaling.Type == omniav1alpha1.AutoscalerTypeKEDA {
-		// Clean up HPA if switching to KEDA
+		// Clean up HPA if switching to KEDA.
 		if err := r.cleanupHPA(ctx, agentRuntime); err != nil {
-			return err
+			return autoscalingCondition(metav1.ConditionFalse, reasonAutoscalingError,
+				fmt.Sprintf("failed to clean up HPA: %v", err)), err
 		}
-		return r.reconcileKEDA(ctx, agentRuntime)
+		if err := r.reconcileKEDA(ctx, agentRuntime, autoscaling); err != nil {
+			if meta.IsNoMatchError(err) {
+				// KEDA CRDs are not installed in this cluster. Surface a clear
+				// condition and leave the agent at static replicas rather than
+				// failing the reconcile.
+				return autoscalingCondition(metav1.ConditionFalse, reasonAutoscalingKEDAMissing,
+					"autoscaling type \"keda\" requested but KEDA is not installed; agent stays at static replicas"), nil
+			}
+			return autoscalingCondition(metav1.ConditionFalse, reasonAutoscalingError,
+				fmt.Sprintf("failed to reconcile KEDA ScaledObject: %v", err)), err
+		}
+		return autoscalingCondition(metav1.ConditionTrue, reasonAutoscalingScaling,
+			"KEDA ScaledObject reconciled"), nil
 	}
 
-	// Default to HPA - clean up KEDA if switching from KEDA
+	// Default to HPA - clean up KEDA if switching from KEDA.
 	if err := r.cleanupKEDA(ctx, agentRuntime); err != nil {
-		return err
+		return autoscalingCondition(metav1.ConditionFalse, reasonAutoscalingError,
+			fmt.Sprintf("failed to clean up KEDA ScaledObject: %v", err)), err
 	}
-	return r.reconcileHPA(ctx, agentRuntime)
+	if err := r.reconcileHPA(ctx, agentRuntime, autoscaling); err != nil {
+		return autoscalingCondition(metav1.ConditionFalse, reasonAutoscalingError,
+			fmt.Sprintf("failed to reconcile HPA: %v", err)), err
+	}
+	return autoscalingCondition(metav1.ConditionTrue, reasonAutoscalingScaling,
+		"HorizontalPodAutoscaler reconciled"), nil
 }
 
 func (r *AgentRuntimeReconciler) cleanupHPA(ctx context.Context, agentRuntime *omniav1alpha1.AgentRuntime) error {
@@ -105,10 +167,9 @@ func (r *AgentRuntimeReconciler) cleanupKEDA(ctx context.Context, agentRuntime *
 func (r *AgentRuntimeReconciler) reconcileKEDA(
 	ctx context.Context,
 	agentRuntime *omniav1alpha1.AgentRuntime,
+	autoscaling *omniav1alpha1.AutoscalingConfig,
 ) error {
 	log := logf.FromContext(ctx)
-
-	autoscaling := agentRuntime.Spec.Runtime.Autoscaling
 
 	// Build KEDA ScaledObject using unstructured to avoid dependency on KEDA API
 	scaledObject := &unstructured.Unstructured{}
@@ -162,7 +223,7 @@ func (r *AgentRuntimeReconciler) reconcileKEDA(
 	}
 
 	// Build triggers
-	triggers := r.buildKEDATriggers(agentRuntime)
+	triggers := r.buildKEDATriggers(agentRuntime, autoscaling)
 
 	// Set spec
 	spec := map[string]interface{}{
@@ -189,14 +250,23 @@ func (r *AgentRuntimeReconciler) reconcileKEDA(
 	})
 	err := r.Get(ctx, types.NamespacedName{Name: agentRuntime.Name, Namespace: agentRuntime.Namespace}, existing)
 
-	if apierrors.IsNotFound(err) {
+	switch {
+	case meta.IsNoMatchError(err):
+		// KEDA CRDs are not installed. Return the raw NoMatch error (unwrapped)
+		// so the caller can classify it via meta.IsNoMatchError and surface a
+		// clear condition instead of failing the reconcile.
+		return err
+	case apierrors.IsNotFound(err):
 		// Create ScaledObject
-		if err := r.Create(ctx, scaledObject); err != nil {
-			return fmt.Errorf("failed to create ScaledObject: %w", err)
+		if createErr := r.Create(ctx, scaledObject); createErr != nil {
+			if meta.IsNoMatchError(createErr) {
+				return createErr
+			}
+			return fmt.Errorf("failed to create ScaledObject: %w", createErr)
 		}
 		log.Info("Created KEDA ScaledObject")
 		return nil
-	} else if err != nil {
+	case err != nil:
 		return fmt.Errorf("failed to get ScaledObject: %w", err)
 	}
 
@@ -212,9 +282,10 @@ func (r *AgentRuntimeReconciler) reconcileKEDA(
 	return nil
 }
 
-func (r *AgentRuntimeReconciler) buildKEDATriggers(agentRuntime *omniav1alpha1.AgentRuntime) []interface{} {
-	autoscaling := agentRuntime.Spec.Runtime.Autoscaling
-
+func (r *AgentRuntimeReconciler) buildKEDATriggers(
+	agentRuntime *omniav1alpha1.AgentRuntime,
+	autoscaling *omniav1alpha1.AutoscalingConfig,
+) []interface{} {
 	// Use custom triggers if specified
 	if autoscaling.KEDA != nil && len(autoscaling.KEDA.Triggers) > 0 {
 		triggers := make([]interface{}, 0, len(autoscaling.KEDA.Triggers))
@@ -255,6 +326,7 @@ func (r *AgentRuntimeReconciler) buildKEDATriggers(agentRuntime *omniav1alpha1.A
 func (r *AgentRuntimeReconciler) reconcileHPA(
 	ctx context.Context,
 	agentRuntime *omniav1alpha1.AgentRuntime,
+	autoscaling *omniav1alpha1.AutoscalingConfig,
 ) error {
 	log := logf.FromContext(ctx)
 
@@ -265,7 +337,6 @@ func (r *AgentRuntimeReconciler) reconcileHPA(
 		},
 	}
 
-	autoscaling := agentRuntime.Spec.Runtime.Autoscaling
 	if autoscaling == nil || !autoscaling.Enabled {
 		// Delete HPA if it exists
 		if err := r.Delete(ctx, hpa); err != nil {
@@ -284,8 +355,6 @@ func (r *AgentRuntimeReconciler) reconcileHPA(
 		if err := controllerutil.SetControllerReference(agentRuntime, hpa, r.Scheme); err != nil {
 			return err
 		}
-
-		autoscaling := agentRuntime.Spec.Runtime.Autoscaling
 
 		// Set defaults
 		minReplicas := int32(1)

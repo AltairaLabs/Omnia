@@ -39,13 +39,6 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Tooltip,
@@ -53,19 +46,12 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { useSecrets, useCreateSecret, useDeleteSecret, useNamespaces } from "@/hooks/resources";
+import { useSecrets, useCreateSecret, useDeleteSecret } from "@/hooks/resources";
 import { usePermissions, Permission } from "@/hooks/auth";
 import { formatDistanceToNow } from "date-fns";
 import type { SecretSummary } from "@/lib/data/secrets-service";
 import Link from "next/link";
-
-// Provider templates for common API key configurations
-const PROVIDER_TEMPLATES: Record<string, { key: string; label: string }> = {
-  claude: { key: "ANTHROPIC_API_KEY", label: "Anthropic (Claude)" },
-  openai: { key: "OPENAI_API_KEY", label: "OpenAI" },
-  gemini: { key: "GEMINI_API_KEY", label: "Google (Gemini)" },
-  custom: { key: "", label: "Custom" },
-};
+import { AddCredentialSecretDialog } from "./add-credential-secret-dialog";
 
 interface KeyValuePair {
   id: string;
@@ -244,7 +230,6 @@ export function CredentialsSection() {
 
   // Queries
   const { data: secrets, isLoading, error } = useSecrets();
-  const { data: namespaces } = useNamespaces();
 
   // Mutations
   const createMutation = useCreateSecret();
@@ -256,30 +241,12 @@ export function CredentialsSection() {
   const [editingSecret, setEditingSecret] = useState<SecretSummary | null>(null);
   const [deleteSecret, setDeleteSecret] = useState<SecretSummary | null>(null);
 
-  // Form state
-  const [namespace, setNamespace] = useState("default");
-  const [secretName, setSecretName] = useState("");
-  const [providerType, setProviderType] = useState("custom");
+  // Edit form state (create is handled by AddCredentialSecretDialog)
+  const [editNamespace, setEditNamespace] = useState("default");
+  const [editSecretName, setEditSecretName] = useState("");
   const [keyValuePairs, setKeyValuePairs] = useState<KeyValuePair[]>([
     createPair(),
   ]);
-
-  // Reset form state
-  const resetForm = useCallback(() => {
-    setNamespace("default");
-    setSecretName("");
-    setProviderType("custom");
-    setKeyValuePairs([createPair()]);
-  }, []);
-
-  // Handle provider template change
-  const handleProviderChange = useCallback((type: string) => {
-    setProviderType(type);
-    if (type !== "custom") {
-      const template = PROVIDER_TEMPLATES[type];
-      setKeyValuePairs([createPair(template.key, "")]);
-    }
-  }, []);
 
   // Add key-value pair
   const addKeyValuePair = useCallback(() => {
@@ -303,31 +270,18 @@ export function CredentialsSection() {
     []
   );
 
-  // Open create dialog
-  const handleOpenCreate = useCallback(() => {
-    resetForm();
-    setShowCreateDialog(true);
-  }, [resetForm]);
-
   // Open edit dialog
   const handleOpenEdit = useCallback((secret: SecretSummary) => {
     setEditingSecret(secret);
-    setNamespace(secret.namespace);
-    setSecretName(secret.name);
-    // Set provider type from annotation if available
-    const providerAnnotation = secret.annotations?.["omnia.altairalabs.ai/provider"];
-    if (providerAnnotation && PROVIDER_TEMPLATES[providerAnnotation]) {
-      setProviderType(providerAnnotation);
-    } else {
-      setProviderType("custom");
-    }
+    setEditNamespace(secret.namespace);
+    setEditSecretName(secret.name);
     // Set existing keys with empty values (we don't have the values)
     setKeyValuePairs(secret.keys.map((key) => createPair(key, "")));
     setShowEditDialog(true);
   }, []);
 
-  // Handle create/update submit
-  const handleSubmit = useCallback(async () => {
+  // Handle edit submit
+  const handleEditSubmit = useCallback(async () => {
     // Build data object from key-value pairs
     const data: Record<string, string> = {};
     for (const pair of keyValuePairs) {
@@ -342,20 +296,18 @@ export function CredentialsSection() {
 
     try {
       await createMutation.mutateAsync({
-        namespace,
-        name: secretName,
+        namespace: editNamespace,
+        name: editSecretName,
         data,
-        providerType: providerType === "custom" ? undefined : providerType,
       });
 
-      setShowCreateDialog(false);
       setShowEditDialog(false);
       setEditingSecret(null);
-      resetForm();
+      setKeyValuePairs([createPair()]);
     } catch {
       // Error is handled by mutation state
     }
-  }, [namespace, secretName, keyValuePairs, providerType, createMutation, resetForm]);
+  }, [editNamespace, editSecretName, keyValuePairs, createMutation]);
 
   // Handle delete
   const handleDelete = useCallback(async () => {
@@ -372,10 +324,10 @@ export function CredentialsSection() {
     }
   }, [deleteSecret, deleteMutation]);
 
-  // Check if form is valid
-  const isFormValid =
-    namespace &&
-    secretName &&
+  // Check if edit form is valid
+  const isEditFormValid =
+    editNamespace &&
+    editSecretName &&
     keyValuePairs.some((pair) => pair.key && pair.value);
 
   if (!canView) {
@@ -398,7 +350,7 @@ export function CredentialsSection() {
               </CardDescription>
             </div>
             {canCreate && (
-              <Button onClick={handleOpenCreate} size="sm">
+              <Button onClick={() => setShowCreateDialog(true)} size="sm">
                 <Plus className="h-4 w-4 mr-2" />
                 Add Credentials
               </Button>
@@ -442,137 +394,12 @@ export function CredentialsSection() {
         </CardContent>
       </Card>
 
-      {/* Create Dialog */}
-      <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
-            <DialogTitle>Add Provider Credentials</DialogTitle>
-            <DialogDescription>
-              Create a new Kubernetes Secret with API credentials for an LLM
-              provider.
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-4 py-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="namespace">Namespace</Label>
-                <Select value={namespace} onValueChange={setNamespace}>
-                  <SelectTrigger id="namespace">
-                    <SelectValue placeholder="Select namespace" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {namespaces?.map((ns) => (
-                      <SelectItem key={ns} value={ns}>
-                        {ns}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="provider">Provider Template</Label>
-                <Select value={providerType} onValueChange={handleProviderChange}>
-                  <SelectTrigger id="provider">
-                    <SelectValue placeholder="Select provider" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {Object.entries(PROVIDER_TEMPLATES).map(([key, template]) => (
-                      <SelectItem key={key} value={key}>
-                        {template.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="secret-name">Secret Name</Label>
-              <Input
-                id="secret-name"
-                placeholder="e.g., anthropic-credentials"
-                value={secretName}
-                onChange={(e) => setSecretName(e.target.value.toLowerCase())}
-              />
-              <p className="text-xs text-muted-foreground">
-                Lowercase letters, numbers, and hyphens only
-              </p>
-            </div>
-
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <Label>Key-Value Pairs</Label>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={addKeyValuePair}
-                >
-                  <Plus className="h-3 w-3 mr-1" />
-                  Add Key
-                </Button>
-              </div>
-
-              <div className="space-y-2">
-                {keyValuePairs.map((pair, index) => (
-                  <div key={pair.id} className="flex gap-2">
-                    <Input
-                      placeholder="Key (e.g., OPENAI_API_KEY)"
-                      value={pair.key}
-                      onChange={(e) =>
-                        updateKeyValuePair(index, "key", e.target.value)
-                      }
-                      className="flex-1"
-                    />
-                    <Input
-                      type="password"
-                      placeholder="Value"
-                      value={pair.value}
-                      onChange={(e) =>
-                        updateKeyValuePair(index, "value", e.target.value)
-                      }
-                      className="flex-1"
-                    />
-                    {keyValuePairs.length > 1 && (
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => removeKeyValuePair(index)}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setShowCreateDialog(false)}
-            >
-              Cancel
-            </Button>
-            <Button
-              onClick={handleSubmit}
-              disabled={!isFormValid || createMutation.isPending}
-            >
-              {createMutation.isPending ? "Creating..." : "Create"}
-            </Button>
-          </DialogFooter>
-
-          {createMutation.error && (
-            <p className="text-sm text-destructive mt-2">
-              {createMutation.error.message}
-            </p>
-          )}
-        </DialogContent>
-      </Dialog>
+      {/* Create Dialog — reuses AddCredentialSecretDialog */}
+      <AddCredentialSecretDialog
+        open={showCreateDialog}
+        onOpenChange={setShowCreateDialog}
+        onCreated={() => setShowCreateDialog(false)}
+      />
 
       {/* Edit Dialog */}
       <Dialog open={showEditDialog} onOpenChange={setShowEditDialog}>
@@ -647,8 +474,8 @@ export function CredentialsSection() {
               Cancel
             </Button>
             <Button
-              onClick={handleSubmit}
-              disabled={!isFormValid || createMutation.isPending}
+              onClick={handleEditSubmit}
+              disabled={!isEditFormValid || createMutation.isPending}
             >
               {createMutation.isPending ? "Updating..." : "Update"}
             </Button>

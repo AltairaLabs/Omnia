@@ -45,6 +45,8 @@ const eslintConfig = defineConfig([
     // Self-hosted Monaco editor assets (copied from node_modules by
     // scripts/copy-monaco.mjs; vendor minified code, not ours to lint)
     "public/monaco/**",
+    // AudioWorklet processor — plain browser JS (no TS, no ESM, AudioWorkletProcessor global)
+    "public/audio/**",
     // Generated types
     "src/types/generated/**",
     // Generated API schema (openapi-typescript output)
@@ -116,6 +118,7 @@ const eslintConfig = defineConfig([
       "sonarjs/pseudo-random": "off",
       "sonarjs/no-identical-functions": "off",
       "sonarjs/use-type-alias": "off",
+      "sonarjs/publicly-writable-directories": "off", // Test files use /tmp for fixtures
     },
   },
   // Mock data files - test fixtures

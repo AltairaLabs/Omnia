@@ -38,7 +38,15 @@ const PUBLIC_PATH_PREFIXES: readonly string[] = [
   "/api/auth/callback",
   "/api/auth/logout",
   "/api/auth/refresh",
+  "/api/auth/session", // session liveness probe — intentionally unauthenticated so expiry is detectable
   "/api/auth/builtin/", // signup / forgot-password / reset-password / verify-email
+  // CLI browser-login entry points — both self-authenticate, so they must run
+  // unauthenticated rather than be 401'd by the middleware. authorize validates
+  // the loopback callback + CLI state and redirects to login itself; token
+  // consumes a one-time exchange code (no session). grant is NOT public — it
+  // requires the browser session and does its own same-origin + auth checks.
+  "/api/cli/authorize",
+  "/api/cli/token",
   "/api/health",
   "/api/config", // needed by the login page to pick the provider button
   "/api/license",
@@ -53,6 +61,30 @@ function isPublicPath(pathname: string): boolean {
     }
   }
   return false;
+}
+
+// Public prefix of Omnia API keys (kept in sync with lib/auth/api-keys).
+const API_KEY_PREFIX = "omnia_sk_";
+
+// hasApiKeyHeader reports whether the request carries an Omnia API key on
+// either the Authorization: Bearer or X-API-Key header. Programmatic clients
+// (CI, deploy adapters, scripts) authenticate this way instead of with a
+// session cookie.
+function hasApiKeyHeader(req: NextRequest): boolean {
+  const auth = req.headers.get("authorization");
+  if (auth?.startsWith(`Bearer ${API_KEY_PREFIX}`)) {
+    return true;
+  }
+  const xKey = req.headers.get("x-api-key");
+  return Boolean(xKey?.startsWith(API_KEY_PREFIX));
+}
+
+// apiKeyAuthEnabled mirrors getApiKeyConfig().enabled (lib/auth/api-keys)
+// without importing that module, keeping the API-key store out of the
+// middleware bundle (it can transitively pull Node-only deps and a process-
+// wide memory store instance).
+function apiKeyAuthEnabled(): boolean {
+  return process.env.OMNIA_AUTH_API_KEYS_ENABLED !== "false";
 }
 
 // Kept in sync with lib/auth/config.ts:generateDevSecret(). iron-session
@@ -131,6 +163,21 @@ export async function middleware(req: NextRequest) {
 
   const { pathname } = req.nextUrl;
   if (isPublicPath(pathname)) {
+    return applySecurityHeaders(NextResponse.next());
+  }
+
+  // Programmatic clients authenticate with an API key, not a session cookie.
+  // Let API-key-bearing /api requests past the cookie gate so the route
+  // handlers can validate + authorize them via getUser() ->
+  // authenticateApiKey(). This only DEFERS to the handler — it grants nothing:
+  // a forged/invalid key falls through to anonymous and is 401/403'd by
+  // withWorkspaceAccess. Without this, the cookie gate below 401s every
+  // API-key client in oauth/builtin mode (#1556).
+  if (
+    pathname.startsWith("/api/") &&
+    apiKeyAuthEnabled() &&
+    hasApiKeyHeader(req)
+  ) {
     return applySecurityHeaders(NextResponse.next());
   }
 

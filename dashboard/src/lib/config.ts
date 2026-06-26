@@ -19,6 +19,17 @@ export interface RuntimeConfig {
   enterpriseEnabled: boolean;
   /** Whether to hide enterprise features completely instead of showing upgrade prompts */
   hideEnterprise: boolean;
+  /**
+   * Authentication mode in use. The SessionWatcher skips polling when this is
+   * "anonymous" because there is no session to expire.
+   */
+  authMode: "anonymous" | "proxy" | "oauth" | "builtin";
+  /**
+   * How often (in seconds) the SessionWatcher polls /api/auth/session.
+   * Defaults to 60; minimum enforced client-side is 15.
+   * Set via OMNIA_SESSION_POLL_INTERVAL_SECONDS.
+   */
+  sessionPollIntervalSeconds: number;
 }
 
 let cachedConfig: RuntimeConfig | null = null;
@@ -35,6 +46,8 @@ const defaultConfig: RuntimeConfig = {
   tempoEnabled: false,
   enterpriseEnabled: false,
   hideEnterprise: false,
+  authMode: "anonymous",
+  sessionPollIntervalSeconds: 60,
 };
 
 /**

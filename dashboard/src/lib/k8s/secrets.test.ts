@@ -349,6 +349,32 @@ describe("secrets", () => {
         })
       ).rejects.toThrow("Failed to read secret after create/update");
     });
+
+    it("creates the secret when the pre-read returns a 404 ApiException", async () => {
+      // A 404 in the shape the fetch-based client actually throws (HTTP-Code in
+      // message + JSON body with code) — NOT a `.statusCode` property.
+      const apiException404 = new Error(
+        'HTTP-Code: 404\nMessage: Unknown API Status Code!\nBody: "{\\"kind\\":\\"Status\\",\\"code\\":404}"'
+      );
+      (apiException404 as unknown as { code: number }).code = 404;
+      (apiException404 as unknown as { body: string }).body = '{"kind":"Status","code":404}';
+
+      mockReadNamespacedSecret
+        .mockRejectedValueOnce(apiException404) // pre-read in createOrUpdateSecret
+        .mockResolvedValueOnce({
+          metadata: { namespace: "ns", name: "s1", labels: { "omnia.altairalabs.ai/type": "credentials" }, creationTimestamp: new Date() },
+          data: { ANTHROPIC_API_KEY: "x" },
+        }); // getSecret() read-back after create
+      mockCreateNamespacedSecret.mockResolvedValue({});
+
+      const result = await secretsModule.createOrUpdateSecret({
+        namespace: "ns", name: "s1", data: { ANTHROPIC_API_KEY: "sk-test" }, providerType: "claude",
+      });
+
+      expect(mockCreateNamespacedSecret).toHaveBeenCalledTimes(1);
+      expect(mockReplaceNamespacedSecret).not.toHaveBeenCalled();
+      expect(result.name).toBe("s1");
+    });
   });
 
   describe("deleteSecret", () => {

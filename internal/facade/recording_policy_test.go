@@ -44,7 +44,7 @@ func (m *mockPolicyFetcher) GetPrivacyPolicy(_ context.Context, _, _ string) (*h
 func TestRecordingPolicyCache_FetchesOnFirstCall(t *testing.T) {
 	policy := &httpclient.PrivacyPolicyResponse{}
 	policy.Recording.Enabled = true
-	policy.Recording.RichData = false
+	policy.Recording.RuntimeData = false
 
 	fetcher := &mockPolicyFetcher{policy: policy}
 	cache := NewRecordingPolicyCache(fetcher, "default", "agent-1", 60*time.Second, logr.Discard())
@@ -52,7 +52,7 @@ func TestRecordingPolicyCache_FetchesOnFirstCall(t *testing.T) {
 	got := cache.Get(context.Background())
 	require.NotNil(t, got)
 	assert.True(t, got.Recording.Enabled)
-	assert.False(t, got.Recording.RichData)
+	assert.False(t, got.Recording.RuntimeData)
 	assert.Equal(t, int32(1), fetcher.callCount.Load())
 }
 
@@ -90,7 +90,7 @@ func TestRecordingPolicyCache_FetchError_DefaultsToRecordingEnabled(t *testing.T
 	got := cache.Get(context.Background())
 	require.NotNil(t, got)
 	assert.True(t, got.Recording.Enabled)
-	assert.True(t, got.Recording.RichData)
+	assert.True(t, got.Recording.RuntimeData)
 	assert.True(t, got.Recording.FacadeData)
 }
 
@@ -101,6 +101,6 @@ func TestRecordingPolicyCache_NilPolicy_DefaultsToRecordingEnabled(t *testing.T)
 	got := cache.Get(context.Background())
 	require.NotNil(t, got)
 	assert.True(t, got.Recording.Enabled)
-	assert.True(t, got.Recording.RichData)
+	assert.True(t, got.Recording.RuntimeData)
 	assert.True(t, got.Recording.FacadeData)
 }

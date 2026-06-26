@@ -30,7 +30,7 @@ spec:
   recording:
     enabled: true
     facadeData: true
-    richData: true
+    runtimeData: true
     pii:
       redact: true
       patterns:
@@ -112,7 +112,7 @@ spec:
   recording:
     enabled: true
     facadeData: true
-    richData: false
+    runtimeData: false
   userOptOut:
     enabled: true
     honorDeleteRequests: true
@@ -160,7 +160,7 @@ spec:
   recording:
     enabled: true
     facadeData: true
-    richData: false
+    runtimeData: false
   auditLog:
     enabled: true
     retentionDays: 90

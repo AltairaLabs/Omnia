@@ -95,6 +95,7 @@ interface TestResource {
     namespace?: string;
     labels?: Record<string, string>;
     annotations?: Record<string, string>;
+    resourceVersion?: string;
   };
   spec?: { field: string };
 }
@@ -507,6 +508,67 @@ describe("createItemRoutes", () => {
         }),
         spec: { field: "new" },
       })
+    );
+  });
+
+  it("PUT forwards client resourceVersion to updateCrd for optimistic concurrency", async () => {
+    const { getWorkspaceResource } = await import("@/lib/k8s/workspace-route-helpers");
+    const { updateCrd } = await import("@/lib/k8s/crd-operations");
+    const { createItemRoutes } = await import("./crd-route-factory");
+
+    vi.mocked(getWorkspaceResource).mockResolvedValue({
+      ok: true,
+      resource: { metadata: { name: "my-item", resourceVersion: "999" }, spec: { field: "old" } },
+      workspace: MOCK_WORKSPACE,
+      clientOptions: { workspace: "test-ws", namespace: "test-ns", role: "editor" as const },
+    });
+    vi.mocked(updateCrd).mockResolvedValue({ metadata: { name: "my-item" }, spec: { field: "new" } });
+
+    const { PUT } = createItemRoutes<TestResource>({
+      kind: "TestKind", plural: "testkinds", resourceLabel: "Test item",
+      paramKey: "itemName", errorLabel: "this test item",
+    });
+
+    const body = { spec: { field: "new" }, metadata: { resourceVersion: "123" } };
+    const request = makeRequest("http://localhost/api/workspaces/test-ws/testkinds/my-item", "PUT", body);
+    const context = makeContext({ name: "test-ws", itemName: "my-item" });
+    const response = await PUT(request, context);
+
+    expect(response.status).toBe(200);
+    expect(updateCrd).toHaveBeenCalledWith(
+      expect.anything(), "testkinds", "my-item",
+      expect.objectContaining({
+        metadata: expect.objectContaining({ resourceVersion: "123" }),
+      })
+    );
+  });
+
+  it("PUT falls back to the server resourceVersion when the body omits it", async () => {
+    const { getWorkspaceResource } = await import("@/lib/k8s/workspace-route-helpers");
+    const { updateCrd } = await import("@/lib/k8s/crd-operations");
+    const { createItemRoutes } = await import("./crd-route-factory");
+
+    vi.mocked(getWorkspaceResource).mockResolvedValue({
+      ok: true,
+      resource: { metadata: { name: "my-item", resourceVersion: "999" }, spec: { field: "old" } },
+      workspace: MOCK_WORKSPACE,
+      clientOptions: { workspace: "test-ws", namespace: "test-ns", role: "editor" as const },
+    });
+    vi.mocked(updateCrd).mockResolvedValue({ metadata: { name: "my-item" }, spec: { field: "new" } });
+
+    const { PUT } = createItemRoutes<TestResource>({
+      kind: "TestKind", plural: "testkinds", resourceLabel: "Test item",
+      paramKey: "itemName", errorLabel: "this test item",
+    });
+
+    const body = { spec: { field: "new" } };
+    const request = makeRequest("http://localhost/api/workspaces/test-ws/testkinds/my-item", "PUT", body);
+    const context = makeContext({ name: "test-ws", itemName: "my-item" });
+    await PUT(request, context);
+
+    expect(updateCrd).toHaveBeenCalledWith(
+      expect.anything(), "testkinds", "my-item",
+      expect.objectContaining({ metadata: expect.objectContaining({ resourceVersion: "999" }) })
     );
   });
 

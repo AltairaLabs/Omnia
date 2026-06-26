@@ -1,6 +1,7 @@
 {{- include "omnia.validateAuth" . -}}
 {{- include "omnia.validateSession" . -}}
 {{- include "omnia.validateBuiltinStore" . -}}
+{{- include "omnia.validateApiKeyStore" . -}}
 {{- if .Values.dashboard.enabled }}
 {{- $po := .Values.dashboard.podOverrides | default dict }}
 apiVersion: apps/v1
@@ -123,6 +124,18 @@ spec:
             {{- else if .Values.dashboard.builtin.admin.password }}
             - name: OMNIA_BUILTIN_ADMIN_PASSWORD
               value: {{ .Values.dashboard.builtin.admin.password | quote }}
+            {{- end }}
+            {{- end }}
+            {{- if eq (include "omnia.dashboard.apiKeyStore" .) "postgres" }}
+            {{- if .Values.dashboard.apiKeys.existingPostgresSecret }}
+            - name: OMNIA_AUTH_API_KEYS_POSTGRES_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.dashboard.apiKeys.existingPostgresSecret }}
+                  key: OMNIA_AUTH_API_KEYS_POSTGRES_URL
+            {{- else if .Values.dashboard.apiKeys.postgresUrl }}
+            - name: OMNIA_AUTH_API_KEYS_POSTGRES_URL
+              value: {{ .Values.dashboard.apiKeys.postgresUrl | quote }}
             {{- end }}
             {{- end }}
             {{- /*
@@ -249,6 +262,11 @@ spec:
             - name: mgmt-plane-signing-key
               mountPath: /etc/omnia/mgmt-plane
               readOnly: true
+            {{- if eq .Values.dashboard.apiKeys.store "file" }}
+            - name: api-keys
+              mountPath: {{ dir .Values.dashboard.apiKeys.filePath }}
+              readOnly: true
+            {{- end }}
             {{- if .Values.internalServiceAuth.enabled }}
             - name: session-api-token
               mountPath: /var/run/secrets/omnia/session-api
@@ -268,6 +286,12 @@ spec:
           secret:
             secretName: {{ .Values.dashboard.signingKey.existingSecret | default (printf "%s-signing-keypair" (include "omnia.dashboard.fullname" .)) }}
             defaultMode: 0o400
+        {{- if eq .Values.dashboard.apiKeys.store "file" }}
+        - name: api-keys
+          secret:
+            secretName: {{ .Values.dashboard.apiKeys.keysSecret }}
+            defaultMode: 0o400
+        {{- end }}
         {{- if .Values.internalServiceAuth.enabled }}
         # Audience-bound projected SA token the dashboard proxy presents to
         # session-api/memory-api. The kubelet rotates it before expiry.

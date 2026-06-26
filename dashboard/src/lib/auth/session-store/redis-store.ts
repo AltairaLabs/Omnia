@@ -8,10 +8,12 @@
  */
 
 import type Redis from "ioredis";
-import type { PkceRecord, SessionRecord, SessionStore } from "./types";
+import type { CliCodeRecord, CliFlowRecord, PkceRecord, SessionRecord, SessionStore } from "./types";
 
 const SESSION_PREFIX = "omnia:sess:";
 const PKCE_PREFIX = "omnia:pkce:";
+const CLI_FLOW_PREFIX = "omnia:cliflow:";
+const CLI_CODE_PREFIX = "omnia:clicode:";
 
 function requirePositiveTtl(ttlSeconds: number): void {
   if (!Number.isFinite(ttlSeconds) || ttlSeconds <= 0) {
@@ -54,5 +56,27 @@ export class RedisSessionStore implements SessionStore {
   async consumePkce(state: string): Promise<PkceRecord | null> {
     const raw = await this.redis.getdel(PKCE_PREFIX + state);
     return parseJson<PkceRecord>(raw, "pkce");
+  }
+
+  async putCliFlow(flowId: string, record: CliFlowRecord, ttlSeconds: number): Promise<void> {
+    requirePositiveTtl(ttlSeconds);
+    await this.redis.set(CLI_FLOW_PREFIX + flowId, JSON.stringify(record), "EX", ttlSeconds);
+  }
+
+  async getCliFlow(flowId: string): Promise<CliFlowRecord | null> {
+    return parseJson<CliFlowRecord>(await this.redis.get(CLI_FLOW_PREFIX + flowId), "cliflow");
+  }
+
+  async consumeCliFlow(flowId: string): Promise<CliFlowRecord | null> {
+    return parseJson<CliFlowRecord>(await this.redis.getdel(CLI_FLOW_PREFIX + flowId), "cliflow");
+  }
+
+  async putCliCode(code: string, record: CliCodeRecord, ttlSeconds: number): Promise<void> {
+    requirePositiveTtl(ttlSeconds);
+    await this.redis.set(CLI_CODE_PREFIX + code, JSON.stringify(record), "EX", ttlSeconds);
+  }
+
+  async consumeCliCode(code: string): Promise<CliCodeRecord | null> {
+    return parseJson<CliCodeRecord>(await this.redis.getdel(CLI_CODE_PREFIX + code), "clicode");
   }
 }

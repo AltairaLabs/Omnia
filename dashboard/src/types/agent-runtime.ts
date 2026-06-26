@@ -6,7 +6,7 @@ import { ObjectMeta, Condition, LocalObjectReference, SecretKeyRef } from "./com
 export type AgentRuntimePhase = "Pending" | "Running" | "Failed";
 export type FacadeType = "websocket" | "grpc" | "a2a" | "rest";
 export type HandlerMode = "echo" | "demo" | "runtime";
-export type SessionStoreType = "memory" | "redis" | "postgres";
+export type ContextStoreType = "memory" | "redis";
 export type ProviderType = "claude" | "openai" | "gemini" | "ollama" | "mock";
 export type AutoscalerType = "hpa" | "keda";
 export type FrameworkType = "promptkit" | "langchain" | "autogen" | "custom";
@@ -27,6 +27,15 @@ export interface FacadeConfig {
   port?: number;
   handler?: HandlerMode;
   mcp?: MCPConfig;
+  /** expose opts the agent into operator-provisioned external exposure (#1553/#1611). */
+  expose?: FacadeExposeConfig;
+}
+
+/** FacadeExposeConfig opts an agent into operator-provisioned external exposure. */
+export interface FacadeExposeConfig {
+  enabled?: boolean;
+  /** host overrides the generated {name}.{namespace}.{baseDomain} hostname. */
+  host?: string;
 }
 
 export interface ToolRegistryRef {
@@ -34,8 +43,8 @@ export interface ToolRegistryRef {
   namespace?: string;
 }
 
-export interface SessionConfig {
-  type: SessionStoreType;
+export interface ContextConfig {
+  type: ContextStoreType;
   storeRef?: LocalObjectReference;
   ttl?: string;
 }
@@ -166,8 +175,12 @@ export interface AudioRequirements {
   maxDurationSeconds?: number;
   /** Optimal sample rate in Hz */
   recommendedSampleRate?: number;
+  /** Number of audio channels (1 = mono, 2 = stereo) */
+  channels?: number;
   /** Whether the provider supports selecting audio segments */
   supportsSegmentSelection?: boolean;
+  /** Audio format (e.g., "pcm", "opus") */
+  format?: string;
 }
 
 /** Requirements for document media */
@@ -209,7 +222,49 @@ export interface ConsoleConfig {
  * tagged "function". */
 export type AgentRuntimeMode = "agent" | "function";
 
+/** Realtime duplex (voice / bidirectional streaming) configuration. */
+export interface DuplexConfig {
+  /** Whether duplex mode is enabled for this agent. */
+  enabled?: boolean;
+  /** Transport mode — "audio" (default) or "audiovideo". */
+  mode?: "audio" | "audiovideo";
+}
+
 // Spec
+/** sharedToken auth: bearer token stored in a Secret. */
+export interface SharedTokenAuth {
+  secretRef: { name?: string };
+  trustEndUserHeader?: boolean;
+}
+
+/** apiKeys auth: per-caller API keys stored as Secrets. */
+export interface ApiKeysAuth {
+  defaultRole?: "viewer" | "editor" | "admin";
+  trustEndUserHeader?: boolean;
+}
+
+/** oidc auth: OIDC JWT validation. */
+export interface OidcAuth {
+  issuer: string;
+  audience: string;
+  claimMapping?: { subject?: string; role?: string; endUser?: string };
+}
+
+/** edgeTrust auth: edge-injected claim headers, no re-verification. */
+export interface EdgeTrustAuth {
+  headerMapping?: { subject?: string; role?: string; endUser?: string; email?: string };
+  claimsFromHeaders?: Record<string, string>;
+}
+
+/** externalAuth configures data-plane authentication for the agent facade. */
+export interface ExternalAuth {
+  allowManagementPlane?: boolean;
+  sharedToken?: SharedTokenAuth;
+  apiKeys?: ApiKeysAuth;
+  oidc?: OidcAuth;
+  edgeTrust?: EdgeTrustAuth;
+}
+
 export interface AgentRuntimeSpec {
   /** mode selects the runtime shape. Defaults to "agent" when unset. */
   mode?: AgentRuntimeMode;
@@ -217,12 +272,14 @@ export interface AgentRuntimeSpec {
   promptPackRef: PromptPackRef;
   facade: FacadeConfig;
   toolRegistryRef?: ToolRegistryRef;
-  session?: SessionConfig;
+  context?: ContextConfig;
   /** memory configures cross-session memory for this agent. */
   memory?: MemoryConfig;
   runtime?: RuntimeConfig;
   providers?: NamedProviderRef[];
   console?: ConsoleConfig;
+  /** Realtime duplex (voice) configuration. When enabled, the console renders VoiceCallBar. */
+  duplex?: DuplexConfig;
   evals?: EvalConfig;
   /** Progressive-delivery (canary) configuration. Present declares a rollout. */
   rollout?: RolloutConfig;
@@ -232,6 +289,8 @@ export interface AgentRuntimeSpec {
   /** outputSchema is the JSON Schema the function's response is
    * validated against. Required when spec.mode === "function". */
   outputSchema?: Record<string, unknown>;
+  /** externalAuth configures authentication for external data-plane traffic. */
+  externalAuth?: ExternalAuth;
 }
 
 /** isFunctionMode returns true when the runtime is declared as a
@@ -331,6 +390,20 @@ export interface RolloutStatus {
   stepStartedAt?: string;
 }
 
+/** FacadeEndpoint is one externally-reachable URL derived from an HTTPRoute. */
+export interface FacadeEndpoint {
+  host: string;
+  path: string;
+  port: number;
+  protocol: "websocket" | "a2a" | "mcp" | "rest";
+  reason?: string;
+  routeName: string;
+  routeNamespace: string;
+  scheme: string;
+  url: string;
+  valid: boolean;
+}
+
 export interface AgentRuntimeStatus {
   phase?: AgentRuntimePhase;
   replicas?: ReplicaStatus;
@@ -338,6 +411,10 @@ export interface AgentRuntimeStatus {
   conditions?: Condition[];
   observedGeneration?: number;
   rollout?: RolloutStatus;
+  /** facade reports externally-reachable endpoints. Empty => in-cluster only. */
+  facade?: {
+    endpoints?: FacadeEndpoint[];
+  };
 }
 
 /** Get the default (or first) provider ref from an AgentRuntimeSpec */

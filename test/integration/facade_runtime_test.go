@@ -306,3 +306,7 @@ func (m *mockResponseWriter) SupportsBinary() bool {
 func (m *mockResponseWriter) WriteBinaryMediaChunk(_ [facade.MediaIDSize]byte, _ uint32, _ bool, _ string, _ []byte) error {
 	return nil
 }
+
+func (m *mockResponseWriter) WriteInterrupt() error {
+	return nil
+}

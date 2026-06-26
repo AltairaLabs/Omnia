@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { extractStatusCode, isAuthError } from "./k8s-errors";
+import { extractStatusCode, extractStatusMessage, isAuthError } from "./k8s-errors";
 
 describe("extractStatusCode", () => {
   it("returns null for non-object errors", () => {
@@ -55,5 +55,30 @@ describe("isAuthError", () => {
     expect(isAuthError(new Error("HTTP-Code: 500"))).toBe(false);
     expect(isAuthError(new Error("plain error"))).toBe(false);
     expect(isAuthError(null)).toBe(false);
+  });
+});
+
+describe("extractStatusMessage", () => {
+  it("parses the Kubernetes Status.message from a JSON-string body", () => {
+    const error = Object.assign(new Error("HTTP-Code: 422\nMessage: Unknown API Status Code!"), {
+      body: JSON.stringify({ message: "ToolRegistry is invalid: spec.handlers[0].name", code: 422 }),
+    });
+    expect(extractStatusMessage(error, "fallback")).toBe(
+      "ToolRegistry is invalid: spec.handlers[0].name"
+    );
+  });
+
+  it("parses the message from an object body", () => {
+    const error = Object.assign(new Error("x"), { body: { message: "already exists", code: 409 } });
+    expect(extractStatusMessage(error, "fallback")).toBe("already exists");
+  });
+
+  it("falls back to the error message when the body has none", () => {
+    expect(extractStatusMessage(new Error("plain boom"), "fallback")).toBe("plain boom");
+  });
+
+  it("falls back to the provided default for non-error input", () => {
+    expect(extractStatusMessage(null, "fallback")).toBe("fallback");
+    expect(extractStatusMessage("nope", "fallback")).toBe("fallback");
   });
 });

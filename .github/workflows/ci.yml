@@ -83,6 +83,22 @@ jobs:
         run: python3 hack/check-openapi-routes.py
 
   # ============================================================================
+  # File length guardrail (ratchet) — see issue #1325
+  # ============================================================================
+  # Fails if a non-test, non-generated source file exceeds the per-language
+  # line threshold (Go 800 / TS 500) without being pinned in
+  # hack/file-length-baseline.txt, or if a baselined file grows beyond its
+  # grace margin. Pure bash, no toolchain, so it always runs.
+  file-length:
+    name: File Length Guardrail
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+      - name: Check file lengths against baseline
+        run: bash hack/check-file-length.sh
+
+  # ============================================================================
   # Test & Coverage
   # ============================================================================
   test:

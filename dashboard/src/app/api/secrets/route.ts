@@ -18,6 +18,7 @@ import {
   createOrUpdateSecret,
   type SecretWriteRequest,
 } from "@/lib/k8s/secrets";
+import { secretErrorResponse } from "@/lib/k8s/secret-error";
 
 /**
  * Validate the secret write request body.
@@ -97,10 +98,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ secrets });
   } catch (error) {
     console.error("Failed to list secrets:", error);
-    return NextResponse.json(
-      { error: "Failed to list secrets" },
-      { status: 500 }
-    );
+    return secretErrorResponse(error, "Failed to list secrets");
   }
 }
 
@@ -155,21 +153,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ secret }, { status: 201 });
   } catch (error) {
     console.error("Failed to create/update secret:", error);
-
-    // Handle specific errors
-    if (
-      error instanceof Error &&
-      error.message.includes("not a managed credential secret")
-    ) {
-      return NextResponse.json(
-        { error: error.message },
-        { status: 409 }
-      );
-    }
-
-    return NextResponse.json(
-      { error: "Failed to create/update secret" },
-      { status: 500 }
-    );
+    return secretErrorResponse(error, "Failed to create/update secret");
   }
 }

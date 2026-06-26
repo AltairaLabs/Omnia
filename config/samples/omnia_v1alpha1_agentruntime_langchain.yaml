@@ -27,8 +27,8 @@ spec:
   toolRegistryRef:
     name: support-tools
 
-  # Session configuration using in-memory store
-  session:
+  # Context store configuration using in-memory store
+  context:
     type: memory
     ttl: "24h"
 

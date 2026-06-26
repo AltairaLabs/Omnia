@@ -4,7 +4,7 @@
  *
  * Kept separate from the rendering component (mirrors workload-graph/to-flow)
  * so the structure — facade(s) in front of a runtime that nests PromptPack,
- * Session and Memory — is unit-testable without mounting React Flow.
+ * Context and Memory — is unit-testable without mounting React Flow.
  *
  * Layout is deterministic (fixed positions): the graph is small and fixed, so
  * pixel-exact manual placement reads cleanly and avoids async-layout jitter.
@@ -21,7 +21,7 @@ export interface AgentTopologyInput {
   facades: AgentTopologyFacade[];
   framework?: { type?: string; version?: string };
   promptPack?: { name?: string; version?: string };
-  session?: { type?: string; ttl?: string };
+  context?: { type?: string; ttl?: string };
   memoryEnabled?: boolean;
   /** Used to deep-link the memory node to per-agent analytics. */
   agentName?: string;
@@ -93,13 +93,13 @@ export function buildAgentTopologyGraph(input: AgentTopologyInput): AgentTopolog
     ...STATIC,
   };
 
-  const sessionNode: Node = {
-    id: "session",
-    type: "agentSession",
+  const contextNode: Node = {
+    id: "context",
+    type: "agentContext",
     parentId: "runtime",
     extent: "parent",
     position: { x: PAD * 2 + CHILD_W, y: RUNTIME_HEADER },
-    data: { sessionType: input.session?.type, ttl: input.session?.ttl },
+    data: { contextType: input.context?.type, ttl: input.context?.ttl },
     style: { width: CHILD_W, height: CHILD_H },
     ...STATIC,
   };
@@ -123,7 +123,7 @@ export function buildAgentTopologyGraph(input: AgentTopologyInput): AgentTopolog
   }));
 
   return {
-    nodes: [...facadeNodes, runtimeNode, promptPackNode, sessionNode, memoryNode],
+    nodes: [...facadeNodes, runtimeNode, promptPackNode, contextNode, memoryNode],
     edges,
   };
 }

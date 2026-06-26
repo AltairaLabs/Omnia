@@ -37,6 +37,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/metrics/filters"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
+	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	"github.com/prometheus/client_golang/prometheus"
 
@@ -65,6 +66,7 @@ func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	utilruntime.Must(omniav1alpha1.AddToScheme(scheme))
 	utilruntime.Must(eev1alpha1.AddToScheme(scheme))
+	utilruntime.Must(gatewayv1.Install(scheme))
 	// +kubebuilder:scaffold:scheme
 }
 
@@ -93,6 +95,10 @@ func main() {
 	var evalWorkerImagePullPolicy string
 	var policyProxyImage string
 	var agentWorkspaceReaderClusterRole string
+	var defaultExposureBaseDomain string
+	var defaultExposureGatewayName string
+	var defaultExposureGatewayNamespace string
+	var defaultExposureGatewaySection string
 	var apiBindAddress string
 	var toolTestAllowedSubjects string
 	var contentAPIBindAddress string
@@ -192,6 +198,14 @@ func main() {
 		"Image for the ToolPolicy enforcement sidecar. If empty, uses the default from policy_proxy_sidecar.go.")
 	flag.StringVar(&agentWorkspaceReaderClusterRole, "agent-workspace-reader-clusterrole", "",
 		"Name of the ClusterRole granting agent pods read access to Workspace CRDs. If empty, no binding is created.")
+	flag.StringVar(&defaultExposureBaseDomain, "default-exposure-base-domain", "",
+		"Base domain for agent HTTPRoute hostnames (#1553). Empty disables default exposure.")
+	flag.StringVar(&defaultExposureGatewayName, "default-exposure-gateway-name", "",
+		"Name of the Gateway agent HTTPRoutes attach to. Empty disables default exposure.")
+	flag.StringVar(&defaultExposureGatewayNamespace, "default-exposure-gateway-namespace", "",
+		"Default-exposure Gateway namespace (cross-ns needs a ReferenceGrant). Empty = agent's namespace.")
+	flag.StringVar(&defaultExposureGatewaySection, "default-exposure-gateway-section", "",
+		"Optional listener sectionName on the default-exposure Gateway.")
 	flag.StringVar(&apiBindAddress, "api-bind-address", "",
 		"Address for the tool test API server (e.g., :8083). If empty, the API server is not started.")
 	flag.StringVar(&contentAPIBindAddress, "content-api-bind-address", "",
@@ -377,13 +391,19 @@ func main() {
 		EvalWorkerImage:                 evalWorkerImage,
 		EvalWorkerImagePullPolicy:       corev1.PullPolicy(evalWorkerImagePullPolicy),
 		AgentWorkspaceReaderClusterRole: agentWorkspaceReaderClusterRole,
-		PolicyProxyImage:                policyProxyImageForEnterprise(enterpriseEnabled, policyProxyImage),
-		RolloutMetrics:                  controller.NewRolloutMetrics(prometheus.DefaultRegisterer),
-		WorkspaceContentPath:            workspaceContentPath,
-		MgmtPlaneJWKSURL:                mgmtPlaneJWKSURL,
-		Recorder:                        mgr.GetEventRecorderFor("agentruntime-controller"),
-		MeshEnabled:                     meshEnabled,
-		ServiceAuth:                     serviceAuth,
+		DefaultExposure: controller.DefaultExposureConfig{
+			BaseDomain:       defaultExposureBaseDomain,
+			GatewayName:      defaultExposureGatewayName,
+			GatewayNamespace: defaultExposureGatewayNamespace,
+			GatewaySection:   defaultExposureGatewaySection,
+		},
+		PolicyProxyImage:     policyProxyImageForEnterprise(enterpriseEnabled, policyProxyImage),
+		RolloutMetrics:       controller.NewRolloutMetrics(prometheus.DefaultRegisterer),
+		WorkspaceContentPath: workspaceContentPath,
+		MgmtPlaneJWKSURL:     mgmtPlaneJWKSURL,
+		Recorder:             mgr.GetEventRecorderFor("agentruntime-controller"),
+		MeshEnabled:          meshEnabled,
+		ServiceAuth:          serviceAuth,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, errUnableToCreateController, logKeyController, "AgentRuntime")
 		os.Exit(1)

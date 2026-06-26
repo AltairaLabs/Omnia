@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { RedisSessionStore } from "./redis-store";
-import type { PkceRecord, SessionRecord } from "./types";
+import type { CliCodeRecord, CliFlowRecord, PkceRecord, SessionRecord } from "./types";
 
 function makeRedis() {
   return {
@@ -119,6 +119,95 @@ describe("RedisSessionStore", () => {
   describe("putSession ttl validation", () => {
     it("rejects negative TTLs", async () => {
       await expect(store.putSession("sid", sampleSession, -1)).rejects.toThrow();
+    });
+  });
+
+  const sampleCliFlow: CliFlowRecord = {
+    callback: "http://127.0.0.1:5000/cb",
+    cliState: "abcd1234",
+    createdAt: 1000,
+  };
+
+  const sampleCliCode: CliCodeRecord = {
+    userId: "u1",
+    email: "u@e.com",
+    groups: ["g"],
+    userRole: "editor",
+    workspace: "team-acme",
+    workspaceRole: "editor",
+    createdAt: 1000,
+  };
+
+  describe("putCliFlow", () => {
+    it("SETs the cliflow key with EX ttl", async () => {
+      await store.putCliFlow("flow1", sampleCliFlow, 300);
+      expect(redis.set).toHaveBeenCalledWith(
+        "omnia:cliflow:flow1",
+        JSON.stringify(sampleCliFlow),
+        "EX",
+        300,
+      );
+    });
+
+    it("rejects non-positive TTLs", async () => {
+      await expect(store.putCliFlow("flow1", sampleCliFlow, 0)).rejects.toThrow();
+      await expect(store.putCliFlow("flow1", sampleCliFlow, -1)).rejects.toThrow();
+    });
+  });
+
+  describe("getCliFlow", () => {
+    it("returns the parsed record when present", async () => {
+      redis.get.mockResolvedValue(JSON.stringify(sampleCliFlow));
+      expect(await store.getCliFlow("flow1")).toEqual(sampleCliFlow);
+      expect(redis.get).toHaveBeenCalledWith("omnia:cliflow:flow1");
+    });
+
+    it("returns null when the key is missing", async () => {
+      redis.get.mockResolvedValue(null);
+      expect(await store.getCliFlow("flow1")).toBeNull();
+    });
+  });
+
+  describe("consumeCliFlow", () => {
+    it("uses GETDEL and returns the parsed record", async () => {
+      redis.getdel.mockResolvedValue(JSON.stringify(sampleCliFlow));
+      expect(await store.consumeCliFlow("flow1")).toEqual(sampleCliFlow);
+      expect(redis.getdel).toHaveBeenCalledWith("omnia:cliflow:flow1");
+    });
+
+    it("returns null when the key is missing", async () => {
+      redis.getdel.mockResolvedValue(null);
+      expect(await store.consumeCliFlow("flow1")).toBeNull();
+    });
+  });
+
+  describe("putCliCode", () => {
+    it("SETs the clicode key with EX ttl", async () => {
+      await store.putCliCode("code1", sampleCliCode, 60);
+      expect(redis.set).toHaveBeenCalledWith(
+        "omnia:clicode:code1",
+        JSON.stringify(sampleCliCode),
+        "EX",
+        60,
+      );
+    });
+
+    it("rejects non-positive TTLs", async () => {
+      await expect(store.putCliCode("code1", sampleCliCode, 0)).rejects.toThrow();
+      await expect(store.putCliCode("code1", sampleCliCode, -1)).rejects.toThrow();
+    });
+  });
+
+  describe("consumeCliCode", () => {
+    it("uses GETDEL and returns the parsed record", async () => {
+      redis.getdel.mockResolvedValue(JSON.stringify(sampleCliCode));
+      expect(await store.consumeCliCode("code1")).toEqual(sampleCliCode);
+      expect(redis.getdel).toHaveBeenCalledWith("omnia:clicode:code1");
+    });
+
+    it("returns null when the key is missing", async () => {
+      redis.getdel.mockResolvedValue(null);
+      expect(await store.consumeCliCode("code1")).toBeNull();
     });
   });
 });

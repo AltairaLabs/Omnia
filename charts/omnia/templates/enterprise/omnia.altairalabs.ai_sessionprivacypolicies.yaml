@@ -142,8 +142,9 @@ spec:
                     description: enabled specifies whether session recording is active.
                     type: boolean
                   facadeData:
-                    description: facadeData enables recording of facade-layer session
-                      data (summaries, metadata).
+                    description: |-
+                      facadeData enables recording of facade-emitted session data (the facade is
+                      always Omnia-controlled).
                     type: boolean
                   pii:
                     description: pii configures PII handling within recorded session
@@ -174,9 +175,13 @@ spec:
                         - mask
                         type: string
                     type: object
-                  richData:
-                    description: richData enables recording of full session content
-                      (messages, tool calls, artifacts).
+                  runtimeData:
+                    description: |-
+                      runtimeData enables recording of runtime-emitted message content (assistant
+                      messages). This gates conversation content ONLY — metering (tokens/cost via
+                      provider calls), tool calls, runtime events and eval results are always
+                      recorded when enabled. The runtime may be customer-supplied, so content
+                      recording is opt-in.
                     type: boolean
                 required:
                 - enabled

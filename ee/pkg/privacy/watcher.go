@@ -25,7 +25,7 @@ import (
 // EffectivePolicy contains the computed privacy policy fields relevant to
 // the session-api's redaction and opt-out logic.
 type EffectivePolicy struct {
-	// Recording holds the effective recording config (PII, facadeData, richData).
+	// Recording holds the effective recording config (PII, facadeData, runtimeData).
 	Recording omniav1alpha1.RecordingConfig
 	// UserOptOut holds the effective user opt-out config.
 	UserOptOut *omniav1alpha1.UserOptOutConfig

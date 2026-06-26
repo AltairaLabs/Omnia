@@ -90,6 +90,7 @@ data:
   OMNIA_SESSION_COOKIE_NAME: {{ .Values.dashboard.auth.cookieName | quote }}
   OMNIA_SESSION_TTL: {{ .Values.dashboard.auth.ttl | quote }}
   OMNIA_AUTH_ANONYMOUS_ROLE: {{ .Values.dashboard.auth.anonymousRole | quote }}
+  OMNIA_AUTH_CLI_TOKEN_TTL_SECONDS: {{ .Values.dashboard.auth.cliTokenTtlSeconds | quote }}
 
   # Role mapping
   {{- if .Values.dashboard.auth.roleMapping.adminGroups }}
@@ -156,6 +157,11 @@ data:
 
   # API keys
   OMNIA_AUTH_API_KEYS_ENABLED: {{ .Values.dashboard.apiKeys.enabled | quote }}
+  {{- $apiKeyStore := include "omnia.dashboard.apiKeyStore" . }}
+  OMNIA_AUTH_API_KEYS_STORE: {{ $apiKeyStore | quote }}
+  {{- if eq $apiKeyStore "file" }}
+  OMNIA_AUTH_API_KEYS_FILE_PATH: {{ .Values.dashboard.apiKeys.filePath | quote }}
+  {{- end }}
   OMNIA_AUTH_API_KEYS_MAX_PER_USER: {{ .Values.dashboard.apiKeys.maxPerUser | quote }}
   OMNIA_AUTH_API_KEYS_DEFAULT_EXPIRATION: {{ .Values.dashboard.apiKeys.defaultExpiration | quote }}
 

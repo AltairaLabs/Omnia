@@ -816,16 +816,11 @@ func (s *OmniaEventStore) writeRecords(ctx context.Context, sessionID string, ac
 	}
 }
 
-// writeMessageAndStats persists messages and updates session stats.
+// writeMessageAndStats updates session stats. Conversation messages are NOT
+// written here — the facade's RuntimeClient bus interceptor records the user
+// and assistant turns off the gRPC bus, so recording is single-writer,
+// protocol-agnostic, and works for any runtime (not just PromptKit's event bus).
 func (s *OmniaEventStore) writeMessageAndStats(ctx context.Context, sessionID string, action eventAction, eventType string, log logr.Logger) {
-	if action.message != nil {
-		if err := s.sessionStore.AppendMessage(ctx, sessionID, *action.message); err != nil {
-			log.Error(err, "failed to append event message",
-				"sessionID", sessionID, "eventType", eventType)
-			return
-		}
-	}
-
 	if action.stats.SetStatus != "" || !action.stats.SetEndedAt.IsZero() {
 		if err := s.sessionStore.UpdateSessionStatus(ctx, sessionID, action.stats); err != nil {
 			log.Error(err, "failed to update session status",

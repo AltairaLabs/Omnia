@@ -93,6 +93,9 @@ func (g *grpcDuplexSink) relayOut() {
 				mc.MediaChunk.Data,
 			)
 		}
+		if _, ok := resp.Message.(*runtimev1.ServerMessage_Interruption); ok {
+			_ = g.writer.WriteInterrupt()
+		}
 	}
 }
 

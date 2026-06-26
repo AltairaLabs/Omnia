@@ -23,9 +23,9 @@ import (
 func TestFacadePolicyJSON_OnlyIncludesFacadeFields(t *testing.T) {
 	eff := &EffectivePolicy{
 		Recording: omniav1alpha1.RecordingConfig{
-			Enabled:    true,
-			FacadeData: true,
-			RichData:   false,
+			Enabled:     true,
+			FacadeData:  true,
+			RuntimeData: false,
 		},
 		Encryption: omniav1alpha1.EncryptionConfig{
 			Enabled: true,
@@ -42,9 +42,9 @@ func TestFacadePolicyJSON_OnlyIncludesFacadeFields(t *testing.T) {
 	recording, ok := decoded["recording"].(map[string]any)
 	require.True(t, ok, "recording field missing")
 	assert.Equal(t, true, recording["enabled"])
-	// richData is false/omitempty — it must not appear in the JSON
-	_, hasRichData := recording["richData"]
-	assert.False(t, hasRichData, "richData=false should be omitted (omitempty)")
+	// runtimeData is false/omitempty — it must not appear in the JSON
+	_, hasRuntimeData := recording["runtimeData"]
+	assert.False(t, hasRuntimeData, "runtimeData=false should be omitted (omitempty)")
 
 	_, hasEncryption := decoded["encryption"]
 	assert.False(t, hasEncryption, "encryption config must not leak to facade")

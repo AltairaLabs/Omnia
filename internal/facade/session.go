@@ -23,10 +23,8 @@ import (
 	"fmt"
 	"runtime/debug"
 	"strings"
-	"time"
 
 	"github.com/go-logr/logr"
-	"github.com/google/uuid"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 
@@ -113,7 +111,7 @@ func (s *Server) processMessage(ctx context.Context, c *Connection, msg *ClientM
 
 	// Send connected message if this is a new session
 	if msg.SessionID == "" {
-		if err := s.sendConnected(c, sessionID); err != nil {
+		if err := s.sendConnected(c, sessionID, false); err != nil {
 			return err
 		}
 	}
@@ -212,38 +210,19 @@ func sessionIDToTraceID(sessionID string) trace.TraceID {
 	return tid
 }
 
-// processRegularMessage stores the user message and dispatches to the handler.
+// processRegularMessage dispatches to the handler. The conversation (user turn
+// + assistant turn) is recorded by the RuntimeClient bus interceptor off the
+// gRPC bus, so it is recorded once, protocol- and runtime-agnostically — no
+// per-protocol recording here.
 func (s *Server) processRegularMessage(ctx context.Context, c *Connection, sessionID string, msg *ClientMessage, writer *connResponseWriter, log logr.Logger) error {
-	// Store user message with a detached context so it completes even if
-	// the WebSocket connection closes before the HTTP call returns.
-	// Lifetime is bounded by the 30s timeout; detachment is intentional.
-	storeCtx, storeCancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer storeCancel()
-	if err := s.sessionStore.AppendMessage(storeCtx, sessionID, session.Message{
-		ID:        uuid.New().String(),
-		Role:      session.RoleUser,
-		Content:   msg.Content,
-		Metadata:  msg.Metadata,
-		Timestamp: time.Now(),
-	}); err != nil {
-		log.Error(err, "failed to store user message")
-	}
-
-	// Wrap writer with recording decorator to persist assistant responses
-	recWriter := newRecordingWriter(ctx, writer, s.sessionStore, sessionID, log, s.recordingPool)
-	if c.policyCache != nil {
-		recWriter.setPolicy(c.policyCache.Get(ctx))
-	}
-
-	// Handle message
 	if s.handler != nil {
-		if err := safeHandleMessage(s.handler, ctx, sessionID, msg, recWriter, log); err != nil {
+		if err := safeHandleMessage(s.handler, ctx, sessionID, msg, writer, log); err != nil {
 			s.sendError(c, sessionID, ErrorCodeInternalError, "internal server error")
 			return err
 		}
 	} else {
 		// Default echo behavior if no handler
-		if err := recWriter.WriteDone("Handler not configured"); err != nil {
+		if err := writer.WriteDone("Handler not configured"); err != nil {
 			return err
 		}
 	}

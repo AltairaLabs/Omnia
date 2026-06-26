@@ -38,7 +38,7 @@ func defaultRecordingPolicy() *httpclient.PrivacyPolicyResponse {
 	p := &httpclient.PrivacyPolicyResponse{}
 	p.Recording.Enabled = true
 	p.Recording.FacadeData = true
-	p.Recording.RichData = true
+	p.Recording.RuntimeData = true
 	return p
 }
 

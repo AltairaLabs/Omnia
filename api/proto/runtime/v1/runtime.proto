@@ -105,6 +105,9 @@ message ServerMessage {
     // Sent during streaming when the LLM produces media content, allowing
     // the client to begin processing before the entire media is available.
     MediaChunk media_chunk = 6;
+
+    // interruption signals a barge-in; the client clears buffered audio.
+    Interruption interruption = 7;
   }
 }
 
@@ -219,6 +222,11 @@ message Error {
   // message is a human-readable error description.
   string message = 2;
 }
+
+// Interruption signals that the in-flight response was interrupted (e.g. the
+// user started speaking over the agent during a duplex session). The client
+// must clear any buffered audio playback immediately.
+message Interruption {}
 
 // MediaChunk contains a streaming media chunk for progressive media delivery.
 // All chunks sharing the same media_id belong to the same media stream.

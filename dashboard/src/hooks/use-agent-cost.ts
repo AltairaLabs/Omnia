@@ -123,9 +123,12 @@ function buildSparkline(
 /**
  * Hook to fetch and cache agent cost data.
  *
- * @param workspace - Workspace name (was historically called `namespace`;
- *                    they're equivalent — workspace name doubles as the
- *                    Kubernetes namespace housing the agent's sessions).
+ * @param workspace - Workspace NAME (NOT the K8s namespace). It flows into
+ *                    `/api/workspaces/{name}/provider-calls/aggregate`, which
+ *                    resolves the backing namespace from the Workspace CR.
+ *                    Passing a namespace 404s when it differs from the
+ *                    workspace name (#1572). Resolve it from `useWorkspace()`
+ *                    (`currentWorkspace?.name`), not `metadata.namespace`.
  * @param agentName - Agent name
  */
 export function useAgentCost(workspace: string, agentName: string) {

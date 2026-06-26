@@ -172,7 +172,7 @@ func TestBuildMCPServer_ReturnsNilWhenDisabled(t *testing.T) {
 	// When cfg.MCPEnabled is false, buildMCPServer must return nil so
 	// startFunctionsAndServe doesn't spin up an unwanted listener.
 	cfg := newMCPServerTestConfig(false)
-	srv := buildMCPServer(cfg, nil, nil, nil, logr.Discard())
+	srv := buildMCPServer(cfg, nil, nil, nil, logr.Discard(), int32(cfg.MCPPort))
 	if srv != nil {
 		t.Errorf("buildMCPServer(disabled) = %+v, want nil", srv)
 	}
@@ -184,7 +184,7 @@ func TestBuildMCPServer_ReturnsServerWhenEnabled(t *testing.T) {
 	// with a non-nil handler. We don't ListenAndServe — just verify
 	// the construction shape.
 	cfg := newMCPServerTestConfig(true)
-	srv := buildMCPServer(cfg, nil, nil, nil, logr.Discard())
+	srv := buildMCPServer(cfg, nil, nil, nil, logr.Discard(), int32(cfg.MCPPort))
 	if srv == nil {
 		t.Fatal("buildMCPServer(enabled) returned nil")
 	}
@@ -202,7 +202,7 @@ func TestBuildMCPServer_ReturnsNilOnBadInputSchema(t *testing.T) {
 	// crashing — the HTTP route is still served.
 	cfg := newMCPServerTestConfig(true)
 	cfg.FunctionInputSchemaJSON = []byte("not json at all {")
-	srv := buildMCPServer(cfg, nil, nil, nil, logr.Discard())
+	srv := buildMCPServer(cfg, nil, nil, nil, logr.Discard(), int32(cfg.MCPPort))
 	if srv != nil {
 		t.Errorf("buildMCPServer(bad-input-schema) = %+v, want nil", srv)
 	}
@@ -212,11 +212,34 @@ func TestBuildMCPServer_CustomPort(t *testing.T) {
 	// Operators can override the listener port via spec.facade.mcp.port.
 	cfg := newMCPServerTestConfig(true)
 	cfg.MCPPort = 9500
-	srv := buildMCPServer(cfg, nil, nil, nil, logr.Discard())
+	srv := buildMCPServer(cfg, nil, nil, nil, logr.Discard(), int32(cfg.MCPPort))
 	if srv == nil {
 		t.Fatal("buildMCPServer(custom-port) returned nil")
 	}
 	if srv.Addr != ":9500" {
 		t.Errorf("Addr = %q, want :9500", srv.Addr)
+	}
+}
+
+func TestBuildMCPServer_InternalTwinPort(t *testing.T) {
+	// The internal management-plane MCP twin is built on the internal port
+	// (with a mgmt-plane-only chain supplied by the caller).
+	cfg := newMCPServerTestConfig(true)
+	srv := buildMCPServer(cfg, nil, nil, nil, logr.Discard(), int32(agent.DefaultInternalMCPPort))
+	if srv == nil {
+		t.Fatal("buildMCPServer(internal port) returned nil")
+	}
+	if srv.Addr != ":19998" {
+		t.Errorf("Addr = %q, want :19998 (internal MCP twin)", srv.Addr)
+	}
+}
+
+func TestBuildMCPServer_NilWhenPortZero(t *testing.T) {
+	// A zero port (management plane disabled / no internal port allocated)
+	// yields no server even when MCP is enabled, so the start helper skips it.
+	cfg := newMCPServerTestConfig(true)
+	srv := buildMCPServer(cfg, nil, nil, nil, logr.Discard(), 0)
+	if srv != nil {
+		t.Errorf("buildMCPServer(port=0) = %+v, want nil", srv)
 	}
 }

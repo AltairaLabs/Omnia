@@ -99,9 +99,10 @@ func NewSharedTokenValidator(token string, opts ...SharedTokenOption) (*SharedTo
 	return v, nil
 }
 
-// Validate implements Validator. It returns ErrNoCredential when no
-// Bearer header is present so the chain can fall through; ErrInvalidCredential
-// when a Bearer header is present but the token does not match.
+// Validate implements Validator. It returns ErrNoCredential when no Bearer
+// header is present, or when a Bearer header is present but the token does not
+// match (the bearer is not our shared token — fall through so a later
+// validator can handle it).
 func (v *SharedTokenValidator) Validate(_ context.Context, r *http.Request) (*policy.AuthenticatedIdentity, error) {
 	tokenString, err := extractBearer(r)
 	if err != nil {
@@ -111,7 +112,11 @@ func (v *SharedTokenValidator) Validate(_ context.Context, r *http.Request) (*po
 	// subtle.ConstantTimeCompare already returns 0 when lengths differ
 	// without revealing which one is longer — let it handle the check.
 	if subtle.ConstantTimeCompare([]byte(tokenString), v.tokenHash) != 1 {
-		return nil, ErrInvalidCredential
+		// Not our shared token. As an opaque-bearer validator we can't tell a
+		// wrong token from a credential of another style, so fall through and
+		// let a later validator (api-keys, or the mgmt-plane on its own
+		// listener) handle it rather than short-circuiting the chain. See #1620.
+		return nil, ErrNoCredential
 	}
 
 	endUser := v.subject

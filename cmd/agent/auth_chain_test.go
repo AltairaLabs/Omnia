@@ -603,3 +603,59 @@ func (s *stubMgmtValidator) Validate(_ context.Context, _ *http.Request) (*polic
 	}
 	return &policy.AuthenticatedIdentity{Origin: policy.OriginManagementPlane}, nil
 }
+
+func TestBuildMgmtChain(t *testing.T) {
+	t.Parallel()
+	if got := buildMgmtChain(nil); len(got) != 0 {
+		t.Errorf("buildMgmtChain(nil) length = %d, want 0", len(got))
+	}
+	if got := buildMgmtChain(&stubMgmtValidator{}); len(got) != 1 {
+		t.Errorf("buildMgmtChain(validator) length = %d, want 1", len(got))
+	}
+}
+
+func TestBuildExternalChain_NoK8sReturnsEmpty(t *testing.T) {
+	t.Parallel()
+	chain, err := buildExternalChain(context.Background(), nil, logr.Discard(), "agent", "ns")
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if len(chain) != 0 {
+		t.Errorf("chain length = %d, want 0 (no k8s, no validators)", len(chain))
+	}
+}
+
+func TestBuildExternalChain_SharedTokenOnlyNoMgmt(t *testing.T) {
+	t.Parallel()
+	scheme := newTestScheme(t)
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "shared-token", Namespace: "ns"},
+		Data:       map[string][]byte{"token": []byte("opaque-bearer")},
+	}
+	ar := &omniav1alpha1.AgentRuntime{
+		ObjectMeta: metav1.ObjectMeta{Name: "agent", Namespace: "ns"},
+		Spec: omniav1alpha1.AgentRuntimeSpec{
+			ExternalAuth: &omniav1alpha1.AgentExternalAuth{
+				SharedToken: &omniav1alpha1.SharedTokenAuth{
+					SecretRef: corev1.LocalObjectReference{Name: "shared-token"},
+				},
+			},
+		},
+	}
+	fc := fake.NewClientBuilder().WithScheme(scheme).WithObjects(ar, secret).Build()
+
+	chain, err := buildExternalChain(context.Background(), fc, logr.Discard(), "agent", "ns")
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if got, want := len(chain), 1; got != want {
+		t.Fatalf("chain length = %d, want %d (sharedToken only, no mgmt)", got, want)
+	}
+	// The external chain must NOT admit a mgmt-plane token: there is no
+	// mgmt validator in it. A non-matching bearer falls through to nothing.
+	r := httptest.NewRequest(http.MethodGet, "/ws", nil)
+	r.Header.Set("Authorization", "Bearer a-mgmt-plane-jwt")
+	if _, err := chain.Run(context.Background(), r); err == nil {
+		t.Error("external chain admitted a non-shared-token bearer; want rejection (no mgmt validator present)")
+	}
+}

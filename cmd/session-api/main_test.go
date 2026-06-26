@@ -140,11 +140,11 @@ func TestEnvBoolFallback(t *testing.T) {
 }
 
 func TestPoolConfigDefaults(t *testing.T) {
-	if defaultMaxConns != 50 {
-		t.Errorf("expected defaultMaxConns=50, got %d", defaultMaxConns)
+	if defaultMaxConns != 8 {
+		t.Errorf("expected defaultMaxConns=8, got %d", defaultMaxConns)
 	}
-	if defaultMinConns != 5 {
-		t.Errorf("expected defaultMinConns=5, got %d", defaultMinConns)
+	if defaultMinConns != 2 {
+		t.Errorf("expected defaultMinConns=2, got %d", defaultMinConns)
 	}
 	if defaultMaxConnLifetime != time.Hour {
 		t.Errorf("expected defaultMaxConnLifetime=1h, got %v", defaultMaxConnLifetime)

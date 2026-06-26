@@ -789,6 +789,9 @@ dashboard:
     ttl: 86400
     # -- Default role for anonymous users
     anonymousRole: viewer
+    # -- TTL (seconds) for CLI deploy-login tokens minted via /api/cli/token.
+    # Short-lived by design; the deploy CLI re-logs in when it expires.
+    cliTokenTtlSeconds: 3600
     # -- Role mapping from groups
     roleMapping:
       # -- Groups that get admin role
@@ -873,6 +876,16 @@ dashboard:
   apiKeys:
     # -- Enable API key authentication
     enabled: true
+    # -- Store backend: memory (ephemeral, dev only), file (read-only K8s Secret, GitOps), or postgres (durable). Left at "memory" while a postgresUrl/existingPostgresSecret is set, it is auto-promoted to postgres so a wired durable backend is not silently ignored (#1582).
+    store: memory
+    # -- File store: path the keys Secret is mounted at (when store=file)
+    filePath: /etc/omnia/api-keys/keys.json
+    # -- File store: name of an existing Secret holding keys.json (when store=file)
+    keysSecret: ""
+    # -- Postgres store: connection URL (when store=postgres). Falls back to builtin.postgresUrl when empty. Use existingPostgresSecret in production.
+    postgresUrl: ""
+    # -- Postgres store: existing Secret with an OMNIA_AUTH_API_KEYS_POSTGRES_URL key (when store=postgres)
+    existingPostgresSecret: ""
     # -- Maximum keys per user
     maxPerUser: 10
     # -- Default expiration in days (0 = never)
@@ -2278,6 +2291,30 @@ istio:
 # ============================================================================
 
 # External gateway for agent traffic (WebSocket connections)
+# defaultExposure has the operator provision a per-agent Gateway API HTTPRoute so
+# agents are reachable from outside the cluster (the chart can't template per-agent
+# routes — agents are CRs created at runtime). Opt-in: an agent is exposed only
+# when it sets spec.facade.expose.enabled AND this is enabled. Exposure does NOT
+# add authentication — spec.externalAuth is still the gate; an exposed agent with
+# no externalAuth validators is management-plane-only at the facade. (#1553)
+defaultExposure:
+  # -- Turn the feature on. When false the operator never provisions agent routes.
+  enabled: false
+  # -- Base domain for generated hostnames ({name}.{namespace}.{baseDomain}).
+  # Required when enabled. The Gateway listener's TLS cert must cover these hosts
+  # (e.g. a wildcard *.{baseDomain} certificate on the Gateway).
+  baseDomain: ""
+  # -- The Gateway agent HTTPRoutes attach to. May be the chart-provisioned
+  # `gateway:` below (name "{fullname}-agents") or a pre-existing external one.
+  gateway:
+    # -- Gateway name. Required when enabled.
+    name: ""
+    # -- Gateway namespace. Empty = same namespace as the agent. A cross-namespace
+    # attachment requires a ReferenceGrant, which the operator does NOT create.
+    namespace: ""
+    # -- Optional listener sectionName on the Gateway.
+    sectionName: ""
+
 gateway:
   # -- Enable external Gateway for agent ingress (requires Istio or Gateway controller)
   enabled: false

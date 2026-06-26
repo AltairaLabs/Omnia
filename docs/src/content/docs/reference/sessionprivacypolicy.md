@@ -82,12 +82,12 @@ Controls what session data is recorded.
 |---|---|---|---|
 | `recording.enabled` | bool | — | Yes |
 | `recording.facadeData` | bool | false | No |
-| `recording.richData` | bool | false | No |
+| `recording.runtimeData` | bool | false | No |
 | `recording.pii` | PIIConfig | — | No |
 
 When `recording.enabled` is `false`, all write endpoints on the session-api return 204 No Content and drop the data.
 
-When `recording.richData` is `false`, the middleware blocks assistant messages, tool calls, runtime events, and provider calls. User messages, status updates, and TTL refreshes continue to be accepted.
+`recording.runtimeData` gates **runtime-emitted message content only** — i.e. assistant message text. When it is `false`, assistant messages are dropped, but **provider-call metering (tokens/cost), tool calls, runtime events, and eval results are still recorded** (they carry no conversation content; PII redaction applies to whatever is recorded). User messages (facade-emitted) are always recorded when `recording.enabled`. The component that emitted a write is identified by the `X-Omnia-Source` header (`facade`/`runtime`).
 
 `recording.facadeData` controls whether facade-layer summary metadata (session open/close timestamps, user IDs, counts) is recorded.
 
@@ -106,7 +106,7 @@ Configures automatic PII detection and handling.
 spec:
   recording:
     enabled: true
-    richData: true
+    runtimeData: true
     pii:
       redact: true
       patterns:
@@ -241,7 +241,7 @@ spec:
   recording:
     enabled: true
     facadeData: true
-    richData: true
+    runtimeData: true
 ```
 
 ### Comprehensive policy — PII redaction, encryption, opt-out, audit
@@ -256,7 +256,7 @@ spec:
   recording:
     enabled: true
     facadeData: true
-    richData: true
+    runtimeData: true
     pii:
       redact: true
       patterns:
@@ -302,7 +302,7 @@ spec:
   recording:
     enabled: true
     facadeData: true
-    richData: false
+    runtimeData: false
   auditLog:
     enabled: true
     retentionDays: 90

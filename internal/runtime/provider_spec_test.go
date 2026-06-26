@@ -20,6 +20,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/AltairaLabs/PromptKit/sdk"
 	"github.com/go-logr/logr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -111,6 +112,7 @@ func TestProviderToSDKSpec_NoCredentialEnv(t *testing.T) {
 // TestExtraProviderOptions_RoleMapping verifies one SDK option is produced per
 // recognized role and unhandled roles are skipped.
 func TestExtraProviderOptions_RoleMapping(t *testing.T) {
+	t.Setenv("HF_TOKEN", "test-token") // credentials present so providers are wired, not skipped
 	roles := []v1alpha1.ProviderRole{
 		v1alpha1.ProviderRoleInference,
 		v1alpha1.ProviderRoleEmbedding,
@@ -144,12 +146,70 @@ func TestExtraProviderOptions_Empty(t *testing.T) {
 	assert.Empty(t, s.extraProviderOptions(logr.Discard()))
 }
 
+// TestExtraProviderOptions_SkipsWhenCredentialMissing is the regression for the
+// "runtime cares about providers it isn't using" bug: an extra provider whose
+// credential env isn't present in the runtime must be SKIPPED, not wired —
+// wiring it makes sdk.Open fail and takes the whole pack down (every Converse
+// errors), even though the agent's pack may not use that role.
+func TestExtraProviderOptions_SkipsWhenCredentialMissing(t *testing.T) {
+	t.Setenv("HF_TOKEN", "") // explicitly absent
+	s := &Server{extraProviders: []ResolvedProvider{{
+		Role:     v1alpha1.ProviderRoleEmbedding,
+		Provider: hfProvider("rag-hero-embeddings", ""),
+	}}}
+	assert.Empty(t, s.extraProviderOptions(logr.Discard()),
+		"a provider with no credential in the runtime must be skipped, not wired")
+}
+
+// TestExtraProviderOptions_WiresWhenCredentialPresent is the counterpart: with
+// the credential present the provider IS wired.
+func TestExtraProviderOptions_WiresWhenCredentialPresent(t *testing.T) {
+	t.Setenv("HF_TOKEN", "tok")
+	s := &Server{extraProviders: []ResolvedProvider{{
+		Role:     v1alpha1.ProviderRoleEmbedding,
+		Provider: hfProvider("rag-hero-embeddings", ""),
+	}}}
+	assert.Len(t, s.extraProviderOptions(logr.Discard()), 1)
+}
+
+// TestExtraProviderOptions_PlatformProviderNotCredentialGated proves the
+// credential skip applies only to env-credentialed providers; a platform-hosted
+// provider (auths via the cloud SDK chain, no env var) is still wired.
+func TestExtraProviderOptions_PlatformProviderNotCredentialGated(t *testing.T) {
+	p := &v1alpha1.Provider{
+		ObjectMeta: metav1.ObjectMeta{Name: "bedrock-embed"},
+		Spec: v1alpha1.ProviderSpec{
+			Type:     v1alpha1.ProviderTypeClaude,
+			Platform: &v1alpha1.PlatformConfig{Type: v1alpha1.PlatformTypeBedrock},
+		},
+	}
+	s := &Server{extraProviders: []ResolvedProvider{{Role: v1alpha1.ProviderRoleEmbedding, Provider: p}}}
+	assert.Len(t, s.extraProviderOptions(logr.Discard()), 1)
+}
+
+// TestExtraProviderOption_RoleMapping covers the pure role→option mapping.
+func TestExtraProviderOption_RoleMapping(t *testing.T) {
+	for _, r := range []v1alpha1.ProviderRole{
+		v1alpha1.ProviderRoleInference,
+		v1alpha1.ProviderRoleEmbedding,
+		v1alpha1.ProviderRoleTTS,
+		v1alpha1.ProviderRoleSTT,
+		v1alpha1.ProviderRoleImage,
+	} {
+		_, ok := extraProviderOption(r, sdk.ProviderSpec{})
+		assert.True(t, ok, "role %s should map to an option", r)
+	}
+	_, ok := extraProviderOption(v1alpha1.ProviderRole("bogus"), sdk.ProviderSpec{})
+	assert.False(t, ok, "unhandled role must return ok=false")
+}
+
 // TestBuildConversationOptions_WiresExtraProviders verifies the resolved
 // non-default providers are actually appended to the conversation options —
 // guarding against the "code exists but isn't wired" failure mode. The only
 // difference between the two servers is one extra inference provider, so the
 // option count must grow by exactly one.
 func TestBuildConversationOptions_WiresExtraProviders(t *testing.T) {
+	t.Setenv("HF_TOKEN", "test-token") // credential present so the extra provider is wired
 	withExtra := NewServer(
 		WithLogger(logr.Discard()),
 		WithExtraProviders([]ResolvedProvider{{

@@ -116,6 +116,12 @@ export const MessageTypeUploadRequest: MessageType = "upload_request";
 export const MessageTypeToolCallAck: MessageType = "tool_call_ack";
 export const MessageTypeToolCallNack: MessageType = "tool_call_nack";
 /**
+ * MessageTypeHangup is sent by the client to signal an intentional session
+ * end. The facade marks the connection as intentionalClose so that
+ * cleanupConnection does not park the realtime audio session.
+ */
+export const MessageTypeHangup: MessageType = "hangup";
+/**
  * Bidirectional message types
  * Server → Client: tool execution result (informational)
  * Client → Server: client-side tool result (response to a client ToolCall)
@@ -132,6 +138,10 @@ export const MessageTypeConnected: MessageType = "connected";
 export const MessageTypeUploadReady: MessageType = "upload_ready";
 export const MessageTypeUploadComplete: MessageType = "upload_complete";
 export const MessageTypeMediaChunk: MessageType = "media_chunk";
+/**
+ * MessageTypeInterrupt tells the client to clear buffered audio (barge-in).
+ */
+export const MessageTypeInterrupt: MessageType = "interrupt";
 /**
  * ToolCallAckInfo contains acknowledgement of a client-side tool call.
  * Sent by the client to indicate it received the tool call and is working on it.
@@ -458,6 +468,12 @@ export interface ConnectedInfo {
    * Capabilities describes the server's supported features.
    */
   capabilities?: ConnectionCapabilities;
+  /**
+   * Resumed is true when this connection re-attached to a parked realtime
+   * session (T1 blip-resume) rather than starting fresh. The client keeps its
+   * sequence counter on resume and resets it on a fresh session.
+   */
+  resumed?: boolean;
 }
 /**
  * Error codes.

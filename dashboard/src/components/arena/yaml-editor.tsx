@@ -7,6 +7,8 @@ import * as yaml from "js-yaml";
 import { cn } from "@/lib/utils";
 import { Loader2, AlertTriangle, CheckCircle } from "lucide-react";
 import type { FileType } from "@/types/arena-project";
+import { yamlMonarchLanguage } from "@/lib/lsp/yaml-monarch";
+import { useTheme } from "next-themes";
 
 interface YamlEditorProps {
   readonly value: string;
@@ -95,6 +97,9 @@ export function YamlEditor({
   const lastRevealNonce = useRef<number | undefined>(undefined);
   const monacoLanguage = language || getLanguage(fileType);
   const isYaml = monacoLanguage === "yaml";
+  // Follow the app's light/dark theme (next-themes) rather than always dark.
+  const { resolvedTheme } = useTheme();
+  const editorTheme = resolvedTheme === "light" ? "vs" : "vs-dark";
 
   // Jump to a requested line once the editor is mounted. Deferred a frame so
   // Monaco has applied the latest model content before we scroll.
@@ -133,6 +138,24 @@ export function YamlEditor({
 
       // Configure YAML-specific settings
       if (isYaml) {
+        // The @codingame editor-api (monaco-editor alias, used since the
+        // monaco-languageclient v8 migration) ships a stripped editor without
+        // the basic languages, so "yaml" isn't registered the way it is in
+        // vanilla monaco-editor. Register it (with a tokenizer for colouring)
+        // before configuring it, otherwise setLanguageConfiguration throws
+        // "Cannot set configuration for unknown language yaml" and the pane
+        // crashes. Mirrors lsp-yaml-editor.tsx.
+        const yamlRegistered = monaco.languages
+          .getLanguages()
+          .some((lang) => lang.id === "yaml");
+        if (!yamlRegistered) {
+          monaco.languages.register({
+            id: "yaml",
+            extensions: [".yaml", ".yml"],
+            aliases: ["YAML", "yaml"],
+          });
+          monaco.languages.setMonarchTokensProvider("yaml", yamlMonarchLanguage);
+        }
         monaco.languages.setLanguageConfiguration("yaml", {
           comments: { lineComment: "#" },
           brackets: [
@@ -181,7 +204,7 @@ export function YamlEditor({
           value={value}
           onChange={handleChange}
           onMount={handleEditorDidMount}
-          theme="vs-dark"
+          theme={editorTheme}
           options={{
             readOnly,
             minimap: { enabled: false },

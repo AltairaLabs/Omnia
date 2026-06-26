@@ -314,7 +314,7 @@ spec:
   facade:
     type: websocket
 
-  session:
+  context:
     type: postgres
     storeRef:
       name: session-db

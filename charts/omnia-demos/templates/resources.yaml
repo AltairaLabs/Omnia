@@ -169,7 +169,7 @@ spec:
     extraEnv:
       - name: LOG_LEVEL
         value: debug
-  session:
+  context:
     type: memory
     ttl: "1h"
   runtime:
@@ -356,7 +356,7 @@ spec:
     type: websocket
     port: 8080
     handler: {{ .Values.audioDemo.agent.handler }}
-  session:
+  context:
     type: memory
     ttl: "1h"
   runtime:
@@ -863,7 +863,7 @@ spec:
     extraEnv:
       - name: LOG_LEVEL
         value: debug
-  session:
+  context:
     type: memory
     ttl: "1h"
   runtime:
@@ -908,7 +908,7 @@ spec:
     type: websocket
     port: 8080
     handler: runtime
-  session:
+  context:
     type: memory
     ttl: "1h"
   runtime:
@@ -969,7 +969,7 @@ spec:
     type: websocket
     port: 8080
     handler: runtime
-  session:
+  context:
     type: memory
     ttl: "1h"
   runtime:

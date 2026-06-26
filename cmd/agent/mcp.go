@@ -82,8 +82,9 @@ func buildMCPServer(
 	chain auth.Chain,
 	tracingProvider *tracing.Provider,
 	log logr.Logger,
+	port int32,
 ) *http.Server {
-	if !cfg.MCPEnabled {
+	if !cfg.MCPEnabled || port == 0 {
 		return nil
 	}
 
@@ -101,7 +102,7 @@ func buildMCPServer(
 	})
 
 	resourceURL := fmt.Sprintf("http://%s.%s.svc.cluster.local:%d/mcp",
-		cfg.AgentName, cfg.Namespace, cfg.MCPPort)
+		cfg.AgentName, cfg.Namespace, port)
 
 	srv := facademcp.NewServer(facademcp.ServerConfig{
 		Adapter: facademcp.NewFunctionToolAdapter(facademcp.FunctionToolAdapterConfig{
@@ -124,10 +125,10 @@ func buildMCPServer(
 	mux := http.NewServeMux()
 	mux.Handle("/", handler)
 
-	log.Info("MCP server configured", "port", cfg.MCPPort, "resource", resourceURL)
+	log.Info("MCP server configured", "port", port, "resource", resourceURL)
 
 	return &http.Server{
-		Addr:         fmt.Sprintf(":%d", cfg.MCPPort),
+		Addr:         fmt.Sprintf(":%d", port),
 		Handler:      mux,
 		ReadTimeout:  readTimeout,
 		WriteTimeout: writeTimeout,

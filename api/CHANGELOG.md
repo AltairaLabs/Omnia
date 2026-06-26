@@ -10,6 +10,36 @@ or `api/proto/`, add an entry below with the date, affected API, and reason.
 
 ## Unreleased
 
+### Removed (session-api + CRD: `recording.richData` deprecated alias)
+
+- **`GET /api/v1/privacy-policy`** no longer returns `recording.richData`; it was the
+  deprecated alias for `recording.runtimeData`. Clients must read `recording.runtimeData`
+  (gates runtime-emitted assistant message content only).
+- The `SessionPrivacyPolicy` CRD's `recording.richData` field is removed — existing
+  policies must use `recording.runtimeData`. (The unrelated `retention.richData` tier is
+  unaffected.) Facade recording also moved onto a RuntimeClient gRPC bus interceptor, so
+  the gate is read off `runtimeData` directly with no alias.
+
+### Added (WebSocket: realtime blip-resume — `resume` query param + `connected.resumed` field)
+
+- **`?resume=<session_id>` WebSocket connect query parameter**: clients that experience
+  a transient network disconnect can re-attach to a parked realtime session by appending
+  `?resume=<session_id>` to the WebSocket connect URL. The facade looks up the parked
+  session and re-attaches the client without starting a new session. If the session is not
+  found or has already expired, the facade falls back to opening a fresh session (identical
+  to a cold connect).
+- **`connected.resumed` boolean** (`internal/facade/protocol.go: ConnectedInfo`): new
+  optional field on the server→client `connected` message. Set to `true` when the
+  connection successfully re-attached to a parked realtime session via `?resume=`; absent
+  or `false` on a normal cold connect. Clients should use this flag to decide whether to
+  restore in-flight UI state (e.g. keep the audio buffer, preserve sequence counters) or
+  reset to a fresh-session baseline.
+
+### Added (WebSocket: `interrupt` server message + gRPC `Interruption` — realtime voice barge-in)
+
+- **gRPC `Interruption` ServerMessage** (`pkg/runtime/v1`): new oneof variant emitted by the runtime when a barge-in is detected during a duplex audio session. The facade's `relayOut` loop handles it.
+- **WebSocket `interrupt` message** (`internal/facade/protocol.go`): new server→client control message (`MessageTypeInterrupt = "interrupt"`). Signals the browser to clear its buffered audio output immediately. No payload beyond the standard `session_id` and `timestamp` fields.
+
 ### Changed (CRD: AgentRuntime memory retrieval strategy + denyCEL enforcement, #1513/#1514/#1515)
 
 - **`AgentRuntime.spec.memory.retrieval.strategy`** enum: removed unimplemented

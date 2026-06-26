@@ -346,6 +346,63 @@ func TestGetSession_ServerError(t *testing.T) {
 	}
 }
 
+// TestRecordRuntimeEvent_204ReturnsNil is the #1599 regression: session-api
+// answers an event accept with 204 No Content (no body). The client must treat
+// any 2xx as success — before the fix it required exactly 201, logged "HTTP 204"
+// on every event, and dropped usage/cost telemetry.
+func TestRecordRuntimeEvent_204ReturnsNil(t *testing.T) {
+	for _, code := range []int{http.StatusNoContent, http.StatusOK, http.StatusCreated, http.StatusAccepted} {
+		t.Run(http.StatusText(code), func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(code)
+			}))
+			defer srv.Close()
+
+			store := NewStore(srv.URL, logr.Discard())
+			t.Cleanup(func() { _ = store.Close() })
+
+			err := store.RecordRuntimeEvent(context.Background(), "sess-1", session.RuntimeEvent{
+				EventType: "stage.started",
+			})
+			if err != nil {
+				t.Fatalf("status %d (2xx) must be a successful write, got: %v", code, err)
+			}
+		})
+	}
+}
+
+// TestRecordRuntimeEvent_Non2xxStillErrors proves the widened check still rejects
+// real failures (a 400 is not retried, so it surfaces as an error).
+func TestRecordRuntimeEvent_Non2xxStillErrors(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(sessionapi.ErrorResponse{Error: "bad event"})
+	}))
+	defer srv.Close()
+
+	store := NewStore(srv.URL, logr.Discard())
+	t.Cleanup(func() { _ = store.Close() })
+
+	err := store.RecordRuntimeEvent(context.Background(), "sess-1", session.RuntimeEvent{EventType: "x"})
+	if err == nil {
+		t.Fatal("a 400 must still return an error")
+	}
+}
+
+func TestIsSuccessStatus(t *testing.T) {
+	for _, c := range []int{200, 201, 202, 204, 299} {
+		if !isSuccessStatus(c) {
+			t.Errorf("status %d should be success", c)
+		}
+	}
+	for _, c := range []int{199, 300, 400, 404, 409, 500} {
+		if isSuccessStatus(c) {
+			t.Errorf("status %d should NOT be success", c)
+		}
+	}
+}
+
 func TestAppendMessage_OK(t *testing.T) {
 	srv := mockSessionAPI(t)
 	defer srv.Close()
@@ -1499,7 +1556,7 @@ func TestStore_GetPrivacyPolicy_Success(t *testing.T) {
 		assert.Equal(t, "default", r.URL.Query().Get("namespace"))
 		assert.Equal(t, "my-agent", r.URL.Query().Get("agent"))
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"recording":{"enabled":true,"facadeData":true,"richData":false}}`))
+		_, _ = w.Write([]byte(`{"recording":{"enabled":true,"facadeData":true,"runtimeData":false}}`))
 	}))
 	defer srv.Close()
 
@@ -1511,7 +1568,7 @@ func TestStore_GetPrivacyPolicy_Success(t *testing.T) {
 	require.NotNil(t, policy)
 	assert.True(t, policy.Recording.Enabled)
 	assert.True(t, policy.Recording.FacadeData)
-	assert.False(t, policy.Recording.RichData)
+	assert.False(t, policy.Recording.RuntimeData)
 }
 
 func TestStore_GetPrivacyPolicy_NoPolicy(t *testing.T) {
@@ -1565,7 +1622,7 @@ func TestStore_GetPrivacyPolicy_BypassesCircuitBreaker(t *testing.T) {
 		sessionAttempts.Add(1)
 		if strings.HasPrefix(r.URL.Path, "/api/v1/privacy-policy") {
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"recording":{"enabled":true,"facadeData":false,"richData":false}}`))
+			_, _ = w.Write([]byte(`{"recording":{"enabled":true,"facadeData":false,"runtimeData":false}}`))
 			return
 		}
 		w.WriteHeader(http.StatusBadGateway)

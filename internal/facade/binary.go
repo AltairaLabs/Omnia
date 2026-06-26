@@ -198,6 +198,11 @@ type BinaryMediaChunkMetadata struct {
 	SessionID   string `json:"session_id"`
 	MimeType    string `json:"mime_type"`
 	TotalChunks uint32 `json:"total_chunks,omitempty"`
+	// SampleRate, Channels, Codec are the negotiated audio params, present on
+	// the first duplex frame so the facade can build DuplexStart accurately.
+	SampleRate int32  `json:"sample_rate,omitempty"`
+	Channels   int32  `json:"channels,omitempty"`
+	Codec      string `json:"codec,omitempty"`
 }
 
 // Encode serializes a BinaryFrame to bytes.

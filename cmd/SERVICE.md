@@ -22,11 +22,13 @@
 
 ## Inputs
 - **K8s API**: watch events for all Omnia CRDs
+- **K8s API**: watches `HTTPRoute` and `Gateway` (`gateway.networking.k8s.io`) read-only to derive external endpoints (disabled gracefully when Gateway API CRDs are absent; requires operator restart if installed later)
 - **HTTP** from Dashboard: proxy requests to Session API and other backends
 - Helm chart values at deployment time
 
 ## Outputs
 - **K8s API**: Deployments, Services, ConfigMaps, PVCs, Events, CRD status updates
+- **K8s API**: `AgentRuntime.status.facade.endpoints` — external URLs derived from observed HTTPRoutes (empty if cluster-internal only)
 - **HTTP** to Dashboard: proxied responses
 - **Prometheus** metrics: reconciliation counts, retention stats
 

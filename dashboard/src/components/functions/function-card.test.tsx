@@ -8,6 +8,8 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { FunctionCard } from "./function-card";
+import { useAgentCost } from "@/hooks/agents";
+import { useWorkspace } from "@/contexts/workspace-context";
 import type { AgentRuntime } from "@/types";
 
 vi.mock("next/link", () => ({
@@ -21,6 +23,9 @@ vi.mock("next/link", () => ({
 }));
 
 // Cost is read from the same Prometheus-backed hook the agent cards use.
+vi.mock("@/contexts/workspace-context", () => ({
+  useWorkspace: vi.fn(() => ({ currentWorkspace: { name: "demo" } })),
+}));
 vi.mock("@/hooks/agents", () => ({
   useAgentCost: vi.fn(() => ({ data: { totalCost: 0, timeSeries: [] } })),
 }));
@@ -59,6 +64,18 @@ describe("FunctionCard", () => {
     render(<FunctionCard fn={mkFn()} />);
     expect(screen.getByText("summarizer")).toBeInTheDocument();
     expect(screen.getByText("ns-a")).toBeInTheDocument();
+  });
+
+  it("queries cost by workspace name (#1572)", () => {
+    render(<FunctionCard fn={mkFn()} />);
+    expect(vi.mocked(useAgentCost)).toHaveBeenCalledWith("demo", "summarizer");
+  });
+
+  it("falls back to an empty cost key when no workspace is selected (#1572)", () => {
+    vi.mocked(useWorkspace).mockReturnValueOnce({ currentWorkspace: null } as never);
+    render(<FunctionCard fn={mkFn()} />);
+    // currentWorkspace null → `currentWorkspace?.name ?? ""` → "" (query disabled).
+    expect(vi.mocked(useAgentCost)).toHaveBeenCalledWith("", "summarizer");
   });
 
   it("counts top-level schema properties on each side", () => {

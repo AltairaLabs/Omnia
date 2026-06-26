@@ -57,6 +57,10 @@ export const POST = withWorkspaceAccess<Params>(
       );
     }
 
+    // `namespace` (K8s backing namespace) addresses the Service; `name` (the
+    // route's workspace NAME) is what the facade's mgmt-plane validator expects
+    // in the JWT `workspace` claim. These differ in the normal case — don't
+    // pass `namespace` to mgmtPlaneAuthHeaders (#1552).
     const namespace = res.workspace.spec.namespace.name;
     const port = res.resource.spec.facade?.port ?? DEFAULT_FACADE_PORT;
     const target = `http://${fnName}.${namespace}.${SERVICE_DOMAIN}:${port}/functions/${encodeURIComponent(fnName)}`;
@@ -68,7 +72,7 @@ export const POST = withWorkspaceAccess<Params>(
     try {
       response = await fetch(target, {
         method: "POST",
-        headers: { "Content-Type": "application/json", ...mgmtPlaneAuthHeaders(fnName, namespace, subject) },
+        headers: { "Content-Type": "application/json", ...mgmtPlaneAuthHeaders(fnName, name, subject) },
         body,
       });
     } catch (err) {

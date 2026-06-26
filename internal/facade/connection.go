@@ -52,6 +52,14 @@ type Connection struct {
 	cohortID string
 	variant  string
 
+	// resumeID is the session_id the client asked to resume via ?resume=.
+	// Empty when this is a fresh (non-resume) connection.
+	resumeID string
+	// intentionalClose is set to true when the client explicitly hangs up
+	// (e.g. sends a close frame with a normal-closure code) so that the
+	// blip-resume path knows NOT to park the audio session.
+	intentionalClose bool
+
 	// sessionConsentGrants holds the per-session consent grants captured
 	// from the first non-empty ClientMessage.SessionConsentGrants the
 	// facade saw on this connection. Subsequent non-empty lists replace
@@ -65,10 +73,6 @@ type Connection struct {
 	// inFlightMessages limits concurrently processed non-tool messages per connection.
 	// Nil when disabled.
 	inFlightMessages chan struct{}
-
-	// policyCache caches the effective recording policy for this connection.
-	// Nil when no PolicyFetcher is configured (memory store, test mode).
-	policyCache *RecordingPolicyCache
 
 	// audioSession is the persistent duplex audio stream for this connection.
 	// Created lazily on the first inbound BinaryMessageTypeMediaChunk frame
@@ -110,22 +114,24 @@ func (s *Server) handleConnection(ctx context.Context, c *Connection) {
 		return
 	}
 
-	// Generate a session ID and send "connected" immediately so the client can
-	// start sending messages without a handshake deadlock. The session is NOT
-	// persisted to the store here — it will be written on the first message via
-	// ensureSession, avoiding empty sessions from connections that never send data.
-	sessionID := uuid.New().String()
-	c.mu.Lock()
-	c.sessionID = sessionID
-	c.mu.Unlock()
-	if err := s.sendConnected(c, sessionID); err != nil {
-		log.Error(err, "failed to send connected message")
-		return
-	}
-
-	// Initialize recording policy cache for this connection when a fetcher is available.
-	if s.policyFetcher != nil && c.namespace != "" && c.agentName != "" {
-		c.policyCache = NewRecordingPolicyCache(s.policyFetcher, c.namespace, c.agentName, 60*time.Second, log)
+	// Attempt to reattach to a parked realtime session named by ?resume=<sid>.
+	// On success, bind the connection to the parked session and send connected
+	// with resumed=true. On miss (no park, owner mismatch, or no resumeID),
+	// fall through to the existing fresh-session path.
+	if _, resumed := s.tryReattach(ctx, c); resumed {
+		if err := s.sendConnected(c, c.SessionID(), true); err != nil {
+			log.Error(err, "failed to send connected message")
+			return
+		}
+	} else {
+		sessionID := uuid.New().String()
+		c.mu.Lock()
+		c.sessionID = sessionID
+		c.mu.Unlock()
+		if err := s.sendConnected(c, sessionID, false); err != nil {
+			log.Error(err, "failed to send connected message")
+			return
+		}
 	}
 
 	// Start ping ticker
@@ -156,6 +162,55 @@ func (c *Connection) SessionPersisted() bool {
 	return c.sessionPersisted
 }
 
+// parkOnClose decides whether a closing connection's realtime session is parked
+// for blip-resume or torn down. Parked sessions keep their provider socket open
+// and their active-session count, expiring via the registry grace timer.
+// Returns true when the session was parked (completion should be skipped),
+// false when it was torn down or there was no audio session.
+func (s *Server) parkOnClose(ctx context.Context, c *Connection) bool {
+	c.mu.Lock()
+	as := c.audioSession
+	c.audioSession = nil
+	intentional := c.intentionalClose
+	sessionID := c.sessionID
+	ownerID := c.userID
+	c.mu.Unlock()
+
+	if as == nil {
+		return false
+	}
+	if intentional {
+		if err := as.close(); err != nil {
+			s.log.Error(err, "audio session close failed", "sessionID", sessionID)
+		}
+		s.decrementAudioSessions(s.metrics)
+		return false
+	}
+	s.parked.park(ctx, sessionID, ownerID, as)
+	s.metrics.RealtimeSessionParked()
+	return true
+}
+
+// tryReattach binds the connection to a parked realtime session named by
+// c.resumeID if one exists and is owned by c.userID. Returns the session and
+// true on success; (nil, false) to fall through to a fresh session.
+func (s *Server) tryReattach(ctx context.Context, c *Connection) (*audioSession, bool) {
+	if c.resumeID == "" {
+		return nil, false
+	}
+	as, ok := s.parked.take(ctx, c.resumeID, c.userID)
+	if !ok {
+		s.log.V(1).Info("realtime reattach miss", "sessionID", c.resumeID, "reason", "miss_or_owner_mismatch")
+		return nil, false
+	}
+	c.mu.Lock()
+	c.sessionID = c.resumeID
+	c.audioSession = as
+	c.mu.Unlock()
+	s.metrics.RealtimeSessionReattached()
+	return as, true
+}
+
 // cleanupConnection handles connection cleanup when it closes.
 func (s *Server) cleanupConnection(c *Connection, log logr.Logger) {
 	s.mu.Lock()
@@ -164,23 +219,16 @@ func (s *Server) cleanupConnection(c *Connection, log logr.Logger) {
 
 	c.mu.Lock()
 	c.closed = true
-	as := c.audioSession
 	c.mu.Unlock()
 
-	// Tear down the duplex audio stream before the connection is removed.
-	if as != nil {
-		if err := as.close(); err != nil {
-			log.Error(err, "audio session close failed", "sessionID", c.sessionID)
-		}
-		s.decrementAudioSessions(s.metrics)
-	}
+	parked := s.parkOnClose(context.Background(), c)
 
 	s.metrics.ConnectionClosed()
 
 	// Snapshot session ID once under the mutex; the closure runs in a goroutine
 	// and must not race against concurrent writers of c.sessionID.
 	sessionID := c.SessionID()
-	if sessionID != "" && c.SessionPersisted() {
+	if !parked && sessionID != "" && c.SessionPersisted() {
 		s.metrics.SessionClosed()
 		s.submitCompletion(func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

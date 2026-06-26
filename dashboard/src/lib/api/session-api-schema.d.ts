@@ -327,6 +327,8 @@ export interface components {
             cohortId?: string;
             /** @description Rollout variant (e.g., stable, canary) */
             variant?: string;
+            /** @description Virtual (synthetic) user the session is attributed to */
+            virtualUserId?: string;
         };
         Message: {
             id?: string;
@@ -485,6 +487,8 @@ export interface components {
             cohortId?: string;
             /** @description Rollout variant (e.g., stable, canary) */
             variant?: string;
+            /** @description Virtual (synthetic) user the session is attributed to (required, non-empty) */
+            virtualUserId?: string;
         };
         RefreshTTLRequest: {
             ttlSeconds: number;
@@ -531,11 +535,11 @@ export interface components {
             /** @description When false, facade skips recording at the edge. */
             facadeData: boolean;
             /**
-             * @description When false, assistant messages, tool calls, runtime events, and
-             *     provider calls are dropped; user messages, status updates, and
-             *     TTL refreshes are still accepted.
+             * @description When false, runtime-emitted assistant message content is dropped;
+             *     user messages, tool calls, provider calls (metering), runtime
+             *     events, status updates, and TTL refreshes are still accepted.
              */
-            richData: boolean;
+            runtimeData: boolean;
         };
     };
     responses: {

@@ -81,6 +81,16 @@ func (s *Server) handleClientMessage(ctx context.Context, c *Connection, message
 	if s.handleToolMessage(ctx, c, &clientMsg, log) {
 		return
 	}
+
+	// Hangup signals an intentional client-initiated session end. Mark the
+	// connection so cleanupConnection does not park the realtime audio session.
+	if clientMsg.Type == MessageTypeHangup {
+		c.mu.Lock()
+		c.intentionalClose = true
+		c.mu.Unlock()
+		return
+	}
+
 	if !c.tryAcquireInFlightMessage() {
 		log.V(1).Info("in-flight message limit exceeded")
 		s.sendError(c, c.sessionID, ErrorCodeRateLimited, "too many in-flight requests")
@@ -227,10 +237,33 @@ func (s *Server) handleBinaryMessage(ctx context.Context, c *Connection, data []
 	}
 }
 
+// audioParamsFromFrame parses negotiated audio params from a media-chunk frame,
+// falling back to defaults (pcm/16000/mono) when fields are absent or invalid.
+func audioParamsFromFrame(frame *BinaryFrame) *AudioSessionStart {
+	p := &AudioSessionStart{Codec: defaultAudioCodec, SampleRate: 16000, Channels: 1}
+	if frame == nil || len(frame.Metadata) == 0 {
+		return p
+	}
+	var meta BinaryMediaChunkMetadata
+	if err := json.Unmarshal(frame.Metadata, &meta); err != nil {
+		return p
+	}
+	if meta.Codec != "" {
+		p.Codec = meta.Codec
+	}
+	if meta.SampleRate > 0 {
+		p.SampleRate = meta.SampleRate
+	}
+	if meta.Channels > 0 {
+		p.Channels = meta.Channels
+	}
+	return p
+}
+
 // routeMediaChunk routes an inbound BinaryMessageTypeMediaChunk frame to the
 // connection's persistent audio session, creating it lazily on the first frame.
 func (s *Server) routeMediaChunk(ctx context.Context, c *Connection, frame *BinaryFrame, log logr.Logger) {
-	as := s.ensureAudioSession(ctx, c, log)
+	as := s.ensureAudioSession(ctx, c, frame, log)
 	if as == nil {
 		// ensureAudioSession already logged and/or sent an error — nothing more to do.
 		return
@@ -274,10 +307,10 @@ func (s *Server) decrementAudioSessions(m ServerMetrics) {
 // The create-or-shed decision and the c.closed check are made under c.mu so
 // they are atomic with cleanupConnection setting c.closed = true.
 //
-// NOTE: codec/sample-rate/channels defaults (pcm/16000/1) are used for the
-// initial Start call. Future work (Task N) can parse BinaryMediaChunkMetadata
-// from the first frame and pass the negotiated parameters here instead.
-func (s *Server) ensureAudioSession(ctx context.Context, c *Connection, log logr.Logger) *audioSession {
+// The inbound frame is passed so that on first creation the negotiated audio
+// params (codec/sample-rate/channels) embedded in the frame's metadata are used
+// to build the DuplexStart message accurately.
+func (s *Server) ensureAudioSession(ctx context.Context, c *Connection, frame *BinaryFrame, log logr.Logger) *audioSession {
 	// Fast path: session already exists.
 	c.mu.Lock()
 	if c.audioSession != nil {
@@ -302,13 +335,13 @@ func (s *Server) ensureAudioSession(ctx context.Context, c *Connection, log logr
 		return nil
 	}
 
-	return s.tryStartAudioSession(ctx, c, log)
+	return s.tryStartAudioSession(ctx, c, frame, log)
 }
 
 // tryStartAudioSession performs the cap check, sink creation, and the
 // double-checked install under c.mu. Extracted from ensureAudioSession to
 // keep cognitive complexity manageable.
-func (s *Server) tryStartAudioSession(ctx context.Context, c *Connection, log logr.Logger) *audioSession {
+func (s *Server) tryStartAudioSession(ctx context.Context, c *Connection, frame *BinaryFrame, log logr.Logger) *audioSession {
 	// Part A: check the pod-level cap.
 	limit := s.maxAudioSessions()
 	if int(s.activeAudioSessions.Load()) >= limit {
@@ -322,9 +355,7 @@ func (s *Server) tryStartAudioSession(ctx context.Context, c *Connection, log lo
 	sink := s.duplexSinkFactory(c.sessionID, w)
 	as := newAudioSession(c.sessionID, sink, w)
 
-	// Default audio parameters. TODO: parse from BinaryMediaChunkMetadata when
-	// the client negotiation protocol is defined (future task).
-	startParams := &AudioSessionStart{Codec: defaultAudioCodec, SampleRate: 16000, Channels: 1}
+	startParams := audioParamsFromFrame(frame)
 	if err := as.start(ctx, startParams); err != nil {
 		log.Error(err, "audio session start failed", "sessionID", c.sessionID)
 		s.sendError(c, c.sessionID, ErrorCodeInvalidMessage, "audio session start failed: "+err.Error())
