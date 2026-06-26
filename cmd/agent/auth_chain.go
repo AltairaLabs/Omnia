@@ -60,6 +60,29 @@ func buildAuthChain(
 	agentName, namespace string,
 	mgmtPlane auth.Validator,
 ) (auth.Chain, error) {
+	external, err := buildExternalChain(ctx, k8s, log, agentName, namespace)
+	if err != nil {
+		return nil, err
+	}
+	chain := append(external, buildMgmtChain(mgmtPlane)...)
+	if len(chain) == 0 {
+		return nil, nil
+	}
+	return chain, nil
+}
+
+// buildExternalChain assembles only the data-plane (external) validators from
+// spec.externalAuth — sharedToken, apiKeys, oidc, edgeTrust — in order. It never
+// includes the mgmt-plane validator. May return an empty chain (no externalAuth
+// configured, or no k8s client); the caller decides what an empty external chain
+// means for its listener. This is the chain the external listeners run once the
+// management plane is isolated onto its own internal listeners.
+func buildExternalChain(
+	ctx context.Context,
+	k8s client.Client,
+	log logr.Logger,
+	agentName, namespace string,
+) (auth.Chain, error) {
 	chain := auth.Chain{}
 
 	if k8s != nil && agentName != "" && namespace != "" {
@@ -67,8 +90,8 @@ func buildAuthChain(
 		err := k8s.Get(ctx, types.NamespacedName{Name: agentName, Namespace: namespace}, ar)
 		switch {
 		case apierrors.IsNotFound(err):
-			// Agent is being created or deleted out-of-band — fall back
-			// to mgmt-plane only and let the controller catch up.
+			// Agent is being created or deleted out-of-band — return an empty
+			// external chain and let the controller catch up.
 			log.V(1).Info("agent runtime not found at startup, skipping data-plane validators",
 				"agent", agentName, "namespace", namespace)
 		case err != nil:
@@ -95,14 +118,17 @@ func buildAuthChain(
 			"hasNamespace", namespace != "")
 	}
 
-	if mgmtPlane != nil {
-		chain = append(chain, mgmtPlane)
-	}
-
-	if len(chain) == 0 {
-		return nil, nil
-	}
 	return chain, nil
+}
+
+// buildMgmtChain returns the single-purpose management-plane chain: just the
+// mgmt-plane validator, or an empty chain when none is configured. This is the
+// chain the internal twin listeners run.
+func buildMgmtChain(mgmtPlane auth.Validator) auth.Chain {
+	if mgmtPlane == nil {
+		return auth.Chain{}
+	}
+	return auth.Chain{mgmtPlane}
 }
 
 // buildDataPlaneValidators reads the AgentRuntime's spec.externalAuth

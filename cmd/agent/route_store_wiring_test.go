@@ -58,10 +58,11 @@ func TestBuildWebSocketServer_WiresRedisRouteStore(t *testing.T) {
 	metrics := agent.NewMetrics(cfg.AgentName, cfg.Namespace)
 	handler := &captureHandler{name: probeAgentName}
 
-	srv, _, err := buildWebSocketServer(cfg, logr.Discard(), store, handler, metrics, nil, nil, nil)
+	servers, err := buildWebSocketServer(cfg, logr.Discard(), store, handler, metrics, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("buildWebSocketServer: %v", err)
 	}
+	srv := servers.external
 
 	if !srv.HasRouteStore() {
 		t.Error("facade reports no RouteStore wired; buildWebSocketServer " +
@@ -92,10 +93,11 @@ func TestBuildWebSocketServer_NoopRouteStoreWhenEnvUnset(t *testing.T) {
 	metrics := agent.NewMetrics(cfg.AgentName, cfg.Namespace)
 	handler := &captureHandler{name: "probe-no-redis"}
 
-	srv, _, err := buildWebSocketServer(cfg, logr.Discard(), store, handler, metrics, nil, nil, nil)
+	servers, err := buildWebSocketServer(cfg, logr.Discard(), store, handler, metrics, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("buildWebSocketServer: %v", err)
 	}
+	srv := servers.external
 
 	if srv.HasRouteStore() {
 		t.Error("facade reports a real RouteStore wired when OMNIA_ROUTE_REDIS_URL is unset; " +
