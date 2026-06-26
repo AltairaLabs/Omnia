@@ -237,3 +237,44 @@ func spanNames(spans tracetest.SpanStubs) []string {
 	}
 	return out
 }
+
+// TestNewA2AHTTPServer_BindsAddrAndAdmitsViaChain proves the internal A2A twin
+// helper binds the given address and enforces the supplied (mgmt-plane) chain:
+// an admitting validator lets the inner handler run.
+func TestNewA2AHTTPServer_BindsAddrAndAdmitsViaChain(t *testing.T) {
+	freshPromRegistry(t)
+	inner := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+	metrics := facadea2a.NewMetrics(probeAgentName, "ns")
+
+	wantID := &policy.AuthenticatedIdentity{Origin: policy.OriginManagementPlane, Subject: "mgmt-admin"}
+	chain := auth.Chain{&alwaysAdmitValidator{id: wantID}}
+	srv := newA2AHTTPServer(":19999", inner, metrics, nil, chain, logr.Discard())
+
+	if srv.Addr != ":19999" {
+		t.Errorf("Addr = %q, want :19999", srv.Addr)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/a2a/test", nil)
+	rr := httptest.NewRecorder()
+	srv.Handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Errorf("admit chain: status = %d, want 200", rr.Code)
+	}
+}
+
+// TestNewA2AHTTPServer_RejectsViaChain proves the internal A2A twin fails closed
+// when its chain rejects — the mgmt-plane listener never serves un-authed traffic.
+func TestNewA2AHTTPServer_RejectsViaChain(t *testing.T) {
+	freshPromRegistry(t)
+	inner := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+	metrics := facadea2a.NewMetrics(probeAgentName, "ns")
+
+	srv := newA2AHTTPServer(":19999", inner, metrics, nil, auth.Chain{&alwaysRejectValidator{}}, logr.Discard())
+
+	req := httptest.NewRequest(http.MethodPost, "/a2a/test", nil)
+	req.Header.Set("Authorization", "Bearer bad")
+	rr := httptest.NewRecorder()
+	srv.Handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusUnauthorized {
+		t.Errorf("reject chain: status = %d, want 401", rr.Code)
+	}
+}
