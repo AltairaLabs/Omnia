@@ -1431,6 +1431,15 @@ type AgentRuntimeStatus struct {
 	// +optional
 	ServiceEndpoint string `json:"serviceEndpoint,omitempty"`
 
+	// managementEndpoints reports the internal (management-plane) listener ports
+	// the facade serves when externalAuth.allowManagementPlane is enabled. A nil
+	// value means the management plane is disabled and no internal listener
+	// exists. The dashboard and in-cluster callers read these to dial the agent
+	// over the management plane — they never compute the port from the external
+	// port.
+	// +optional
+	ManagementEndpoints *ManagementEndpoints `json:"managementEndpoints,omitempty"`
+
 	// a2a holds A2A-specific status information when facade.type is "a2a".
 	// +optional
 	A2A *A2AStatus `json:"a2a,omitempty"`
@@ -1453,6 +1462,24 @@ type AgentRuntimeStatus struct {
 	// observedGeneration is the most recent generation observed by the controller.
 	// +optional
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
+}
+
+// ManagementEndpoints holds the internal management-plane listener ports the
+// facade serves (in-cluster only) when allowManagementPlane is enabled. A
+// surface's field is nil when that surface is disabled. Callers read these to
+// reach the agent over the management plane.
+type ManagementEndpoints struct {
+	// ws is the internal WebSocket management-plane port.
+	// +optional
+	WS *int32 `json:"ws,omitempty"`
+
+	// a2a is the internal A2A management-plane port (dual-protocol agents).
+	// +optional
+	A2A *int32 `json:"a2a,omitempty"`
+
+	// mcp is the internal MCP management-plane port (function-mode agents).
+	// +optional
+	MCP *int32 `json:"mcp,omitempty"`
 }
 
 // Facade protocol values for FacadeEndpoint.Protocol.

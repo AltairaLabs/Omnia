@@ -276,8 +276,12 @@ var _ = Describe("AgentRuntime Controller", func() {
 				return k8sClient.Get(ctx, agentRuntimeKey, service)
 			}, timeout, interval).Should(Succeed())
 
-			Expect(service.Spec.Ports).To(HaveLen(1))
+			// facade + the internal management-plane twin (allowManagementPlane
+			// defaults true, so every agent gets a facade-mgmt port).
+			Expect(service.Spec.Ports).To(HaveLen(2))
 			Expect(service.Spec.Ports[0].Port).To(Equal(int32(DefaultFacadePort)))
+			Expect(service.Spec.Ports[1].Name).To(Equal(portNameFacadeMgmt))
+			Expect(service.Spec.Ports[1].Port).To(Equal(int32(DefaultInternalFacadePort)))
 			Expect(service.Spec.Type).To(Equal(corev1.ServiceTypeClusterIP))
 
 			By("verifying owner references are set")
@@ -2329,7 +2333,9 @@ var _ = Describe("AgentRuntime Controller", func() {
 			Eventually(func() error {
 				return k8sClient.Get(ctx, agentRuntimeKey, service)
 			}, timeout, interval).Should(Succeed())
-			Expect(service.Spec.Ports).To(HaveLen(2))
+			// facade + a2a + their internal management-plane twins
+			// (allowManagementPlane defaults true).
+			Expect(service.Spec.Ports).To(HaveLen(4))
 
 			portNames := make(map[string]int32)
 			for _, p := range service.Spec.Ports {
@@ -2338,6 +2344,8 @@ var _ = Describe("AgentRuntime Controller", func() {
 			Expect(portNames).To(HaveKey("facade"))
 			Expect(portNames).To(HaveKey("a2a"))
 			Expect(portNames["a2a"]).To(Equal(int32(DefaultA2APort)))
+			Expect(portNames[portNameFacadeMgmt]).To(Equal(int32(DefaultInternalFacadePort)))
+			Expect(portNames[portNameA2AMgmt]).To(Equal(int32(DefaultInternalA2APort)))
 
 			By("verifying A2A status is populated for dual-protocol agent")
 			updated := &omniav1alpha1.AgentRuntime{}
