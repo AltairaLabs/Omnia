@@ -154,7 +154,10 @@ func runA2AFacade(cfg *agent.Config, log logr.Logger, tracingProvider *tracing.P
 	mux := http.NewServeMux()
 	mux.Handle("/", a2aHandler)
 
-	// Serve A2A handler on the facade port.
+	// Serve A2A on the external facade port; mirror it on the internal
+	// management-plane twin port when the controller has allocated one (a
+	// mgmt-plane-only chain). Both listeners wrap the same a2aSrv handler and
+	// metrics, differing only in auth chain + address.
 	facadeServer := &http.Server{
 		Addr:         fmt.Sprintf(":%d", cfg.FacadePort),
 		Handler:      mux,
@@ -162,9 +165,25 @@ func runA2AFacade(cfg *agent.Config, log logr.Logger, tracingProvider *tracing.P
 		WriteTimeout: writeTimeout,
 		IdleTimeout:  idleTimeout,
 	}
-
 	healthServer := newHealthServer(cfg, readyzOKHandler)
-	runPrimaryAndHealthServers(log, "A2A server", facadeServer, healthServer)
+
+	var internalA2AServer *http.Server
+	if cfg.InternalFacadePort != 0 {
+		internalA2AServer = newA2AHTTPServer(
+			fmt.Sprintf(":%d", cfg.InternalFacadePort),
+			a2aSrv.Handler(), a2aMetrics, tracingProvider, buildMgmtChain(mgmtPlane), log)
+	}
+
+	servers := nonNilServers(map[string]*http.Server{
+		"A2A server":        facadeServer,
+		"health server":     healthServer,
+		"internal a2a twin": internalA2AServer,
+	})
+	errChan := make(chan error, len(servers))
+	for name, srv := range servers {
+		startServerGoroutine(name, srv, errChan, log)
+	}
+	waitForShutdownSignal(log, errChan)
 
 	// Graceful shutdown
 	log.Info("shutting down...")
@@ -174,7 +193,7 @@ func runA2AFacade(cfg *agent.Config, log logr.Logger, tracingProvider *tracing.P
 	if err := a2aSrv.Shutdown(ctx); err != nil {
 		log.Error(err, "error shutting down A2A server")
 	}
-	shutdownPrimaryAndHealthServers(log, "HTTP server", facadeServer, healthServer)
+	shutdownServers(log, servers)
 
 	log.Info("shutdown complete")
 }

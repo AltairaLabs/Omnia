@@ -91,23 +91,32 @@ func runFunctionsFacade(cfg *agent.Config, log logr.Logger, tracingProvider *tra
 	}
 
 	// Build the shared auth chain once; both the HTTP route and (when
-	// enabled) the MCP server's outer middleware use it.
-	chain := buildFunctionAuthChain(cfg, log)
+	// enabled) the MCP server's outer middleware use it. mgmtPlane is kept
+	// separately for the internal MCP twin's mgmt-plane-only chain.
+	chain, mgmtPlane := buildFunctionAuthChain(cfg, log)
 
 	mux := http.NewServeMux()
 	mux.Handle("POST /functions/{name}", wrapWithAuthChain(chain, handler, log))
 
 	facadeServer := newFunctionsHTTPServer(cfg, mux)
 	healthServer := newFunctionsHealthServer(cfg, rc)
-	mcpServer := buildMCPServer(cfg, rc, chain, tracingProvider, log)
+	// External MCP (data-plane + mgmt chain) on the public MCP port, and the
+	// internal management-plane twin (mgmt-only chain) on the internal port when
+	// the controller has allocated one. buildMCPServer returns nil when MCP is
+	// disabled or the port is zero, so the start helper skips it.
+	mcpServer := buildMCPServer(cfg, rc, chain, tracingProvider, log, int32(cfg.MCPPort))
+	internalMCPServer := buildMCPServer(
+		cfg, rc, buildMgmtChain(mgmtPlane), tracingProvider, log, int32(cfg.InternalMCPPort))
 
-	startFunctionsAndServe(log, facadeServer, healthServer, mcpServer)
+	startFunctionsAndServe(log, facadeServer, healthServer, mcpServer, internalMCPServer)
 }
 
 // buildFunctionAuthChain loads the mgmt-plane + data-plane validator
 // chain. Failures are fatal — silent downgrade to no-auth would mask
-// a real misconfig.
-func buildFunctionAuthChain(cfg *agent.Config, log logr.Logger) auth.Chain {
+// a real misconfig. Returns the external chain (data-plane + mgmt-plane) and
+// the mgmt-plane validator separately so the internal MCP twin can run a
+// mgmt-plane-only chain.
+func buildFunctionAuthChain(cfg *agent.Config, log logr.Logger) (auth.Chain, auth.Validator) {
 	mgmtPlane, err := loadMgmtPlaneValidator(log, cfg.AgentName, cfg.WorkspaceName)
 	if err != nil {
 		log.Error(err, "mgmt-plane validator load failed")
@@ -119,7 +128,7 @@ func buildFunctionAuthChain(cfg *agent.Config, log logr.Logger) auth.Chain {
 		log.Error(err, "auth chain build failed")
 		os.Exit(1)
 	}
-	return chain
+	return chain, mgmtPlane
 }
 
 // wrapWithAuthChain applies the auth middleware to the function HTTP
@@ -201,15 +210,17 @@ func newFunctionsHealthServer(cfg *agent.Config, rc *facade.RuntimeClient) *http
 	})
 }
 
-// startFunctionsAndServe runs the facade + health (+ optional MCP)
-// servers and blocks until SIGINT/SIGTERM or a fatal server error.
-// mcpServer may be nil when MCP is disabled.
-func startFunctionsAndServe(log logr.Logger, facadeServer, healthServer, mcpServer *http.Server) {
-	errChan := make(chan error, 3)
+// startFunctionsAndServe runs the facade + health (+ optional MCP +
+// optional internal mgmt MCP twin) servers and blocks until SIGINT/SIGTERM or
+// a fatal server error. mcpServer / internalMCPServer may be nil when MCP or
+// the management plane is disabled.
+func startFunctionsAndServe(log logr.Logger, facadeServer, healthServer, mcpServer, internalMCPServer *http.Server) {
+	errChan := make(chan error, 4)
 	servers := nonNilServers(map[string]*http.Server{
-		"functions facade": facadeServer,
-		"health server":    healthServer,
-		"mcp server":       mcpServer,
+		"functions facade":  facadeServer,
+		"health server":     healthServer,
+		"mcp server":        mcpServer,
+		"internal mcp twin": internalMCPServer,
 	})
 	for name, srv := range servers {
 		startServerGoroutine(name, srv, errChan, log)
