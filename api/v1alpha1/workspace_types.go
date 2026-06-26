@@ -669,6 +669,16 @@ type WorkspaceServiceGroup struct {
 	// evalWorker opts this service group into the out-of-band eval-worker.
 	// +optional
 	EvalWorker *ServiceGroupEvalWorker `json:"evalWorker,omitempty"`
+
+	// autoscaling is the default autoscaling policy for every AgentRuntime in
+	// this service group. An agent that omits spec.runtime.autoscaling inherits
+	// this policy whole; an agent that sets its own block fully owns autoscaling
+	// and this default is ignored (explicit agent spec wins as a unit). When the
+	// resolved policy requests type "keda" but KEDA is not installed in the
+	// cluster, the agent surfaces an AutoscalingReady=False condition and stays
+	// at static replicas rather than failing.
+	// +optional
+	Autoscaling *AutoscalingConfig `json:"autoscaling,omitempty"`
 }
 
 // ServiceGroupEvalWorker configures the per-service-group eval-worker.

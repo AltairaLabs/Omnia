@@ -230,6 +230,48 @@ The annotated ServiceAccount **and** the cloud-side federated credential must be
 Consequence: agents in a UI-created workspace **cannot** use `auth.type: workloadIdentity` until the FIC / IRSA role / WLI binding is created out of band. For dynamic workspaces, use **secret-based provider auth** (`servicePrincipal`, `accessKey`, or `serviceAccount`) instead, or pre-provision a shared federated ServiceAccount that the workspace references.
 :::
 
+### `services`
+
+Named service groups for the workspace. Each group bundles the session-api and
+memory-api endpoints (and related defaults) that its agents use; an AgentRuntime
+selects a group via `spec.serviceGroup` (defaulting to `default`). A group also
+carries **agent-runtime defaults** that its agents inherit.
+
+#### `services[].autoscaling`
+
+Default autoscaling policy for **every AgentRuntime in this service group**. An
+agent that omits `spec.runtime.autoscaling` inherits this policy whole; an agent
+that sets its own block fully owns autoscaling and this default is ignored
+(explicit agent spec wins as a unit). This lets a workspace owner turn on
+"autoscaling by default" once — including for agents created via the dashboard or
+a deploy tool, which can't easily express per-agent scaling.
+
+The value is an [`AutoscalingConfig`](/reference/agentruntime/#runtimeautoscaling)
+— the same shape as `AgentRuntime.spec.runtime.autoscaling`.
+
+```yaml
+spec:
+  services:
+    - name: default
+      autoscaling:
+        enabled: true
+        type: hpa
+        minReplicas: 1
+        maxReplicas: 10
+        targetMemoryUtilizationPercentage: 70
+```
+
+An AgentRuntime in this group with no `spec.runtime.autoscaling` inherits the
+above; one that sets its own keeps it.
+
+:::caution[KEDA must be installed for `type: keda`]
+KEDA is not installed by the chart by default. When a resolved default requests
+`type: keda` but the KEDA CRDs are absent, the agent surfaces an
+`AutoscalingReady=False` condition with reason `KEDANotInstalled` and stays at
+static replicas — the reconcile does not fail. Use `type: hpa` (the default) on
+clusters without KEDA.
+:::
+
 ### `quotas`
 
 Resource quotas for the workspace.

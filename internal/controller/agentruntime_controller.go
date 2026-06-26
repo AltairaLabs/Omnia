@@ -527,11 +527,15 @@ func (r *AgentRuntimeReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return rolloutResult, nil
 	}
 
-	// Reconcile autoscaling (HPA or KEDA if enabled)
-	if err := r.reconcileAutoscaling(ctx, agentRuntime); err != nil {
+	// Reconcile autoscaling (HPA or KEDA, resolved from the agent's own policy
+	// or the inherited WorkspaceServiceGroup default). Non-blocking: errors are
+	// logged and surfaced via the AutoscalingReady condition, not fatal.
+	autoscalingCond, err := r.reconcileAutoscaling(ctx, agentRuntime)
+	if err != nil {
 		log.Error(err, "Failed to reconcile autoscaling")
-		// Don't fail the reconciliation for autoscaling errors, just log
 	}
+	SetCondition(&agentRuntime.Status.Conditions, agentRuntime.Generation,
+		autoscalingCond.Type, autoscalingCond.Status, autoscalingCond.Reason, autoscalingCond.Message)
 
 	// Reconcile eval worker deployment for non-PromptKit agents with evals enabled
 	if err := r.reconcileEvalWorker(ctx, agentRuntime); err != nil {
