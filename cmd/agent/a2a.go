@@ -92,19 +92,18 @@ func runA2AFacade(cfg *agent.Config, log logr.Logger, tracingProvider *tracing.P
 		log.Info("A2A bearer auth enabled (legacy)")
 	}
 
-	// Build the PR 2b-era auth chain. Reads the agent's own
-	// spec.externalAuth, then combines data-plane validators with the
-	// mgmt-plane validator. Wrapped around buildA2AHandler below so an
-	// A2A caller presenting a valid credential sees the same 200-OK
-	// path as the WS facade.
+	// Build the external (data-plane-only) auth chain for the public A2A
+	// listener. The mgmt-plane validator is loaded separately and runs only on
+	// the internal twin listener (full plane isolation) — mgmt-plane A2A callers
+	// dial the internal port.
 	mgmtPlane, err := loadMgmtPlaneValidator(log, cfg.AgentName, cfg.WorkspaceName)
 	if err != nil {
 		log.Error(err, "mgmt-plane validator load failed")
 		os.Exit(1)
 	}
-	chain, err := buildAuthChain(context.Background(), buildK8sClient(), log, cfg.AgentName, cfg.Namespace, mgmtPlane)
+	chain, err := buildExternalChain(context.Background(), buildK8sClient(), log, cfg.AgentName, cfg.Namespace)
 	if err != nil {
-		log.Error(err, "auth chain build failed")
+		log.Error(err, "external auth chain build failed")
 		os.Exit(1)
 	}
 
