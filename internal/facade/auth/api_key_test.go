@@ -108,14 +108,15 @@ func TestAPIKeyValidator_UnknownKeyFallsThrough(t *testing.T) {
 func TestAPIKeyValidator_ChainFallsThroughToLaterValidator(t *testing.T) {
 	t.Parallel()
 	store := newAPIKeyStore(t) // contains a known key, but we present a different bearer
-	admit := &stubValidator{id: &policy.AuthenticatedIdentity{Origin: policy.OriginManagementPlane, Subject: "admin"}}
+	wantSubject := "mgmt-admin"
+	admit := &stubValidator{id: &policy.AuthenticatedIdentity{Origin: policy.OriginManagementPlane, Subject: wantSubject}}
 	chain := auth.Chain{auth.NewAPIKeyValidator(store), admit}
 
 	id, err := chain.Run(context.Background(), reqWithBearer("a-mgmt-plane-jwt-shaped-bearer"))
 	if err != nil {
 		t.Fatalf("Run err = %v, want nil (apiKeys must fall through to the admitting validator)", err)
 	}
-	if id == nil || id.Subject != "admin" {
+	if id == nil || id.Subject != wantSubject {
 		t.Errorf("identity = %+v, want admitted by the later validator", id)
 	}
 	if admit.called != 1 {
