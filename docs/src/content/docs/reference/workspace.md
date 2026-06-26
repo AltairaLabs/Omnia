@@ -192,6 +192,44 @@ spec:
     role: viewer  # Read-only for anonymous users
 ```
 
+### `runtime`
+
+Workspace-wide pod defaults applied to **every AgentRuntime** in the workspace. Its purpose is hyperscaler-agnostic **cloud workload-identity**: the ServiceAccount and pod labels needed to bind a runtime pod to a cloud workload identity (Azure Workload Identity, AWS IRSA, GKE Workload Identity) so keyless providers (`Provider.auth.type: workloadIdentity`) authenticate without a stored secret.
+
+| Field | Type | Required |
+|-------|------|----------|
+| `runtime.serviceAccountName` | string | No |
+| `runtime.podLabels` | map[string]string | No |
+| `runtime.podAnnotations` | map[string]string | No |
+
+| Field | Description |
+|-------|-------------|
+| `serviceAccountName` | The ServiceAccount every agent runtime pod in this workspace runs as. Provisioned out of band (IaC) with the cloud identity annotations (e.g. `azure.workload.identity/client-id`, `eks.amazonaws.com/role-arn`, `iam.gke.io/gcp-service-account`). Empty = no default; agents fall back to the operator-created per-agent SA. |
+| `podLabels` | Labels added to every agent runtime pod, e.g. `azure.workload.identity/use: "true"` to opt into the Azure webhook. AWS IRSA and GKE WLI need none. |
+| `podAnnotations` | Annotations added to every agent runtime pod. Reserved for parity with `podLabels`; rarely needed. |
+
+```yaml
+spec:
+  runtime:
+    serviceAccountName: ws-runtime-sa
+    podLabels:
+      azure.workload.identity/use: "true"
+```
+
+**Precedence.** An AgentRuntime that sets its own `spec.podOverrides.serviceAccountName` is bringing its own identity (its own annotated SA), so it opts **out** of these defaults as a unit — neither the workspace SA nor the workspace pod labels are applied to it. Agents that set no SA inherit these defaults. This lets agents provisioned via the deploy API (which can't carry cloud-specific SA names) still authenticate to keyless providers.
+
+#### Workload-identity federation is provisioned out of band (IaC)
+
+Omnia treats `runtime` as **opaque passthrough** — it never interprets the values or branches on cloud provider. The operator references the ServiceAccount by name and applies the pod labels, but it does **not** create the cloud-side federated trust (Azure FIC, AWS IRSA role/trust policy, or GKE WLI binding).
+
+Each cloud's trust statement is **per-exact-subject** — `system:serviceaccount:<namespace>:<sa>` on Azure, the role trust policy on AWS, a specific KSA↔GSA binding on GKE — and there are no wildcard subjects. Because Omnia isolates each workspace in its own namespace, **every workspace needs its own federated credential**, even when sharing one managed identity and one SA name.
+
+:::caution[Keyless providers require an IaC-provisioned workspace]
+The annotated ServiceAccount **and** the cloud-side federated credential must be provisioned out of band by the same IaC (Terraform/Bicep/Helm/GitOps) that creates the `Workspace`. For a **dynamically created** workspace (dashboard UI / API → operator creates the namespace at runtime) there is no IaC step in that path, so nothing provisions the cloud-side credential for the new workspace's runtime SA.
+
+Consequence: agents in a UI-created workspace **cannot** use `auth.type: workloadIdentity` until the FIC / IRSA role / WLI binding is created out of band. For dynamic workspaces, use **secret-based provider auth** (`servicePrincipal`, `accessKey`, or `serviceAccount`) instead, or pre-provision a shared federated ServiceAccount that the workspace references.
+:::
+
 ### `quotas`
 
 Resource quotas for the workspace.
@@ -526,6 +564,13 @@ spec:
     create: true
     labels:
       environment: production
+
+  # Workspace-wide cloud workload identity (keyless providers).
+  # The SA + cloud-side federated credential must be provisioned by IaC.
+  runtime:
+    serviceAccountName: ws-runtime-sa
+    podLabels:
+      azure.workload.identity/use: "true"
 
   roleBindings:
     # Owners: Full workspace control
