@@ -27,7 +27,7 @@ type Input struct {
 
 // Point is one projected memory in the 2D layout.
 type Point struct {
-	ID         string     `json:"id"`
+	ID         string     `json:"id,omitempty"`
 	X          float64    `json:"x"`
 	Y          float64    `json:"y"`
 	Tier       string     `json:"tier"`
@@ -37,9 +37,13 @@ type Point struct {
 	Category   string     `json:"category,omitempty"`
 	Confidence float64    `json:"confidence"`
 	Title      string     `json:"title,omitempty"`
-	Preview    string     `json:"preview"`
+	Preview    string     `json:"preview,omitempty"`
 	ObservedAt time.Time  `json:"observedAt"`
 	ExpiresAt  *time.Time `json:"expiresAt,omitempty"` // for age-fade toward expiry
+	// Masked is true when consent policy stripped this point's identifying and
+	// content fields server-side (sensitive category). A masked point is an
+	// anonymous, non-interactive dot: only position/tier/confidence/timestamps.
+	Masked bool `json:"masked,omitempty"`
 }
 
 // Result is the full projection outcome.
