@@ -176,12 +176,14 @@ describe("ProviderDialog", () => {
         </TestWrapper>
       );
 
-      // Click Create without filling name
+      // Click Create without filling name — inline FieldError appears under the name field.
+      // Check for aria-invalid on the name input specifically.
       const submitButton = screen.getByRole("button", { name: /create provider/i });
       fireEvent.click(submitButton);
 
       await waitFor(() => {
-        expect(screen.getByText("Name is required")).toBeInTheDocument();
+        const nameInput = screen.getByLabelText("Name");
+        expect(nameInput).toHaveAttribute("aria-invalid", "true");
       });
       expect(mockCreateProvider).not.toHaveBeenCalled();
     });
@@ -203,9 +205,49 @@ describe("ProviderDialog", () => {
 
       await waitFor(() => {
         expect(
-          screen.getByText(/must be a valid DNS subdomain/i)
+          screen.getByText(/lowercase letters, numbers, hyphens/i)
         ).toBeInTheDocument();
       });
+    });
+  });
+
+  describe("inline validation (#1612)", () => {
+    it("shows an inline error and blocks submit for an invalid provider name", async () => {
+      vi.useRealTimers();
+      const user = userEvent.setup();
+      render(
+        <TestWrapper>
+          <ProviderDialog open onOpenChange={() => {}} />
+        </TestWrapper>
+      );
+      await user.type(screen.getByLabelText(/^name$/i), "Bad_Name");
+      expect(
+        await screen.findByText(/lowercase letters, numbers, hyphens/i)
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: /create provider/i })
+      ).toBeDisabled();
+    });
+
+    it("shows an inline error for an env var name that fails the pattern", async () => {
+      vi.useRealTimers();
+      const user = userEvent.setup();
+      render(
+        <TestWrapper>
+          <ProviderDialog open onOpenChange={() => {}} />
+        </TestWrapper>
+      );
+      // Switch to envVar credential source
+      fireEvent.click(screen.getByLabelText("Env Variable"));
+      const envInput = screen.getByLabelText("Environment Variable");
+      await user.type(envInput, "123_INVALID");
+      // Pattern validation fires on change; env var input should be marked invalid
+      await waitFor(() => {
+        expect(envInput).toHaveAttribute("aria-invalid", "true");
+      });
+      expect(
+        screen.getByRole("button", { name: /create provider/i })
+      ).toBeDisabled();
     });
   });
 

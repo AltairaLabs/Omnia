@@ -30,6 +30,9 @@ import {
 } from "@/components/ui/collapsible";
 import { AlertCircle, Loader2, ChevronDown, Plus, Trash2 } from "lucide-react";
 import type { Provider, ProviderSpec } from "@/types/generated/provider";
+import { useFieldValidation } from "@/hooks/use-field-validation";
+import { FieldError } from "@/components/ui/field-error";
+import { crdConstraints } from "@/types/generated/crd-constraints";
 
 // --- Types ---
 
@@ -363,28 +366,24 @@ function getInitialFormState(provider?: Provider | null): FormState {
   };
 }
 
-function validateName(name: string): string | null {
-  if (!name.trim()) return "Name is required";
-  if (!/^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$/.test(name)) {
-    return "Name must be a valid DNS subdomain (lowercase alphanumeric, hyphens, dots)";
+/**
+ * Cross-field validation rules that cannot be expressed as single-field CRD
+ * constraints. Returns an error string for the Alert banner, or null.
+ *
+ * - Role/vendor compatibility is enforced here because VENDORS_BY_ROLE is UI
+ *   state, not a single-field constraint.
+ * - Platform requirements (region, project, endpoint) are cross-field because
+ *   each sub-field is only required conditionally on platformType.
+ * - Auth secret is required conditionally on authType (not workloadIdentity).
+ */
+function validateCrossFields(form: FormState): string | null {
+  if (!vendorAllowedForRole(form.role, form.providerType)) {
+    return `Vendor "${form.providerType}" is not supported for role "${form.role}"`;
   }
-  return null;
-}
-
-function validateCredentialFields(form: FormState): string | null {
-  if (form.credentialSource === "secret" && !form.credentialSecretName.trim()) {
-    return "Secret name is required";
+  // Platform is llm-only.
+  if (form.role !== "llm" && form.platformType) {
+    return "Hosting platform is only valid when role is llm";
   }
-  if (form.credentialSource === "envVar" && !form.credentialEnvVar.trim()) {
-    return "Environment variable name is required";
-  }
-  if (form.credentialSource === "filePath" && !form.credentialFilePath.trim()) {
-    return "File path is required";
-  }
-  return null;
-}
-
-function validatePlatformFields(form: FormState): string | null {
   if (!form.platformType) return null;
 
   if (
@@ -399,48 +398,15 @@ function validatePlatformFields(form: FormState): string | null {
   if (form.platformType === "azure" && !form.platformEndpoint.trim()) {
     return "Endpoint is required for azure";
   }
+  if (!form.authType) return "Auth type is required when a platform is configured";
 
   const allowed = AUTH_BY_PLATFORM[form.platformType];
-  if (!form.authType) return "Auth type is required when a platform is configured";
   if (!allowed.includes(form.authType)) {
     return `Auth type ${form.authType} is not valid for platform ${form.platformType}`;
   }
-
   if (form.authType !== "workloadIdentity" && !form.authSecretName.trim()) {
     return "Credentials secret name is required for static auth";
   }
-
-  return null;
-}
-
-function validateRoleAndVendor(form: FormState): string | null {
-  if (!vendorAllowedForRole(form.role, form.providerType)) {
-    return `Vendor "${form.providerType}" is not supported for role "${form.role}"`;
-  }
-  // Platform is llm-only. Block submit if someone left platform set after
-  // switching to a non-llm role (the wizard clears it, but defend the
-  // contract anyway so manual state never escapes).
-  if (form.role !== "llm" && form.platformType) {
-    return "Hosting platform is only valid when role is llm";
-  }
-  return null;
-}
-
-function validateForm(form: FormState): string | null {
-  const nameError = validateName(form.name);
-  if (nameError) return nameError;
-
-  const roleError = validateRoleAndVendor(form);
-  if (roleError) return roleError;
-
-  if (form.platformType) {
-    return validatePlatformFields(form);
-  }
-
-  if (!isLocal(form.providerType)) {
-    return validateCredentialFields(form);
-  }
-
   return null;
 }
 
@@ -598,13 +564,20 @@ function buildSpec(form: FormState): ProviderSpec {
 
 // --- Sub-components ---
 
+interface ValidateProps {
+  validate: (path: string, value: unknown) => void;
+  errors: Record<string, string>;
+}
+
 function CredentialFields({
   form,
   updateForm,
+  validate,
+  errors,
 }: Readonly<{
   form: FormState;
   updateForm: <K extends keyof FormState>(key: K, value: FormState[K]) => void;
-}>) {
+} & ValidateProps>) {
   return (
     <div className="space-y-4">
       <Label>Credential Source</Label>
@@ -634,9 +607,15 @@ function CredentialFields({
             <Input
               id="cred-secret-name"
               placeholder="my-api-key"
+              aria-invalid={!!errors["spec.credential.secretRef.name"]}
+              aria-describedby={errors["spec.credential.secretRef.name"] ? "cred-secret-name-error" : undefined}
               value={form.credentialSecretName}
-              onChange={(e) => updateForm("credentialSecretName", e.target.value)}
+              onChange={(e) => {
+                updateForm("credentialSecretName", e.target.value);
+                validate("spec.credential.secretRef.name", e.target.value);
+              }}
             />
+            <FieldError id="cred-secret-name-error" message={errors["spec.credential.secretRef.name"]} />
           </div>
           <div className="space-y-2">
             <Label htmlFor="cred-secret-key">Key (optional)</Label>
@@ -656,9 +635,15 @@ function CredentialFields({
           <Input
             id="cred-env-var"
             placeholder="ANTHROPIC_API_KEY"
+            aria-invalid={!!errors["spec.credential.envVar"]}
+            aria-describedby={errors["spec.credential.envVar"] ? "cred-env-var-error" : undefined}
             value={form.credentialEnvVar}
-            onChange={(e) => updateForm("credentialEnvVar", e.target.value)}
+            onChange={(e) => {
+              updateForm("credentialEnvVar", e.target.value);
+              validate("spec.credential.envVar", e.target.value);
+            }}
           />
+          <FieldError id="cred-env-var-error" message={errors["spec.credential.envVar"]} />
         </div>
       )}
 
@@ -668,9 +653,15 @@ function CredentialFields({
           <Input
             id="cred-file-path"
             placeholder="/var/run/secrets/api-key"
+            aria-invalid={!!errors["spec.credential.filePath"]}
+            aria-describedby={errors["spec.credential.filePath"] ? "cred-file-path-error" : undefined}
             value={form.credentialFilePath}
-            onChange={(e) => updateForm("credentialFilePath", e.target.value)}
+            onChange={(e) => {
+              updateForm("credentialFilePath", e.target.value);
+              validate("spec.credential.filePath", e.target.value);
+            }}
           />
+          <FieldError id="cred-file-path-error" message={errors["spec.credential.filePath"]} />
         </div>
       )}
     </div>
@@ -1063,10 +1054,12 @@ function PlatformFields({
 function TTSFields({
   form,
   updateForm,
+  validate,
+  errors,
 }: Readonly<{
   form: FormState;
   updateForm: <K extends keyof FormState>(key: K, value: FormState[K]) => void;
-}>) {
+} & ValidateProps>) {
   const TTS_FORMAT_NONE = "none";
   return (
     <div className="border rounded-lg p-4 space-y-4">
@@ -1109,9 +1102,15 @@ function TTSFields({
             type="number"
             min="8000"
             placeholder="24000"
+            aria-invalid={!!errors["spec.tts.sampleRate"]}
+            aria-describedby={errors["spec.tts.sampleRate"] ? "tts-sample-rate-error" : undefined}
             value={form.ttsSampleRate}
-            onChange={(e) => updateForm("ttsSampleRate", e.target.value)}
+            onChange={(e) => {
+              updateForm("ttsSampleRate", e.target.value);
+              validate("spec.tts.sampleRate", e.target.value ? Number(e.target.value) : null);
+            }}
           />
+          <FieldError id="tts-sample-rate-error" message={errors["spec.tts.sampleRate"]} />
         </div>
       </div>
     </div>
@@ -1121,10 +1120,12 @@ function TTSFields({
 function STTFields({
   form,
   updateForm,
+  validate,
+  errors,
 }: Readonly<{
   form: FormState;
   updateForm: <K extends keyof FormState>(key: K, value: FormState[K]) => void;
-}>) {
+} & ValidateProps>) {
   return (
     <div className="border rounded-lg p-4 space-y-4">
       <Label className="text-base font-semibold">Speech-to-Text</Label>
@@ -1134,9 +1135,15 @@ function STTFields({
           <Input
             id="stt-language"
             placeholder="en"
+            aria-invalid={!!errors["spec.stt.language"]}
+            aria-describedby={errors["spec.stt.language"] ? "stt-language-error" : undefined}
             value={form.sttLanguage}
-            onChange={(e) => updateForm("sttLanguage", e.target.value)}
+            onChange={(e) => {
+              updateForm("sttLanguage", e.target.value);
+              validate("spec.stt.language", e.target.value);
+            }}
           />
+          <FieldError id="stt-language-error" message={errors["spec.stt.language"]} />
         </div>
         <div className="space-y-2">
           <Label htmlFor="stt-sample-rate">Sample Rate (Hz)</Label>
@@ -1145,9 +1152,15 @@ function STTFields({
             type="number"
             min="8000"
             placeholder="16000"
+            aria-invalid={!!errors["spec.stt.sampleRate"]}
+            aria-describedby={errors["spec.stt.sampleRate"] ? "stt-sample-rate-error" : undefined}
             value={form.sttSampleRate}
-            onChange={(e) => updateForm("sttSampleRate", e.target.value)}
+            onChange={(e) => {
+              updateForm("sttSampleRate", e.target.value);
+              validate("spec.stt.sampleRate", e.target.value ? Number(e.target.value) : null);
+            }}
           />
+          <FieldError id="stt-sample-rate-error" message={errors["spec.stt.sampleRate"]} />
         </div>
       </div>
     </div>
@@ -1157,10 +1170,12 @@ function STTFields({
 function EmbeddingFields({
   form,
   updateForm,
+  validate,
+  errors,
 }: Readonly<{
   form: FormState;
   updateForm: <K extends keyof FormState>(key: K, value: FormState[K]) => void;
-}>) {
+} & ValidateProps>) {
   const DISTANCE_NONE = "none";
   return (
     <div className="border rounded-lg p-4 space-y-4">
@@ -1173,9 +1188,15 @@ function EmbeddingFields({
             type="number"
             min="1"
             placeholder="1536"
+            aria-invalid={!!errors["spec.embedding.dimensions"]}
+            aria-describedby={errors["spec.embedding.dimensions"] ? "embedding-dimensions-error" : undefined}
             value={form.embeddingDimensions}
-            onChange={(e) => updateForm("embeddingDimensions", e.target.value)}
+            onChange={(e) => {
+              updateForm("embeddingDimensions", e.target.value);
+              validate("spec.embedding.dimensions", e.target.value ? Number(e.target.value) : null);
+            }}
           />
+          <FieldError id="embedding-dimensions-error" message={errors["spec.embedding.dimensions"]} />
         </div>
         <div className="space-y-2">
           <Label htmlFor="embedding-distance">Distance metric</Label>
@@ -1296,6 +1317,47 @@ interface ProviderDialogFormProps {
   onOpenChange: (open: boolean) => void;
 }
 
+function buildValidateAllFields(
+  formState: FormState,
+  showCredential: boolean,
+): Array<{ path: string; value: unknown }> {
+  const fields: Array<{ path: string; value: unknown }> = [
+    { path: "metadata.name", value: formState.name },
+  ];
+
+  if (showCredential) {
+    if (formState.credentialSource === "secret") {
+      fields.push({ path: "spec.credential.secretRef.name", value: formState.credentialSecretName });
+    } else if (formState.credentialSource === "envVar") {
+      fields.push({ path: "spec.credential.envVar", value: formState.credentialEnvVar });
+    } else if (formState.credentialSource === "filePath") {
+      fields.push({ path: "spec.credential.filePath", value: formState.credentialFilePath });
+    }
+  }
+
+  if (formState.role === "embedding") {
+    fields.push({
+      path: "spec.embedding.dimensions",
+      value: formState.embeddingDimensions ? Number(formState.embeddingDimensions) : null,
+    });
+  }
+  if (formState.role === "stt") {
+    fields.push({ path: "spec.stt.language", value: formState.sttLanguage });
+    fields.push({
+      path: "spec.stt.sampleRate",
+      value: formState.sttSampleRate ? Number(formState.sttSampleRate) : null,
+    });
+  }
+  if (formState.role === "tts") {
+    fields.push({
+      path: "spec.tts.sampleRate",
+      value: formState.ttsSampleRate ? Number(formState.ttsSampleRate) : null,
+    });
+  }
+
+  return fields;
+}
+
 function ProviderDialogForm({
   provider,
   isEditing,
@@ -1307,6 +1369,8 @@ function ProviderDialogForm({
 }: Readonly<ProviderDialogFormProps>) {
   const [formState, setFormState] = useState<FormState>(() => getInitialFormState(provider));
   const [error, setError] = useState<string | null>(null);
+
+  const { errors, validate, validateAll, hasErrors } = useFieldValidation(crdConstraints.Provider);
 
   const updateForm = <K extends keyof FormState>(key: K, value: FormState[K]) => {
     setFormState((prev) => ({ ...prev, [key]: value }));
@@ -1342,13 +1406,22 @@ function ProviderDialogForm({
     setFormState((prev) => applyRoleChange(prev, role));
   };
 
+  const isLLMRole = formState.role === "llm";
+  const showCredential =
+    !isLocal(formState.providerType) && (isLLMRole ? !formState.platformType : true);
+  const showPlatform = isLLMRole && supportsPlatform(formState.providerType);
+
   const handleSubmit = async () => {
     try {
       setError(null);
 
-      const validationError = validateForm(formState);
-      if (validationError) {
-        setError(validationError);
+      const fields = buildValidateAllFields(formState, showCredential);
+      if (!validateAll(fields)) return;
+
+      // Cross-field checks not expressible as single-field CRD constraints.
+      const crossFieldError = validateCrossFields(formState);
+      if (crossFieldError) {
+        setError(crossFieldError);
         return;
       }
 
@@ -1366,11 +1439,6 @@ function ProviderDialogForm({
       setError(err instanceof Error ? err.message : "Failed to save provider");
     }
   };
-
-  const isLLMRole = formState.role === "llm";
-  const showCredential =
-    !isLocal(formState.providerType) && (isLLMRole ? !formState.platformType : true);
-  const showPlatform = isLLMRole && supportsPlatform(formState.providerType);
 
   // Narrow the vendor list to those the CRD CEL matrix accepts for this role
   // so the user can't pick an invalid (role, vendor) pair from the UI.
@@ -1403,10 +1471,16 @@ function ProviderDialogForm({
             <Input
               id="provider-name"
               placeholder="my-provider"
+              aria-invalid={!!errors["metadata.name"]}
+              aria-describedby={errors["metadata.name"] ? "provider-name-error" : undefined}
               value={formState.name}
-              onChange={(e) => updateForm("name", e.target.value)}
+              onChange={(e) => {
+                updateForm("name", e.target.value);
+                validate("metadata.name", e.target.value);
+              }}
               disabled={isEditing}
             />
+            <FieldError id="provider-name-error" message={errors["metadata.name"]} />
           </div>
 
           {/* Role — pick first so the vendor list can narrow. Disabled in
@@ -1481,17 +1555,21 @@ function ProviderDialogForm({
           {showPlatform && <PlatformFields form={formState} updateForm={updateForm} />}
 
           {/* Role-specific config blocks (CEL-gated; at most one of tts/stt/embedding) */}
-          {formState.role === "tts" && <TTSFields form={formState} updateForm={updateForm} />}
-          {formState.role === "stt" && <STTFields form={formState} updateForm={updateForm} />}
+          {formState.role === "tts" && (
+            <TTSFields form={formState} updateForm={updateForm} validate={validate} errors={errors} />
+          )}
+          {formState.role === "stt" && (
+            <STTFields form={formState} updateForm={updateForm} validate={validate} errors={errors} />
+          )}
           {formState.role === "embedding" && (
-            <EmbeddingFields form={formState} updateForm={updateForm} />
+            <EmbeddingFields form={formState} updateForm={updateForm} validate={validate} errors={errors} />
           )}
 
           {/* Credential section */}
           {showCredential && (
             <div className="border rounded-lg p-4 space-y-4">
               <Label className="text-base font-semibold">Credentials</Label>
-              <CredentialFields form={formState} updateForm={updateForm} />
+              <CredentialFields form={formState} updateForm={updateForm} validate={validate} errors={errors} />
             </div>
           )}
 
@@ -1513,7 +1591,7 @@ function ProviderDialogForm({
         <Button variant="outline" onClick={() => onOpenChange(false)}>
           Cancel
         </Button>
-        <Button onClick={handleSubmit} disabled={loading}>
+        <Button onClick={handleSubmit} disabled={hasErrors || loading}>
           {loading && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
           {isEditing ? "Save Changes" : "Create Provider"}
         </Button>
