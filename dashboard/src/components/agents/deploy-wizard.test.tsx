@@ -11,12 +11,55 @@
 
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   isValidJsonObject,
   BasicInfoStep,
   FunctionSchemaEditors,
   composeAgentYaml,
+  DeployWizard,
 } from "./deploy-wizard";
+
+// ---------------------------------------------------------------------------
+// Module-level mocks — must be at the top level so vitest hoists them before
+// imports. Each mock is kept minimal: only what DeployWizard actually reads.
+// ---------------------------------------------------------------------------
+
+vi.mock("@/hooks/core", () => ({
+  useReadOnly: vi.fn(() => ({ isReadOnly: false, message: "" })),
+}));
+
+vi.mock("@/hooks/auth", () => ({
+  usePermissions: vi.fn(() => ({ can: () => true })),
+  Permission: { AGENTS_DEPLOY: "agents:deploy" },
+}));
+
+vi.mock("@/hooks/resources", () => ({
+  usePromptPacks: vi.fn(() => ({ data: [] })),
+  useToolRegistries: vi.fn(() => ({ data: [] })),
+  useProviders: vi.fn(() => ({ data: [] })),
+}));
+
+vi.mock("@/contexts/workspace-context", () => ({
+  useWorkspace: vi.fn(() => ({
+    currentWorkspace: { name: "ws", namespace: "ns-a", displayName: "Workspace A" },
+  })),
+}));
+
+vi.mock("@/lib/data", () => ({
+  useDataService: vi.fn(() => ({
+    createAgent: vi.fn().mockResolvedValue({}),
+  })),
+}));
+
+function renderWizard() {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <DeployWizard open={true} onOpenChange={vi.fn()} />
+    </QueryClientProvider>,
+  );
+}
 
 describe("isValidJsonObject", () => {
   it("accepts a JSON object", () => {
@@ -185,6 +228,62 @@ describe("BasicInfoStep", () => {
   });
 });
 
+describe("BasicInfoStep with validation", () => {
+  const baseForm = {
+    name: "test-fn",
+    mode: "agent" as const,
+    inputSchemaJson: "{}",
+    outputSchemaJson: "{}",
+    framework: "promptkit" as const,
+    frameworkVersion: "",
+    customImage: "",
+    promptPackName: "",
+    promptPackTrack: "stable",
+    providerRefName: "",
+    toolRegistryName: "",
+    toolRegistryNamespace: "",
+    contextType: "memory" as const,
+    contextTtl: "24h",
+    replicas: 1,
+    cpuRequest: "100m",
+    cpuLimit: "500m",
+    memoryRequest: "128Mi",
+    memoryLimit: "512Mi",
+    facadeType: "websocket" as const,
+    facadePort: 8080,
+  };
+
+  it("shows a FieldError when errors contains metadata.name", () => {
+    render(
+      <BasicInfoStep
+        formData={baseForm}
+        currentWorkspace={{ name: "ws", namespace: "ns-a" }}
+        updateField={vi.fn()}
+        errors={{ "metadata.name": "Use lowercase letters, numbers, and hyphens; must start and end with a letter or number." }}
+        validate={vi.fn()}
+      />,
+    );
+    const alert = screen.getByRole("alert");
+    expect(alert).toBeInTheDocument();
+    expect(alert).toHaveTextContent(/must start and end with a letter or number/i);
+  });
+
+  it("calls validate with metadata.name on name input change", () => {
+    const validate = vi.fn();
+    render(
+      <BasicInfoStep
+        formData={baseForm}
+        currentWorkspace={{ name: "ws", namespace: "ns-a" }}
+        updateField={vi.fn()}
+        errors={{}}
+        validate={validate}
+      />,
+    );
+    fireEvent.change(screen.getByLabelText(/Agent Name/i), { target: { value: "my-agent" } });
+    expect(validate).toHaveBeenCalledWith("metadata.name", "my-agent");
+  });
+});
+
 describe("composeAgentYaml", () => {
   const baseForm = {
     name: "my-fn",
@@ -275,5 +374,29 @@ describe("composeAgentYaml", () => {
     const yaml = composeAgentYaml({ ...baseForm, replicas: 3 }, "ns-a");
     const spec = (yaml as { spec: { runtime?: { replicas?: number } } }).spec;
     expect(spec.runtime?.replicas).toBe(3);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// I-1: Full-wizard integration — validate → error → Next disabled
+// ---------------------------------------------------------------------------
+describe("DeployWizard integration", () => {
+  it("shows inline error and disables Next when an invalid name is typed", async () => {
+    renderWizard();
+
+    const nameInput = screen.getByLabelText(/Agent Name/i);
+    // The wizard auto-formats on input (toLowerCase + replaceAll); type a
+    // value that is invalid even after auto-format (a leading hyphen triggers
+    // the CRD constraint that names must start with a letter or number).
+    fireEvent.change(nameInput, { target: { value: "-bad" } });
+
+    // (a) Inline error must be visible — role="alert" is the FieldError element
+    const errorAlert = await screen.findByRole("alert");
+    expect(errorAlert).toBeInTheDocument();
+    expect(errorAlert).toHaveTextContent(/lowercase letters/i);
+
+    // (b) Next button must be disabled
+    const nextBtn = screen.getByRole("button", { name: /next/i });
+    expect(nextBtn).toBeDisabled();
   });
 });

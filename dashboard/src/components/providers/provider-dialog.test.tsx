@@ -218,12 +218,20 @@ describe("ProviderDialog", () => {
         </TestWrapper>
       );
 
-      // Click Create without filling name
+      // Click Create without filling name — inline FieldError appears under the name field.
+      // Check for aria-invalid on the name input specifically.
       const submitButton = screen.getByRole("button", { name: /create provider/i });
       fireEvent.click(submitButton);
 
       await waitFor(() => {
-        expect(screen.getByText("Name is required")).toBeInTheDocument();
+        const nameInput = screen.getByLabelText("Name");
+        expect(nameInput).toHaveAttribute("aria-invalid", "true");
+        // FieldError message must also render (Q-1: message text assertion restored).
+        // Use the aria-describedby id to locate the specific element and avoid
+        // false-positive collisions when multiple fields show the same message.
+        const describedById = nameInput.getAttribute("aria-describedby");
+        const errorEl = document.getElementById(describedById ?? "");
+        expect(errorEl?.textContent).toBe("This field is required.");
       });
       expect(mockCreateProvider).not.toHaveBeenCalled();
     });
@@ -245,9 +253,107 @@ describe("ProviderDialog", () => {
 
       await waitFor(() => {
         expect(
-          screen.getByText(/must be a valid DNS subdomain/i)
+          screen.getByText(/lowercase letters, numbers, hyphens/i)
         ).toBeInTheDocument();
       });
+    });
+  });
+
+  describe("inline validation (#1612)", () => {
+    it("shows an inline error and blocks submit for an invalid provider name", async () => {
+      vi.useRealTimers();
+      const user = userEvent.setup();
+      render(
+        <TestWrapper>
+          <ProviderDialog open onOpenChange={() => {}} />
+        </TestWrapper>
+      );
+      await user.type(screen.getByLabelText(/^name$/i), "Bad_Name");
+      expect(
+        await screen.findByText(/lowercase letters, numbers, hyphens/i)
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: /create provider/i })
+      ).toBeDisabled();
+    });
+
+    it("shows an inline error for an env var name that fails the pattern", async () => {
+      vi.useRealTimers();
+      const user = userEvent.setup();
+      render(
+        <TestWrapper>
+          <ProviderDialog open onOpenChange={() => {}} />
+        </TestWrapper>
+      );
+      await user.type(screen.getByLabelText(/^name$/i), "env-pattern-provider");
+      // Switch to envVar credential source
+      fireEvent.click(screen.getByLabelText("Env Variable"));
+      const envInput = screen.getByLabelText("Environment variable name");
+      await user.type(envInput, "123_INVALID");
+      // The adopted UX shows the format error inline as a <p>, not via aria-invalid.
+      await waitFor(() => {
+        expect(
+          screen.getAllByText(/enter a variable name.*not a key=value/i).length
+        ).toBeGreaterThan(0);
+      });
+      // An invalid env var name must block submit (validateActiveCredential).
+      fireEvent.click(screen.getByRole("button", { name: /create provider/i }));
+      await waitFor(() => {
+        expect(
+          screen.getAllByText(/enter a variable name.*not a key=value/i).length
+        ).toBeGreaterThan(0);
+      });
+      expect(mockCreateProvider).not.toHaveBeenCalled();
+    });
+
+    it("blocks submit and shows Alert when envVar source is selected but field is empty (I-1)", async () => {
+      vi.useRealTimers();
+      const user = userEvent.setup();
+      render(
+        <TestWrapper>
+          <ProviderDialog open onOpenChange={() => {}} />
+        </TestWrapper>
+      );
+
+      // Provide a valid name so we get past the name validation
+      await user.type(screen.getByLabelText(/^name$/i), "env-provider");
+
+      // Switch to envVar credential source and leave the env var blank
+      fireEvent.click(screen.getByLabelText("Env Variable"));
+
+      fireEvent.click(screen.getByRole("button", { name: /create provider/i }));
+
+      // The cross-field error must appear in the Alert banner
+      await waitFor(() => {
+        expect(
+          screen.getByText("Environment variable name is required")
+        ).toBeInTheDocument();
+      });
+      expect(mockCreateProvider).not.toHaveBeenCalled();
+    });
+
+    it("blocks submit and shows Alert when filePath source is selected but field is empty (I-1)", async () => {
+      vi.useRealTimers();
+      const user = userEvent.setup();
+      render(
+        <TestWrapper>
+          <ProviderDialog open onOpenChange={() => {}} />
+        </TestWrapper>
+      );
+
+      await user.type(screen.getByLabelText(/^name$/i), "fp-provider");
+
+      // Switch to filePath credential source and leave the path blank
+      fireEvent.click(screen.getByLabelText("File Path"));
+
+      fireEvent.click(screen.getByRole("button", { name: /create provider/i }));
+
+      await waitFor(() => {
+        expect(
+          screen.getByText("File path is required")
+        ).toBeInTheDocument();
+      });
+      expect(mockCreateProvider).not.toHaveBeenCalled();
     });
   });
 

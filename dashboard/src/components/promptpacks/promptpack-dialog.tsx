@@ -16,6 +16,9 @@ import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { AlertCircle, Loader2 } from "lucide-react";
 import type { PromptPackSpec } from "@/types/prompt-pack";
+import { useFieldValidation } from "@/hooks/use-field-validation";
+import { FieldError } from "@/components/ui/field-error";
+import { crdConstraints } from "@/types/generated/crd-constraints";
 
 // --- Form state ---
 interface FormState {
@@ -29,26 +32,6 @@ const INITIAL_FORM: FormState = {
   configMapName: "",
   version: "",
 };
-
-// --- Validation ---
-const DNS_NAME_RE = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
-const SEMVER_RE = /^v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
-
-function validateForm(form: FormState): string | null {
-  if (!form.name.trim()) return "Name is required";
-  if (!DNS_NAME_RE.test(form.name)) {
-    return "Name must be a valid DNS subdomain (lowercase alphanumeric and hyphens)";
-  }
-  if (!form.configMapName.trim()) return "ConfigMap reference is required";
-  if (!DNS_NAME_RE.test(form.configMapName)) {
-    return "ConfigMap name must be a valid DNS subdomain";
-  }
-  if (!form.version.trim()) return "Version is required";
-  if (!SEMVER_RE.test(form.version)) {
-    return "Version must be valid semver (e.g. 1.0.0)";
-  }
-  return null;
-}
 
 function buildSpec(form: FormState): PromptPackSpec {
   return {
@@ -76,14 +59,24 @@ function PromptPackDialogForm({
   const [error, setError] = useState<string | null>(null);
   const { createPromptPack, loading } = usePromptPackMutations();
 
+  const { errors, validate, validateAll, hasErrors } = useFieldValidation(
+    crdConstraints.PromptPack
+  );
+
   function updateForm<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm((prev) => ({ ...prev, [key]: value }));
   }
 
   async function handleSubmit() {
-    const validationError = validateForm(form);
-    if (validationError) {
-      setError(validationError);
+    const valid = validateAll([
+      { path: "metadata.name", value: form.name },
+      { path: "spec.version", value: form.version },
+    ]);
+    if (!valid) return;
+
+    // Cross-field: configMap name is required (no constraint in CRD map)
+    if (!form.configMapName.trim()) {
+      setError("ConfigMap reference is required");
       return;
     }
 
@@ -120,9 +113,15 @@ function PromptPackDialogForm({
           <Input
             id="pp-name"
             placeholder="my-prompt-pack"
+            aria-invalid={!!errors["metadata.name"]}
+            aria-describedby={errors["metadata.name"] ? "pp-name-error" : undefined}
             value={form.name}
-            onChange={(e) => updateForm("name", e.target.value)}
+            onChange={(e) => {
+              updateForm("name", e.target.value);
+              validate("metadata.name", e.target.value);
+            }}
           />
+          <FieldError id="pp-name-error" message={errors["metadata.name"]} />
         </div>
 
         {/* ConfigMap Reference */}
@@ -145,9 +144,15 @@ function PromptPackDialogForm({
           <Input
             id="pp-version"
             placeholder="1.0.0"
+            aria-invalid={!!errors["spec.version"]}
+            aria-describedby={errors["spec.version"] ? "pp-version-error" : undefined}
             value={form.version}
-            onChange={(e) => updateForm("version", e.target.value)}
+            onChange={(e) => {
+              updateForm("version", e.target.value);
+              validate("spec.version", e.target.value);
+            }}
           />
+          <FieldError id="pp-version-error" message={errors["spec.version"]} />
         </div>
       </div>
 
@@ -155,7 +160,7 @@ function PromptPackDialogForm({
         <Button variant="outline" onClick={() => onOpenChange(false)}>
           Cancel
         </Button>
-        <Button onClick={handleSubmit} disabled={loading}>
+        <Button onClick={handleSubmit} disabled={hasErrors || loading}>
           {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
           Create PromptPack
         </Button>

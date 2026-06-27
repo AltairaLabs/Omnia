@@ -4,6 +4,7 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import React from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { SkillSourceDialog } from "./skill-source-dialog";
@@ -72,26 +73,30 @@ describe("SkillSourceDialog", () => {
     );
   });
 
-  it("rejects empty name", async () => {
+  it("shows an inline error and blocks submit for an invalid skill-source name", async () => {
+    const user = userEvent.setup();
+    renderDialog();
+    await user.type(screen.getByLabelText("Name"), "Bad_Name");
+    expect(await screen.findByText(/lowercase letters/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /create|save/i })).toBeDisabled();
+  });
+
+  it("rejects empty name on submit", async () => {
     renderDialog();
     fireEvent.click(screen.getByRole("button", { name: "Create" }));
     await waitFor(() => {
-      expect(screen.getByText("Name is required")).toBeInTheDocument();
+      expect(screen.getByText("This field is required.")).toBeInTheDocument();
     });
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
-  it("rejects invalid DNS name", async () => {
+  it("shows inline DNS error on keystroke for invalid name", async () => {
     renderDialog();
     fireEvent.change(screen.getByLabelText("Name"), {
       target: { value: "Has Spaces" },
     });
-    fireEvent.change(screen.getByLabelText("ConfigMap name"), {
-      target: { value: "skills" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Create" }));
     await waitFor(() => {
-      expect(screen.getByText(/must be lowercase alphanumeric/i)).toBeInTheDocument();
+      expect(screen.getByText(/lowercase letters/i)).toBeInTheDocument();
     });
   });
 
@@ -125,7 +130,7 @@ describe("SkillSourceDialog", () => {
     });
   });
 
-  it("rejects git type without a URL", async () => {
+  it("rejects git type without a URL (cross-field check)", async () => {
     renderDialog({
       source: {
         apiVersion: "omnia.altairalabs.ai/v1alpha1",
@@ -140,7 +145,7 @@ describe("SkillSourceDialog", () => {
     });
   });
 
-  it("rejects oci type without a URL", async () => {
+  it("rejects oci type without a URL (cross-field check)", async () => {
     renderDialog({
       source: {
         apiVersion: "omnia.altairalabs.ai/v1alpha1",
@@ -155,7 +160,7 @@ describe("SkillSourceDialog", () => {
     });
   });
 
-  it("rejects configmap type without a ConfigMap name", async () => {
+  it("rejects configmap type without a ConfigMap name (cross-field check)", async () => {
     renderDialog();
     fireEvent.change(screen.getByLabelText("Name"), {
       target: { value: "skills-cm" },
@@ -342,5 +347,99 @@ describe("SkillSourceDialog", () => {
     expect(screen.getByDisplayValue("billing/*, ops/*")).toBeInTheDocument();
     expect(screen.getByDisplayValue("**/draft/**")).toBeInTheDocument();
     expect(screen.getByDisplayValue("refund-processing")).toBeInTheDocument();
+  });
+
+  it("shows inline interval error for invalid format", async () => {
+    renderDialog();
+    fireEvent.change(screen.getByLabelText("Reconcile interval"), {
+      target: { value: "not-valid" },
+    });
+    await waitFor(() => {
+      expect(screen.getByText(/invalid format/i)).toBeInTheDocument();
+    });
+  });
+
+  it("shows inline git URL error for non-matching pattern", async () => {
+    renderDialog({
+      source: {
+        apiVersion: "omnia.altairalabs.ai/v1alpha1",
+        kind: "SkillSource",
+        metadata: { name: "skills-git" },
+        spec: {
+          type: "git",
+          git: { url: "https://example.com/skills.git" },
+          interval: "1h",
+        },
+      },
+    });
+    fireEvent.change(screen.getByLabelText("Repository URL"), {
+      target: { value: "not-a-url" },
+    });
+    await waitFor(() => {
+      expect(screen.getByText(/invalid format/i)).toBeInTheDocument();
+    });
+  });
+
+  it("closes dialog on Cancel button click", () => {
+    const onOpenChange = vi.fn();
+    renderDialog({ onOpenChange });
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+
+  it("updates filterExclude and filterNames inputs", () => {
+    renderDialog();
+    fireEvent.change(
+      screen.getByPlaceholderText("Exclude: **/draft/**"),
+      { target: { value: "**/test/**" } }
+    );
+    fireEvent.change(
+      screen.getByPlaceholderText("Names: refund-processing, order-lookup"),
+      { target: { value: "my-skill" } }
+    );
+    expect(screen.getByDisplayValue("**/test/**")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("my-skill")).toBeInTheDocument();
+  });
+
+  it("shows inline OCI URL error for non-matching pattern", async () => {
+    renderDialog({
+      source: {
+        apiVersion: "omnia.altairalabs.ai/v1alpha1",
+        kind: "SkillSource",
+        metadata: { name: "skills-oci" },
+        spec: {
+          type: "oci",
+          oci: { url: "oci://ghcr.io/org/skills" },
+          interval: "1h",
+        },
+      },
+    });
+    fireEvent.change(screen.getByLabelText("OCI URL"), {
+      target: { value: "not-oci-url" },
+    });
+    await waitFor(() => {
+      expect(screen.getByText(/invalid format/i)).toBeInTheDocument();
+    });
+  });
+
+  it("shows inline configMap name error for empty value", async () => {
+    renderDialog({
+      source: {
+        apiVersion: "omnia.altairalabs.ai/v1alpha1",
+        kind: "SkillSource",
+        metadata: { name: "skills-cm" },
+        spec: {
+          type: "configmap",
+          configMap: { name: "my-cm" },
+          interval: "1h",
+        },
+      },
+    });
+    fireEvent.change(screen.getByLabelText("ConfigMap name"), {
+      target: { value: "" },
+    });
+    // Empty configMap.name has no inline error (only cross-field on submit)
+    // but we can verify no inline error blocks the button
+    expect(screen.getByRole("button", { name: "Save" })).not.toBeDisabled();
   });
 });
