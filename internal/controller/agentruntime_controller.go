@@ -542,7 +542,7 @@ func (r *AgentRuntimeReconciler) Reconcile(ctx context.Context, req ctrl.Request
 
 	// Surface facade auth configuration as a status condition so
 	// operators can see at a glance whether the agent admits traffic.
-	// Catches the Unreachable combo (allowManagementPlane=false + no
+	// Catches the Unreachable combo (no facade has managementPlane enabled and no
 	// data-plane validator) which otherwise 401s silently at runtime.
 	authCond := evaluateExternalAuthCondition(agentRuntime)
 	SetCondition(&agentRuntime.Status.Conditions, agentRuntime.Generation,

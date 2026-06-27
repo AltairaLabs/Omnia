@@ -146,9 +146,9 @@ metadata:
 spec:
   promptPackRef:
     name: test-prompts
-  facade:
-    type: websocket
-    port: 8080
+  facades:
+    - type: websocket
+      port: 8080
   context:
     type: memory
     ttl: "1h"
@@ -216,10 +216,10 @@ metadata:
 spec:
   promptPackRef:
     name: test-prompts
-  facade:
-    type: websocket
-    port: 8080
-    handler: demo
+  facades:
+    - type: websocket
+      port: 8080
+      handler: demo
   context:
     type: memory
     ttl: "1h"

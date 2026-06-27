@@ -844,8 +844,10 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/NamedProviderRef'
-        facade:
-          $ref: '#/components/schemas/FacadeConfig'
+        facades:
+          type: array
+          items:
+            $ref: '#/components/schemas/FacadeConfig'
         context:
           $ref: '#/components/schemas/ContextConfig'
         runtime:
@@ -877,11 +879,13 @@ components:
       properties:
         type:
           type: string
-          enum: [websocket, grpc]
+          enum: [websocket, rest, mcp, a2a]
         port:
           type: integer
         handler:
           type: string
+        managementPlane:
+          type: boolean
 
     ContextConfig:
       type: object

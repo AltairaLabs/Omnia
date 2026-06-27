@@ -54,7 +54,7 @@ func applyMCPFacadeOptions(facadeContainer *corev1.Container, ar *omniav1alpha1.
 }
 
 // appendMCPServicePort returns ports with an "mcp" entry appended when
-// spec.facade.mcp.enabled is true, otherwise returns the input slice
+// an mcp facade is present, otherwise returns the input slice
 // unchanged. Mirrors applyMCPFacadeOptions but for the Service side.
 func appendMCPServicePort(ports []corev1.ServicePort, ar *omniav1alpha1.AgentRuntime) []corev1.ServicePort {
 	if !isMCPEnabled(ar) {

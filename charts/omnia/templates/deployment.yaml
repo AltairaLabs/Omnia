@@ -160,8 +160,9 @@ spec:
             - --agent-workspace-reader-clusterrole={{ include "omnia.fullname" . }}-agent-workspace-reader
             {{- if .Values.defaultExposure.enabled }}
             {{- /* Operator-provisioned default external exposure (#1553). Opt-in
-              per agent via spec.facade.expose.enabled; the operator creates a
-              host-based HTTPRoute attached to this Gateway. */}}
+              per agent via the primary facade's expose.enabled
+              (spec.facades[].expose); the operator creates a host-based
+              HTTPRoute attached to this Gateway. */}}
             - --default-exposure-base-domain={{ required "defaultExposure.baseDomain is required when defaultExposure.enabled" .Values.defaultExposure.baseDomain }}
             - --default-exposure-gateway-name={{ required "defaultExposure.gateway.name is required when defaultExposure.enabled" .Values.defaultExposure.gateway.name }}
             {{- with .Values.defaultExposure.gateway.namespace }}

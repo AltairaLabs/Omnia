@@ -35,7 +35,7 @@ import (
 // DefaultExposureConfig is the chart-configured Gateway + base domain used to
 // provision per-agent HTTPRoutes (#1553). The feature is OFF unless both a
 // gateway name and a base domain are set (`configured`); even then an agent is
-// exposed only when it opts in via spec.facade.expose.enabled.
+// exposed only when it opts in via the primary facade's expose.enabled.
 type DefaultExposureConfig struct {
 	BaseDomain       string
 	GatewayName      string

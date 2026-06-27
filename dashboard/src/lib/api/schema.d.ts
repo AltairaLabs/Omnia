@@ -479,7 +479,7 @@ export interface components {
             promptPackRef?: components["schemas"]["LocalObjectReference"];
             toolRegistryRef?: components["schemas"]["LocalObjectReference"];
             providers?: components["schemas"]["NamedProviderRef"][];
-            facade?: components["schemas"]["FacadeConfig"];
+            facades?: components["schemas"]["FacadeConfig"][];
             context?: components["schemas"]["ContextConfig"];
             runtime?: components["schemas"]["RuntimeConfig"];
             console?: components["schemas"]["ConsoleConfig"];
@@ -495,9 +495,10 @@ export interface components {
         };
         FacadeConfig: {
             /** @enum {string} */
-            type?: "websocket" | "grpc";
+            type?: "websocket" | "rest" | "mcp" | "a2a";
             port?: number;
             handler?: string;
+            managementPlane?: boolean;
         };
         ContextConfig: {
             /** @enum {string} */

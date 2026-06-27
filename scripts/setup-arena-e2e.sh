@@ -495,9 +495,9 @@ spec:
     type: langchain
   promptPackRef:
     name: eval-e2e-pack
-  facade:
-    type: websocket
-    port: 8080
+  facades:
+    - type: websocket
+      port: 8080
   providers:
     - name: default
       providerRef:

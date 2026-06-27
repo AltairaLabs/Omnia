@@ -42,7 +42,7 @@ const annotationConfigHash = "omnia.altairalabs.ai/config-hash"
 const drainGraceBufferSeconds = 30
 
 // defaultDrainTimeoutSeconds mirrors facade DefaultServerConfig().DrainTimeout
-// (30s); used when spec.facade.drainTimeout is unset or unparseable.
+// (30s); used when the primary facade's drainTimeout is unset or unparseable.
 const defaultDrainTimeoutSeconds = 30
 
 // maxDrainTimeoutSeconds caps the drain window so a misconfigured large

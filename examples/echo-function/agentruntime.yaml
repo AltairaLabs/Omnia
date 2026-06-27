@@ -24,9 +24,9 @@ spec:
   mode: function
   promptPackRef:
     name: echo-pack
-  facade:
-    type: rest
-    port: 8080
+  facades:
+    - type: rest
+      port: 8080
   providers:
     - name: default
       providerRef:

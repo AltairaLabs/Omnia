@@ -71,7 +71,7 @@ const (
 
 	// Internal management-plane twin-listener ports. The facade serves each
 	// surface a second time on these ports behind a mgmt-plane-only auth chain
-	// when externalAuth.allowManagementPlane is enabled. Independently declared
+	// when a facade's managementPlane is enabled. Independently declared
 	// (not an offset of the external port); must match the agent package's
 	// Default Internal*Port constants.
 	DefaultInternalFacadePort = 18080
@@ -203,7 +203,7 @@ const (
 
 	// ConditionTypeExternalAuth surfaces the effective facade auth
 	// configuration. False/Unreachable means the operator explicitly
-	// set spec.externalAuth.allowManagementPlane=false without
+	// set a facade's managementPlane=false without
 	// configuring any data-plane validator — the agent cannot accept
 	// any callers. Always emitted so operators can assert on it from
 	// kubectl describe / helm unittest.

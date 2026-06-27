@@ -383,9 +383,9 @@ spec:
     name: demo-assistant
   providerRef:
     name: openai-provider
-  facade:
-    type: websocket
-    port: 8080
+  facades:
+    - type: websocket
+      port: 8080
   context:
     type: redis
     storeRef:
