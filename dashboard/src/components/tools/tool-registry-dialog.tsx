@@ -3,6 +3,9 @@
 import { useState } from "react";
 import { AlertCircle, Loader2, Plus, Trash2 } from "lucide-react";
 import { useToolRegistryMutations } from "@/hooks/use-tool-registry-mutations";
+import { useFieldValidation } from "@/hooks/use-field-validation";
+import { FieldError } from "@/components/ui/field-error";
+import { crdConstraints } from "@/types/generated/crd-constraints";
 import {
   Dialog,
   DialogContent,
@@ -86,49 +89,6 @@ function initialFormState(): ToolRegistryFormState {
   return { name: "", handlers: [emptyHandler()] };
 }
 
-// --- Validation (exported for unit tests) ---
-
-export function validateName(name: string): string | null {
-  if (!name.trim()) return "Name is required";
-  if (!/^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$/.test(name)) {
-    return "Name must be a valid DNS subdomain (lowercase alphanumeric, hyphens, dots)";
-  }
-  return null;
-}
-
-function validateHandler(h: HandlerForm, index: number): string | null {
-  const where = `Handler ${index + 1}`;
-  if (!h.name.trim()) return `${where}: name is required`;
-  if (h.type === "http") {
-    if (!h.httpEndpoint.trim()) return `${where}: endpoint is required`;
-    if (!h.httpToolName.trim()) return `${where}: tool name is required`;
-    return null;
-  }
-  if (h.type === "openapi") {
-    if (!h.openapiSpecURL.trim()) return `${where}: spec URL is required`;
-    return null;
-  }
-  // mcp
-  if (h.mcpTransport === "sse" && !h.mcpEndpoint.trim()) {
-    return `${where}: endpoint is required for SSE transport`;
-  }
-  if (h.mcpTransport === "stdio" && !h.mcpCommand.trim()) {
-    return `${where}: command is required for stdio transport`;
-  }
-  return null;
-}
-
-export function validateToolRegistryForm(form: ToolRegistryFormState): string | null {
-  const nameError = validateName(form.name);
-  if (nameError) return nameError;
-  if (form.handlers.length === 0) return "At least one handler is required";
-  for (let i = 0; i < form.handlers.length; i++) {
-    const err = validateHandler(form.handlers[i], i);
-    if (err) return err;
-  }
-  return null;
-}
-
 // --- Spec building (exported for unit tests) ---
 
 function buildHttpHandler(h: HandlerForm): HandlerDefinition {
@@ -175,6 +135,7 @@ export function buildToolRegistrySpec(form: ToolRegistryFormState): ToolRegistry
 // --- Sub-components ---
 
 type UpdateHandler = (id: string, patch: Partial<HandlerForm>) => void;
+type ValidateField = (path: string, value: unknown, opts: { index: number }) => void;
 
 function HttpFields({ h, update }: Readonly<{ h: HandlerForm; update: UpdateHandler }>) {
   return (
@@ -315,12 +276,16 @@ function HandlerCard({
   canRemove,
   update,
   remove,
+  validate,
+  errors,
 }: Readonly<{
   h: HandlerForm;
   index: number;
   canRemove: boolean;
   update: UpdateHandler;
   remove: (id: string) => void;
+  validate: ValidateField;
+  errors: Record<string, string>;
 }>) {
   const Fields = HANDLER_FIELDS[h.type];
   return (
@@ -345,13 +310,24 @@ function HandlerCard({
           <Input
             id={`${h.id}-name`}
             placeholder="weather-api"
+            aria-invalid={!!errors[`spec.handlers[${index}].name`]}
             value={h.name}
-            onChange={(e) => update(h.id, { name: e.target.value })}
+            onChange={(e) => {
+              update(h.id, { name: e.target.value });
+              validate("spec.handlers[].name", e.target.value, { index });
+            }}
           />
+          <FieldError message={errors[`spec.handlers[${index}].name`]} />
         </div>
         <div className="space-y-2">
           <Label htmlFor={`${h.id}-type`}>Type</Label>
-          <Select value={h.type} onValueChange={(v) => update(h.id, { type: v as HandlerKind })}>
+          <Select
+            value={h.type}
+            onValueChange={(v) => {
+              update(h.id, { type: v as HandlerKind });
+              validate("spec.handlers[].type", v, { index });
+            }}
+          >
             <SelectTrigger id={`${h.id}-type`}>
               <SelectValue />
             </SelectTrigger>
@@ -361,6 +337,7 @@ function HandlerCard({
               <SelectItem value="openapi">OpenAPI</SelectItem>
             </SelectContent>
           </Select>
+          <FieldError message={errors[`spec.handlers[${index}].type`]} />
         </div>
       </div>
       <Fields h={h} update={update} />
@@ -399,6 +376,9 @@ function ToolRegistryDialogForm({
   const { createToolRegistry, loading } = useToolRegistryMutations();
   const [form, setForm] = useState<ToolRegistryFormState>(() => initialFormState());
   const [error, setError] = useState<string | null>(null);
+  const { errors, validate, validateAll, hasErrors } = useFieldValidation(
+    crdConstraints.ToolRegistry
+  );
 
   const update: UpdateHandler = (id, patch) => {
     setForm((prev) => ({
@@ -417,9 +397,14 @@ function ToolRegistryDialogForm({
 
   const handleSubmit = async () => {
     setError(null);
-    const validationError = validateToolRegistryForm(form);
-    if (validationError) {
-      setError(validationError);
+    const fields = [
+      { path: "metadata.name", value: form.name },
+      ...form.handlers.flatMap((h, index) => [
+        { path: "spec.handlers[].name", value: h.name, index },
+        { path: "spec.handlers[].type", value: h.type, index },
+      ]),
+    ];
+    if (!validateAll(fields)) {
       return;
     }
     try {
@@ -455,9 +440,15 @@ function ToolRegistryDialogForm({
             <Input
               id="registry-name"
               placeholder="my-tools"
+              aria-invalid={!!errors["metadata.name"]}
+              aria-describedby={errors["metadata.name"] ? "registry-name-error" : undefined}
               value={form.name}
-              onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))}
+              onChange={(e) => {
+                setForm((prev) => ({ ...prev, name: e.target.value }));
+                validate("metadata.name", e.target.value);
+              }}
             />
+            <FieldError id="registry-name-error" message={errors["metadata.name"]} />
           </div>
 
           {form.handlers.map((h, index) => (
@@ -468,6 +459,8 @@ function ToolRegistryDialogForm({
               canRemove={form.handlers.length > 1}
               update={update}
               remove={removeHandler}
+              validate={validate}
+              errors={errors}
             />
           ))}
 
@@ -482,7 +475,7 @@ function ToolRegistryDialogForm({
         <Button variant="outline" onClick={() => onOpenChange(false)}>
           Cancel
         </Button>
-        <Button onClick={handleSubmit} disabled={loading}>
+        <Button onClick={handleSubmit} disabled={hasErrors || loading}>
           {loading && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
           Create ToolRegistry
         </Button>

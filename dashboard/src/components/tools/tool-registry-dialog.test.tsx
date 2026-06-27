@@ -6,7 +6,6 @@ import {
   OpenAPIFields,
   McpFields,
   buildToolRegistrySpec,
-  validateToolRegistryForm,
   emptyHandler,
   type HandlerForm,
   type ToolRegistryFormState,
@@ -115,55 +114,60 @@ describe("buildToolRegistrySpec", () => {
   });
 });
 
-describe("validateToolRegistryForm", () => {
-  it("rejects empty name", () => {
-    expect(validateToolRegistryForm(form({ name: "" }))).toMatch(/name is required/i);
-  });
-  it("rejects invalid DNS name", () => {
-    expect(validateToolRegistryForm(form({ name: "Bad Name" }))).toMatch(/DNS/i);
-  });
-  it("rejects zero handlers", () => {
-    expect(validateToolRegistryForm(form({ handlers: [] }))).toMatch(/at least one handler/i);
-  });
-  it("rejects http handler without endpoint", () => {
+describe("inline validation via ToolRegistryDialog", () => {
+  afterEach(() => cleanup());
+
+  it("shows an inline error for an invalid resource name and blocks submit", async () => {
+    const user = userEvent.setup();
+    render(<ToolRegistryDialog open onOpenChange={() => {}} />);
+
+    const nameInput = screen.getByLabelText("Name");
+    await user.type(nameInput, "Bad Name");
+
     expect(
-      validateToolRegistryForm(form({ handlers: [handler({ type: "http", httpToolName: "t" })] }))
-    ).toMatch(/endpoint is required/i);
+      await screen.findByText(/lowercase letters, numbers, hyphens/i)
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /create/i })).toBeDisabled();
   });
-  it("rejects http handler without tool name", () => {
-    expect(
-      validateToolRegistryForm(
-        form({ handlers: [handler({ type: "http", httpEndpoint: "https://x" })] })
-      )
-    ).toMatch(/tool name is required/i);
+
+  it("shows required errors on submit when name is empty", async () => {
+    render(<ToolRegistryDialog open onOpenChange={() => {}} />);
+    fireEvent.click(screen.getByRole("button", { name: "Create ToolRegistry" }));
+    const errors = await screen.findAllByText(/this field is required/i);
+    expect(errors.length).toBeGreaterThan(0);
+    expect(mockCreateToolRegistry).not.toHaveBeenCalled();
   });
-  it("rejects openapi handler without spec URL", () => {
+
+  it("shows an inline error for an invalid handler name pattern", async () => {
+    const user = userEvent.setup();
+    render(<ToolRegistryDialog open onOpenChange={() => {}} />);
+
+    const handlerName = screen.getByLabelText(/handler name/i);
+    await user.type(handlerName, "Api");
+
     expect(
-      validateToolRegistryForm(form({ handlers: [handler({ type: "openapi" })] }))
-    ).toMatch(/spec URL is required/i);
+      await screen.findByText(/lowercase letters, numbers, and hyphens/i)
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /create/i })).toBeDisabled();
   });
-  it("rejects mcp sse handler without endpoint", () => {
+
+  it("clears the handler name error when input becomes valid", async () => {
+    const user = userEvent.setup();
+    render(<ToolRegistryDialog open onOpenChange={() => {}} />);
+
+    const handlerName = screen.getByLabelText(/handler name/i);
+    await user.type(handlerName, "Api");
     expect(
-      validateToolRegistryForm(
-        form({ handlers: [handler({ type: "mcp", mcpTransport: "sse" })] })
-      )
-    ).toMatch(/endpoint is required/i);
-  });
-  it("rejects mcp stdio handler without command", () => {
-    expect(
-      validateToolRegistryForm(
-        form({ handlers: [handler({ type: "mcp", mcpTransport: "stdio" })] })
-      )
-    ).toMatch(/command is required/i);
-  });
-  it("accepts a valid http handler", () => {
-    expect(
-      validateToolRegistryForm(
-        form({
-          handlers: [handler({ type: "http", httpEndpoint: "https://x", httpToolName: "t" })],
-        })
-      )
-    ).toBeNull();
+      await screen.findByText(/lowercase letters, numbers, and hyphens/i)
+    ).toBeInTheDocument();
+
+    await user.clear(handlerName);
+    await user.type(handlerName, "valid-name");
+    await waitFor(() => {
+      expect(
+        screen.queryByText(/lowercase letters, numbers, and hyphens/i)
+      ).not.toBeInTheDocument();
+    });
   });
 });
 
@@ -204,6 +208,19 @@ describe("ToolRegistryDialog", () => {
     cleanup();
   });
 
+  it("shows an inline error and blocks submit for an uppercase handler name", async () => {
+    const user = userEvent.setup();
+    render(<ToolRegistryDialog open onOpenChange={() => {}} />);
+
+    const handlerName = screen.getByLabelText(/handler name/i);
+    await user.type(handlerName, "Api");
+
+    expect(
+      await screen.findByText(/lowercase letters, numbers, and hyphens/i)
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /create/i })).toBeDisabled();
+  });
+
   it("renders the create dialog and a default handler", () => {
     render(<ToolRegistryDialog open onOpenChange={vi.fn()} />);
     expect(
@@ -224,10 +241,11 @@ describe("ToolRegistryDialog", () => {
     expect(screen.queryByText("Handler 2")).not.toBeInTheDocument();
   });
 
-  it("shows a validation error and does not create when name is empty", async () => {
+  it("shows inline required errors and does not create when name is empty", async () => {
     render(<ToolRegistryDialog open onOpenChange={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: "Create ToolRegistry" }));
-    expect(await screen.findByText(/name is required/i)).toBeInTheDocument();
+    const errs = await screen.findAllByText(/this field is required/i);
+    expect(errs.length).toBeGreaterThan(0);
     expect(mockCreateToolRegistry).not.toHaveBeenCalled();
   });
 
