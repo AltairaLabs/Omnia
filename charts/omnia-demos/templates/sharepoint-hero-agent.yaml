@@ -31,6 +31,31 @@ spec:
     - type: websocket
       port: 8080
       handler: runtime
+    {{- if .Values.sharepointHero.a2a.enabled }}
+    # A2A secondary facade (Omnia #1645 facades[] shape). The operator adds a
+    # :9999 facade Service port for synchronous request/response + agent-card
+    # discovery. KNOWN GAP (#1576): with a websocket primary, the a2a card
+    # advertises the in-cluster URL, not the external agents.<domain> route.
+    - type: a2a
+      port: 9999
+      a2a:
+        agentCard:
+          name: {{ .Values.sharepointHero.a2a.agentCard.name | quote }}
+          {{- with .Values.sharepointHero.a2a.agentCard.description }}
+          description: {{ . | quote }}
+          {{- end }}
+    {{- end }}
+  {{- if .Values.sharepointHero.externalAuth.apiKeys.enabled }}
+  # Per-caller API-key auth for external (non-dashboard) callers, applied to
+  # each facade's external auth chain. Strict: external listeners reject
+  # unauthenticated requests once set. Since Omnia #1620 (plane isolation),
+  # the dashboard "Try this agent" path is unaffected — it dials each facade's
+  # internal mgmt twin (managementPlane defaults true), which has its own
+  # mgmt-plane-only auth chain. Keys are created in the dashboard UI, never
+  # stored in the CR.
+  externalAuth:
+    apiKeys: {}
+  {{- end }}
   evals:
     # rag-hero is a PromptKit agent, which self-evaluates lightweight evals
     # inline and is excluded from the out-of-band eval-worker by default. The
