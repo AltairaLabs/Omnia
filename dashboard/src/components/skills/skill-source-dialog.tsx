@@ -38,6 +38,9 @@ import type {
   SkillSourceSpec,
   SkillSourceType,
 } from "@/types/skill-source";
+import { useFieldValidation } from "@/hooks/use-field-validation";
+import { FieldError } from "@/components/ui/field-error";
+import { crdConstraints } from "@/types/generated/crd-constraints";
 
 interface SkillSourceDialogProps {
   open: boolean;
@@ -140,12 +143,11 @@ function buildSpec(form: FormState): SkillSourceSpec {
   return spec;
 }
 
-function validate(form: FormState): string | null {
-  if (!form.name.trim()) return "Name is required";
-  if (!/^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/.test(form.name)) {
-    return "Name must be lowercase alphanumeric with dashes (DNS-1123)";
-  }
-  if (!form.interval.trim()) return "Interval is required";
+/**
+ * Cross-field checks that cannot be expressed as single-field constraints.
+ * Type-specific source URL is required only for the active type.
+ */
+function validateCrossFields(form: FormState): string | null {
   if (form.type === "git" && !form.git.url) {
     return "Git repository URL is required";
   }
@@ -168,13 +170,20 @@ const TYPE_OPTIONS: {
   { value: "oci", label: "OCI Registry", icon: <Box className="h-4 w-4" /> },
 ];
 
+interface FieldValidateProps {
+  validate: (path: string, value: unknown) => void;
+  errors: Record<string, string>;
+}
+
 function GitFields({
   spec,
   onChange,
+  validate,
+  errors,
 }: Readonly<{
   spec: GitSourceRef;
   onChange: (spec: GitSourceRef) => void;
-}>) {
+} & FieldValidateProps>) {
   return (
     <div className="space-y-4">
       <div className="space-y-2">
@@ -182,9 +191,15 @@ function GitFields({
         <Input
           id="git-url"
           placeholder="https://github.com/org/skills.git"
+          aria-invalid={!!errors["spec.git.url"]}
+          aria-describedby={errors["spec.git.url"] ? "git-url-error" : undefined}
           value={spec.url}
-          onChange={(e) => onChange({ ...spec, url: e.target.value })}
+          onChange={(e) => {
+            onChange({ ...spec, url: e.target.value });
+            validate("spec.git.url", e.target.value);
+          }}
         />
+        <FieldError id="git-url-error" message={errors["spec.git.url"]} />
       </div>
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-2">
@@ -236,10 +251,12 @@ function GitFields({
 function OCIFields({
   spec,
   onChange,
+  validate,
+  errors,
 }: Readonly<{
   spec: OCISourceRef;
   onChange: (spec: OCISourceRef) => void;
-}>) {
+} & FieldValidateProps>) {
   return (
     <div className="space-y-4">
       <div className="space-y-2">
@@ -247,9 +264,15 @@ function OCIFields({
         <Input
           id="oci-url"
           placeholder="oci://ghcr.io/org/skills"
+          aria-invalid={!!errors["spec.oci.url"]}
+          aria-describedby={errors["spec.oci.url"] ? "oci-url-error" : undefined}
           value={spec.url}
-          onChange={(e) => onChange({ ...spec, url: e.target.value })}
+          onChange={(e) => {
+            onChange({ ...spec, url: e.target.value });
+            validate("spec.oci.url", e.target.value);
+          }}
         />
+        <FieldError id="oci-url-error" message={errors["spec.oci.url"]} />
       </div>
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-2">
@@ -288,10 +311,12 @@ function OCIFields({
 function ConfigMapFields({
   spec,
   onChange,
+  validate,
+  errors,
 }: Readonly<{
   spec: ConfigMapSourceRef;
   onChange: (spec: ConfigMapSourceRef) => void;
-}>) {
+} & FieldValidateProps>) {
   return (
     <div className="space-y-4">
       <div className="space-y-2">
@@ -299,9 +324,15 @@ function ConfigMapFields({
         <Input
           id="cm-name"
           placeholder="my-skills"
+          aria-invalid={!!errors["spec.configMap.name"]}
+          aria-describedby={errors["spec.configMap.name"] ? "cm-name-error" : undefined}
           value={spec.name}
-          onChange={(e) => onChange({ ...spec, name: e.target.value })}
+          onChange={(e) => {
+            onChange({ ...spec, name: e.target.value });
+            validate("spec.configMap.name", e.target.value);
+          }}
         />
+        <FieldError id="cm-name-error" message={errors["spec.configMap.name"]} />
       </div>
       <div className="space-y-2">
         <Label htmlFor="cm-key">Key (optional)</Label>
@@ -352,13 +383,26 @@ function SkillSourceDialogInner({
   const [form, setForm] = useState<FormState>(() => initialForm(source));
   const [error, setError] = useState<string | null>(null);
 
+  const { errors, validate, validateAll, hasErrors } = useFieldValidation(
+    crdConstraints.SkillSource
+  );
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const msg = validate(form);
-    if (msg) {
-      setError(msg);
+
+    const valid = validateAll([
+      { path: "metadata.name", value: form.name },
+      { path: "spec.interval", value: form.interval },
+    ]);
+    if (!valid) return;
+
+    // Cross-field: type-specific source URL is required only for the active type.
+    const crossFieldError = validateCrossFields(form);
+    if (crossFieldError) {
+      setError(crossFieldError);
       return;
     }
+
     setError(null);
     try {
       const spec = buildSpec(form);
@@ -395,10 +439,16 @@ function SkillSourceDialogInner({
               <Input
                 id="name"
                 placeholder="anthropic-skills"
+                aria-invalid={!!errors["metadata.name"]}
+                aria-describedby={errors["metadata.name"] ? "name-error" : undefined}
                 value={form.name}
                 disabled={isEdit}
-                onChange={(e) => setForm({ ...form, name: e.target.value })}
+                onChange={(e) => {
+                  setForm({ ...form, name: e.target.value });
+                  validate("metadata.name", e.target.value);
+                }}
               />
+              <FieldError id="name-error" message={errors["metadata.name"]} />
             </div>
 
             <div className="space-y-2">
@@ -428,18 +478,24 @@ function SkillSourceDialogInner({
             {form.type === "git" && (
               <GitFields
                 spec={form.git}
+                validate={validate}
+                errors={errors}
                 onChange={(git) => setForm({ ...form, git })}
               />
             )}
             {form.type === "oci" && (
               <OCIFields
                 spec={form.oci}
+                validate={validate}
+                errors={errors}
                 onChange={(oci) => setForm({ ...form, oci })}
               />
             )}
             {form.type === "configmap" && (
               <ConfigMapFields
                 spec={form.configMap}
+                validate={validate}
+                errors={errors}
                 onChange={(configMap) => setForm({ ...form, configMap })}
               />
             )}
@@ -450,11 +506,15 @@ function SkillSourceDialogInner({
                 <Input
                   id="interval"
                   placeholder="1h"
+                  aria-invalid={!!errors["spec.interval"]}
+                  aria-describedby={errors["spec.interval"] ? "interval-error" : undefined}
                   value={form.interval}
-                  onChange={(e) =>
-                    setForm({ ...form, interval: e.target.value })
-                  }
+                  onChange={(e) => {
+                    setForm({ ...form, interval: e.target.value });
+                    validate("spec.interval", e.target.value);
+                  }}
                 />
+                <FieldError id="interval-error" message={errors["spec.interval"]} />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="timeout">Fetch timeout</Label>
@@ -536,7 +596,7 @@ function SkillSourceDialogInner({
             >
               Cancel
             </Button>
-            <Button type="submit" disabled={loading}>
+            <Button type="submit" disabled={hasErrors || loading}>
               {loading && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
               {isEdit ? "Save" : "Create"}
             </Button>

@@ -69,7 +69,7 @@ describe("PromptPackDialog", () => {
     expect(onOpenChange).toHaveBeenCalledWith(false);
   });
 
-  it("validates required name field", async () => {
+  it("validates required name field on submit", async () => {
     vi.useRealTimers();
     render(
       <PromptPackDialog open={true} onOpenChange={vi.fn()} />
@@ -80,32 +80,37 @@ describe("PromptPackDialog", () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByText("Name is required")).toBeInTheDocument();
+      // Both name and version are required; expect at least one inline error
+      expect(screen.getAllByText("This field is required.").length).toBeGreaterThan(0);
     });
     expect(mockCreatePromptPack).not.toHaveBeenCalled();
   });
 
-  it("validates DNS name format", async () => {
+  it("shows inline DNS error on invalid name keystroke", async () => {
     vi.useRealTimers();
     const user = userEvent.setup();
     render(
       <PromptPackDialog open={true} onOpenChange={vi.fn()} />
     );
 
-    await user.type(screen.getByLabelText("Name"), "Invalid Name!");
-
-    fireEvent.click(
-      screen.getByRole("button", { name: /create promptpack/i })
-    );
+    await user.type(screen.getByLabelText("Name"), "Invalid_Name!");
 
     await waitFor(() => {
       expect(
-        screen.getByText(/must be a valid DNS subdomain/i)
+        screen.getByText(/use lowercase letters/i)
       ).toBeInTheDocument();
     });
   });
 
-  it("validates version format", async () => {
+  it("shows inline error and blocks submit for an invalid version", async () => {
+    const user = userEvent.setup();
+    render(<PromptPackDialog open onOpenChange={() => {}} />);
+    await user.type(screen.getByLabelText(/version/i), "not-a-version");
+    expect(await screen.findByText(/invalid format/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /create|save/i })).toBeDisabled();
+  });
+
+  it("shows error on invalid version format on submit", async () => {
     vi.useRealTimers();
     const user = userEvent.setup();
     render(
@@ -121,8 +126,9 @@ describe("PromptPackDialog", () => {
     );
 
     await waitFor(() => {
+      // Version pattern has no friendly message; falls back to generic
       expect(
-        screen.getByText(/version must be valid semver/i)
+        screen.getByText(/invalid format/i)
       ).toBeInTheDocument();
     });
   });
@@ -211,6 +217,20 @@ describe("PromptPackDialog", () => {
           version: "1.2.3",
         })
       );
+    });
+  });
+
+  it("submit is disabled when there are inline validation errors", async () => {
+    vi.useRealTimers();
+    const user = userEvent.setup();
+    render(
+      <PromptPackDialog open={true} onOpenChange={vi.fn()} />
+    );
+
+    await user.type(screen.getByLabelText("Name"), "INVALID_NAME");
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /create promptpack/i })).toBeDisabled();
     });
   });
 });
