@@ -24,6 +24,7 @@ const CRDS = [
   { file: 'omnia.altairalabs.ai_toolregistries.yaml', name: 'ToolRegistry' },
   { file: 'omnia.altairalabs.ai_providers.yaml', name: 'Provider' },
   { file: 'omnia.altairalabs.ai_sessionretentionpolicies.yaml', name: 'SessionRetentionPolicy' },
+  { file: 'omnia.altairalabs.ai_skillsources.yaml', name: 'SkillSource' },
 ];
 
 // Convert OpenAPI type to TypeScript type
@@ -159,6 +160,59 @@ function processCrd(crdPath, resourceName) {
   return lines.join('\n');
 }
 
+// --- Constraint extraction (issue #1612) ---
+
+const CONSTRAINT_KEYS = ['pattern', 'enum', 'minLength', 'maxLength', 'minimum', 'maximum'];
+
+// Walk a schema node, collecting field-path -> constraint entries.
+// Array items append "[]" to the path; required comes from each object's
+// `required` array. x-kubernetes-validations (CEL) is skipped and logged.
+function collectConstraints(schema, prefix, out, requiredFields) {
+  if (!schema || typeof schema !== 'object') return;
+
+  if (prefix && schema['x-kubernetes-validations']) {
+    console.log(`    (skipping CEL rule on ${prefix})`);
+  }
+
+  const constraint = {};
+  if (schema.type && schema.type !== 'object' && schema.type !== 'array') {
+    constraint.type = schema.type;
+  }
+  for (const key of CONSTRAINT_KEYS) {
+    if (schema[key] !== undefined) constraint[key] = schema[key];
+  }
+  if (prefix && requiredFields && requiredFields.has(lastSegment(prefix))) {
+    constraint.required = true;
+  }
+  if (prefix && Object.keys(constraint).length > 0) {
+    out[prefix] = constraint;
+  }
+
+  if (schema.properties) {
+    const req = new Set(schema.required || []);
+    for (const [name, child] of Object.entries(schema.properties)) {
+      const childPrefix = prefix ? `${prefix}.${name}` : name;
+      collectConstraints(child, childPrefix, out, req);
+    }
+  }
+  if (schema.type === 'array' && schema.items) {
+    collectConstraints(schema.items, `${prefix}[]`, out, null);
+  }
+}
+
+function lastSegment(prefix) {
+  return prefix.split('.').pop();
+}
+
+// Build the constraint map for one CRD's spec schema.
+function extractConstraints(crdSchema) {
+  const out = {};
+  if (crdSchema && crdSchema.properties && crdSchema.properties.spec) {
+    collectConstraints(crdSchema.properties.spec, 'spec', out, new Set());
+  }
+  return out;
+}
+
 // Main execution
 function main() {
   console.log('Generating TypeScript types from CRDs...\n');
@@ -173,6 +227,8 @@ function main() {
     '// Do not edit manually - run \'make generate-dashboard-types\' to regenerate',
     '',
   ];
+
+  const allConstraints = {};
 
   for (const { file, name } of CRDS) {
     const crdPath = path.join(CRD_DIR, file);
@@ -193,12 +249,29 @@ function main() {
 
       indexExports.push(`export * from "./${name.toLowerCase()}";`);
     }
+
+    const crdYaml = yaml.load(fs.readFileSync(crdPath, 'utf8'));
+    const crdSchema = crdYaml.spec.versions[0].schema.openAPIV3Schema;
+    allConstraints[name] = extractConstraints(crdSchema);
   }
 
   // Write index file
   indexExports.push('');
   fs.writeFileSync(path.join(OUTPUT_DIR, 'index.ts'), indexExports.join('\n'));
   console.log(`    -> index.ts`);
+
+  const constraintsHeader = [
+    '// Auto-generated from CRD OpenAPI schemas (issue #1612).',
+    "// Do not edit manually - run 'make generate-dashboard-types' to regenerate.",
+    '',
+    'import type { FieldConstraint } from "@/lib/validation/constraint-types";',
+    '',
+    'export const crdConstraints: Record<string, Record<string, FieldConstraint>> =',
+    `  ${JSON.stringify(allConstraints, null, 2)};`,
+    '',
+  ].join('\n');
+  fs.writeFileSync(path.join(OUTPUT_DIR, 'crd-constraints.ts'), constraintsHeader);
+  console.log('    -> crd-constraints.ts');
 
   console.log('\nDone!');
   console.log(`\nNote: Generated types are in ${path.relative(process.cwd(), OUTPUT_DIR)}/`);
