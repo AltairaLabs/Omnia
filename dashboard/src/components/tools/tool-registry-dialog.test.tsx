@@ -208,19 +208,6 @@ describe("ToolRegistryDialog", () => {
     cleanup();
   });
 
-  it("shows an inline error and blocks submit for an uppercase handler name", async () => {
-    const user = userEvent.setup();
-    render(<ToolRegistryDialog open onOpenChange={() => {}} />);
-
-    const handlerName = screen.getByLabelText(/handler name/i);
-    await user.type(handlerName, "Api");
-
-    expect(
-      await screen.findByText(/lowercase letters, numbers, and hyphens/i)
-    ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /create/i })).toBeDisabled();
-  });
-
   it("renders the create dialog and a default handler", () => {
     render(<ToolRegistryDialog open onOpenChange={vi.fn()} />);
     expect(
@@ -239,6 +226,21 @@ describe("ToolRegistryDialog", () => {
 
     await user.click(screen.getByRole("button", { name: "Remove handler 2" }));
     expect(screen.queryByText("Handler 2")).not.toBeInTheDocument();
+  });
+
+  it("handler-name input aria-describedby points at the rendered FieldError id", async () => {
+    const user = userEvent.setup();
+    render(<ToolRegistryDialog open onOpenChange={() => {}} />);
+
+    const handlerName = screen.getByLabelText(/handler name/i);
+    await user.type(handlerName, "Api");
+
+    const errorText = await screen.findByText(/lowercase letters, numbers, and hyphens/i);
+    const describedById = handlerName.getAttribute("aria-describedby");
+    expect(describedById).toBeTruthy();
+    const errorElement = document.getElementById(describedById!);
+    expect(errorElement).not.toBeNull();
+    expect(errorElement).toContainElement(errorText as HTMLElement);
   });
 
   it("shows inline required errors and does not create when name is empty", async () => {

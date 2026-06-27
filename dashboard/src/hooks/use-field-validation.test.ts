@@ -60,4 +60,11 @@ describe("useFieldValidation", () => {
     act(() => result.current.validate("metadata.name", "Bad_Name"));
     expect(result.current.errors["metadata.name"]).toBeDefined();
   });
+
+  it("creates no error entry for a path with no constraint", () => {
+    const { result } = renderHook(() => useFieldValidation(constraints));
+    act(() => result.current.validate("spec.description", "some value"));
+    expect(result.current.errors).toEqual({});
+    expect(result.current.hasErrors).toBe(false);
+  });
 });

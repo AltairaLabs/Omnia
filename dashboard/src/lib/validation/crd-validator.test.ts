@@ -47,6 +47,18 @@ describe("validateField", () => {
   it("falls back to a generic message for an unknown pattern", () => {
     expect(validateField("??", { pattern: "^[A-Z]+$" })).toBe("Invalid format.");
   });
+
+  it("enforces minLength with a friendly message", () => {
+    expect(validateField("ab", { type: "string", minLength: 5 })).toBe(
+      "Must be at least 5 characters."
+    );
+    expect(validateField("abcde", { type: "string", minLength: 5 })).toBeNull();
+  });
+
+  it("gives a DNS-subdomain friendly message for metadata.name pattern violations", () => {
+    const result = validateField("Bad.Name", METADATA_NAME_CONSTRAINT);
+    expect(result).toContain("hyphens, and dots");
+  });
 });
 
 describe("getConstraint", () => {

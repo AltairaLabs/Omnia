@@ -311,13 +311,14 @@ function HandlerCard({
             id={`${h.id}-name`}
             placeholder="weather-api"
             aria-invalid={!!errors[`spec.handlers[${index}].name`]}
+            aria-describedby={errors[`spec.handlers[${index}].name`] ? `${h.id}-name-error` : undefined}
             value={h.name}
             onChange={(e) => {
               update(h.id, { name: e.target.value });
               validate("spec.handlers[].name", e.target.value, { index });
             }}
           />
-          <FieldError message={errors[`spec.handlers[${index}].name`]} />
+          <FieldError id={`${h.id}-name-error`} message={errors[`spec.handlers[${index}].name`]} />
         </div>
         <div className="space-y-2">
           <Label htmlFor={`${h.id}-type`}>Type</Label>
@@ -328,7 +329,10 @@ function HandlerCard({
               validate("spec.handlers[].type", v, { index });
             }}
           >
-            <SelectTrigger id={`${h.id}-type`}>
+            <SelectTrigger
+              id={`${h.id}-type`}
+              aria-describedby={errors[`spec.handlers[${index}].type`] ? `${h.id}-type-error` : undefined}
+            >
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -337,7 +341,7 @@ function HandlerCard({
               <SelectItem value="openapi">OpenAPI</SelectItem>
             </SelectContent>
           </Select>
-          <FieldError message={errors[`spec.handlers[${index}].type`]} />
+          <FieldError id={`${h.id}-type-error`} message={errors[`spec.handlers[${index}].type`]} />
         </div>
       </div>
       <Fields h={h} update={update} />
