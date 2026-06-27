@@ -362,7 +362,7 @@ func createRuntimeHandler(
 
 	handler := agent.NewRuntimeHandler(rc)
 	// Apply CRD-driven client tool timeout, populated from
-	// AgentRuntime.spec.facade.clientToolTimeout by agent.LoadFromCRD.
+	// the primary facade's clientToolTimeout by agent.LoadFromCRD.
 	if cfg.ClientToolTimeout > 0 {
 		handler.SetClientToolTimeout(cfg.ClientToolTimeout)
 		log.V(1).Info("client tool timeout override applied", "timeout", cfg.ClientToolTimeout)

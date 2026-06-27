@@ -203,10 +203,10 @@ spec:
     name: assistant-pack
   providerRef:
     name: my-provider
-  facade:
-    type: websocket
-    port: 8080
-    handler: demo  # Use "demo" for testing without an API key
+  facades:
+    - type: websocket
+      port: 8080
+      handler: demo  # Use "demo" for testing without an API key
   context:
     type: memory
     ttl: "1h"

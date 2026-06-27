@@ -61,9 +61,9 @@ spec:
   mode: function
   promptPackRef:
     name: safe-default-summarizer
-  facade:
-    type: rest
-    port: 8080
+  facades:
+    - type: rest
+      port: 8080
   inputSchema:
     type: object
     required:

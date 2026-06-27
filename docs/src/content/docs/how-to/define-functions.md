@@ -47,9 +47,9 @@ spec:
   mode: function
   promptPackRef:
     name: summarizer-pack
-  facade:
-    type: rest          # function mode serves HTTP at POST /functions/{name}
-    port: 8080
+  facades:
+    - type: rest        # function mode serves HTTP at POST /functions/{name}
+      port: 8080
   providers:
     - name: default
       providerRef:
@@ -86,8 +86,8 @@ The CEL validation gates on the CRD enforce:
   `spec.outputSchema`.
 - `spec.mode == "agent"` (the default) forbids those schemas (and
   `spec.outputFormat`).
-- `spec.mode == "function"` requires `spec.facade.type` to be `rest` (HTTP)
-  or `a2a`; `websocket` and `grpc` are rejected.
+- `spec.mode == "function"` requires each entry in `spec.facades` to be
+  of type `rest` (HTTP), `a2a`, or `mcp`; `websocket` is rejected.
 
 Apply the resource the usual way:
 

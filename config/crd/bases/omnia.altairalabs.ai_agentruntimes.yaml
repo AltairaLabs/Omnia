@@ -54,253 +54,6 @@ spec:
           spec:
             description: spec defines the desired state of AgentRuntime
             properties:
-              a2a:
-                description: |-
-                  a2a configures the A2A (Agent-to-Agent) protocol.
-
-                  Deprecated: set spec.facade.a2a instead. The operator projects
-                  spec.a2a → spec.facade.a2a at reconcile time for back-compat;
-                  this field will be removed in a future release.
-                properties:
-                  agentCard:
-                    description: agentCard configures the Agent Card served at /.well-known/agent.json.
-                    properties:
-                      capabilities:
-                        description: capabilities describes protocol features the
-                          agent supports.
-                        properties:
-                          pushNotifications:
-                            description: pushNotifications indicates whether the agent
-                              supports push notifications.
-                            type: boolean
-                          streaming:
-                            description: streaming indicates whether the agent supports
-                              streaming responses via SSE.
-                            type: boolean
-                        type: object
-                      defaultInputModes:
-                        description: defaultInputModes lists supported input content
-                          types (e.g., "text", "audio").
-                        items:
-                          type: string
-                        type: array
-                      defaultOutputModes:
-                        description: defaultOutputModes lists supported output content
-                          types (e.g., "text", "audio").
-                        items:
-                          type: string
-                        type: array
-                      description:
-                        description: description is a human-readable description of
-                          the agent.
-                        type: string
-                      name:
-                        description: name is the agent's display name.
-                        minLength: 1
-                        type: string
-                      organization:
-                        description: organization is the name of the organization
-                          that provides this agent.
-                        type: string
-                      skills:
-                        description: skills lists the agent's capabilities for discovery.
-                        items:
-                          description: AgentSkillSpec describes a specific skill an
-                            agent can perform.
-                          properties:
-                            description:
-                              description: description explains what this skill does.
-                              type: string
-                            examples:
-                              description: examples provides example prompts for this
-                                skill.
-                              items:
-                                type: string
-                              type: array
-                            id:
-                              description: id is the unique identifier for this skill.
-                              minLength: 1
-                              type: string
-                            name:
-                              description: name is the human-readable name for this
-                                skill.
-                              minLength: 1
-                              type: string
-                            tags:
-                              description: tags are keywords for categorization and
-                                search.
-                              items:
-                                type: string
-                              type: array
-                          required:
-                          - id
-                          - name
-                          type: object
-                        type: array
-                      version:
-                        description: version is the agent's version string.
-                        type: string
-                    required:
-                    - name
-                    type: object
-                  authentication:
-                    description: |-
-                      authentication configures request authentication for the A2A endpoint.
-
-                      Deprecated: use spec.externalAuth.sharedToken instead. The
-                      AgentRuntime controller transparently projects this field into
-                      spec.externalAuth.sharedToken at reconcile time when the new field
-                      is unset; setting both is allowed but spec.externalAuth wins.
-                      Removal scheduled for the next major.
-                    properties:
-                      secretRef:
-                        description: |-
-                          secretRef references a Secret containing a bearer token.
-                          The secret should contain a key named "token".
-                        properties:
-                          name:
-                            default: ""
-                            description: |-
-                              Name of the referent.
-                              This field is effectively required, but due to backwards compatibility is
-                              allowed to be empty. Instances of this type with an empty value here are
-                              almost certainly wrong.
-                              More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
-                            type: string
-                        type: object
-                        x-kubernetes-map-type: atomic
-                    type: object
-                  clients:
-                    description: |-
-                      clients configures connections to other A2A agents.
-                      Each client can reference an in-cluster AgentRuntime or an external URL.
-                    items:
-                      description: A2AClientSpec configures an A2A client connection
-                        to another agent.
-                      properties:
-                        agentRuntimeRef:
-                          description: |-
-                            agentRuntimeRef references another AgentRuntime in the cluster.
-                            The controller resolves this to a service URL using the target's status.
-                            Mutually exclusive with url.
-                          properties:
-                            name:
-                              description: name is the AgentRuntime resource name.
-                              minLength: 1
-                              type: string
-                            namespace:
-                              description: |-
-                                namespace is the namespace of the target AgentRuntime.
-                                Defaults to the same namespace as the referencing AgentRuntime.
-                              type: string
-                          required:
-                          - name
-                          type: object
-                        authentication:
-                          description: authentication configures credentials for outgoing
-                            calls to this agent.
-                          properties:
-                            secretRef:
-                              description: 'secretRef references a Secret containing
-                                a bearer token (key: "token").'
-                              properties:
-                                name:
-                                  default: ""
-                                  description: |-
-                                    Name of the referent.
-                                    This field is effectively required, but due to backwards compatibility is
-                                    allowed to be empty. Instances of this type with an empty value here are
-                                    almost certainly wrong.
-                                    More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
-                                  type: string
-                              type: object
-                              x-kubernetes-map-type: atomic
-                          type: object
-                        exposeAsTools:
-                          description: |-
-                            exposeAsTools registers the remote agent's skills as local tools
-                            via PromptKit's A2A Tool Bridge.
-                          type: boolean
-                        name:
-                          description: name is a unique identifier for this client
-                            within the agent.
-                          minLength: 1
-                          type: string
-                        url:
-                          description: |-
-                            url is the direct URL of an external A2A agent endpoint.
-                            Used instead of agentRuntimeRef for agents outside the cluster.
-                            Mutually exclusive with agentRuntimeRef.
-                          type: string
-                      required:
-                      - name
-                      type: object
-                    type: array
-                  conversationTTL:
-                    default: 30m
-                    description: |-
-                      conversationTTL is how long idle conversations are retained before eviction.
-                      Uses Go duration format (e.g., "30m", "1h"). Defaults to "30m".
-                    type: string
-                  enabled:
-                    description: |-
-                      enabled adds A2A as an additional endpoint alongside the primary facade.
-                      Only meaningful when facade.type is NOT "a2a" (i.e., websocket or grpc).
-                      When facade.type is "a2a", A2A is always the primary protocol regardless of this field.
-                    type: boolean
-                  port:
-                    default: 9999
-                    description: |-
-                      port is the TCP port for the A2A endpoint in dual-protocol mode.
-                      Defaults to 9999. Only used when enabled is true and facade.type is not "a2a".
-                    format: int32
-                    type: integer
-                  taskStore:
-                    description: |-
-                      taskStore configures the task persistence backend.
-                      Defaults to in-memory. Set type to "redis" for persistence across restarts.
-                    properties:
-                      redisSecretRef:
-                        description: |-
-                          redisSecretRef references a Secret containing a Redis connection URL
-                          in a key named "url". Takes precedence over redisURL.
-                        properties:
-                          name:
-                            default: ""
-                            description: |-
-                              Name of the referent.
-                              This field is effectively required, but due to backwards compatibility is
-                              allowed to be empty. Instances of this type with an empty value here are
-                              almost certainly wrong.
-                              More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
-                            type: string
-                        type: object
-                        x-kubernetes-map-type: atomic
-                      redisURL:
-                        description: |-
-                          redisURL is the Redis connection URL when type is "redis".
-                          Format: redis://[:password@]host:port[/db]
-                        type: string
-                      type:
-                        allOf:
-                        - enum:
-                          - memory
-                          - redis
-                        - enum:
-                          - memory
-                          - redis
-                        default: memory
-                        description: type is the task store backend type. Defaults
-                          to "memory".
-                        type: string
-                    type: object
-                  taskTTL:
-                    default: 1h
-                    description: |-
-                      taskTTL is how long completed/failed/canceled tasks are retained before eviction.
-                      Uses Go duration format (e.g., "1h", "30m"). Defaults to "1h".
-                    type: string
-                type: object
               console:
                 description: |-
                   console configures the dashboard console UI settings.
@@ -4019,28 +3772,12 @@ spec:
               externalAuth:
                 description: |-
                   externalAuth configures authentication for data-plane traffic to
-                  this agent's facade (external apps streaming via WebSocket or A2A).
+                  this agent's facades (external apps streaming via WebSocket or A2A).
                   When unset, the agent is reachable only from the management plane
                   (the dashboard's debug view) — no customer traffic until at least
-                  one validator is filled in. Subsumes the deprecated
-                  spec.a2a.authentication.secretRef field; the controller projects
-                  the legacy shape into spec.externalAuth.sharedToken at reconcile
-                  time.
+                  one validator is filled in. Applied to each facade's external auth
+                  chain.
                 properties:
-                  allowManagementPlane:
-                    default: true
-                    description: |-
-                      allowManagementPlane governs whether dashboard-minted management-
-                      plane tokens (the "Try this agent" debug view) are accepted for
-                      this agent. Defaults to true so the debug view works out of the
-                      box; paranoid customers wanting strict data-plane-only isolation
-                      set this to false explicitly.
-
-                      Pointer with default=true so an explicit `false` stays
-                      distinguishable from "field omitted" for future audit/migration
-                      logic. Only consulted when spec.externalAuth is set; when the whole
-                      block is unset the facade defaults to mgmt-plane-only.
-                    type: boolean
                   apiKeys:
                     description: |-
                       apiKeys configures per-caller API keys for this agent. Each key is
@@ -4171,10 +3908,6 @@ spec:
                       sharedToken validates a single bearer token shared across all
                       callers of this agent. Simplest partner integration; one token in
                       a Kubernetes Secret, rotated by editing the Secret.
-
-                      Subsumes the existing spec.a2a.authentication.secretRef field
-                      (which is now deprecated and transparently projected into this
-                      location by the AgentRuntime controller at reconcile time).
                     properties:
                       secretRef:
                         description: |-
@@ -4215,332 +3948,206 @@ spec:
                   extraPodAnnotations defines additional annotations to add to the agent pods.
                   Use this for integrations like service meshes, logging agents, or monitoring tools.
                 type: object
-              facade:
-                description: facade configures the client-facing connection interface.
-                properties:
-                  a2a:
-                    description: |-
-                      a2a configures the A2A protocol surface for this facade.
-                      When type=a2a, this is the primary protocol; when type=websocket
-                      or grpc, a2a.enabled=true adds A2A as a dual-protocol surface on
-                      a separate port. Use this instead of the deprecated top-level
-                      spec.a2a; the operator projects spec.a2a → spec.facade.a2a at
-                      reconcile time for back-compat.
-                    properties:
-                      agentCard:
-                        description: agentCard configures the Agent Card served at
-                          /.well-known/agent.json.
-                        properties:
-                          capabilities:
-                            description: capabilities describes protocol features
-                              the agent supports.
-                            properties:
-                              pushNotifications:
-                                description: pushNotifications indicates whether the
-                                  agent supports push notifications.
-                                type: boolean
-                              streaming:
-                                description: streaming indicates whether the agent
-                                  supports streaming responses via SSE.
-                                type: boolean
-                            type: object
-                          defaultInputModes:
-                            description: defaultInputModes lists supported input content
-                              types (e.g., "text", "audio").
-                            items:
-                              type: string
-                            type: array
-                          defaultOutputModes:
-                            description: defaultOutputModes lists supported output
-                              content types (e.g., "text", "audio").
-                            items:
-                              type: string
-                            type: array
-                          description:
-                            description: description is a human-readable description
-                              of the agent.
-                            type: string
-                          name:
-                            description: name is the agent's display name.
-                            minLength: 1
-                            type: string
-                          organization:
-                            description: organization is the name of the organization
-                              that provides this agent.
-                            type: string
-                          skills:
-                            description: skills lists the agent's capabilities for
-                              discovery.
-                            items:
-                              description: AgentSkillSpec describes a specific skill
-                                an agent can perform.
-                              properties:
-                                description:
-                                  description: description explains what this skill
-                                    does.
-                                  type: string
-                                examples:
-                                  description: examples provides example prompts for
-                                    this skill.
-                                  items:
-                                    type: string
-                                  type: array
-                                id:
-                                  description: id is the unique identifier for this
-                                    skill.
-                                  minLength: 1
-                                  type: string
-                                name:
-                                  description: name is the human-readable name for
-                                    this skill.
-                                  minLength: 1
-                                  type: string
-                                tags:
-                                  description: tags are keywords for categorization
-                                    and search.
-                                  items:
-                                    type: string
-                                  type: array
-                              required:
-                              - id
-                              - name
-                              type: object
-                            type: array
-                          version:
-                            description: version is the agent's version string.
-                            type: string
-                        required:
-                        - name
-                        type: object
-                      authentication:
-                        description: |-
-                          authentication configures request authentication for the A2A endpoint.
-
-                          Deprecated: use spec.externalAuth.sharedToken instead. The
-                          AgentRuntime controller transparently projects this field into
-                          spec.externalAuth.sharedToken at reconcile time when the new field
-                          is unset; setting both is allowed but spec.externalAuth wins.
-                          Removal scheduled for the next major.
-                        properties:
-                          secretRef:
-                            description: |-
-                              secretRef references a Secret containing a bearer token.
-                              The secret should contain a key named "token".
-                            properties:
-                              name:
-                                default: ""
-                                description: |-
-                                  Name of the referent.
-                                  This field is effectively required, but due to backwards compatibility is
-                                  allowed to be empty. Instances of this type with an empty value here are
-                                  almost certainly wrong.
-                                  More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
-                                type: string
-                            type: object
-                            x-kubernetes-map-type: atomic
-                        type: object
-                      clients:
-                        description: |-
-                          clients configures connections to other A2A agents.
-                          Each client can reference an in-cluster AgentRuntime or an external URL.
-                        items:
-                          description: A2AClientSpec configures an A2A client connection
-                            to another agent.
+              facades:
+                description: |-
+                  facades composes one or more single-protocol facades on top of the
+                  shared agent substrate. Each entry is one protocol surface (websocket,
+                  a2a, rest, or mcp); all run co-resident in the same pod. Agent mode uses
+                  websocket and/or a2a; function mode uses rest (required) and optionally
+                  mcp. Must be non-empty with no duplicate types (CEL-validated).
+                items:
+                  description: FacadeConfig defines the configuration for the client-facing
+                    facade.
+                  properties:
+                    a2a:
+                      description: |-
+                        a2a configures the A2A protocol surface. Only meaningful on a
+                        type=a2a facade. When the agent also has a websocket facade, A2A is a
+                        secondary listener on a2a.port (default 9999); when a2a is the only
+                        agent-mode facade it is the primary listener (default 8080). Carries
+                        the A2A TTLs, task store, agent-card, and outbound clients.
+                      properties:
+                        agentCard:
+                          description: agentCard configures the Agent Card served
+                            at /.well-known/agent.json.
                           properties:
-                            agentRuntimeRef:
-                              description: |-
-                                agentRuntimeRef references another AgentRuntime in the cluster.
-                                The controller resolves this to a service URL using the target's status.
-                                Mutually exclusive with url.
+                            capabilities:
+                              description: capabilities describes protocol features
+                                the agent supports.
                               properties:
-                                name:
-                                  description: name is the AgentRuntime resource name.
-                                  minLength: 1
-                                  type: string
-                                namespace:
-                                  description: |-
-                                    namespace is the namespace of the target AgentRuntime.
-                                    Defaults to the same namespace as the referencing AgentRuntime.
-                                  type: string
-                              required:
-                              - name
+                                pushNotifications:
+                                  description: pushNotifications indicates whether
+                                    the agent supports push notifications.
+                                  type: boolean
+                                streaming:
+                                  description: streaming indicates whether the agent
+                                    supports streaming responses via SSE.
+                                  type: boolean
                               type: object
-                            authentication:
-                              description: authentication configures credentials for
-                                outgoing calls to this agent.
-                              properties:
-                                secretRef:
-                                  description: 'secretRef references a Secret containing
-                                    a bearer token (key: "token").'
-                                  properties:
-                                    name:
-                                      default: ""
-                                      description: |-
-                                        Name of the referent.
-                                        This field is effectively required, but due to backwards compatibility is
-                                        allowed to be empty. Instances of this type with an empty value here are
-                                        almost certainly wrong.
-                                        More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
-                                      type: string
-                                  type: object
-                                  x-kubernetes-map-type: atomic
-                              type: object
-                            exposeAsTools:
-                              description: |-
-                                exposeAsTools registers the remote agent's skills as local tools
-                                via PromptKit's A2A Tool Bridge.
-                              type: boolean
+                            defaultInputModes:
+                              description: defaultInputModes lists supported input
+                                content types (e.g., "text", "audio").
+                              items:
+                                type: string
+                              type: array
+                            defaultOutputModes:
+                              description: defaultOutputModes lists supported output
+                                content types (e.g., "text", "audio").
+                              items:
+                                type: string
+                              type: array
+                            description:
+                              description: description is a human-readable description
+                                of the agent.
+                              type: string
                             name:
-                              description: name is a unique identifier for this client
-                                within the agent.
+                              description: name is the agent's display name.
                               minLength: 1
                               type: string
-                            url:
-                              description: |-
-                                url is the direct URL of an external A2A agent endpoint.
-                                Used instead of agentRuntimeRef for agents outside the cluster.
-                                Mutually exclusive with agentRuntimeRef.
+                            organization:
+                              description: organization is the name of the organization
+                                that provides this agent.
+                              type: string
+                            skills:
+                              description: skills lists the agent's capabilities for
+                                discovery.
+                              items:
+                                description: AgentSkillSpec describes a specific skill
+                                  an agent can perform.
+                                properties:
+                                  description:
+                                    description: description explains what this skill
+                                      does.
+                                    type: string
+                                  examples:
+                                    description: examples provides example prompts
+                                      for this skill.
+                                    items:
+                                      type: string
+                                    type: array
+                                  id:
+                                    description: id is the unique identifier for this
+                                      skill.
+                                    minLength: 1
+                                    type: string
+                                  name:
+                                    description: name is the human-readable name for
+                                      this skill.
+                                    minLength: 1
+                                    type: string
+                                  tags:
+                                    description: tags are keywords for categorization
+                                      and search.
+                                    items:
+                                      type: string
+                                    type: array
+                                required:
+                                - id
+                                - name
+                                type: object
+                              type: array
+                            version:
+                              description: version is the agent's version string.
                               type: string
                           required:
                           - name
                           type: object
-                        type: array
-                      conversationTTL:
-                        default: 30m
-                        description: |-
-                          conversationTTL is how long idle conversations are retained before eviction.
-                          Uses Go duration format (e.g., "30m", "1h"). Defaults to "30m".
-                        type: string
-                      enabled:
-                        description: |-
-                          enabled adds A2A as an additional endpoint alongside the primary facade.
-                          Only meaningful when facade.type is NOT "a2a" (i.e., websocket or grpc).
-                          When facade.type is "a2a", A2A is always the primary protocol regardless of this field.
-                        type: boolean
-                      port:
-                        default: 9999
-                        description: |-
-                          port is the TCP port for the A2A endpoint in dual-protocol mode.
-                          Defaults to 9999. Only used when enabled is true and facade.type is not "a2a".
-                        format: int32
-                        type: integer
-                      taskStore:
-                        description: |-
-                          taskStore configures the task persistence backend.
-                          Defaults to in-memory. Set type to "redis" for persistence across restarts.
-                        properties:
-                          redisSecretRef:
-                            description: |-
-                              redisSecretRef references a Secret containing a Redis connection URL
-                              in a key named "url". Takes precedence over redisURL.
+                        clients:
+                          description: |-
+                            clients configures connections to other A2A agents.
+                            Each client can reference an in-cluster AgentRuntime or an external URL.
+                          items:
+                            description: A2AClientSpec configures an A2A client connection
+                              to another agent.
                             properties:
-                              name:
-                                default: ""
+                              agentRuntimeRef:
                                 description: |-
-                                  Name of the referent.
-                                  This field is effectively required, but due to backwards compatibility is
-                                  allowed to be empty. Instances of this type with an empty value here are
-                                  almost certainly wrong.
-                                  More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                                  agentRuntimeRef references another AgentRuntime in the cluster.
+                                  The controller resolves this to a service URL using the target's status.
+                                  Mutually exclusive with url.
+                                properties:
+                                  name:
+                                    description: name is the AgentRuntime resource
+                                      name.
+                                    minLength: 1
+                                    type: string
+                                  namespace:
+                                    description: |-
+                                      namespace is the namespace of the target AgentRuntime.
+                                      Defaults to the same namespace as the referencing AgentRuntime.
+                                    type: string
+                                required:
+                                - name
+                                type: object
+                              authentication:
+                                description: authentication configures credentials
+                                  for outgoing calls to this agent.
+                                properties:
+                                  secretRef:
+                                    description: 'secretRef references a Secret containing
+                                      a bearer token (key: "token").'
+                                    properties:
+                                      name:
+                                        default: ""
+                                        description: |-
+                                          Name of the referent.
+                                          This field is effectively required, but due to backwards compatibility is
+                                          allowed to be empty. Instances of this type with an empty value here are
+                                          almost certainly wrong.
+                                          More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                                        type: string
+                                    type: object
+                                    x-kubernetes-map-type: atomic
+                                type: object
+                              exposeAsTools:
+                                description: |-
+                                  exposeAsTools registers the remote agent's skills as local tools
+                                  via PromptKit's A2A Tool Bridge.
+                                type: boolean
+                              name:
+                                description: name is a unique identifier for this
+                                  client within the agent.
+                                minLength: 1
                                 type: string
+                              url:
+                                description: |-
+                                  url is the direct URL of an external A2A agent endpoint.
+                                  Used instead of agentRuntimeRef for agents outside the cluster.
+                                  Mutually exclusive with agentRuntimeRef.
+                                type: string
+                            required:
+                            - name
                             type: object
-                            x-kubernetes-map-type: atomic
-                          redisURL:
-                            description: |-
-                              redisURL is the Redis connection URL when type is "redis".
-                              Format: redis://[:password@]host:port[/db]
-                            type: string
-                          type:
-                            allOf:
-                            - enum:
-                              - memory
-                              - redis
-                            - enum:
-                              - memory
-                              - redis
-                            default: memory
-                            description: type is the task store backend type. Defaults
-                              to "memory".
-                            type: string
-                        type: object
-                      taskTTL:
-                        default: 1h
-                        description: |-
-                          taskTTL is how long completed/failed/canceled tasks are retained before eviction.
-                          Uses Go duration format (e.g., "1h", "30m"). Defaults to "1h".
-                        type: string
-                    type: object
-                  clientToolTimeout:
-                    description: |-
-                      clientToolTimeout is the max time to wait for client tool responses per turn.
-                      Defaults to 60s.
-                    type: string
-                  drainTimeout:
-                    description: |-
-                      drainTimeout is how long the facade keeps serving active realtime calls
-                      after receiving SIGTERM (rollout/drain/scale-down) before cleanly tearing
-                      down the remainder. Duration format (e.g. "30s", "2m"). New calls stop
-                      immediately on drain regardless. Defaults to 30s when unset.
-                    type: string
-                  expose:
-                    description: |-
-                      expose opts this agent into operator-provisioned external exposure.
-                      Opt-in: an agent is never externally reachable unless this is set AND the
-                      platform has a default-exposure Gateway configured (Helm
-                      `defaultExposure`). When both hold, the operator creates a host-based
-                      HTTPRoute targeting this agent's facade Service, surfaced via
-                      status.facade.endpoints (#1553). Exposure does NOT add authentication —
-                      spec.externalAuth is still the gate; an exposed agent with no externalAuth
-                      validators is management-plane-only at the facade.
-                    properties:
-                      enabled:
-                        description: |-
-                          enabled creates an external HTTPRoute for this agent. Requires the platform
-                          to have a default-exposure Gateway configured (Helm `defaultExposure`);
-                          when no Gateway is configured this is a no-op. Defaults to false.
-                        type: boolean
-                      host:
-                        description: |-
-                          host overrides the generated hostname (`{name}.{namespace}.{baseDomain}`).
-                          Set for a custom domain on an individual agent. Must be a hostname the
-                          configured Gateway's listener accepts (e.g. covered by its TLS cert).
-                        type: string
-                    type: object
-                  extraEnv:
-                    description: |-
-                      extraEnv defines additional environment variables for the facade container.
-                      Use this for debugging (e.g., LOG_LEVEL=debug) or custom configuration.
-                    items:
-                      description: EnvVar represents an environment variable present
-                        in a Container.
-                      properties:
-                        name:
+                          type: array
+                        conversationTTL:
+                          default: 30m
                           description: |-
-                            Name of the environment variable.
-                            May consist of any printable ASCII characters except '='.
+                            conversationTTL is how long idle conversations are retained before eviction.
+                            Uses Go duration format (e.g., "30m", "1h"). Defaults to "30m".
                           type: string
-                        value:
+                        enabled:
                           description: |-
-                            Variable references $(VAR_NAME) are expanded
-                            using the previously defined environment variables in the container and
-                            any service environment variables. If a variable cannot be resolved,
-                            the reference in the input string will be unchanged. Double $$ are reduced
-                            to a single $, which allows for escaping the $(VAR_NAME) syntax: i.e.
-                            "$$(VAR_NAME)" will produce the string literal "$(VAR_NAME)".
-                            Escaped references will never be expanded, regardless of whether the variable
-                            exists or not.
-                            Defaults to "".
-                          type: string
-                        valueFrom:
-                          description: Source for the environment variable's value.
-                            Cannot be used if value is not empty.
+                            enabled adds A2A as an additional endpoint alongside the primary facade.
+                            Only meaningful when facade.type is NOT "a2a" (i.e., websocket or grpc).
+                            When facade.type is "a2a", A2A is always the primary protocol regardless of this field.
+                          type: boolean
+                        port:
+                          default: 9999
+                          description: |-
+                            port is the TCP port for the A2A endpoint in dual-protocol mode.
+                            Defaults to 9999. Only used when enabled is true and facade.type is not "a2a".
+                          format: int32
+                          type: integer
+                        taskStore:
+                          description: |-
+                            taskStore configures the task persistence backend.
+                            Defaults to in-memory. Set type to "redis" for persistence across restarts.
                           properties:
-                            configMapKeyRef:
-                              description: Selects a key of a ConfigMap.
+                            redisSecretRef:
+                              description: |-
+                                redisSecretRef references a Secret containing a Redis connection URL
+                                in a key named "url". Takes precedence over redisURL.
                               properties:
-                                key:
-                                  description: The key to select.
-                                  type: string
                                 name:
                                   default: ""
                                   description: |-
@@ -4550,177 +4157,298 @@ spec:
                                     almost certainly wrong.
                                     More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
                                   type: string
-                                optional:
-                                  description: Specify whether the ConfigMap or its
-                                    key must be defined
-                                  type: boolean
-                              required:
-                              - key
                               type: object
                               x-kubernetes-map-type: atomic
-                            fieldRef:
+                            redisURL:
                               description: |-
-                                Selects a field of the pod: supports metadata.name, metadata.namespace, `metadata.labels['<KEY>']`, `metadata.annotations['<KEY>']`,
-                                spec.nodeName, spec.serviceAccountName, status.hostIP, status.podIP, status.podIPs.
-                              properties:
-                                apiVersion:
-                                  description: Version of the schema the FieldPath
-                                    is written in terms of, defaults to "v1".
-                                  type: string
-                                fieldPath:
-                                  description: Path of the field to select in the
-                                    specified API version.
-                                  type: string
-                              required:
-                              - fieldPath
-                              type: object
-                              x-kubernetes-map-type: atomic
-                            fileKeyRef:
-                              description: |-
-                                FileKeyRef selects a key of the env file.
-                                Requires the EnvFiles feature gate to be enabled.
-                              properties:
-                                key:
-                                  description: |-
-                                    The key within the env file. An invalid key will prevent the pod from starting.
-                                    The keys defined within a source may consist of any printable ASCII characters except '='.
-                                    During Alpha stage of the EnvFiles feature gate, the key size is limited to 128 characters.
-                                  type: string
-                                optional:
-                                  default: false
-                                  description: |-
-                                    Specify whether the file or its key must be defined. If the file or key
-                                    does not exist, then the env var is not published.
-                                    If optional is set to true and the specified key does not exist,
-                                    the environment variable will not be set in the Pod's containers.
-
-                                    If optional is set to false and the specified key does not exist,
-                                    an error will be returned during Pod creation.
-                                  type: boolean
-                                path:
-                                  description: |-
-                                    The path within the volume from which to select the file.
-                                    Must be relative and may not contain the '..' path or start with '..'.
-                                  type: string
-                                volumeName:
-                                  description: The name of the volume mount containing
-                                    the env file.
-                                  type: string
-                              required:
-                              - key
-                              - path
-                              - volumeName
-                              type: object
-                              x-kubernetes-map-type: atomic
-                            resourceFieldRef:
-                              description: |-
-                                Selects a resource of the container: only resources limits and requests
-                                (limits.cpu, limits.memory, limits.ephemeral-storage, requests.cpu, requests.memory and requests.ephemeral-storage) are currently supported.
-                              properties:
-                                containerName:
-                                  description: 'Container name: required for volumes,
-                                    optional for env vars'
-                                  type: string
-                                divisor:
-                                  anyOf:
-                                  - type: integer
-                                  - type: string
-                                  description: Specifies the output format of the
-                                    exposed resources, defaults to "1"
-                                  pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
-                                  x-kubernetes-int-or-string: true
-                                resource:
-                                  description: 'Required: resource to select'
-                                  type: string
-                              required:
-                              - resource
-                              type: object
-                              x-kubernetes-map-type: atomic
-                            secretKeyRef:
-                              description: Selects a key of a secret in the pod's
-                                namespace
-                              properties:
-                                key:
-                                  description: The key of the secret to select from.  Must
-                                    be a valid secret key.
-                                  type: string
-                                name:
-                                  default: ""
-                                  description: |-
-                                    Name of the referent.
-                                    This field is effectively required, but due to backwards compatibility is
-                                    allowed to be empty. Instances of this type with an empty value here are
-                                    almost certainly wrong.
-                                    More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
-                                  type: string
-                                optional:
-                                  description: Specify whether the Secret or its key
-                                    must be defined
-                                  type: boolean
-                              required:
-                              - key
-                              type: object
-                              x-kubernetes-map-type: atomic
+                                redisURL is the Redis connection URL when type is "redis".
+                                Format: redis://[:password@]host:port[/db]
+                              type: string
+                            type:
+                              allOf:
+                              - enum:
+                                - memory
+                                - redis
+                              - enum:
+                                - memory
+                                - redis
+                              default: memory
+                              description: type is the task store backend type. Defaults
+                                to "memory".
+                              type: string
                           type: object
-                      required:
-                      - name
+                        taskTTL:
+                          default: 1h
+                          description: |-
+                            taskTTL is how long completed/failed/canceled tasks are retained before eviction.
+                            Uses Go duration format (e.g., "1h", "30m"). Defaults to "1h".
+                          type: string
                       type: object
-                    type: array
-                  handler:
-                    default: runtime
-                    description: |-
-                      handler specifies the message handler mode.
-                      "echo" returns input messages back (for testing connectivity).
-                      "demo" provides streaming responses with simulated tool calls (for demos).
-                      "runtime" uses the runtime framework in the container (default, for production).
-                    enum:
-                    - echo
-                    - demo
-                    - runtime
-                    type: string
-                  image:
-                    description: |-
-                      image overrides the default facade container image.
-                      Use this to specify a custom facade image or private registry.
-                    type: string
-                  mcp:
-                    description: |-
-                      mcp configures the MCP (Model Context Protocol) surface for
-                      function-mode pods. Cannot be enabled on agent-mode runtimes
-                      (CEL-validated). When enabled, the pod serves Streamable HTTP
-                      MCP on facade.mcp.port (default 9998) alongside the function
-                      HTTP route on facade.port.
-                    properties:
-                      enabled:
-                        description: enabled turns the MCP server on. Default false.
-                        type: boolean
-                      port:
-                        description: port is the listen port for the MCP server. Default
-                          9998.
-                        format: int32
-                        maximum: 65535
-                        minimum: 1
-                        type: integer
-                    type: object
-                  port:
-                    default: 8080
-                    description: port is the port number for the facade service.
-                    format: int32
-                    maximum: 65535
-                    minimum: 1
-                    type: integer
-                  type:
-                    default: websocket
-                    description: type specifies the facade protocol type.
-                    enum:
-                    - websocket
-                    - grpc
-                    - a2a
-                    - rest
-                    type: string
-                required:
-                - type
-                type: object
+                    clientToolTimeout:
+                      description: |-
+                        clientToolTimeout is the max time to wait for client tool responses per turn.
+                        Defaults to 60s.
+                      type: string
+                    drainTimeout:
+                      description: |-
+                        drainTimeout is how long the facade keeps serving active realtime calls
+                        after receiving SIGTERM (rollout/drain/scale-down) before cleanly tearing
+                        down the remainder. Duration format (e.g. "30s", "2m"). New calls stop
+                        immediately on drain regardless. Defaults to 30s when unset.
+                      type: string
+                    expose:
+                      description: |-
+                        expose opts this agent into operator-provisioned external exposure.
+                        Opt-in: an agent is never externally reachable unless this is set AND the
+                        platform has a default-exposure Gateway configured (Helm
+                        `defaultExposure`). When both hold, the operator creates a host-based
+                        HTTPRoute targeting this agent's facade Service, surfaced via
+                        status.facade.endpoints (#1553). Exposure does NOT add authentication —
+                        spec.externalAuth is still the gate; an exposed agent with no externalAuth
+                        validators is management-plane-only at the facade.
+                      properties:
+                        enabled:
+                          description: |-
+                            enabled creates an external HTTPRoute for this agent. Requires the platform
+                            to have a default-exposure Gateway configured (Helm `defaultExposure`);
+                            when no Gateway is configured this is a no-op. Defaults to false.
+                          type: boolean
+                        host:
+                          description: |-
+                            host overrides the generated hostname (`{name}.{namespace}.{baseDomain}`).
+                            Set for a custom domain on an individual agent. Must be a hostname the
+                            configured Gateway's listener accepts (e.g. covered by its TLS cert).
+                          type: string
+                      type: object
+                    extraEnv:
+                      description: |-
+                        extraEnv defines additional environment variables for the facade container.
+                        Use this for debugging (e.g., LOG_LEVEL=debug) or custom configuration.
+                      items:
+                        description: EnvVar represents an environment variable present
+                          in a Container.
+                        properties:
+                          name:
+                            description: |-
+                              Name of the environment variable.
+                              May consist of any printable ASCII characters except '='.
+                            type: string
+                          value:
+                            description: |-
+                              Variable references $(VAR_NAME) are expanded
+                              using the previously defined environment variables in the container and
+                              any service environment variables. If a variable cannot be resolved,
+                              the reference in the input string will be unchanged. Double $$ are reduced
+                              to a single $, which allows for escaping the $(VAR_NAME) syntax: i.e.
+                              "$$(VAR_NAME)" will produce the string literal "$(VAR_NAME)".
+                              Escaped references will never be expanded, regardless of whether the variable
+                              exists or not.
+                              Defaults to "".
+                            type: string
+                          valueFrom:
+                            description: Source for the environment variable's value.
+                              Cannot be used if value is not empty.
+                            properties:
+                              configMapKeyRef:
+                                description: Selects a key of a ConfigMap.
+                                properties:
+                                  key:
+                                    description: The key to select.
+                                    type: string
+                                  name:
+                                    default: ""
+                                    description: |-
+                                      Name of the referent.
+                                      This field is effectively required, but due to backwards compatibility is
+                                      allowed to be empty. Instances of this type with an empty value here are
+                                      almost certainly wrong.
+                                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                                    type: string
+                                  optional:
+                                    description: Specify whether the ConfigMap or
+                                      its key must be defined
+                                    type: boolean
+                                required:
+                                - key
+                                type: object
+                                x-kubernetes-map-type: atomic
+                              fieldRef:
+                                description: |-
+                                  Selects a field of the pod: supports metadata.name, metadata.namespace, `metadata.labels['<KEY>']`, `metadata.annotations['<KEY>']`,
+                                  spec.nodeName, spec.serviceAccountName, status.hostIP, status.podIP, status.podIPs.
+                                properties:
+                                  apiVersion:
+                                    description: Version of the schema the FieldPath
+                                      is written in terms of, defaults to "v1".
+                                    type: string
+                                  fieldPath:
+                                    description: Path of the field to select in the
+                                      specified API version.
+                                    type: string
+                                required:
+                                - fieldPath
+                                type: object
+                                x-kubernetes-map-type: atomic
+                              fileKeyRef:
+                                description: |-
+                                  FileKeyRef selects a key of the env file.
+                                  Requires the EnvFiles feature gate to be enabled.
+                                properties:
+                                  key:
+                                    description: |-
+                                      The key within the env file. An invalid key will prevent the pod from starting.
+                                      The keys defined within a source may consist of any printable ASCII characters except '='.
+                                      During Alpha stage of the EnvFiles feature gate, the key size is limited to 128 characters.
+                                    type: string
+                                  optional:
+                                    default: false
+                                    description: |-
+                                      Specify whether the file or its key must be defined. If the file or key
+                                      does not exist, then the env var is not published.
+                                      If optional is set to true and the specified key does not exist,
+                                      the environment variable will not be set in the Pod's containers.
+
+                                      If optional is set to false and the specified key does not exist,
+                                      an error will be returned during Pod creation.
+                                    type: boolean
+                                  path:
+                                    description: |-
+                                      The path within the volume from which to select the file.
+                                      Must be relative and may not contain the '..' path or start with '..'.
+                                    type: string
+                                  volumeName:
+                                    description: The name of the volume mount containing
+                                      the env file.
+                                    type: string
+                                required:
+                                - key
+                                - path
+                                - volumeName
+                                type: object
+                                x-kubernetes-map-type: atomic
+                              resourceFieldRef:
+                                description: |-
+                                  Selects a resource of the container: only resources limits and requests
+                                  (limits.cpu, limits.memory, limits.ephemeral-storage, requests.cpu, requests.memory and requests.ephemeral-storage) are currently supported.
+                                properties:
+                                  containerName:
+                                    description: 'Container name: required for volumes,
+                                      optional for env vars'
+                                    type: string
+                                  divisor:
+                                    anyOf:
+                                    - type: integer
+                                    - type: string
+                                    description: Specifies the output format of the
+                                      exposed resources, defaults to "1"
+                                    pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                                    x-kubernetes-int-or-string: true
+                                  resource:
+                                    description: 'Required: resource to select'
+                                    type: string
+                                required:
+                                - resource
+                                type: object
+                                x-kubernetes-map-type: atomic
+                              secretKeyRef:
+                                description: Selects a key of a secret in the pod's
+                                  namespace
+                                properties:
+                                  key:
+                                    description: The key of the secret to select from.  Must
+                                      be a valid secret key.
+                                    type: string
+                                  name:
+                                    default: ""
+                                    description: |-
+                                      Name of the referent.
+                                      This field is effectively required, but due to backwards compatibility is
+                                      allowed to be empty. Instances of this type with an empty value here are
+                                      almost certainly wrong.
+                                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                                    type: string
+                                  optional:
+                                    description: Specify whether the Secret or its
+                                      key must be defined
+                                    type: boolean
+                                required:
+                                - key
+                                type: object
+                                x-kubernetes-map-type: atomic
+                            type: object
+                        required:
+                        - name
+                        type: object
+                      type: array
+                    handler:
+                      default: runtime
+                      description: |-
+                        handler specifies the message handler mode.
+                        "echo" returns input messages back (for testing connectivity).
+                        "demo" provides streaming responses with simulated tool calls (for demos).
+                        "runtime" uses the runtime framework in the container (default, for production).
+                      enum:
+                      - echo
+                      - demo
+                      - runtime
+                      type: string
+                    image:
+                      description: |-
+                        image overrides the default facade container image.
+                        Use this to specify a custom facade image or private registry.
+                      type: string
+                    managementPlane:
+                      description: |-
+                        managementPlane gates this facade's internal management-plane twin
+                        listener. Default true: the operator allocates an internal port,
+                        publishes it under status.managementEndpoints, and the facade serves a
+                        management-plane-only auth chain there (the dashboard's "Try this agent"
+                        and other in-cluster callers dial it). Set false for an external-only
+                        facade — no internal listener, no *-mgmt Service port, no status entry;
+                        the external listener is unaffected. Replaces the former agent-global
+                        externalAuth.allowManagementPlane.
+                      type: boolean
+                    mcp:
+                      description: |-
+                        mcp configures the MCP (Model Context Protocol) surface. Only
+                        meaningful on a type=mcp facade (function mode). The pod serves
+                        Streamable HTTP MCP on mcp.port (default 9998) alongside the function
+                        rest facade.
+                      properties:
+                        enabled:
+                          description: enabled turns the MCP server on. Default false.
+                          type: boolean
+                        port:
+                          description: port is the listen port for the MCP server.
+                            Default 9998.
+                          format: int32
+                          maximum: 65535
+                          minimum: 1
+                          type: integer
+                      type: object
+                    port:
+                      default: 8080
+                      description: port is the port number for the facade service.
+                      format: int32
+                      maximum: 65535
+                      minimum: 1
+                      type: integer
+                    type:
+                      default: websocket
+                      description: type specifies the facade protocol type.
+                      enum:
+                      - websocket
+                      - a2a
+                      - rest
+                      - mcp
+                      type: string
+                  required:
+                  - type
+                  type: object
+                maxItems: 4
+                minItems: 1
+                type: array
+                x-kubernetes-list-type: atomic
               framework:
                 description: |-
                   framework specifies which agent framework to use.
@@ -4834,10 +4562,11 @@ spec:
                 default: agent
                 description: |-
                   mode controls how the AgentRuntime is invoked. "agent" (default) is
-                  the existing conversational runtime; "function" exposes the pack as
-                  a one-shot, structured-I/O HTTP endpoint at POST /functions/{name}.
-                  When set to "function", spec.inputSchema and spec.outputSchema are
-                  required and the facade type must be 'rest' or 'a2a'.
+                  the existing conversational runtime (websocket and/or a2a facades);
+                  "function" exposes the pack as a one-shot, structured-I/O HTTP endpoint
+                  at POST /functions/{name} (a rest facade, optionally with an mcp
+                  facade). When set to "function", spec.inputSchema and spec.outputSchema
+                  are required.
                 enum:
                 - agent
                 - function
@@ -4875,7 +4604,7 @@ spec:
                   (extraEnv, extraEnvFrom, extraVolumeMounts) apply to both the facade
                   and runtime containers but NOT to operator-injected sidecars
                   (e.g. policy-proxy). Per-container env overrides remain available
-                  via spec.facade.extraEnv and spec.runtime.extraEnv.
+                  via spec.facades[].extraEnv and spec.runtime.extraEnv.
                 properties:
                   affinity:
                     description: affinity replaces the operator-default affinity when
@@ -11988,7 +11717,7 @@ spec:
                 - name
                 type: object
             required:
-            - facade
+            - facades
             - promptPackRef
             type: object
             x-kubernetes-validations:
@@ -12002,20 +11731,23 @@ spec:
               rule: self.mode == 'function' || !has(self.outputSchema)
             - message: spec.outputFormat is only valid when spec.mode is 'function'
               rule: self.mode == 'function' || !has(self.outputFormat)
-            - message: mode 'function' requires facade.type 'rest' (HTTP) or 'a2a';
-                'websocket' and 'grpc' are not valid for functions
-              rule: self.mode != 'function' || self.facade.type in ['rest', 'a2a']
-            - message: facade.type 'rest' is only valid when mode is 'function'
-              rule: self.facade.type != 'rest' || self.mode == 'function'
-            - message: facade.mcp.enabled requires mode=function
-              rule: '!has(self.facade.mcp) || !self.facade.mcp.enabled || self.mode
-                == ''function'''
+            - message: spec.facades must not contain duplicate facade types
+              rule: self.facades.all(f, self.facades.exists_one(g, g.type == f.type))
+            - message: mode 'agent' allows only 'websocket' and 'a2a' facades
+              rule: self.mode != 'agent' || self.facades.all(f, f.type == 'websocket'
+                || f.type == 'a2a')
+            - message: mode 'function' allows only 'rest' and 'mcp' facades
+              rule: self.mode != 'function' || self.facades.all(f, f.type == 'rest'
+                || f.type == 'mcp')
+            - message: mode 'function' requires exactly one 'rest' facade
+              rule: self.mode != 'function' || self.facades.exists_one(f, f.type ==
+                'rest')
           status:
             description: status defines the observed state of AgentRuntime
             properties:
               a2a:
-                description: a2a holds A2A-specific status information when facade.type
-                  is "a2a".
+                description: a2a holds A2A-specific status information when an a2a
+                  facade is present.
                 properties:
                   agentCardURL:
                     description: agentCardURL is the URL where the agent card is served.
@@ -12188,11 +11920,11 @@ spec:
               managementEndpoints:
                 description: |-
                   managementEndpoints reports the internal (management-plane) listener ports
-                  the facade serves when externalAuth.allowManagementPlane is enabled. A nil
-                  value means the management plane is disabled and no internal listener
-                  exists. The dashboard and in-cluster callers read these to dial the agent
-                  over the management plane — they never compute the port from the external
-                  port.
+                  the facades serve, one entry per surface whose facade has
+                  managementPlane enabled (the default). A surface's field is nil when no
+                  such facade exists or its managementPlane is false. The dashboard and
+                  in-cluster callers read these to dial the agent over the management plane
+                  — they never compute the port from the external port.
                 properties:
                   a2a:
                     description: a2a is the internal A2A management-plane port (dual-protocol

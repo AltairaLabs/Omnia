@@ -84,8 +84,8 @@ spec:
     - name: default
       providerRef:
         name: openrouter
-  facade:
-    type: websocket
+  facades:
+    - type: websocket
 ```
 
 ## Choosing a model

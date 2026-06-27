@@ -13,7 +13,7 @@ import { useDataService } from "@/lib/data";
 import { useAgentCost } from "@/hooks/agents";
 import { useProvider } from "@/hooks/resources";
 import type { AgentRuntime } from "@/types";
-import { getDefaultProviderRef } from "@/types/agent-runtime";
+import { getDefaultProviderRef, primaryFacade } from "@/types/agent-runtime";
 import { useWorkspace } from "@/contexts/workspace-context";
 
 interface AgentCardProps {
@@ -113,7 +113,7 @@ export function AgentCard({ agent }: Readonly<AgentCardProps>) {
             </div>
             <div>
               <p className="text-muted-foreground">Facade</p>
-              <p className="font-medium capitalize">{spec.facade?.type || "websocket"}</p>
+              <p className="font-medium capitalize">{primaryFacade(spec)?.type ?? "websocket"}</p>
             </div>
           </div>
         </CardContent>

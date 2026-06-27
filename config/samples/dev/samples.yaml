@@ -480,13 +480,13 @@ spec:
     - name: default
       providerRef:
         name: claude-provider
-  facade:
-    type: websocket
-    port: 8080
-    handler: demo
-    extraEnv:
-      - name: LOG_LEVEL
-        value: debug
+  facades:
+    - type: websocket
+      port: 8080
+      handler: demo
+      extraEnv:
+        - name: LOG_LEVEL
+          value: debug
   context:
     type: memory
     ttl: "1h"
@@ -518,13 +518,13 @@ spec:
     - name: default
       providerRef:
         name: gemini-provider
-  facade:
-    type: websocket
-    port: 8080
-    handler: runtime
-    extraEnv:
-      - name: LOG_LEVEL
-        value: debug
+  facades:
+    - type: websocket
+      port: 8080
+      handler: runtime
+      extraEnv:
+        - name: LOG_LEVEL
+          value: debug
   memory:
     enabled: true
   context:
@@ -558,13 +558,13 @@ spec:
     - name: default
       providerRef:
         name: ollama-provider
-  facade:
-    type: websocket
-    port: 8080
-    handler: runtime
-    extraEnv:
-      - name: LOG_LEVEL
-        value: debug
+  facades:
+    - type: websocket
+      port: 8080
+      handler: runtime
+      extraEnv:
+        - name: LOG_LEVEL
+          value: debug
   memory:
     enabled: true
   context:

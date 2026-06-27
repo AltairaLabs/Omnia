@@ -29,7 +29,8 @@ function createMockAgent(name: string, namespace: string): AgentRuntime {
     kind: "AgentRuntime",
     metadata: { name, namespace },
     spec: {
-      facade: { type: "websocket", port: 8080 },
+      promptPackRef: { name: "test-pack" },
+      facades: [{ type: "websocket", port: 8080 }],
       runtime: { replicas: 1 },
     },
     status: { phase: "Running" },

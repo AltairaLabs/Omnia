@@ -33,10 +33,7 @@ const secretKeyRedisURL = "url"
 func (r *AgentRuntimeReconciler) buildFacadeEnvVars(
 	agentRuntime *omniav1alpha1.AgentRuntime,
 ) []corev1.EnvVar {
-	port := int32(DefaultFacadePort)
-	if agentRuntime.Spec.Facade.Port != nil {
-		port = *agentRuntime.Spec.Facade.Port
-	}
+	port := primaryFacadePort(agentRuntime)
 
 	envVars := []corev1.EnvVar{
 		// Identity from Downward API — facade reads CRD directly using these
@@ -76,8 +73,8 @@ func (r *AgentRuntimeReconciler) buildFacadeEnvVars(
 
 	// Determine handler mode - default to runtime if not specified
 	handlerMode := omniav1alpha1.HandlerModeRuntime
-	if agentRuntime.Spec.Facade.Handler != nil {
-		handlerMode = *agentRuntime.Spec.Facade.Handler
+	if f := primaryFacade(agentRuntime); f != nil && f.Handler != nil {
+		handlerMode = *f.Handler
 	}
 
 	envVars = append(envVars, corev1.EnvVar{
@@ -153,9 +150,9 @@ func (r *AgentRuntimeReconciler) buildFacadeEnvVars(
 		})
 	}
 
-	// Add extra env vars from CRD
-	if agentRuntime.Spec.Facade.ExtraEnv != nil {
-		envVars = append(envVars, agentRuntime.Spec.Facade.ExtraEnv...)
+	// Add extra env vars from the primary facade
+	if f := primaryFacade(agentRuntime); f != nil && f.ExtraEnv != nil {
+		envVars = append(envVars, f.ExtraEnv...)
 	}
 
 	return envVars

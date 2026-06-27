@@ -82,8 +82,8 @@ serviceAccount:
 # spec:
 #   promptPackRef:
 #     name: my-promptpack
-#   facade:
-#     type: websocket
+#   facades:
+#     - type: websocket
 #   podOverrides:
 #     serviceAccountName: omnia-wli
 #     labels:

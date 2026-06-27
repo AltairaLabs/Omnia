@@ -8,7 +8,7 @@ describe("facadeAuthHint", () => {
   });
 
   it("returns management-plane only when no auth method is set", () => {
-    const auth: ExternalAuth = { allowManagementPlane: true };
+    const auth: ExternalAuth = {};
     expect(facadeAuthHint(auth)).toEqual({ label: "Management-plane only" });
   });
 

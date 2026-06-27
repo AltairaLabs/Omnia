@@ -31,8 +31,8 @@ func (r *AgentRuntimeReconciler) buildFacadeContainer(
 ) corev1.Container {
 	// Check for CRD image override first, then operator default, then hardcoded default
 	facadeImage := ""
-	if agentRuntime.Spec.Facade.Image != "" {
-		facadeImage = agentRuntime.Spec.Facade.Image
+	if f := primaryFacade(agentRuntime); f != nil && f.Image != "" {
+		facadeImage = f.Image
 	} else if r.FacadeImage != "" {
 		facadeImage = r.FacadeImage
 	} else {
@@ -113,8 +113,8 @@ func (r *AgentRuntimeReconciler) buildA2AContainer(
 ) corev1.Container {
 	// A2A uses the facade image (which includes the SDK)
 	facadeImage := ""
-	if agentRuntime.Spec.Facade.Image != "" {
-		facadeImage = agentRuntime.Spec.Facade.Image
+	if f := primaryFacade(agentRuntime); f != nil && f.Image != "" {
+		facadeImage = f.Image
 	} else if r.FacadeImage != "" {
 		facadeImage = r.FacadeImage
 	} else {

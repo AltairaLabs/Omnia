@@ -162,7 +162,7 @@ var _ = Describe("AgentRuntime facade endpoints", func() {
 				ObjectMeta: metav1.ObjectMeta{Name: testMappedAgent, Namespace: mapNS.Name},
 				Spec: omniav1alpha1.AgentRuntimeSpec{
 					PromptPackRef: omniav1alpha1.PromptPackRef{Name: "dummy"},
-					Facade:        omniav1alpha1.FacadeConfig{Type: omniav1alpha1.FacadeType(omniav1alpha1.FacadeProtocolWebSocket), Port: &port},
+					Facades:       []omniav1alpha1.FacadeConfig{{Type: omniav1alpha1.FacadeType(omniav1alpha1.FacadeProtocolWebSocket), Port: &port}},
 				},
 			}
 			Expect(k8sClient.Create(ctx, agent)).To(Succeed())

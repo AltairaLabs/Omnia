@@ -37,8 +37,6 @@ import (
 	"github.com/altairalabs/omnia/internal/media"
 	"github.com/altairalabs/omnia/internal/session"
 	"github.com/altairalabs/omnia/internal/tracing"
-
-	a2aserver "github.com/AltairaLabs/PromptKit/server/a2a"
 )
 
 // runWebSocketFacade starts the traditional WebSocket facade with a gRPC runtime sidecar.
@@ -123,7 +121,7 @@ func runWebSocketFacade(cfg *agent.Config, log logr.Logger, tracingProvider *tra
 // webSocketServers holds the external facade server and its optional internal
 // management-plane twin (and their muxes). The internal pair is nil when no
 // internal listener is configured (cfg.InternalFacadePort == 0, i.e.
-// allowManagementPlane disabled).
+// managementPlane disabled).
 type webSocketServers struct {
 	external    *facade.Server
 	externalMux *http.ServeMux
@@ -271,7 +269,7 @@ func buildWebSocketServer(
 	servers := &webSocketServers{external: external, externalMux: newWSMux(external)}
 
 	// Internal twin listener: management-plane-only chain. Started only when the
-	// controller has allocated an internal port (allowManagementPlane enabled).
+	// controller has allocated an internal port (managementPlane enabled).
 	// It never permits unauthenticated upgrades — it exists solely for
 	// mgmt-plane callers, which always present a dashboard-minted JWT.
 	if cfg.InternalFacadePort != 0 {
@@ -421,13 +419,6 @@ func startA2AServer(
 		"conversationTTL", cfg.A2AConversationTTL,
 	)
 
-	// Legacy per-SDK bearer authenticator (see a2a.go for rationale).
-	var a2aAuth a2aserver.Authenticator
-	if cfg.A2AAuthToken != "" {
-		a2aAuth = facadea2a.NewBearerAuthenticator(cfg.A2AAuthToken)
-		log.Info("A2A bearer auth enabled (legacy)")
-	}
-
 	// Build the auth chain for this A2A endpoint. In dual-protocol mode
 	// the WebSocket side has already built its chain in
 	// buildWebSocketServer; we rebuild here rather than plumb it across
@@ -462,7 +453,6 @@ func startA2AServer(
 		TaskTTL:         cfg.A2ATaskTTL,
 		ConversationTTL: cfg.A2AConversationTTL,
 		CardProvider:    cardProvider,
-		Authenticator:   a2aAuth,
 		TaskStore:       taskStore,
 		Log:             log,
 	})

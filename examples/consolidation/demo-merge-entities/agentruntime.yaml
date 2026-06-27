@@ -12,9 +12,9 @@ spec:
   mode: function
   promptPackRef:
     name: demo-merge-entities
-  facade:
-    type: rest
-    port: 8080
+  facades:
+    - type: rest
+      port: 8080
   inputSchema:
     type: object
     required:

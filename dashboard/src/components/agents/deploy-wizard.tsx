@@ -204,7 +204,7 @@ export function composeAgentYaml(
   namespace: string | undefined,
 ): Record<string, unknown> {
   // Function mode serves HTTP (POST /functions/{name}); the CEL gate
-  // requires facade.type 'rest'. Pin it rather than trusting facadeType.
+  // requires a facade of type 'rest'. Pin it rather than trusting facadeType.
   const facadeType: FacadeType =
     formData.mode === "function" ? "rest" : formData.facadeType;
   const yaml: Record<string, unknown> = {
@@ -219,10 +219,12 @@ export function composeAgentYaml(
         name: formData.promptPackName,
         track: formData.promptPackTrack,
       },
-      facade: {
-        type: facadeType,
-        port: formData.facadePort,
-      },
+      facades: [
+        {
+          type: facadeType,
+          port: formData.facadePort,
+        },
+      ],
     },
   };
   const spec = yaml.spec as Record<string, unknown>;

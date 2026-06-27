@@ -3,7 +3,7 @@
  *
  * Invokes a function-mode AgentRuntime, mirroring how the Console reaches an
  * agent's facade: address the operator-created Service `<fnName>.<namespace>`
- * on spec.facade.port and POST the input to the facade's `/functions/<fnName>`
+ * on the primary facade's port and POST the input to the facade's `/functions/<fnName>`
  * endpoint. Auth mirrors the Console WS proxy — a minted mgmt-plane JWT when a
  * signing key is configured, otherwise unauthenticated (dev fallback).
  *
@@ -15,7 +15,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { withWorkspaceAccess } from "@/lib/auth/workspace-guard";
 import { getWorkspaceResource, CRD_AGENTS } from "@/lib/k8s/workspace-route-helpers";
 import { mgmtPlaneAuthHeaders } from "@/lib/functions/invoke-token";
-import { isFunctionMode } from "@/types/agent-runtime";
+import { isFunctionMode, primaryFacade } from "@/types/agent-runtime";
 import type { AgentRuntime } from "@/types";
 import type { WorkspaceAccess } from "@/types/workspace";
 import type { User } from "@/lib/auth/types";
@@ -62,7 +62,7 @@ export const POST = withWorkspaceAccess<Params>(
     // in the JWT `workspace` claim. These differ in the normal case — don't
     // pass `namespace` to mgmtPlaneAuthHeaders (#1552).
     const namespace = res.workspace.spec.namespace.name;
-    const port = res.resource.spec.facade?.port ?? DEFAULT_FACADE_PORT;
+    const port = primaryFacade(res.resource.spec)?.port ?? DEFAULT_FACADE_PORT;
     const target = `http://${fnName}.${namespace}.${SERVICE_DOMAIN}:${port}/functions/${encodeURIComponent(fnName)}`;
 
     const body = await request.text();

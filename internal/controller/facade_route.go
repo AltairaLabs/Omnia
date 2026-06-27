@@ -35,7 +35,7 @@ import (
 // DefaultExposureConfig is the chart-configured Gateway + base domain used to
 // provision per-agent HTTPRoutes (#1553). The feature is OFF unless both a
 // gateway name and a base domain are set (`configured`); even then an agent is
-// exposed only when it opts in via spec.facade.expose.enabled.
+// exposed only when it opts in via the primary facade's expose.enabled.
 type DefaultExposureConfig struct {
 	BaseDomain       string
 	GatewayName      string
@@ -116,27 +116,24 @@ func (r *AgentRuntimeReconciler) reconcileFacadeRoute(
 // exposeDecision returns whether the agent should have an external route, and
 // the hostname + backend Service port to use. host-based only: a root-path
 // HTTPRoute that the #1559 discovery marks valid:true with no URL rewrite.
+//
+// Exposure follows the primary facade's expose config and routes to the primary
+// facade port. Independently exposing a secondary facade (e.g. an external a2a
+// route alongside a websocket primary) is a known gap — a dual agent's a2a card
+// then falls back to the in-cluster URL (correct, just not externally routed).
 func (r *AgentRuntimeReconciler) exposeDecision(agent *omniav1alpha1.AgentRuntime) (bool, string, int32) {
 	if !r.DefaultExposure.configured() {
 		return false, "", 0
 	}
-	f := agent.Spec.Facade
-	if f.Expose == nil || !f.Expose.Enabled {
-		return false, "", 0
-	}
-	// grpc primary facades aren't routable via HTTPRoute.
-	if f.Type == omniav1alpha1.FacadeTypeGRPC {
+	f := primaryFacade(agent)
+	if f == nil || f.Expose == nil || !f.Expose.Enabled {
 		return false, "", 0
 	}
 	host := f.Expose.Host
 	if host == "" {
 		host = fmt.Sprintf("%s.%s.%s", agent.Name, agent.Namespace, r.DefaultExposure.BaseDomain)
 	}
-	port := defaultFacadePort
-	if f.Port != nil {
-		port = *f.Port
-	}
-	return true, host, port
+	return true, host, primaryFacadePort(agent)
 }
 
 // buildHTTPRouteSpec builds a host-based HTTPRoute spec pointing the configured

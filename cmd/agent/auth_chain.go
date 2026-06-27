@@ -32,45 +32,8 @@ import (
 )
 
 // sharedTokenSecretKey is the data key the chart-managed Secret holds
-// the bearer value under. Matches the existing OMNIA_A2A_AUTH_TOKEN
-// pattern (and the documented A2A integration).
+// the bearer value under (the documented sharedToken integration).
 const sharedTokenSecretKey = "token"
-
-// buildAuthChain composes the data-plane external chain with the mgmt-plane
-// validator: external (sharedToken/apiKeys/oidc/edgeTrust) → mgmt-plane.
-//
-// As of full plane isolation (#1620 Milestone C) no listener wires this merged
-// chain: external listeners run buildExternalChain (data-plane only) and the
-// internal twin listeners run buildMgmtChain (mgmt-plane only). It is retained
-// as the canonical composition and exercised by the data-plane edge-case tests
-// (legacy A2A projection, missing-Secret errors) in auth_chain_test.go.
-//
-// Inputs:
-//
-//   - k8s: client for reading the AgentRuntime CR + the referenced
-//     SharedToken Secret. Pass nil when the agent is running outside a
-//     cluster (dev/test).
-//   - mgmtPlane: the mgmt-plane validator built earlier in startup
-//     (loadMgmtPlaneValidator). Pass nil to omit it from the chain.
-//
-// Returns nil if the chain ends up empty.
-func buildAuthChain(
-	ctx context.Context,
-	k8s client.Client,
-	log logr.Logger,
-	agentName, namespace string,
-	mgmtPlane auth.Validator,
-) (auth.Chain, error) {
-	external, err := buildExternalChain(ctx, k8s, log, agentName, namespace)
-	if err != nil {
-		return nil, err
-	}
-	chain := append(external, buildMgmtChain(mgmtPlane)...)
-	if len(chain) == 0 {
-		return nil, nil
-	}
-	return chain, nil
-}
 
 // buildExternalChain assembles only the data-plane (external) validators from
 // spec.externalAuth — sharedToken, apiKeys, oidc, edgeTrust — in order. It never
@@ -98,13 +61,6 @@ func buildExternalChain(
 		case err != nil:
 			return nil, fmt.Errorf("get AgentRuntime %s/%s: %w", namespace, agentName, err)
 		default:
-			// Fold the deprecated spec.a2a.authentication.secretRef into
-			// spec.externalAuth.sharedToken. The reconciler does the same
-			// on its in-memory copy, but that copy is never persisted, so
-			// this side needs to re-run the projection — otherwise legacy
-			// CRs without spec.externalAuth produce an empty data-plane
-			// chain and every A2A request 401s after PR 3's default flip.
-			omniav1alpha1.ProjectLegacyA2AAuth(ar)
 			validators, err := buildDataPlaneValidators(ctx, k8s, log, ar)
 			if err != nil {
 				return nil, err

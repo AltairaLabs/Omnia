@@ -206,12 +206,12 @@ spec:
   mode: function
   promptPackRef:
     name: %[3]s
-  facade:
-    type: rest
-    port: 8080
-    extraEnv:
-      - name: OMNIA_FACADE_ALLOW_UNAUTHENTICATED
-        value: "true"
+  facades:
+    - type: rest
+      port: 8080
+      extraEnv:
+        - name: OMNIA_FACADE_ALLOW_UNAUTHENTICATED
+          value: "true"
   inputSchema:
     type: object
     required: ["q"]

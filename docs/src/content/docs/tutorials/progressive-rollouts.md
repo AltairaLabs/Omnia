@@ -86,10 +86,10 @@ spec:
       providerRef:
         name: claude-sonnet
 
-  facade:
-    type: websocket
-    port: 8080
-    handler: runtime
+  facades:
+    - type: websocket
+      port: 8080
+      handler: runtime
 
   rollout:
     candidate:

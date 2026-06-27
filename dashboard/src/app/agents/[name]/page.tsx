@@ -170,7 +170,11 @@ export default function AgentDetailPage({ params }: Readonly<AgentDetailPageProp
                 nests PromptPack, Session and Memory. PromptPack → Workload tab. */}
             <AgentTopology
               agentName={metadata.name}
-              facades={[{ type: spec.facade?.type ?? "websocket", port: spec.facade?.port }]}
+              facades={
+                spec.facades?.length
+                  ? spec.facades.map(f => ({ type: f.type, port: f.port }))
+                  : [{ type: "websocket" }]
+              }
               framework={spec.framework}
               promptPack={{
                 name: spec.promptPackRef?.name,

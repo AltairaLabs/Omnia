@@ -35,7 +35,7 @@ function ctx() {
   return { params: Promise.resolve({ name: "ws1", agentName: "a1" }) };
 }
 
-async function setupEditor() {
+async function setupEditor(facades: unknown = [{ type: "websocket", port: 8080 }]) {
   const { getUser } = await import("@/lib/auth");
   const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
   const { getWorkspaceResource } = await import("@/lib/k8s/workspace-route-helpers");
@@ -47,7 +47,7 @@ async function setupEditor() {
   });
   vi.mocked(getWorkspaceResource).mockResolvedValue({
     ok: true,
-    resource: {} as never,
+    resource: { spec: { promptPackRef: { name: "p" }, facades } } as never,
     workspace: {} as never,
     clientOptions: { workspace: "ws1", namespace: "ns1", role: "editor" },
   } as Awaited<ReturnType<typeof getWorkspaceResource>>);
@@ -56,7 +56,7 @@ async function setupEditor() {
 describe("PATCH /workspaces/:name/agents/:agentName/expose (#1611)", () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it("patches spec.facade.expose with enabled + host", async () => {
+  it("sets expose on the primary facade with enabled + host", async () => {
     await setupEditor();
     const { patchCrd } = await import("@/lib/k8s/crd-operations");
     vi.mocked(patchCrd).mockResolvedValue({ metadata: { name: "a1" } } as never);
@@ -65,11 +65,15 @@ describe("PATCH /workspaces/:name/agents/:agentName/expose (#1611)", () => {
     const res = await PATCH(req({ enabled: true, host: "x.example.com" }), ctx());
     expect(res.status).toBe(200);
     expect(patchCrd).toHaveBeenCalledWith(expect.anything(), expect.anything(), "a1", {
-      spec: { facade: { expose: { enabled: true, host: "x.example.com" } } },
+      spec: {
+        facades: [
+          { type: "websocket", port: 8080, expose: { enabled: true, host: "x.example.com" } },
+        ],
+      },
     });
   });
 
-  it("clears the host (null) when blank", async () => {
+  it("omits the host when blank", async () => {
     await setupEditor();
     const { patchCrd } = await import("@/lib/k8s/crd-operations");
     vi.mocked(patchCrd).mockResolvedValue({} as never);
@@ -77,8 +81,37 @@ describe("PATCH /workspaces/:name/agents/:agentName/expose (#1611)", () => {
 
     await PATCH(req({ enabled: false, host: "  " }), ctx());
     expect(patchCrd).toHaveBeenCalledWith(expect.anything(), expect.anything(), "a1", {
-      spec: { facade: { expose: { enabled: false, host: null } } },
+      spec: {
+        facades: [{ type: "websocket", port: 8080, expose: { enabled: false } }],
+      },
     });
+  });
+
+  it("sets expose only on the primary (websocket) facade in a multi-facade agent", async () => {
+    await setupEditor([
+      { type: "a2a", port: 9000 },
+      { type: "websocket", port: 8080 },
+    ]);
+    const { patchCrd } = await import("@/lib/k8s/crd-operations");
+    vi.mocked(patchCrd).mockResolvedValue({} as never);
+    const { PATCH } = await import("./route");
+
+    await PATCH(req({ enabled: true, host: "" }), ctx());
+    expect(patchCrd).toHaveBeenCalledWith(expect.anything(), expect.anything(), "a1", {
+      spec: {
+        facades: [
+          { type: "a2a", port: 9000 },
+          { type: "websocket", port: 8080, expose: { enabled: true } },
+        ],
+      },
+    });
+  });
+
+  it("returns 400 when the agent has no facades", async () => {
+    await setupEditor([]);
+    const { PATCH } = await import("./route");
+    const res = await PATCH(req({ enabled: true }), ctx());
+    expect(res.status).toBe(400);
   });
 
   it("rejects a non-boolean enabled with 400", async () => {

@@ -473,20 +473,6 @@ func (r *AgentRuntimeReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{RequeueAfter: time.Millisecond}, nil
 	}
 
-	// Project the deprecated spec.a2a.authentication.secretRef into
-	// spec.externalAuth.sharedToken so downstream code (cmd/agent's
-	// chain builder, the dashboard UI, etc.) only has to look at one
-	// field. In-memory only — never persisted. PR 2a added the helper;
-	// PR 2b wires it.
-	projectLegacyA2AAuth(agentRuntime)
-
-	// Project the deprecated top-level spec.a2a into spec.facade.a2a
-	// so legacy CRs continue to work after the migration. In-memory
-	// only — never persisted. Downstream readers should prefer
-	// spec.facade.a2a going forward; existing reads from spec.a2a
-	// are tolerated until the next major.
-	omniav1alpha1.ProjectLegacyFacadeA2A(agentRuntime)
-
 	// Track the observed generation up front so EVERY status write below —
 	// including the dependency-missing / Failed early-return paths — carries a
 	// current observedGeneration. Without this, a Failed agent keeps an empty
@@ -556,7 +542,7 @@ func (r *AgentRuntimeReconciler) Reconcile(ctx context.Context, req ctrl.Request
 
 	// Surface facade auth configuration as a status condition so
 	// operators can see at a glance whether the agent admits traffic.
-	// Catches the Unreachable combo (allowManagementPlane=false + no
+	// Catches the Unreachable combo (no facade has managementPlane enabled and no
 	// data-plane validator) which otherwise 401s silently at runtime.
 	authCond := evaluateExternalAuthCondition(agentRuntime)
 	SetCondition(&agentRuntime.Status.Conditions, agentRuntime.Generation,
@@ -695,10 +681,7 @@ func (r *AgentRuntimeReconciler) reconcileService(ctx context.Context, agentRunt
 		},
 	}
 
-	port := int32(DefaultFacadePort)
-	if agentRuntime.Spec.Facade.Port != nil {
-		port = *agentRuntime.Spec.Facade.Port
-	}
+	port := primaryFacadePort(agentRuntime)
 
 	result, err := controllerutil.CreateOrUpdate(ctx, r.Client, service, func() error {
 		// Set owner reference
@@ -740,13 +723,9 @@ func (r *AgentRuntimeReconciler) reconcileService(ctx context.Context, agentRunt
 
 		// Dual-protocol: expose A2A port alongside the primary facade.
 		if isDualProtocol(agentRuntime) {
-			a2aPort := int32(DefaultA2APort)
-			if agentRuntime.Spec.A2A.Port != nil {
-				a2aPort = *agentRuntime.Spec.A2A.Port
-			}
 			ports = append(ports, corev1.ServicePort{
 				Name:       "a2a",
-				Port:       a2aPort,
+				Port:       a2aSecondaryPort(agentRuntime),
 				TargetPort: intstr.FromString("a2a"),
 				Protocol:   corev1.ProtocolTCP,
 			})
@@ -755,15 +734,15 @@ func (r *AgentRuntimeReconciler) reconcileService(ctx context.Context, agentRunt
 		// MCP: expose MCP port on function-mode pods when enabled.
 		ports = appendMCPServicePort(ports, agentRuntime)
 
-		// Internal management-plane twin ports (ClusterIP-only) when
-		// allowManagementPlane is enabled.
+		// Internal management-plane twin ports (ClusterIP-only) for each facade
+		// whose managementPlane is enabled.
 		ports = appendManagementServicePorts(ports, agentRuntime)
 
-		// Classify every port for Istio L7 (waypoint/sidecar). Done in one pass
-		// over the assembled ports so facades added over time are handled in a
-		// single place (agentPortAppProtocol) and never silently left as opaque
-		// TCP — which would break mode=mesh routing and the facade WS upgrade.
-		setAgentPortAppProtocols(ports, facadeTypeOrDefault(agentRuntime))
+		// Classify every port for Istio L7 (waypoint/sidecar). All facade
+		// protocols are HTTP, so this stamps appProtocol=http on each port —
+		// never silently left as opaque TCP, which would break mode=mesh routing
+		// and the facade WS upgrade.
+		setAgentPortAppProtocols(ports)
 
 		service.Spec = corev1.ServiceSpec{
 			Selector: labels,
@@ -811,17 +790,15 @@ func (r *AgentRuntimeReconciler) reconcileA2AStatus(
 	log logr.Logger,
 	agentRuntime *omniav1alpha1.AgentRuntime,
 ) {
-	isA2A := agentRuntime.Spec.Facade.Type == omniav1alpha1.FacadeTypeA2A || isDualProtocol(agentRuntime)
-	if !isA2A {
+	if facadeOfType(agentRuntime, omniav1alpha1.FacadeTypeA2A) == nil {
 		return
 	}
 
-	port := int32(DefaultFacadePort)
-	if agentRuntime.Spec.Facade.Port != nil {
-		port = *agentRuntime.Spec.Facade.Port
-	}
-	if isDualProtocol(agentRuntime) && agentRuntime.Spec.A2A != nil && agentRuntime.Spec.A2A.Port != nil {
-		port = *agentRuntime.Spec.A2A.Port
+	// Standalone a2a binds the primary facade port; a dual-protocol secondary
+	// a2a binds the a2a port.
+	port := primaryFacadePort(agentRuntime)
+	if isDualProtocol(agentRuntime) {
+		port = a2aSecondaryPort(agentRuntime)
 	}
 
 	endpoint := fmt.Sprintf("http://%s.%s.svc.cluster.local:%d",

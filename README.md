@@ -114,9 +114,9 @@ spec:
     name: my-pack
   providerRef:
     name: claude-provider
-  facade:
-    type: websocket
-    port: 8080
+  facades:
+    - type: websocket
+      port: 8080
 ```
 
 4. Connect to your agent:

@@ -48,7 +48,7 @@ func TestBuildA2AContainer(t *testing.T) {
 	ar := &omniav1alpha1.AgentRuntime{}
 	ar.Name = "test-agent"
 	ar.Namespace = "default"
-	ar.Spec.Facade.Type = omniav1alpha1.FacadeTypeA2A
+	ar.Spec.Facades = []omniav1alpha1.FacadeConfig{{Type: omniav1alpha1.FacadeTypeA2A}}
 	ar.Spec.PromptPackRef.Name = "test-pack"
 
 	container := r.buildA2AContainer(ar, newTestPromptPack(), nil, 9999, nil)
@@ -80,7 +80,7 @@ func TestBuildA2AContainer_CustomImage(t *testing.T) {
 	r := &AgentRuntimeReconciler{FacadeImage: "custom:latest"}
 
 	ar := &omniav1alpha1.AgentRuntime{}
-	ar.Spec.Facade.Type = omniav1alpha1.FacadeTypeA2A
+	ar.Spec.Facades = []omniav1alpha1.FacadeConfig{{Type: omniav1alpha1.FacadeTypeA2A}}
 
 	container := r.buildA2AContainer(ar, newTestPromptPack(), nil, 8080, nil)
 	if container.Image != "custom:latest" {
@@ -92,8 +92,7 @@ func TestBuildA2AContainer_CRDImageOverride(t *testing.T) {
 	r := &AgentRuntimeReconciler{FacadeImage: "operator-default:v1"}
 
 	ar := &omniav1alpha1.AgentRuntime{}
-	ar.Spec.Facade.Type = omniav1alpha1.FacadeTypeA2A
-	ar.Spec.Facade.Image = "crd-override:v2"
+	ar.Spec.Facades = []omniav1alpha1.FacadeConfig{{Type: omniav1alpha1.FacadeTypeA2A, Image: "crd-override:v2"}}
 
 	container := r.buildA2AContainer(ar, newTestPromptPack(), nil, 8080, nil)
 	if container.Image != "crd-override:v2" {
@@ -107,11 +106,10 @@ func TestBuildA2AEnvVars(t *testing.T) {
 	ar := &omniav1alpha1.AgentRuntime{}
 	ar.Name = "test-agent"
 	ar.Namespace = "default"
-	ar.Spec.Facade.Type = omniav1alpha1.FacadeTypeA2A
-	ar.Spec.A2A = &omniav1alpha1.A2AConfig{
+	ar.Spec.Facades = []omniav1alpha1.FacadeConfig{{Type: omniav1alpha1.FacadeTypeA2A, A2A: &omniav1alpha1.A2AConfig{
 		TaskTTL:         strPtr("2h"),
 		ConversationTTL: strPtr("45m"),
-	}
+	}}}
 
 	envVars := r.buildA2AEnvVars(ar, nil)
 
@@ -144,7 +142,7 @@ func TestBuildA2AEnvVars_NoA2AConfig(t *testing.T) {
 	r := &AgentRuntimeReconciler{}
 
 	ar := &omniav1alpha1.AgentRuntime{}
-	ar.Spec.Facade.Type = omniav1alpha1.FacadeTypeA2A
+	ar.Spec.Facades = []omniav1alpha1.FacadeConfig{{Type: omniav1alpha1.FacadeTypeA2A}}
 
 	envVars := r.buildA2AEnvVars(ar, nil)
 
@@ -171,7 +169,7 @@ func TestBuildA2AEnvVars_WithTracing(t *testing.T) {
 	}
 
 	ar := &omniav1alpha1.AgentRuntime{}
-	ar.Spec.Facade.Type = omniav1alpha1.FacadeTypeA2A
+	ar.Spec.Facades = []omniav1alpha1.FacadeConfig{{Type: omniav1alpha1.FacadeTypeA2A}}
 
 	envVars := r.buildA2AEnvVars(ar, nil)
 
@@ -194,8 +192,7 @@ func TestBuildA2AEnvVars_WithClients(t *testing.T) {
 	r := &AgentRuntimeReconciler{}
 
 	ar := &omniav1alpha1.AgentRuntime{}
-	ar.Spec.Facade.Type = omniav1alpha1.FacadeTypeA2A
-	ar.Spec.A2A = &omniav1alpha1.A2AConfig{
+	ar.Spec.Facades = []omniav1alpha1.FacadeConfig{{Type: omniav1alpha1.FacadeTypeA2A, A2A: &omniav1alpha1.A2AConfig{
 		Clients: []omniav1alpha1.A2AClientSpec{
 			{
 				Name:          "agent-a",
@@ -206,7 +203,7 @@ func TestBuildA2AEnvVars_WithClients(t *testing.T) {
 				},
 			},
 		},
-	}
+	}}}
 
 	clients := []ResolvedA2AClient{
 		{Name: "agent-a", URL: "http://agent-a:8080", ExposeAsTools: true, AuthTokenEnv: "OMNIA_A2A_CLIENT_TOKEN_AGENT_A"},
@@ -291,30 +288,22 @@ func TestIsDualProtocol(t *testing.T) {
 		expected bool
 	}{
 		{
-			name: "websocket with A2A enabled",
+			name: "websocket + a2a facade is dual-protocol",
 			ar: func() *omniav1alpha1.AgentRuntime {
 				ar := &omniav1alpha1.AgentRuntime{}
-				ar.Spec.Facade.Type = omniav1alpha1.FacadeTypeWebSocket
-				ar.Spec.A2A = &omniav1alpha1.A2AConfig{Enabled: true}
+				ar.Spec.Facades = []omniav1alpha1.FacadeConfig{
+					{Type: omniav1alpha1.FacadeTypeWebSocket},
+					{Type: omniav1alpha1.FacadeTypeA2A, A2A: &omniav1alpha1.A2AConfig{}},
+				}
 				return ar
 			}(),
 			expected: true,
 		},
 		{
-			name: "websocket without A2A",
+			name: "websocket only",
 			ar: func() *omniav1alpha1.AgentRuntime {
 				ar := &omniav1alpha1.AgentRuntime{}
-				ar.Spec.Facade.Type = omniav1alpha1.FacadeTypeWebSocket
-				return ar
-			}(),
-			expected: false,
-		},
-		{
-			name: "websocket with A2A disabled",
-			ar: func() *omniav1alpha1.AgentRuntime {
-				ar := &omniav1alpha1.AgentRuntime{}
-				ar.Spec.Facade.Type = omniav1alpha1.FacadeTypeWebSocket
-				ar.Spec.A2A = &omniav1alpha1.A2AConfig{Enabled: false}
+				ar.Spec.Facades = []omniav1alpha1.FacadeConfig{{Type: omniav1alpha1.FacadeTypeWebSocket}}
 				return ar
 			}(),
 			expected: false,
@@ -323,8 +312,9 @@ func TestIsDualProtocol(t *testing.T) {
 			name: "A2A primary facade (not dual-protocol)",
 			ar: func() *omniav1alpha1.AgentRuntime {
 				ar := &omniav1alpha1.AgentRuntime{}
-				ar.Spec.Facade.Type = omniav1alpha1.FacadeTypeA2A
-				ar.Spec.A2A = &omniav1alpha1.A2AConfig{Enabled: true}
+				ar.Spec.Facades = []omniav1alpha1.FacadeConfig{
+					{Type: omniav1alpha1.FacadeTypeA2A, A2A: &omniav1alpha1.A2AConfig{}},
+				}
 				return ar
 			}(),
 			expected: false,
@@ -348,26 +338,29 @@ func TestIsMCPEnabled(t *testing.T) {
 		expected bool
 	}{
 		{
-			name: "function-mode with MCP enabled",
+			name: "function-mode with mcp facade",
 			ar: func() *omniav1alpha1.AgentRuntime {
 				ar := &omniav1alpha1.AgentRuntime{}
 				ar.Spec.Mode = "function"
-				ar.Spec.Facade.MCP = &omniav1alpha1.MCPConfig{Enabled: true}
+				ar.Spec.Facades = []omniav1alpha1.FacadeConfig{
+					{Type: omniav1alpha1.FacadeTypeREST},
+					{Type: omniav1alpha1.FacadeTypeMCP, MCP: &omniav1alpha1.MCPConfig{Enabled: true}},
+				}
 				return ar
 			}(),
 			expected: true,
 		},
 		{
-			name: "MCP block present but disabled",
+			name: "function-mode rest only (no mcp facade)",
 			ar: func() *omniav1alpha1.AgentRuntime {
 				ar := &omniav1alpha1.AgentRuntime{}
-				ar.Spec.Facade.MCP = &omniav1alpha1.MCPConfig{Enabled: false}
+				ar.Spec.Facades = []omniav1alpha1.FacadeConfig{{Type: omniav1alpha1.FacadeTypeREST}}
 				return ar
 			}(),
 			expected: false,
 		},
 		{
-			name:     "no MCP block",
+			name:     "no facades",
 			ar:       &omniav1alpha1.AgentRuntime{},
 			expected: false,
 		},
@@ -394,22 +387,26 @@ func TestMCPPort(t *testing.T) {
 			name: "custom port",
 			ar: func() *omniav1alpha1.AgentRuntime {
 				ar := &omniav1alpha1.AgentRuntime{}
-				ar.Spec.Facade.MCP = &omniav1alpha1.MCPConfig{Enabled: true, Port: &custom}
+				ar.Spec.Facades = []omniav1alpha1.FacadeConfig{
+					{Type: omniav1alpha1.FacadeTypeMCP, MCP: &omniav1alpha1.MCPConfig{Enabled: true, Port: &custom}},
+				}
 				return ar
 			}(),
 			expected: custom,
 		},
 		{
-			name: "default port when MCP enabled without port",
+			name: "default port when MCP facade without port",
 			ar: func() *omniav1alpha1.AgentRuntime {
 				ar := &omniav1alpha1.AgentRuntime{}
-				ar.Spec.Facade.MCP = &omniav1alpha1.MCPConfig{Enabled: true}
+				ar.Spec.Facades = []omniav1alpha1.FacadeConfig{
+					{Type: omniav1alpha1.FacadeTypeMCP, MCP: &omniav1alpha1.MCPConfig{Enabled: true}},
+				}
 				return ar
 			}(),
 			expected: DefaultMCPPort,
 		},
 		{
-			name:     "default port when MCP block absent",
+			name:     "default port when mcp facade absent",
 			ar:       &omniav1alpha1.AgentRuntime{},
 			expected: DefaultMCPPort,
 		},
@@ -431,9 +428,9 @@ func TestApplyMCPFacadeOptions_AppendsPortAndEnv(t *testing.T) {
 	ar := &omniav1alpha1.AgentRuntime{
 		Spec: omniav1alpha1.AgentRuntimeSpec{
 			Mode: "function",
-			Facade: omniav1alpha1.FacadeConfig{
-				Type: omniav1alpha1.FacadeTypeREST,
-				MCP:  &omniav1alpha1.MCPConfig{Enabled: enabled, Port: &port},
+			Facades: []omniav1alpha1.FacadeConfig{
+				{Type: omniav1alpha1.FacadeTypeREST},
+				{Type: omniav1alpha1.FacadeTypeMCP, MCP: &omniav1alpha1.MCPConfig{Enabled: enabled, Port: &port}},
 			},
 		},
 	}
@@ -452,10 +449,10 @@ func TestApplyMCPFacadeOptions_AppendsPortAndEnv(t *testing.T) {
 	}
 }
 
-func TestApplyMCPFacadeOptions_NoopWhenDisabled(t *testing.T) {
+func TestApplyMCPFacadeOptions_NoopWhenNoMCPFacade(t *testing.T) {
 	ar := &omniav1alpha1.AgentRuntime{
 		Spec: omniav1alpha1.AgentRuntimeSpec{
-			Facade: omniav1alpha1.FacadeConfig{MCP: &omniav1alpha1.MCPConfig{Enabled: false}},
+			Facades: []omniav1alpha1.FacadeConfig{{Type: omniav1alpha1.FacadeTypeREST}},
 		},
 	}
 	facade := &corev1.Container{}
@@ -472,7 +469,10 @@ func TestApplyMCPFacadeOptions_NoopWhenDisabled(t *testing.T) {
 func TestApplyMCPFacadeOptions_DefaultPortWhenUnset(t *testing.T) {
 	ar := &omniav1alpha1.AgentRuntime{
 		Spec: omniav1alpha1.AgentRuntimeSpec{
-			Facade: omniav1alpha1.FacadeConfig{MCP: &omniav1alpha1.MCPConfig{Enabled: true}},
+			Facades: []omniav1alpha1.FacadeConfig{
+				{Type: omniav1alpha1.FacadeTypeREST},
+				{Type: omniav1alpha1.FacadeTypeMCP, MCP: &omniav1alpha1.MCPConfig{Enabled: true}},
+			},
 		},
 	}
 	facade := &corev1.Container{}
@@ -487,7 +487,10 @@ func TestAppendMCPServicePort_AppendsWhenEnabled(t *testing.T) {
 	port := int32(9500)
 	ar := &omniav1alpha1.AgentRuntime{
 		Spec: omniav1alpha1.AgentRuntimeSpec{
-			Facade: omniav1alpha1.FacadeConfig{MCP: &omniav1alpha1.MCPConfig{Enabled: true, Port: &port}},
+			Facades: []omniav1alpha1.FacadeConfig{
+				{Type: omniav1alpha1.FacadeTypeREST},
+				{Type: omniav1alpha1.FacadeTypeMCP, MCP: &omniav1alpha1.MCPConfig{Enabled: true, Port: &port}},
+			},
 		},
 	}
 	got := appendMCPServicePort(nil, ar)
@@ -505,39 +508,17 @@ func TestAppendMCPServicePort_NoopWhenDisabled(t *testing.T) {
 	}
 }
 
-func TestAgentPortAppProtocol(t *testing.T) {
-	cases := []struct {
-		port   string
-		facade omniav1alpha1.FacadeType
-		want   string
-	}{
-		{"facade", omniav1alpha1.FacadeTypeWebSocket, appProtocolHTTP},
-		{"facade", omniav1alpha1.FacadeTypeA2A, appProtocolHTTP},
-		{"facade", omniav1alpha1.FacadeTypeGRPC, appProtocolGRPC},
-		// Function-mode rest facade serves HTTP — must NOT be mislabelled grpc.
-		{"facade", omniav1alpha1.FacadeTypeREST, appProtocolHTTP},
-		{"a2a", omniav1alpha1.FacadeTypeWebSocket, appProtocolHTTP},
-		{portNameMCP, omniav1alpha1.FacadeTypeWebSocket, appProtocolHTTP},
-		// A facade port name we don't recognise yet must still be L7-routable.
-		{"some-future-facade", omniav1alpha1.FacadeTypeWebSocket, appProtocolHTTP},
-	}
-	for _, tc := range cases {
-		if got := agentPortAppProtocol(tc.port, tc.facade); got != tc.want {
-			t.Errorf("agentPortAppProtocol(%q,%q)=%q want %q", tc.port, tc.facade, got, tc.want)
-		}
-	}
-}
-
 func TestSetAgentPortAppProtocols(t *testing.T) {
+	// Every facade protocol (websocket/a2a/rest/mcp) is HTTP, so all ports get
+	// appProtocol=http regardless of name.
 	ports := []corev1.ServicePort{{Name: "facade"}, {Name: "a2a"}, {Name: portNameMCP}}
-	setAgentPortAppProtocols(ports, omniav1alpha1.FacadeTypeGRPC)
-	want := map[string]string{"facade": appProtocolGRPC, "a2a": appProtocolHTTP, portNameMCP: appProtocolHTTP}
+	setAgentPortAppProtocols(ports)
 	for _, p := range ports {
 		if p.AppProtocol == nil {
 			t.Fatalf("port %q has nil appProtocol", p.Name)
 		}
-		if *p.AppProtocol != want[p.Name] {
-			t.Errorf("port %q appProtocol = %q want %q", p.Name, *p.AppProtocol, want[p.Name])
+		if *p.AppProtocol != appProtocolHTTP {
+			t.Errorf("port %q appProtocol = %q want %q", p.Name, *p.AppProtocol, appProtocolHTTP)
 		}
 	}
 }
@@ -549,14 +530,17 @@ func TestBuildA2ADualProtocolEnvVars(t *testing.T) {
 	convTTL := "45m"
 
 	ar := &omniav1alpha1.AgentRuntime{}
-	ar.Spec.A2A = &omniav1alpha1.A2AConfig{
-		Enabled:         true,
-		TaskTTL:         &taskTTL,
-		ConversationTTL: &convTTL,
-		TaskStore: &omniav1alpha1.A2ATaskStoreConfig{
-			Type:     omniav1alpha1.A2ATaskStoreRedis,
-			RedisURL: "redis://localhost:6379/0",
-		},
+	ar.Spec.Facades = []omniav1alpha1.FacadeConfig{
+		{Type: omniav1alpha1.FacadeTypeWebSocket},
+		{Type: omniav1alpha1.FacadeTypeA2A, A2A: &omniav1alpha1.A2AConfig{
+			Enabled:         true,
+			TaskTTL:         &taskTTL,
+			ConversationTTL: &convTTL,
+			TaskStore: &omniav1alpha1.A2ATaskStoreConfig{
+				Type:     omniav1alpha1.A2ATaskStoreRedis,
+				RedisURL: "redis://localhost:6379/0",
+			},
+		}},
 	}
 
 	envVars := r.buildA2ADualProtocolEnvVars(ar)
@@ -585,15 +569,11 @@ func TestBuildA2ADualProtocolEnvVars(t *testing.T) {
 func TestBuildA2AConfigEnvVars_FullConfig(t *testing.T) {
 	taskTTL := "1h"
 	convTTL := "30m"
-	secretRef := &corev1.LocalObjectReference{Name: "auth-secret"}
 	redisSecretRef := &corev1.LocalObjectReference{Name: testRedisSecretName}
 
 	a2a := &omniav1alpha1.A2AConfig{
 		TaskTTL:         &taskTTL,
 		ConversationTTL: &convTTL,
-		Authentication: &omniav1alpha1.A2AAuthConfig{
-			SecretRef: secretRef,
-		},
 		TaskStore: &omniav1alpha1.A2ATaskStoreConfig{
 			Type:           omniav1alpha1.A2ATaskStoreRedis,
 			RedisSecretRef: redisSecretRef,
@@ -623,19 +603,14 @@ func TestBuildA2AConfigEnvVars_FullConfig(t *testing.T) {
 		t.Errorf("task store type = %q, want %q", envMap["OMNIA_A2A_TASK_STORE_TYPE"], "redis")
 	}
 
-	// Verify secret-based env vars exist.
-	foundAuth := false
+	// Verify secret-based env vars exist. A2A data-plane auth is no longer
+	// carried on A2AConfig (it moved to spec.externalAuth), so only the redis
+	// URL secret remains.
 	foundRedis := false
 	for _, name := range secretEnvNames {
-		if name == "OMNIA_A2A_AUTH_TOKEN" {
-			foundAuth = true
-		}
 		if name == "OMNIA_A2A_REDIS_URL" {
 			foundRedis = true
 		}
-	}
-	if !foundAuth {
-		t.Error("expected OMNIA_A2A_AUTH_TOKEN from secret")
 	}
 	if !foundRedis {
 		t.Error("expected OMNIA_A2A_REDIS_URL from secret")
@@ -745,12 +720,15 @@ func TestBuildA2ADualProtocolEnvVars_RedisURL_BothSet(t *testing.T) {
 	r := &AgentRuntimeReconciler{}
 	redisSecretRef := &corev1.LocalObjectReference{Name: testRedisSecretName}
 	ar := &omniav1alpha1.AgentRuntime{}
-	ar.Spec.A2A = &omniav1alpha1.A2AConfig{
-		TaskStore: &omniav1alpha1.A2ATaskStoreConfig{
-			Type:           omniav1alpha1.A2ATaskStoreRedis,
-			RedisURL:       "redis://localhost:6379",
-			RedisSecretRef: redisSecretRef,
-		},
+	ar.Spec.Facades = []omniav1alpha1.FacadeConfig{
+		{Type: omniav1alpha1.FacadeTypeWebSocket},
+		{Type: omniav1alpha1.FacadeTypeA2A, A2A: &omniav1alpha1.A2AConfig{
+			TaskStore: &omniav1alpha1.A2ATaskStoreConfig{
+				Type:           omniav1alpha1.A2ATaskStoreRedis,
+				RedisURL:       "redis://localhost:6379",
+				RedisSecretRef: redisSecretRef,
+			},
+		}},
 	}
 
 	envVars := r.buildA2ADualProtocolEnvVars(ar)
@@ -771,11 +749,14 @@ func TestBuildA2ADualProtocolEnvVars_RedisURL_OnlySecretRef(t *testing.T) {
 	r := &AgentRuntimeReconciler{}
 	redisSecretRef := &corev1.LocalObjectReference{Name: testRedisSecretName}
 	ar := &omniav1alpha1.AgentRuntime{}
-	ar.Spec.A2A = &omniav1alpha1.A2AConfig{
-		TaskStore: &omniav1alpha1.A2ATaskStoreConfig{
-			Type:           omniav1alpha1.A2ATaskStoreRedis,
-			RedisSecretRef: redisSecretRef,
-		},
+	ar.Spec.Facades = []omniav1alpha1.FacadeConfig{
+		{Type: omniav1alpha1.FacadeTypeWebSocket},
+		{Type: omniav1alpha1.FacadeTypeA2A, A2A: &omniav1alpha1.A2AConfig{
+			TaskStore: &omniav1alpha1.A2ATaskStoreConfig{
+				Type:           omniav1alpha1.A2ATaskStoreRedis,
+				RedisSecretRef: redisSecretRef,
+			},
+		}},
 	}
 
 	envVars := r.buildA2ADualProtocolEnvVars(ar)
@@ -795,11 +776,14 @@ func TestBuildA2ADualProtocolEnvVars_RedisURL_OnlySecretRef(t *testing.T) {
 func TestBuildA2ADualProtocolEnvVars_RedisURL_OnlyPlainURL(t *testing.T) {
 	r := &AgentRuntimeReconciler{}
 	ar := &omniav1alpha1.AgentRuntime{}
-	ar.Spec.A2A = &omniav1alpha1.A2AConfig{
-		TaskStore: &omniav1alpha1.A2ATaskStoreConfig{
-			Type:     omniav1alpha1.A2ATaskStoreRedis,
-			RedisURL: "redis://localhost:6379",
-		},
+	ar.Spec.Facades = []omniav1alpha1.FacadeConfig{
+		{Type: omniav1alpha1.FacadeTypeWebSocket},
+		{Type: omniav1alpha1.FacadeTypeA2A, A2A: &omniav1alpha1.A2AConfig{
+			TaskStore: &omniav1alpha1.A2ATaskStoreConfig{
+				Type:     omniav1alpha1.A2ATaskStoreRedis,
+				RedisURL: "redis://localhost:6379",
+			},
+		}},
 	}
 
 	envVars := r.buildA2ADualProtocolEnvVars(ar)
@@ -1314,7 +1298,7 @@ func TestBuildDeploymentSpec_SelectorExcludesMutableModeLabel(t *testing.T) {
 	ar.Name = "selector-test"
 	ar.Namespace = "ns"
 	ar.Spec.Mode = omniav1alpha1.AgentRuntimeModeFunction
-	ar.Spec.Facade.Type = omniav1alpha1.FacadeTypeREST
+	ar.Spec.Facades = []omniav1alpha1.FacadeConfig{{Type: omniav1alpha1.FacadeTypeREST}}
 	ar.Spec.PromptPackRef.Name = "p"
 
 	dep := &appsv1.Deployment{}
@@ -1344,7 +1328,7 @@ func TestBuildDeploymentSpec_PodOverrides(t *testing.T) {
 	ar := &omniav1alpha1.AgentRuntime{}
 	ar.Name = "a"
 	ar.Namespace = "ns"
-	ar.Spec.Facade.Type = omniav1alpha1.FacadeTypeWebSocket
+	ar.Spec.Facades = []omniav1alpha1.FacadeConfig{{Type: omniav1alpha1.FacadeTypeWebSocket}}
 	ar.Spec.PromptPackRef.Name = "p"
 	ar.Spec.PodOverrides = &omniav1alpha1.PodOverrides{
 		ServiceAccountName: "wli-sa",
@@ -1397,7 +1381,7 @@ func TestBuildDeploymentSpec_PodOverrides_SkipsPolicyProxy(t *testing.T) {
 	ar := &omniav1alpha1.AgentRuntime{}
 	ar.Name = "a"
 	ar.Namespace = "ns"
-	ar.Spec.Facade.Type = omniav1alpha1.FacadeTypeWebSocket
+	ar.Spec.Facades = []omniav1alpha1.FacadeConfig{{Type: omniav1alpha1.FacadeTypeWebSocket}}
 	ar.Spec.PromptPackRef.Name = "p"
 	ar.Spec.PodOverrides = &omniav1alpha1.PodOverrides{
 		ExtraEnv: []corev1.EnvVar{{Name: "USER_VAR", Value: "x"}},
@@ -1460,7 +1444,7 @@ func TestBuildDeploymentSpec_HardenedSecurityContext(t *testing.T) {
 	ar := &omniav1alpha1.AgentRuntime{
 		ObjectMeta: metav1.ObjectMeta{Name: "agent", Namespace: "ns"},
 		Spec: omniav1alpha1.AgentRuntimeSpec{
-			Facade: omniav1alpha1.FacadeConfig{Type: omniav1alpha1.FacadeTypeWebSocket},
+			Facades: []omniav1alpha1.FacadeConfig{{Type: omniav1alpha1.FacadeTypeWebSocket}},
 		},
 	}
 	pp := newTestPromptPack()
@@ -1498,7 +1482,7 @@ func TestBuildDeploymentSpec_PolicyProxyKeepsOwnSecurityContext(t *testing.T) {
 	ar := &omniav1alpha1.AgentRuntime{
 		ObjectMeta: metav1.ObjectMeta{Name: "agent", Namespace: "ns"},
 		Spec: omniav1alpha1.AgentRuntimeSpec{
-			Facade: omniav1alpha1.FacadeConfig{Type: omniav1alpha1.FacadeTypeWebSocket},
+			Facades: []omniav1alpha1.FacadeConfig{{Type: omniav1alpha1.FacadeTypeWebSocket}},
 		},
 	}
 	pp := newTestPromptPack()
@@ -1556,7 +1540,7 @@ func TestBuildDeploymentSpec_MetricsPortContract(t *testing.T) {
 	ar := &omniav1alpha1.AgentRuntime{}
 	ar.Name = "metrics-contract"
 	ar.Namespace = "ns"
-	ar.Spec.Facade.Type = omniav1alpha1.FacadeTypeWebSocket
+	ar.Spec.Facades = []omniav1alpha1.FacadeConfig{{Type: omniav1alpha1.FacadeTypeWebSocket}}
 	ar.Spec.PromptPackRef.Name = "p"
 
 	dep := &appsv1.Deployment{}
@@ -1605,10 +1589,9 @@ func TestDeployment_GracePeriodFromDrainTimeout(t *testing.T) {
 	ar := &omniav1alpha1.AgentRuntime{}
 	ar.Name = "drain-timeout-test"
 	ar.Namespace = "ns"
-	ar.Spec.Facade.Type = omniav1alpha1.FacadeTypeWebSocket
 	ar.Spec.PromptPackRef.Name = "p"
 	d := "2m"
-	ar.Spec.Facade.DrainTimeout = &d
+	ar.Spec.Facades = []omniav1alpha1.FacadeConfig{{Type: omniav1alpha1.FacadeTypeWebSocket, DrainTimeout: &d}}
 
 	dep := &appsv1.Deployment{}
 	r.buildDeploymentSpec(context.Background(), dep, ar, newTestPromptPack(), nil, "", nil)
@@ -1626,7 +1609,7 @@ func TestDeployment_GracePeriodDefaultWhenUnset(t *testing.T) {
 	ar := &omniav1alpha1.AgentRuntime{}
 	ar.Name = "drain-default-test"
 	ar.Namespace = "ns"
-	ar.Spec.Facade.Type = omniav1alpha1.FacadeTypeWebSocket
+	ar.Spec.Facades = []omniav1alpha1.FacadeConfig{{Type: omniav1alpha1.FacadeTypeWebSocket}}
 	ar.Spec.PromptPackRef.Name = "p"
 	// DrainTimeout intentionally not set
 
@@ -1646,11 +1629,10 @@ func TestDeployment_GracePeriodDefaultWhenSubSecond(t *testing.T) {
 	ar := &omniav1alpha1.AgentRuntime{}
 	ar.Name = "drain-subsecond-test"
 	ar.Namespace = "ns"
-	ar.Spec.Facade.Type = omniav1alpha1.FacadeTypeWebSocket
 	ar.Spec.PromptPackRef.Name = "p"
 	// Sub-second drain timeout: positive but truncates to 0 seconds — must fall to default.
 	d := "500ms"
-	ar.Spec.Facade.DrainTimeout = &d
+	ar.Spec.Facades = []omniav1alpha1.FacadeConfig{{Type: omniav1alpha1.FacadeTypeWebSocket, DrainTimeout: &d}}
 
 	dep := &appsv1.Deployment{}
 	r.buildDeploymentSpec(context.Background(), dep, ar, newTestPromptPack(), nil, "", nil)
@@ -1668,12 +1650,11 @@ func TestDeployment_GracePeriodClampedAtMax(t *testing.T) {
 	ar := &omniav1alpha1.AgentRuntime{}
 	ar.Name = "drain-clamp-test"
 	ar.Namespace = "ns"
-	ar.Spec.Facade.Type = omniav1alpha1.FacadeTypeWebSocket
 	ar.Spec.PromptPackRef.Name = "p"
 	// A misconfigured huge drainTimeout must not stall teardown: the drain
 	// window is clamped to maxDrainTimeoutSeconds before adding the buffer.
 	d := "1h"
-	ar.Spec.Facade.DrainTimeout = &d
+	ar.Spec.Facades = []omniav1alpha1.FacadeConfig{{Type: omniav1alpha1.FacadeTypeWebSocket, DrainTimeout: &d}}
 
 	dep := &appsv1.Deployment{}
 	r.buildDeploymentSpec(context.Background(), dep, ar, newTestPromptPack(), nil, "", nil)

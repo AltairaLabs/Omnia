@@ -39,9 +39,9 @@ func TestLoadFromCRD_FunctionMode_PopulatesModeAndSchemas(t *testing.T) {
 		PromptPackRef: v1alpha1.PromptPackRef{
 			Name: "summarizer-pack",
 		},
-		Facade: v1alpha1.FacadeConfig{
-			Type: v1alpha1.FacadeTypeGRPC,
-		},
+		Facades: []v1alpha1.FacadeConfig{{
+			Type: v1alpha1.FacadeTypeREST,
+		}},
 		InputSchema:  &apiextensionsv1.JSON{Raw: []byte(functionTestInputSchema)},
 		OutputSchema: &apiextensionsv1.JSON{Raw: []byte(functionTestOutputSchema)},
 	})
@@ -76,7 +76,7 @@ func TestLoadFromCRD_FunctionMode_EmptyRawSchemaSurfacesAsEmptyBytes(t *testing.
 	ar := newFakeAgentRuntime("edge", "prod", v1alpha1.AgentRuntimeSpec{
 		Mode:          v1alpha1.AgentRuntimeModeFunction,
 		PromptPackRef: v1alpha1.PromptPackRef{Name: "edge-pack"},
-		Facade:        v1alpha1.FacadeConfig{Type: v1alpha1.FacadeTypeGRPC},
+		Facades:       []v1alpha1.FacadeConfig{{Type: v1alpha1.FacadeTypeREST}},
 		InputSchema:   &apiextensionsv1.JSON{Raw: []byte{}},
 		OutputSchema:  &apiextensionsv1.JSON{Raw: []byte(functionTestOutputSchema)},
 	})
@@ -103,9 +103,9 @@ func TestLoadFromCRD_AgentMode_DoesNotPopulateFunctionFields(t *testing.T) {
 		PromptPackRef: v1alpha1.PromptPackRef{
 			Name: "chat-pack",
 		},
-		Facade: v1alpha1.FacadeConfig{
+		Facades: []v1alpha1.FacadeConfig{{
 			Type: v1alpha1.FacadeTypeWebSocket,
-		},
+		}},
 	})
 
 	c := fake.NewClientBuilder().WithScheme(k8s.Scheme()).
@@ -134,9 +134,9 @@ func TestLoadFromCRD_FunctionMode_PassesValidate(t *testing.T) {
 	ar := newFakeAgentRuntime("summarizer", "prod", v1alpha1.AgentRuntimeSpec{
 		Mode:          v1alpha1.AgentRuntimeModeFunction,
 		PromptPackRef: v1alpha1.PromptPackRef{Name: "summarizer-pack"},
-		Facade: v1alpha1.FacadeConfig{
+		Facades: []v1alpha1.FacadeConfig{{
 			Type: v1alpha1.FacadeTypeREST,
-		},
+		}},
 		InputSchema:  &apiextensionsv1.JSON{Raw: []byte(functionTestInputSchema)},
 		OutputSchema: &apiextensionsv1.JSON{Raw: []byte(functionTestOutputSchema)},
 	})
@@ -205,18 +205,18 @@ func functionFacadeConfig(facade FacadeType) *Config {
 }
 
 func TestFunctionMode_FacadeTypeValidation(t *testing.T) {
-	// Function mode serves HTTP (POST /functions/{name}); only rest and a2a
-	// are honest labels. websocket and grpc must be refused even if the CEL
-	// gate were bypassed, so the binary never boots half-working (#1464).
+	// Function mode serves a one-shot HTTP route (POST /functions/{name}); rest
+	// is the only honest primary-facade label. websocket and a2a must be refused
+	// even if the CEL gate were bypassed, so the binary never boots
+	// half-working (#1464, #1576).
 	tests := []struct {
 		name    string
 		facade  FacadeType
 		wantErr bool
 	}{
 		{name: "rest accepted", facade: FacadeTypeREST, wantErr: false},
-		{name: "a2a accepted", facade: FacadeTypeA2A, wantErr: false},
+		{name: "a2a rejected", facade: FacadeTypeA2A, wantErr: true},
 		{name: "websocket rejected", facade: FacadeTypeWebSocket, wantErr: true},
-		{name: "grpc rejected", facade: FacadeTypeGRPC, wantErr: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -236,7 +236,7 @@ func TestLoadFromCRD_PreModeRuntime_DefaultsToAgent(t *testing.T) {
 	// EffectiveMode() must default to "agent".
 	ar := newFakeAgentRuntime("legacy", "prod", v1alpha1.AgentRuntimeSpec{
 		PromptPackRef: v1alpha1.PromptPackRef{Name: "legacy-pack"},
-		Facade:        v1alpha1.FacadeConfig{Type: v1alpha1.FacadeTypeWebSocket},
+		Facades:       []v1alpha1.FacadeConfig{{Type: v1alpha1.FacadeTypeWebSocket}},
 	})
 
 	c := fake.NewClientBuilder().WithScheme(k8s.Scheme()).

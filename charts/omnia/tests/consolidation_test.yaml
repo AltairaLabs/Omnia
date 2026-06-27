@@ -64,10 +64,10 @@ tests:
           path: spec.mode
           value: function
       - equal:
-          path: spec.facade.type
+          path: spec.facades[0].type
           value: rest
       - equal:
-          path: spec.facade.port
+          path: spec.facades[0].port
           value: 8080
       - isNotNullOrEmpty:
           path: spec.inputSchema

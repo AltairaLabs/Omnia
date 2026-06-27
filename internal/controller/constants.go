@@ -71,7 +71,7 @@ const (
 
 	// Internal management-plane twin-listener ports. The facade serves each
 	// surface a second time on these ports behind a mgmt-plane-only auth chain
-	// when externalAuth.allowManagementPlane is enabled. Independently declared
+	// when a facade's managementPlane is enabled. Independently declared
 	// (not an offset of the external port); must match the agent package's
 	// Default Internal*Port constants.
 	DefaultInternalFacadePort = 18080
@@ -83,14 +83,13 @@ const (
 	portNameA2AMgmt    = "a2a-mgmt"
 	portNameMCPMgmt    = "mcp-mgmt"
 
-	// appProtocolHTTP / appProtocolGRPC are Istio Service-port appProtocol values.
-	// Setting appProtocol is what lets an Istio waypoint (or sidecar) do L7 on a
-	// port — required for mode=mesh weighted routing AND for the facade's
-	// WebSocket upgrade to traverse the waypoint. Without it Istio treats the
-	// port as opaque TCP and the waypoint silently bypasses/breaks L7. WebSocket
-	// and A2A (JSON-RPC) are HTTP/1.1; a gRPC facade is HTTP/2.
+	// appProtocolHTTP is the Istio Service-port appProtocol value stamped on
+	// every agent facade port. Setting appProtocol is what lets an Istio
+	// waypoint (or sidecar) do L7 on a port — required for mode=mesh weighted
+	// routing AND for the facade's WebSocket upgrade to traverse the waypoint.
+	// Without it Istio treats the port as opaque TCP and the waypoint silently
+	// bypasses/breaks L7. Every facade protocol (websocket/a2a/rest/mcp) is HTTP.
 	appProtocolHTTP = "http"
-	appProtocolGRPC = "grpc"
 	// DefaultFacadeHealthPort is the health port for the facade container.
 	DefaultFacadeHealthPort = 8081
 	// DefaultRuntimeGRPCPort is the gRPC port for the runtime container.
@@ -204,7 +203,7 @@ const (
 
 	// ConditionTypeExternalAuth surfaces the effective facade auth
 	// configuration. False/Unreachable means the operator explicitly
-	// set spec.externalAuth.allowManagementPlane=false without
+	// set a facade's managementPlane=false without
 	// configuring any data-plane validator — the agent cannot accept
 	// any callers. Always emitted so operators can assert on it from
 	// kubectl describe / helm unittest.

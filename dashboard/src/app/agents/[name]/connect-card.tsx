@@ -12,7 +12,7 @@ import { cn } from "@/lib/utils";
 import { facadeAuthHint } from "@/lib/agents/facade-auth-hint";
 import { useWorkspacePermissions } from "@/hooks/use-workspace-permissions";
 import { useSetAgentExpose } from "@/hooks/use-set-agent-expose";
-import type { AgentRuntime, FacadeEndpoint } from "@/types/agent-runtime";
+import { primaryFacade, type AgentRuntime, type FacadeEndpoint } from "@/types/agent-runtime";
 
 interface ConnectCardProps {
   agent: AgentRuntime;
@@ -111,7 +111,7 @@ function EmptyState() {
 
 /**
  * ExposeControl is the opt-in toggle for operator-provisioned external exposure
- * (#1611). It PATCHes spec.facade.expose; the operator creates/removes the
+ * (#1611). It PATCHes the primary facade's expose; the operator creates/removes the
  * HTTPRoute (#1553) and #1559 surfaces the resulting URL above. Editor-gated;
  * warns that exposure ≠ auth.
  */
@@ -119,7 +119,7 @@ function ExposeControl({ agent, workspace, onExposeChange }: Readonly<ConnectCar
   const { isEditor } = useWorkspacePermissions();
   const { save, saving, error } = useSetAgentExpose(workspace, agent.metadata.name);
 
-  const current = agent.spec.facade?.expose;
+  const current = primaryFacade(agent.spec)?.expose;
   const currentEnabled = current?.enabled ?? false;
   const currentHost = current?.host ?? "";
   const [enabled, setEnabled] = useState(currentEnabled);

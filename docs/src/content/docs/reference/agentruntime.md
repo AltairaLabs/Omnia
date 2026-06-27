@@ -26,7 +26,7 @@ for when to pick which.
 | Value      | Behaviour |
 |------------|-----------|
 | `agent`    | Long-lived conversational runtime served over WebSocket (`/ws`). Default. |
-| `function` | One-shot HTTP runtime served over `POST /functions/{name}`. Requires `inputSchema` + `outputSchema`. Rejects `facade.type: websocket`. |
+| `function` | One-shot HTTP runtime served over `POST /functions/{name}`. Requires `inputSchema` + `outputSchema`. Rejects facade entries of type `websocket`. |
 
 ```yaml
 spec:
@@ -170,29 +170,41 @@ The `framework.image` field allows you to override the default runtime container
 - **Required** when using `type: custom`
 - **Optional** for built-in frameworks when you need a private registry or custom build
 
-### `facade`
+### `facades`
 
-WebSocket facade configuration.
+A list of facade entries. Each entry exposes the runtime over **one**
+protocol. An agent can expose several protocols at once by listing
+multiple entries — for example a `websocket` surface for browsers plus
+an `a2a` surface for agent-to-agent invocation, or a `rest` surface plus
+an `mcp` surface for a function. `facades` replaces the former single
+`spec.facade` object.
 
 | Field | Type | Default | Required |
 |-------|------|---------|----------|
-| `facade.type` | string (`websocket` \| `grpc` \| `a2a` \| `rest`) | websocket | Yes |
-| `facade.port` | integer | 8080 | No |
-| `facade.handler` | string | runtime | No |
-| `facade.image` | string | - | No |
+| `facades[].type` | string (`websocket` \| `a2a` \| `rest` \| `mcp`) | websocket | Yes |
+| `facades[].port` | integer | 8080 | No |
+| `facades[].handler` | string | runtime | No |
+| `facades[].image` | string | - | No |
+| `facades[].managementPlane` | boolean | true | No |
+| `facades[].a2a` | object | - | No (only for `type: a2a`) |
+| `facades[].mcp` | object | - | No (only for `type: mcp`) |
+| `facades[].expose` | object | - | No |
 
-`facade.type` must match how the runtime is invoked. `mode: agent` runtimes use
-`websocket` (or `a2a`); `mode: function` runtimes serve HTTP at
-`POST /functions/{name}` and must use `rest` (or `a2a` for agent-to-agent
-invocation). `websocket` and `grpc` are rejected for function mode.
+Each entry's `type` must match how the runtime is invoked. `mode: agent`
+runtimes use `websocket` (or `a2a`); `mode: function` runtimes serve HTTP
+at `POST /functions/{name}` and must use `rest` (optionally alongside
+`a2a` for agent-to-agent invocation or `mcp` to expose the function as an
+MCP tool). `websocket` is rejected for function mode.
+
+> The legacy `type: grpc` facade no longer exists. Use `websocket`.
 
 ```yaml
 spec:
-  facade:
-    type: websocket
-    port: 8080
-    handler: runtime
-    image: myregistry.io/omnia-facade:v1.0.0  # Optional override
+  facades:
+    - type: websocket
+      port: 8080
+      handler: runtime
+      image: myregistry.io/omnia-facade:v1.0.0  # Optional override
 ```
 
 #### Handler Modes
@@ -203,36 +215,98 @@ spec:
 | `demo` | Demo mode with simulated streaming responses | No |
 | `echo` | Simple echo handler for testing connectivity | No |
 
+#### `facades[].managementPlane`
+
+Controls whether the operator's management plane (the dashboard debug
+view and other control-plane callers) is admitted on this facade.
+Defaults to `true`. Set to `false` to isolate a facade to data-plane
+traffic only — the management-plane validator is dropped from that
+facade's auth chain. Because the flag is per facade, you can admit the
+management plane on one surface (e.g. the WebSocket debug view) while
+isolating another (e.g. an external A2A endpoint).
+
+```yaml
+spec:
+  facades:
+    - type: websocket
+      managementPlane: true    # dashboard debug view works
+    - type: a2a
+      managementPlane: false   # external A2A surface, data-plane only
+      a2a:
+        taskTTL: "1h"
+```
+
+This field replaces the former `spec.externalAuth.allowManagementPlane`,
+which applied to the whole agent.
+
+#### `facades[].a2a`
+
+A2A (agent-to-agent) configuration. Present only on a `type: a2a`
+facade entry; the entry's presence is itself the toggle (there is no
+`enabled` flag). All A2A-specific knobs live under this object.
+
+```yaml
+spec:
+  facades:
+    - type: websocket
+    - type: a2a
+      a2a:
+        port: 9999
+        taskTTL: "1h"
+```
+
+#### `facades[].mcp`
+
+MCP (Model Context Protocol) configuration for exposing a function as a
+typed MCP tool. Present only on a `type: mcp` facade entry, listed
+alongside the `rest` facade of a function-mode runtime. See
+[Expose Functions as MCP Tools](/how-to/expose-functions-as-mcp/).
+
+```yaml
+spec:
+  facades:
+    - type: rest
+      port: 8080
+    - type: mcp
+      mcp:
+        port: 9998   # defaults to 9998
+```
+
+#### `facades[].expose`
+
+Optional ingress/exposure configuration for an individual facade entry.
+Lives at the same level as `type`.
+
 #### Image Override
 
-The `facade.image` field allows you to override the default facade container image. Use this when:
+The `facades[].image` field allows you to override the default facade container image. Use this when:
 - Using a private container registry
 - Running a custom build of the facade
 - Pinning to a specific version different from the operator default
 
-### `facade.media`
+### `facades[].media`
 
-Optional media storage configuration for the facade. When enabled, clients can upload files via HTTP endpoints before referencing them in WebSocket messages.
+Optional media storage configuration for a facade. When enabled, clients can upload files via HTTP endpoints before referencing them in WebSocket messages.
 
 | Field | Type | Default | Required |
 |-------|------|---------|----------|
-| `facade.media.enabled` | boolean | false | No |
-| `facade.media.storagePath` | string | /var/omnia/media | No |
-| `facade.media.publicURL` | string | - | Yes (if enabled) |
-| `facade.media.maxFileSize` | string | 10Mi | No |
-| `facade.media.defaultTTL` | duration | 24h | No |
+| `facades[].media.enabled` | boolean | false | No |
+| `facades[].media.storagePath` | string | /var/omnia/media | No |
+| `facades[].media.publicURL` | string | - | Yes (if enabled) |
+| `facades[].media.maxFileSize` | string | 10Mi | No |
+| `facades[].media.defaultTTL` | duration | 24h | No |
 
 ```yaml
 spec:
-  facade:
-    type: websocket
-    port: 8080
-    media:
-      enabled: true
-      storagePath: /var/omnia/media
-      publicURL: https://agent.example.com
-      maxFileSize: 10Mi
-      defaultTTL: 24h
+  facades:
+    - type: websocket
+      port: 8080
+      media:
+        enabled: true
+        storagePath: /var/omnia/media
+        publicURL: https://agent.example.com
+        maxFileSize: 10Mi
+        defaultTTL: 24h
 ```
 
 #### When to Use Facade Media Storage
@@ -689,10 +763,10 @@ spec:
   toolRegistryRef:
     name: service-tools
 
-  facade:
-    type: websocket
-    port: 8080
-    handler: runtime
+  facades:
+    - type: websocket
+      port: 8080
+      handler: runtime
 
   context:
     type: redis

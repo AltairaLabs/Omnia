@@ -164,17 +164,21 @@ You can configure several at once — they all run:
 
 ```yaml
 spec:
+  facades:
+    - type: websocket
+      managementPlane: true   # dashboard debug view still works
   externalAuth:
-    allowManagementPlane: true   # dashboard debug view still works
     sharedToken: { secretRef: { name: partner-token } }
     apiKeys:    { defaultRole: viewer }
     oidc:       { issuer: "https://auth.example.com", audience: "my-agent" }
 ```
 
-The facade tries each in order and admits the first that accepts the
-request. Setting `allowManagementPlane: false` blocks the dashboard
-debug view for this agent — useful for paranoid workloads that want
-data-plane-only isolation.
+The facade tries each validator in order and admits the first that
+accepts the request. Setting `managementPlane: false` on a facade entry
+blocks the dashboard debug view for that facade — useful for paranoid
+workloads that want data-plane-only isolation. `managementPlane` is set
+per facade, so you can admit the management plane on one surface while
+isolating another.
 
 ## Connect with a token
 
@@ -242,9 +246,8 @@ missing:
 
 ## Migrating from legacy A2A shared-token
 
-Previously `spec.a2a.authentication.secretRef` set a shared bearer on
-the A2A HTTP endpoint only. The controller now projects that value onto
-`spec.externalAuth.sharedToken.secretRef` in memory so both the WS and
-A2A facades validate against it. Move new work to
-`spec.externalAuth.sharedToken` directly — the legacy field will be
-removed in a future release.
+Older releases set a shared bearer on the A2A HTTP endpoint only, via a
+per-facade `authentication.secretRef`. That field has been removed —
+configure the shared bearer once on `spec.externalAuth.sharedToken.secretRef`
+and every facade in `spec.facades` (WebSocket, A2A, MCP, …) validates
+against it.

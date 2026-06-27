@@ -79,7 +79,7 @@ function mkAgent(
     spec: {
       mode,
       promptPackRef: { name: "pack" },
-      facade: { type: "rest" as never },
+      facades: [{ type: "rest" }],
     },
   };
 }

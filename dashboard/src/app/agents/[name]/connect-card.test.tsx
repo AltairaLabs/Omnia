@@ -34,7 +34,7 @@ function makeAgent(overrides: Partial<AgentRuntime> = {}): AgentRuntime {
     },
     spec: {
       promptPackRef: { name: "my-pack" },
-      facade: { type: "websocket" },
+      facades: [{ type: "websocket" }],
     },
     status: {},
     ...overrides,
@@ -78,7 +78,7 @@ describe("ConnectCard", () => {
     it("reflects spec.facade.expose.enabled and saves a toggle", async () => {
       const onExposeChange = vi.fn();
       const agent = makeAgent({
-        spec: { promptPackRef: { name: "p" }, facade: { type: "websocket", expose: { enabled: false } } },
+        spec: { promptPackRef: { name: "p" }, facades: [{ type: "websocket", expose: { enabled: false } }] },
       });
       render(<ConnectCard agent={agent} workspace="ws1" onExposeChange={onExposeChange} />);
 
@@ -93,7 +93,7 @@ describe("ConnectCard", () => {
 
     it("warns that exposure is unauthenticated when there is no externalAuth", async () => {
       const agent = makeAgent({
-        spec: { promptPackRef: { name: "p" }, facade: { type: "websocket" } },
+        spec: { promptPackRef: { name: "p" }, facades: [{ type: "websocket" }] },
       });
       render(<ConnectCard agent={agent} workspace="ws1" />);
       await userEvent.click(screen.getByRole("switch", { name: /expose externally/i }));
@@ -103,7 +103,7 @@ describe("ConnectCard", () => {
     it("disables the toggle for non-editors", () => {
       mockIsEditor.mockReturnValue(false);
       const agent = makeAgent({
-        spec: { promptPackRef: { name: "p" }, facade: { type: "websocket", expose: { enabled: true } } },
+        spec: { promptPackRef: { name: "p" }, facades: [{ type: "websocket", expose: { enabled: true } }] },
       });
       render(<ConnectCard agent={agent} workspace="ws1" />);
       expect(screen.getByRole("switch", { name: /expose externally/i })).toBeDisabled();
@@ -207,7 +207,7 @@ describe("ConnectCard", () => {
       const agent = makeAgent({
         spec: {
           promptPackRef: { name: "my-pack" },
-          facade: { type: "websocket" },
+          facades: [{ type: "websocket" }],
           externalAuth: {
             sharedToken: { secretRef: { name: "my-agent-token" } },
           },
@@ -223,7 +223,7 @@ describe("ConnectCard", () => {
       const agent = makeAgent({
         spec: {
           promptPackRef: { name: "my-pack" },
-          facade: { type: "websocket" },
+          facades: [{ type: "websocket" }],
           externalAuth: {
             oidc: { issuer: "https://auth.example.com", audience: "my-agent" },
           },

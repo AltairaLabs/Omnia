@@ -4,7 +4,7 @@ import { ObjectMeta, Condition, LocalObjectReference, SecretKeyRef } from "./com
 
 // Enums
 export type AgentRuntimePhase = "Pending" | "Running" | "Failed";
-export type FacadeType = "websocket" | "grpc" | "a2a" | "rest";
+export type FacadeType = "websocket" | "a2a" | "rest" | "mcp";
 export type HandlerMode = "echo" | "demo" | "runtime";
 export type ContextStoreType = "memory" | "redis";
 export type ProviderType = "claude" | "openai" | "gemini" | "ollama" | "mock";
@@ -22,11 +22,24 @@ export interface MCPConfig {
   port?: number;
 }
 
+/** A2AConfig configures the A2A protocol surface on an a2a facade entry. */
+export interface A2AConfig {
+  port?: number;
+  taskTTL?: string;
+  conversationTTL?: string;
+}
+
+/** FacadeConfig is one single-protocol facade in spec.facades. */
 export interface FacadeConfig {
   type: FacadeType;
   port?: number;
   handler?: HandlerMode;
+  /** a2a configures the A2A surface; only meaningful on a type:"a2a" facade. */
+  a2a?: A2AConfig;
+  /** mcp configures the MCP surface; only meaningful on a type:"mcp" facade. */
   mcp?: MCPConfig;
+  /** managementPlane gates this facade's internal mgmt twin (default true). */
+  managementPlane?: boolean;
   /** expose opts the agent into operator-provisioned external exposure (#1553/#1611). */
   expose?: FacadeExposeConfig;
 }
@@ -256,9 +269,9 @@ export interface EdgeTrustAuth {
   claimsFromHeaders?: Record<string, string>;
 }
 
-/** externalAuth configures data-plane authentication for the agent facade. */
+/** externalAuth configures data-plane authentication for the agent facades.
+ * The management plane is gated per-facade via facades[].managementPlane. */
 export interface ExternalAuth {
-  allowManagementPlane?: boolean;
   sharedToken?: SharedTokenAuth;
   apiKeys?: ApiKeysAuth;
   oidc?: OidcAuth;
@@ -270,7 +283,8 @@ export interface AgentRuntimeSpec {
   mode?: AgentRuntimeMode;
   framework?: FrameworkConfig;
   promptPackRef: PromptPackRef;
-  facade: FacadeConfig;
+  /** facades composes one or more single-protocol facades (#1576). */
+  facades: FacadeConfig[];
   toolRegistryRef?: ToolRegistryRef;
   context?: ContextConfig;
   /** memory configures cross-session memory for this agent. */
@@ -291,6 +305,17 @@ export interface AgentRuntimeSpec {
   outputSchema?: Record<string, unknown>;
   /** externalAuth configures authentication for external data-plane traffic. */
   externalAuth?: ExternalAuth;
+}
+
+/** primaryFacade selects the facade used for single-surface display purposes:
+ * the websocket facade if present, else the rest facade, else the first facade.
+ * Returns undefined when the agent declares no facades. */
+export function primaryFacade(spec: AgentRuntimeSpec): FacadeConfig | undefined {
+  return (
+    spec.facades?.find(f => f.type === "websocket") ??
+    spec.facades?.find(f => f.type === "rest") ??
+    spec.facades?.[0]
+  );
 }
 
 /** isFunctionMode returns true when the runtime is declared as a

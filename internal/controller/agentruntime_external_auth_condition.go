@@ -28,7 +28,7 @@ import (
 // Status breakdown:
 //   - True / DashboardOnly        — no externalAuth configured; mgmt-plane is the only admit path
 //   - True / DataPlaneConfigured  — at least one data-plane validator is set
-//   - False / Unreachable         — allowManagementPlane=false AND no data-plane validator — no caller can admit
+//   - False / Unreachable         — no facade serves the management plane AND no data-plane validator — no caller can admit
 //
 // The reconciler sets this condition every pass so operators can
 // `kubectl describe agentruntime` and immediately see whether the
@@ -49,8 +49,9 @@ func evaluateExternalAuthCondition(ar *omniav1alpha1.AgentRuntime) metav1.Condit
 		ext.OIDC != nil ||
 		ext.EdgeTrust != nil
 
-	// allowManagementPlane defaults to true per the CRD's +kubebuilder:default.
-	mgmtPlaneAllowed := ext.ManagementPlaneAllowed()
+	// The management plane is reachable when at least one facade serves it
+	// (facades[].managementPlane, default true).
+	mgmtPlaneAllowed := anyManagementPlaneEnabled(ar)
 
 	if hasDataPlane {
 		return metav1.Condition{
@@ -66,7 +67,7 @@ func evaluateExternalAuthCondition(ar *omniav1alpha1.AgentRuntime) metav1.Condit
 			Type:   ConditionTypeExternalAuth,
 			Status: metav1.ConditionFalse,
 			Reason: "Unreachable",
-			Message: "spec.externalAuth.allowManagementPlane=false but no data-plane validator " +
+			Message: "no facade has managementPlane enabled and no data-plane validator " +
 				"(sharedToken / apiKeys / oidc / edgeTrust) is configured — the facade will reject every request",
 		}
 	}

@@ -66,7 +66,6 @@ const (
 	// A2A configuration.
 	EnvA2ATaskTTL         = "OMNIA_A2A_TASK_TTL"
 	EnvA2AConversationTTL = "OMNIA_A2A_CONVERSATION_TTL"
-	EnvA2AAuthToken       = "OMNIA_A2A_AUTH_TOKEN"
 	EnvA2ATaskStoreType   = "OMNIA_A2A_TASK_STORE_TYPE"
 	EnvA2ARedisURL        = "OMNIA_A2A_REDIS_URL"
 	EnvA2AEnabled         = "OMNIA_A2A_ENABLED"
@@ -80,7 +79,7 @@ const (
 	// Internal management-plane twin-listener ports. The facade serves each
 	// surface a second time on these ports behind a mgmt-plane-only auth chain
 	// (see facade plane-isolation design). In-cluster these are derived from the
-	// CRD (gated on externalAuth.allowManagementPlane); these env vars are the
+	// CRD (gated per-facade on facades[].managementPlane); these env vars are the
 	// demo/E2E fallback. Zero means "no internal listener for that surface".
 	EnvInternalFacadePort = "OMNIA_INTERNAL_FACADE_PORT"
 	EnvInternalA2APort    = "OMNIA_INTERNAL_A2A_PORT"
@@ -103,8 +102,8 @@ const (
 	DefaultMCPPort             = 9998
 
 	// Internal management-plane twin-listener port defaults. Independently
-	// declared (not derived from the external port by an offset). Used when
-	// externalAuth.allowManagementPlane is enabled.
+	// declared (not derived from the external port by an offset). Used per
+	// facade whose managementPlane is enabled (the default).
 	DefaultInternalFacadePort = 18080
 	DefaultInternalA2APort    = 19999
 	DefaultInternalMCPPort    = 19998
@@ -122,13 +121,9 @@ type FacadeType string
 const (
 	FacadeTypeWebSocket FacadeType = "websocket"
 	FacadeTypeA2A       FacadeType = "a2a"
-	// FacadeTypeGRPC is retained for agent-mode back-compat with pre-Phase-1
-	// configs. Function-mode runtimes no longer use it (#1464); they declare
-	// FacadeTypeREST.
-	FacadeTypeGRPC FacadeType = "grpc"
-	// FacadeTypeREST is the facade type for function-mode AgentRuntimes
-	// (#1464). The route is HTTP (POST /functions/{name}) — an honest label
-	// for the one-shot request/response surface.
+	// FacadeTypeREST is the primary facade type for function-mode
+	// AgentRuntimes (#1464). The route is HTTP (POST /functions/{name}) — an
+	// honest label for the one-shot request/response surface.
 	FacadeTypeREST FacadeType = "rest"
 )
 
@@ -209,13 +204,13 @@ type Config struct {
 	SessionTTL time.Duration
 
 	// ClientToolTimeout overrides the default 60s timeout for client tool
-	// responses. Sourced from AgentRuntime.spec.facade.clientToolTimeout.
+	// responses. Sourced from the primary facade's clientToolTimeout.
 	// Zero means "use RuntimeHandler default".
 	ClientToolTimeout time.Duration
 
 	// DrainTimeout is how long the facade keeps serving active realtime calls
 	// after SIGTERM before tearing down remaining connections.
-	// Sourced from AgentRuntime.spec.facade.drainTimeout. Zero means "use
+	// Sourced from the primary facade's drainTimeout. Zero means "use
 	// facade.DefaultServerConfig default (30s)".
 	DrainTimeout time.Duration
 
@@ -250,7 +245,6 @@ type Config struct {
 	// A2A configuration.
 	A2ATaskTTL         time.Duration
 	A2AConversationTTL time.Duration
-	A2AAuthToken       string
 	A2ATaskStoreType   string // "memory" or "redis"
 	A2ARedisURL        string // Redis URL for A2A task store
 	A2AEnabled         bool   // true when A2A is an additional endpoint (dual-protocol)
@@ -316,12 +310,11 @@ func (c *Config) Validate() error {
 		return fmt.Errorf(errWithValueFmt, ErrInvalidHandlerMode, c.HandlerMode)
 	}
 
-	// Validate facade type. Function-mode AgentRuntimes use facade.type=rest
-	// (the CRD's CEL gate requires rest or a2a for mode=function). Agent-mode
-	// pods accept websocket or a2a as before. Grpc is also implicitly OK in
-	// agent mode for back-compat with pre-Phase-1 configs that already used it.
+	// Validate the primary facade type. Agent-mode pods serve websocket or a2a;
+	// function-mode pods serve rest (the CRD's CEL gate enforces the
+	// mode↔facade-type split — see spec.facades validations).
 	switch c.FacadeType {
-	case FacadeTypeWebSocket, FacadeTypeA2A, FacadeTypeGRPC, FacadeTypeREST:
+	case FacadeTypeWebSocket, FacadeTypeA2A, FacadeTypeREST:
 		// Valid
 	default:
 		return fmt.Errorf(errWithValueFmt, ErrInvalidFacadeType, c.FacadeType)
@@ -334,9 +327,9 @@ func (c *Config) Validate() error {
 		if len(c.FunctionOutputSchemaJSON) == 0 {
 			return ErrMissingFunctionOutputSchema
 		}
-		// Function mode serves HTTP; only rest (HTTP) and a2a are valid.
-		if c.FacadeType != FacadeTypeREST && c.FacadeType != FacadeTypeA2A {
-			return fmt.Errorf("%w: function mode requires facade.type=rest or a2a, got %q",
+		// Function mode serves a one-shot HTTP route; the primary facade is rest.
+		if c.FacadeType != FacadeTypeREST {
+			return fmt.Errorf("%w: function mode requires a rest facade, got %q",
 				ErrInvalidFacadeType, c.FacadeType)
 		}
 	}

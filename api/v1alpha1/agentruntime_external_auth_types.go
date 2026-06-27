@@ -19,7 +19,7 @@ package v1alpha1
 import corev1 "k8s.io/api/core/v1"
 
 // AgentExternalAuth configures authentication for data-plane clients
-// (external apps streaming to this agent's facade).
+// (external apps streaming to this agent's facades).
 //
 // Each validator is independent. When multiple are configured, any one
 // that accepts the request admits it. Not configuring any validator here
@@ -27,32 +27,12 @@ import corev1 "k8s.io/api/core/v1"
 // dashboard's debug view) — no customer traffic until an admin fills in
 // at least one validator. This is the secure default.
 //
-// PR 2a (this struct + the legacy projection) is behaviour-preserving —
-// no validator is wired into the facade middleware until later PRs in
-// the series. The CRD shape lands first so operators can start adopting
-// it without a deploy-flag-day.
+// The management plane is gated per-facade by facades[].managementPlane,
+// not here.
 type AgentExternalAuth struct {
-	// allowManagementPlane governs whether dashboard-minted management-
-	// plane tokens (the "Try this agent" debug view) are accepted for
-	// this agent. Defaults to true so the debug view works out of the
-	// box; paranoid customers wanting strict data-plane-only isolation
-	// set this to false explicitly.
-	//
-	// Pointer with default=true so an explicit `false` stays
-	// distinguishable from "field omitted" for future audit/migration
-	// logic. Only consulted when spec.externalAuth is set; when the whole
-	// block is unset the facade defaults to mgmt-plane-only.
-	// +kubebuilder:default=true
-	// +optional
-	AllowManagementPlane *bool `json:"allowManagementPlane,omitempty"`
-
 	// sharedToken validates a single bearer token shared across all
 	// callers of this agent. Simplest partner integration; one token in
 	// a Kubernetes Secret, rotated by editing the Secret.
-	//
-	// Subsumes the existing spec.a2a.authentication.secretRef field
-	// (which is now deprecated and transparently projected into this
-	// location by the AgentRuntime controller at reconcile time).
 	// +optional
 	SharedToken *SharedTokenAuth `json:"sharedToken,omitempty"`
 
@@ -85,19 +65,6 @@ type AgentExternalAuth struct {
 	// chart's authentication.enabled=true setup).
 	// +optional
 	EdgeTrust *EdgeTrustAuth `json:"edgeTrust,omitempty"`
-}
-
-// ManagementPlaneAllowed reports whether dashboard-minted management-plane
-// tokens are accepted for this agent. Defaults to true — a nil receiver (the
-// whole externalAuth block omitted) or a nil AllowManagementPlane field both
-// mean the permissive default; only an explicit allowManagementPlane:false
-// opts out. Centralizes the nil-as-true convention so the controller and the
-// facade config loader agree on a single source of truth.
-func (e *AgentExternalAuth) ManagementPlaneAllowed() bool {
-	if e == nil || e.AllowManagementPlane == nil {
-		return true
-	}
-	return *e.AllowManagementPlane
 }
 
 // SharedTokenAuth validates a single bearer token shared by all callers.

@@ -22,9 +22,10 @@ vi.mock("@/lib/k8s/workspace-route-helpers", () => ({
 vi.mock("@/lib/functions/invoke-token", () => ({
   mgmtPlaneAuthHeaders: vi.fn(() => ({})),
 }));
-vi.mock("@/types/agent-runtime", () => ({
-  isFunctionMode: vi.fn(() => true),
-}));
+vi.mock("@/types/agent-runtime", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/types/agent-runtime")>();
+  return { ...actual, isFunctionMode: vi.fn(() => true) };
+});
 
 import { POST } from "./route";
 import { getWorkspaceResource } from "@/lib/k8s/workspace-route-helpers";
@@ -56,7 +57,7 @@ beforeEach(() => {
   vi.mocked(isFunctionMode).mockReturnValue(true);
   vi.mocked(getWorkspaceResource).mockResolvedValue({
     ok: true,
-    resource: { spec: { facade: { port: 8080 } } },
+    resource: { spec: { facades: [{ type: "rest", port: 8080 }] } },
     workspace: { spec: { namespace: { name: "omnia-ws" } } },
   } as Awaited<ReturnType<typeof getWorkspaceResource>>);
 });

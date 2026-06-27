@@ -144,7 +144,7 @@ func functionAR(name string, inputSchema, outputSchema string) *corev1alpha1.Age
 	}
 	ar.Spec.Mode = corev1alpha1.AgentRuntimeModeFunction
 	ar.Spec.PromptPackRef = corev1alpha1.PromptPackRef{Name: "pack"}
-	ar.Spec.Facade = corev1alpha1.FacadeConfig{Type: corev1alpha1.FacadeTypeREST}
+	ar.Spec.Facades = []corev1alpha1.FacadeConfig{{Type: corev1alpha1.FacadeTypeREST}}
 	ar.Spec.InputSchema = &apiextensionsv1.JSON{Raw: []byte(inputSchema)}
 	ar.Spec.OutputSchema = &apiextensionsv1.JSON{Raw: []byte(outputSchema)}
 	return ar

@@ -26,7 +26,7 @@ sidebar:
 - **Tolerations / topologySpreadConstraints / imagePullSecrets / extraVolumes / extraVolumeMounts / extraEnv / extraEnvFrom:** appended.
 - **Affinity / priorityClassName / serviceAccountName:** your value replaces the operator default when non-empty.
 
-For multi-container pods (`AgentRuntime` facade + runtime), container-scoped overrides (`extraEnv`, `extraEnvFrom`, `extraVolumeMounts`) apply to both user containers but skip operator-injected sidecars such as the enterprise `policy-proxy`. Per-container env remains available via `spec.facade.extraEnv` and `spec.runtime.extraEnv`.
+For multi-container pods (`AgentRuntime` facade + runtime), container-scoped overrides (`extraEnv`, `extraEnvFrom`, `extraVolumeMounts`) apply to both user containers but skip operator-injected sidecars such as the enterprise `policy-proxy`. Per-container env remains available via `spec.facades[].extraEnv` and `spec.runtime.extraEnv`.
 
 ## Example — Azure Key Vault via CSI (Workspace session-api)
 
@@ -77,8 +77,8 @@ metadata:
 spec:
   promptPackRef:
     name: vision
-  facade:
-    type: websocket
+  facades:
+    - type: websocket
   podOverrides:
     serviceAccountName: vision-irsa
     nodeSelector:
@@ -121,7 +121,7 @@ spec:
 ## Interaction with existing fields
 
 - `AgentRuntime.spec.runtime.nodeSelector` / `.tolerations` / `.affinity` are still honored. `spec.podOverrides.*` values are merged **after** them (append for slices, key-wise merge for maps, replacement for scalars).
-- `AgentRuntime.spec.facade.extraEnv` and `AgentRuntime.spec.runtime.extraEnv` continue to target each container specifically; prefer them for per-container env.
+- `AgentRuntime.spec.facades[].extraEnv` and `AgentRuntime.spec.runtime.extraEnv` continue to target each container specifically; prefer them for per-container env.
 - `AgentRuntime.spec.extraPodAnnotations` is preserved; user annotations from `podOverrides.annotations` override on key collision.
 
 ## Out of scope

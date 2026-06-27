@@ -42,7 +42,7 @@ func exposedAgent(name string, expose *omniav1alpha1.FacadeExposeConfig) *omniav
 	return &omniav1alpha1.AgentRuntime{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: exNS, UID: types.UID("uid-" + name)},
 		Spec: omniav1alpha1.AgentRuntimeSpec{
-			Facade: omniav1alpha1.FacadeConfig{Type: omniav1alpha1.FacadeTypeWebSocket, Expose: expose},
+			Facades: []omniav1alpha1.FacadeConfig{{Type: omniav1alpha1.FacadeTypeWebSocket, Expose: expose}},
 		},
 	}
 }
@@ -85,14 +85,6 @@ func TestExposeDecision(t *testing.T) {
 	}
 }
 
-func TestExposeDecision_GRPCNotRoutable(t *testing.T) {
-	r := &AgentRuntimeReconciler{DefaultExposure: DefaultExposureConfig{BaseDomain: exBaseDomain, GatewayName: exGateway}}
-	a := exposedAgent("a", &omniav1alpha1.FacadeExposeConfig{Enabled: true})
-	a.Spec.Facade.Type = omniav1alpha1.FacadeTypeGRPC
-	got, _, _ := r.exposeDecision(a)
-	assert.False(t, got, "grpc primary facades are not routable via HTTPRoute")
-}
-
 func TestReconcileFacadeRoute_CreatesWhenOptedIn(t *testing.T) {
 	agent := exposedAgent("chat", &omniav1alpha1.FacadeExposeConfig{Enabled: true})
 	r := configuredReconciler(t, agent)
@@ -121,7 +113,7 @@ func TestReconcileFacadeRoute_DeletesWhenDisabled(t *testing.T) {
 	require.NoError(t, r.reconcileFacadeRoute(context.Background(), agent))
 
 	// Opt out and re-reconcile → the owned route is removed.
-	agent.Spec.Facade.Expose.Enabled = false
+	agent.Spec.Facades[0].Expose.Enabled = false
 	require.NoError(t, r.reconcileFacadeRoute(context.Background(), agent))
 	err := r.Get(context.Background(), types.NamespacedName{Namespace: exNS, Name: exRouteName}, &gatewayv1.HTTPRoute{})
 	assert.True(t, client.IgnoreNotFound(err) == nil && err != nil, "route should be gone")

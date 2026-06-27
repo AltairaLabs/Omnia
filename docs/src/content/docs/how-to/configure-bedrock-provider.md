@@ -163,9 +163,9 @@ spec:
     name: my-prompts
   providerRef:
     name: bedrock-claude
-  facade:
-    type: websocket
-    port: 8080
+  facades:
+    - type: websocket
+      port: 8080
 ```
 
 ## Troubleshooting

@@ -156,9 +156,9 @@ spec:
     name: my-prompts
   providerRef:
     name: vertex-gemini
-  facade:
-    type: websocket
-    port: 8080
+  facades:
+    - type: websocket
+      port: 8080
 ```
 
 ## Troubleshooting

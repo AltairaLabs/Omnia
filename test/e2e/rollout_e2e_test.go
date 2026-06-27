@@ -285,9 +285,9 @@ metadata:
 spec:
   promptPackRef:
     name: %s
-  facade:
-    type: websocket
-    port: 8080
+  facades:
+    - type: websocket
+      port: 8080
   context:
     type: memory
     ttl: "1h"
@@ -571,9 +571,9 @@ metadata:
 spec:
   promptPackRef:
     name: %s
-  facade:
-    type: websocket
-    port: 8080
+  facades:
+    - type: websocket
+      port: 8080
   context:
     type: memory
     ttl: "1h"
