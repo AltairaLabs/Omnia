@@ -225,10 +225,10 @@ var _ = Describe("AgentPolicy Controller (envtest)", func() {
 					ObjectMeta: metav1.ObjectMeta{Name: agentName, Namespace: namespace},
 					Spec: omniav1alpha1.AgentRuntimeSpec{
 						PromptPackRef: omniav1alpha1.PromptPackRef{Name: "dummy"},
-						Facade: omniav1alpha1.FacadeConfig{
+						Facades: []omniav1alpha1.FacadeConfig{{
 							Type: omniav1alpha1.FacadeType("websocket"),
 							Port: &port,
-						},
+						}},
 					},
 				}
 				Expect(k8sClient.Create(ctx, ar)).To(Succeed())

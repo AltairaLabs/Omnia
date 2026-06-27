@@ -10,6 +10,29 @@ or `api/proto/`, add an entry below with the date, affected API, and reason.
 
 ## Unreleased
 
+### Changed (CRD: `AgentRuntime.spec.facade` → `spec.facades` composition, #1576) — BREAKING
+
+- `AgentRuntime` now composes a list of single-protocol facades: `spec.facade`
+  (singular object) is replaced by `spec.facades` (required, non-empty, max 4,
+  no duplicate types). Each entry is one protocol: `websocket`, `a2a`, `rest`,
+  or `mcp`. Agent mode uses `websocket` and/or `a2a`; function mode uses `rest`
+  (exactly one, required) plus optional `mcp` (CEL-enforced).
+- **Removed** `spec.facade` (singular), the deprecated top-level `spec.a2a`,
+  `spec.a2a.authentication` / `A2AAuthConfig`, the `grpc` facade type, and
+  `spec.externalAuth.allowManagementPlane`. The A2A surface config (TTLs,
+  clients, task store, agent card) now lives under the a2a facade entry's
+  `a2a:` block; the MCP surface under the mcp facade entry's `mcp:` block.
+- **Added** per-facade `facades[].managementPlane` (default true) gating each
+  facade's internal management-plane twin — replaces the agent-global
+  `allowManagementPlane`. `facades[].expose` (external HTTPRoute opt-in) is
+  per-facade.
+- The A2A agent card now advertises the external interface URL derived from the
+  observed HTTPRoute (`status.facade.endpoints`, protocol=a2a), falling back to
+  the in-cluster Service URL when no external route is observed (fixes #1576's
+  wrong-URL bug). `status.managementEndpoints` is populated per-facade.
+- Hard cutover, no projection shim (alpha). All in-repo manifests, the config
+  loader, controller, facade, and dashboard moved to `spec.facades` together.
+
 ### Removed (session-api + CRD: `recording.richData` deprecated alias)
 
 - **`GET /api/v1/privacy-policy`** no longer returns `recording.richData`; it was the

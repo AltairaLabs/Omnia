@@ -187,14 +187,15 @@ spec:
   mode: function
   promptPackRef:
     name: %[3]s
-  facade:
-    type: rest
-    port: 8080
-    mcp:
-      enabled: true
-    extraEnv:
-      - name: OMNIA_FACADE_ALLOW_UNAUTHENTICATED
-        value: "true"
+  facades:
+    - type: rest
+      port: 8080
+      extraEnv:
+        - name: OMNIA_FACADE_ALLOW_UNAUTHENTICATED
+          value: "true"
+    - type: mcp
+      mcp:
+        port: 9998
   inputSchema:
     type: object
     required: ["message"]

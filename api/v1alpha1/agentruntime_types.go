@@ -27,7 +27,8 @@ import (
 // WebSocket facade. Set to "function" to expose the pack as a one-shot,
 // structured-I/O HTTP endpoint (see Phase 1 of Functions, #1102 / #1103).
 // "inference" is intentionally not used here so we can reuse that name
-// later for a more generic Provider role.
+// later for a more generic Provider role. Function mode requires a 'rest'
+// facade (optionally an 'mcp' facade) via CEL.
 // +kubebuilder:validation:Enum=agent;function
 type AgentRuntimeMode string
 
@@ -35,8 +36,8 @@ const (
 	// AgentRuntimeModeAgent is the conversational runtime mode.
 	AgentRuntimeModeAgent AgentRuntimeMode = "agent"
 	// AgentRuntimeModeFunction is the one-shot, structured-I/O runtime mode.
-	// Requires spec.inputSchema and spec.outputSchema; requires
-	// spec.facade.type to be "rest" or "a2a" via CEL.
+	// Requires spec.inputSchema and spec.outputSchema; requires a "rest"
+	// facade (optionally an "mcp" facade) via CEL.
 	AgentRuntimeModeFunction AgentRuntimeMode = "function"
 )
 
@@ -52,21 +53,23 @@ type PromptPackRef struct {
 	Version *string `json:"version,omitempty"`
 }
 
-// FacadeType defines the type of facade for client connections.
-// +kubebuilder:validation:Enum=websocket;grpc;a2a;rest
+// FacadeType defines the protocol a single facade speaks. An AgentRuntime
+// composes one or more single-protocol facades via spec.facades.
+// +kubebuilder:validation:Enum=websocket;a2a;rest;mcp
 type FacadeType string
 
 const (
-	// FacadeTypeWebSocket uses WebSocket for client connections.
+	// FacadeTypeWebSocket uses WebSocket for client connections (agent mode).
 	FacadeTypeWebSocket FacadeType = "websocket"
-	// FacadeTypeGRPC uses gRPC for client connections.
-	FacadeTypeGRPC FacadeType = "grpc"
-	// FacadeTypeA2A uses the A2A JSON-RPC protocol for agent-to-agent communication.
+	// FacadeTypeA2A uses the A2A JSON-RPC protocol for agent-to-agent communication (agent mode).
 	FacadeTypeA2A FacadeType = "a2a"
 	// FacadeTypeREST uses a one-shot HTTP/REST endpoint (POST /functions/{name}).
 	// Only valid for mode=function, which serves structured request/response over
 	// HTTP rather than a persistent client connection.
 	FacadeTypeREST FacadeType = "rest"
+	// FacadeTypeMCP serves the Model Context Protocol (Streamable HTTP) surface.
+	// Only valid alongside a rest facade in mode=function.
+	FacadeTypeMCP FacadeType = "mcp"
 )
 
 // HandlerMode defines the message handler mode for the facade.
@@ -126,22 +129,31 @@ type FacadeConfig struct {
 	// +optional
 	ClientToolTimeout *metav1.Duration `json:"clientToolTimeout,omitempty"`
 
-	// a2a configures the A2A protocol surface for this facade.
-	// When type=a2a, this is the primary protocol; when type=websocket
-	// or grpc, a2a.enabled=true adds A2A as a dual-protocol surface on
-	// a separate port. Use this instead of the deprecated top-level
-	// spec.a2a; the operator projects spec.a2a → spec.facade.a2a at
-	// reconcile time for back-compat.
+	// a2a configures the A2A protocol surface. Only meaningful on a
+	// type=a2a facade. When the agent also has a websocket facade, A2A is a
+	// secondary listener on a2a.port (default 9999); when a2a is the only
+	// agent-mode facade it is the primary listener (default 8080). Carries
+	// the A2A TTLs, task store, agent-card, and outbound clients.
 	// +optional
 	A2A *A2AConfig `json:"a2a,omitempty"`
 
-	// mcp configures the MCP (Model Context Protocol) surface for
-	// function-mode pods. Cannot be enabled on agent-mode runtimes
-	// (CEL-validated). When enabled, the pod serves Streamable HTTP
-	// MCP on facade.mcp.port (default 9998) alongside the function
-	// HTTP route on facade.port.
+	// mcp configures the MCP (Model Context Protocol) surface. Only
+	// meaningful on a type=mcp facade (function mode). The pod serves
+	// Streamable HTTP MCP on mcp.port (default 9998) alongside the function
+	// rest facade.
 	// +optional
 	MCP *MCPConfig `json:"mcp,omitempty"`
+
+	// managementPlane gates this facade's internal management-plane twin
+	// listener. Default true: the operator allocates an internal port,
+	// publishes it under status.managementEndpoints, and the facade serves a
+	// management-plane-only auth chain there (the dashboard's "Try this agent"
+	// and other in-cluster callers dial it). Set false for an external-only
+	// facade — no internal listener, no *-mgmt Service port, no status entry;
+	// the external listener is unaffected. Replaces the former agent-global
+	// externalAuth.allowManagementPlane.
+	// +optional
+	ManagementPlane *bool `json:"managementPlane,omitempty"`
 
 	// expose opts this agent into operator-provisioned external exposure.
 	// Opt-in: an agent is never externally reachable unless this is set AND the
@@ -153,6 +165,16 @@ type FacadeConfig struct {
 	// validators is management-plane-only at the facade.
 	// +optional
 	Expose *FacadeExposeConfig `json:"expose,omitempty"`
+}
+
+// ManagementPlaneEnabled reports whether this facade serves an internal
+// management-plane twin listener. A nil managementPlane field means the
+// permissive default (true); only an explicit managementPlane:false opts out.
+func (f *FacadeConfig) ManagementPlaneEnabled() bool {
+	if f == nil || f.ManagementPlane == nil {
+		return true
+	}
+	return *f.ManagementPlane
 }
 
 // FacadeExposeConfig opts an agent into operator-provisioned external exposure
@@ -776,16 +798,6 @@ type A2AConfig struct {
 	// +optional
 	ConversationTTL *string `json:"conversationTTL,omitempty"`
 
-	// authentication configures request authentication for the A2A endpoint.
-	//
-	// Deprecated: use spec.externalAuth.sharedToken instead. The
-	// AgentRuntime controller transparently projects this field into
-	// spec.externalAuth.sharedToken at reconcile time when the new field
-	// is unset; setting both is allowed but spec.externalAuth wins.
-	// Removal scheduled for the next major.
-	// +optional
-	Authentication *A2AAuthConfig `json:"authentication,omitempty"`
-
 	// taskStore configures the task persistence backend.
 	// Defaults to in-memory. Set type to "redis" for persistence across restarts.
 	// +optional
@@ -918,14 +930,6 @@ type AgentCapabilitiesSpec struct {
 	// pushNotifications indicates whether the agent supports push notifications.
 	// +optional
 	PushNotifications bool `json:"pushNotifications,omitempty"`
-}
-
-// A2AAuthConfig configures authentication for A2A requests.
-type A2AAuthConfig struct {
-	// secretRef references a Secret containing a bearer token.
-	// The secret should contain a key named "token".
-	// +optional
-	SecretRef *corev1.LocalObjectReference `json:"secretRef,omitempty"`
 }
 
 // A2AClientSpec configures an A2A client connection to another agent.
@@ -1231,15 +1235,18 @@ type MemoryToolsConfig struct {
 // +kubebuilder:validation:XValidation:rule="self.mode == 'function' || !has(self.inputSchema)",message="spec.inputSchema is only valid when spec.mode is 'function'"
 // +kubebuilder:validation:XValidation:rule="self.mode == 'function' || !has(self.outputSchema)",message="spec.outputSchema is only valid when spec.mode is 'function'"
 // +kubebuilder:validation:XValidation:rule="self.mode == 'function' || !has(self.outputFormat)",message="spec.outputFormat is only valid when spec.mode is 'function'"
-// +kubebuilder:validation:XValidation:rule="self.mode != 'function' || self.facade.type in ['rest', 'a2a']",message="mode 'function' requires facade.type 'rest' (HTTP) or 'a2a'; 'websocket' and 'grpc' are not valid for functions"
-// +kubebuilder:validation:XValidation:rule="self.facade.type != 'rest' || self.mode == 'function'",message="facade.type 'rest' is only valid when mode is 'function'"
-// +kubebuilder:validation:XValidation:rule="!has(self.facade.mcp) || !self.facade.mcp.enabled || self.mode == 'function'",message="facade.mcp.enabled requires mode=function"
+// Facade composition validations (#1576):
+// +kubebuilder:validation:XValidation:rule="self.facades.all(f, self.facades.exists_one(g, g.type == f.type))",message="spec.facades must not contain duplicate facade types"
+// +kubebuilder:validation:XValidation:rule="self.mode != 'agent' || self.facades.all(f, f.type == 'websocket' || f.type == 'a2a')",message="mode 'agent' allows only 'websocket' and 'a2a' facades"
+// +kubebuilder:validation:XValidation:rule="self.mode != 'function' || self.facades.all(f, f.type == 'rest' || f.type == 'mcp')",message="mode 'function' allows only 'rest' and 'mcp' facades"
+// +kubebuilder:validation:XValidation:rule="self.mode != 'function' || self.facades.exists_one(f, f.type == 'rest')",message="mode 'function' requires exactly one 'rest' facade"
 type AgentRuntimeSpec struct {
 	// mode controls how the AgentRuntime is invoked. "agent" (default) is
-	// the existing conversational runtime; "function" exposes the pack as
-	// a one-shot, structured-I/O HTTP endpoint at POST /functions/{name}.
-	// When set to "function", spec.inputSchema and spec.outputSchema are
-	// required and the facade type must be 'rest' or 'a2a'.
+	// the existing conversational runtime (websocket and/or a2a facades);
+	// "function" exposes the pack as a one-shot, structured-I/O HTTP endpoint
+	// at POST /functions/{name} (a rest facade, optionally with an mcp
+	// facade). When set to "function", spec.inputSchema and spec.outputSchema
+	// are required.
 	// +optional
 	// +kubebuilder:default="agent"
 	Mode AgentRuntimeMode `json:"mode,omitempty"`
@@ -1284,9 +1291,16 @@ type AgentRuntimeSpec struct {
 	// +kubebuilder:validation:Required
 	PromptPackRef PromptPackRef `json:"promptPackRef"`
 
-	// facade configures the client-facing connection interface.
+	// facades composes one or more single-protocol facades on top of the
+	// shared agent substrate. Each entry is one protocol surface (websocket,
+	// a2a, rest, or mcp); all run co-resident in the same pod. Agent mode uses
+	// websocket and/or a2a; function mode uses rest (required) and optionally
+	// mcp. Must be non-empty with no duplicate types (CEL-validated).
 	// +kubebuilder:validation:Required
-	Facade FacadeConfig `json:"facade"`
+	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:MaxItems=4
+	// +listType=atomic
+	Facades []FacadeConfig `json:"facades"`
 
 	// toolRegistryRef optionally references a ToolRegistry for available tools.
 	// +optional
@@ -1325,23 +1339,12 @@ type AgentRuntimeSpec struct {
 	// +optional
 	Duplex *DuplexConfig `json:"duplex,omitempty"`
 
-	// a2a configures the A2A (Agent-to-Agent) protocol.
-	//
-	// Deprecated: set spec.facade.a2a instead. The operator projects
-	// spec.a2a → spec.facade.a2a at reconcile time for back-compat;
-	// this field will be removed in a future release.
-	//
-	// +optional
-	A2A *A2AConfig `json:"a2a,omitempty"`
-
 	// externalAuth configures authentication for data-plane traffic to
-	// this agent's facade (external apps streaming via WebSocket or A2A).
+	// this agent's facades (external apps streaming via WebSocket or A2A).
 	// When unset, the agent is reachable only from the management plane
 	// (the dashboard's debug view) — no customer traffic until at least
-	// one validator is filled in. Subsumes the deprecated
-	// spec.a2a.authentication.secretRef field; the controller projects
-	// the legacy shape into spec.externalAuth.sharedToken at reconcile
-	// time.
+	// one validator is filled in. Applied to each facade's external auth
+	// chain.
 	// +optional
 	ExternalAuth *AgentExternalAuth `json:"externalAuth,omitempty"`
 
@@ -1381,7 +1384,7 @@ type AgentRuntimeSpec struct {
 	// (extraEnv, extraEnvFrom, extraVolumeMounts) apply to both the facade
 	// and runtime containers but NOT to operator-injected sidecars
 	// (e.g. policy-proxy). Per-container env overrides remain available
-	// via spec.facade.extraEnv and spec.runtime.extraEnv.
+	// via spec.facades[].extraEnv and spec.runtime.extraEnv.
 	// +optional
 	PodOverrides *PodOverrides `json:"podOverrides,omitempty"`
 }
@@ -1432,15 +1435,15 @@ type AgentRuntimeStatus struct {
 	ServiceEndpoint string `json:"serviceEndpoint,omitempty"`
 
 	// managementEndpoints reports the internal (management-plane) listener ports
-	// the facade serves when externalAuth.allowManagementPlane is enabled. A nil
-	// value means the management plane is disabled and no internal listener
-	// exists. The dashboard and in-cluster callers read these to dial the agent
-	// over the management plane — they never compute the port from the external
-	// port.
+	// the facades serve, one entry per surface whose facade has
+	// managementPlane enabled (the default). A surface's field is nil when no
+	// such facade exists or its managementPlane is false. The dashboard and
+	// in-cluster callers read these to dial the agent over the management plane
+	// — they never compute the port from the external port.
 	// +optional
 	ManagementEndpoints *ManagementEndpoints `json:"managementEndpoints,omitempty"`
 
-	// a2a holds A2A-specific status information when facade.type is "a2a".
+	// a2a holds A2A-specific status information when an a2a facade is present.
 	// +optional
 	A2A *A2AStatus `json:"a2a,omitempty"`
 
@@ -1465,9 +1468,10 @@ type AgentRuntimeStatus struct {
 }
 
 // ManagementEndpoints holds the internal management-plane listener ports the
-// facade serves (in-cluster only) when allowManagementPlane is enabled. A
-// surface's field is nil when that surface is disabled. Callers read these to
-// reach the agent over the management plane.
+// facades serve (in-cluster only) for each facade with managementPlane
+// enabled. A surface's field is nil when that surface is absent or its
+// managementPlane is false. Callers read these to reach the agent over the
+// management plane.
 type ManagementEndpoints struct {
 	// ws is the internal WebSocket management-plane port.
 	// +optional

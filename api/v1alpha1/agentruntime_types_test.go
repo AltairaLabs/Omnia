@@ -51,9 +51,9 @@ func TestFacadeTypeConstants(t *testing.T) {
 		expected string
 	}{
 		{"WebSocket", FacadeTypeWebSocket, "websocket"},
-		{"gRPC", FacadeTypeGRPC, "grpc"},
 		{"A2A", FacadeTypeA2A, "a2a"},
 		{"REST", FacadeTypeREST, "rest"},
+		{"MCP", FacadeTypeMCP, "mcp"},
 	}
 
 	for _, tt := range tests {
@@ -127,10 +127,10 @@ func TestAgentRuntimeCreation(t *testing.T) {
 				Name:    testPromptPack,
 				Version: &version,
 			},
-			Facade: FacadeConfig{
+			Facades: []FacadeConfig{{
 				Type: FacadeTypeWebSocket,
 				Port: &port,
-			},
+			}},
 			ToolRegistryRef: &ToolRegistryRef{
 				Name:      "my-tools",
 				Namespace: &namespace,
@@ -171,11 +171,11 @@ func TestAgentRuntimeCreation(t *testing.T) {
 	if *ar.Spec.PromptPackRef.Version != testVersion {
 		t.Errorf("PromptPackRef.Version = %q, want %q", *ar.Spec.PromptPackRef.Version, testVersion)
 	}
-	if ar.Spec.Facade.Type != FacadeTypeWebSocket {
-		t.Errorf("Facade.Type = %q, want %q", ar.Spec.Facade.Type, FacadeTypeWebSocket)
+	if ar.Spec.Facades[0].Type != FacadeTypeWebSocket {
+		t.Errorf("Facades[0].Type = %q, want %q", ar.Spec.Facades[0].Type, FacadeTypeWebSocket)
 	}
-	if *ar.Spec.Facade.Port != 8080 {
-		t.Errorf("Facade.Port = %d, want %d", *ar.Spec.Facade.Port, 8080)
+	if *ar.Spec.Facades[0].Port != 8080 {
+		t.Errorf("Facades[0].Port = %d, want %d", *ar.Spec.Facades[0].Port, 8080)
 	}
 	if ar.Spec.ToolRegistryRef.Name != "my-tools" {
 		t.Errorf("ToolRegistryRef.Name = %q, want %q", ar.Spec.ToolRegistryRef.Name, "my-tools")
@@ -256,7 +256,7 @@ func TestAgentRuntimeListCreation(t *testing.T) {
 				},
 				Spec: AgentRuntimeSpec{
 					PromptPackRef: PromptPackRef{Name: "pack-1"},
-					Facade:        FacadeConfig{Type: FacadeTypeWebSocket},
+					Facades:       []FacadeConfig{{Type: FacadeTypeWebSocket}},
 					Providers: []NamedProviderRef{
 						{Name: "default", ProviderRef: ProviderRef{Name: "provider-1"}},
 					},
@@ -269,7 +269,7 @@ func TestAgentRuntimeListCreation(t *testing.T) {
 				},
 				Spec: AgentRuntimeSpec{
 					PromptPackRef: PromptPackRef{Name: "pack-2"},
-					Facade:        FacadeConfig{Type: FacadeTypeGRPC},
+					Facades:       []FacadeConfig{{Type: FacadeTypeA2A}},
 					Providers: []NamedProviderRef{
 						{Name: "default", ProviderRef: ProviderRef{Name: "provider-2"}},
 					},
@@ -284,8 +284,8 @@ func TestAgentRuntimeListCreation(t *testing.T) {
 	if list.Items[0].Name != "agent-1" {
 		t.Errorf("Items[0].Name = %q, want %q", list.Items[0].Name, "agent-1")
 	}
-	if list.Items[1].Spec.Facade.Type != FacadeTypeGRPC {
-		t.Errorf("Items[1].Spec.Facade.Type = %q, want %q", list.Items[1].Spec.Facade.Type, FacadeTypeGRPC)
+	if list.Items[1].Spec.Facades[0].Type != FacadeTypeA2A {
+		t.Errorf("Items[1].Spec.Facades[0].Type = %q, want %q", list.Items[1].Spec.Facades[0].Type, FacadeTypeA2A)
 	}
 }
 
@@ -300,9 +300,9 @@ func TestMinimalAgentRuntime(t *testing.T) {
 			PromptPackRef: PromptPackRef{
 				Name: testPromptPack,
 			},
-			Facade: FacadeConfig{
+			Facades: []FacadeConfig{{
 				Type: FacadeTypeWebSocket,
-			},
+			}},
 			Providers: []NamedProviderRef{
 				{Name: "default", ProviderRef: ProviderRef{Name: testCredentials}},
 			},
@@ -313,8 +313,8 @@ func TestMinimalAgentRuntime(t *testing.T) {
 	if ar.Spec.PromptPackRef.Name != testPromptPack {
 		t.Errorf("PromptPackRef.Name = %q, want %q", ar.Spec.PromptPackRef.Name, testPromptPack)
 	}
-	if ar.Spec.Facade.Type != FacadeTypeWebSocket {
-		t.Errorf("Facade.Type = %q, want %q", ar.Spec.Facade.Type, FacadeTypeWebSocket)
+	if ar.Spec.Facades[0].Type != FacadeTypeWebSocket {
+		t.Errorf("Facades[0].Type = %q, want %q", ar.Spec.Facades[0].Type, FacadeTypeWebSocket)
 	}
 	if ar.Spec.Providers[0].ProviderRef.Name != testCredentials {
 		t.Errorf("Providers[0].ProviderRef.Name = %q, want %q", ar.Spec.Providers[0].ProviderRef.Name, testCredentials)
@@ -324,8 +324,8 @@ func TestMinimalAgentRuntime(t *testing.T) {
 	if ar.Spec.PromptPackRef.Version != nil {
 		t.Error("PromptPackRef.Version should be nil")
 	}
-	if ar.Spec.Facade.Port != nil {
-		t.Error("Facade.Port should be nil")
+	if ar.Spec.Facades[0].Port != nil {
+		t.Error("Facades[0].Port should be nil")
 	}
 	if ar.Spec.ToolRegistryRef != nil {
 		t.Error("ToolRegistryRef should be nil")
@@ -338,15 +338,15 @@ func TestMinimalAgentRuntime(t *testing.T) {
 	}
 }
 
-func TestFacadeConfigWithGRPC(t *testing.T) {
+func TestFacadeConfigWithCustomPort(t *testing.T) {
 	port := int32(9090)
 	config := FacadeConfig{
-		Type: FacadeTypeGRPC,
+		Type: FacadeTypeA2A,
 		Port: &port,
 	}
 
-	if config.Type != FacadeTypeGRPC {
-		t.Errorf("Type = %q, want %q", config.Type, FacadeTypeGRPC)
+	if config.Type != FacadeTypeA2A {
+		t.Errorf("Type = %q, want %q", config.Type, FacadeTypeA2A)
 	}
 	if *config.Port != 9090 {
 		t.Errorf("Port = %d, want %d", *config.Port, 9090)
@@ -582,10 +582,10 @@ func TestAgentRuntimeDeepCopy(t *testing.T) {
 				Name:    "my-prompts",
 				Version: &version,
 			},
-			Facade: FacadeConfig{
+			Facades: []FacadeConfig{{
 				Type: FacadeTypeWebSocket,
 				Port: &port,
-			},
+			}},
 			Runtime: &RuntimeConfig{
 				Replicas: &replicas,
 			},
@@ -638,7 +638,7 @@ func TestAgentRuntimeListDeepCopy(t *testing.T) {
 				},
 				Spec: AgentRuntimeSpec{
 					PromptPackRef: PromptPackRef{Name: "pack-1"},
-					Facade:        FacadeConfig{Type: FacadeTypeWebSocket},
+					Facades:       []FacadeConfig{{Type: FacadeTypeWebSocket}},
 					Providers: []NamedProviderRef{
 						{Name: "default", ProviderRef: ProviderRef{Name: "provider-1"}},
 					},
@@ -666,10 +666,10 @@ func TestAgentRuntimeSpecDeepCopy(t *testing.T) {
 
 	original := AgentRuntimeSpec{
 		PromptPackRef: PromptPackRef{Name: "prompts"},
-		Facade: FacadeConfig{
+		Facades: []FacadeConfig{{
 			Type: FacadeTypeWebSocket,
 			Port: &port,
-		},
+		}},
 		Context: &ContextConfig{
 			Type: ContextStoreTypeRedis,
 			TTL:  &ttl,
@@ -683,11 +683,11 @@ func TestAgentRuntimeSpecDeepCopy(t *testing.T) {
 
 	// Modify the copy
 	newPort := int32(9090)
-	copied.Facade.Port = &newPort
+	copied.Facades[0].Port = &newPort
 
 	// Verify original is unchanged
-	if *original.Facade.Port != 8080 {
-		t.Errorf("original.Facade.Port was modified, got %d, want %d", *original.Facade.Port, 8080)
+	if *original.Facades[0].Port != 8080 {
+		t.Errorf("original.Facades[0].Port was modified, got %d, want %d", *original.Facades[0].Port, 8080)
 	}
 }
 
@@ -711,7 +711,7 @@ func TestAgentRuntimeMemoryConfig(t *testing.T) {
 		},
 		Spec: AgentRuntimeSpec{
 			PromptPackRef: PromptPackRef{Name: testPromptPack},
-			Facade:        FacadeConfig{Type: FacadeTypeWebSocket},
+			Facades:       []FacadeConfig{{Type: FacadeTypeWebSocket}},
 			Providers: []NamedProviderRef{
 				{Name: "default", ProviderRef: ProviderRef{Name: testCredentials}},
 			},
@@ -778,7 +778,7 @@ func TestAgentRuntimeMemoryConfigNil(t *testing.T) {
 		},
 		Spec: AgentRuntimeSpec{
 			PromptPackRef: PromptPackRef{Name: testPromptPack},
-			Facade:        FacadeConfig{Type: FacadeTypeWebSocket},
+			Facades:       []FacadeConfig{{Type: FacadeTypeWebSocket}},
 			Providers: []NamedProviderRef{
 				{Name: "default", ProviderRef: ProviderRef{Name: testCredentials}},
 			},

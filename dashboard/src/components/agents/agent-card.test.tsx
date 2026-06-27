@@ -60,10 +60,12 @@ const createMockAgent = (overrides?: Partial<AgentRuntime>): AgentRuntime => ({
     providers: [
       { name: "default", providerRef: { name: "openai-provider" } },
     ],
-    facade: {
-      type: "websocket",
-      port: 8080,
-    },
+    facades: [
+      {
+        type: "websocket",
+        port: 8080,
+      },
+    ],
     promptPackRef: {
       name: "test-promptpack",
     },
@@ -281,7 +283,7 @@ describe("AgentCard", () => {
       spec: {
         framework: { type: "promptkit" },
         promptPackRef: { name: "test-pack" },
-        facade: { type: "websocket", port: 8080 },
+        facades: [{ type: "websocket", port: 8080 }],
         runtime: {
           replicas: 2,
           autoscaling: {
@@ -304,7 +306,7 @@ describe("AgentCard", () => {
       spec: {
         framework: { type: "promptkit" },
         promptPackRef: { name: "test-pack" },
-        facade: { type: "websocket", port: 8080 },
+        facades: [{ type: "websocket", port: 8080 }],
         providers: [
           { name: "default", providerRef: { name: "my-provider", namespace: "default" } },
         ],
@@ -356,7 +358,7 @@ describe("AgentCard", () => {
       spec: {
         framework: { type: "promptkit" },
         promptPackRef: { name: "test-pack" },
-        facade: { type: "websocket", port: 8080 },
+        facades: [{ type: "websocket", port: 8080 }],
         providers: [
           { name: "default", providerRef: { name: "claude-provider" } },
         ],
@@ -432,7 +434,7 @@ describe("AgentCard", () => {
       spec: {
         framework: { type: "promptkit" },
         promptPackRef: { name: "test-pack" },
-        facade: { type: "websocket", port: 8080 },
+        facades: [{ type: "websocket", port: 8080 }],
         providers: [
           { name: "default", providerRef: { name: "gemini-provider" } },
         ],
@@ -449,7 +451,7 @@ describe("AgentCard", () => {
       spec: {
         framework: { type: "promptkit" },
         promptPackRef: { name: "test-pack" },
-        facade: { type: "websocket", port: 8080 },
+        facades: [{ type: "websocket", port: 8080 }],
         providers: [
           { name: "default", providerRef: { name: "ollama-provider" } },
         ],

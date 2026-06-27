@@ -30,7 +30,8 @@ schemas, so exposing a function over A2A loses the typed contract.
 
 ## Enable MCP on a function
 
-Add `facade.mcp.enabled: true` to your function-mode `AgentRuntime`:
+Add an `mcp` facade entry alongside the `rest` facade on your
+function-mode `AgentRuntime`:
 
 ```yaml
 apiVersion: omnia.altairalabs.ai/v1alpha1
@@ -41,12 +42,12 @@ spec:
   mode: function
   promptPackRef:
     name: weather-pack
-  facade:
-    type: rest
-    port: 8080
-    mcp:
-      enabled: true
-      # port defaults to 9998
+  facades:
+    - type: rest
+      port: 8080
+    - type: mcp
+      mcp:
+        port: 9998   # defaults to 9998
   inputSchema:
     type: object
     required: ["latitude", "longitude"]
@@ -63,10 +64,10 @@ spec:
 
 After applying, the pod's Service has two ports:
 
-- `8080` (`facade.port`) — HTTP `POST /functions/{name}` for non-agent
-  consumers.
-- `9998` (`facade.mcp.port`) — Streamable HTTP MCP for agent /
-  typed-tool consumers.
+- `8080` (the `rest` facade's `port`) — HTTP `POST /functions/{name}`
+  for non-agent consumers.
+- `9998` (the `mcp` facade's `mcp.port`) — Streamable HTTP MCP for
+  agent / typed-tool consumers.
 
 The dashboard's `/functions` catalog shows an **MCP** badge next to
 function names that opt in.

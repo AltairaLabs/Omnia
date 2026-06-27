@@ -940,16 +940,16 @@ spec:
     name: test-prompts
   toolRegistryRef:
     name: test-tools
-  facade:
-    type: websocket
-    port: 8080
-    # The E2E curls /ws without a credential to assert the 101 upgrade.
-    # The B2 strict default would 401 this — opt into the dev escape
-    # hatch so the handshake succeeds. Production installs MUST never
-    # set this env var.
-    extraEnv:
-      - name: OMNIA_FACADE_ALLOW_UNAUTHENTICATED
-        value: "true"
+  facades:
+    - type: websocket
+      port: 8080
+      # The E2E curls /ws without a credential to assert the 101 upgrade.
+      # The B2 strict default would 401 this — opt into the dev escape
+      # hatch so the handshake succeeds. Production installs MUST never
+      # set this env var.
+      extraEnv:
+        - name: OMNIA_FACADE_ALLOW_UNAUTHENTICATED
+          value: "true"
   context:
     type: memory
     ttl: "1h"
@@ -1722,13 +1722,13 @@ spec:
     name: test-prompts
   toolRegistryRef:
     name: http-tools
-  facade:
-    type: websocket
-    port: 8080
-    # E2E clients connect without credentials; opt into the dev hatch.
-    extraEnv:
-      - name: OMNIA_FACADE_ALLOW_UNAUTHENTICATED
-        value: "true"
+  facades:
+    - type: websocket
+      port: 8080
+      # E2E clients connect without credentials; opt into the dev hatch.
+      extraEnv:
+        - name: OMNIA_FACADE_ALLOW_UNAUTHENTICATED
+          value: "true"
   context:
     type: memory
     ttl: "1h"
@@ -1837,14 +1837,14 @@ metadata:
 spec:
   promptPackRef:
     name: test-prompts
-  facade:
-    type: websocket
-    port: 8080
-    image: %s
-    # E2E clients connect without credentials; opt into the dev hatch.
-    extraEnv:
-      - name: OMNIA_FACADE_ALLOW_UNAUTHENTICATED
-        value: "true"
+  facades:
+    - type: websocket
+      port: 8080
+      image: %s
+      # E2E clients connect without credentials; opt into the dev hatch.
+      extraEnv:
+        - name: OMNIA_FACADE_ALLOW_UNAUTHENTICATED
+          value: "true"
   framework:
     type: custom
     image: %s
@@ -1921,13 +1921,13 @@ metadata:
 spec:
   promptPackRef:
     name: test-prompts
-  facade:
-    type: websocket
-    port: 8080
-    # E2E clients connect without credentials; opt into the dev hatch.
-    extraEnv:
-      - name: OMNIA_FACADE_ALLOW_UNAUTHENTICATED
-        value: "true"
+  facades:
+    - type: websocket
+      port: 8080
+      # E2E clients connect without credentials; opt into the dev hatch.
+      extraEnv:
+        - name: OMNIA_FACADE_ALLOW_UNAUTHENTICATED
+          value: "true"
   context:
     type: memory
     ttl: "1h"
@@ -1996,14 +1996,14 @@ metadata:
 spec:
   promptPackRef:
     name: test-prompts
-  facade:
-    type: websocket
-    port: 8080
-    image: %s
-    # E2E clients connect without credentials; opt into the dev hatch.
-    extraEnv:
-      - name: OMNIA_FACADE_ALLOW_UNAUTHENTICATED
-        value: "true"
+  facades:
+    - type: websocket
+      port: 8080
+      image: %s
+      # E2E clients connect without credentials; opt into the dev hatch.
+      extraEnv:
+        - name: OMNIA_FACADE_ALLOW_UNAUTHENTICATED
+          value: "true"
   context:
     type: memory
     ttl: "1h"
@@ -2070,14 +2070,14 @@ metadata:
 spec:
   promptPackRef:
     name: test-prompts
-  facade:
-    type: websocket
-    port: 8080
-    handler: demo
-    # E2E clients connect without credentials; opt into the dev hatch.
-    extraEnv:
-      - name: OMNIA_FACADE_ALLOW_UNAUTHENTICATED
-        value: "true"
+  facades:
+    - type: websocket
+      port: 8080
+      handler: demo
+      # E2E clients connect without credentials; opt into the dev hatch.
+      extraEnv:
+        - name: OMNIA_FACADE_ALLOW_UNAUTHENTICATED
+          value: "true"
   context:
     type: memory
     ttl: "1h"
@@ -2391,13 +2391,13 @@ spec:
     name: client-tool-prompts
   toolRegistryRef:
     name: client-tools
-  facade:
-    type: websocket
-    port: 8080
-    # E2E clients connect without credentials; opt into the dev hatch.
-    extraEnv:
-      - name: OMNIA_FACADE_ALLOW_UNAUTHENTICATED
-        value: "true"
+  facades:
+    - type: websocket
+      port: 8080
+      # E2E clients connect without credentials; opt into the dev hatch.
+      extraEnv:
+        - name: OMNIA_FACADE_ALLOW_UNAUTHENTICATED
+          value: "true"
   context:
     type: memory
     ttl: "1h"

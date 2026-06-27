@@ -153,9 +153,9 @@ var _ = Describe("AgentRuntime Controller", func() {
 					PromptPackRef: omniav1alpha1.PromptPackRef{
 						Name: "nonexistent-promptpack",
 					},
-					Facade: omniav1alpha1.FacadeConfig{
+					Facades: []omniav1alpha1.FacadeConfig{{
 						Type: omniav1alpha1.FacadeTypeWebSocket,
-					},
+					}},
 					Providers: []omniav1alpha1.NamedProviderRef{
 						{Name: "default", ProviderRef: omniav1alpha1.ProviderRef{Name: providerKey.Name}},
 					},
@@ -209,9 +209,9 @@ var _ = Describe("AgentRuntime Controller", func() {
 					PromptPackRef: omniav1alpha1.PromptPackRef{
 						Name: promptPackKey.Name,
 					},
-					Facade: omniav1alpha1.FacadeConfig{
+					Facades: []omniav1alpha1.FacadeConfig{{
 						Type: omniav1alpha1.FacadeTypeWebSocket,
-					},
+					}},
 					Providers: []omniav1alpha1.NamedProviderRef{
 						{Name: "default", ProviderRef: omniav1alpha1.ProviderRef{Name: providerKey.Name}},
 					},
@@ -317,9 +317,9 @@ var _ = Describe("AgentRuntime Controller", func() {
 					PromptPackRef: omniav1alpha1.PromptPackRef{
 						Name: promptPackKey.Name,
 					},
-					Facade: omniav1alpha1.FacadeConfig{
+					Facades: []omniav1alpha1.FacadeConfig{{
 						Type: omniav1alpha1.FacadeTypeWebSocket,
-					},
+					}},
 					Providers: []omniav1alpha1.NamedProviderRef{
 						{Name: "default", ProviderRef: omniav1alpha1.ProviderRef{Name: providerKey.Name}},
 					},
@@ -380,9 +380,9 @@ var _ = Describe("AgentRuntime Controller", func() {
 					PromptPackRef: omniav1alpha1.PromptPackRef{
 						Name: promptPackKey.Name,
 					},
-					Facade: omniav1alpha1.FacadeConfig{
+					Facades: []omniav1alpha1.FacadeConfig{{
 						Type: omniav1alpha1.FacadeTypeWebSocket,
-					},
+					}},
 					Providers: []omniav1alpha1.NamedProviderRef{
 						{Name: "default", ProviderRef: omniav1alpha1.ProviderRef{Name: providerKey.Name}},
 					},
@@ -443,10 +443,10 @@ var _ = Describe("AgentRuntime Controller", func() {
 					PromptPackRef: omniav1alpha1.PromptPackRef{
 						Name: promptPackKey.Name,
 					},
-					Facade: omniav1alpha1.FacadeConfig{
+					Facades: []omniav1alpha1.FacadeConfig{{
 						Type: omniav1alpha1.FacadeTypeWebSocket,
 						Port: &customPort,
-					},
+					}},
 					Providers: []omniav1alpha1.NamedProviderRef{
 						{Name: "default", ProviderRef: omniav1alpha1.ProviderRef{Name: providerKey.Name}},
 					},
@@ -500,9 +500,9 @@ var _ = Describe("AgentRuntime Controller", func() {
 					PromptPackRef: omniav1alpha1.PromptPackRef{
 						Name: promptPackKey.Name,
 					},
-					Facade: omniav1alpha1.FacadeConfig{
+					Facades: []omniav1alpha1.FacadeConfig{{
 						Type: omniav1alpha1.FacadeTypeWebSocket,
-					},
+					}},
 					Runtime: &omniav1alpha1.RuntimeConfig{
 						Replicas: &replicas,
 					},
@@ -551,9 +551,9 @@ var _ = Describe("AgentRuntime Controller", func() {
 					PromptPackRef: omniav1alpha1.PromptPackRef{
 						Name: promptPackKey.Name,
 					},
-					Facade: omniav1alpha1.FacadeConfig{
+					Facades: []omniav1alpha1.FacadeConfig{{
 						Type: omniav1alpha1.FacadeTypeWebSocket,
-					},
+					}},
 					Providers: []omniav1alpha1.NamedProviderRef{
 						{Name: "default", ProviderRef: omniav1alpha1.ProviderRef{Name: providerKey.Name}},
 					},
@@ -646,10 +646,10 @@ var _ = Describe("AgentRuntime Controller", func() {
 					PromptPackRef: omniav1alpha1.PromptPackRef{
 						Name: promptPackKey.Name,
 					},
-					Facade: omniav1alpha1.FacadeConfig{
+					Facades: []omniav1alpha1.FacadeConfig{{
 						Type:    omniav1alpha1.FacadeTypeWebSocket,
 						Handler: &demoMode,
-					},
+					}},
 					Providers: []omniav1alpha1.NamedProviderRef{
 						{Name: "default", ProviderRef: omniav1alpha1.ProviderRef{Name: providerKey.Name}},
 					},
@@ -716,9 +716,9 @@ var _ = Describe("AgentRuntime Controller", func() {
 					PromptPackRef: omniav1alpha1.PromptPackRef{
 						Name: promptPackKey.Name,
 					},
-					Facade: omniav1alpha1.FacadeConfig{
+					Facades: []omniav1alpha1.FacadeConfig{{
 						Type: omniav1alpha1.FacadeTypeWebSocket,
-					},
+					}},
 					Providers: []omniav1alpha1.NamedProviderRef{
 						{Name: "default", ProviderRef: omniav1alpha1.ProviderRef{Name: providerKey.Name}},
 					},
@@ -788,9 +788,9 @@ var _ = Describe("AgentRuntime Controller", func() {
 					PromptPackRef: omniav1alpha1.PromptPackRef{
 						Name: promptPackKey.Name,
 					},
-					Facade: omniav1alpha1.FacadeConfig{
+					Facades: []omniav1alpha1.FacadeConfig{{
 						Type: omniav1alpha1.FacadeTypeWebSocket,
-					},
+					}},
 					// No Provider config - no provider env vars should be set
 				},
 			}
@@ -875,9 +875,9 @@ var _ = Describe("AgentRuntime Controller", func() {
 					PromptPackRef: omniav1alpha1.PromptPackRef{
 						Name: promptPackKey.Name,
 					},
-					Facade: omniav1alpha1.FacadeConfig{
+					Facades: []omniav1alpha1.FacadeConfig{{
 						Type: omniav1alpha1.FacadeTypeWebSocket,
-					},
+					}},
 					Providers: []omniav1alpha1.NamedProviderRef{
 						{Name: "default", ProviderRef: omniav1alpha1.ProviderRef{Name: providerKey.Name}},
 					},
@@ -949,10 +949,10 @@ var _ = Describe("AgentRuntime Controller", func() {
 					PromptPackRef: omniav1alpha1.PromptPackRef{
 						Name: promptPackKey.Name,
 					},
-					Facade: omniav1alpha1.FacadeConfig{
+					Facades: []omniav1alpha1.FacadeConfig{{
 						Type:  omniav1alpha1.FacadeTypeWebSocket,
 						Image: customFacadeImage, // CRD override
-					},
+					}},
 					Framework: &omniav1alpha1.FrameworkConfig{
 						Type:  omniav1alpha1.FrameworkTypeCustom,
 						Image: customRuntimeImage, // CRD override
@@ -1027,10 +1027,10 @@ var _ = Describe("AgentRuntime Controller", func() {
 					PromptPackRef: omniav1alpha1.PromptPackRef{
 						Name: promptPackKey.Name,
 					},
-					Facade: omniav1alpha1.FacadeConfig{
+					Facades: []omniav1alpha1.FacadeConfig{{
 						Type:  omniav1alpha1.FacadeTypeWebSocket,
 						Image: customFacadeImage, // Only facade is overridden
-					},
+					}},
 					// Framework.Image is NOT set - should fall back to operator default
 					Providers: []omniav1alpha1.NamedProviderRef{
 						{Name: "default", ProviderRef: omniav1alpha1.ProviderRef{Name: providerKey.Name}},
@@ -1092,9 +1092,9 @@ var _ = Describe("AgentRuntime Controller", func() {
 					PromptPackRef: omniav1alpha1.PromptPackRef{
 						Name: promptPackKey.Name,
 					},
-					Facade: omniav1alpha1.FacadeConfig{
+					Facades: []omniav1alpha1.FacadeConfig{{
 						Type: omniav1alpha1.FacadeTypeWebSocket,
-					},
+					}},
 					Providers: []omniav1alpha1.NamedProviderRef{
 						{Name: "default", ProviderRef: omniav1alpha1.ProviderRef{Name: providerKey.Name}},
 					},
@@ -1185,9 +1185,9 @@ var _ = Describe("AgentRuntime Controller", func() {
 					PromptPackRef: omniav1alpha1.PromptPackRef{
 						Name: promptPackKey.Name,
 					},
-					Facade: omniav1alpha1.FacadeConfig{
+					Facades: []omniav1alpha1.FacadeConfig{{
 						Type: omniav1alpha1.FacadeTypeWebSocket,
-					},
+					}},
 					ToolRegistryRef: &omniav1alpha1.ToolRegistryRef{
 						Name: toolRegistryKey.Name,
 					},
@@ -1263,9 +1263,9 @@ var _ = Describe("AgentRuntime Controller", func() {
 					PromptPackRef: omniav1alpha1.PromptPackRef{
 						Name: promptPackKey.Name,
 					},
-					Facade: omniav1alpha1.FacadeConfig{
+					Facades: []omniav1alpha1.FacadeConfig{{
 						Type: omniav1alpha1.FacadeTypeWebSocket,
-					},
+					}},
 					ToolRegistryRef: &omniav1alpha1.ToolRegistryRef{
 						Name: "nonexistent-toolregistry",
 					},
@@ -1317,9 +1317,9 @@ var _ = Describe("AgentRuntime Controller", func() {
 					PromptPackRef: omniav1alpha1.PromptPackRef{
 						Name: promptPackKey.Name,
 					},
-					Facade: omniav1alpha1.FacadeConfig{
+					Facades: []omniav1alpha1.FacadeConfig{{
 						Type: omniav1alpha1.FacadeTypeWebSocket,
-					},
+					}},
 					Context: &omniav1alpha1.ContextConfig{
 						Type: omniav1alpha1.ContextStoreTypeRedis,
 						TTL:  &sessionTTL,
@@ -1386,9 +1386,9 @@ var _ = Describe("AgentRuntime Controller", func() {
 					PromptPackRef: omniav1alpha1.PromptPackRef{
 						Name: promptPackKey.Name,
 					},
-					Facade: omniav1alpha1.FacadeConfig{
+					Facades: []omniav1alpha1.FacadeConfig{{
 						Type: omniav1alpha1.FacadeTypeWebSocket,
-					},
+					}},
 					Providers: []omniav1alpha1.NamedProviderRef{
 						{Name: "default", ProviderRef: omniav1alpha1.ProviderRef{Name: providerKey.Name}},
 					},
@@ -1463,9 +1463,9 @@ var _ = Describe("AgentRuntime Controller", func() {
 					PromptPackRef: omniav1alpha1.PromptPackRef{
 						Name: promptPackKey.Name,
 					},
-					Facade: omniav1alpha1.FacadeConfig{
+					Facades: []omniav1alpha1.FacadeConfig{{
 						Type: omniav1alpha1.FacadeTypeWebSocket,
-					},
+					}},
 					ToolRegistryRef: &omniav1alpha1.ToolRegistryRef{
 						Name:      "cross-ns-toolregistry",
 						Namespace: &otherNS,
@@ -1523,9 +1523,9 @@ var _ = Describe("AgentRuntime Controller", func() {
 					PromptPackRef: omniav1alpha1.PromptPackRef{
 						Name: promptPackKey.Name,
 					},
-					Facade: omniav1alpha1.FacadeConfig{
+					Facades: []omniav1alpha1.FacadeConfig{{
 						Type: omniav1alpha1.FacadeTypeWebSocket,
-					},
+					}},
 					Providers: []omniav1alpha1.NamedProviderRef{
 						{Name: "default", ProviderRef: omniav1alpha1.ProviderRef{Name: providerKey.Name}},
 					},
@@ -1595,9 +1595,9 @@ var _ = Describe("AgentRuntime Controller", func() {
 					PromptPackRef: omniav1alpha1.PromptPackRef{
 						Name: promptPackKey.Name,
 					},
-					Facade: omniav1alpha1.FacadeConfig{
+					Facades: []omniav1alpha1.FacadeConfig{{
 						Type: omniav1alpha1.FacadeTypeWebSocket,
-					},
+					}},
 					Providers: []omniav1alpha1.NamedProviderRef{
 						{Name: "default", ProviderRef: omniav1alpha1.ProviderRef{Name: providerKey.Name}},
 					},
@@ -1657,9 +1657,9 @@ var _ = Describe("AgentRuntime Controller", func() {
 					PromptPackRef: omniav1alpha1.PromptPackRef{
 						Name: promptPackKey.Name,
 					},
-					Facade: omniav1alpha1.FacadeConfig{
+					Facades: []omniav1alpha1.FacadeConfig{{
 						Type: omniav1alpha1.FacadeTypeWebSocket,
-					},
+					}},
 					Providers: []omniav1alpha1.NamedProviderRef{
 						{Name: "default", ProviderRef: omniav1alpha1.ProviderRef{Name: providerKey.Name}},
 					},
@@ -1727,9 +1727,9 @@ var _ = Describe("AgentRuntime Controller", func() {
 					PromptPackRef: omniav1alpha1.PromptPackRef{
 						Name: promptPackKey.Name,
 					},
-					Facade: omniav1alpha1.FacadeConfig{
+					Facades: []omniav1alpha1.FacadeConfig{{
 						Type: omniav1alpha1.FacadeTypeWebSocket,
-					},
+					}},
 					Providers: []omniav1alpha1.NamedProviderRef{
 						{Name: "default", ProviderRef: omniav1alpha1.ProviderRef{Name: providerKey.Name}},
 					},
@@ -1780,9 +1780,9 @@ var _ = Describe("AgentRuntime Controller", func() {
 					PromptPackRef: omniav1alpha1.PromptPackRef{
 						Name: promptPackKey.Name,
 					},
-					Facade: omniav1alpha1.FacadeConfig{
+					Facades: []omniav1alpha1.FacadeConfig{{
 						Type: omniav1alpha1.FacadeTypeWebSocket,
-					},
+					}},
 					Providers: []omniav1alpha1.NamedProviderRef{
 						{Name: "default", ProviderRef: omniav1alpha1.ProviderRef{Name: providerKey.Name}},
 					},
@@ -1851,9 +1851,9 @@ var _ = Describe("AgentRuntime Controller", func() {
 					PromptPackRef: omniav1alpha1.PromptPackRef{
 						Name: promptPackKey.Name,
 					},
-					Facade: omniav1alpha1.FacadeConfig{
+					Facades: []omniav1alpha1.FacadeConfig{{
 						Type: omniav1alpha1.FacadeTypeWebSocket,
-					},
+					}},
 					Providers: []omniav1alpha1.NamedProviderRef{
 						{Name: "default", ProviderRef: omniav1alpha1.ProviderRef{Name: providerKey.Name}},
 					},
@@ -1916,9 +1916,9 @@ var _ = Describe("AgentRuntime Controller", func() {
 					PromptPackRef: omniav1alpha1.PromptPackRef{
 						Name: promptPackKey.Name,
 					},
-					Facade: omniav1alpha1.FacadeConfig{
+					Facades: []omniav1alpha1.FacadeConfig{{
 						Type: omniav1alpha1.FacadeTypeWebSocket,
-					},
+					}},
 					Providers: []omniav1alpha1.NamedProviderRef{
 						{Name: "default", ProviderRef: omniav1alpha1.ProviderRef{Name: providerKey.Name}},
 					},
@@ -1984,9 +1984,9 @@ var _ = Describe("AgentRuntime Controller", func() {
 					PromptPackRef: omniav1alpha1.PromptPackRef{
 						Name: promptPackKey.Name,
 					},
-					Facade: omniav1alpha1.FacadeConfig{
+					Facades: []omniav1alpha1.FacadeConfig{{
 						Type: omniav1alpha1.FacadeTypeWebSocket,
-					},
+					}},
 					Providers: []omniav1alpha1.NamedProviderRef{
 						{Name: "default", ProviderRef: omniav1alpha1.ProviderRef{Name: providerKey.Name}},
 					},
@@ -2049,9 +2049,9 @@ var _ = Describe("AgentRuntime Controller", func() {
 					PromptPackRef: omniav1alpha1.PromptPackRef{
 						Name: promptPackKey.Name,
 					},
-					Facade: omniav1alpha1.FacadeConfig{
+					Facades: []omniav1alpha1.FacadeConfig{{
 						Type: omniav1alpha1.FacadeTypeWebSocket,
-					},
+					}},
 					Providers: []omniav1alpha1.NamedProviderRef{
 						{Name: "default", ProviderRef: omniav1alpha1.ProviderRef{Name: providerKey.Name}},
 					},
@@ -2110,9 +2110,9 @@ var _ = Describe("AgentRuntime Controller", func() {
 					PromptPackRef: omniav1alpha1.PromptPackRef{
 						Name: promptPackKey.Name,
 					},
-					Facade: omniav1alpha1.FacadeConfig{
+					Facades: []omniav1alpha1.FacadeConfig{{
 						Type: omniav1alpha1.FacadeTypeWebSocket,
-					},
+					}},
 					Providers: []omniav1alpha1.NamedProviderRef{
 						{Name: "default", ProviderRef: omniav1alpha1.ProviderRef{Name: providerKey.Name}},
 					},
@@ -2187,9 +2187,9 @@ var _ = Describe("AgentRuntime Controller", func() {
 					PromptPackRef: omniav1alpha1.PromptPackRef{
 						Name: promptPackKey.Name,
 					},
-					Facade: omniav1alpha1.FacadeConfig{
+					Facades: []omniav1alpha1.FacadeConfig{{
 						Type: omniav1alpha1.FacadeTypeWebSocket,
-					},
+					}},
 					Providers: []omniav1alpha1.NamedProviderRef{
 						{Name: "default", ProviderRef: omniav1alpha1.ProviderRef{Name: providerKey.Name}},
 					},
@@ -2254,9 +2254,9 @@ var _ = Describe("AgentRuntime Controller", func() {
 					PromptPackRef: omniav1alpha1.PromptPackRef{
 						Name: promptPackKey.Name,
 					},
-					Facade: omniav1alpha1.FacadeConfig{
+					Facades: []omniav1alpha1.FacadeConfig{{
 						Type: omniav1alpha1.FacadeTypeA2A,
-					},
+					}},
 					Providers: []omniav1alpha1.NamedProviderRef{
 						{Name: "default", ProviderRef: omniav1alpha1.ProviderRef{Name: providerKey.Name}},
 					},
@@ -2310,11 +2310,9 @@ var _ = Describe("AgentRuntime Controller", func() {
 					PromptPackRef: omniav1alpha1.PromptPackRef{
 						Name: promptPackKey.Name,
 					},
-					Facade: omniav1alpha1.FacadeConfig{
-						Type: omniav1alpha1.FacadeTypeWebSocket,
-					},
-					A2A: &omniav1alpha1.A2AConfig{
-						Enabled: true,
+					Facades: []omniav1alpha1.FacadeConfig{
+						{Type: omniav1alpha1.FacadeTypeWebSocket},
+						{Type: omniav1alpha1.FacadeTypeA2A, A2A: &omniav1alpha1.A2AConfig{}},
 					},
 					Providers: []omniav1alpha1.NamedProviderRef{
 						{Name: "default", ProviderRef: omniav1alpha1.ProviderRef{Name: providerKey.Name}},
@@ -2384,9 +2382,9 @@ var _ = Describe("AgentRuntime Controller", func() {
 					PromptPackRef: omniav1alpha1.PromptPackRef{
 						Name: promptPackKey.Name,
 					},
-					Facade: omniav1alpha1.FacadeConfig{
+					Facades: []omniav1alpha1.FacadeConfig{{
 						Type: omniav1alpha1.FacadeTypeWebSocket,
-					},
+					}},
 					Providers: []omniav1alpha1.NamedProviderRef{
 						{Name: "default", ProviderRef: omniav1alpha1.ProviderRef{Name: providerKey.Name}},
 					},
@@ -2688,9 +2686,9 @@ var _ = Describe("AgentRuntime Controller", func() {
 					PromptPackRef: omniav1alpha1.PromptPackRef{
 						Name: "test-pack",
 					},
-					Facade: omniav1alpha1.FacadeConfig{
+					Facades: []omniav1alpha1.FacadeConfig{{
 						Type: omniav1alpha1.FacadeTypeWebSocket,
-					},
+					}},
 					Providers: []omniav1alpha1.NamedProviderRef{
 						{Name: "default", ProviderRef: ref},
 					},
@@ -2759,9 +2757,9 @@ var _ = Describe("AgentRuntime Controller", func() {
 					PromptPackRef: omniav1alpha1.PromptPackRef{
 						Name: "test-pack",
 					},
-					Facade: omniav1alpha1.FacadeConfig{
+					Facades: []omniav1alpha1.FacadeConfig{{
 						Type: omniav1alpha1.FacadeTypeWebSocket,
-					},
+					}},
 					Providers: []omniav1alpha1.NamedProviderRef{
 						{Name: "default", ProviderRef: ref},
 					},
@@ -2815,7 +2813,7 @@ var _ = Describe("AgentRuntime Controller", func() {
 				},
 				Spec: omniav1alpha1.AgentRuntimeSpec{
 					PromptPackRef: omniav1alpha1.PromptPackRef{Name: "test-pack"},
-					Facade:        omniav1alpha1.FacadeConfig{Type: omniav1alpha1.FacadeTypeWebSocket},
+					Facades:       []omniav1alpha1.FacadeConfig{{Type: omniav1alpha1.FacadeTypeWebSocket}},
 					Providers: []omniav1alpha1.NamedProviderRef{
 						{Name: "default", ProviderRef: ref},
 					},
@@ -2867,7 +2865,7 @@ var _ = Describe("AgentRuntime Controller", func() {
 				},
 				Spec: omniav1alpha1.AgentRuntimeSpec{
 					PromptPackRef: omniav1alpha1.PromptPackRef{Name: "test-pack"},
-					Facade:        omniav1alpha1.FacadeConfig{Type: omniav1alpha1.FacadeTypeWebSocket},
+					Facades:       []omniav1alpha1.FacadeConfig{{Type: omniav1alpha1.FacadeTypeWebSocket}},
 					Providers: []omniav1alpha1.NamedProviderRef{
 						{Name: "default", ProviderRef: ref, RequiredCapabilities: []omniav1alpha1.ProviderCapability{
 							omniav1alpha1.ProviderCapabilityText,
@@ -2926,7 +2924,7 @@ var _ = Describe("AgentRuntime Controller", func() {
 				},
 				Spec: omniav1alpha1.AgentRuntimeSpec{
 					PromptPackRef: omniav1alpha1.PromptPackRef{Name: "test-pack"},
-					Facade:        omniav1alpha1.FacadeConfig{Type: omniav1alpha1.FacadeTypeWebSocket},
+					Facades:       []omniav1alpha1.FacadeConfig{{Type: omniav1alpha1.FacadeTypeWebSocket}},
 					Providers: []omniav1alpha1.NamedProviderRef{
 						{Name: "default", ProviderRef: ref, RequiredCapabilities: []omniav1alpha1.ProviderCapability{
 							omniav1alpha1.ProviderCapabilityText,
@@ -2980,7 +2978,7 @@ var _ = Describe("AgentRuntime Controller", func() {
 				},
 				Spec: omniav1alpha1.AgentRuntimeSpec{
 					PromptPackRef: omniav1alpha1.PromptPackRef{Name: "test-pack"},
-					Facade:        omniav1alpha1.FacadeConfig{Type: omniav1alpha1.FacadeTypeWebSocket},
+					Facades:       []omniav1alpha1.FacadeConfig{{Type: omniav1alpha1.FacadeTypeWebSocket}},
 					Providers: []omniav1alpha1.NamedProviderRef{
 						{Name: "default", ProviderRef: ref, Role: omniav1alpha1.ProviderRoleLLM},
 					},
@@ -3034,7 +3032,7 @@ var _ = Describe("AgentRuntime Controller", func() {
 				},
 				Spec: omniav1alpha1.AgentRuntimeSpec{
 					PromptPackRef: omniav1alpha1.PromptPackRef{Name: "test-pack"},
-					Facade:        omniav1alpha1.FacadeConfig{Type: omniav1alpha1.FacadeTypeWebSocket},
+					Facades:       []omniav1alpha1.FacadeConfig{{Type: omniav1alpha1.FacadeTypeWebSocket}},
 					Providers: []omniav1alpha1.NamedProviderRef{
 						{Name: "embed", ProviderRef: ref, Role: omniav1alpha1.ProviderRoleEmbedding},
 					},
@@ -3130,9 +3128,9 @@ var _ = Describe("AgentRuntime Controller", func() {
 					PromptPackRef: omniav1alpha1.PromptPackRef{
 						Name: "test-pack",
 					},
-					Facade: omniav1alpha1.FacadeConfig{
+					Facades: []omniav1alpha1.FacadeConfig{{
 						Type: omniav1alpha1.FacadeTypeWebSocket,
-					},
+					}},
 					Providers: []omniav1alpha1.NamedProviderRef{
 						{
 							Name:        "default",
@@ -3181,9 +3179,9 @@ var _ = Describe("AgentRuntime Controller", func() {
 					PromptPackRef: omniav1alpha1.PromptPackRef{
 						Name: "test-pack",
 					},
-					Facade: omniav1alpha1.FacadeConfig{
+					Facades: []omniav1alpha1.FacadeConfig{{
 						Type: omniav1alpha1.FacadeTypeWebSocket,
-					},
+					}},
 					Providers: []omniav1alpha1.NamedProviderRef{
 						{
 							Name:        "default",
@@ -3223,9 +3221,9 @@ var _ = Describe("AgentRuntime Controller", func() {
 					PromptPackRef: omniav1alpha1.PromptPackRef{
 						Name: "test-pack",
 					},
-					Facade: omniav1alpha1.FacadeConfig{
+					Facades: []omniav1alpha1.FacadeConfig{{
 						Type: omniav1alpha1.FacadeTypeWebSocket,
-					},
+					}},
 				},
 			}
 			Expect(k8sClient.Create(ctx, agentRuntime)).To(Succeed())
@@ -3277,9 +3275,9 @@ var _ = Describe("AgentRuntime Controller", func() {
 					PromptPackRef: omniav1alpha1.PromptPackRef{
 						Name: "test-pack",
 					},
-					Facade: omniav1alpha1.FacadeConfig{
+					Facades: []omniav1alpha1.FacadeConfig{{
 						Type: omniav1alpha1.FacadeTypeWebSocket,
-					},
+					}},
 					Providers: []omniav1alpha1.NamedProviderRef{
 						{
 							Name:        "default",
@@ -3304,10 +3302,6 @@ var _ = Describe("AgentRuntime Controller", func() {
 
 // Test helper functions and buildKEDATriggers (unit tests, no envtest required)
 var _ = Describe("AgentRuntime Controller Unit Tests", func() {
-	const (
-		anthropicAPIKey = "ANTHROPIC_API_KEY"
-	)
-
 	Describe("ptr helper function", func() {
 		It("should return a pointer to an int32 value", func() {
 			val := int32(42)
@@ -4035,9 +4029,9 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 						Providers: []omniav1alpha1.NamedProviderRef{
 							{Name: "default", ProviderRef: omniav1alpha1.ProviderRef{Name: "test-provider"}},
 						},
-						Facade: omniav1alpha1.FacadeConfig{
+						Facades: []omniav1alpha1.FacadeConfig{{
 							Type: omniav1alpha1.FacadeTypeWebSocket,
-						},
+						}},
 					},
 				}
 				Expect(k8sClient.Create(ctx, ar)).To(Succeed())
@@ -4136,9 +4130,9 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 						PromptPackRef: omniav1alpha1.PromptPackRef{
 							Name: "watched-pack",
 						},
-						Facade: omniav1alpha1.FacadeConfig{
+						Facades: []omniav1alpha1.FacadeConfig{{
 							Type: omniav1alpha1.FacadeTypeWebSocket,
-						},
+						}},
 					},
 				}
 				Expect(k8sClient.Create(ctx, ar)).To(Succeed())
@@ -4217,7 +4211,7 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 					ObjectMeta: metav1.ObjectMeta{Name: privAgentKey.Name, Namespace: privAgentKey.Namespace},
 					Spec: omniav1alpha1.AgentRuntimeSpec{
 						PromptPackRef: omniav1alpha1.PromptPackRef{Name: "pp"},
-						Facade:        omniav1alpha1.FacadeConfig{Type: omniav1alpha1.FacadeTypeWebSocket},
+						Facades:       []omniav1alpha1.FacadeConfig{{Type: omniav1alpha1.FacadeTypeWebSocket}},
 					},
 				}
 				cond := privReconciler.validatePrivacyPolicyRef(ctxPriv, ar)
@@ -4231,7 +4225,7 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 					ObjectMeta: metav1.ObjectMeta{Name: privAgentKey.Name, Namespace: privAgentKey.Namespace},
 					Spec: omniav1alpha1.AgentRuntimeSpec{
 						PromptPackRef:    omniav1alpha1.PromptPackRef{Name: "pp"},
-						Facade:           omniav1alpha1.FacadeConfig{Type: omniav1alpha1.FacadeTypeWebSocket},
+						Facades:          []omniav1alpha1.FacadeConfig{{Type: omniav1alpha1.FacadeTypeWebSocket}},
 						PrivacyPolicyRef: &corev1.LocalObjectReference{Name: "does-not-exist"},
 					},
 				}
@@ -4257,7 +4251,7 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 					ObjectMeta: metav1.ObjectMeta{Name: privAgentKey.Name, Namespace: privAgentKey.Namespace},
 					Spec: omniav1alpha1.AgentRuntimeSpec{
 						PromptPackRef:    omniav1alpha1.PromptPackRef{Name: "pp"},
-						Facade:           omniav1alpha1.FacadeConfig{Type: omniav1alpha1.FacadeTypeWebSocket},
+						Facades:          []omniav1alpha1.FacadeConfig{{Type: omniav1alpha1.FacadeTypeWebSocket}},
 						PrivacyPolicyRef: &corev1.LocalObjectReference{Name: privPolicyName},
 					},
 				}
@@ -4284,7 +4278,7 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 					},
 					Spec: omniav1alpha1.AgentRuntimeSpec{
 						PromptPackRef: omniav1alpha1.PromptPackRef{Name: "dummy"},
-						Facade:        omniav1alpha1.FacadeConfig{Type: omniav1alpha1.FacadeTypeWebSocket},
+						Facades:       []omniav1alpha1.FacadeConfig{{Type: omniav1alpha1.FacadeTypeWebSocket}},
 						Duplex:        &omniav1alpha1.DuplexConfig{Enabled: true, Mode: "hologram"},
 					},
 				}
@@ -4299,7 +4293,7 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 					},
 					Spec: omniav1alpha1.AgentRuntimeSpec{
 						PromptPackRef: omniav1alpha1.PromptPackRef{Name: "dummy"},
-						Facade:        omniav1alpha1.FacadeConfig{Type: omniav1alpha1.FacadeTypeWebSocket},
+						Facades:       []omniav1alpha1.FacadeConfig{{Type: omniav1alpha1.FacadeTypeWebSocket}},
 						Duplex:        &omniav1alpha1.DuplexConfig{Enabled: true, Mode: "audio"},
 					},
 				}
@@ -4323,7 +4317,7 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 					},
 					Spec: omniav1alpha1.AgentRuntimeSpec{
 						PromptPackRef: omniav1alpha1.PromptPackRef{Name: "dummy"},
-						Facade:        omniav1alpha1.FacadeConfig{Type: omniav1alpha1.FacadeTypeWebSocket},
+						Facades:       []omniav1alpha1.FacadeConfig{{Type: omniav1alpha1.FacadeTypeWebSocket}},
 						Context: &omniav1alpha1.ContextConfig{
 							Type: omniav1alpha1.ContextStoreTypeRedis,
 						},
@@ -4344,7 +4338,7 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 					},
 					Spec: omniav1alpha1.AgentRuntimeSpec{
 						PromptPackRef: omniav1alpha1.PromptPackRef{Name: "dummy"},
-						Facade:        omniav1alpha1.FacadeConfig{Type: omniav1alpha1.FacadeTypeWebSocket},
+						Facades:       []omniav1alpha1.FacadeConfig{{Type: omniav1alpha1.FacadeTypeWebSocket}},
 						Context: &omniav1alpha1.ContextConfig{
 							Type:     omniav1alpha1.ContextStoreType("postgres"),
 							StoreRef: &corev1.LocalObjectReference{Name: "pg-secret"},
@@ -4362,7 +4356,7 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 					},
 					Spec: omniav1alpha1.AgentRuntimeSpec{
 						PromptPackRef: omniav1alpha1.PromptPackRef{Name: "dummy"},
-						Facade:        omniav1alpha1.FacadeConfig{Type: omniav1alpha1.FacadeTypeWebSocket},
+						Facades:       []omniav1alpha1.FacadeConfig{{Type: omniav1alpha1.FacadeTypeWebSocket}},
 						Context: &omniav1alpha1.ContextConfig{
 							Type:     omniav1alpha1.ContextStoreTypeRedis,
 							StoreRef: &corev1.LocalObjectReference{Name: "my-redis-secret"},
@@ -4381,7 +4375,7 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 					},
 					Spec: omniav1alpha1.AgentRuntimeSpec{
 						PromptPackRef: omniav1alpha1.PromptPackRef{Name: "dummy"},
-						Facade:        omniav1alpha1.FacadeConfig{Type: omniav1alpha1.FacadeTypeWebSocket},
+						Facades:       []omniav1alpha1.FacadeConfig{{Type: omniav1alpha1.FacadeTypeWebSocket}},
 						Context: &omniav1alpha1.ContextConfig{
 							Type: omniav1alpha1.ContextStoreTypeMemory,
 						},

@@ -438,9 +438,9 @@ spec:
     name: claude-production
     namespace: agents  # Optional, defaults to same namespace
 
-  facade:
-    type: websocket
-    port: 8080
+  facades:
+    - type: websocket
+      port: 8080
 ```
 
 ## Multiple Providers

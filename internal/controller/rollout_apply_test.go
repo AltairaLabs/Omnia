@@ -158,7 +158,7 @@ var _ = Describe("AgentRuntime applyTrafficRouting dispatch (envtest)", func() {
 			ObjectMeta: metav1.ObjectMeta{Name: agentName, Namespace: namespace, Generation: 1},
 			Spec: omniav1alpha1.AgentRuntimeSpec{
 				PromptPackRef: omniav1alpha1.PromptPackRef{Name: "p", Version: ptr.To("v1")},
-				Facade:        omniav1alpha1.FacadeConfig{Type: omniav1alpha1.FacadeTypeWebSocket, Port: &port},
+				Facades:       []omniav1alpha1.FacadeConfig{{Type: omniav1alpha1.FacadeTypeWebSocket, Port: &port}},
 				Providers: []omniav1alpha1.NamedProviderRef{{
 					Name:        defaultSvcGroupName,
 					ProviderRef: omniav1alpha1.ProviderRef{Name: testClaudeProviderNm},

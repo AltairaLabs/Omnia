@@ -150,9 +150,9 @@ spec:
     name: assistant-pack
   toolRegistryRef:
     name: agent-tools
-  facade:
-    type: websocket
-    port: 8080
+  facades:
+    - type: websocket
+      port: 8080
   context:
     type: memory
     ttl: "1h"

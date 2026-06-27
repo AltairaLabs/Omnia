@@ -25,25 +25,18 @@ import (
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 )
 
-// isMCPEnabled returns true when the AgentRuntime has MCP enabled on the
-// facade. CEL validation in the CRD enforces that mcp.enabled requires
-// mode=function, so here we trust the spec without re-checking mode.
-func isMCPEnabled(ar *omniav1alpha1.AgentRuntime) bool {
-	return ar.Spec.Facade.MCP != nil && ar.Spec.Facade.MCP.Enabled
-}
-
-// mcpPort returns the configured MCP port, defaulting to DefaultMCPPort
-// when unset. Caller has already verified isMCPEnabled.
+// mcpPort returns the mcp facade's configured port, defaulting to DefaultMCPPort
+// when unset. Caller has already verified isMCPEnabled (see facades.go).
 func mcpPort(ar *omniav1alpha1.AgentRuntime) int32 {
-	if ar.Spec.Facade.MCP != nil && ar.Spec.Facade.MCP.Port != nil {
-		return *ar.Spec.Facade.MCP.Port
+	if f := facadeOfType(ar, omniav1alpha1.FacadeTypeMCP); f != nil && f.MCP != nil && f.MCP.Port != nil {
+		return *f.MCP.Port
 	}
 	return DefaultMCPPort
 }
 
 // applyMCPFacadeOptions appends the MCP container port + env vars to
-// the facade container when spec.facade.mcp.enabled is true. CEL
-// enforces function-mode; callers don't need to re-check.
+// the facade container when an mcp facade is present. CEL enforces
+// function-mode; callers don't need to re-check.
 func applyMCPFacadeOptions(facadeContainer *corev1.Container, ar *omniav1alpha1.AgentRuntime) {
 	if !isMCPEnabled(ar) {
 		return

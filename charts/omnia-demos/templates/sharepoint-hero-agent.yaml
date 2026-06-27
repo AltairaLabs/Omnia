@@ -27,10 +27,10 @@ spec:
   podOverrides:
     {{- include "omnia-demos.azureWorkloadIdentityPodOverrides" . | nindent 4 }}
   {{- end }}
-  facade:
-    type: websocket
-    port: 8080
-    handler: runtime
+  facades:
+    - type: websocket
+      port: 8080
+      handler: runtime
   evals:
     # rag-hero is a PromptKit agent, which self-evaluates lightweight evals
     # inline and is excluded from the out-of-band eval-worker by default. The

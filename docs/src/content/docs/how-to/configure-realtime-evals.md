@@ -35,8 +35,8 @@ spec:
     - name: default
       providerRef:
         name: claude-sonnet
-  facade:
-    type: websocket
+  facades:
+    - type: websocket
   evals:
     enabled: true
 ```
@@ -311,8 +311,8 @@ spec:
       providerRef:
         name: claude-haiku
 
-  facade:
-    type: websocket
+  facades:
+    - type: websocket
 
   context:
     type: postgres

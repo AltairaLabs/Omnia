@@ -218,7 +218,7 @@ describe("composeAgentYaml", () => {
       metadata: { name: "my-fn", namespace: "ns-a" },
       spec: {
         promptPackRef: { name: "my-pack", track: "stable" },
-        facade: { type: "websocket", port: 8080 },
+        facades: [{ type: "websocket", port: 8080 }],
       },
     });
     // Function-mode fields must be absent — pre-PR YAMLs byte-identical.
@@ -244,13 +244,13 @@ describe("composeAgentYaml", () => {
     expect(spec.outputSchema).toEqual({ type: "object", required: ["a"] });
   });
 
-  it("pins facade.type to 'rest' in function mode regardless of facadeType", () => {
+  it("pins the facade type to 'rest' in function mode regardless of facadeType", () => {
     const yaml = composeAgentYaml(
       { ...baseForm, mode: "function", facadeType: "websocket" },
       "ns-a",
     );
-    const spec = (yaml as { spec: { facade: { type: string } } }).spec;
-    expect(spec.facade.type).toBe("rest");
+    const spec = (yaml as { spec: { facades: { type: string }[] } }).spec;
+    expect(spec.facades[0].type).toBe("rest");
   });
 
   it("falls back to 'default' namespace when none supplied", () => {

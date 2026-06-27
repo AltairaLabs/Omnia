@@ -37,8 +37,6 @@ import (
 	"github.com/altairalabs/omnia/internal/media"
 	"github.com/altairalabs/omnia/internal/session"
 	"github.com/altairalabs/omnia/internal/tracing"
-
-	a2aserver "github.com/AltairaLabs/PromptKit/server/a2a"
 )
 
 // runWebSocketFacade starts the traditional WebSocket facade with a gRPC runtime sidecar.
@@ -421,13 +419,6 @@ func startA2AServer(
 		"conversationTTL", cfg.A2AConversationTTL,
 	)
 
-	// Legacy per-SDK bearer authenticator (see a2a.go for rationale).
-	var a2aAuth a2aserver.Authenticator
-	if cfg.A2AAuthToken != "" {
-		a2aAuth = facadea2a.NewBearerAuthenticator(cfg.A2AAuthToken)
-		log.Info("A2A bearer auth enabled (legacy)")
-	}
-
 	// Build the auth chain for this A2A endpoint. In dual-protocol mode
 	// the WebSocket side has already built its chain in
 	// buildWebSocketServer; we rebuild here rather than plumb it across
@@ -462,7 +453,6 @@ func startA2AServer(
 		TaskTTL:         cfg.A2ATaskTTL,
 		ConversationTTL: cfg.A2AConversationTTL,
 		CardProvider:    cardProvider,
-		Authenticator:   a2aAuth,
 		TaskStore:       taskStore,
 		Log:             log,
 	})

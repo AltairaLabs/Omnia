@@ -84,9 +84,9 @@ To deploy your first agent, create an AgentRuntime resource:
   spec:
     promptPackRef:
       name: my-promptpack
-    facade:
-      type: websocket
-      port: 8080
+    facades:
+      - type: websocket
+        port: 8080
     # Optional: customize the pod (workload identity, CSI secrets, GPU, etc.).
     # Full reference: https://omnia.altairalabs.ai/docs/how-to/configure-pod-overrides
     # podOverrides:

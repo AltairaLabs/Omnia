@@ -46,7 +46,7 @@ export function FunctionCard({ fn }: Readonly<FunctionCardProps>) {
   const { currentWorkspace } = useWorkspace();
   const inputFields = schemaFieldCount(spec.inputSchema);
   const outputFields = schemaFieldCount(spec.outputSchema);
-  const mcpEnabled = Boolean(spec.facade?.mcp?.enabled);
+  const mcpEnabled = Boolean(spec.facades?.some(f => f.type === "mcp"));
 
   const defaultProviderRef = getDefaultProviderRef(spec);
   const { data: provider } = useProvider(defaultProviderRef?.name, namespace);

@@ -289,14 +289,15 @@ kind: AgentRuntime
 metadata:
   name: my-agent
 spec:
-  facade:
-    env:
-      - name: OMNIA_MEDIA_STORAGE_TYPE
-        value: s3
-      - name: OMNIA_MEDIA_S3_BUCKET
-        value: my-media-bucket
-      - name: OMNIA_MEDIA_S3_REGION
-        value: us-west-2
+  facades:
+    - type: websocket
+      env:
+        - name: OMNIA_MEDIA_STORAGE_TYPE
+          value: s3
+        - name: OMNIA_MEDIA_S3_BUCKET
+          value: my-media-bucket
+        - name: OMNIA_MEDIA_S3_REGION
+          value: us-west-2
 ```
 
 ## Troubleshooting

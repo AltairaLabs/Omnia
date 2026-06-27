@@ -3,7 +3,8 @@
 import { useCallback, useState } from "react";
 
 /**
- * useSetAgentExpose PATCHes spec.facade.expose on an agent (#1611) and tracks
+ * useSetAgentExpose PATCHes expose on the agent's primary facade (#1611/#1576)
+ * and tracks
  * the in-flight + error state. The error is the surfaced server message (e.g. a
  * 403 for a non-editor, or a validation message), so callers can show it inline.
  */

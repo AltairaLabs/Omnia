@@ -434,7 +434,7 @@ func TestReconcile_ValidPolicy(t *testing.T) {
 		},
 		Spec: omniav1alpha1.AgentRuntimeSpec{
 			PromptPackRef: omniav1alpha1.PromptPackRef{Name: "test"},
-			Facade:        omniav1alpha1.FacadeConfig{Type: omniav1alpha1.FacadeTypeWebSocket},
+			Facades:       []omniav1alpha1.FacadeConfig{{Type: omniav1alpha1.FacadeTypeWebSocket}},
 		},
 	}
 
@@ -574,14 +574,14 @@ func TestReconcile_WithSelector(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "agent-a", Namespace: "default"},
 		Spec: omniav1alpha1.AgentRuntimeSpec{
 			PromptPackRef: omniav1alpha1.PromptPackRef{Name: "test"},
-			Facade:        omniav1alpha1.FacadeConfig{Type: omniav1alpha1.FacadeTypeWebSocket},
+			Facades:       []omniav1alpha1.FacadeConfig{{Type: omniav1alpha1.FacadeTypeWebSocket}},
 		},
 	}
 	agentB := &omniav1alpha1.AgentRuntime{
 		ObjectMeta: metav1.ObjectMeta{Name: "agent-b", Namespace: "default"},
 		Spec: omniav1alpha1.AgentRuntimeSpec{
 			PromptPackRef: omniav1alpha1.PromptPackRef{Name: "test"},
-			Facade:        omniav1alpha1.FacadeConfig{Type: omniav1alpha1.FacadeTypeWebSocket},
+			Facades:       []omniav1alpha1.FacadeConfig{{Type: omniav1alpha1.FacadeTypeWebSocket}},
 		},
 	}
 
@@ -618,14 +618,14 @@ func TestCountMatchedAgents_AllAgents(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "agent-a", Namespace: "default"},
 		Spec: omniav1alpha1.AgentRuntimeSpec{
 			PromptPackRef: omniav1alpha1.PromptPackRef{Name: "test"},
-			Facade:        omniav1alpha1.FacadeConfig{Type: omniav1alpha1.FacadeTypeWebSocket},
+			Facades:       []omniav1alpha1.FacadeConfig{{Type: omniav1alpha1.FacadeTypeWebSocket}},
 		},
 	}
 	agentB := &omniav1alpha1.AgentRuntime{
 		ObjectMeta: metav1.ObjectMeta{Name: "agent-b", Namespace: "default"},
 		Spec: omniav1alpha1.AgentRuntimeSpec{
 			PromptPackRef: omniav1alpha1.PromptPackRef{Name: "test"},
-			Facade:        omniav1alpha1.FacadeConfig{Type: omniav1alpha1.FacadeTypeWebSocket},
+			Facades:       []omniav1alpha1.FacadeConfig{{Type: omniav1alpha1.FacadeTypeWebSocket}},
 		},
 	}
 
@@ -652,14 +652,14 @@ func TestCountMatchedAgents_Filtered(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "agent-a", Namespace: "default"},
 		Spec: omniav1alpha1.AgentRuntimeSpec{
 			PromptPackRef: omniav1alpha1.PromptPackRef{Name: "test"},
-			Facade:        omniav1alpha1.FacadeConfig{Type: omniav1alpha1.FacadeTypeWebSocket},
+			Facades:       []omniav1alpha1.FacadeConfig{{Type: omniav1alpha1.FacadeTypeWebSocket}},
 		},
 	}
 	agentB := &omniav1alpha1.AgentRuntime{
 		ObjectMeta: metav1.ObjectMeta{Name: "agent-b", Namespace: "default"},
 		Spec: omniav1alpha1.AgentRuntimeSpec{
 			PromptPackRef: omniav1alpha1.PromptPackRef{Name: "test"},
-			Facade:        omniav1alpha1.FacadeConfig{Type: omniav1alpha1.FacadeTypeWebSocket},
+			Facades:       []omniav1alpha1.FacadeConfig{{Type: omniav1alpha1.FacadeTypeWebSocket}},
 		},
 	}
 
@@ -706,7 +706,7 @@ func TestReconcile_PermissiveModeClaimMapping(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "agent-a", Namespace: "default"},
 		Spec: omniav1alpha1.AgentRuntimeSpec{
 			PromptPackRef: omniav1alpha1.PromptPackRef{Name: "test"},
-			Facade:        omniav1alpha1.FacadeConfig{Type: omniav1alpha1.FacadeTypeWebSocket},
+			Facades:       []omniav1alpha1.FacadeConfig{{Type: omniav1alpha1.FacadeTypeWebSocket}},
 		},
 	}
 

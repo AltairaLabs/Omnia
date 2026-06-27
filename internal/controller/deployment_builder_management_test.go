@@ -25,10 +25,23 @@ import (
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 )
 
+// wsOnlyAR is the simplest valid agent: a single websocket facade with the
+// management plane on by default.
+func wsOnlyAR() *omniav1alpha1.AgentRuntime {
+	return &omniav1alpha1.AgentRuntime{
+		Spec: omniav1alpha1.AgentRuntimeSpec{
+			Facades: []omniav1alpha1.FacadeConfig{{Type: omniav1alpha1.FacadeTypeWebSocket}},
+		},
+	}
+}
+
 func dualProtocolAR() *omniav1alpha1.AgentRuntime {
 	return &omniav1alpha1.AgentRuntime{
 		Spec: omniav1alpha1.AgentRuntimeSpec{
-			A2A: &omniav1alpha1.A2AConfig{Enabled: true},
+			Facades: []omniav1alpha1.FacadeConfig{
+				{Type: omniav1alpha1.FacadeTypeWebSocket},
+				{Type: omniav1alpha1.FacadeTypeA2A, A2A: &omniav1alpha1.A2AConfig{}},
+			},
 		},
 	}
 }
@@ -36,7 +49,10 @@ func dualProtocolAR() *omniav1alpha1.AgentRuntime {
 func mcpAR() *omniav1alpha1.AgentRuntime {
 	return &omniav1alpha1.AgentRuntime{
 		Spec: omniav1alpha1.AgentRuntimeSpec{
-			Facade: omniav1alpha1.FacadeConfig{MCP: &omniav1alpha1.MCPConfig{Enabled: true}},
+			Facades: []omniav1alpha1.FacadeConfig{
+				{Type: omniav1alpha1.FacadeTypeREST},
+				{Type: omniav1alpha1.FacadeTypeMCP, MCP: &omniav1alpha1.MCPConfig{Enabled: true}},
+			},
 		},
 	}
 }
@@ -51,7 +67,7 @@ func portNames(ports []corev1.ServicePort) map[string]int32 {
 
 func TestAppendManagementServicePorts(t *testing.T) {
 	t.Run("WS-only agent gets facade-mgmt when allowed (default)", func(t *testing.T) {
-		ports := appendManagementServicePorts(nil, &omniav1alpha1.AgentRuntime{})
+		ports := appendManagementServicePorts(nil, wsOnlyAR())
 		got := portNames(ports)
 		if got[portNameFacadeMgmt] != DefaultInternalFacadePort {
 			t.Errorf("facade-mgmt port = %d, want %d", got[portNameFacadeMgmt], DefaultInternalFacadePort)
@@ -75,9 +91,11 @@ func TestAppendManagementServicePorts(t *testing.T) {
 		}
 	})
 
-	t.Run("allowManagementPlane=false adds no ports", func(t *testing.T) {
+	t.Run("every facade managementPlane=false adds no ports", func(t *testing.T) {
 		ar := dualProtocolAR()
-		ar.Spec.ExternalAuth = &omniav1alpha1.AgentExternalAuth{AllowManagementPlane: ptr.To(false)}
+		for i := range ar.Spec.Facades {
+			ar.Spec.Facades[i].ManagementPlane = ptr.To(false)
+		}
 		ports := appendManagementServicePorts(nil, ar)
 		if len(ports) != 0 {
 			t.Errorf("got %d ports, want 0 when management plane disabled", len(ports))
@@ -87,7 +105,7 @@ func TestAppendManagementServicePorts(t *testing.T) {
 
 func TestManagementEndpointsStatus(t *testing.T) {
 	t.Run("WS-only agent advertises ws only", func(t *testing.T) {
-		me := managementEndpointsStatus(&omniav1alpha1.AgentRuntime{})
+		me := managementEndpointsStatus(wsOnlyAR())
 		if me == nil || me.WS == nil || *me.WS != DefaultInternalFacadePort {
 			t.Fatalf("WS = %v, want %d", me, DefaultInternalFacadePort)
 		}
@@ -111,11 +129,8 @@ func TestManagementEndpointsStatus(t *testing.T) {
 	})
 
 	t.Run("disabled returns nil", func(t *testing.T) {
-		ar := &omniav1alpha1.AgentRuntime{
-			Spec: omniav1alpha1.AgentRuntimeSpec{
-				ExternalAuth: &omniav1alpha1.AgentExternalAuth{AllowManagementPlane: ptr.To(false)},
-			},
-		}
+		ar := wsOnlyAR()
+		ar.Spec.Facades[0].ManagementPlane = ptr.To(false)
 		if me := managementEndpointsStatus(ar); me != nil {
 			t.Errorf("got %+v, want nil when management plane disabled", me)
 		}

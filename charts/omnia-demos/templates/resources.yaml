@@ -162,13 +162,13 @@ spec:
         name: ollama
   evals:
     enabled: true
-  facade:
-    type: websocket
-    port: 8080
-    handler: {{ .Values.agent.handler }}
-    extraEnv:
-      - name: LOG_LEVEL
-        value: debug
+  facades:
+    - type: websocket
+      port: 8080
+      handler: {{ .Values.agent.handler }}
+      extraEnv:
+        - name: LOG_LEVEL
+          value: debug
   context:
     type: memory
     ttl: "1h"
@@ -352,10 +352,10 @@ spec:
     - name: default
       providerRef:
         name: gemini
-  facade:
-    type: websocket
-    port: 8080
-    handler: {{ .Values.audioDemo.agent.handler }}
+  facades:
+    - type: websocket
+      port: 8080
+      handler: {{ .Values.audioDemo.agent.handler }}
   context:
     type: memory
     ttl: "1h"
@@ -856,13 +856,13 @@ spec:
     retrieval:
       strategy: keyword
       limit: 5
-  facade:
-    type: websocket
-    port: 8080
-    handler: {{ .Values.toolsDemo.agent.handler }}
-    extraEnv:
-      - name: LOG_LEVEL
-        value: debug
+  facades:
+    - type: websocket
+      port: 8080
+      handler: {{ .Values.toolsDemo.agent.handler }}
+      extraEnv:
+        - name: LOG_LEVEL
+          value: debug
   context:
     type: memory
     ttl: "1h"
@@ -904,10 +904,10 @@ spec:
     - name: default
       providerRef:
         name: ollama
-  facade:
-    type: websocket
-    port: 8080
-    handler: runtime
+  facades:
+    - type: websocket
+      port: 8080
+      handler: runtime
   context:
     type: memory
     ttl: "1h"
@@ -965,10 +965,10 @@ spec:
         name: ollama-tools
   toolRegistryRef:
     name: demo-tools
-  facade:
-    type: websocket
-    port: 8080
-    handler: runtime
+  facades:
+    - type: websocket
+      port: 8080
+      handler: runtime
   context:
     type: memory
     ttl: "1h"

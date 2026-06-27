@@ -362,9 +362,9 @@ var _ = Describe("PromptPack Controller", func() {
 					PromptPackRef: omniav1alpha1.PromptPackRef{
 						Name: "referenced-pack",
 					},
-					Facade: omniav1alpha1.FacadeConfig{
+					Facades: []omniav1alpha1.FacadeConfig{{
 						Type: omniav1alpha1.FacadeTypeWebSocket,
-					},
+					}},
 					Providers: []omniav1alpha1.NamedProviderRef{
 						{Name: "default", ProviderRef: omniav1alpha1.ProviderRef{Name: "test-provider"}},
 					},

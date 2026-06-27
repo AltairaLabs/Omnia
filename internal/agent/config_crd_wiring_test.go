@@ -64,10 +64,10 @@ func TestLoadFromCRD_ClientToolTimeoutPropagates(t *testing.T) {
 		},
 		Spec: v1alpha1.AgentRuntimeSpec{
 			PromptPackRef: v1alpha1.PromptPackRef{Name: "test-prompts"},
-			Facade: v1alpha1.FacadeConfig{
+			Facades: []v1alpha1.FacadeConfig{{
 				Type:              v1alpha1.FacadeTypeWebSocket,
 				ClientToolTimeout: &metav1.Duration{Duration: 45 * time.Second},
-			},
+			}},
 		},
 	}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(ns, ar).Build()
@@ -108,10 +108,10 @@ func TestLoadFromCRD_ClientToolTimeoutZeroWhenNil(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "wiring-test", Namespace: "default"},
 		Spec: v1alpha1.AgentRuntimeSpec{
 			PromptPackRef: v1alpha1.PromptPackRef{Name: "test-prompts"},
-			Facade: v1alpha1.FacadeConfig{
+			Facades: []v1alpha1.FacadeConfig{{
 				Type: v1alpha1.FacadeTypeWebSocket,
 				// ClientToolTimeout deliberately not set
-			},
+			}},
 		},
 	}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(ns, ar).Build()

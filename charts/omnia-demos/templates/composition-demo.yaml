@@ -298,10 +298,10 @@ spec:
     name: demo-composition-tools
   evals:
     enabled: true
-  facade:
-    type: rest
-    port: 8080
-    handler: {{ .Values.compositionDemo.agent.handler }}
+  facades:
+    - type: rest
+      port: 8080
+      handler: {{ .Values.compositionDemo.agent.handler }}
   runtime:
     replicas: {{ .Values.compositionDemo.agent.replicas }}
     resources:

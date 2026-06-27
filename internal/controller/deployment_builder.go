@@ -50,12 +50,12 @@ const defaultDrainTimeoutSeconds = 30
 const maxDrainTimeoutSeconds = 600
 
 // gracePeriodFor returns the pod TerminationGracePeriodSeconds for ar: the
-// effective drain timeout (spec.facade.drainTimeout, or the 30s default,
-// clamped to maxDrainTimeoutSeconds) plus drainGraceBufferSeconds.
+// effective drain timeout (the primary facade's drainTimeout, or the 30s
+// default, clamped to maxDrainTimeoutSeconds) plus drainGraceBufferSeconds.
 func gracePeriodFor(ar *omniav1alpha1.AgentRuntime) int64 {
 	drainSecs := int64(defaultDrainTimeoutSeconds)
-	if ar.Spec.Facade.DrainTimeout != nil {
-		if d, err := time.ParseDuration(*ar.Spec.Facade.DrainTimeout); err == nil && d >= time.Second {
+	if f := primaryFacade(ar); f != nil && f.DrainTimeout != nil {
+		if d, err := time.ParseDuration(*f.DrainTimeout); err == nil && d >= time.Second {
 			drainSecs = int64(d.Seconds())
 		}
 	}
@@ -155,18 +155,15 @@ func (r *AgentRuntimeReconciler) buildDeploymentSpec(
 		replicas = *agentRuntime.Spec.Runtime.Replicas
 	}
 
-	facadePort := int32(DefaultFacadePort)
-	if agentRuntime.Spec.Facade.Port != nil {
-		facadePort = *agentRuntime.Spec.Facade.Port
-	}
+	facadePort := primaryFacadePort(agentRuntime)
 
 	// Build volumes (shared between containers)
 	volumes := r.buildVolumes(agentRuntime, promptPack, toolRegistry)
 
-	// A2A facade runs the SDK in-process (single container), while WebSocket/gRPC
-	// uses the traditional facade + runtime sidecar architecture.
+	// A standalone A2A facade runs the SDK in-process (single container), while
+	// WebSocket/REST uses the traditional facade + runtime sidecar architecture.
 	var containers []corev1.Container
-	if agentRuntime.Spec.Facade.Type == omniav1alpha1.FacadeTypeA2A {
+	if isStandaloneA2A(agentRuntime) {
 		a2aContainer := r.buildA2AContainer(agentRuntime, promptPack, toolRegistry, facadePort, resolvedClients)
 		containers = []corev1.Container{a2aContainer}
 	} else {
@@ -174,10 +171,7 @@ func (r *AgentRuntimeReconciler) buildDeploymentSpec(
 
 		// Dual-protocol: add A2A port and env vars to the facade container.
 		if isDualProtocol(agentRuntime) {
-			a2aPort := int32(DefaultA2APort)
-			if agentRuntime.Spec.A2A.Port != nil {
-				a2aPort = *agentRuntime.Spec.A2A.Port
-			}
+			a2aPort := a2aSecondaryPort(agentRuntime)
 			facadeContainer.Ports = append(facadeContainer.Ports, corev1.ContainerPort{
 				Name:          "a2a",
 				ContainerPort: a2aPort,
@@ -342,10 +336,7 @@ func (r *AgentRuntimeReconciler) buildA2AEnvVars(
 	agentRuntime *omniav1alpha1.AgentRuntime,
 	resolvedClients []ResolvedA2AClient,
 ) []corev1.EnvVar {
-	port := int32(DefaultFacadePort)
-	if agentRuntime.Spec.Facade.Port != nil {
-		port = *agentRuntime.Spec.Facade.Port
-	}
+	port := primaryFacadePort(agentRuntime)
 
 	envVars := []corev1.EnvVar{
 		{
@@ -388,16 +379,16 @@ func (r *AgentRuntimeReconciler) buildA2AEnvVars(
 
 	// Handler mode
 	handlerMode := omniav1alpha1.HandlerModeRuntime
-	if agentRuntime.Spec.Facade.Handler != nil {
-		handlerMode = *agentRuntime.Spec.Facade.Handler
+	if f := primaryFacade(agentRuntime); f != nil && f.Handler != nil {
+		handlerMode = *f.Handler
 	}
 	envVars = append(envVars, corev1.EnvVar{
 		Name:  "OMNIA_HANDLER_MODE",
 		Value: string(handlerMode),
 	})
 
-	// A2A-specific config (TTLs, auth, task store).
-	envVars = append(envVars, buildA2AConfigEnvVars(agentRuntime.Spec.A2A)...)
+	// A2A-specific config (TTLs, task store).
+	envVars = append(envVars, buildA2AConfigEnvVars(a2aConfig(agentRuntime))...)
 
 	// Tracing
 	if r.TracingEnabled && r.TracingEndpoint != "" {
@@ -412,14 +403,14 @@ func (r *AgentRuntimeReconciler) buildA2AEnvVars(
 	envVars = append(envVars, buildA2AClientEnvVars(agentRuntime, resolvedClients)...)
 
 	// Extra env vars from CRD
-	if agentRuntime.Spec.Facade.ExtraEnv != nil {
-		envVars = append(envVars, agentRuntime.Spec.Facade.ExtraEnv...)
+	if f := primaryFacade(agentRuntime); f != nil && f.ExtraEnv != nil {
+		envVars = append(envVars, f.ExtraEnv...)
 	}
 
 	return envVars
 }
 
-// buildA2AConfigEnvVars creates env vars for A2A TTLs, auth, and task store config.
+// buildA2AConfigEnvVars creates env vars for A2A TTLs and task store config.
 func buildA2AConfigEnvVars(a2a *omniav1alpha1.A2AConfig) []corev1.EnvVar {
 	if a2a == nil {
 		return nil
@@ -437,17 +428,6 @@ func buildA2AConfigEnvVars(a2a *omniav1alpha1.A2AConfig) []corev1.EnvVar {
 		envVars = append(envVars, corev1.EnvVar{
 			Name:  "OMNIA_A2A_CONVERSATION_TTL",
 			Value: *a2a.ConversationTTL,
-		})
-	}
-	if a2a.Authentication != nil && a2a.Authentication.SecretRef != nil {
-		envVars = append(envVars, corev1.EnvVar{
-			Name: "OMNIA_A2A_AUTH_TOKEN",
-			ValueFrom: &corev1.EnvVarSource{
-				SecretKeyRef: &corev1.SecretKeySelector{
-					LocalObjectReference: *a2a.Authentication.SecretRef,
-					Key:                  "token",
-				},
-			},
 		})
 	}
 	if a2a.TaskStore != nil {
@@ -501,7 +481,11 @@ func buildA2AClientEnvVars(
 		if rc.AuthTokenEnv == "" {
 			continue
 		}
-		for _, cs := range agentRuntime.Spec.A2A.Clients {
+		a2a := a2aConfig(agentRuntime)
+		if a2a == nil {
+			continue
+		}
+		for _, cs := range a2a.Clients {
 			if cs.Name == rc.Name && cs.Authentication != nil && cs.Authentication.SecretRef != nil {
 				envVars = append(envVars, corev1.EnvVar{
 					Name: rc.AuthTokenEnv,
@@ -520,76 +504,12 @@ func buildA2AClientEnvVars(
 	return envVars
 }
 
-// isDualProtocol returns true when the AgentRuntime has A2A enabled as an
-// additional endpoint alongside a non-A2A primary facade (websocket or grpc).
-func isDualProtocol(ar *omniav1alpha1.AgentRuntime) bool {
-	return ar.Spec.Facade.Type != omniav1alpha1.FacadeTypeA2A &&
-		ar.Spec.A2A != nil &&
-		ar.Spec.A2A.Enabled
-}
-
-// buildA2ADualProtocolEnvVars returns extra env vars needed when A2A runs
-// alongside the primary facade. These are appended to the facade container's env.
+// buildA2ADualProtocolEnvVars returns extra env vars needed when A2A runs as a
+// secondary listener alongside the primary websocket facade. These are appended
+// to the facade container's env. Shares buildA2AConfigEnvVars with the
+// standalone-A2A path so both emit the same TTL/task-store env.
 func (r *AgentRuntimeReconciler) buildA2ADualProtocolEnvVars(
 	agentRuntime *omniav1alpha1.AgentRuntime,
 ) []corev1.EnvVar {
-	var envVars []corev1.EnvVar
-
-	if agentRuntime.Spec.A2A == nil {
-		return envVars
-	}
-
-	// A2A TTLs
-	if agentRuntime.Spec.A2A.TaskTTL != nil {
-		envVars = append(envVars, corev1.EnvVar{
-			Name:  "OMNIA_A2A_TASK_TTL",
-			Value: *agentRuntime.Spec.A2A.TaskTTL,
-		})
-	}
-	if agentRuntime.Spec.A2A.ConversationTTL != nil {
-		envVars = append(envVars, corev1.EnvVar{
-			Name:  "OMNIA_A2A_CONVERSATION_TTL",
-			Value: *agentRuntime.Spec.A2A.ConversationTTL,
-		})
-	}
-
-	// Auth token from secret
-	if agentRuntime.Spec.A2A.Authentication != nil && agentRuntime.Spec.A2A.Authentication.SecretRef != nil {
-		envVars = append(envVars, corev1.EnvVar{
-			Name: "OMNIA_A2A_AUTH_TOKEN",
-			ValueFrom: &corev1.EnvVarSource{
-				SecretKeyRef: &corev1.SecretKeySelector{
-					LocalObjectReference: *agentRuntime.Spec.A2A.Authentication.SecretRef,
-					Key:                  "token",
-				},
-			},
-		})
-	}
-
-	// Task store configuration
-	if agentRuntime.Spec.A2A.TaskStore != nil {
-		envVars = append(envVars, corev1.EnvVar{
-			Name:  "OMNIA_A2A_TASK_STORE_TYPE",
-			Value: string(agentRuntime.Spec.A2A.TaskStore.Type),
-		})
-		if agentRuntime.Spec.A2A.TaskStore.RedisSecretRef != nil {
-			// Secret ref takes precedence over plain-text URL.
-			envVars = append(envVars, corev1.EnvVar{
-				Name: "OMNIA_A2A_REDIS_URL",
-				ValueFrom: &corev1.EnvVarSource{
-					SecretKeyRef: &corev1.SecretKeySelector{
-						LocalObjectReference: *agentRuntime.Spec.A2A.TaskStore.RedisSecretRef,
-						Key:                  "url",
-					},
-				},
-			})
-		} else if agentRuntime.Spec.A2A.TaskStore.RedisURL != "" {
-			envVars = append(envVars, corev1.EnvVar{
-				Name:  "OMNIA_A2A_REDIS_URL",
-				Value: agentRuntime.Spec.A2A.TaskStore.RedisURL,
-			})
-		}
-	}
-
-	return envVars
+	return buildA2AConfigEnvVars(a2aConfig(agentRuntime))
 }

@@ -46,7 +46,7 @@ func TestA2AEnvVars_SetsStableVariant(t *testing.T) {
 	r := &AgentRuntimeReconciler{}
 	ar := &omniav1alpha1.AgentRuntime{}
 	ar.Name = variantTestAgent
-	ar.Spec.Facade.Type = omniav1alpha1.FacadeTypeA2A
+	ar.Spec.Facades = []omniav1alpha1.FacadeConfig{{Type: omniav1alpha1.FacadeTypeA2A}}
 
 	_, ok := findEnv(r.buildA2AEnvVars(ar, nil), envFacadeVariant)
 	assert.True(t, ok, "buildA2AEnvVars must set %s", envFacadeVariant)

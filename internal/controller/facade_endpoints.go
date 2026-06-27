@@ -9,49 +9,32 @@ import (
 )
 
 const (
-	defaultFacadePort = int32(8080)
-	defaultA2APort    = int32(9999)
-	defaultMCPPort    = int32(9998)
-
 	// URL scheme constants for facade endpoints.
 	schemeHTTPS = "https"
 	schemeWS    = "ws"
 	schemeWSS   = "wss"
 )
 
-// facadePortProtocols maps each externally-exposed Service port to its facade
-// protocol. grpc primary facades are skipped (not routable via HTTPRoute).
+// facadePortProtocols maps each externally-reachable Service port to its facade
+// protocol, one entry per facade in spec.facades. The a2a facade binds the
+// primary facade port when it is standalone, else the dual-protocol a2a port.
 func facadePortProtocols(agent *omniav1alpha1.AgentRuntime) map[int32]string {
 	out := map[int32]string{}
-	f := agent.Spec.Facade
-
-	primaryPort := defaultFacadePort
-	if f.Port != nil {
-		primaryPort = *f.Port
-	}
-	switch string(f.Type) {
-	case omniav1alpha1.FacadeProtocolWebSocket:
-		out[primaryPort] = omniav1alpha1.FacadeProtocolWebSocket
-	case omniav1alpha1.FacadeProtocolA2A:
-		out[primaryPort] = omniav1alpha1.FacadeProtocolA2A
-	case omniav1alpha1.FacadeProtocolREST:
-		out[primaryPort] = omniav1alpha1.FacadeProtocolREST
-		// grpc: intentionally not added (use GRPCRoute, out of scope).
-	}
-
-	if f.A2A != nil && f.A2A.Enabled && string(f.Type) != omniav1alpha1.FacadeProtocolA2A {
-		p := defaultA2APort
-		if f.A2A.Port != nil {
-			p = *f.A2A.Port
+	for i := range agent.Spec.Facades {
+		switch agent.Spec.Facades[i].Type {
+		case omniav1alpha1.FacadeTypeWebSocket:
+			out[primaryFacadePort(agent)] = omniav1alpha1.FacadeProtocolWebSocket
+		case omniav1alpha1.FacadeTypeREST:
+			out[primaryFacadePort(agent)] = omniav1alpha1.FacadeProtocolREST
+		case omniav1alpha1.FacadeTypeA2A:
+			if isStandaloneA2A(agent) {
+				out[primaryFacadePort(agent)] = omniav1alpha1.FacadeProtocolA2A
+			} else {
+				out[a2aSecondaryPort(agent)] = omniav1alpha1.FacadeProtocolA2A
+			}
+		case omniav1alpha1.FacadeTypeMCP:
+			out[mcpPort(agent)] = omniav1alpha1.FacadeProtocolMCP
 		}
-		out[p] = omniav1alpha1.FacadeProtocolA2A
-	}
-	if f.MCP != nil && f.MCP.Enabled {
-		p := defaultMCPPort
-		if f.MCP.Port != nil {
-			p = *f.MCP.Port
-		}
-		out[p] = omniav1alpha1.FacadeProtocolMCP
 	}
 	return out
 }

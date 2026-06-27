@@ -264,9 +264,9 @@ metadata:
 spec:
   promptPackRef:
     name: test-prompts
-  facade:
-    type: websocket
-    handler: demo  # Use 'echo' for simple connectivity testing
+  facades:
+    - type: websocket
+      handler: demo  # Use 'echo' for simple connectivity testing
   context:
     type: memory
 ```

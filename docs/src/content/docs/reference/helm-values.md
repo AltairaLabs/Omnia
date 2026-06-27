@@ -148,7 +148,7 @@ The facade can optionally provide media storage for file uploads. Configure via 
 #### Local Storage (Development)
 
 ```yaml
-# AgentRuntime spec.facade.env
+# AgentRuntime spec.facades[].env
 - name: OMNIA_MEDIA_STORAGE_TYPE
   value: local
 - name: OMNIA_MEDIA_STORAGE_PATH

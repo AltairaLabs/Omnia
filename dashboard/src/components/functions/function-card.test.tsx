@@ -45,7 +45,7 @@ function mkFn(overrides: Partial<AgentRuntime> = {}): AgentRuntime {
     spec: {
       mode: "function",
       promptPackRef: { name: "summarizer-pack" },
-      facade: { type: "rest" as never },
+      facades: [{ type: "rest" }],
       inputSchema: {
         type: "object",
         properties: { q: { type: "string" }, k: { type: "integer" } },
@@ -124,11 +124,11 @@ describe("FunctionCard", () => {
     expect(link).toHaveAttribute("href", "/functions/summarizer?namespace=default");
   });
 
-  it("renders the MCP badge when spec.facade.mcp.enabled is true", () => {
+  it("renders the MCP badge when an mcp facade is present", () => {
     const fn = mkFn({
       spec: {
         ...mkFn().spec,
-        facade: { type: "rest" as never, mcp: { enabled: true } },
+        facades: [{ type: "rest" }, { type: "mcp" }],
       },
     });
     render(<FunctionCard fn={fn} />);
@@ -136,16 +136,16 @@ describe("FunctionCard", () => {
     expect(screen.getByText("MCP")).toBeInTheDocument();
   });
 
-  it("hides the MCP badge when MCP is not enabled", () => {
+  it("hides the MCP badge when there is no mcp facade", () => {
     render(<FunctionCard fn={mkFn()} />);
     expect(screen.queryByTestId("mcp-badge")).not.toBeInTheDocument();
   });
 
-  it("hides the MCP badge when MCP block is present but disabled", () => {
+  it("hides the MCP badge for a rest-only multi-facade function", () => {
     const fn = mkFn({
       spec: {
         ...mkFn().spec,
-        facade: { type: "rest" as never, mcp: { enabled: false } },
+        facades: [{ type: "rest" }],
       },
     });
     render(<FunctionCard fn={fn} />);

@@ -179,9 +179,9 @@ spec:
     name: my-prompts
   providerRef:
     name: azure-openai
-  facade:
-    type: websocket
-    port: 8080
+  facades:
+    - type: websocket
+      port: 8080
 ```
 
 ## Troubleshooting

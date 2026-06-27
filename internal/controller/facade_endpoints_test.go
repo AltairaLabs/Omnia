@@ -21,10 +21,10 @@ func ptrI32(v int32) *int32 { return &v }
 func TestFacadePortProtocols(t *testing.T) {
 	ws := omniav1alpha1.FacadeType(omniav1alpha1.FacadeProtocolWebSocket)
 	agent := &omniav1alpha1.AgentRuntime{}
-	agent.Spec.Facade = omniav1alpha1.FacadeConfig{
-		Type: ws, Port: ptrI32(8080),
-		A2A: &omniav1alpha1.A2AConfig{Enabled: true, Port: ptrI32(9999)},
-		MCP: &omniav1alpha1.MCPConfig{Enabled: true, Port: ptrI32(9998)},
+	agent.Spec.Facades = []omniav1alpha1.FacadeConfig{
+		{Type: ws, Port: ptrI32(8080)},
+		{Type: omniav1alpha1.FacadeTypeA2A, A2A: &omniav1alpha1.A2AConfig{Port: ptrI32(9999)}},
+		{Type: omniav1alpha1.FacadeTypeMCP, MCP: &omniav1alpha1.MCPConfig{Enabled: true, Port: ptrI32(9998)}},
 	}
 	got := facadePortProtocols(agent)
 	want := map[int32]string{
@@ -42,11 +42,11 @@ func TestFacadePortProtocols(t *testing.T) {
 	}
 }
 
-func TestFacadePortProtocolsGRPCSkipped(t *testing.T) {
+func TestFacadePortProtocolsUnknownTypeSkipped(t *testing.T) {
 	agent := &omniav1alpha1.AgentRuntime{}
-	agent.Spec.Facade = omniav1alpha1.FacadeConfig{Type: omniav1alpha1.FacadeType("grpc"), Port: ptrI32(8080)}
+	agent.Spec.Facades = []omniav1alpha1.FacadeConfig{{Type: omniav1alpha1.FacadeType("grpc"), Port: ptrI32(8080)}}
 	if got := facadePortProtocols(agent); len(got) != 0 {
-		t.Fatalf("grpc primary should be skipped, got %v", got)
+		t.Fatalf("unknown facade type should be skipped, got %v", got)
 	}
 }
 
@@ -69,11 +69,11 @@ func TestCanonicalFacadePath(t *testing.T) {
 
 func TestFacadePortProtocolsDefaultPorts(t *testing.T) {
 	agent := &omniav1alpha1.AgentRuntime{}
-	agent.Spec.Facade = omniav1alpha1.FacadeConfig{
-		Type: omniav1alpha1.FacadeType(omniav1alpha1.FacadeProtocolWebSocket),
+	agent.Spec.Facades = []omniav1alpha1.FacadeConfig{
 		// Port, A2A.Port, MCP.Port all nil — defaults should apply.
-		A2A: &omniav1alpha1.A2AConfig{Enabled: true},
-		MCP: &omniav1alpha1.MCPConfig{Enabled: true},
+		{Type: omniav1alpha1.FacadeType(omniav1alpha1.FacadeProtocolWebSocket)},
+		{Type: omniav1alpha1.FacadeTypeA2A, A2A: &omniav1alpha1.A2AConfig{}},
+		{Type: omniav1alpha1.FacadeTypeMCP, MCP: &omniav1alpha1.MCPConfig{Enabled: true}},
 	}
 	got := facadePortProtocols(agent)
 	want := map[int32]string{
@@ -149,7 +149,7 @@ func hostRoute(name, host, svc string, port int32, prefix string, rewrite bool) 
 
 func wsAgent(name string) *omniav1alpha1.AgentRuntime {
 	a := &omniav1alpha1.AgentRuntime{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns}}
-	a.Spec.Facade = omniav1alpha1.FacadeConfig{Type: omniav1alpha1.FacadeType(omniav1alpha1.FacadeProtocolWebSocket), Port: ptrI32(8080)}
+	a.Spec.Facades = []omniav1alpha1.FacadeConfig{{Type: omniav1alpha1.FacadeType(omniav1alpha1.FacadeProtocolWebSocket), Port: ptrI32(8080)}}
 	return a
 }
 
@@ -214,11 +214,10 @@ func TestBuildFacadeEndpoints_GatewayUnresolvable(t *testing.T) {
 
 func multiProtoAgent(name string) *omniav1alpha1.AgentRuntime {
 	a := &omniav1alpha1.AgentRuntime{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns}}
-	a.Spec.Facade = omniav1alpha1.FacadeConfig{
-		Type: omniav1alpha1.FacadeType(omniav1alpha1.FacadeProtocolWebSocket),
-		Port: ptrI32(8080),
-		A2A:  &omniav1alpha1.A2AConfig{Enabled: true, Port: ptrI32(9999)},
-		MCP:  &omniav1alpha1.MCPConfig{Enabled: true, Port: ptrI32(9998)},
+	a.Spec.Facades = []omniav1alpha1.FacadeConfig{
+		{Type: omniav1alpha1.FacadeType(omniav1alpha1.FacadeProtocolWebSocket), Port: ptrI32(8080)},
+		{Type: omniav1alpha1.FacadeTypeA2A, A2A: &omniav1alpha1.A2AConfig{Port: ptrI32(9999)}},
+		{Type: omniav1alpha1.FacadeTypeMCP, MCP: &omniav1alpha1.MCPConfig{Enabled: true, Port: ptrI32(9998)}},
 	}
 	return a
 }

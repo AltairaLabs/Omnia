@@ -11,7 +11,7 @@ import { formatCost, formatTokens } from "@/lib/pricing";
 import { useAgentCost } from "@/hooks/agents";
 import { useProvider, useProviderMetrics } from "@/hooks/resources";
 import type { AgentRuntime, PromptPack, ToolRegistry, Provider, ProviderType } from "@/types";
-import { getDefaultProviderRef } from "@/types/agent-runtime";
+import { getDefaultProviderRef, primaryFacade } from "@/types/agent-runtime";
 import { useWorkspace } from "@/contexts/workspace-context";
 
 /** Selected node info for rendering the appropriate card */
@@ -207,7 +207,7 @@ function AgentSummaryCard({ agent, onClose }: Readonly<{ agent: AgentRuntime; on
         <StatItem label="Provider" value={providerType || "-"} />
         <StatItem label="Model" value={modelDisplay} title={provider?.spec?.model} />
         <StatItem label="Replicas" value={replicaDisplay} />
-        <StatItem label="Facade" value={spec.facade?.type || "websocket"} />
+        <StatItem label="Facade" value={primaryFacade(spec)?.type ?? "websocket"} />
       </div>
     </SummaryCardLayout>
   );

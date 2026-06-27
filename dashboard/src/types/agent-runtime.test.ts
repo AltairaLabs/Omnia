@@ -17,7 +17,7 @@ import {
 function mkSpec(overrides: Partial<AgentRuntimeSpec> = {}): AgentRuntimeSpec {
   return {
     promptPackRef: { name: "pack" },
-    facade: { type: "rest" as never },
+    facades: [{ type: "rest" }],
     ...overrides,
   };
 }

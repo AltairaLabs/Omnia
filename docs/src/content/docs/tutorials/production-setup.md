@@ -187,10 +187,10 @@ spec:
     name: my-promptpack
   providerRef:
     name: claude-production
-  facade:
-    type: websocket
-    port: 8080
-    handler: runtime  # Production mode
+  facades:
+    - type: websocket
+      port: 8080
+      handler: runtime  # Production mode
   context:
     type: redis
     storeRef:

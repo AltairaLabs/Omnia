@@ -35,14 +35,15 @@ func (r *AgentRuntimeReconciler) resolveA2AClients(
 	log logr.Logger,
 	agentRuntime *omniav1alpha1.AgentRuntime,
 ) ([]ResolvedA2AClient, []omniav1alpha1.A2AClientStatus) {
-	if agentRuntime.Spec.A2A == nil || len(agentRuntime.Spec.A2A.Clients) == 0 {
+	a2a := a2aConfig(agentRuntime)
+	if a2a == nil || len(a2a.Clients) == 0 {
 		return nil, nil
 	}
 
-	resolved := make([]ResolvedA2AClient, 0, len(agentRuntime.Spec.A2A.Clients))
-	statuses := make([]omniav1alpha1.A2AClientStatus, 0, len(agentRuntime.Spec.A2A.Clients))
+	resolved := make([]ResolvedA2AClient, 0, len(a2a.Clients))
+	statuses := make([]omniav1alpha1.A2AClientStatus, 0, len(a2a.Clients))
 
-	for _, client := range agentRuntime.Spec.A2A.Clients {
+	for _, client := range a2a.Clients {
 		rc, status := r.resolveOneClient(ctx, log, agentRuntime, client)
 		statuses = append(statuses, status)
 		if rc != nil {

@@ -18,6 +18,11 @@ import (
 // It implements a2aserver.AgentCardProvider.
 type CRDCardProvider struct {
 	card a2a.AgentCard
+	// interfaceURLFn, when set, is consulted at card-serve time for the agent's
+	// externally-reachable interface URL (derived from observed HTTPRoutes). A
+	// non-empty return overrides the in-cluster SupportedInterfaces URL baked in
+	// at construction, so the card reflects exposure without a pod restart (#1576).
+	interfaceURLFn func() string
 }
 
 // NewCRDCardProvider creates a card provider from the AgentRuntime's A2A config.
@@ -73,7 +78,28 @@ func NewCRDCardProvider(spec *omniav1alpha1.AgentCardSpec, serviceEndpoint strin
 	return &CRDCardProvider{card: card}
 }
 
-// AgentCard returns the built agent card.
+// WithInterfaceURLFn sets a serve-time resolver for the agent's external
+// interface URL. The function returns the full interface URL (scheme + host +
+// path) or "" when no external route is observed, in which case the in-cluster
+// URL baked in at construction is kept.
+func (p *CRDCardProvider) WithInterfaceURLFn(fn func() string) *CRDCardProvider {
+	p.interfaceURLFn = fn
+	return p
+}
+
+// AgentCard returns the agent card, overriding the interface URL from the
+// serve-time resolver when one is configured and returns a non-empty URL.
 func (p *CRDCardProvider) AgentCard(*http.Request) (*a2a.AgentCard, error) {
-	return &p.card, nil
+	if p.interfaceURLFn == nil {
+		return &p.card, nil
+	}
+	url := p.interfaceURLFn()
+	if url == "" {
+		return &p.card, nil
+	}
+	card := p.card
+	card.SupportedInterfaces = []a2a.AgentInterface{
+		{URL: url, ProtocolBinding: "jsonrpc+http"},
+	}
+	return &card, nil
 }

@@ -181,11 +181,11 @@ var _ = Describe("PolicyWatcher envtest integration", func() {
 			DeferCleanup(func() { _ = k8sClient.Delete(ctx, agentPolicy) })
 
 			// AgentRuntime references the strict policy.
-			// Must set required fields: facade.type and promptPackRef.name.
+			// Must set required fields: facades and promptPackRef.name.
 			ar := &corev1alpha1.AgentRuntime{
 				ObjectMeta: metav1.ObjectMeta{Name: "test-agent", Namespace: testNS},
 			}
-			ar.Spec.Facade.Type = corev1alpha1.FacadeTypeWebSocket
+			ar.Spec.Facades = []corev1alpha1.FacadeConfig{{Type: corev1alpha1.FacadeTypeWebSocket}}
 			ar.Spec.PromptPackRef = corev1alpha1.PromptPackRef{Name: "placeholder"}
 			ar.Spec.PrivacyPolicyRef = &corev1.LocalObjectReference{Name: "strict"}
 			Expect(k8sClient.Create(ctx, ar)).To(Succeed())

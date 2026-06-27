@@ -59,10 +59,10 @@ func TestLoadFromCRD_HappyPath(t *testing.T) {
 			Name:    "my-pack",
 			Version: ptr.To("v1.0.0"),
 		},
-		Facade: v1alpha1.FacadeConfig{
+		Facades: []v1alpha1.FacadeConfig{{
 			Type: v1alpha1.FacadeTypeWebSocket,
 			Port: ptr.To(int32(9090)),
-		},
+		}},
 		Context: &v1alpha1.ContextConfig{
 			Type: v1alpha1.ContextStoreTypeRedis,
 			TTL:  ptr.To("2h"),
@@ -141,7 +141,7 @@ func TestLoadFromCRD_PromptPackVersionNil(t *testing.T) {
 			Name: "pack",
 			// Version is nil
 		},
-		Facade: v1alpha1.FacadeConfig{Type: v1alpha1.FacadeTypeWebSocket},
+		Facades: []v1alpha1.FacadeConfig{{Type: v1alpha1.FacadeTypeWebSocket}},
 	})
 
 	c := fake.NewClientBuilder().WithScheme(k8s.Scheme()).WithRuntimeObjects(ar, testNamespace(ar.Namespace)).Build()
@@ -158,10 +158,10 @@ func TestLoadFromCRD_PromptPackVersionNil(t *testing.T) {
 func TestLoadFromCRD_FacadePortDefault(t *testing.T) {
 	ar := newFakeAgentRuntime("agent", "ns", v1alpha1.AgentRuntimeSpec{
 		PromptPackRef: v1alpha1.PromptPackRef{Name: "pack"},
-		Facade: v1alpha1.FacadeConfig{
+		Facades: []v1alpha1.FacadeConfig{{
 			Type: v1alpha1.FacadeTypeWebSocket,
 			// Port is nil — should default
-		},
+		}},
 	})
 
 	c := fake.NewClientBuilder().WithScheme(k8s.Scheme()).WithRuntimeObjects(ar, testNamespace(ar.Namespace)).Build()
@@ -178,7 +178,7 @@ func TestLoadFromCRD_FacadePortDefault(t *testing.T) {
 func TestLoadFromCRD_InvalidSessionTTL(t *testing.T) {
 	ar := newFakeAgentRuntime("agent", "ns", v1alpha1.AgentRuntimeSpec{
 		PromptPackRef: v1alpha1.PromptPackRef{Name: "pack"},
-		Facade:        v1alpha1.FacadeConfig{Type: v1alpha1.FacadeTypeWebSocket},
+		Facades:       []v1alpha1.FacadeConfig{{Type: v1alpha1.FacadeTypeWebSocket}},
 		Context: &v1alpha1.ContextConfig{
 			Type: v1alpha1.ContextStoreTypeMemory,
 			TTL:  ptr.To("not-a-duration"),
@@ -196,7 +196,7 @@ func TestLoadFromCRD_InvalidSessionTTL(t *testing.T) {
 func TestLoadFromCRD_SessionNil(t *testing.T) {
 	ar := newFakeAgentRuntime("agent", "ns", v1alpha1.AgentRuntimeSpec{
 		PromptPackRef: v1alpha1.PromptPackRef{Name: "pack"},
-		Facade:        v1alpha1.FacadeConfig{Type: v1alpha1.FacadeTypeWebSocket},
+		Facades:       []v1alpha1.FacadeConfig{{Type: v1alpha1.FacadeTypeWebSocket}},
 		// Session is nil
 	})
 
@@ -214,7 +214,7 @@ func TestLoadFromCRD_SessionNil(t *testing.T) {
 func TestLoadFromCRD_SessionTTLNil(t *testing.T) {
 	ar := newFakeAgentRuntime("agent", "ns", v1alpha1.AgentRuntimeSpec{
 		PromptPackRef: v1alpha1.PromptPackRef{Name: "pack"},
-		Facade:        v1alpha1.FacadeConfig{Type: v1alpha1.FacadeTypeWebSocket},
+		Facades:       []v1alpha1.FacadeConfig{{Type: v1alpha1.FacadeTypeWebSocket}},
 		Context: &v1alpha1.ContextConfig{
 			Type: v1alpha1.ContextStoreTypeMemory,
 			// TTL is nil — should default
@@ -235,10 +235,10 @@ func TestLoadFromCRD_SessionTTLNil(t *testing.T) {
 func TestLoadConfigFromCRD_DrainTimeout(t *testing.T) {
 	d := "2m"
 	ar := &v1alpha1.AgentRuntime{Spec: v1alpha1.AgentRuntimeSpec{
-		Facade: v1alpha1.FacadeConfig{Type: v1alpha1.FacadeTypeWebSocket, DrainTimeout: &d},
+		Facades: []v1alpha1.FacadeConfig{{Type: v1alpha1.FacadeTypeWebSocket, DrainTimeout: &d}},
 	}}
 	cfg := &Config{}
-	if err := loadFacadeConfigFromCRD(cfg, ar); err != nil {
+	if err := loadFacadesFromCRD(cfg, ar); err != nil {
 		t.Fatalf("load: %v", err)
 	}
 	if cfg.DrainTimeout != 2*time.Minute {
@@ -249,10 +249,10 @@ func TestLoadConfigFromCRD_DrainTimeout(t *testing.T) {
 func TestLoadConfigFromCRD_DrainTimeout_Invalid(t *testing.T) {
 	d := "bad-duration"
 	ar := &v1alpha1.AgentRuntime{Spec: v1alpha1.AgentRuntimeSpec{
-		Facade: v1alpha1.FacadeConfig{Type: v1alpha1.FacadeTypeWebSocket, DrainTimeout: &d},
+		Facades: []v1alpha1.FacadeConfig{{Type: v1alpha1.FacadeTypeWebSocket, DrainTimeout: &d}},
 	}}
 	cfg := &Config{}
-	err := loadFacadeConfigFromCRD(cfg, ar)
+	err := loadFacadesFromCRD(cfg, ar)
 	if err == nil {
 		t.Fatal("expected error for invalid drain timeout")
 	}
@@ -264,7 +264,7 @@ func TestLoadConfigFromCRD_DrainTimeout_Invalid(t *testing.T) {
 func TestLoadFromCRD_ToolRegistryNoNamespace(t *testing.T) {
 	ar := newFakeAgentRuntime("agent", "mynamespace", v1alpha1.AgentRuntimeSpec{
 		PromptPackRef: v1alpha1.PromptPackRef{Name: "pack"},
-		Facade:        v1alpha1.FacadeConfig{Type: v1alpha1.FacadeTypeWebSocket},
+		Facades:       []v1alpha1.FacadeConfig{{Type: v1alpha1.FacadeTypeWebSocket}},
 		ToolRegistryRef: &v1alpha1.ToolRegistryRef{
 			Name: "tools",
 			// Namespace is nil — should default to agent namespace
@@ -285,7 +285,7 @@ func TestLoadFromCRD_ToolRegistryNoNamespace(t *testing.T) {
 func TestLoadFromCRD_NoToolRegistry(t *testing.T) {
 	ar := newFakeAgentRuntime("agent", "ns", v1alpha1.AgentRuntimeSpec{
 		PromptPackRef: v1alpha1.PromptPackRef{Name: "pack"},
-		Facade:        v1alpha1.FacadeConfig{Type: v1alpha1.FacadeTypeWebSocket},
+		Facades:       []v1alpha1.FacadeConfig{{Type: v1alpha1.FacadeTypeWebSocket}},
 		// ToolRegistryRef is nil
 	})
 
@@ -303,7 +303,7 @@ func TestLoadFromCRD_NoToolRegistry(t *testing.T) {
 func TestLoadFromCRD_MediaFromEnvFallback(t *testing.T) {
 	ar := newFakeAgentRuntime("agent", "ns", v1alpha1.AgentRuntimeSpec{
 		PromptPackRef: v1alpha1.PromptPackRef{Name: "pack"},
-		Facade:        v1alpha1.FacadeConfig{Type: v1alpha1.FacadeTypeWebSocket},
+		Facades:       []v1alpha1.FacadeConfig{{Type: v1alpha1.FacadeTypeWebSocket}},
 		// Media is nil — should fall back to env
 	})
 
@@ -327,7 +327,7 @@ func TestLoadFromCRD_MediaFromEnvFallback(t *testing.T) {
 func TestLoadFromCRD_MediaEmptyBasePath(t *testing.T) {
 	ar := newFakeAgentRuntime("agent", "ns", v1alpha1.AgentRuntimeSpec{
 		PromptPackRef: v1alpha1.PromptPackRef{Name: "pack"},
-		Facade:        v1alpha1.FacadeConfig{Type: v1alpha1.FacadeTypeWebSocket},
+		Facades:       []v1alpha1.FacadeConfig{{Type: v1alpha1.FacadeTypeWebSocket}},
 		Media: &v1alpha1.MediaConfig{
 			BasePath: "", // empty — should fall back to env
 		},
@@ -402,7 +402,7 @@ func TestLoadTracingConfigFromEnv(t *testing.T) {
 func TestLoadFromCRD_InvalidHealthPort(t *testing.T) {
 	ar := newFakeAgentRuntime("agent", "ns", v1alpha1.AgentRuntimeSpec{
 		PromptPackRef: v1alpha1.PromptPackRef{Name: "pack"},
-		Facade:        v1alpha1.FacadeConfig{Type: v1alpha1.FacadeTypeWebSocket},
+		Facades:       []v1alpha1.FacadeConfig{{Type: v1alpha1.FacadeTypeWebSocket}},
 	})
 
 	c := fake.NewClientBuilder().WithScheme(k8s.Scheme()).WithRuntimeObjects(ar, testNamespace(ar.Namespace)).Build()
@@ -418,7 +418,7 @@ func TestLoadFromCRD_InvalidHealthPort(t *testing.T) {
 func TestLoadFromCRD_TracingError(t *testing.T) {
 	ar := newFakeAgentRuntime("agent", "ns", v1alpha1.AgentRuntimeSpec{
 		PromptPackRef: v1alpha1.PromptPackRef{Name: "pack"},
-		Facade:        v1alpha1.FacadeConfig{Type: v1alpha1.FacadeTypeWebSocket},
+		Facades:       []v1alpha1.FacadeConfig{{Type: v1alpha1.FacadeTypeWebSocket}},
 	})
 
 	c := fake.NewClientBuilder().WithScheme(k8s.Scheme()).WithRuntimeObjects(ar, testNamespace(ar.Namespace)).Build()
@@ -434,7 +434,7 @@ func TestLoadFromCRD_TracingError(t *testing.T) {
 func TestLoadFromCRD_HandlerModeFromEnv(t *testing.T) {
 	ar := newFakeAgentRuntime("agent", "ns", v1alpha1.AgentRuntimeSpec{
 		PromptPackRef: v1alpha1.PromptPackRef{Name: "pack"},
-		Facade:        v1alpha1.FacadeConfig{Type: v1alpha1.FacadeTypeWebSocket},
+		Facades:       []v1alpha1.FacadeConfig{{Type: v1alpha1.FacadeTypeWebSocket}},
 	})
 
 	c := fake.NewClientBuilder().WithScheme(k8s.Scheme()).WithRuntimeObjects(ar, testNamespace(ar.Namespace)).Build()
@@ -549,7 +549,7 @@ func TestLoadFromEnvFallback_InvalidHealthPort(t *testing.T) {
 func TestLoadA2AConfigFromCRD_Defaults(t *testing.T) {
 	ar := newFakeAgentRuntime("agent", "ns", v1alpha1.AgentRuntimeSpec{
 		PromptPackRef: v1alpha1.PromptPackRef{Name: "pack"},
-		Facade:        v1alpha1.FacadeConfig{Type: v1alpha1.FacadeTypeA2A},
+		Facades:       []v1alpha1.FacadeConfig{{Type: v1alpha1.FacadeTypeA2A}},
 	})
 	c := fake.NewClientBuilder().WithScheme(k8s.Scheme()).WithRuntimeObjects(ar, testNamespace(ar.Namespace)).Build()
 
@@ -568,11 +568,13 @@ func TestLoadA2AConfigFromCRD_Defaults(t *testing.T) {
 func TestLoadA2AConfigFromCRD_CustomTTLs(t *testing.T) {
 	ar := newFakeAgentRuntime("agent", "ns", v1alpha1.AgentRuntimeSpec{
 		PromptPackRef: v1alpha1.PromptPackRef{Name: "pack"},
-		Facade:        v1alpha1.FacadeConfig{Type: v1alpha1.FacadeTypeA2A},
-		A2A: &v1alpha1.A2AConfig{
-			TaskTTL:         ptr.To("2h"),
-			ConversationTTL: ptr.To("45m"),
-		},
+		Facades: []v1alpha1.FacadeConfig{{
+			Type: v1alpha1.FacadeTypeA2A,
+			A2A: &v1alpha1.A2AConfig{
+				TaskTTL:         ptr.To("2h"),
+				ConversationTTL: ptr.To("45m"),
+			},
+		}},
 	})
 	c := fake.NewClientBuilder().WithScheme(k8s.Scheme()).WithRuntimeObjects(ar, testNamespace(ar.Namespace)).Build()
 
@@ -591,10 +593,12 @@ func TestLoadA2AConfigFromCRD_CustomTTLs(t *testing.T) {
 func TestLoadA2AConfigFromCRD_InvalidTaskTTL(t *testing.T) {
 	ar := newFakeAgentRuntime("agent", "ns", v1alpha1.AgentRuntimeSpec{
 		PromptPackRef: v1alpha1.PromptPackRef{Name: "pack"},
-		Facade:        v1alpha1.FacadeConfig{Type: v1alpha1.FacadeTypeA2A},
-		A2A: &v1alpha1.A2AConfig{
-			TaskTTL: ptr.To("not-a-duration"),
-		},
+		Facades: []v1alpha1.FacadeConfig{{
+			Type: v1alpha1.FacadeTypeA2A,
+			A2A: &v1alpha1.A2AConfig{
+				TaskTTL: ptr.To("not-a-duration"),
+			},
+		}},
 	})
 	c := fake.NewClientBuilder().WithScheme(k8s.Scheme()).WithRuntimeObjects(ar, testNamespace(ar.Namespace)).Build()
 
@@ -607,10 +611,12 @@ func TestLoadA2AConfigFromCRD_InvalidTaskTTL(t *testing.T) {
 func TestLoadA2AConfigFromCRD_InvalidConversationTTL(t *testing.T) {
 	ar := newFakeAgentRuntime("agent", "ns", v1alpha1.AgentRuntimeSpec{
 		PromptPackRef: v1alpha1.PromptPackRef{Name: "pack"},
-		Facade:        v1alpha1.FacadeConfig{Type: v1alpha1.FacadeTypeA2A},
-		A2A: &v1alpha1.A2AConfig{
-			ConversationTTL: ptr.To("not-a-duration"),
-		},
+		Facades: []v1alpha1.FacadeConfig{{
+			Type: v1alpha1.FacadeTypeA2A,
+			A2A: &v1alpha1.A2AConfig{
+				ConversationTTL: ptr.To("not-a-duration"),
+			},
+		}},
 	})
 	c := fake.NewClientBuilder().WithScheme(k8s.Scheme()).WithRuntimeObjects(ar, testNamespace(ar.Namespace)).Build()
 
@@ -623,7 +629,6 @@ func TestLoadA2AConfigFromCRD_InvalidConversationTTL(t *testing.T) {
 func TestLoadA2AConfigFromEnv_CustomTTLs(t *testing.T) {
 	t.Setenv(EnvA2ATaskTTL, "3h")
 	t.Setenv(EnvA2AConversationTTL, "15m")
-	t.Setenv(EnvA2AAuthToken, "my-secret-token")
 
 	cfg := &Config{}
 	err := loadA2AConfigFromEnv(cfg)
@@ -635,9 +640,6 @@ func TestLoadA2AConfigFromEnv_CustomTTLs(t *testing.T) {
 	}
 	if cfg.A2AConversationTTL != 15*time.Minute {
 		t.Errorf("A2AConversationTTL = %v, want %v", cfg.A2AConversationTTL, 15*time.Minute)
-	}
-	if cfg.A2AAuthToken != "my-secret-token" {
-		t.Errorf("A2AAuthToken = %q, want %q", cfg.A2AAuthToken, "my-secret-token")
 	}
 }
 
@@ -748,9 +750,9 @@ func TestLoadMCPConfigFromCRD_FromFacade(t *testing.T) {
 	ar := newFakeAgentRuntime("fn", "default", v1alpha1.AgentRuntimeSpec{
 		PromptPackRef: v1alpha1.PromptPackRef{Name: "p"},
 		Mode:          "function",
-		Facade: v1alpha1.FacadeConfig{
-			Type: v1alpha1.FacadeTypeREST,
-			MCP:  &v1alpha1.MCPConfig{Enabled: true, Port: &port},
+		Facades: []v1alpha1.FacadeConfig{
+			{Type: v1alpha1.FacadeTypeREST},
+			{Type: v1alpha1.FacadeTypeMCP, MCP: &v1alpha1.MCPConfig{Enabled: true, Port: &port}},
 		},
 	})
 	c := fake.NewClientBuilder().WithScheme(k8s.Scheme()).WithRuntimeObjects(ar, testNamespace(ar.Namespace)).Build()
@@ -771,9 +773,9 @@ func TestLoadMCPConfigFromCRD_DefaultPortWhenUnset(t *testing.T) {
 	ar := newFakeAgentRuntime("fn", "default", v1alpha1.AgentRuntimeSpec{
 		PromptPackRef: v1alpha1.PromptPackRef{Name: "p"},
 		Mode:          "function",
-		Facade: v1alpha1.FacadeConfig{
-			Type: v1alpha1.FacadeTypeREST,
-			MCP:  &v1alpha1.MCPConfig{Enabled: true},
+		Facades: []v1alpha1.FacadeConfig{
+			{Type: v1alpha1.FacadeTypeREST},
+			{Type: v1alpha1.FacadeTypeMCP, MCP: &v1alpha1.MCPConfig{Enabled: true}},
 		},
 	})
 	c := fake.NewClientBuilder().WithScheme(k8s.Scheme()).WithRuntimeObjects(ar, testNamespace(ar.Namespace)).Build()
@@ -798,10 +800,10 @@ func TestLoadFromEnvFallback_InvalidMCPPort(t *testing.T) {
 func TestLoadMCPConfigFromCRD_NilMCP(t *testing.T) {
 	ar := newFakeAgentRuntime("fn", "default", v1alpha1.AgentRuntimeSpec{
 		PromptPackRef: v1alpha1.PromptPackRef{Name: "p"},
-		Facade: v1alpha1.FacadeConfig{
+		Facades: []v1alpha1.FacadeConfig{{
 			Type: v1alpha1.FacadeTypeWebSocket,
-			// MCP is nil
-		},
+			// no mcp facade
+		}},
 	})
 	c := fake.NewClientBuilder().WithScheme(k8s.Scheme()).WithRuntimeObjects(ar, testNamespace(ar.Namespace)).Build()
 
@@ -818,25 +820,76 @@ func TestLoadMCPConfigFromCRD_NilMCP(t *testing.T) {
 }
 
 func TestApplyManagementPlanePorts(t *testing.T) {
+	// a2aEnabled pre-seeds cfg.A2AEnabled so applyManagementPlanePorts maps a
+	// secondary (dual-protocol) a2a facade to the a2a twin port rather than the
+	// facade twin port. With a2aEnabled false a lone a2a facade is the primary
+	// and maps to the facade twin port.
 	tests := []struct {
 		name       string
-		ext        *v1alpha1.AgentExternalAuth
+		facades    []v1alpha1.FacadeConfig
 		a2aEnabled bool
-		mcpEnabled bool
 		wantFacade int
 		wantA2A    int
 		wantMCP    int
 	}{
-		{name: "nil externalAuth defaults to mgmt allowed (WS only)", ext: nil, wantFacade: DefaultInternalFacadePort},
-		{name: "nil allowManagementPlane defaults true", ext: &v1alpha1.AgentExternalAuth{}, wantFacade: DefaultInternalFacadePort},
-		{name: "a2a enabled adds a2a internal port", ext: &v1alpha1.AgentExternalAuth{}, a2aEnabled: true, wantFacade: DefaultInternalFacadePort, wantA2A: DefaultInternalA2APort},
-		{name: "mcp enabled adds mcp internal port", ext: &v1alpha1.AgentExternalAuth{}, mcpEnabled: true, wantFacade: DefaultInternalFacadePort, wantMCP: DefaultInternalMCPPort},
-		{name: "allowManagementPlane false disables all", ext: &v1alpha1.AgentExternalAuth{AllowManagementPlane: ptr.To(false)}, a2aEnabled: true, mcpEnabled: true},
+		{
+			name:       "websocket only, mgmt default true",
+			facades:    []v1alpha1.FacadeConfig{{Type: v1alpha1.FacadeTypeWebSocket}},
+			wantFacade: DefaultInternalFacadePort,
+		},
+		{
+			name:       "websocket with explicit mgmt true",
+			facades:    []v1alpha1.FacadeConfig{{Type: v1alpha1.FacadeTypeWebSocket, ManagementPlane: ptr.To(true)}},
+			wantFacade: DefaultInternalFacadePort,
+		},
+		{
+			name: "websocket + secondary a2a adds a2a internal port",
+			facades: []v1alpha1.FacadeConfig{
+				{Type: v1alpha1.FacadeTypeWebSocket},
+				{Type: v1alpha1.FacadeTypeA2A},
+			},
+			a2aEnabled: true,
+			wantFacade: DefaultInternalFacadePort,
+			wantA2A:    DefaultInternalA2APort,
+		},
+		{
+			name: "rest + mcp adds mcp internal port",
+			facades: []v1alpha1.FacadeConfig{
+				{Type: v1alpha1.FacadeTypeREST},
+				{Type: v1alpha1.FacadeTypeMCP},
+			},
+			wantFacade: DefaultInternalFacadePort,
+			wantMCP:    DefaultInternalMCPPort,
+		},
+		{
+			name:       "standalone a2a primary maps to facade twin port",
+			facades:    []v1alpha1.FacadeConfig{{Type: v1alpha1.FacadeTypeA2A}},
+			wantFacade: DefaultInternalFacadePort,
+		},
+		{
+			name: "managementPlane false on websocket leaves facade port zero",
+			facades: []v1alpha1.FacadeConfig{
+				{Type: v1alpha1.FacadeTypeWebSocket, ManagementPlane: ptr.To(false)},
+				{Type: v1alpha1.FacadeTypeA2A},
+			},
+			a2aEnabled: true,
+			wantFacade: 0,
+			wantA2A:    DefaultInternalA2APort,
+		},
+		{
+			name: "managementPlane false on every facade disables all",
+			facades: []v1alpha1.FacadeConfig{
+				{Type: v1alpha1.FacadeTypeWebSocket, ManagementPlane: ptr.To(false)},
+				{Type: v1alpha1.FacadeTypeA2A, ManagementPlane: ptr.To(false)},
+				{Type: v1alpha1.FacadeTypeMCP, ManagementPlane: ptr.To(false)},
+			},
+			a2aEnabled: true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cfg := &Config{A2AEnabled: tt.a2aEnabled, MCPEnabled: tt.mcpEnabled}
-			applyManagementPlanePorts(cfg, tt.ext)
+			cfg := &Config{A2AEnabled: tt.a2aEnabled}
+			applyManagementPlanePorts(cfg, tt.facades)
 			if cfg.InternalFacadePort != tt.wantFacade {
 				t.Errorf("InternalFacadePort = %d, want %d", cfg.InternalFacadePort, tt.wantFacade)
 			}
@@ -847,6 +900,114 @@ func TestApplyManagementPlanePorts(t *testing.T) {
 				t.Errorf("InternalMCPPort = %d, want %d", cfg.InternalMCPPort, tt.wantMCP)
 			}
 		})
+	}
+}
+
+// TestLoadFacadesFromCRD_DerivedConfig exercises the multi-facade → flat Config
+// derivation contract (#1576): which facade is primary, when A2A/MCP become
+// secondary listeners, and the resulting ports.
+func TestLoadFacadesFromCRD_DerivedConfig(t *testing.T) {
+	tests := []struct {
+		name         string
+		facades      []v1alpha1.FacadeConfig
+		wantFacade   FacadeType
+		wantA2A      bool
+		wantA2APort  int
+		wantMCP      bool
+		wantMCPPort  int
+		wantFacadeNo int
+	}{
+		{
+			name:         "websocket only",
+			facades:      []v1alpha1.FacadeConfig{{Type: v1alpha1.FacadeTypeWebSocket}},
+			wantFacade:   FacadeTypeWebSocket,
+			wantA2A:      false,
+			wantFacadeNo: DefaultFacadePort,
+		},
+		{
+			name: "websocket + a2a secondary",
+			facades: []v1alpha1.FacadeConfig{
+				{Type: v1alpha1.FacadeTypeWebSocket},
+				{Type: v1alpha1.FacadeTypeA2A},
+			},
+			wantFacade:   FacadeTypeWebSocket,
+			wantA2A:      true,
+			wantA2APort:  DefaultA2APort,
+			wantFacadeNo: DefaultFacadePort,
+		},
+		{
+			name:         "standalone a2a primary",
+			facades:      []v1alpha1.FacadeConfig{{Type: v1alpha1.FacadeTypeA2A}},
+			wantFacade:   FacadeTypeA2A,
+			wantA2A:      false,
+			wantFacadeNo: DefaultFacadePort,
+		},
+		{
+			name: "function mode rest + mcp",
+			facades: []v1alpha1.FacadeConfig{
+				{Type: v1alpha1.FacadeTypeREST},
+				{Type: v1alpha1.FacadeTypeMCP},
+			},
+			wantFacade:   FacadeTypeREST,
+			wantMCP:      true,
+			wantMCPPort:  DefaultMCPPort,
+			wantFacadeNo: DefaultFacadePort,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ar := &v1alpha1.AgentRuntime{Spec: v1alpha1.AgentRuntimeSpec{Facades: tt.facades}}
+			cfg := &Config{}
+			if err := loadFacadesFromCRD(cfg, ar); err != nil {
+				t.Fatalf("loadFacadesFromCRD: %v", err)
+			}
+			assertFlatConfig(t, cfg, tt.wantFacade, tt.wantFacadeNo,
+				tt.wantA2A, tt.wantA2APort, tt.wantMCP, tt.wantMCPPort)
+
+			// Verify the per-facade management-plane port derivation against the
+			// same facade slice (the production LoadFromCRD calls these in
+			// sequence).
+			applyManagementPlanePorts(cfg, tt.facades)
+			assertMgmtPorts(t, cfg, tt.wantA2A, tt.wantMCP)
+		})
+	}
+}
+
+func assertFlatConfig(
+	t *testing.T, cfg *Config, wantFacade FacadeType, wantPort int,
+	wantA2A bool, wantA2APort int, wantMCP bool, wantMCPPort int,
+) {
+	t.Helper()
+	if cfg.FacadeType != wantFacade {
+		t.Errorf("FacadeType = %q, want %q", cfg.FacadeType, wantFacade)
+	}
+	if cfg.FacadePort != wantPort {
+		t.Errorf("FacadePort = %d, want %d", cfg.FacadePort, wantPort)
+	}
+	if cfg.A2AEnabled != wantA2A {
+		t.Errorf("A2AEnabled = %v, want %v", cfg.A2AEnabled, wantA2A)
+	}
+	if wantA2A && cfg.A2APort != wantA2APort {
+		t.Errorf("A2APort = %d, want %d", cfg.A2APort, wantA2APort)
+	}
+	if cfg.MCPEnabled != wantMCP {
+		t.Errorf("MCPEnabled = %v, want %v", cfg.MCPEnabled, wantMCP)
+	}
+	if wantMCP && cfg.MCPPort != wantMCPPort {
+		t.Errorf("MCPPort = %d, want %d", cfg.MCPPort, wantMCPPort)
+	}
+}
+
+func assertMgmtPorts(t *testing.T, cfg *Config, wantA2A, wantMCP bool) {
+	t.Helper()
+	if cfg.InternalFacadePort != DefaultInternalFacadePort {
+		t.Errorf("InternalFacadePort = %d, want %d", cfg.InternalFacadePort, DefaultInternalFacadePort)
+	}
+	if wantA2A && cfg.InternalA2APort != DefaultInternalA2APort {
+		t.Errorf("InternalA2APort = %d, want %d", cfg.InternalA2APort, DefaultInternalA2APort)
+	}
+	if wantMCP && cfg.InternalMCPPort != DefaultInternalMCPPort {
+		t.Errorf("InternalMCPPort = %d, want %d", cfg.InternalMCPPort, DefaultInternalMCPPort)
 	}
 }
 

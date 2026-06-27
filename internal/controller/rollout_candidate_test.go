@@ -114,7 +114,7 @@ func TestReconcileCandidateDeployment_CreatesWithCanaryLabel(t *testing.T) {
 	require.NoError(t, corev1.AddToScheme(scheme))
 
 	ar := newRolloutTestAR()
-	ar.Spec.Facade.Type = omniav1alpha1.FacadeTypeWebSocket
+	ar.Spec.Facades = []omniav1alpha1.FacadeConfig{{Type: omniav1alpha1.FacadeTypeWebSocket}}
 	ar.Spec.PromptPackRef.Name = "test-pack"
 	ar.Spec.Rollout = &omniav1alpha1.RolloutConfig{
 		Candidate: &omniav1alpha1.CandidateOverrides{
@@ -153,7 +153,7 @@ func TestReconcileCandidateDeployment_MountsCandidatePromptPack(t *testing.T) {
 	require.NoError(t, corev1.AddToScheme(scheme))
 
 	ar := newRolloutTestAR()
-	ar.Spec.Facade.Type = omniav1alpha1.FacadeTypeWebSocket
+	ar.Spec.Facades = []omniav1alpha1.FacadeConfig{{Type: omniav1alpha1.FacadeTypeWebSocket}}
 	ar.Spec.PromptPackRef.Name = "stable-pack"
 	ar.Spec.Rollout = &omniav1alpha1.RolloutConfig{
 		Candidate: &omniav1alpha1.CandidateOverrides{

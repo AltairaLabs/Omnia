@@ -43,12 +43,6 @@ func LoadFromCRD(ctx context.Context, c client.Client, name, namespace string) (
 		return nil, fmt.Errorf("resolve workspace name: %w", err)
 	}
 
-	// Normalise legacy spec.a2a → spec.facade.a2a so downstream loaders
-	// read from a single location. The operator's reconciler does the
-	// same projection (Task 8); this side covers pods that boot before
-	// the reconciler has rewritten the CR.
-	v1alpha1.ProjectLegacyFacadeA2A(ar)
-
 	cfg := &Config{
 		AgentName:     name,
 		Namespace:     namespace,
@@ -62,8 +56,8 @@ func LoadFromCRD(ctx context.Context, c client.Client, name, namespace string) (
 	}
 	cfg.PromptPackPath = getEnvOrDefault(EnvPromptPackMountPath, DefaultPromptPackMountPath)
 
-	// Facade config from CRD
-	if err := loadFacadeConfigFromCRD(cfg, ar); err != nil {
+	// Facade config from CRD: derive the flat Config from spec.facades.
+	if err := loadFacadesFromCRD(cfg, ar); err != nil {
 		return nil, err
 	}
 
@@ -100,32 +94,38 @@ func LoadFromCRD(ctx context.Context, c client.Client, name, namespace string) (
 		return nil, err
 	}
 
-	if err := loadA2AConfigFromCRD(cfg, ar); err != nil {
-		return nil, err
-	}
-
-	loadMCPConfigFromCRD(cfg, ar)
-
-	applyManagementPlanePorts(cfg, ar.Spec.ExternalAuth)
+	applyManagementPlanePorts(cfg, ar.Spec.Facades)
 
 	return cfg, nil
 }
 
-// applyManagementPlanePorts sets the internal twin-listener ports the facade
-// serves behind the mgmt-plane-only chain. They are infrastructure constants
-// (not CRD fields), gated on externalAuth.allowManagementPlane and on whether
-// each surface is enabled. When the management plane is disabled the ports stay
-// zero and no internal listener is started.
-func applyManagementPlanePorts(cfg *Config, ext *v1alpha1.AgentExternalAuth) {
-	if !ext.ManagementPlaneAllowed() {
-		return
-	}
-	cfg.InternalFacadePort = DefaultInternalFacadePort
-	if cfg.A2AEnabled {
-		cfg.InternalA2APort = DefaultInternalA2APort
-	}
-	if cfg.MCPEnabled {
-		cfg.InternalMCPPort = DefaultInternalMCPPort
+// applyManagementPlanePorts sets the internal twin-listener ports the facades
+// serve behind the mgmt-plane-only chain. They are infrastructure constants
+// (not CRD fields), gated per-facade on facades[].managementPlane (default
+// true). A facade with managementPlane:false leaves its surface's internal port
+// at zero and no internal listener is started for it.
+//
+// Must run after loadFacadesFromCRD so cfg.A2AEnabled (a2a primary vs secondary)
+// is known: a standalone a2a primary maps to the facade twin port, a secondary
+// a2a maps to the a2a twin port.
+func applyManagementPlanePorts(cfg *Config, facades []v1alpha1.FacadeConfig) {
+	for i := range facades {
+		f := &facades[i]
+		if !f.ManagementPlaneEnabled() {
+			continue
+		}
+		switch f.Type {
+		case v1alpha1.FacadeTypeWebSocket, v1alpha1.FacadeTypeREST:
+			cfg.InternalFacadePort = DefaultInternalFacadePort
+		case v1alpha1.FacadeTypeA2A:
+			if cfg.A2AEnabled {
+				cfg.InternalA2APort = DefaultInternalA2APort
+			} else {
+				cfg.InternalFacadePort = DefaultInternalFacadePort
+			}
+		case v1alpha1.FacadeTypeMCP:
+			cfg.InternalMCPPort = DefaultInternalMCPPort
+		}
 	}
 }
 
@@ -150,39 +150,126 @@ func loadInternalPortsFromEnv(cfg *Config) error {
 	return nil
 }
 
-// loadA2AConfigFromCRD populates A2A-related config fields from the AgentRuntime CRD.
-//
-// Reads from spec.facade.a2a. Callers must call ProjectLegacyFacadeA2A
-// before invoking this so legacy spec.a2a values are normalised into
-// the new location.
-func loadA2AConfigFromCRD(cfg *Config, ar *v1alpha1.AgentRuntime) error {
-	a2a := ar.Spec.Facade.A2A
-	if a2a == nil {
-		cfg.A2ATaskTTL = DefaultA2ATaskTTL
-		cfg.A2AConversationTTL = DefaultA2AConversationTTL
-		return nil
-	}
+// loadFacadesFromCRD derives the flat facade-related Config from spec.facades.
+// Each facade entry is a single protocol surface; the primary (the listener
+// main.go dispatches to) is the websocket facade in agent mode, the rest facade
+// in function mode, or the a2a facade when it is the only agent-mode facade. An
+// a2a or mcp facade present alongside a primary becomes a secondary listener
+// (today's dual-protocol shape), so the flat Config (FacadeType/FacadePort,
+// A2AEnabled/A2APort, MCPEnabled/MCPPort) is unchanged and cmd/agent startup is
+// untouched.
+func loadFacadesFromCRD(cfg *Config, ar *v1alpha1.AgentRuntime) error {
+	facades := ar.Spec.Facades
+	wsF := findFacade(facades, v1alpha1.FacadeTypeWebSocket)
+	a2aF := findFacade(facades, v1alpha1.FacadeTypeA2A)
+	restF := findFacade(facades, v1alpha1.FacadeTypeREST)
+	mcpF := findFacade(facades, v1alpha1.FacadeTypeMCP)
 
-	if err := loadA2ATTLsFromCRD(cfg, a2a); err != nil {
+	primary := primaryFacade(wsF, restF, a2aF)
+	if primary == nil {
+		return fmt.Errorf("spec.facades has no primary facade (websocket, rest, or a2a)")
+	}
+	if err := applyPrimaryFacade(cfg, primary); err != nil {
 		return err
 	}
-
-	cfg.A2AAuthToken = os.Getenv(EnvA2AAuthToken)
-
-	// Dual-protocol: A2A as additional endpoint alongside websocket/grpc.
-	cfg.A2AEnabled = a2a.Enabled
-	if a2a.Port != nil {
-		cfg.A2APort = int(*a2a.Port)
-	} else {
-		cfg.A2APort = DefaultA2APort
+	if err := applyA2AFacade(cfg, a2aF, wsF != nil); err != nil {
+		return err
 	}
+	applyMCPFacade(cfg, mcpF)
+	return nil
+}
 
-	loadA2ATaskStoreFromCRD(cfg, a2a)
+// findFacade returns the facade of the given type, or nil if absent. CEL
+// guarantees at most one facade per type.
+func findFacade(facades []v1alpha1.FacadeConfig, t v1alpha1.FacadeType) *v1alpha1.FacadeConfig {
+	for i := range facades {
+		if facades[i].Type == t {
+			return &facades[i]
+		}
+	}
+	return nil
+}
 
+// primaryFacade picks the listener main.go dispatches to: websocket (agent) >
+// rest (function) > a2a (standalone agent).
+func primaryFacade(wsF, restF, a2aF *v1alpha1.FacadeConfig) *v1alpha1.FacadeConfig {
+	switch {
+	case wsF != nil:
+		return wsF
+	case restF != nil:
+		return restF
+	default:
+		return a2aF
+	}
+}
+
+// applyPrimaryFacade copies the primary facade's type, port, and timeouts into
+// the flat Config.
+func applyPrimaryFacade(cfg *Config, f *v1alpha1.FacadeConfig) error {
+	cfg.FacadeType = FacadeType(f.Type)
+	cfg.FacadePort = int32PtrOr(f.Port, DefaultFacadePort)
+	if f.ClientToolTimeout != nil {
+		cfg.ClientToolTimeout = f.ClientToolTimeout.Duration
+	}
+	if f.DrainTimeout != nil {
+		d, err := time.ParseDuration(*f.DrainTimeout)
+		if err != nil {
+			return fmt.Errorf("invalid drain timeout %q: %w", *f.DrainTimeout, err)
+		}
+		cfg.DrainTimeout = d
+	}
+	return nil
+}
+
+// applyA2AFacade loads the A2A TTLs, task store, clients, and dual-protocol port
+// from the a2a facade entry. wsPrimary reports whether a websocket facade is the
+// primary; when true the a2a facade is a secondary listener (A2AEnabled) on
+// A2APort, otherwise a2a is itself the primary (on FacadePort) and A2AEnabled
+// stays false.
+func applyA2AFacade(cfg *Config, f *v1alpha1.FacadeConfig, wsPrimary bool) error {
+	cfg.A2ATaskTTL = DefaultA2ATaskTTL
+	cfg.A2AConversationTTL = DefaultA2AConversationTTL
+	cfg.A2ATaskStoreType = getEnvOrDefault(EnvA2ATaskStoreType, "memory")
+	cfg.A2ARedisURL = os.Getenv(EnvA2ARedisURL)
+	cfg.A2APort = DefaultA2APort
+	if f == nil {
+		return nil
+	}
+	cfg.A2AEnabled = wsPrimary
 	// Resolved A2A clients are injected as JSON by the operator.
 	cfg.A2AClientsJSON = os.Getenv(EnvA2AClients)
 
+	a2a := f.A2A
+	if a2a == nil {
+		return nil
+	}
+	if err := loadA2ATTLsFromCRD(cfg, a2a); err != nil {
+		return err
+	}
+	cfg.A2APort = int32PtrOr(a2a.Port, DefaultA2APort)
+	loadA2ATaskStoreFromCRD(cfg, a2a)
 	return nil
+}
+
+// applyMCPFacade enables the MCP secondary listener and sets its port from the
+// mcp facade entry.
+func applyMCPFacade(cfg *Config, f *v1alpha1.FacadeConfig) {
+	cfg.MCPPort = DefaultMCPPort
+	if f == nil {
+		return
+	}
+	cfg.MCPEnabled = true
+	if f.MCP != nil && f.MCP.Port != nil {
+		cfg.MCPPort = int(*f.MCP.Port)
+	}
+}
+
+// int32PtrOr returns *p as an int, or def when p is nil.
+func int32PtrOr(p *int32, def int) int {
+	if p != nil {
+		return int(*p)
+	}
+	return def
 }
 
 // loadA2ATTLsFromCRD parses A2A TTL durations from the CRD.
@@ -225,27 +312,6 @@ func loadA2ATaskStoreFromCRD(cfg *Config, a2a *v1alpha1.A2AConfig) {
 		cfg.A2ATaskStoreType = getEnvOrDefault(EnvA2ATaskStoreType, "memory")
 		cfg.A2ARedisURL = os.Getenv(EnvA2ARedisURL)
 	}
-}
-
-// loadFacadeConfigFromCRD populates facade-related config fields from the AgentRuntime CRD.
-func loadFacadeConfigFromCRD(cfg *Config, ar *v1alpha1.AgentRuntime) error {
-	cfg.FacadeType = FacadeType(ar.Spec.Facade.Type)
-	if ar.Spec.Facade.Port != nil {
-		cfg.FacadePort = int(*ar.Spec.Facade.Port)
-	} else {
-		cfg.FacadePort = DefaultFacadePort
-	}
-	if ar.Spec.Facade.ClientToolTimeout != nil {
-		cfg.ClientToolTimeout = ar.Spec.Facade.ClientToolTimeout.Duration
-	}
-	if ar.Spec.Facade.DrainTimeout != nil {
-		d, err := time.ParseDuration(*ar.Spec.Facade.DrainTimeout)
-		if err != nil {
-			return fmt.Errorf("invalid drain timeout %q: %w", *ar.Spec.Facade.DrainTimeout, err)
-		}
-		cfg.DrainTimeout = d
-	}
-	return nil
 }
 
 // loadContextConfigFromCRD populates context-store-related config fields from the AgentRuntime CRD.
@@ -401,7 +467,6 @@ func loadA2AConfigFromEnv(cfg *Config) error {
 		cfg.A2AConversationTTL = DefaultA2AConversationTTL
 	}
 
-	cfg.A2AAuthToken = os.Getenv(EnvA2AAuthToken)
 	cfg.A2ATaskStoreType = getEnvOrDefault(EnvA2ATaskStoreType, "memory")
 	cfg.A2ARedisURL = os.Getenv(EnvA2ARedisURL)
 	cfg.A2AEnabled = os.Getenv(EnvA2AEnabled) == envValueTrue
@@ -429,18 +494,4 @@ func loadMCPConfigFromEnv(cfg *Config) error {
 		cfg.MCPPort = DefaultMCPPort
 	}
 	return nil
-}
-
-// loadMCPConfigFromCRD populates MCP-related config fields from the AgentRuntime CRD.
-func loadMCPConfigFromCRD(cfg *Config, ar *v1alpha1.AgentRuntime) {
-	if ar.Spec.Facade.MCP != nil {
-		cfg.MCPEnabled = ar.Spec.Facade.MCP.Enabled
-		if ar.Spec.Facade.MCP.Port != nil {
-			cfg.MCPPort = int(*ar.Spec.Facade.MCP.Port)
-		} else {
-			cfg.MCPPort = DefaultMCPPort
-		}
-	} else {
-		cfg.MCPPort = DefaultMCPPort
-	}
 }

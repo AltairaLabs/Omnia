@@ -24,7 +24,7 @@ import (
 )
 
 // TestMain isolates the cmd/agent test binary from the developer's ambient
-// kubeconfig. Several constructors (buildWebSocketServer → buildAuthChain →
+// kubeconfig. Several constructors (buildWebSocketServer → buildExternalChain →
 // buildK8sClient) call ctrl.GetConfig(); with a live kubeconfig present that
 // reaches a real cluster and the auth-chain build fails, which previously
 // crashed the whole test binary via os.Exit(1) — silently, since the tests

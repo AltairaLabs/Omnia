@@ -11,9 +11,9 @@ spec:
     name: customer-support
     track: stable
   # WebSocket facade for client connections
-  facade:
-    type: websocket
-    port: 8080
+  facades:
+    - type: websocket
+      port: 8080
   # Optional tool registry reference
   toolRegistryRef:
     name: support-tools

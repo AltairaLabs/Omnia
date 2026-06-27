@@ -11,10 +11,14 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"sync"
+	"time"
 
 	"github.com/go-logr/logr"
 	"github.com/redis/go-redis/v9"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 	"github.com/altairalabs/omnia/internal/agent"
@@ -81,17 +85,6 @@ func runA2AFacade(cfg *agent.Config, log logr.Logger, tracingProvider *tracing.P
 		"taskStoreType", cfg.A2ATaskStoreType,
 	)
 
-	// Legacy per-SDK bearer authenticator. Kept for back-compat with
-	// deployments that haven't migrated to spec.externalAuth.sharedToken
-	// yet. Once the projection shim fires (PR 2b), OMNIA_A2A_AUTH_TOKEN
-	// is unset because the shared token reaches the facade via the auth
-	// chain instead — nothing below runs.
-	var a2aAuth a2aserver.Authenticator
-	if cfg.A2AAuthToken != "" {
-		a2aAuth = facadea2a.NewBearerAuthenticator(cfg.A2AAuthToken)
-		log.Info("A2A bearer auth enabled (legacy)")
-	}
-
 	// Build the external (data-plane-only) auth chain for the public A2A
 	// listener. The mgmt-plane validator is loaded separately and runs only on
 	// the internal twin listener (full plane isolation) — mgmt-plane A2A callers
@@ -137,7 +130,6 @@ func runA2AFacade(cfg *agent.Config, log logr.Logger, tracingProvider *tracing.P
 		TaskTTL:         cfg.A2ATaskTTL,
 		ConversationTTL: cfg.A2AConversationTTL,
 		CardProvider:    cardProvider,
-		Authenticator:   a2aAuth,
 		TaskStore:       taskStore,
 		SDKOptions:      sdkOptions,
 		Log:             log,
@@ -197,7 +189,14 @@ func runA2AFacade(cfg *agent.Config, log logr.Logger, tracingProvider *tracing.P
 	log.Info("shutdown complete")
 }
 
-// buildCardProvider creates the agent card provider from config.
+// a2aExternalURLCacheTTL bounds how often the card provider re-reads the
+// AgentRuntime status to resolve the external interface URL.
+const a2aExternalURLCacheTTL = 30 * time.Second
+
+// buildCardProvider creates the agent card provider from config. The card's
+// interface URL is resolved at serve time from the agent's observed external
+// HTTPRoutes (status.facade.endpoints, protocol=a2a), falling back to the
+// in-cluster Service URL when no external route is observed (#1576).
 func buildCardProvider(cfg *agent.Config, log logr.Logger) a2aserver.AgentCardProvider {
 	log.V(1).Info("building default agent card", "agentName", cfg.AgentName)
 
@@ -209,7 +208,61 @@ func buildCardProvider(cfg *agent.Config, log logr.Logger) a2aserver.AgentCardPr
 	endpoint := fmt.Sprintf("http://%s.%s.svc.cluster.local:%d",
 		cfg.AgentName, cfg.Namespace, cfg.FacadePort)
 
-	return facadea2a.NewCRDCardProvider(spec, endpoint)
+	provider := facadea2a.NewCRDCardProvider(spec, endpoint)
+
+	c := buildK8sClient()
+	if c == nil {
+		return provider
+	}
+	resolver := newCachedURLResolver(a2aExternalURLCacheTTL, func() string {
+		return resolveA2AExternalURL(context.Background(), c, cfg.Namespace, cfg.AgentName)
+	})
+	return provider.WithInterfaceURLFn(resolver.get)
+}
+
+// resolveA2AExternalURL returns the agent's externally-reachable A2A interface
+// URL from status.facade.endpoints (protocol=a2a, valid), or "" when no external
+// route is observed (the card then keeps its in-cluster URL).
+func resolveA2AExternalURL(ctx context.Context, c client.Client, namespace, name string) string {
+	ar := &omniav1alpha1.AgentRuntime{}
+	if err := c.Get(ctx, types.NamespacedName{Namespace: namespace, Name: name}, ar); err != nil {
+		return ""
+	}
+	if ar.Status.Facade == nil {
+		return ""
+	}
+	for _, ep := range ar.Status.Facade.Endpoints {
+		if ep.Protocol == omniav1alpha1.FacadeProtocolA2A && ep.Valid && ep.URL != "" {
+			return ep.URL
+		}
+	}
+	return ""
+}
+
+// cachedURLResolver memoises a URL resolver for a short TTL so the A2A card
+// provider doesn't read the AgentRuntime status on every card request.
+type cachedURLResolver struct {
+	mu      sync.Mutex
+	ttl     time.Duration
+	expires time.Time
+	cached  string
+	resolve func() string
+}
+
+func newCachedURLResolver(ttl time.Duration, resolve func() string) *cachedURLResolver {
+	return &cachedURLResolver{ttl: ttl, resolve: resolve}
+}
+
+func (c *cachedURLResolver) get() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	now := time.Now()
+	if !c.expires.IsZero() && now.Before(c.expires) {
+		return c.cached
+	}
+	c.cached = c.resolve()
+	c.expires = now.Add(c.ttl)
+	return c.cached
 }
 
 // buildTaskStore creates the appropriate task store based on configuration.

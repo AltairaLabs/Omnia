@@ -198,7 +198,9 @@ func TestResolveA2AClients_NilA2A(t *testing.T) {
 func TestResolveA2AClients_EmptyClients(t *testing.T) {
 	r := &AgentRuntimeReconciler{}
 	ar := &omniav1alpha1.AgentRuntime{}
-	ar.Spec.A2A = &omniav1alpha1.A2AConfig{}
+	ar.Spec.Facades = []omniav1alpha1.FacadeConfig{
+		{Type: omniav1alpha1.FacadeTypeA2A, A2A: &omniav1alpha1.A2AConfig{}},
+	}
 
 	clients, statuses := r.resolveA2AClients(context.TODO(), discardLogger(), ar)
 	if clients != nil {
@@ -212,13 +214,13 @@ func TestResolveA2AClients_EmptyClients(t *testing.T) {
 func TestResolveA2AClients_MultipleClients(t *testing.T) {
 	r := &AgentRuntimeReconciler{}
 	ar := &omniav1alpha1.AgentRuntime{}
-	ar.Spec.A2A = &omniav1alpha1.A2AConfig{
+	ar.Spec.Facades = []omniav1alpha1.FacadeConfig{{Type: omniav1alpha1.FacadeTypeA2A, A2A: &omniav1alpha1.A2AConfig{
 		Clients: []omniav1alpha1.A2AClientSpec{
 			{Name: "ext-1", URL: "http://ext-1.example.com"},
 			{Name: "ext-2", URL: "http://ext-2.example.com", ExposeAsTools: true},
 			{Name: "broken"}, // no URL or ref
 		},
-	}
+	}}}
 
 	clients, statuses := r.resolveA2AClients(context.TODO(), discardLogger(), ar)
 	// 2 resolved (ext-1, ext-2), 1 failed (broken)

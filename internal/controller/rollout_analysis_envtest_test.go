@@ -61,10 +61,10 @@ var _ = Describe("AgentRuntime Rollout Analysis (envtest)", func() {
 					Name:    testStablePackName,
 					Version: ptr.To("v1"),
 				},
-				Facade: omniav1alpha1.FacadeConfig{
+				Facades: []omniav1alpha1.FacadeConfig{{
 					Type: omniav1alpha1.FacadeTypeWebSocket,
 					Port: &port,
-				},
+				}},
 				Providers: []omniav1alpha1.NamedProviderRef{{
 					Name:        "default",
 					ProviderRef: omniav1alpha1.ProviderRef{Name: "claude-provider"},

@@ -28,7 +28,7 @@ function mkFn(name: string, ns: string): AgentRuntime {
     spec: {
       mode: "function",
       promptPackRef: { name: "pack" },
-      facade: { type: "rest" as never },
+      facades: [{ type: "rest" }],
       inputSchema: { type: "object", properties: { q: { type: "string" }, k: { type: "integer" } } },
       outputSchema: { type: "object", properties: { a: { type: "string" } } },
     },

@@ -90,7 +90,7 @@ func TestLoadFromCRD_NamedProviders(t *testing.T) {
 		},
 		Spec: v1alpha1.AgentRuntimeSpec{
 			PromptPackRef: v1alpha1.PromptPackRef{Name: "test-pack"},
-			Facade:        v1alpha1.FacadeConfig{Type: v1alpha1.FacadeTypeWebSocket},
+			Facades:       []v1alpha1.FacadeConfig{{Type: v1alpha1.FacadeTypeWebSocket}},
 			Providers: []v1alpha1.NamedProviderRef{
 				{
 					Name:        "default",
@@ -164,7 +164,7 @@ func TestLoadFromCRD_SingleProvider(t *testing.T) {
 		},
 		Spec: v1alpha1.AgentRuntimeSpec{
 			PromptPackRef: v1alpha1.PromptPackRef{Name: "test-pack"},
-			Facade:        v1alpha1.FacadeConfig{Type: v1alpha1.FacadeTypeWebSocket},
+			Facades:       []v1alpha1.FacadeConfig{{Type: v1alpha1.FacadeTypeWebSocket}},
 			Providers: []v1alpha1.NamedProviderRef{
 				{Name: "default", ProviderRef: v1alpha1.ProviderRef{Name: "openai-provider"}},
 			},
@@ -216,7 +216,7 @@ func TestLoadFromCRD_Headers(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "test-agent", Namespace: "test-ns"},
 		Spec: v1alpha1.AgentRuntimeSpec{
 			PromptPackRef: v1alpha1.PromptPackRef{Name: "test-pack"},
-			Facade:        v1alpha1.FacadeConfig{Type: v1alpha1.FacadeTypeWebSocket},
+			Facades:       []v1alpha1.FacadeConfig{{Type: v1alpha1.FacadeTypeWebSocket}},
 			Providers: []v1alpha1.NamedProviderRef{
 				{Name: "default", ProviderRef: v1alpha1.ProviderRef{Name: "openrouter-provider"}},
 			},
@@ -242,7 +242,7 @@ func TestLoadFromCRD_NoProviders(t *testing.T) {
 		},
 		Spec: v1alpha1.AgentRuntimeSpec{
 			PromptPackRef: v1alpha1.PromptPackRef{Name: "test-pack"},
-			Facade:        v1alpha1.FacadeConfig{Type: v1alpha1.FacadeTypeWebSocket},
+			Facades:       []v1alpha1.FacadeConfig{{Type: v1alpha1.FacadeTypeWebSocket}},
 		},
 	}
 
@@ -266,7 +266,7 @@ func TestLoadFromCRD_MockProviderAnnotation(t *testing.T) {
 		},
 		Spec: v1alpha1.AgentRuntimeSpec{
 			PromptPackRef: v1alpha1.PromptPackRef{Name: "test-pack"},
-			Facade:        v1alpha1.FacadeConfig{Type: v1alpha1.FacadeTypeWebSocket},
+			Facades:       []v1alpha1.FacadeConfig{{Type: v1alpha1.FacadeTypeWebSocket}},
 		},
 	}
 
@@ -289,7 +289,7 @@ func TestLoadFromCRD_MockConfigPathAnnotation(t *testing.T) {
 		},
 		Spec: v1alpha1.AgentRuntimeSpec{
 			PromptPackRef: v1alpha1.PromptPackRef{Name: "test-pack"},
-			Facade:        v1alpha1.FacadeConfig{Type: v1alpha1.FacadeTypeWebSocket},
+			Facades:       []v1alpha1.FacadeConfig{{Type: v1alpha1.FacadeTypeWebSocket}},
 		},
 	}
 
@@ -319,7 +319,7 @@ func TestLoadFromCRD_MockProviderType(t *testing.T) {
 		},
 		Spec: v1alpha1.AgentRuntimeSpec{
 			PromptPackRef: v1alpha1.PromptPackRef{Name: "test-pack"},
-			Facade:        v1alpha1.FacadeConfig{Type: v1alpha1.FacadeTypeWebSocket},
+			Facades:       []v1alpha1.FacadeConfig{{Type: v1alpha1.FacadeTypeWebSocket}},
 			Providers: []v1alpha1.NamedProviderRef{
 				{Name: "default", ProviderRef: v1alpha1.ProviderRef{Name: "mock-provider"}},
 			},
@@ -369,7 +369,7 @@ func TestLoadFromCRD_CredentialSecretRef(t *testing.T) {
 		},
 		Spec: v1alpha1.AgentRuntimeSpec{
 			PromptPackRef: v1alpha1.PromptPackRef{Name: "test-pack"},
-			Facade:        v1alpha1.FacadeConfig{Type: v1alpha1.FacadeTypeWebSocket},
+			Facades:       []v1alpha1.FacadeConfig{{Type: v1alpha1.FacadeTypeWebSocket}},
 			Providers: []v1alpha1.NamedProviderRef{
 				{Name: "default", ProviderRef: v1alpha1.ProviderRef{Name: "gemini-provider"}},
 			},
@@ -404,7 +404,7 @@ func TestLoadFromCRD_NamedProvidersSortedFallback(t *testing.T) {
 		},
 		Spec: v1alpha1.AgentRuntimeSpec{
 			PromptPackRef: v1alpha1.PromptPackRef{Name: "test-pack"},
-			Facade:        v1alpha1.FacadeConfig{Type: v1alpha1.FacadeTypeWebSocket},
+			Facades:       []v1alpha1.FacadeConfig{{Type: v1alpha1.FacadeTypeWebSocket}},
 			Providers: []v1alpha1.NamedProviderRef{
 				{
 					Name:        "beta",
@@ -432,7 +432,7 @@ func TestLoadFromCRD_InlineEvalGroups_Absent(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "agent", Namespace: "test-ns"},
 		Spec: v1alpha1.AgentRuntimeSpec{
 			PromptPackRef: v1alpha1.PromptPackRef{Name: "pack"},
-			Facade:        v1alpha1.FacadeConfig{Type: v1alpha1.FacadeTypeWebSocket},
+			Facades:       []v1alpha1.FacadeConfig{{Type: v1alpha1.FacadeTypeWebSocket}},
 			Evals:         &v1alpha1.EvalConfig{Enabled: true},
 		},
 	}
@@ -449,7 +449,7 @@ func TestLoadFromCRD_InlineEvalGroups_Custom(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "agent", Namespace: "test-ns"},
 		Spec: v1alpha1.AgentRuntimeSpec{
 			PromptPackRef: v1alpha1.PromptPackRef{Name: "pack"},
-			Facade:        v1alpha1.FacadeConfig{Type: v1alpha1.FacadeTypeWebSocket},
+			Facades:       []v1alpha1.FacadeConfig{{Type: v1alpha1.FacadeTypeWebSocket}},
 			Evals: &v1alpha1.EvalConfig{
 				Enabled: true,
 				Inline: &v1alpha1.EvalPathConfig{
@@ -469,7 +469,7 @@ func TestLoadFromCRD_FunctionOutputFormat(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "fn-agent", Namespace: "test-ns"},
 		Spec: v1alpha1.AgentRuntimeSpec{
 			PromptPackRef: v1alpha1.PromptPackRef{Name: "pack"},
-			Facade:        v1alpha1.FacadeConfig{Type: v1alpha1.FacadeTypeREST},
+			Facades:       []v1alpha1.FacadeConfig{{Type: v1alpha1.FacadeTypeREST}},
 			Mode:          v1alpha1.AgentRuntimeModeFunction,
 			InputSchema:   &apiextensionsv1.JSON{Raw: []byte(`{"type":"object"}`)},
 			OutputSchema:  &apiextensionsv1.JSON{Raw: []byte(`{"type":"object"}`)},
@@ -499,7 +499,7 @@ func TestLoadFromCRD_ProviderNotFound(t *testing.T) {
 		},
 		Spec: v1alpha1.AgentRuntimeSpec{
 			PromptPackRef: v1alpha1.PromptPackRef{Name: "test-pack"},
-			Facade:        v1alpha1.FacadeConfig{Type: v1alpha1.FacadeTypeWebSocket},
+			Facades:       []v1alpha1.FacadeConfig{{Type: v1alpha1.FacadeTypeWebSocket}},
 			Providers: []v1alpha1.NamedProviderRef{
 				{Name: "default", ProviderRef: v1alpha1.ProviderRef{Name: "missing-provider"}},
 			},
@@ -535,7 +535,7 @@ func TestLoadFromCRD_SecretNotFound(t *testing.T) {
 		},
 		Spec: v1alpha1.AgentRuntimeSpec{
 			PromptPackRef: v1alpha1.PromptPackRef{Name: "test-pack"},
-			Facade:        v1alpha1.FacadeConfig{Type: v1alpha1.FacadeTypeWebSocket},
+			Facades:       []v1alpha1.FacadeConfig{{Type: v1alpha1.FacadeTypeWebSocket}},
 			Providers: []v1alpha1.NamedProviderRef{
 				{Name: "default", ProviderRef: v1alpha1.ProviderRef{Name: "claude-provider"}},
 			},
@@ -581,7 +581,7 @@ func TestLoadFromCRD_SecretMissingKey(t *testing.T) {
 		},
 		Spec: v1alpha1.AgentRuntimeSpec{
 			PromptPackRef: v1alpha1.PromptPackRef{Name: "test-pack"},
-			Facade:        v1alpha1.FacadeConfig{Type: v1alpha1.FacadeTypeWebSocket},
+			Facades:       []v1alpha1.FacadeConfig{{Type: v1alpha1.FacadeTypeWebSocket}},
 			Providers: []v1alpha1.NamedProviderRef{
 				{Name: "default", ProviderRef: v1alpha1.ProviderRef{Name: "claude-provider"}},
 			},
@@ -649,7 +649,7 @@ func TestLoadFromCRD_TracingEnvVars(t *testing.T) {
 		},
 		Spec: v1alpha1.AgentRuntimeSpec{
 			PromptPackRef: v1alpha1.PromptPackRef{Name: "test-pack"},
-			Facade:        v1alpha1.FacadeConfig{Type: v1alpha1.FacadeTypeWebSocket},
+			Facades:       []v1alpha1.FacadeConfig{{Type: v1alpha1.FacadeTypeWebSocket}},
 		},
 	}
 
@@ -676,7 +676,7 @@ func TestLoadFromCRD_TracingDisabledByDefault(t *testing.T) {
 		},
 		Spec: v1alpha1.AgentRuntimeSpec{
 			PromptPackRef: v1alpha1.PromptPackRef{Name: "test-pack"},
-			Facade:        v1alpha1.FacadeConfig{Type: v1alpha1.FacadeTypeWebSocket},
+			Facades:       []v1alpha1.FacadeConfig{{Type: v1alpha1.FacadeTypeWebSocket}},
 		},
 	}
 
@@ -703,7 +703,7 @@ func TestLoadFromCRD_ToolRegistryRef(t *testing.T) {
 		},
 		Spec: v1alpha1.AgentRuntimeSpec{
 			PromptPackRef: v1alpha1.PromptPackRef{Name: "test-pack"},
-			Facade:        v1alpha1.FacadeConfig{Type: v1alpha1.FacadeTypeWebSocket},
+			Facades:       []v1alpha1.FacadeConfig{{Type: v1alpha1.FacadeTypeWebSocket}},
 			ToolRegistryRef: &v1alpha1.ToolRegistryRef{
 				Name: "demo-tools",
 			},
@@ -725,7 +725,7 @@ func TestLoadFromCRD_NoToolRegistryRef(t *testing.T) {
 		},
 		Spec: v1alpha1.AgentRuntimeSpec{
 			PromptPackRef: v1alpha1.PromptPackRef{Name: "test-pack"},
-			Facade:        v1alpha1.FacadeConfig{Type: v1alpha1.FacadeTypeWebSocket},
+			Facades:       []v1alpha1.FacadeConfig{{Type: v1alpha1.FacadeTypeWebSocket}},
 		},
 	}
 
@@ -797,7 +797,7 @@ func TestLoadFromCRD_ProviderPricing(t *testing.T) {
 		},
 		Spec: v1alpha1.AgentRuntimeSpec{
 			PromptPackRef: v1alpha1.PromptPackRef{Name: "test-pack"},
-			Facade:        v1alpha1.FacadeConfig{Type: v1alpha1.FacadeTypeWebSocket},
+			Facades:       []v1alpha1.FacadeConfig{{Type: v1alpha1.FacadeTypeWebSocket}},
 			Providers: []v1alpha1.NamedProviderRef{
 				{Name: "default", ProviderRef: v1alpha1.ProviderRef{Name: "ollama-provider"}},
 			},
@@ -821,7 +821,7 @@ func TestLoadFromCRD_MemoryEnabled(t *testing.T) {
 		},
 		Spec: v1alpha1.AgentRuntimeSpec{
 			PromptPackRef: v1alpha1.PromptPackRef{Name: "test-pack"},
-			Facade:        v1alpha1.FacadeConfig{Type: v1alpha1.FacadeTypeWebSocket},
+			Facades:       []v1alpha1.FacadeConfig{{Type: v1alpha1.FacadeTypeWebSocket}},
 			Memory: &v1alpha1.MemoryConfig{
 				Enabled: true,
 			},
@@ -865,7 +865,7 @@ func TestLoadFromCRD_MemoryToggles(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{Name: "test-agent", Namespace: "test-ns"},
 				Spec: v1alpha1.AgentRuntimeSpec{
 					PromptPackRef: v1alpha1.PromptPackRef{Name: "test-pack"},
-					Facade:        v1alpha1.FacadeConfig{Type: v1alpha1.FacadeTypeWebSocket},
+					Facades:       []v1alpha1.FacadeConfig{{Type: v1alpha1.FacadeTypeWebSocket}},
 					Memory: &v1alpha1.MemoryConfig{
 						Enabled:   true,
 						Retrieval: tt.retrieval,
@@ -891,7 +891,7 @@ func TestLoadFromCRD_MemoryDisabled(t *testing.T) {
 		},
 		Spec: v1alpha1.AgentRuntimeSpec{
 			PromptPackRef: v1alpha1.PromptPackRef{Name: "test-pack"},
-			Facade:        v1alpha1.FacadeConfig{Type: v1alpha1.FacadeTypeWebSocket},
+			Facades:       []v1alpha1.FacadeConfig{{Type: v1alpha1.FacadeTypeWebSocket}},
 		},
 	}
 
@@ -911,7 +911,7 @@ func TestLoadFromCRD_MemoryEnvOverride(t *testing.T) {
 		},
 		Spec: v1alpha1.AgentRuntimeSpec{
 			PromptPackRef: v1alpha1.PromptPackRef{Name: "test-pack"},
-			Facade:        v1alpha1.FacadeConfig{Type: v1alpha1.FacadeTypeWebSocket},
+			Facades:       []v1alpha1.FacadeConfig{{Type: v1alpha1.FacadeTypeWebSocket}},
 			Memory: &v1alpha1.MemoryConfig{
 				Enabled: true,
 			},
@@ -1161,7 +1161,7 @@ func TestLoadFromCRD_MemoryRetrievalConfig(t *testing.T) {
 			},
 			Spec: v1alpha1.AgentRuntimeSpec{
 				PromptPackRef: v1alpha1.PromptPackRef{Name: "test-pack"},
-				Facade:        v1alpha1.FacadeConfig{Type: v1alpha1.FacadeTypeWebSocket},
+				Facades:       []v1alpha1.FacadeConfig{{Type: v1alpha1.FacadeTypeWebSocket}},
 				Memory: &v1alpha1.MemoryConfig{
 					Enabled: true,
 					Retrieval: &v1alpha1.MemoryRetrievalConfig{
@@ -1194,7 +1194,7 @@ func TestLoadFromCRD_MemoryRetrievalConfig(t *testing.T) {
 			},
 			Spec: v1alpha1.AgentRuntimeSpec{
 				PromptPackRef: v1alpha1.PromptPackRef{Name: "test-pack"},
-				Facade:        v1alpha1.FacadeConfig{Type: v1alpha1.FacadeTypeWebSocket},
+				Facades:       []v1alpha1.FacadeConfig{{Type: v1alpha1.FacadeTypeWebSocket}},
 				Memory: &v1alpha1.MemoryConfig{
 					Enabled: true,
 				},
@@ -1222,7 +1222,7 @@ func TestLoadFromCRD_MemoryRetrievalConfig(t *testing.T) {
 			},
 			Spec: v1alpha1.AgentRuntimeSpec{
 				PromptPackRef: v1alpha1.PromptPackRef{Name: "test-pack"},
-				Facade:        v1alpha1.FacadeConfig{Type: v1alpha1.FacadeTypeWebSocket},
+				Facades:       []v1alpha1.FacadeConfig{{Type: v1alpha1.FacadeTypeWebSocket}},
 				Memory: &v1alpha1.MemoryConfig{
 					Enabled: true,
 					Retrieval: &v1alpha1.MemoryRetrievalConfig{

@@ -28,9 +28,29 @@ import (
 
 func ptrBool(b bool) *bool { return &b }
 
+// arWithExternalAuth builds an AgentRuntime with a single websocket facade whose
+// managementPlane defaults to enabled (nil pointer), so the management plane is
+// reachable unless a test overrides it.
 func arWithExternalAuth(ext *omniav1alpha1.AgentExternalAuth) *omniav1alpha1.AgentRuntime {
 	return &omniav1alpha1.AgentRuntime{
-		Spec: omniav1alpha1.AgentRuntimeSpec{ExternalAuth: ext},
+		Spec: omniav1alpha1.AgentRuntimeSpec{
+			Facades:      []omniav1alpha1.FacadeConfig{{Type: omniav1alpha1.FacadeTypeWebSocket}},
+			ExternalAuth: ext,
+		},
+	}
+}
+
+// arWithExternalAuthNoMgmt builds an AgentRuntime whose every facade has the
+// management plane explicitly disabled — the per-facade replacement for the
+// removed externalAuth.allowManagementPlane=false.
+func arWithExternalAuthNoMgmt(ext *omniav1alpha1.AgentExternalAuth) *omniav1alpha1.AgentRuntime {
+	return &omniav1alpha1.AgentRuntime{
+		Spec: omniav1alpha1.AgentRuntimeSpec{
+			Facades: []omniav1alpha1.FacadeConfig{
+				{Type: omniav1alpha1.FacadeTypeWebSocket, ManagementPlane: ptrBool(false)},
+			},
+			ExternalAuth: ext,
+		},
 	}
 }
 
@@ -81,13 +101,12 @@ func TestEvaluateExternalAuthCondition_DataPlaneConfigured(t *testing.T) {
 }
 
 // TestEvaluateExternalAuthCondition_Unreachable proves T11 surfaces
-// the "dark agent" foot-gun: allowManagementPlane=false AND no
+// the "dark agent" foot-gun: every facade has managementPlane=false AND no
 // data-plane validator means the facade 401s every request. Operators
 // need to see this as a False condition on kubectl describe.
 func TestEvaluateExternalAuthCondition_Unreachable(t *testing.T) {
 	t.Parallel()
-	ext := &omniav1alpha1.AgentExternalAuth{AllowManagementPlane: ptrBool(false)}
-	cond := evaluateExternalAuthCondition(arWithExternalAuth(ext))
+	cond := evaluateExternalAuthCondition(arWithExternalAuthNoMgmt(&omniav1alpha1.AgentExternalAuth{}))
 	if cond.Status != metav1.ConditionFalse {
 		t.Errorf("status = %v, want False", cond.Status)
 	}
@@ -116,17 +135,16 @@ func TestEvaluateExternalAuthCondition_AllowManagementPlanePointerNil(t *testing
 }
 
 func TestEvaluateExternalAuthCondition_AllowManagementPlaneExplicitFalseWithDataPlane(t *testing.T) {
-	// allowManagementPlane=false is fine as long as a data-plane
+	// every facade managementPlane=false is fine as long as a data-plane
 	// validator is configured — condition still True, and the message
 	// must NOT include managementPlane since that path is disabled.
 	t.Parallel()
 	ext := &omniav1alpha1.AgentExternalAuth{
-		AllowManagementPlane: ptrBool(false),
 		SharedToken: &omniav1alpha1.SharedTokenAuth{
 			SecretRef: corev1.LocalObjectReference{Name: "t"},
 		},
 	}
-	cond := evaluateExternalAuthCondition(arWithExternalAuth(ext))
+	cond := evaluateExternalAuthCondition(arWithExternalAuthNoMgmt(ext))
 	if cond.Status != metav1.ConditionTrue {
 		t.Errorf("status = %v, want True", cond.Status)
 	}

@@ -40,7 +40,7 @@ func newRolloutTestAR() *omniav1alpha1.AgentRuntime {
 		Name:    testStablePackName,
 		Version: ptr.To("v1"),
 	}
-	ar.Spec.Facade.Type = omniav1alpha1.FacadeTypeWebSocket
+	ar.Spec.Facades = []omniav1alpha1.FacadeConfig{{Type: omniav1alpha1.FacadeTypeWebSocket}}
 	ar.Spec.Providers = []omniav1alpha1.NamedProviderRef{
 		{
 			Name:        "default",
