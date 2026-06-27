@@ -23,26 +23,32 @@ import {
 } from "@/components/ui/select";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { Checkbox } from "@/components/ui/checkbox";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/components/ui/collapsible";
-import { AlertCircle, Loader2, ChevronDown, Plus, Trash2 } from "lucide-react";
+import { AlertCircle, Loader2 } from "lucide-react";
 import type { Provider, ProviderSpec } from "@/types/generated/provider";
 import { useFieldValidation } from "@/hooks/use-field-validation";
 import { FieldError } from "@/components/ui/field-error";
 import { crdConstraints } from "@/types/generated/crd-constraints";
 import { SecretKeySelect } from "./secret-key-select";
 import { AddCredentialSecretDialog } from "@/components/credentials/add-credential-secret-dialog";
+import {
+  CapabilitiesFields,
+  DefaultsFields,
+  HeadersFields,
+  PricingFields,
+} from "./provider-dialog-fields";
+import {
+  EmbeddingFields,
+  PlatformFields,
+  STTFields,
+  TTSFields,
+} from "./provider-model-fields";
 
 // --- Types ---
 
 type CredentialSource = "secret" | "envVar" | "filePath";
 type ProviderRole = NonNullable<ProviderSpec["role"]>;
 
-interface FormState {
+export interface FormState {
   name: string;
   role: ProviderRole;
   providerType: ProviderSpec["type"];
@@ -235,10 +241,10 @@ function applyRoleChange(prev: FormState, role: ProviderRole): FormState {
   };
 }
 
-type PlatformType = "bedrock" | "vertex" | "azure";
+export type PlatformType = "bedrock" | "vertex" | "azure";
 
 // Auth methods allowed per platform. Mirrors the CRD's CEL auth matrix.
-const AUTH_BY_PLATFORM: Record<PlatformType, readonly string[]> = {
+export const AUTH_BY_PLATFORM: Record<PlatformType, readonly string[]> = {
   bedrock: ["workloadIdentity", "accessKey"],
   vertex: ["workloadIdentity", "serviceAccount"],
   azure: ["workloadIdentity", "servicePrincipal"],
@@ -247,18 +253,6 @@ const AUTH_BY_PLATFORM: Record<PlatformType, readonly string[]> = {
 function supportsPlatform(type: ProviderSpec["type"]): boolean {
   return PLATFORM_ELIGIBLE_TYPES.has(type);
 }
-
-const ALL_CAPABILITIES = [
-  "text",
-  "streaming",
-  "vision",
-  "tools",
-  "json",
-  "audio",
-  "video",
-  "documents",
-  "duplex",
-] as const;
 
 // --- Helpers ---
 
@@ -270,7 +264,7 @@ function isLocal(type: ProviderSpec["type"]): boolean {
 // on full page reload, which is fine because the dialog itself remounts via
 // `formResetKey` whenever it opens.
 let nextHeaderEntryId = 0;
-function makeHeaderEntryId(): string {
+export function makeHeaderEntryId(): string {
   nextHeaderEntryId += 1;
   return `h-${nextHeaderEntryId}`;
 }
@@ -607,7 +601,7 @@ function buildSpec(form: FormState): ProviderSpec {
 
 // --- Sub-components ---
 
-interface ValidateProps {
+export interface ValidateProps {
   validate: (path: string, value: unknown) => void;
   errors: Record<string, string>;
 }
@@ -696,599 +690,6 @@ function CredentialFields({
         </div>
       )}
     </div>
-  );
-}
-
-function DefaultsFields({
-  form,
-  updateForm,
-}: Readonly<{
-  form: FormState;
-  updateForm: <K extends keyof FormState>(key: K, value: FormState[K]) => void;
-}>) {
-  const [open, setOpen] = useState(
-    !!(form.temperature || form.topP || form.maxTokens || form.contextWindow)
-  );
-
-  return (
-    <Collapsible open={open} onOpenChange={setOpen}>
-      <CollapsibleTrigger asChild>
-        <Button variant="ghost" className="w-full justify-between px-0 font-semibold">
-          Defaults
-          <ChevronDown className={`h-4 w-4 transition-transform ${open ? "rotate-180" : ""}`} />
-        </Button>
-      </CollapsibleTrigger>
-      <CollapsibleContent className="space-y-4 pt-2">
-        <div className="grid grid-cols-2 gap-4">
-          <div className="space-y-2">
-            <Label htmlFor="temperature">Temperature</Label>
-            <Input
-              id="temperature"
-              type="number"
-              step="0.1"
-              min="0"
-              max="2"
-              placeholder="0.7"
-              value={form.temperature}
-              onChange={(e) => updateForm("temperature", e.target.value)}
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="top-p">Top P</Label>
-            <Input
-              id="top-p"
-              type="number"
-              step="0.1"
-              min="0"
-              max="1"
-              placeholder="0.9"
-              value={form.topP}
-              onChange={(e) => updateForm("topP", e.target.value)}
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="max-tokens">Max Tokens</Label>
-            <Input
-              id="max-tokens"
-              type="number"
-              min="1"
-              placeholder="4096"
-              value={form.maxTokens}
-              onChange={(e) => updateForm("maxTokens", e.target.value)}
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="context-window">Context Window</Label>
-            <Input
-              id="context-window"
-              type="number"
-              min="1"
-              placeholder="128000"
-              value={form.contextWindow}
-              onChange={(e) => updateForm("contextWindow", e.target.value)}
-            />
-          </div>
-        </div>
-      </CollapsibleContent>
-    </Collapsible>
-  );
-}
-
-function PricingFields({
-  form,
-  updateForm,
-}: Readonly<{
-  form: FormState;
-  updateForm: <K extends keyof FormState>(key: K, value: FormState[K]) => void;
-}>) {
-  const [open, setOpen] = useState(
-    !!(form.inputCostPer1K || form.outputCostPer1K || form.cachedCostPer1K)
-  );
-
-  return (
-    <Collapsible open={open} onOpenChange={setOpen}>
-      <CollapsibleTrigger asChild>
-        <Button variant="ghost" className="w-full justify-between px-0 font-semibold">
-          Pricing
-          <ChevronDown className={`h-4 w-4 transition-transform ${open ? "rotate-180" : ""}`} />
-        </Button>
-      </CollapsibleTrigger>
-      <CollapsibleContent className="space-y-4 pt-2">
-        <div className="grid grid-cols-3 gap-4">
-          <div className="space-y-2">
-            <Label htmlFor="input-cost">Input / 1K tokens</Label>
-            <Input
-              id="input-cost"
-              placeholder="0.003"
-              value={form.inputCostPer1K}
-              onChange={(e) => updateForm("inputCostPer1K", e.target.value)}
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="output-cost">Output / 1K tokens</Label>
-            <Input
-              id="output-cost"
-              placeholder="0.015"
-              value={form.outputCostPer1K}
-              onChange={(e) => updateForm("outputCostPer1K", e.target.value)}
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="cached-cost">Cached / 1K tokens</Label>
-            <Input
-              id="cached-cost"
-              placeholder="0.0003"
-              value={form.cachedCostPer1K}
-              onChange={(e) => updateForm("cachedCostPer1K", e.target.value)}
-            />
-          </div>
-        </div>
-      </CollapsibleContent>
-    </Collapsible>
-  );
-}
-
-function HeadersFields({
-  form,
-  updateForm,
-}: Readonly<{
-  form: FormState;
-  updateForm: <K extends keyof FormState>(key: K, value: FormState[K]) => void;
-}>) {
-  const [open, setOpen] = useState(form.headerEntries.length > 0);
-
-  const updateEntry = (index: number, field: "key" | "value", next: string) => {
-    const entries = form.headerEntries.map((entry, i) =>
-      i === index ? { ...entry, [field]: next } : entry,
-    );
-    updateForm("headerEntries", entries);
-  };
-
-  const addEntry = () => {
-    updateForm("headerEntries", [
-      ...form.headerEntries,
-      { id: makeHeaderEntryId(), key: "", value: "" },
-    ]);
-  };
-
-  const removeEntry = (index: number) => {
-    updateForm(
-      "headerEntries",
-      form.headerEntries.filter((_, i) => i !== index),
-    );
-  };
-
-  return (
-    <Collapsible open={open} onOpenChange={setOpen}>
-      <CollapsibleTrigger asChild>
-        <Button variant="ghost" className="w-full justify-between px-0 font-semibold">
-          HTTP Headers
-          <ChevronDown className={`h-4 w-4 transition-transform ${open ? "rotate-180" : ""}`} />
-        </Button>
-      </CollapsibleTrigger>
-      <CollapsibleContent className="space-y-3 pt-2">
-        <p className="text-sm text-muted-foreground">
-          Custom HTTP headers sent on every provider request. Used by gateway providers
-          (e.g., OpenRouter&rsquo;s <code>HTTP-Referer</code> / <code>X-Title</code>) or tenant
-          routing. Collisions with built-in provider headers are rejected by PromptKit.
-        </p>
-        {form.headerEntries.map((entry, index) => (
-          <div key={entry.id} className="flex gap-2 items-start">
-            <Input
-              aria-label={`Header ${index + 1} name`}
-              placeholder="HTTP-Referer"
-              value={entry.key}
-              onChange={(e) => updateEntry(index, "key", e.target.value)}
-              className="flex-1"
-            />
-            <Input
-              aria-label={`Header ${index + 1} value`}
-              placeholder="https://my-app.example.com"
-              value={entry.value}
-              onChange={(e) => updateEntry(index, "value", e.target.value)}
-              className="flex-1"
-            />
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              aria-label={`Remove header ${index + 1}`}
-              onClick={() => removeEntry(index)}
-            >
-              <Trash2 className="h-4 w-4" />
-            </Button>
-          </div>
-        ))}
-        <Button type="button" variant="outline" size="sm" onClick={addEntry}>
-          <Plus className="h-4 w-4 mr-1" />
-          Add header
-        </Button>
-      </CollapsibleContent>
-    </Collapsible>
-  );
-}
-
-function PlatformFields({
-  form,
-  updateForm,
-  namespace,
-}: Readonly<{
-  form: FormState;
-  updateForm: <K extends keyof FormState>(key: K, value: FormState[K]) => void;
-  namespace?: string;
-}>) {
-  const authOptions =
-    form.platformType ? AUTH_BY_PLATFORM[form.platformType] : [];
-
-  // Radix Select disallows empty-string item values, so we use "none" as a
-  // sentinel for "no platform" and translate at the boundary.
-  const PLATFORM_NONE = "none";
-
-  const onPlatformChange = (value: string) => {
-    const next = (value === PLATFORM_NONE ? "" : value) as FormState["platformType"];
-    updateForm("platformType", next);
-    updateForm("platformRegion", "");
-    updateForm("platformProject", "");
-    updateForm("platformEndpoint", "");
-    updateForm("authType", "");
-    updateForm("authRoleArn", "");
-    updateForm("authServiceAccountEmail", "");
-    updateForm("authSecretName", "");
-    updateForm("authSecretKey", "");
-  };
-
-  const onAuthTypeChange = (value: string) => {
-    updateForm("authType", value as FormState["authType"]);
-    updateForm("authRoleArn", "");
-    updateForm("authServiceAccountEmail", "");
-    updateForm("authSecretName", "");
-    updateForm("authSecretKey", "");
-  };
-
-  return (
-    <div className="border rounded-lg p-4 space-y-4">
-      <Label className="text-base font-semibold">Hosting Platform (optional)</Label>
-
-      <div className="space-y-2">
-        <Label htmlFor="platform-type">Platform</Label>
-        <Select
-          value={form.platformType || PLATFORM_NONE}
-          onValueChange={onPlatformChange}
-        >
-          <SelectTrigger id="platform-type">
-            <SelectValue placeholder="None (direct API)" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value={PLATFORM_NONE}>None (direct API)</SelectItem>
-            <SelectItem value="bedrock">AWS Bedrock</SelectItem>
-            <SelectItem value="vertex">GCP Vertex</SelectItem>
-            <SelectItem value="azure">Azure AI Foundry</SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
-
-      {form.platformType && (
-        <>
-          {(form.platformType === "bedrock" || form.platformType === "vertex") && (
-            <div className="space-y-2">
-              <Label htmlFor="platform-region">Region</Label>
-              <Input
-                id="platform-region"
-                placeholder={form.platformType === "bedrock" ? "us-east-1" : "us-central1"}
-                value={form.platformRegion}
-                onChange={(e) => updateForm("platformRegion", e.target.value)}
-              />
-            </div>
-          )}
-
-          {form.platformType === "vertex" && (
-            <div className="space-y-2">
-              <Label htmlFor="platform-project">Project</Label>
-              <Input
-                id="platform-project"
-                placeholder="my-gcp-project"
-                value={form.platformProject}
-                onChange={(e) => updateForm("platformProject", e.target.value)}
-              />
-            </div>
-          )}
-
-          {form.platformType === "azure" && (
-            <>
-              <div className="space-y-2">
-                <Label htmlFor="platform-endpoint">Endpoint</Label>
-                <Input
-                  id="platform-endpoint"
-                  placeholder="https://my-resource.openai.azure.com"
-                  value={form.platformEndpoint}
-                  onChange={(e) => updateForm("platformEndpoint", e.target.value)}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="platform-region">Region (optional)</Label>
-                <Input
-                  id="platform-region"
-                  placeholder="eastus"
-                  value={form.platformRegion}
-                  onChange={(e) => updateForm("platformRegion", e.target.value)}
-                />
-              </div>
-            </>
-          )}
-
-          <div className="space-y-2">
-            <Label htmlFor="auth-type">Auth</Label>
-            <Select value={form.authType} onValueChange={onAuthTypeChange}>
-              <SelectTrigger id="auth-type">
-                <SelectValue placeholder="Select auth method" />
-              </SelectTrigger>
-              <SelectContent>
-                {authOptions.map((opt) => (
-                  <SelectItem key={opt} value={opt}>
-                    {opt}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          {form.authType === "workloadIdentity" && form.platformType === "bedrock" && (
-            <div className="space-y-2">
-              <Label htmlFor="auth-role-arn">Role ARN (optional)</Label>
-              <Input
-                id="auth-role-arn"
-                placeholder="arn:aws:iam::123456789012:role/omnia-bedrock"
-                value={form.authRoleArn}
-                onChange={(e) => updateForm("authRoleArn", e.target.value)}
-              />
-            </div>
-          )}
-
-          {form.authType === "workloadIdentity" && form.platformType === "vertex" && (
-            <div className="space-y-2">
-              <Label htmlFor="auth-service-account-email">Service Account Email (optional)</Label>
-              <Input
-                id="auth-service-account-email"
-                placeholder="omnia-vertex@my-project.iam.gserviceaccount.com"
-                value={form.authServiceAccountEmail}
-                onChange={(e) => updateForm("authServiceAccountEmail", e.target.value)}
-              />
-            </div>
-          )}
-
-          {form.authType && form.authType !== "workloadIdentity" && (
-            <SecretKeySelect
-              idPrefix="auth"
-              namespace={namespace}
-              secretName={form.authSecretName}
-              secretKey={form.authSecretKey}
-              onSecretNameChange={(v) => updateForm("authSecretName", v)}
-              onSecretKeyChange={(v) => updateForm("authSecretKey", v)}
-            />
-          )}
-        </>
-      )}
-    </div>
-  );
-}
-
-function TTSFields({
-  form,
-  updateForm,
-  validate,
-  errors,
-}: Readonly<{
-  form: FormState;
-  updateForm: <K extends keyof FormState>(key: K, value: FormState[K]) => void;
-} & ValidateProps>) {
-  const TTS_FORMAT_NONE = "none";
-  return (
-    <div className="border rounded-lg p-4 space-y-4">
-      <Label className="text-base font-semibold">Text-to-Speech</Label>
-      <div className="grid grid-cols-2 gap-4">
-        <div className="space-y-2">
-          <Label htmlFor="tts-voice">Voice</Label>
-          <Input
-            id="tts-voice"
-            placeholder="alloy"
-            value={form.ttsVoice}
-            onChange={(e) => updateForm("ttsVoice", e.target.value)}
-          />
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="tts-format">Format</Label>
-          <Select
-            value={form.ttsFormat || TTS_FORMAT_NONE}
-            onValueChange={(v) =>
-              updateForm("ttsFormat", (v === TTS_FORMAT_NONE ? "" : v) as FormState["ttsFormat"])
-            }
-          >
-            <SelectTrigger id="tts-format">
-              <SelectValue placeholder="Provider default" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={TTS_FORMAT_NONE}>Provider default</SelectItem>
-              <SelectItem value="pcm">pcm</SelectItem>
-              <SelectItem value="mp3">mp3</SelectItem>
-              <SelectItem value="opus">opus</SelectItem>
-              <SelectItem value="wav">wav</SelectItem>
-              <SelectItem value="flac">flac</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="tts-sample-rate">Sample Rate (Hz)</Label>
-          <Input
-            id="tts-sample-rate"
-            type="number"
-            min="8000"
-            placeholder="24000"
-            aria-invalid={!!errors["spec.tts.sampleRate"]}
-            aria-describedby={errors["spec.tts.sampleRate"] ? "tts-sample-rate-error" : undefined}
-            value={form.ttsSampleRate}
-            onChange={(e) => {
-              updateForm("ttsSampleRate", e.target.value);
-              validate("spec.tts.sampleRate", e.target.value ? Number(e.target.value) : null);
-            }}
-          />
-          <FieldError id="tts-sample-rate-error" message={errors["spec.tts.sampleRate"]} />
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function STTFields({
-  form,
-  updateForm,
-  validate,
-  errors,
-}: Readonly<{
-  form: FormState;
-  updateForm: <K extends keyof FormState>(key: K, value: FormState[K]) => void;
-} & ValidateProps>) {
-  return (
-    <div className="border rounded-lg p-4 space-y-4">
-      <Label className="text-base font-semibold">Speech-to-Text</Label>
-      <div className="grid grid-cols-2 gap-4">
-        <div className="space-y-2">
-          <Label htmlFor="stt-language">Language (ISO-639-1)</Label>
-          <Input
-            id="stt-language"
-            placeholder="en"
-            aria-invalid={!!errors["spec.stt.language"]}
-            aria-describedby={errors["spec.stt.language"] ? "stt-language-error" : undefined}
-            value={form.sttLanguage}
-            onChange={(e) => {
-              updateForm("sttLanguage", e.target.value);
-              validate("spec.stt.language", e.target.value);
-            }}
-          />
-          <FieldError id="stt-language-error" message={errors["spec.stt.language"]} />
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="stt-sample-rate">Sample Rate (Hz)</Label>
-          <Input
-            id="stt-sample-rate"
-            type="number"
-            min="8000"
-            placeholder="16000"
-            aria-invalid={!!errors["spec.stt.sampleRate"]}
-            aria-describedby={errors["spec.stt.sampleRate"] ? "stt-sample-rate-error" : undefined}
-            value={form.sttSampleRate}
-            onChange={(e) => {
-              updateForm("sttSampleRate", e.target.value);
-              validate("spec.stt.sampleRate", e.target.value ? Number(e.target.value) : null);
-            }}
-          />
-          <FieldError id="stt-sample-rate-error" message={errors["spec.stt.sampleRate"]} />
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function EmbeddingFields({
-  form,
-  updateForm,
-  validate,
-  errors,
-}: Readonly<{
-  form: FormState;
-  updateForm: <K extends keyof FormState>(key: K, value: FormState[K]) => void;
-} & ValidateProps>) {
-  const DISTANCE_NONE = "none";
-  return (
-    <div className="border rounded-lg p-4 space-y-4">
-      <Label className="text-base font-semibold">Embedding</Label>
-      <div className="grid grid-cols-2 gap-4">
-        <div className="space-y-2">
-          <Label htmlFor="embedding-dimensions">Dimensions</Label>
-          <Input
-            id="embedding-dimensions"
-            type="number"
-            min="1"
-            placeholder="1536"
-            aria-invalid={!!errors["spec.embedding.dimensions"]}
-            aria-describedby={errors["spec.embedding.dimensions"] ? "embedding-dimensions-error" : undefined}
-            value={form.embeddingDimensions}
-            onChange={(e) => {
-              updateForm("embeddingDimensions", e.target.value);
-              validate("spec.embedding.dimensions", e.target.value ? Number(e.target.value) : null);
-            }}
-          />
-          <FieldError id="embedding-dimensions-error" message={errors["spec.embedding.dimensions"]} />
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="embedding-distance">Distance metric</Label>
-          <Select
-            value={form.embeddingDistance || DISTANCE_NONE}
-            onValueChange={(v) =>
-              updateForm(
-                "embeddingDistance",
-                (v === DISTANCE_NONE ? "" : v) as FormState["embeddingDistance"],
-              )
-            }
-          >
-            <SelectTrigger id="embedding-distance">
-              <SelectValue placeholder="Consumer chooses" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={DISTANCE_NONE}>Consumer chooses</SelectItem>
-              <SelectItem value="cosine">cosine</SelectItem>
-              <SelectItem value="l2">l2</SelectItem>
-              <SelectItem value="dot">dot</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function CapabilitiesFields({
-  form,
-  updateForm,
-}: Readonly<{
-  form: FormState;
-  updateForm: <K extends keyof FormState>(key: K, value: FormState[K]) => void;
-}>) {
-  const [open, setOpen] = useState(form.capabilities.length > 0);
-
-  const toggleCapability = (cap: string) => {
-    const current = form.capabilities;
-    if (current.includes(cap)) {
-      updateForm("capabilities", current.filter((c) => c !== cap));
-    } else {
-      updateForm("capabilities", [...current, cap]);
-    }
-  };
-
-  return (
-    <Collapsible open={open} onOpenChange={setOpen}>
-      <CollapsibleTrigger asChild>
-        <Button variant="ghost" className="w-full justify-between px-0 font-semibold">
-          Capabilities
-          <ChevronDown className={`h-4 w-4 transition-transform ${open ? "rotate-180" : ""}`} />
-        </Button>
-      </CollapsibleTrigger>
-      <CollapsibleContent className="pt-2">
-        <div className="grid grid-cols-2 gap-2">
-          {ALL_CAPABILITIES.map((cap) => (
-            <div key={cap} className="flex items-center space-x-2">
-              <Checkbox
-                id={`cap-${cap}`}
-                checked={form.capabilities.includes(cap)}
-                onCheckedChange={() => toggleCapability(cap)}
-              />
-              <Label htmlFor={`cap-${cap}`} className="text-sm font-normal capitalize">
-                {cap}
-              </Label>
-            </div>
-          ))}
-        </div>
-      </CollapsibleContent>
-    </Collapsible>
   );
 }
 

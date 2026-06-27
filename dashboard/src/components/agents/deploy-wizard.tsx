@@ -13,7 +13,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { YamlBlock } from "@/components/ui/yaml-block";
 import { Progress } from "@/components/ui/progress";
@@ -35,16 +34,21 @@ import {
   AlertCircle,
   Lock,
 } from "lucide-react";
+import {
+  FrameworkStep,
+  PromptPackStep,
+  ProviderStep,
+  OptionsStep,
+  RuntimeStep,
+  type WizardFormData,
+  type AgentMode,
+  type FacadeType,
+} from "./deploy-wizard-steps";
 
 interface DeployWizardProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }
-
-type FrameworkType = "promptkit" | "langchain" | "autogen" | "custom";
-type FacadeType = "websocket" | "grpc" | "rest";
-type ContextStoreType = "memory" | "redis";
-type AgentMode = "agent" | "function";
 
 /** Default placeholder shown in the schema editors when mode=function
  * is selected. Gives authors a starting shape they can edit; it is
@@ -60,36 +64,6 @@ const DEFAULT_OUTPUT_SCHEMA = `{
   "properties": {},
   "required": []
 }`;
-
-interface WizardFormData {
-  // Step 1: Basic Info
-  name: string;
-  mode: AgentMode;
-  inputSchemaJson: string;
-  outputSchemaJson: string;
-  // Step 2: Framework
-  framework: FrameworkType;
-  frameworkVersion: string;
-  customImage: string;
-  // Step 3: PromptPack
-  promptPackName: string;
-  promptPackTrack: string;
-  // Step 4: Provider
-  providerRefName: string;
-  // Step 5: Tools & Context
-  toolRegistryName: string;
-  toolRegistryNamespace: string;
-  contextType: ContextStoreType;
-  contextTtl: string;
-  // Step 6: Runtime
-  replicas: number;
-  cpuRequest: string;
-  cpuLimit: string;
-  memoryRequest: string;
-  memoryLimit: string;
-  facadeType: FacadeType;
-  facadePort: number;
-}
 
 /** isValidJsonObject returns true iff the string parses to a JSON
  * object (not an array, not a scalar). Schemas are objects; rejecting
@@ -141,12 +115,12 @@ const STEPS = [
   { title: "Review", description: "Deploy agent" },
 ];
 
-const FRAMEWORKS: { value: FrameworkType; label: string; description: string }[] = [
-  { value: "promptkit", label: "PromptKit", description: "AltairaLabs' native framework" },
-  { value: "langchain", label: "LangChain", description: "Popular Python framework" },
-  { value: "autogen", label: "AutoGen", description: "Microsoft's agent framework" },
-  { value: "custom", label: "Custom", description: "Your own container image" },
-];
+const FRAMEWORKS = [
+  { value: "promptkit", label: "PromptKit" },
+  { value: "langchain", label: "LangChain" },
+  { value: "autogen", label: "AutoGen" },
+  { value: "custom", label: "Custom" },
+] as const;
 
 /**
  * Get the disabled message based on read-only and permission status.
@@ -475,128 +449,6 @@ function SchemaEditor({
   );
 }
 
-interface RuntimeStepProps {
-  formData: WizardFormData;
-  updateField: <K extends keyof WizardFormData>(field: K, value: WizardFormData[K]) => void;
-  errors: Record<string, string>;
-  validate: (path: string, value: unknown) => void;
-}
-
-/** RuntimeStep is step 5 of the wizard. Extracted from renderStep to keep
- * renderStep below SonarCloud's cognitive-complexity cap. */
-function RuntimeStep({ formData, updateField, errors, validate }: Readonly<RuntimeStepProps>) {
-  return (
-    <div className="space-y-6">
-      <div className="grid grid-cols-2 gap-4">
-        <div className="space-y-2">
-          <Label>Facade Type</Label>
-          <Select
-            value={formData.mode === "function" ? "rest" : formData.facadeType}
-            onValueChange={(v) => {
-              updateField("facadeType", v as FacadeType);
-              validate("spec.facade.type", v);
-            }}
-            disabled={formData.mode === "function"}
-          >
-            <SelectTrigger
-              aria-invalid={!!errors["spec.facade.type"]}
-              aria-describedby={errors["spec.facade.type"] ? "facade-type-error" : undefined}
-            >
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {formData.mode === "function" ? (
-                <SelectItem value="rest">REST (HTTP)</SelectItem>
-              ) : (
-                <>
-                  <SelectItem value="websocket">WebSocket</SelectItem>
-                  <SelectItem value="grpc">gRPC</SelectItem>
-                </>
-              )}
-            </SelectContent>
-          </Select>
-          <FieldError id="facade-type-error" message={errors["spec.facade.type"]} />
-          {formData.mode === "function" && (
-            <p className="text-xs text-muted-foreground">
-              Function mode uses the REST (HTTP) facade.
-            </p>
-          )}
-        </div>
-
-        <div className="space-y-2">
-          <Label htmlFor="facadePort">Port</Label>
-          <Input
-            id="facadePort"
-            type="number"
-            value={formData.facadePort}
-            aria-invalid={!!errors["spec.facade.port"]}
-            aria-describedby={errors["spec.facade.port"] ? "facade-port-error" : undefined}
-            onChange={(e) => {
-              const v = Number.parseInt(e.target.value) || 8080;
-              updateField("facadePort", v);
-              validate("spec.facade.port", v);
-            }}
-          />
-          <FieldError id="facade-port-error" message={errors["spec.facade.port"]} />
-        </div>
-      </div>
-
-      <div className="space-y-2">
-        <Label htmlFor="replicas">Replicas</Label>
-        <Input
-          id="replicas"
-          type="number"
-          min={0}
-          value={formData.replicas}
-          onChange={(e) => updateField("replicas", Number.parseInt(e.target.value) || 0)}
-        />
-      </div>
-
-      <div className="space-y-4 border-t pt-4">
-        <Label className="text-base">Resource Limits</Label>
-        <div className="grid grid-cols-2 gap-4">
-          <div className="space-y-2">
-            <Label htmlFor="cpuRequest">CPU Request</Label>
-            <Input
-              id="cpuRequest"
-              value={formData.cpuRequest}
-              onChange={(e) => updateField("cpuRequest", e.target.value)}
-              placeholder="100m"
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="cpuLimit">CPU Limit</Label>
-            <Input
-              id="cpuLimit"
-              value={formData.cpuLimit}
-              onChange={(e) => updateField("cpuLimit", e.target.value)}
-              placeholder="500m"
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="memoryRequest">Memory Request</Label>
-            <Input
-              id="memoryRequest"
-              value={formData.memoryRequest}
-              onChange={(e) => updateField("memoryRequest", e.target.value)}
-              placeholder="128Mi"
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="memoryLimit">Memory Limit</Label>
-            <Input
-              id="memoryLimit"
-              value={formData.memoryLimit}
-              onChange={(e) => updateField("memoryLimit", e.target.value)}
-              placeholder="512Mi"
-            />
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 /** Fields validated at step 0 (Basic Info). */
 function step0Fields(formData: WizardFormData): FieldInput[] {
   return [{ path: "metadata.name", value: formData.name }];
@@ -761,235 +613,35 @@ export function DeployWizard({ open, onOpenChange }: Readonly<DeployWizardProps>
             validate={validate}
           />
         );
-
       case 1:
-        return (
-          <div className="space-y-4">
-            <Label>Agent Framework</Label>
-            <RadioGroup
-              value={formData.framework}
-              onValueChange={(v) => updateField("framework", v as FrameworkType)}
-              className="grid grid-cols-1 gap-2"
-            >
-              {FRAMEWORKS.map((fw) => (
-                <label
-                  key={fw.value}
-                  htmlFor={fw.value}
-                  className={cn(
-                    "flex items-center space-x-3 rounded-lg border p-3 cursor-pointer transition-colors",
-                    formData.framework === fw.value
-                      ? "border-primary bg-primary/5"
-                      : "hover:bg-muted/50"
-                  )}
-                >
-                  <RadioGroupItem value={fw.value} id={fw.value} />
-                  <div className="flex-1">
-                    <span className="cursor-pointer font-medium">
-                      {fw.label}
-                    </span>
-                    <p className="text-xs text-muted-foreground">{fw.description}</p>
-                  </div>
-                </label>
-              ))}
-            </RadioGroup>
-
-            {formData.framework === "custom" && (
-              <div className="space-y-2 pt-2">
-                <Label htmlFor="customImage">Container Image</Label>
-                <Input
-                  id="customImage"
-                  value={formData.customImage}
-                  onChange={(e) => updateField("customImage", e.target.value)}
-                  placeholder="myregistry/my-agent:v1.0"
-                />
-              </div>
-            )}
-          </div>
-        );
-
+        return <FrameworkStep formData={formData} updateField={updateField} />;
       case 2:
         return (
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <Label>PromptPack</Label>
-              <p className="text-xs text-muted-foreground mb-2">
-                Showing PromptPacks in {currentWorkspace?.namespace} namespace
-              </p>
-              <Select
-                value={formData.promptPackName}
-                onValueChange={(v) => updateField("promptPackName", v)}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select a PromptPack" />
-                </SelectTrigger>
-                <SelectContent>
-                  {promptPacks?.map((pack) => (
-                    <SelectItem key={pack.metadata.uid} value={pack.metadata.name}>
-                      <div className="flex items-center gap-2">
-                        <span>{pack.metadata.name}</span>
-                        <Badge variant="outline" className="text-xs">
-                          {pack.status?.phase || "Unknown"}
-                        </Badge>
-                      </div>
-                    </SelectItem>
-                  ))}
-                  {(!promptPacks || promptPacks.length === 0) && (
-                    <SelectItem value="__no_promptpacks__" disabled>
-                      No PromptPacks available
-                    </SelectItem>
-                  )}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-2">
-              <Label>Release Track</Label>
-              <RadioGroup
-                value={formData.promptPackTrack}
-                onValueChange={(v) => updateField("promptPackTrack", v)}
-                className="flex gap-4"
-              >
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="stable" id="track-stable" />
-                  <Label htmlFor="track-stable" className="cursor-pointer">Stable</Label>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="canary" id="track-canary" />
-                  <Label htmlFor="track-canary" className="cursor-pointer">Canary</Label>
-                </div>
-              </RadioGroup>
-            </div>
-          </div>
+          <PromptPackStep
+            formData={formData}
+            currentWorkspace={currentWorkspace}
+            promptPacks={promptPacks}
+            updateField={updateField}
+          />
         );
-
       case 3:
         return (
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <Label>LLM Provider</Label>
-              <p className="text-xs text-muted-foreground mb-2">
-                Select a configured Provider from {currentWorkspace?.namespace} namespace
-              </p>
-              <Select
-                value={formData.providerRefName}
-                onValueChange={(v) => updateField("providerRefName", v)}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select a Provider" />
-                </SelectTrigger>
-                <SelectContent>
-                  {providers?.map((provider) => (
-                    <SelectItem key={provider.metadata.uid} value={provider.metadata.name}>
-                      <div className="flex items-center gap-2">
-                        <span>{provider.metadata.name}</span>
-                        <Badge variant="outline" className="text-xs">
-                          {provider.spec.type}
-                        </Badge>
-                        {provider.spec.model && (
-                          <Badge variant="secondary" className="text-xs">
-                            {provider.spec.model}
-                          </Badge>
-                        )}
-                      </div>
-                    </SelectItem>
-                  ))}
-                  {(!providers || providers.length === 0) && (
-                    <SelectItem value="__no_providers__" disabled>
-                      No Providers available
-                    </SelectItem>
-                  )}
-                </SelectContent>
-              </Select>
-              {(!providers || providers.length === 0) && (
-                <p className="text-xs text-amber-600 dark:text-amber-400">
-                  No Providers configured. Create a Provider resource first.
-                </p>
-              )}
-            </div>
-          </div>
+          <ProviderStep
+            formData={formData}
+            currentWorkspace={currentWorkspace}
+            providers={providers}
+            updateField={updateField}
+          />
         );
-
       case 4:
         return (
-          <div className="space-y-6">
-            <div className="space-y-2">
-              <Label>Tool Registry (Optional)</Label>
-              <p className="text-xs text-muted-foreground mb-2">
-                Cross-namespace references are supported
-              </p>
-              <Select
-                value={formData.toolRegistryName ? `${formData.toolRegistryNamespace || currentWorkspace?.namespace}/${formData.toolRegistryName}` : "__none__"}
-                onValueChange={(v) => {
-                  if (v === "__none__") {
-                    updateField("toolRegistryName", "");
-                    updateField("toolRegistryNamespace", "");
-                  } else {
-                    const [ns, name] = v.split("/");
-                    updateField("toolRegistryName", name);
-                    // Only set namespace if different from agent namespace
-                    updateField("toolRegistryNamespace", ns === currentWorkspace?.namespace ? "" : ns);
-                  }
-                }}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="None" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__none__">None</SelectItem>
-                  {toolRegistries?.map((registry) => {
-                    const ns = registry.metadata.namespace || "default";
-                    const name = registry.metadata.name;
-                    const isSameNamespace = ns === currentWorkspace?.namespace;
-                    return (
-                      <SelectItem key={registry.metadata.uid} value={`${ns}/${name}`}>
-                        <div className="flex items-center gap-2">
-                          <span>{name}</span>
-                          {!isSameNamespace && (
-                            <Badge variant="secondary" className="text-xs">
-                              {ns}
-                            </Badge>
-                          )}
-                          <Badge variant="outline" className="text-xs">
-                            {registry.status?.discoveredToolsCount || 0} tools
-                          </Badge>
-                        </div>
-                      </SelectItem>
-                    );
-                  })}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-4 border-t pt-4">
-              <Label className="text-base">Context Store</Label>
-              <RadioGroup
-                value={formData.contextType}
-                onValueChange={(v) => updateField("contextType", v as ContextStoreType)}
-                className="flex gap-4"
-              >
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="memory" id="context-memory" />
-                  <Label htmlFor="context-memory" className="cursor-pointer">In-Memory</Label>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="redis" id="context-redis" />
-                  <Label htmlFor="context-redis" className="cursor-pointer">Redis</Label>
-                </div>
-              </RadioGroup>
-
-              <div className="space-y-2">
-                <Label htmlFor="contextTtl">Context TTL</Label>
-                <Input
-                  id="contextTtl"
-                  value={formData.contextTtl}
-                  onChange={(e) => updateField("contextTtl", e.target.value)}
-                  placeholder="24h"
-                />
-              </div>
-            </div>
-          </div>
+          <OptionsStep
+            formData={formData}
+            currentWorkspace={currentWorkspace}
+            toolRegistries={toolRegistries}
+            updateField={updateField}
+          />
         );
-
       case 5:
         return (
           <RuntimeStep
@@ -999,79 +651,17 @@ export function DeployWizard({ open, onOpenChange }: Readonly<DeployWizardProps>
             validate={validate}
           />
         );
-
       case 6:
         return (
-          <div className="space-y-4">
-            {success ? (
-              <div className="flex flex-col items-center justify-center py-8 text-center">
-                <div className="rounded-full bg-green-500/10 p-3 mb-4">
-                  <Check className="h-8 w-8 text-green-500" />
-                </div>
-                <h3 className="text-lg font-semibold">Agent Created!</h3>
-                <p className="text-sm text-muted-foreground mt-1">
-                  {formData.name} is being deployed to {currentWorkspace?.namespace}
-                </p>
-              </div>
-            ) : (
-              <>
-                <div className="flex items-center justify-between">
-                  <h3 className="font-medium">Review Configuration</h3>
-                  <Badge variant="outline">
-                    {currentWorkspace?.namespace}/{formData.name}
-                  </Badge>
-                </div>
-
-                <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
-                  <div className="text-muted-foreground">Framework</div>
-                  <div>{FRAMEWORKS.find((f) => f.value === formData.framework)?.label}</div>
-
-                  <div className="text-muted-foreground">PromptPack</div>
-                  <div>{formData.promptPackName} ({formData.promptPackTrack})</div>
-
-                  <div className="text-muted-foreground">Provider</div>
-                  <div>
-                    {formData.providerRefName ? (
-                      (() => {
-                        const selectedProvider = providers?.find(p => p.metadata.name === formData.providerRefName);
-                        const providerType = selectedProvider?.spec.type ?? "";
-                        const providerModel = selectedProvider?.spec.model;
-                        const modelSuffix = providerModel ? " / " + providerModel : "";
-                        return selectedProvider
-                          ? formData.providerRefName + " (" + providerType + modelSuffix + ")"
-                          : formData.providerRefName;
-                      })()
-                    ) : (
-                      <span className="text-muted-foreground italic">None selected</span>
-                    )}
-                  </div>
-
-                  <div className="text-muted-foreground">Facade</div>
-                  <div>{formData.facadeType}:{formData.facadePort}</div>
-
-                  <div className="text-muted-foreground">Replicas</div>
-                  <div>{formData.replicas}</div>
-                </div>
-
-                <div className="border-t pt-4">
-                  <h4 className="text-sm font-medium mb-2">YAML Preview</h4>
-                  <YamlBlock
-                    data={generateYaml()}
-                    className="max-h-[200px] overflow-auto text-xs"
-                  />
-                </div>
-
-                {error && (
-                  <div className="flex items-center gap-2 p-3 rounded-lg bg-destructive/10 text-destructive text-sm">
-                    <AlertCircle className="h-4 w-4 shrink-0" />
-                    {error}
-                  </div>
-                )}
-              </>
-            )}
-          </div>
+          <ReviewStep
+            formData={formData}
+            currentWorkspace={currentWorkspace}
+            providers={providers}
+            success={success}
+            error={error}
+            generateYaml={generateYaml}
+          />
         );
-
       default:
         return null;
     }
@@ -1182,4 +772,100 @@ export function DeployWizard({ open, onOpenChange }: Readonly<DeployWizardProps>
       </DialogContent>
     </Dialog>
   );
+}
+
+// ---------------------------------------------------------------------------
+// ReviewStep — wizard step 6 (inline, uses providers from parent scope via props)
+// ---------------------------------------------------------------------------
+
+interface ReviewStepProps {
+  formData: WizardFormData;
+  currentWorkspace: { name?: string; namespace?: string; displayName?: string } | null;
+  providers: Array<{ metadata: { name: string }; spec: { type: string; model?: string } }> | undefined;
+  success: boolean;
+  error: string | null;
+  generateYaml: () => Record<string, unknown>;
+}
+
+function ReviewStep({
+  formData,
+  currentWorkspace,
+  providers,
+  success,
+  error,
+  generateYaml,
+}: Readonly<ReviewStepProps>) {
+  if (success) {
+    return (
+      <div className="flex flex-col items-center justify-center py-8 text-center">
+        <div className="rounded-full bg-green-500/10 p-3 mb-4">
+          <Check className="h-8 w-8 text-green-500" />
+        </div>
+        <h3 className="text-lg font-semibold">Agent Created!</h3>
+        <p className="text-sm text-muted-foreground mt-1">
+          {formData.name} is being deployed to {currentWorkspace?.namespace}
+        </p>
+      </div>
+    );
+  }
+
+  const selectedProvider = providers?.find((p) => p.metadata.name === formData.providerRefName);
+  const providerDisplay = buildProviderDisplay(formData.providerRefName, selectedProvider);
+
+  return (
+    <>
+      <div className="flex items-center justify-between">
+        <h3 className="font-medium">Review Configuration</h3>
+        <Badge variant="outline">
+          {currentWorkspace?.namespace}/{formData.name}
+        </Badge>
+      </div>
+
+      <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+        <div className="text-muted-foreground">Framework</div>
+        <div>{FRAMEWORKS.find((f) => f.value === formData.framework)?.label}</div>
+
+        <div className="text-muted-foreground">PromptPack</div>
+        <div>{formData.promptPackName} ({formData.promptPackTrack})</div>
+
+        <div className="text-muted-foreground">Provider</div>
+        <div>{providerDisplay}</div>
+
+        <div className="text-muted-foreground">Facade</div>
+        <div>{formData.facadeType}:{formData.facadePort}</div>
+
+        <div className="text-muted-foreground">Replicas</div>
+        <div>{formData.replicas}</div>
+      </div>
+
+      <div className="border-t pt-4">
+        <h4 className="text-sm font-medium mb-2">YAML Preview</h4>
+        <YamlBlock
+          data={generateYaml()}
+          className="max-h-[200px] overflow-auto text-xs"
+        />
+      </div>
+
+      {error && (
+        <div className="flex items-center gap-2 p-3 rounded-lg bg-destructive/10 text-destructive text-sm">
+          <AlertCircle className="h-4 w-4 shrink-0" />
+          {error}
+        </div>
+      )}
+    </>
+  );
+}
+
+function buildProviderDisplay(
+  providerRefName: string,
+  selectedProvider: { metadata: { name: string }; spec: { type: string; model?: string } } | undefined,
+): React.ReactNode {
+  if (!providerRefName) {
+    return <span className="text-muted-foreground italic">None selected</span>;
+  }
+  if (!selectedProvider) {
+    return providerRefName;
+  }
+  const modelSuffix = selectedProvider.spec.model ? " / " + selectedProvider.spec.model : "";
+  return providerRefName + " (" + selectedProvider.spec.type + modelSuffix + ")";
 }
