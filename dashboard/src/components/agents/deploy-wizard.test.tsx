@@ -185,6 +185,62 @@ describe("BasicInfoStep", () => {
   });
 });
 
+describe("BasicInfoStep with validation", () => {
+  const baseForm = {
+    name: "test-fn",
+    mode: "agent" as const,
+    inputSchemaJson: "{}",
+    outputSchemaJson: "{}",
+    framework: "promptkit" as const,
+    frameworkVersion: "",
+    customImage: "",
+    promptPackName: "",
+    promptPackTrack: "stable",
+    providerRefName: "",
+    toolRegistryName: "",
+    toolRegistryNamespace: "",
+    sessionType: "memory" as const,
+    sessionTtl: "24h",
+    replicas: 1,
+    cpuRequest: "100m",
+    cpuLimit: "500m",
+    memoryRequest: "128Mi",
+    memoryLimit: "512Mi",
+    facadeType: "websocket" as const,
+    facadePort: 8080,
+  };
+
+  it("shows a FieldError when errors contains metadata.name", () => {
+    render(
+      <BasicInfoStep
+        formData={baseForm}
+        currentWorkspace={{ name: "ws", namespace: "ns-a" }}
+        updateField={vi.fn()}
+        errors={{ "metadata.name": "Use lowercase letters, numbers, and hyphens; must start and end with a letter or number." }}
+        validate={vi.fn()}
+      />,
+    );
+    const alert = screen.getByRole("alert");
+    expect(alert).toBeInTheDocument();
+    expect(alert).toHaveTextContent(/must start and end with a letter or number/i);
+  });
+
+  it("calls validate with metadata.name on name input change", () => {
+    const validate = vi.fn();
+    render(
+      <BasicInfoStep
+        formData={baseForm}
+        currentWorkspace={{ name: "ws", namespace: "ns-a" }}
+        updateField={vi.fn()}
+        errors={{}}
+        validate={validate}
+      />,
+    );
+    fireEvent.change(screen.getByLabelText(/Agent Name/i), { target: { value: "my-agent" } });
+    expect(validate).toHaveBeenCalledWith("metadata.name", "my-agent");
+  });
+});
+
 describe("composeAgentYaml", () => {
   const baseForm = {
     name: "my-fn",

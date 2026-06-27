@@ -17,12 +17,15 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge";
 import { YamlBlock } from "@/components/ui/yaml-block";
 import { Progress } from "@/components/ui/progress";
+import { FieldError } from "@/components/ui/field-error";
 import { cn } from "@/lib/utils";
 import { usePromptPacks, useToolRegistries, useProviders } from "@/hooks/resources";
 import { useReadOnly } from "@/hooks/core";
 import { usePermissions, Permission } from "@/hooks/auth";
 import { useDataService } from "@/lib/data";
 import { useWorkspace } from "@/contexts/workspace-context";
+import { useFieldValidation, type FieldInput } from "@/hooks/use-field-validation";
+import { crdConstraints } from "@/types/generated/crd-constraints";
 import {
   ChevronLeft,
   ChevronRight,
@@ -283,6 +286,8 @@ interface BasicInfoStepProps {
   formData: WizardFormData;
   currentWorkspace: { name?: string; namespace?: string; displayName?: string } | null;
   updateField: <K extends keyof WizardFormData>(field: K, value: WizardFormData[K]) => void;
+  errors?: Record<string, string>;
+  validate?: (path: string, value: unknown) => void;
 }
 
 /** BasicInfoStep is step 0 of the wizard. Pulled out so renderStep
@@ -292,6 +297,8 @@ export function BasicInfoStep({
   formData,
   currentWorkspace,
   updateField,
+  errors = {},
+  validate = () => {},
 }: Readonly<BasicInfoStepProps>) {
   return (
     <div className="space-y-4">
@@ -300,14 +307,19 @@ export function BasicInfoStep({
         <Input
           id="name"
           value={formData.name}
-          onChange={(e) =>
-            updateField("name", e.target.value.toLowerCase().replaceAll(/[^a-z0-9-]/g, "-"))
-          }
+          aria-invalid={!!errors["metadata.name"]}
+          aria-describedby={errors["metadata.name"] ? "agent-name-error" : undefined}
+          onChange={(e) => {
+            const v = e.target.value.toLowerCase().replaceAll(/[^a-z0-9-]/g, "-");
+            updateField("name", v);
+            validate("metadata.name", v);
+          }}
           placeholder="my-agent"
         />
         <p className="text-xs text-muted-foreground">
           Lowercase letters, numbers, and hyphens only
         </p>
+        <FieldError id="agent-name-error" message={errors["metadata.name"]} />
       </div>
       <div className="space-y-2">
         <Label>Workspace</Label>
@@ -463,12 +475,151 @@ function SchemaEditor({
   );
 }
 
+interface RuntimeStepProps {
+  formData: WizardFormData;
+  updateField: <K extends keyof WizardFormData>(field: K, value: WizardFormData[K]) => void;
+  errors: Record<string, string>;
+  validate: (path: string, value: unknown) => void;
+}
+
+/** RuntimeStep is step 5 of the wizard. Extracted from renderStep to keep
+ * renderStep below SonarCloud's cognitive-complexity cap. */
+function RuntimeStep({ formData, updateField, errors, validate }: Readonly<RuntimeStepProps>) {
+  return (
+    <div className="space-y-6">
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-2">
+          <Label>Facade Type</Label>
+          <Select
+            value={formData.mode === "function" ? "rest" : formData.facadeType}
+            onValueChange={(v) => {
+              updateField("facadeType", v as FacadeType);
+              validate("spec.facade.type", v);
+            }}
+            disabled={formData.mode === "function"}
+          >
+            <SelectTrigger aria-invalid={!!errors["spec.facade.type"]}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {formData.mode === "function" ? (
+                <SelectItem value="rest">REST (HTTP)</SelectItem>
+              ) : (
+                <>
+                  <SelectItem value="websocket">WebSocket</SelectItem>
+                  <SelectItem value="grpc">gRPC</SelectItem>
+                </>
+              )}
+            </SelectContent>
+          </Select>
+          <FieldError message={errors["spec.facade.type"]} />
+          {formData.mode === "function" && (
+            <p className="text-xs text-muted-foreground">
+              Function mode uses the REST (HTTP) facade.
+            </p>
+          )}
+        </div>
+
+        <div className="space-y-2">
+          <Label htmlFor="facadePort">Port</Label>
+          <Input
+            id="facadePort"
+            type="number"
+            value={formData.facadePort}
+            aria-invalid={!!errors["spec.facade.port"]}
+            aria-describedby={errors["spec.facade.port"] ? "facade-port-error" : undefined}
+            onChange={(e) => {
+              const v = Number.parseInt(e.target.value) || 8080;
+              updateField("facadePort", v);
+              validate("spec.facade.port", v);
+            }}
+          />
+          <FieldError id="facade-port-error" message={errors["spec.facade.port"]} />
+        </div>
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="replicas">Replicas</Label>
+        <Input
+          id="replicas"
+          type="number"
+          min={0}
+          value={formData.replicas}
+          onChange={(e) => updateField("replicas", Number.parseInt(e.target.value) || 0)}
+        />
+      </div>
+
+      <div className="space-y-4 border-t pt-4">
+        <Label className="text-base">Resource Limits</Label>
+        <div className="grid grid-cols-2 gap-4">
+          <div className="space-y-2">
+            <Label htmlFor="cpuRequest">CPU Request</Label>
+            <Input
+              id="cpuRequest"
+              value={formData.cpuRequest}
+              onChange={(e) => updateField("cpuRequest", e.target.value)}
+              placeholder="100m"
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="cpuLimit">CPU Limit</Label>
+            <Input
+              id="cpuLimit"
+              value={formData.cpuLimit}
+              onChange={(e) => updateField("cpuLimit", e.target.value)}
+              placeholder="500m"
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="memoryRequest">Memory Request</Label>
+            <Input
+              id="memoryRequest"
+              value={formData.memoryRequest}
+              onChange={(e) => updateField("memoryRequest", e.target.value)}
+              placeholder="128Mi"
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="memoryLimit">Memory Limit</Label>
+            <Input
+              id="memoryLimit"
+              value={formData.memoryLimit}
+              onChange={(e) => updateField("memoryLimit", e.target.value)}
+              placeholder="512Mi"
+            />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Fields validated at step 0 (Basic Info). */
+function step0Fields(formData: WizardFormData): FieldInput[] {
+  return [{ path: "metadata.name", value: formData.name }];
+}
+
+/** Fields validated at step 5 (Runtime). */
+function step5Fields(formData: WizardFormData): FieldInput[] {
+  return [
+    { path: "spec.facade.port", value: formData.facadePort },
+    { path: "spec.facade.type", value: formData.facadeType },
+  ];
+}
+
+/** All constrained fields — used for final submit validation. */
+function allConstrainedFields(formData: WizardFormData): FieldInput[] {
+  return [...step0Fields(formData), ...step5Fields(formData)];
+}
+
 export function DeployWizard({ open, onOpenChange }: Readonly<DeployWizardProps>) {
   const [step, setStep] = useState(0);
   const [formData, setFormData] = useState<WizardFormData>(INITIAL_FORM_DATA);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
+
+  const { errors, validate, validateAll, hasErrors } = useFieldValidation(crdConstraints.AgentRuntime);
 
   const { isReadOnly, message: readOnlyMessage } = useReadOnly();
   const { can } = usePermissions();
@@ -491,6 +642,13 @@ export function DeployWizard({ open, onOpenChange }: Readonly<DeployWizardProps>
   ) => {
     setFormData((prev) => ({ ...prev, [field]: value }));
   }, []);
+
+  const handleNext = useCallback(() => {
+    let valid = true;
+    if (step === 0) valid = validateAll(step0Fields(formData));
+    if (step === 5) valid = validateAll(step5Fields(formData));
+    if (valid) setStep((s) => s + 1);
+  }, [step, formData, validateAll]);
 
   const canProceed = useCallback(() => {
     switch (step) {
@@ -531,6 +689,8 @@ export function DeployWizard({ open, onOpenChange }: Readonly<DeployWizardProps>
   );
 
   const handleSubmit = async () => {
+    if (!validateAll(allConstrainedFields(formData))) return;
+
     if (!currentWorkspace) {
       setError("No workspace selected");
       return;
@@ -577,6 +737,8 @@ export function DeployWizard({ open, onOpenChange }: Readonly<DeployWizardProps>
             formData={formData}
             currentWorkspace={currentWorkspace}
             updateField={updateField}
+            errors={errors}
+            validate={validate}
           />
         );
 
@@ -810,100 +972,12 @@ export function DeployWizard({ open, onOpenChange }: Readonly<DeployWizardProps>
 
       case 5:
         return (
-          <div className="space-y-6">
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label>Facade Type</Label>
-                <Select
-                  value={formData.mode === "function" ? "rest" : formData.facadeType}
-                  onValueChange={(v) => updateField("facadeType", v as FacadeType)}
-                  disabled={formData.mode === "function"}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {formData.mode === "function" ? (
-                      <SelectItem value="rest">REST (HTTP)</SelectItem>
-                    ) : (
-                      <>
-                        <SelectItem value="websocket">WebSocket</SelectItem>
-                        <SelectItem value="grpc">gRPC</SelectItem>
-                      </>
-                    )}
-                  </SelectContent>
-                </Select>
-                {formData.mode === "function" && (
-                  <p className="text-xs text-muted-foreground">
-                    Function mode uses the REST (HTTP) facade.
-                  </p>
-                )}
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="facadePort">Port</Label>
-                <Input
-                  id="facadePort"
-                  type="number"
-                  value={formData.facadePort}
-                  onChange={(e) => updateField("facadePort", Number.parseInt(e.target.value) || 8080)}
-                />
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="replicas">Replicas</Label>
-              <Input
-                id="replicas"
-                type="number"
-                min={0}
-                value={formData.replicas}
-                onChange={(e) => updateField("replicas", Number.parseInt(e.target.value) || 0)}
-              />
-            </div>
-
-            <div className="space-y-4 border-t pt-4">
-              <Label className="text-base">Resource Limits</Label>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="cpuRequest">CPU Request</Label>
-                  <Input
-                    id="cpuRequest"
-                    value={formData.cpuRequest}
-                    onChange={(e) => updateField("cpuRequest", e.target.value)}
-                    placeholder="100m"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="cpuLimit">CPU Limit</Label>
-                  <Input
-                    id="cpuLimit"
-                    value={formData.cpuLimit}
-                    onChange={(e) => updateField("cpuLimit", e.target.value)}
-                    placeholder="500m"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="memoryRequest">Memory Request</Label>
-                  <Input
-                    id="memoryRequest"
-                    value={formData.memoryRequest}
-                    onChange={(e) => updateField("memoryRequest", e.target.value)}
-                    placeholder="128Mi"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="memoryLimit">Memory Limit</Label>
-                  <Input
-                    id="memoryLimit"
-                    value={formData.memoryLimit}
-                    onChange={(e) => updateField("memoryLimit", e.target.value)}
-                    placeholder="512Mi"
-                  />
-                </div>
-              </div>
-            </div>
-          </div>
+          <RuntimeStep
+            formData={formData}
+            updateField={updateField}
+            errors={errors}
+            validate={validate}
+          />
         );
 
       case 6:
@@ -1070,8 +1144,8 @@ export function DeployWizard({ open, onOpenChange }: Readonly<DeployWizardProps>
 
           {step < STEPS.length - 1 ? (
             <Button
-              onClick={() => setStep((s) => s + 1)}
-              disabled={!canProceed()}
+              onClick={handleNext}
+              disabled={!canProceed() || hasErrors}
             >
               Next
               <ChevronRight className="h-4 w-4 ml-1" />
