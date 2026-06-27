@@ -367,11 +367,35 @@ function getInitialFormState(provider?: Provider | null): FormState {
 }
 
 /**
+ * Checks that the active credential source has a non-empty value. Returns an
+ * error message or null. Credential is required when the provider is not local
+ * and (for llm role) no hosting platform is configured.
+ */
+function validateActiveCredential(form: FormState): string | null {
+  const credentialRequired =
+    !isLocal(form.providerType) && (form.role !== "llm" || !form.platformType);
+  if (!credentialRequired) return null;
+
+  if (form.credentialSource === "secret" && !form.credentialSecretName.trim()) {
+    return "Secret name is required";
+  }
+  if (form.credentialSource === "envVar" && !form.credentialEnvVar.trim()) {
+    return "Environment variable name is required";
+  }
+  if (form.credentialSource === "filePath" && !form.credentialFilePath.trim()) {
+    return "File path is required";
+  }
+  return null;
+}
+
+/**
  * Cross-field validation rules that cannot be expressed as single-field CRD
  * constraints. Returns an error string for the Alert banner, or null.
  *
  * - Role/vendor compatibility is enforced here because VENDORS_BY_ROLE is UI
  *   state, not a single-field constraint.
+ * - Active credential source field is required when credential section is shown
+ *   (conditional on source, so it cannot be expressed in the static map).
  * - Platform requirements (region, project, endpoint) are cross-field because
  *   each sub-field is only required conditionally on platformType.
  * - Auth secret is required conditionally on authType (not workloadIdentity).
@@ -384,6 +408,10 @@ function validateCrossFields(form: FormState): string | null {
   if (form.role !== "llm" && form.platformType) {
     return "Hosting platform is only valid when role is llm";
   }
+
+  const credentialError = validateActiveCredential(form);
+  if (credentialError) return credentialError;
+
   if (!form.platformType) return null;
 
   if (

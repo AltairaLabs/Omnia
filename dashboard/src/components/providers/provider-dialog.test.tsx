@@ -184,6 +184,12 @@ describe("ProviderDialog", () => {
       await waitFor(() => {
         const nameInput = screen.getByLabelText("Name");
         expect(nameInput).toHaveAttribute("aria-invalid", "true");
+        // FieldError message must also render (Q-1: message text assertion restored).
+        // Use the aria-describedby id to locate the specific element and avoid
+        // false-positive collisions when multiple fields show the same message.
+        const describedById = nameInput.getAttribute("aria-describedby");
+        const errorEl = document.getElementById(describedById ?? "");
+        expect(errorEl?.textContent).toBe("This field is required.");
       });
       expect(mockCreateProvider).not.toHaveBeenCalled();
     });
@@ -248,6 +254,56 @@ describe("ProviderDialog", () => {
       expect(
         screen.getByRole("button", { name: /create provider/i })
       ).toBeDisabled();
+    });
+
+    it("blocks submit and shows Alert when envVar source is selected but field is empty (I-1)", async () => {
+      vi.useRealTimers();
+      const user = userEvent.setup();
+      render(
+        <TestWrapper>
+          <ProviderDialog open onOpenChange={() => {}} />
+        </TestWrapper>
+      );
+
+      // Provide a valid name so we get past the name validation
+      await user.type(screen.getByLabelText(/^name$/i), "env-provider");
+
+      // Switch to envVar credential source and leave the env var blank
+      fireEvent.click(screen.getByLabelText("Env Variable"));
+
+      fireEvent.click(screen.getByRole("button", { name: /create provider/i }));
+
+      // The cross-field error must appear in the Alert banner
+      await waitFor(() => {
+        expect(
+          screen.getByText("Environment variable name is required")
+        ).toBeInTheDocument();
+      });
+      expect(mockCreateProvider).not.toHaveBeenCalled();
+    });
+
+    it("blocks submit and shows Alert when filePath source is selected but field is empty (I-1)", async () => {
+      vi.useRealTimers();
+      const user = userEvent.setup();
+      render(
+        <TestWrapper>
+          <ProviderDialog open onOpenChange={() => {}} />
+        </TestWrapper>
+      );
+
+      await user.type(screen.getByLabelText(/^name$/i), "fp-provider");
+
+      // Switch to filePath credential source and leave the path blank
+      fireEvent.click(screen.getByLabelText("File Path"));
+
+      fireEvent.click(screen.getByRole("button", { name: /create provider/i }));
+
+      await waitFor(() => {
+        expect(
+          screen.getByText("File path is required")
+        ).toBeInTheDocument();
+      });
+      expect(mockCreateProvider).not.toHaveBeenCalled();
     });
   });
 
