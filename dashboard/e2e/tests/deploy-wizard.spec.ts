@@ -50,7 +50,7 @@ const LABELS = {
   noProvidersAvailable: 'text=No Providers available',
   noProvidersConfigured: 'text=No Providers configured',
   toolRegistry: 'label[data-slot="label"]:has-text("Tool Registry")',
-  sessionStorage: 'label[data-slot="label"]:has-text("Session Storage")',
+  contextStore: 'label[data-slot="label"]:has-text("Context Store")',
   facadeType: 'label[data-slot="label"]:has-text("Facade Type")',
   replicas: 'label[data-slot="label"]:has-text("Replicas")',
   reviewConfig: 'text=Review Configuration',
@@ -172,10 +172,10 @@ test.describe('Deploy Agent Wizard', () => {
     await expect(dialog.locator(LABELS.llmProvider)).toBeVisible();
     await nextBtn.click();
 
-    // Step 5: Options (Tools & Session) - wait for step indicator
+    // Step 5: Options (Tools & Context) - wait for step indicator
     await expect(dialog.locator(STEPS.step5)).toBeVisible({ timeout: 5000 });
     await expect(dialog.locator(LABELS.toolRegistry)).toBeVisible();
-    await expect(dialog.locator(LABELS.sessionStorage)).toBeVisible();
+    await expect(dialog.locator(LABELS.contextStore)).toBeVisible();
     await nextBtn.click();
 
     // Step 6: Runtime - wait for step indicator

@@ -3,6 +3,7 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { AgentCard } from "./agent-card";
 import { DataServiceProvider, type DataService } from "@/lib/data";
+import { useAgentCost } from "@/hooks/agents";
 import type { AgentRuntime } from "@/types";
 
 // Mock the hooks
@@ -26,6 +27,10 @@ vi.mock("@/hooks/auth", () => ({
   Permission: {
     AGENTS_SCALE: "agents:scale",
   },
+}));
+
+vi.mock("@/contexts/workspace-context", () => ({
+  useWorkspace: vi.fn(() => ({ currentWorkspace: { name: "demo" } })),
 }));
 
 // Mock next/link
@@ -182,6 +187,13 @@ describe("AgentCard", () => {
     renderWithProviders(<AgentCard agent={agent} />);
 
     expect(screen.getByText("Running")).toBeInTheDocument();
+  });
+
+  it("queries cost by workspace name, not the agent namespace (#1572)", () => {
+    const agent = createMockAgent(); // metadata.namespace = "default"
+    renderWithProviders(<AgentCard agent={agent} />);
+    // currentWorkspace.name = "demo" (mocked) — must be the cost key, not "default".
+    expect(vi.mocked(useAgentCost)).toHaveBeenCalledWith("demo", "test-agent");
   });
 
   it("renders provider type", () => {

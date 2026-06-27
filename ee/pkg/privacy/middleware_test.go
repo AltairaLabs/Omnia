@@ -474,9 +474,9 @@ func TestPrivacyMiddleware_RecordingDisabled_Returns204(t *testing.T) {
 	assert.False(t, called, "next handler should not be called")
 }
 
-// newRichDataDisabledMiddleware returns a PrivacyMiddleware with Recording.Enabled=true
-// and RichData=false, backed by a mock session that resolves to default/test-agent.
-func newRichDataDisabledMiddleware() *PrivacyMiddleware {
+// newRuntimeDataDisabledMiddleware returns a PrivacyMiddleware with Recording.Enabled=true
+// and RuntimeData=false, backed by a mock session that resolves to default/test-agent.
+func newRuntimeDataDisabledMiddleware() *PrivacyMiddleware {
 	lookup := &mockSessionLookup{ns: "default", agent: "test-agent"}
 	cache := NewSessionMetadataCache(lookup, 100)
 	watcher := &PolicyWatcher{}
@@ -485,16 +485,16 @@ func newRichDataDisabledMiddleware() *PrivacyMiddleware {
 		Spec: omniav1alpha1.SessionPrivacyPolicySpec{
 
 			Recording: omniav1alpha1.RecordingConfig{
-				Enabled:  true,
-				RichData: false,
+				Enabled:     true,
+				RuntimeData: false,
 			},
 		},
 	})
 	return NewPrivacyMiddleware(watcher, cache, nil, nil, logr.Discard())
 }
 
-func TestPrivacyMiddleware_RichDataDisabled_DropsAssistantMessage(t *testing.T) {
-	mw := newRichDataDisabledMiddleware()
+func TestPrivacyMiddleware_RuntimeDataDisabled_DropsAssistantMessage(t *testing.T) {
+	mw := newRuntimeDataDisabledMiddleware()
 	called := false
 	next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) { called = true })
 
@@ -508,8 +508,8 @@ func TestPrivacyMiddleware_RichDataDisabled_DropsAssistantMessage(t *testing.T) 
 	assert.False(t, called)
 }
 
-func TestPrivacyMiddleware_RichDataDisabled_AllowsUserMessage(t *testing.T) {
-	mw := newRichDataDisabledMiddleware()
+func TestPrivacyMiddleware_RuntimeDataDisabled_AllowsUserMessage(t *testing.T) {
+	mw := newRuntimeDataDisabledMiddleware()
 	called := false
 	next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) { called = true })
 
@@ -519,11 +519,11 @@ func TestPrivacyMiddleware_RichDataDisabled_AllowsUserMessage(t *testing.T) {
 
 	mw.Wrap(next).ServeHTTP(rec, req)
 
-	assert.True(t, called, "user messages must pass through even when RichData=false")
+	assert.True(t, called, "user messages must pass through even when RuntimeData=false")
 }
 
-func TestPrivacyMiddleware_RichDataDisabled_BlocksToolCallEndpoint(t *testing.T) {
-	mw := newRichDataDisabledMiddleware()
+func TestPrivacyMiddleware_RuntimeDataDisabled_AllowsToolCallEndpoint(t *testing.T) {
+	mw := newRuntimeDataDisabledMiddleware()
 	called := false
 	next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) { called = true })
 
@@ -533,12 +533,14 @@ func TestPrivacyMiddleware_RichDataDisabled_BlocksToolCallEndpoint(t *testing.T)
 
 	mw.Wrap(next).ServeHTTP(rec, req)
 
-	assert.Equal(t, http.StatusNoContent, rec.Code)
-	assert.False(t, called)
+	// Tool calls are structured records, not message content — recorded
+	// regardless of runtimeData (only /messages is content-gated).
+	assert.True(t, called, "tool calls must be recorded even when runtimeData=false")
+	assert.NotEqual(t, http.StatusNoContent, rec.Code)
 }
 
-func TestPrivacyMiddleware_RichDataDisabled_AllowsStatusUpdate(t *testing.T) {
-	mw := newRichDataDisabledMiddleware()
+func TestPrivacyMiddleware_RuntimeDataDisabled_AllowsStatusUpdate(t *testing.T) {
+	mw := newRuntimeDataDisabledMiddleware()
 	called := false
 	next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) { called = true })
 

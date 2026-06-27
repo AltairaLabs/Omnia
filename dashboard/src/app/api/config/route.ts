@@ -8,6 +8,17 @@
 
 import { NextResponse } from "next/server";
 
+const MIN_POLL_INTERVAL_SECONDS = 15;
+const DEFAULT_POLL_INTERVAL_SECONDS = 60;
+
+function parseSessionPollInterval(): number {
+  const raw = process.env.OMNIA_SESSION_POLL_INTERVAL_SECONDS;
+  if (!raw) return DEFAULT_POLL_INTERVAL_SECONDS;
+  const parsed = Number.parseInt(raw, 10);
+  if (Number.isNaN(parsed)) return DEFAULT_POLL_INTERVAL_SECONDS;
+  return Math.max(MIN_POLL_INTERVAL_SECONDS, parsed);
+}
+
 export async function GET() {
   return NextResponse.json({
     devMode: process.env.NEXT_PUBLIC_DEV_MODE === "true",
@@ -26,5 +37,8 @@ export async function GET() {
     // hideEnterprise: true to completely hide enterprise features instead of showing upgrade prompts
     enterpriseEnabled: process.env.NEXT_PUBLIC_ENTERPRISE_ENABLED === "true",
     hideEnterprise: process.env.NEXT_PUBLIC_HIDE_ENTERPRISE === "true",
+    // Session expiry detection
+    authMode: process.env.OMNIA_AUTH_MODE || "anonymous",
+    sessionPollIntervalSeconds: parseSessionPollInterval(),
   });
 }

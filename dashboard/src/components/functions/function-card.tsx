@@ -22,6 +22,7 @@ import { useAgentCost } from "@/hooks/agents";
 import { useProvider } from "@/hooks/resources";
 import type { AgentRuntime } from "@/types";
 import { getDefaultProviderRef } from "@/types/agent-runtime";
+import { useWorkspace } from "@/contexts/workspace-context";
 
 interface FunctionCardProps {
   fn: AgentRuntime;
@@ -42,6 +43,7 @@ export function schemaFieldCount(schema: Record<string, unknown> | undefined): n
 export function FunctionCard({ fn }: Readonly<FunctionCardProps>) {
   const { metadata, spec, status } = fn;
   const namespace = metadata.namespace ?? "default";
+  const { currentWorkspace } = useWorkspace();
   const inputFields = schemaFieldCount(spec.inputSchema);
   const outputFields = schemaFieldCount(spec.outputSchema);
   const mcpEnabled = Boolean(spec.facade?.mcp?.enabled);
@@ -49,8 +51,9 @@ export function FunctionCard({ fn }: Readonly<FunctionCardProps>) {
   const defaultProviderRef = getDefaultProviderRef(spec);
   const { data: provider } = useProvider(defaultProviderRef?.name, namespace);
 
-  // Cost from the same Prometheus-backed hook the agent cards use.
-  const { data: costData } = useAgentCost(namespace, metadata.name);
+  // Cost is keyed by workspace NAME (the API resolves the backing namespace);
+  // passing the namespace 404s when namespace != workspace name (#1572).
+  const { data: costData } = useAgentCost(currentWorkspace?.name ?? "", metadata.name);
   const sparklineData = costData?.timeSeries || [];
   const totalCost = costData?.totalCost || 0;
 

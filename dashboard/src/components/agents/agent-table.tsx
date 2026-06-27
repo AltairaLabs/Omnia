@@ -13,6 +13,7 @@ import { StatusBadge } from "./status-badge";
 import { FrameworkBadge } from "./framework-badge";
 import { CostBadge } from "@/components/cost";
 import { useAgentCost } from "@/hooks/agents";
+import { useWorkspace } from "@/contexts/workspace-context";
 import type { AgentRuntime } from "@/types";
 import { getDefaultProviderRef } from "@/types/agent-runtime";
 
@@ -37,9 +38,12 @@ function formatAge(timestamp?: string): string {
 
 /**
  * Renders the cost cell for an agent row using real Prometheus data.
+ * Cost is keyed by workspace NAME (the API resolves the backing namespace);
+ * the page is workspace-scoped, so the current workspace applies to every row (#1572).
  */
-function AgentCostCell({ namespace, name }: Readonly<{ namespace: string; name: string }>) {
-  const { data: costData } = useAgentCost(namespace, name);
+function AgentCostCell({ name }: Readonly<{ name: string }>) {
+  const { currentWorkspace } = useWorkspace();
+  const { data: costData } = useAgentCost(currentWorkspace?.name ?? "", name);
 
   if (!costData?.available) {
     return <span className="text-muted-foreground">-</span>;
@@ -98,10 +102,7 @@ export function AgentTable({ agents }: Readonly<AgentTableProps>) {
                 {getDefaultProviderRef(agent.spec)?.name || "-"}
               </TableCell>
               <TableCell>
-                <AgentCostCell
-                  namespace={agent.metadata.namespace || "default"}
-                  name={agent.metadata.name || ""}
-                />
+                <AgentCostCell name={agent.metadata.name || ""} />
               </TableCell>
               <TableCell className="text-muted-foreground">
                 {formatAge(agent.metadata.creationTimestamp)}

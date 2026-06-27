@@ -14,6 +14,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getUser } from "@/lib/auth";
 import { Permission, userHasPermission } from "@/lib/auth/permissions";
 import { getSecret, deleteSecret } from "@/lib/k8s/secrets";
+import { secretErrorResponse } from "@/lib/k8s/secret-error";
 
 interface RouteParams {
   params: Promise<{ namespace: string; name: string }>;
@@ -58,10 +59,7 @@ export async function GET(
     return NextResponse.json({ secret });
   } catch (error) {
     console.error("Failed to get secret:", error);
-    return NextResponse.json(
-      { error: "Failed to get secret" },
-      { status: 500 }
-    );
+    return secretErrorResponse(error, "Failed to get secret");
   }
 }
 
@@ -111,21 +109,6 @@ export async function DELETE(
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error("Failed to delete secret:", error);
-
-    // Handle specific errors
-    if (
-      error instanceof Error &&
-      error.message.includes("not a managed credential secret")
-    ) {
-      return NextResponse.json(
-        { error: error.message },
-        { status: 409 }
-      );
-    }
-
-    return NextResponse.json(
-      { error: "Failed to delete secret" },
-      { status: 500 }
-    );
+    return secretErrorResponse(error, "Failed to delete secret");
   }
 }

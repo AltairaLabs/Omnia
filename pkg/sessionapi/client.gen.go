@@ -160,10 +160,10 @@ type PrivacyRecordingFlags struct {
 	// FacadeData When false, facade skips recording at the edge.
 	FacadeData bool `json:"facadeData"`
 
-	// RichData When false, assistant messages, tool calls, runtime events, and
-	// provider calls are dropped; user messages, status updates, and
-	// TTL refreshes are still accepted.
-	RichData bool `json:"richData"`
+	// RuntimeData When false, runtime-emitted assistant message content is dropped;
+	// user messages, tool calls, provider calls (metering), runtime
+	// events, status updates, and TTL refreshes are still accepted.
+	RuntimeData bool `json:"runtimeData"`
 }
 
 // ProviderCall defines model for ProviderCall.
@@ -251,7 +251,10 @@ type Session struct {
 	UpdatedAt          *time.Time          `json:"updatedAt,omitempty"`
 
 	// Variant Rollout variant (e.g., stable, canary)
-	Variant       *string `json:"variant,omitempty"`
+	Variant *string `json:"variant,omitempty"`
+
+	// VirtualUserId Virtual (synthetic) user the session is attributed to
+	VirtualUserId *string `json:"virtualUserId,omitempty"`
 	WorkspaceName *string `json:"workspaceName,omitempty"`
 }
 

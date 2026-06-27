@@ -1114,3 +1114,114 @@ func TestRedisQueue_VisibilityTimeoutRequeueDoubleCount(t *testing.T) {
 	t.Logf("Stats after visibility timeout race: total=%d, passed=%d", stats.Passed+stats.Failed, stats.Passed)
 	assert.Equal(t, int64(1), stats.Passed, "visibility timeout race should not double-count")
 }
+
+// Test fixture identifiers for the FailItem suite. Defined as constants to
+// avoid duplicated string literals (goconst).
+const (
+	failTestScenario = "scen-a"
+	failTestProvider = "prov-x"
+)
+
+// TestRedisQueue_FailItem covers the terminal-failure path: the item is moved
+// to the failed set, failure accumulators are incremented (main + scenario +
+// provider), and the error is recorded on the item.
+func TestRedisQueue_FailItem(t *testing.T) {
+	client := getTestRedisClient(t)
+	defer cleanupRedisKeys(t, client)
+	defer func() { _ = client.Close() }()
+
+	q := NewRedisQueueFromClient(client, Options{VisibilityTimeout: 5 * time.Minute, MaxRetries: 1})
+	defer func() { _ = q.Close() }()
+
+	ctx := context.Background()
+	jobID := "test-fail-item"
+
+	items := []WorkItem{{ID: "item-1", ScenarioID: failTestScenario, ProviderID: failTestProvider}}
+	require.NoError(t, q.Push(ctx, jobID, items))
+
+	item, err := q.Pop(ctx, jobID)
+	require.NoError(t, err)
+	require.Equal(t, "item-1", item.ID)
+
+	require.NoError(t, q.FailItem(ctx, jobID, "item-1", errors.New("execution timeout")))
+
+	// Item must land in the failed set with the recorded error.
+	failed, err := q.GetFailedItems(ctx, jobID)
+	require.NoError(t, err)
+	require.Len(t, failed, 1)
+	assert.Equal(t, "item-1", failed[0].ID)
+	assert.Equal(t, ItemStatusFailed, failed[0].Status)
+	assert.Equal(t, "execution timeout", failed[0].Error)
+
+	// Failure accumulators must reflect 1 failed across main + groups.
+	stats, err := q.GetStats(ctx, jobID)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), stats.Total)
+	assert.Equal(t, int64(0), stats.Passed)
+	assert.Equal(t, int64(1), stats.Failed)
+	if scen := stats.ByScenario[failTestScenario]; assert.NotNil(t, scen) {
+		assert.Equal(t, int64(1), scen.Failed)
+	}
+	if prov := stats.ByProvider[failTestProvider]; assert.NotNil(t, prov) {
+		assert.Equal(t, int64(1), prov.Failed)
+	}
+
+	// Processing bookkeeping must be cleared.
+	processing, err := client.ZCard(ctx, q.processingZSetKey(jobID)).Result()
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), processing)
+}
+
+// TestRedisQueue_FailItem_NotInProcessing verifies that failing an item that is
+// not currently in the processing set returns ErrItemNotFound.
+func TestRedisQueue_FailItem_NotInProcessing(t *testing.T) {
+	client := getTestRedisClient(t)
+	defer cleanupRedisKeys(t, client)
+	defer func() { _ = client.Close() }()
+
+	q := NewRedisQueueFromClient(client, DefaultOptions())
+	defer func() { _ = q.Close() }()
+
+	ctx := context.Background()
+	jobID := "test-fail-item-missing"
+
+	err := q.FailItem(ctx, jobID, "never-popped", errors.New("boom"))
+	assert.Equal(t, ErrItemNotFound, err)
+}
+
+// TestRedisQueue_FailItem_Idempotent verifies that an item already counted in
+// stats (e.g. completed first, then failed via a stale worker) does not
+// double-increment the failure accumulators.
+func TestRedisQueue_FailItem_Idempotent(t *testing.T) {
+	client := getTestRedisClient(t)
+	defer cleanupRedisKeys(t, client)
+	defer func() { _ = client.Close() }()
+
+	q := NewRedisQueueFromClient(client, Options{VisibilityTimeout: 5 * time.Minute, MaxRetries: 1})
+	defer func() { _ = q.Close() }()
+
+	ctx := context.Background()
+	jobID := "test-fail-item-idempotent"
+
+	items := []WorkItem{{ID: "item-1", ScenarioID: failTestScenario, ProviderID: failTestProvider}}
+	require.NoError(t, q.Push(ctx, jobID, items))
+
+	item, err := q.Pop(ctx, jobID)
+	require.NoError(t, err)
+
+	// Complete it (marks stats counted).
+	require.NoError(t, q.CompleteItem(ctx, jobID, item.ID, &ItemResult{Status: statusPass, DurationMs: 10}))
+
+	// Re-push + re-pop the same item id, then fail it. Because the id was
+	// already counted, failure stats must not be incremented again.
+	require.NoError(t, q.Push(ctx, jobID, items))
+	item2, err := q.Pop(ctx, jobID)
+	require.NoError(t, err)
+	require.NoError(t, q.FailItem(ctx, jobID, item2.ID, errors.New("late failure")))
+
+	stats, err := q.GetStats(ctx, jobID)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), stats.Total, "already-counted item must not re-increment total")
+	assert.Equal(t, int64(1), stats.Passed)
+	assert.Equal(t, int64(0), stats.Failed, "already-counted item must not increment failed")
+}

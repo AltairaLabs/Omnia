@@ -30,4 +30,14 @@ describe("applySecurityHeaders", () => {
     expect(res.headers.get("X-Content-Type-Options")).toBe("nosniff");
     expect(res.headers.get("Strict-Transport-Security")).toContain("max-age=");
   });
+
+  it("allows microphone for self (duplex voice console)", () => {
+    const res = applySecurityHeaders(NextResponse.next());
+    expect(res.headers.get("Permissions-Policy")).toContain("microphone=(self)");
+  });
+
+  it("keeps camera disabled", () => {
+    const res = applySecurityHeaders(NextResponse.next());
+    expect(res.headers.get("Permissions-Policy")).toContain("camera=()");
+  });
 });

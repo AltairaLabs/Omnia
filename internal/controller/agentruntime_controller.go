@@ -114,6 +114,8 @@ type AgentRuntimeReconciler struct {
 	// AgentWorkspaceReaderClusterRole is the name of the ClusterRole that grants
 	// agent pods read access to Workspace CRDs (for service URL resolution).
 	AgentWorkspaceReaderClusterRole string
+	// DefaultExposure configures external exposure (#1553). See DefaultExposureConfig.
+	DefaultExposure DefaultExposureConfig
 	// PolicyProxyImage is the container image for the ToolPolicy enforcement
 	// sidecar. When a ToolPolicy exists in the agent's namespace, this sidecar
 	// is injected into the agent pod to evaluate CEL rules before tool execution.
@@ -159,6 +161,14 @@ type AgentRuntimeReconciler struct {
 	// to session-api via httpclient) and eval-worker pods get an audience-bound
 	// projected SA token + SESSION_API_TOKEN_PATH. Zero value = disabled.
 	ServiceAuth ServiceAuthConfig
+
+	// gatewayAPIPresent records whether the Gateway API CRDs
+	// (gateway.networking.k8s.io) are served by the cluster, detected once at
+	// SetupWithManager time. When false, the HTTPRoute/Gateway watches are not
+	// registered and reconcileFacadeEndpoints clears status.facade rather than
+	// listing absent CRDs. Installing the CRDs requires an operator restart to
+	// re-detect.
+	gatewayAPIPresent bool
 }
 
 // +kubebuilder:rbac:groups=omnia.altairalabs.ai,resources=agentruntimes,verbs=get;list;watch;create;update;patch;delete
@@ -178,6 +188,8 @@ type AgentRuntimeReconciler struct {
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=clusterrolebindings,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=policy,resources=poddisruptionbudgets,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=keda.sh,resources=scaledobjects,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=gateway.networking.k8s.io,resources=httproutes,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=gateway.networking.k8s.io,resources=gateways,verbs=get;list;watch
 
 // reconcileReferences fetches and validates all referenced resources.
 // Returns promptPack (required), toolRegistry (optional), providers map, and any error.
@@ -267,9 +279,16 @@ func (r *AgentRuntimeReconciler) fetchAndValidateProvider(
 		r.handleRefError(ctx, log, agentRuntime, ConditionTypeProviderReady, "ProviderNotFound", err)
 		return nil, ctrl.Result{}, err
 	}
-	if provider.Status.Phase == omniav1alpha1.ProviderPhaseError {
+	// A provider with a SET phase that isn't Ready is not usable. Previously
+	// this gated only on == Error, so an Unavailable (unreachable) or Pending
+	// provider sailed through and the AgentRuntime reported Ready while
+	// referencing a provider it can't use. An empty phase is still treated as
+	// ready — that's the brief optimistic window before the provider
+	// controller writes status, and blocking it would stall every fresh agent.
+	// The 10s requeue lets a recovering provider clear this without a spec edit.
+	if provider.Status.Phase != "" && provider.Status.Phase != omniav1alpha1.ProviderPhaseReady {
 		SetCondition(&agentRuntime.Status.Conditions, agentRuntime.Generation, ConditionTypeProviderReady, metav1.ConditionFalse,
-			"ProviderNotReady", fmt.Sprintf("Provider %s is in %s phase", provider.Name, provider.Status.Phase))
+			"ProviderNotReady", fmt.Sprintf("Provider %s is not ready (phase: %q)", provider.Name, provider.Status.Phase))
 		agentRuntime.Status.Phase = omniav1alpha1.AgentRuntimePhasePending
 		if statusErr := r.Status().Update(ctx, agentRuntime); statusErr != nil {
 			log.Error(statusErr, logMsgFailedToUpdateStatus)
@@ -385,6 +404,11 @@ func (r *AgentRuntimeReconciler) reconcileResources(
 	if err := r.reconcileFacadeRBAC(ctx, agentRuntime); err != nil {
 		log.Error(err, "Failed to reconcile facade RBAC")
 		// Don't fail the reconciliation for RBAC errors, just log
+	}
+
+	// Reconcile operator-provisioned external exposure (#1553); best-effort.
+	if err := r.reconcileFacadeRoute(ctx, agentRuntime); err != nil {
+		log.Error(err, "Failed to reconcile facade HTTPRoute")
 	}
 
 	// Reconcile tools ConfigMap
@@ -503,11 +527,15 @@ func (r *AgentRuntimeReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return rolloutResult, nil
 	}
 
-	// Reconcile autoscaling (HPA or KEDA if enabled)
-	if err := r.reconcileAutoscaling(ctx, agentRuntime); err != nil {
+	// Reconcile autoscaling (HPA or KEDA, resolved from the agent's own policy
+	// or the inherited WorkspaceServiceGroup default). Non-blocking: errors are
+	// logged and surfaced via the AutoscalingReady condition, not fatal.
+	autoscalingCond, err := r.reconcileAutoscaling(ctx, agentRuntime)
+	if err != nil {
 		log.Error(err, "Failed to reconcile autoscaling")
-		// Don't fail the reconciliation for autoscaling errors, just log
 	}
+	SetCondition(&agentRuntime.Status.Conditions, agentRuntime.Generation,
+		autoscalingCond.Type, autoscalingCond.Status, autoscalingCond.Reason, autoscalingCond.Message)
 
 	// Reconcile eval worker deployment for non-PromptKit agents with evals enabled
 	if err := r.reconcileEvalWorker(ctx, agentRuntime); err != nil {
@@ -552,6 +580,12 @@ func (r *AgentRuntimeReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		SetCondition(&agentRuntime.Status.Conditions, agentRuntime.Generation, ConditionTypeReady, metav1.ConditionFalse,
 			"RuntimeNotReady", "Waiting for pods to be ready")
 	}
+
+	// Publish externally-reachable facade endpoints derived from observed
+	// HTTPRoutes/Gateways into status.facade. No-op when the Gateway API is not
+	// installed. Done just before the status write so it persists in the same
+	// Status().Update below — do not add a second status write.
+	r.reconcileFacadeEndpoints(ctx, agentRuntime)
 
 	// observedGeneration is already set at the top of Reconcile.
 	if err := r.Status().Update(ctx, agentRuntime); err != nil {
@@ -721,6 +755,10 @@ func (r *AgentRuntimeReconciler) reconcileService(ctx context.Context, agentRunt
 		// MCP: expose MCP port on function-mode pods when enabled.
 		ports = appendMCPServicePort(ports, agentRuntime)
 
+		// Internal management-plane twin ports (ClusterIP-only) when
+		// allowManagementPlane is enabled.
+		ports = appendManagementServicePorts(ports, agentRuntime)
+
 		// Classify every port for Istio L7 (waypoint/sidecar). Done in one pass
 		// over the assembled ports so facades added over time are handled in a
 		// single place (agentPortAppProtocol) and never silently left as opaque
@@ -744,41 +782,12 @@ func (r *AgentRuntimeReconciler) reconcileService(ctx context.Context, agentRunt
 	agentRuntime.Status.ServiceEndpoint = fmt.Sprintf("%s.%s.svc.cluster.local:%d",
 		agentRuntime.Name, agentRuntime.Namespace, port)
 
+	// Advertise the internal management-plane ports so the dashboard and
+	// in-cluster callers can discover them explicitly (never computed).
+	agentRuntime.Status.ManagementEndpoints = managementEndpointsStatus(agentRuntime)
+
 	log.Info("Service reconciled", "result", result, "endpoint", agentRuntime.Status.ServiceEndpoint)
 	return nil
-}
-
-// facadeTypeOrDefault returns the agent's facade type, defaulting to websocket
-// (the implicit default when spec.facade.type is unset).
-func facadeTypeOrDefault(ar *omniav1alpha1.AgentRuntime) omniav1alpha1.FacadeType {
-	if ar.Spec.Facade.Type != "" {
-		return ar.Spec.Facade.Type
-	}
-	return omniav1alpha1.FacadeTypeWebSocket
-}
-
-// agentPortAppProtocol is the single source of truth mapping an agent Service
-// port to its Istio appProtocol. Facades added over time get classified here in
-// one place; anything unrecognised falls back to http (HTTP/1.1) so a waypoint
-// still does L7 rather than silently treating a new port as opaque TCP. Only the
-// primary "facade" port varies by facade type (gRPC is HTTP/2); a2a (JSON-RPC)
-// and mcp (HTTP/SSE) are HTTP.
-func agentPortAppProtocol(portName string, facadeType omniav1alpha1.FacadeType) string {
-	if portName == "facade" && facadeType == omniav1alpha1.FacadeTypeGRPC {
-		return appProtocolGRPC
-	}
-	return appProtocolHTTP
-}
-
-// setAgentPortAppProtocols stamps appProtocol on every agent Service port so an
-// Istio waypoint/sidecar classifies them for L7 routing (required for mode=mesh
-// weighted routing and the facade WebSocket upgrade). One pass over the
-// assembled ports keeps new facades from being missed.
-func setAgentPortAppProtocols(ports []corev1.ServicePort, facadeType omniav1alpha1.FacadeType) {
-	for i := range ports {
-		ap := agentPortAppProtocol(ports[i].Name, facadeType)
-		ports[i].AppProtocol = &ap
-	}
 }
 
 func (r *AgentRuntimeReconciler) updateStatusFromDeployment(
@@ -831,7 +840,9 @@ func (r *AgentRuntimeReconciler) reconcileA2AStatus(
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *AgentRuntimeReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	return ctrl.NewControllerManagedBy(mgr).
+	r.gatewayAPIPresent = gatewayAPIAvailable(mgr.GetRESTMapper())
+
+	b := ctrl.NewControllerManagedBy(mgr).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 3}).
 		For(&omniav1alpha1.AgentRuntime{}).
 		Owns(&appsv1.Deployment{}).
@@ -858,7 +869,9 @@ func (r *AgentRuntimeReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Watches(
 			&corev1.Secret{},
 			handler.EnqueueRequestsFromMapFunc(r.findAgentRuntimesForSecret),
-		).
-		Named("agentruntime").
-		Complete(r)
+		)
+
+	b = r.registerFacadeWatches(b)
+
+	return b.Named("agentruntime").Complete(r)
 }

@@ -8,6 +8,7 @@
  */
 
 import * as k8s from "@kubernetes/client-node";
+import { extractStatusCode } from "./k8s-errors";
 
 // Label used to identify secrets managed by this system
 export const CREDENTIALS_LABEL = "omnia.altairalabs.ai/type";
@@ -397,24 +398,5 @@ function getModifiedAt(secret: k8s.V1Secret): string {
 }
 
 function isNotFoundError(error: unknown): boolean {
-  // Check for response body with statusCode 404
-  if (
-    typeof error === "object" &&
-    error !== null &&
-    "statusCode" in error
-  ) {
-    return (error as { statusCode?: number }).statusCode === 404;
-  }
-  // Check for nested response object with statusCode
-  if (
-    typeof error === "object" &&
-    error !== null &&
-    "response" in error &&
-    typeof (error as { response: unknown }).response === "object" &&
-    (error as { response: unknown }).response !== null
-  ) {
-    const response = (error as { response: { statusCode?: number } }).response;
-    return response?.statusCode === 404;
-  }
-  return false;
+  return extractStatusCode(error) === 404;
 }

@@ -226,22 +226,27 @@ export function getWorkspaceWatchPath(): string {
 // Helper functions
 
 function isNotFoundError(error: unknown): boolean {
-  if (
-    typeof error === "object" &&
-    error !== null &&
-    "statusCode" in error
-  ) {
-    return (error as { statusCode?: number }).statusCode === 404;
-  }
-  if (
-    typeof error === "object" &&
-    error !== null &&
-    "response" in error &&
-    typeof (error as { response: unknown }).response === "object" &&
-    (error as { response: unknown }).response !== null
-  ) {
-    const response = (error as { response: { statusCode?: number } }).response;
-    return response?.statusCode === 404;
+  if (typeof error === "object" && error !== null) {
+    // The fetch-based @kubernetes/client-node ApiException carries the HTTP
+    // status in `code` (numeric), NOT `statusCode`. Without this branch a 404
+    // from getClusterCustomObject re-throws, getWorkspace never returns null,
+    // and the workspace-scoped route returns a bodyless 500 instead of a clean
+    // 404 — which the deploy adapter misreads as a retryable server error and
+    // retries forever (#1600).
+    if ((error as { code?: unknown }).code === 404) {
+      return true;
+    }
+    if ("statusCode" in error) {
+      return (error as { statusCode?: number }).statusCode === 404;
+    }
+    if (
+      "response" in error &&
+      typeof (error as { response: unknown }).response === "object" &&
+      (error as { response: unknown }).response !== null
+    ) {
+      const response = (error as { response: { statusCode?: number } }).response;
+      return response?.statusCode === 404;
+    }
   }
   return false;
 }

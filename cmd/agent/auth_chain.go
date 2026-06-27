@@ -36,29 +36,53 @@ import (
 // pattern (and the documented A2A integration).
 const sharedTokenSecretKey = "token"
 
-// buildAuthChain assembles the facade's per-agent auth chain. Order:
+// buildAuthChain composes the data-plane external chain with the mgmt-plane
+// validator: external (sharedToken/apiKeys/oidc/edgeTrust) → mgmt-plane.
 //
-//	sharedToken → mgmt-plane
-//
-// (apiKeys, oidc, edgeTrust slot in here in PRs 2c/2d/2e — they are
-// no-ops here when their CRD field is unset.)
+// As of full plane isolation (#1620 Milestone C) no listener wires this merged
+// chain: external listeners run buildExternalChain (data-plane only) and the
+// internal twin listeners run buildMgmtChain (mgmt-plane only). It is retained
+// as the canonical composition and exercised by the data-plane edge-case tests
+// (legacy A2A projection, missing-Secret errors) in auth_chain_test.go.
 //
 // Inputs:
 //
 //   - k8s: client for reading the AgentRuntime CR + the referenced
 //     SharedToken Secret. Pass nil when the agent is running outside a
-//     cluster (dev/test); the chain falls back to mgmt-plane only.
+//     cluster (dev/test).
 //   - mgmtPlane: the mgmt-plane validator built earlier in startup
 //     (loadMgmtPlaneValidator). Pass nil to omit it from the chain.
 //
-// Returns nil if the chain ends up empty — the facade then runs in the
-// PR 1a/c default unauthenticated-upgrade mode.
+// Returns nil if the chain ends up empty.
 func buildAuthChain(
 	ctx context.Context,
 	k8s client.Client,
 	log logr.Logger,
 	agentName, namespace string,
 	mgmtPlane auth.Validator,
+) (auth.Chain, error) {
+	external, err := buildExternalChain(ctx, k8s, log, agentName, namespace)
+	if err != nil {
+		return nil, err
+	}
+	chain := append(external, buildMgmtChain(mgmtPlane)...)
+	if len(chain) == 0 {
+		return nil, nil
+	}
+	return chain, nil
+}
+
+// buildExternalChain assembles only the data-plane (external) validators from
+// spec.externalAuth — sharedToken, apiKeys, oidc, edgeTrust — in order. It never
+// includes the mgmt-plane validator. May return an empty chain (no externalAuth
+// configured, or no k8s client); the caller decides what an empty external chain
+// means for its listener. This is the chain the external listeners run once the
+// management plane is isolated onto its own internal listeners.
+func buildExternalChain(
+	ctx context.Context,
+	k8s client.Client,
+	log logr.Logger,
+	agentName, namespace string,
 ) (auth.Chain, error) {
 	chain := auth.Chain{}
 
@@ -67,8 +91,8 @@ func buildAuthChain(
 		err := k8s.Get(ctx, types.NamespacedName{Name: agentName, Namespace: namespace}, ar)
 		switch {
 		case apierrors.IsNotFound(err):
-			// Agent is being created or deleted out-of-band — fall back
-			// to mgmt-plane only and let the controller catch up.
+			// Agent is being created or deleted out-of-band — return an empty
+			// external chain and let the controller catch up.
 			log.V(1).Info("agent runtime not found at startup, skipping data-plane validators",
 				"agent", agentName, "namespace", namespace)
 		case err != nil:
@@ -95,14 +119,17 @@ func buildAuthChain(
 			"hasNamespace", namespace != "")
 	}
 
-	if mgmtPlane != nil {
-		chain = append(chain, mgmtPlane)
-	}
-
-	if len(chain) == 0 {
-		return nil, nil
-	}
 	return chain, nil
+}
+
+// buildMgmtChain returns the single-purpose management-plane chain: just the
+// mgmt-plane validator, or an empty chain when none is configured. This is the
+// chain the internal twin listeners run.
+func buildMgmtChain(mgmtPlane auth.Validator) auth.Chain {
+	if mgmtPlane == nil {
+		return auth.Chain{}
+	}
+	return auth.Chain{mgmtPlane}
 }
 
 // buildDataPlaneValidators reads the AgentRuntime's spec.externalAuth

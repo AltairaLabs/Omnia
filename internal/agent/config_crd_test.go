@@ -18,6 +18,7 @@ package agent
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -62,8 +63,8 @@ func TestLoadFromCRD_HappyPath(t *testing.T) {
 			Type: v1alpha1.FacadeTypeWebSocket,
 			Port: ptr.To(int32(9090)),
 		},
-		Session: &v1alpha1.SessionConfig{
-			Type: v1alpha1.SessionStoreTypeRedis,
+		Context: &v1alpha1.ContextConfig{
+			Type: v1alpha1.ContextStoreTypeRedis,
 			TTL:  ptr.To("2h"),
 		},
 		ToolRegistryRef: &v1alpha1.ToolRegistryRef{
@@ -178,8 +179,8 @@ func TestLoadFromCRD_InvalidSessionTTL(t *testing.T) {
 	ar := newFakeAgentRuntime("agent", "ns", v1alpha1.AgentRuntimeSpec{
 		PromptPackRef: v1alpha1.PromptPackRef{Name: "pack"},
 		Facade:        v1alpha1.FacadeConfig{Type: v1alpha1.FacadeTypeWebSocket},
-		Session: &v1alpha1.SessionConfig{
-			Type: v1alpha1.SessionStoreTypeMemory,
+		Context: &v1alpha1.ContextConfig{
+			Type: v1alpha1.ContextStoreTypeMemory,
 			TTL:  ptr.To("not-a-duration"),
 		},
 	})
@@ -214,8 +215,8 @@ func TestLoadFromCRD_SessionTTLNil(t *testing.T) {
 	ar := newFakeAgentRuntime("agent", "ns", v1alpha1.AgentRuntimeSpec{
 		PromptPackRef: v1alpha1.PromptPackRef{Name: "pack"},
 		Facade:        v1alpha1.FacadeConfig{Type: v1alpha1.FacadeTypeWebSocket},
-		Session: &v1alpha1.SessionConfig{
-			Type: v1alpha1.SessionStoreTypeMemory,
+		Context: &v1alpha1.ContextConfig{
+			Type: v1alpha1.ContextStoreTypeMemory,
 			// TTL is nil — should default
 		},
 	})
@@ -228,6 +229,35 @@ func TestLoadFromCRD_SessionTTLNil(t *testing.T) {
 	}
 	if cfg.SessionTTL != DefaultSessionTTL {
 		t.Errorf("SessionTTL = %v, want default %v", cfg.SessionTTL, DefaultSessionTTL)
+	}
+}
+
+func TestLoadConfigFromCRD_DrainTimeout(t *testing.T) {
+	d := "2m"
+	ar := &v1alpha1.AgentRuntime{Spec: v1alpha1.AgentRuntimeSpec{
+		Facade: v1alpha1.FacadeConfig{Type: v1alpha1.FacadeTypeWebSocket, DrainTimeout: &d},
+	}}
+	cfg := &Config{}
+	if err := loadFacadeConfigFromCRD(cfg, ar); err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.DrainTimeout != 2*time.Minute {
+		t.Fatalf("DrainTimeout = %v, want 2m", cfg.DrainTimeout)
+	}
+}
+
+func TestLoadConfigFromCRD_DrainTimeout_Invalid(t *testing.T) {
+	d := "bad-duration"
+	ar := &v1alpha1.AgentRuntime{Spec: v1alpha1.AgentRuntimeSpec{
+		Facade: v1alpha1.FacadeConfig{Type: v1alpha1.FacadeTypeWebSocket, DrainTimeout: &d},
+	}}
+	cfg := &Config{}
+	err := loadFacadeConfigFromCRD(cfg, ar)
+	if err == nil {
+		t.Fatal("expected error for invalid drain timeout")
+	}
+	if got := err.Error(); !strings.Contains(got, "invalid drain timeout") {
+		t.Errorf("error = %q, want it to contain %q", got, "invalid drain timeout")
 	}
 }
 
@@ -784,5 +814,63 @@ func TestLoadMCPConfigFromCRD_NilMCP(t *testing.T) {
 	}
 	if cfg.MCPPort != DefaultMCPPort {
 		t.Errorf("MCPPort default: got %d want %d", cfg.MCPPort, DefaultMCPPort)
+	}
+}
+
+func TestApplyManagementPlanePorts(t *testing.T) {
+	tests := []struct {
+		name       string
+		ext        *v1alpha1.AgentExternalAuth
+		a2aEnabled bool
+		mcpEnabled bool
+		wantFacade int
+		wantA2A    int
+		wantMCP    int
+	}{
+		{name: "nil externalAuth defaults to mgmt allowed (WS only)", ext: nil, wantFacade: DefaultInternalFacadePort},
+		{name: "nil allowManagementPlane defaults true", ext: &v1alpha1.AgentExternalAuth{}, wantFacade: DefaultInternalFacadePort},
+		{name: "a2a enabled adds a2a internal port", ext: &v1alpha1.AgentExternalAuth{}, a2aEnabled: true, wantFacade: DefaultInternalFacadePort, wantA2A: DefaultInternalA2APort},
+		{name: "mcp enabled adds mcp internal port", ext: &v1alpha1.AgentExternalAuth{}, mcpEnabled: true, wantFacade: DefaultInternalFacadePort, wantMCP: DefaultInternalMCPPort},
+		{name: "allowManagementPlane false disables all", ext: &v1alpha1.AgentExternalAuth{AllowManagementPlane: ptr.To(false)}, a2aEnabled: true, mcpEnabled: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &Config{A2AEnabled: tt.a2aEnabled, MCPEnabled: tt.mcpEnabled}
+			applyManagementPlanePorts(cfg, tt.ext)
+			if cfg.InternalFacadePort != tt.wantFacade {
+				t.Errorf("InternalFacadePort = %d, want %d", cfg.InternalFacadePort, tt.wantFacade)
+			}
+			if cfg.InternalA2APort != tt.wantA2A {
+				t.Errorf("InternalA2APort = %d, want %d", cfg.InternalA2APort, tt.wantA2A)
+			}
+			if cfg.InternalMCPPort != tt.wantMCP {
+				t.Errorf("InternalMCPPort = %d, want %d", cfg.InternalMCPPort, tt.wantMCP)
+			}
+		})
+	}
+}
+
+func TestLoadInternalPortsFromEnv(t *testing.T) {
+	t.Setenv(EnvInternalFacadePort, "18080")
+	t.Setenv(EnvInternalA2APort, "19999")
+	cfg := &Config{}
+	if err := loadInternalPortsFromEnv(cfg); err != nil {
+		t.Fatalf("loadInternalPortsFromEnv: %v", err)
+	}
+	if cfg.InternalFacadePort != 18080 {
+		t.Errorf("InternalFacadePort = %d, want 18080", cfg.InternalFacadePort)
+	}
+	if cfg.InternalA2APort != 19999 {
+		t.Errorf("InternalA2APort = %d, want 19999", cfg.InternalA2APort)
+	}
+	if cfg.InternalMCPPort != 0 {
+		t.Errorf("InternalMCPPort = %d, want 0 (unset)", cfg.InternalMCPPort)
+	}
+}
+
+func TestLoadInternalPortsFromEnv_Invalid(t *testing.T) {
+	t.Setenv(EnvInternalFacadePort, "not-a-number")
+	if err := loadInternalPortsFromEnv(&Config{}); err == nil {
+		t.Error("expected error for malformed internal port, got nil")
 	}
 }

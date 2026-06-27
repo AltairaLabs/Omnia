@@ -25,7 +25,6 @@ import {
 import {
   validateWorkspace,
   getWorkspaceResource,
-  serverErrorResponse,
   notFoundResponse,
   handleK8sError,
   buildCrdResource,
@@ -47,6 +46,7 @@ interface CrdMetadata {
   namespace?: string;
   labels?: Record<string, string>;
   annotations?: Record<string, string>;
+  resourceVersion?: string;
 }
 
 /**
@@ -153,7 +153,7 @@ export function createCollectionRoutes<T>(config: CollectionRouteConfig) {
         if (auditCtx) {
           auditError(auditCtx, "list", undefined, error, 500);
         }
-        return serverErrorResponse(error, `Failed to list ${errorLabel}`);
+        return handleK8sError(error, `list ${errorLabel}`);
       }
     }
   );
@@ -207,7 +207,9 @@ export function createCollectionRoutes<T>(config: CollectionRouteConfig) {
         if (auditCtx) {
           auditError(auditCtx, "create", resourceName, error, 500);
         }
-        return serverErrorResponse(error, `Failed to create ${errorLabel}`);
+        // Surface CRD validation (422) / AlreadyExists (409) with the real
+        // Kubernetes message instead of a generic 500 (#1600 follow-up).
+        return handleK8sError(error, `create ${errorLabel}`);
       }
     }
   );
@@ -356,6 +358,8 @@ export function createItemRoutes<T extends CrdResource>(config: ItemRouteConfig)
           ...result.resource.metadata?.annotations,
           ...body.metadata?.annotations,
         },
+        resourceVersion:
+          body.metadata?.resourceVersion ?? result.resource.metadata?.resourceVersion,
       },
       spec: body.spec || result.resource.spec,
     };
@@ -389,7 +393,7 @@ export function createSharedCollectionRoutes<T>(config: SharedCollectionRouteCon
       const items = await listSharedCrd<T>(plural, SYSTEM_NAMESPACE);
       return NextResponse.json(items);
     } catch (error) {
-      return serverErrorResponse(error, `Failed to list ${errorLabel}`);
+      return handleK8sError(error, `list ${errorLabel}`);
     }
   }
 
@@ -426,7 +430,7 @@ export function createSharedItemRoutes<T>(config: SharedItemRouteConfig) {
 
       return NextResponse.json(item);
     } catch (error) {
-      return serverErrorResponse(error, `Failed to get ${errorLabel}`);
+      return handleK8sError(error, `get ${errorLabel}`);
     }
   }
 

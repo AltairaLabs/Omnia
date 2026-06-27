@@ -11,6 +11,7 @@ import { useAgentConsole, useConsoleConfig } from "@/hooks/console";
 import { ConsoleMessage } from "./console-message";
 import { AttachmentPreview } from "./attachment-preview";
 import { ImageCropDialog } from "./image-crop-dialog";
+import { VoiceCallBar } from "./voice/voice-call-bar";
 import { AgentErrorBanner } from "./agent-error-banner";
 import { isAllowedType, formatFileSize, needsResize } from "./attachment-utils";
 import { blobToDataUrl, getImageDimensions } from "@/lib/image-processor";
@@ -107,7 +108,9 @@ export function AgentConsole({ agentName, namespace, sessionId, className }: Rea
   const dragCounterRef = useRef(0);
 
   // Get attachment config from agent's console configuration
-  const { config: attachmentConfig, mediaRequirements } = useConsoleConfig(namespace, agentName);
+  const { config: attachmentConfig, mediaRequirements, duplex } = useConsoleConfig(namespace, agentName);
+  const audioSampleRate = mediaRequirements.audio?.recommendedSampleRate ?? 24000;
+  const audioChannels = mediaRequirements.audio?.channels ?? 1;
 
   const {
     sessionId: serverSessionId,
@@ -120,17 +123,19 @@ export function AgentConsole({ agentName, namespace, sessionId, className }: Rea
     clearMessages,
     approveToolCall,
     rejectToolCall,
+    handleMessage,
   } = useAgentConsole({
     agentName,
     namespace,
     sessionId,
   });
 
-  // Auto-connect on mount
+  // Auto-connect on mount (skip text WebSocket for duplex agents — VoiceCallBar manages its own connection)
   useEffect(() => {
+    if (duplex?.enabled) return;
     connect();
     return () => disconnect();
-  }, [connect, disconnect]);
+  }, [connect, disconnect, duplex?.enabled]);
 
   // Execute a client-side tool and send the result
   const executeClientTool = useCallback((callId: string, toolName: string, args?: Record<string, unknown>) => {
@@ -436,6 +441,69 @@ export function AgentConsole({ agentName, namespace, sessionId, className }: Rea
     ),
   }[status];
 
+  /** Renders the text-input composer (attachment button + textarea + send button). */
+  function renderTextComposer() {
+    return (
+      <div className="p-4 border-t bg-muted/30">
+        {attachments.length > 0 && (
+          <AttachmentPreview
+            attachments={attachments}
+            onRemove={removeAttachment}
+            className="mb-3"
+          />
+        )}
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          accept={attachmentConfig.acceptString}
+          onChange={handleFileInputChange}
+          className="hidden"
+          tabIndex={-1}
+        />
+        <div className="flex gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="icon"
+            onClick={handleAttachmentClick}
+            disabled={status !== "connected" || attachments.length >= attachmentConfig.maxFiles}
+            className="shrink-0"
+            aria-label="Attach files"
+            data-testid="attachment-button"
+          >
+            <Paperclip className="h-4 w-4" />
+          </Button>
+          <Textarea
+            ref={textareaRef}
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={handleKeyDown}
+            onPaste={handlePaste}
+            placeholder={
+              status === "connected"
+                ? "Type a message... (Enter to send, Shift+Enter for new line)"
+                : "Connect to start chatting..."
+            }
+            disabled={status !== "connected"}
+            className="min-h-[44px] max-h-[120px] resize-none"
+            rows={1}
+            data-testid="console-input"
+          />
+          <Button
+            onClick={handleSend}
+            disabled={!canSend}
+            className="shrink-0"
+            aria-label="Send message"
+            data-testid="send-button"
+          >
+            <Send className="h-4 w-4" />
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     // eslint-disable-next-line jsx-a11y/no-static-element-interactions -- Drag events for file drop zone, keyboard users can use the attach file button instead
     <div
@@ -567,68 +635,18 @@ export function AgentConsole({ agentName, namespace, sessionId, className }: Rea
         )}
       </div>
 
-      {/* Input area */}
-      <div className="p-4 border-t bg-muted/30">
-        {/* Attachment preview */}
-        {attachments.length > 0 && (
-          <AttachmentPreview
-            attachments={attachments}
-            onRemove={removeAttachment}
-            className="mb-3"
-          />
-        )}
-
-        {/* Hidden file input - visually hidden but accessible for programmatic clicks */}
-        <input
-          ref={fileInputRef}
-          type="file"
-          multiple
-          accept={attachmentConfig.acceptString}
-          onChange={handleFileInputChange}
-          className="hidden"
-          tabIndex={-1}
+      {/* Input area — voice call bar for duplex agents, text composer otherwise */}
+      {duplex?.enabled ? (
+        <VoiceCallBar
+          namespace={namespace}
+          agentName={agentName}
+          sampleRate={audioSampleRate}
+          channels={audioChannels}
+          onServerMessage={handleMessage}
         />
-
-        <div className="flex gap-2">
-          <Button
-            type="button"
-            variant="outline"
-            size="icon"
-            onClick={handleAttachmentClick}
-            disabled={status !== "connected" || attachments.length >= attachmentConfig.maxFiles}
-            className="shrink-0"
-            aria-label="Attach files"
-            data-testid="attachment-button"
-          >
-            <Paperclip className="h-4 w-4" />
-          </Button>
-          <Textarea
-            ref={textareaRef}
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            onPaste={handlePaste}
-            placeholder={
-              status === "connected"
-                ? "Type a message... (Enter to send, Shift+Enter for new line)"
-                : "Connect to start chatting..."
-            }
-            disabled={status !== "connected"}
-            className="min-h-[44px] max-h-[120px] resize-none"
-            rows={1}
-            data-testid="console-input"
-          />
-          <Button
-            onClick={handleSend}
-            disabled={!canSend}
-            className="shrink-0"
-            aria-label="Send message"
-            data-testid="send-button"
-          >
-            <Send className="h-4 w-4" />
-          </Button>
-        </div>
-      </div>
+      ) : (
+        renderTextComposer()
+      )}
 
       {/* Image crop dialog */}
       {cropFile && mediaRequirements?.image?.maxDimensions && (

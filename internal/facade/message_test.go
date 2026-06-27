@@ -126,6 +126,21 @@ func TestHandleClientMessage_ToolCallNackConvertedToResult(t *testing.T) {
 	assert.Equal(t, "tool not supported", router.resultCalls[0].result.Error)
 }
 
+func TestAudioParamsFromFrame_HonorsNegotiation(t *testing.T) {
+	meta, _ := json.Marshal(BinaryMediaChunkMetadata{SampleRate: 24000, Channels: 1, Codec: "pcm"})
+	got := audioParamsFromFrame(&BinaryFrame{Metadata: meta})
+	if got.SampleRate != 24000 || got.Channels != 1 || got.Codec != "pcm" {
+		t.Fatalf("got %+v", got)
+	}
+}
+
+func TestAudioParamsFromFrame_Defaults(t *testing.T) {
+	got := audioParamsFromFrame(&BinaryFrame{})
+	if got.SampleRate != 16000 || got.Channels != 1 || got.Codec != defaultAudioCodec {
+		t.Fatalf("got %+v", got)
+	}
+}
+
 func TestSendBinaryFrame_ClosedConnection(t *testing.T) {
 	s := &Server{
 		config:  DefaultServerConfig(),

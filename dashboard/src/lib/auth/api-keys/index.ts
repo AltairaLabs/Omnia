@@ -24,17 +24,19 @@
 export * from "./types";
 export { getMemoryApiKeyStore } from "./memory-store";
 export { getFileApiKeyStore, FileApiKeyStore } from "./file-store";
+export { PostgresApiKeyStore, getPostgresApiKeyStore } from "./postgres-store";
 
 import { headers } from "next/headers";
 import type { ApiKeyStore, ApiKey } from "./types";
 import { getMemoryApiKeyStore } from "./memory-store";
 import { getFileApiKeyStore } from "./file-store";
+import { getPostgresApiKeyStore } from "./postgres-store";
 import type { User } from "../types";
 
 /**
  * Store type for API keys.
  */
-export type ApiKeyStoreType = "memory" | "file";
+export type ApiKeyStoreType = "memory" | "file" | "postgres";
 
 /**
  * Configuration for API key authentication.
@@ -46,6 +48,8 @@ export interface ApiKeyConfig {
   storeType: ApiKeyStoreType;
   /** Path to keys file (when storeType=file) */
   filePath: string;
+  /** PostgreSQL connection string (when storeType=postgres) */
+  postgresUrl: string;
   /** Maximum keys per user (for memory store) */
   maxKeysPerUser: number;
   /** Default expiration in days (0 = never, for memory store) */
@@ -68,6 +72,10 @@ export function getApiKeyConfig(): ApiKeyConfig {
     enabled: process.env.OMNIA_AUTH_API_KEYS_ENABLED !== "false",
     storeType,
     filePath,
+    postgresUrl:
+      process.env.OMNIA_AUTH_API_KEYS_POSTGRES_URL ||
+      process.env.OMNIA_BUILTIN_POSTGRES_URL ||
+      "",
     maxKeysPerUser: Number.parseInt(
       process.env.OMNIA_AUTH_API_KEYS_MAX_PER_USER || "10",
       10
@@ -76,9 +84,20 @@ export function getApiKeyConfig(): ApiKeyConfig {
       process.env.OMNIA_AUTH_API_KEYS_DEFAULT_EXPIRATION || "90",
       10
     ),
-    // File store is read-only
-    allowCreate: storeType === "memory",
+    // Only the file store is read-only; memory and postgres support creation
+    allowCreate: storeType !== "file",
   };
+}
+
+// memoryStoreWarned gates the "memory store while a postgres URL is wired"
+// warning so it fires once per process instead of on every store lookup
+// (getApiKeyStore runs per request). resetApiKeyAuthWarningsForTest re-arms it.
+let memoryStoreWarned = false;
+
+// resetApiKeyAuthWarningsForTest re-arms the once-per-process warnings. Test
+// helper only — not used in production code paths.
+export function resetApiKeyAuthWarningsForTest(): void {
+  memoryStoreWarned = false;
 }
 
 /**
@@ -87,6 +106,7 @@ export function getApiKeyConfig(): ApiKeyConfig {
  * Store types:
  * - memory: In-memory store (default, for development)
  * - file: File-based store reading from mounted K8s Secret
+ * - postgres: PostgreSQL-backed store (production)
  */
 export function getApiKeyStore(): ApiKeyStore {
   const config = getApiKeyConfig();
@@ -94,8 +114,24 @@ export function getApiKeyStore(): ApiKeyStore {
   switch (config.storeType) {
     case "file":
       return getFileApiKeyStore(config.filePath);
+    case "postgres":
+      return getPostgresApiKeyStore(config.postgresUrl);
     case "memory":
     default:
+      // A wired postgres URL + the ephemeral memory store is almost always a
+      // misconfig: keys are lost on every dashboard restart, so saved
+      // credentials (e.g. deploy-profile tokens) silently stop working. Warn
+      // loudly once so it's visible in logs rather than surfacing as opaque
+      // 401/403s later (#1582).
+      if (config.postgresUrl && !memoryStoreWarned) {
+        memoryStoreWarned = true;
+        console.warn(
+          "[api-keys] OMNIA_AUTH_API_KEYS_POSTGRES_URL is set but the api-key " +
+            "store is the ephemeral in-memory store — keys are lost on every " +
+            "dashboard restart. Set OMNIA_AUTH_API_KEYS_STORE=postgres to use " +
+            "the durable store."
+        );
+      }
       return getMemoryApiKeyStore();
   }
 }
@@ -156,20 +192,49 @@ export async function authenticateApiKey(): Promise<User | null> {
     // Ignore errors updating last used
   });
 
+  warnIfMissingOwnerSnapshot(apiKey);
+
   // Create user from API key
   return createUserFromApiKey(apiKey);
 }
 
+// warnIfMissingOwnerSnapshot surfaces the silent failure where a
+// workspace-scoped key carries no owner identity/group snapshot at all. Such a
+// key authenticates but resolves NO workspace role (group roleBindings and
+// directGrants both have nothing to match), and a scoped key can't fall back to
+// platform-admin (#1561) — so every request 403s with an opaque "Access denied".
+// The usual cause is a dashboard image/schema skew: the key was minted before
+// the owner-snapshot columns existed (#1568). Legacy unscoped keys are
+// unaffected and intentionally not warned. Exported for testing. (#1582)
+export function warnIfMissingOwnerSnapshot(apiKey: ApiKey): void {
+  const scoped = !!apiKey.workspaces && apiKey.workspaces.length > 0;
+  const hasSnapshot =
+    !!apiKey.ownerEmail ||
+    (!!apiKey.ownerGroups && apiKey.ownerGroups.length > 0);
+  if (scoped && !hasSnapshot) {
+    console.warn(
+      `[api-keys] workspace-scoped key ${apiKey.id} carries no owner snapshot ` +
+        "(email/groups) — it will resolve no workspace role and every request " +
+        "will 403. Likely minted before the owner-snapshot upgrade (#1568); " +
+        "re-issue the key after upgrading the dashboard."
+    );
+  }
+}
+
 /**
- * Create a User object from an API key.
+ * Build a User from an API key. Carries the owner's snapshot identity/groups
+ * (so per-workspace role resolves as if the owner called) and the key's
+ * workspace allowlist. Exported for testing.
  */
-function createUserFromApiKey(apiKey: ApiKey): User {
+export function createUserFromApiKey(apiKey: ApiKey): User {
   return {
     id: apiKey.userId,
     username: `apikey:${apiKey.name}`,
-    groups: [],
+    email: apiKey.ownerEmail,
+    groups: apiKey.ownerGroups ?? [],
     role: apiKey.role,
     provider: "proxy", // Treat API keys like proxy auth
+    apiKeyScope: { workspaces: apiKey.workspaces },
   };
 }
 

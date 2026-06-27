@@ -191,7 +191,7 @@ spec:
     type: websocket
     port: 8080
     handler: runtime  # Production mode
-  session:
+  context:
     type: redis
     storeRef:
       name: redis-credentials

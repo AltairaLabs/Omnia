@@ -104,3 +104,18 @@ func TestNoOpMetrics_AudioMethods_ViaInterface(t *testing.T) {
 	metrics.AudioSessionEnded()
 	metrics.AudioIngestLatency(0.001)
 }
+
+func TestNoOpMetrics_RealtimeHooks(t *testing.T) {
+	var m ServerMetrics = &NoOpMetrics{}
+	m.RealtimeSessionParked()
+	m.RealtimeSessionReattached()
+	m.RealtimeSessionParkExpired()
+}
+
+func TestNoOpMetrics_DrainHooks(t *testing.T) {
+	var m ServerMetrics = &NoOpMetrics{}
+	m.RealtimeDrainStarted()
+	m.RealtimeDrainCompleted("all_drained", 1.2, 3, 0)
+	m.RealtimeDrainCompleted("deadline", 30.0, 0, 2)
+	m.RealtimeDrainCompleted("ctx_canceled", 5.5, 1, 1)
+}

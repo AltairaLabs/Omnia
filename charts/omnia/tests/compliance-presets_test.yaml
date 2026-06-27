@@ -122,7 +122,7 @@ tests:
           path: metadata.labels["omnia.altairalabs.ai/compliance-preset"]
           value: ccpa
       - equal:
-          path: spec.recording.richData
+          path: spec.recording.runtimeData
           value: false
       - equal:
           path: spec.recording.pii.encrypt

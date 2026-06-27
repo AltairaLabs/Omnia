@@ -70,6 +70,60 @@ func TestReconcileRole_IncludesNamespaceReadAccess(t *testing.T) {
 	assert.True(t, hasNamespaceRead, "facade Role must grant GET on namespaces for workspace name resolution")
 }
 
+// reconcileRoleAndGetSecretVerbs reconciles the facade Role for ar and returns
+// the verbs granted on core/secrets.
+func reconcileRoleAndGetSecretVerbs(t *testing.T, ar *omniav1alpha1.AgentRuntime) []string {
+	t.Helper()
+	scheme := runtime.NewScheme()
+	require.NoError(t, omniav1alpha1.AddToScheme(scheme))
+	require.NoError(t, rbacv1.AddToScheme(scheme))
+	fakeClient := fake.NewClientBuilder().WithScheme(scheme).Build()
+	r := &AgentRuntimeReconciler{Client: fakeClient, Scheme: scheme}
+	require.NoError(t, r.reconcileRole(context.Background(), ar))
+
+	role := &rbacv1.Role{}
+	require.NoError(t, fakeClient.Get(context.Background(), types.NamespacedName{
+		Name: ar.Name + "-facade", Namespace: ar.Namespace,
+	}, role))
+	for _, rule := range role.Rules {
+		for _, res := range rule.Resources {
+			if res == "secrets" {
+				return rule.Verbs
+			}
+		}
+	}
+	return nil
+}
+
+// TestReconcileRole_SecretsGetOnlyWithoutAPIKeys: with no externalAuth.apiKeys,
+// the facade only Gets a named Secret (sharedToken/oidc) — no list/watch.
+func TestReconcileRole_SecretsGetOnlyWithoutAPIKeys(t *testing.T) {
+	ar := &omniav1alpha1.AgentRuntime{
+		ObjectMeta: metav1.ObjectMeta{Name: "no-apikeys", Namespace: "test-ns", UID: "u1"},
+	}
+	verbs := reconcileRoleAndGetSecretVerbs(t, ar)
+	assert.ElementsMatch(t, []string{"get"}, verbs,
+		"without apiKeys auth the facade should only get a named Secret")
+}
+
+// TestReconcileRole_SecretsListWatchWithAPIKeys is the #1591 regression: when
+// externalAuth.apiKeys is set, the api-key store Lists Secrets by label, so the
+// Role must grant list+watch (not just get) — else the facade crash-loops on
+// RBAC once api-key auth is enabled.
+func TestReconcileRole_SecretsListWatchWithAPIKeys(t *testing.T) {
+	ar := &omniav1alpha1.AgentRuntime{
+		ObjectMeta: metav1.ObjectMeta{Name: "with-apikeys", Namespace: "test-ns", UID: "u2"},
+		Spec: omniav1alpha1.AgentRuntimeSpec{
+			ExternalAuth: &omniav1alpha1.AgentExternalAuth{
+				APIKeys: &omniav1alpha1.APIKeysAuth{},
+			},
+		},
+	}
+	verbs := reconcileRoleAndGetSecretVerbs(t, ar)
+	assert.ElementsMatch(t, []string{"get", "list", "watch"}, verbs,
+		"apiKeys auth needs list+watch on Secrets for the label-selected store")
+}
+
 func TestReconcileWorkspaceReaderBinding_Creates(t *testing.T) {
 	ar := &omniav1alpha1.AgentRuntime{
 		ObjectMeta: metav1.ObjectMeta{

@@ -6,7 +6,7 @@
  * `RedisSessionStore`; do not use this for multi-replica deployments.
  */
 
-import type { PkceRecord, SessionRecord, SessionStore } from "./types";
+import type { CliCodeRecord, CliFlowRecord, PkceRecord, SessionRecord, SessionStore } from "./types";
 
 interface Entry<T> {
   value: T;
@@ -22,6 +22,8 @@ function requirePositiveTtl(ttlSeconds: number): void {
 export class MemorySessionStore implements SessionStore {
   private readonly sessions = new Map<string, Entry<SessionRecord>>();
   private readonly pkce = new Map<string, Entry<PkceRecord>>();
+  private readonly cliFlows = new Map<string, Entry<CliFlowRecord>>();
+  private readonly cliCodes = new Map<string, Entry<CliCodeRecord>>();
 
   async getSession(sid: string): Promise<SessionRecord | null> {
     return this.readAndExpire(this.sessions, sid);
@@ -52,6 +54,36 @@ export class MemorySessionStore implements SessionStore {
     if (!entry) return null;
     // Single-use: always delete on consume, even if expired.
     this.pkce.delete(state);
+    if (entry.expiresAt <= Date.now()) return null;
+    return entry.value;
+  }
+
+  async putCliFlow(flowId: string, record: CliFlowRecord, ttlSeconds: number): Promise<void> {
+    requirePositiveTtl(ttlSeconds);
+    this.cliFlows.set(flowId, { value: record, expiresAt: Date.now() + ttlSeconds * 1000 });
+  }
+
+  async getCliFlow(flowId: string): Promise<CliFlowRecord | null> {
+    return this.readAndExpire(this.cliFlows, flowId);
+  }
+
+  async consumeCliFlow(flowId: string): Promise<CliFlowRecord | null> {
+    const entry = this.cliFlows.get(flowId);
+    if (!entry) return null;
+    this.cliFlows.delete(flowId);
+    if (entry.expiresAt <= Date.now()) return null;
+    return entry.value;
+  }
+
+  async putCliCode(code: string, record: CliCodeRecord, ttlSeconds: number): Promise<void> {
+    requirePositiveTtl(ttlSeconds);
+    this.cliCodes.set(code, { value: record, expiresAt: Date.now() + ttlSeconds * 1000 });
+  }
+
+  async consumeCliCode(code: string): Promise<CliCodeRecord | null> {
+    const entry = this.cliCodes.get(code);
+    if (!entry) return null;
+    this.cliCodes.delete(code);
     if (entry.expiresAt <= Date.now()) return null;
     return entry.value;
   }

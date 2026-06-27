@@ -268,7 +268,7 @@ var _ = Describe("AgentRuntime Controller", func() {
 
 			By("verifying termination grace period")
 			Expect(deployment.Spec.Template.Spec.TerminationGracePeriodSeconds).NotTo(BeNil())
-			Expect(*deployment.Spec.Template.Spec.TerminationGracePeriodSeconds).To(Equal(int64(45)))
+			Expect(*deployment.Spec.Template.Spec.TerminationGracePeriodSeconds).To(Equal(int64(defaultDrainTimeoutSeconds + drainGraceBufferSeconds)))
 
 			By("verifying the Service was created")
 			service := &corev1.Service{}
@@ -276,8 +276,12 @@ var _ = Describe("AgentRuntime Controller", func() {
 				return k8sClient.Get(ctx, agentRuntimeKey, service)
 			}, timeout, interval).Should(Succeed())
 
-			Expect(service.Spec.Ports).To(HaveLen(1))
+			// facade + the internal management-plane twin (allowManagementPlane
+			// defaults true, so every agent gets a facade-mgmt port).
+			Expect(service.Spec.Ports).To(HaveLen(2))
 			Expect(service.Spec.Ports[0].Port).To(Equal(int32(DefaultFacadePort)))
+			Expect(service.Spec.Ports[1].Name).To(Equal(portNameFacadeMgmt))
+			Expect(service.Spec.Ports[1].Port).To(Equal(int32(DefaultInternalFacadePort)))
 			Expect(service.Spec.Type).To(Equal(corev1.ServiceTypeClusterIP))
 
 			By("verifying owner references are set")
@@ -1316,11 +1320,11 @@ var _ = Describe("AgentRuntime Controller", func() {
 					Facade: omniav1alpha1.FacadeConfig{
 						Type: omniav1alpha1.FacadeTypeWebSocket,
 					},
-					Session: &omniav1alpha1.SessionConfig{
-						Type: omniav1alpha1.SessionStoreTypeRedis,
+					Context: &omniav1alpha1.ContextConfig{
+						Type: omniav1alpha1.ContextStoreTypeRedis,
 						TTL:  &sessionTTL,
 						StoreRef: &corev1.LocalObjectReference{
-							Name: "redis-secret",
+							Name: testRedisSecretName,
 						},
 					},
 					Providers: []omniav1alpha1.NamedProviderRef{
@@ -2329,7 +2333,9 @@ var _ = Describe("AgentRuntime Controller", func() {
 			Eventually(func() error {
 				return k8sClient.Get(ctx, agentRuntimeKey, service)
 			}, timeout, interval).Should(Succeed())
-			Expect(service.Spec.Ports).To(HaveLen(2))
+			// facade + a2a + their internal management-plane twins
+			// (allowManagementPlane defaults true).
+			Expect(service.Spec.Ports).To(HaveLen(4))
 
 			portNames := make(map[string]int32)
 			for _, p := range service.Spec.Ports {
@@ -2338,6 +2344,8 @@ var _ = Describe("AgentRuntime Controller", func() {
 			Expect(portNames).To(HaveKey("facade"))
 			Expect(portNames).To(HaveKey("a2a"))
 			Expect(portNames["a2a"]).To(Equal(int32(DefaultA2APort)))
+			Expect(portNames[portNameFacadeMgmt]).To(Equal(int32(DefaultInternalFacadePort)))
+			Expect(portNames[portNameA2AMgmt]).To(Equal(int32(DefaultInternalA2APort)))
 
 			By("verifying A2A status is populated for dual-protocol agent")
 			updated := &omniav1alpha1.AgentRuntime{}
@@ -2776,6 +2784,61 @@ var _ = Describe("AgentRuntime Controller", func() {
 			Expect(condition).NotTo(BeNil())
 			Expect(condition.Status).To(Equal(metav1.ConditionTrue))
 			Expect(condition.Reason).To(Equal("ProviderFound"))
+		})
+
+		// Regression: an Unavailable (unreachable) provider used to slip through
+		// because the gate only rejected Error, so the AgentRuntime reported
+		// Ready while referencing a provider it can't use.
+		It("should reject a provider in Unavailable phase", func() {
+			By("creating a Provider in Unavailable phase")
+			providerUnavail := &omniav1alpha1.Provider{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "provider-unavailable",
+					Namespace: "default",
+				},
+				Spec: omniav1alpha1.ProviderSpec{
+					Type:    omniav1alpha1.ProviderTypeOllama,
+					Model:   "llama3",
+					BaseURL: "http://ollama:11434",
+				},
+			}
+			Expect(k8sClient.Create(ctx, providerUnavail)).To(Succeed())
+			providerUnavail.Status.Phase = omniav1alpha1.ProviderPhaseUnavailable
+			Expect(k8sClient.Status().Update(ctx, providerUnavail)).To(Succeed())
+			defer func() { _ = k8sClient.Delete(ctx, providerUnavail) }()
+
+			ref := omniav1alpha1.ProviderRef{Name: "provider-unavailable"}
+			agentRuntime := &omniav1alpha1.AgentRuntime{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "agent-unavailable-provider",
+					Namespace: "default",
+				},
+				Spec: omniav1alpha1.AgentRuntimeSpec{
+					PromptPackRef: omniav1alpha1.PromptPackRef{Name: "test-pack"},
+					Facade:        omniav1alpha1.FacadeConfig{Type: omniav1alpha1.FacadeTypeWebSocket},
+					Providers: []omniav1alpha1.NamedProviderRef{
+						{Name: "default", ProviderRef: ref},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, agentRuntime)).To(Succeed())
+			defer func() { _ = k8sClient.Delete(ctx, agentRuntime) }()
+
+			By("calling fetchAndValidateProvider")
+			log := logf.FromContext(ctx)
+			fetchedProvider, result, err := reconciler.fetchAndValidateProvider(ctx, log, agentRuntime, agentRuntime.Spec.Providers[0])
+
+			By("verifying it requeues and does not return the provider")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result.RequeueAfter).To(Equal(10 * time.Second))
+			Expect(fetchedProvider).To(BeNil())
+
+			By("verifying ProviderReady is False (ProviderNotReady)")
+			condition := meta.FindStatusCondition(agentRuntime.Status.Conditions, ConditionTypeProviderReady)
+			Expect(condition).NotTo(BeNil())
+			Expect(condition.Status).To(Equal(metav1.ConditionFalse))
+			Expect(condition.Reason).To(Equal("ProviderNotReady"))
+			Expect(condition.Message).To(ContainSubstring("Unavailable"))
 		})
 
 		It("should reject a provider missing required capabilities", func() {
@@ -3311,7 +3374,7 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 				},
 			}
 
-			triggers := reconciler.buildKEDATriggers(agentRuntime)
+			triggers := reconciler.buildKEDATriggers(agentRuntime, agentRuntime.Spec.Runtime.Autoscaling)
 
 			Expect(triggers).To(HaveLen(1))
 			trigger := triggers[0].(map[string]interface{})
@@ -3343,7 +3406,7 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 				},
 			}
 
-			triggers := reconciler.buildKEDATriggers(agentRuntime)
+			triggers := reconciler.buildKEDATriggers(agentRuntime, agentRuntime.Spec.Runtime.Autoscaling)
 
 			Expect(triggers).To(HaveLen(1))
 			trigger := triggers[0].(map[string]interface{})
@@ -3370,7 +3433,7 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 				},
 			}
 
-			triggers := reconciler.buildKEDATriggers(agentRuntime)
+			triggers := reconciler.buildKEDATriggers(agentRuntime, agentRuntime.Spec.Runtime.Autoscaling)
 
 			Expect(triggers).To(HaveLen(1))
 			trigger := triggers[0].(map[string]interface{})
@@ -3412,7 +3475,7 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 				},
 			}
 
-			triggers := reconciler.buildKEDATriggers(agentRuntime)
+			triggers := reconciler.buildKEDATriggers(agentRuntime, agentRuntime.Spec.Runtime.Autoscaling)
 
 			Expect(triggers).To(HaveLen(2))
 
@@ -3461,7 +3524,7 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 				},
 			}
 
-			triggers := reconciler.buildKEDATriggers(agentRuntime)
+			triggers := reconciler.buildKEDATriggers(agentRuntime, agentRuntime.Spec.Runtime.Autoscaling)
 
 			// Should use custom trigger, not default
 			Expect(triggers).To(HaveLen(1))
@@ -3489,7 +3552,7 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 				},
 			}
 
-			triggers := reconciler.buildKEDATriggers(agentRuntime)
+			triggers := reconciler.buildKEDATriggers(agentRuntime, agentRuntime.Spec.Runtime.Autoscaling)
 
 			// Should fall back to default prometheus trigger
 			Expect(triggers).To(HaveLen(1))
@@ -4203,6 +4266,129 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 				Expect(cond.Status).To(Equal(metav1.ConditionTrue))
 				Expect(cond.Reason).To(Equal("PolicyResolved"))
 				Expect(cond.Message).To(ContainSubstring(privPolicyName))
+			})
+		})
+
+		Context("duplex field validation (API server enforcement)", func() {
+			var duplexCtx context.Context
+
+			BeforeEach(func() {
+				duplexCtx = context.Background()
+			})
+
+			It("rejects an invalid duplex mode", func() {
+				ar := &omniav1alpha1.AgentRuntime{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "duplex-invalid-test",
+						Namespace: "default",
+					},
+					Spec: omniav1alpha1.AgentRuntimeSpec{
+						PromptPackRef: omniav1alpha1.PromptPackRef{Name: "dummy"},
+						Facade:        omniav1alpha1.FacadeConfig{Type: omniav1alpha1.FacadeTypeWebSocket},
+						Duplex:        &omniav1alpha1.DuplexConfig{Enabled: true, Mode: "hologram"},
+					},
+				}
+				Expect(k8sClient.Create(duplexCtx, ar)).To(MatchError(ContainSubstring("Unsupported value")))
+			})
+
+			It("accepts audio duplex mode", func() {
+				ar := &omniav1alpha1.AgentRuntime{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "duplex-valid-audio-test",
+						Namespace: "default",
+					},
+					Spec: omniav1alpha1.AgentRuntimeSpec{
+						PromptPackRef: omniav1alpha1.PromptPackRef{Name: "dummy"},
+						Facade:        omniav1alpha1.FacadeConfig{Type: omniav1alpha1.FacadeTypeWebSocket},
+						Duplex:        &omniav1alpha1.DuplexConfig{Enabled: true, Mode: "audio"},
+					},
+				}
+				Expect(k8sClient.Create(duplexCtx, ar)).To(Succeed())
+				defer func() { _ = k8sClient.Delete(duplexCtx, ar) }()
+			})
+		})
+
+		Context("context storeRef validation (API server enforcement)", func() {
+			var contextCtx context.Context
+
+			BeforeEach(func() {
+				contextCtx = context.Background()
+			})
+
+			It("rejects redis context type without storeRef", func() {
+				ar := &omniav1alpha1.AgentRuntime{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "context-redis-no-storeref",
+						Namespace: "default",
+					},
+					Spec: omniav1alpha1.AgentRuntimeSpec{
+						PromptPackRef: omniav1alpha1.PromptPackRef{Name: "dummy"},
+						Facade:        omniav1alpha1.FacadeConfig{Type: omniav1alpha1.FacadeTypeWebSocket},
+						Context: &omniav1alpha1.ContextConfig{
+							Type: omniav1alpha1.ContextStoreTypeRedis,
+						},
+					},
+				}
+				Expect(k8sClient.Create(contextCtx, ar)).To(MatchError(ContainSubstring("storeRef")))
+			})
+
+			It("rejects postgres as an unsupported context store type", func() {
+				// postgres is NOT a supported runtime context backend (only fast
+				// instant stores: memory|redis). Long-term conversation storage is
+				// session-api's concern, not spec.context. Selecting postgres must
+				// fail at admission on the enum, not silently fall back to memory.
+				ar := &omniav1alpha1.AgentRuntime{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "context-postgres-unsupported",
+						Namespace: "default",
+					},
+					Spec: omniav1alpha1.AgentRuntimeSpec{
+						PromptPackRef: omniav1alpha1.PromptPackRef{Name: "dummy"},
+						Facade:        omniav1alpha1.FacadeConfig{Type: omniav1alpha1.FacadeTypeWebSocket},
+						Context: &omniav1alpha1.ContextConfig{
+							Type:     omniav1alpha1.ContextStoreType("postgres"),
+							StoreRef: &corev1.LocalObjectReference{Name: "pg-secret"},
+						},
+					},
+				}
+				Expect(k8sClient.Create(contextCtx, ar)).To(MatchError(ContainSubstring("Unsupported value")))
+			})
+
+			It("accepts redis context type with storeRef", func() {
+				ar := &omniav1alpha1.AgentRuntime{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "context-redis-with-storeref",
+						Namespace: "default",
+					},
+					Spec: omniav1alpha1.AgentRuntimeSpec{
+						PromptPackRef: omniav1alpha1.PromptPackRef{Name: "dummy"},
+						Facade:        omniav1alpha1.FacadeConfig{Type: omniav1alpha1.FacadeTypeWebSocket},
+						Context: &omniav1alpha1.ContextConfig{
+							Type:     omniav1alpha1.ContextStoreTypeRedis,
+							StoreRef: &corev1.LocalObjectReference{Name: "my-redis-secret"},
+						},
+					},
+				}
+				Expect(k8sClient.Create(contextCtx, ar)).To(Succeed())
+				defer func() { _ = k8sClient.Delete(contextCtx, ar) }()
+			})
+
+			It("accepts memory context type without storeRef", func() {
+				ar := &omniav1alpha1.AgentRuntime{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "context-memory-no-storeref",
+						Namespace: "default",
+					},
+					Spec: omniav1alpha1.AgentRuntimeSpec{
+						PromptPackRef: omniav1alpha1.PromptPackRef{Name: "dummy"},
+						Facade:        omniav1alpha1.FacadeConfig{Type: omniav1alpha1.FacadeTypeWebSocket},
+						Context: &omniav1alpha1.ContextConfig{
+							Type: omniav1alpha1.ContextStoreTypeMemory,
+						},
+					},
+				}
+				Expect(k8sClient.Create(contextCtx, ar)).To(Succeed())
+				defer func() { _ = k8sClient.Delete(contextCtx, ar) }()
 			})
 		})
 	})

@@ -112,6 +112,12 @@ export const crdConstraints: Record<string, Record<string, FieldConstraint>> =
       "minimum": 1,
       "maximum": 20
     },
+    "spec.console.mediaRequirements.audio.channels": {
+      "type": "integer"
+    },
+    "spec.console.mediaRequirements.audio.format": {
+      "type": "string"
+    },
     "spec.console.mediaRequirements.audio.maxDurationSeconds": {
       "type": "integer",
       "minimum": 1
@@ -189,6 +195,30 @@ export const crdConstraints: Record<string, Record<string, FieldConstraint>> =
     },
     "spec.console.mediaRequirements.video.supportsSegmentSelection": {
       "type": "boolean"
+    },
+    "spec.context.storeRef.name": {
+      "type": "string"
+    },
+    "spec.context.ttl": {
+      "type": "string"
+    },
+    "spec.context.type": {
+      "type": "string",
+      "enum": [
+        "memory",
+        "redis"
+      ],
+      "required": true
+    },
+    "spec.duplex.enabled": {
+      "type": "boolean"
+    },
+    "spec.duplex.mode": {
+      "type": "string",
+      "enum": [
+        "audio",
+        "audiovideo"
+      ]
     },
     "spec.evals.enabled": {
       "type": "boolean"
@@ -1333,6 +1363,15 @@ export const crdConstraints: Record<string, Record<string, FieldConstraint>> =
       "type": "string"
     },
     "spec.facade.clientToolTimeout": {
+      "type": "string"
+    },
+    "spec.facade.drainTimeout": {
+      "type": "string"
+    },
+    "spec.facade.expose.enabled": {
+      "type": "boolean"
+    },
+    "spec.facade.expose.host": {
       "type": "string"
     },
     "spec.facade.extraEnv[].name": {
@@ -3626,21 +3665,6 @@ export const crdConstraints: Record<string, Record<string, FieldConstraint>> =
       "type": "string",
       "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$",
       "maxLength": 63
-    },
-    "spec.session.storeRef.name": {
-      "type": "string"
-    },
-    "spec.session.ttl": {
-      "type": "string"
-    },
-    "spec.session.type": {
-      "type": "string",
-      "enum": [
-        "memory",
-        "redis",
-        "postgres"
-      ],
-      "required": true
     },
     "spec.toolRegistryRef.name": {
       "type": "string",

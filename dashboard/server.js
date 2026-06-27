@@ -21,12 +21,34 @@ const next = require("next");
 const { WebSocket, WebSocketServer } = require("ws");
 const { checkAnonymousAuthGuard } = require("./lib/auth-boot-guard");
 const { loadSigningKey, mintToken } = require("./lib/mgmt-plane-token");
+const { resolveWorkspaceName, resolveAgentMgmtWsPort } = require("./lib/workspace-resolver");
 const { serveJwks, JWKS_PATH } = require("./lib/jwks");
 const {
   SERVICE_TOKEN_PATH,
   handleServiceTokenRequest,
   parseAllowlist,
 } = require("./lib/service-token");
+const { resolveUpstreamTarget } = require("./lib/server-upstream");
+
+// Redis client for route-hint lookups (resume-based WS reconnect, Task 9).
+// Lazily created: only when OMNIA_ROUTE_REDIS_URL is set. When unset (dev /
+// test) the route resolver always falls back to the Service target.
+const OMNIA_ROUTE_REDIS_URL = process.env.OMNIA_ROUTE_REDIS_URL || "";
+let routeRedis = null;
+if (OMNIA_ROUTE_REDIS_URL) {
+  try {
+    const Redis = require("ioredis");
+    routeRedis = new Redis(OMNIA_ROUTE_REDIS_URL, {
+      lazyConnect: true,
+      enableOfflineQueue: false,
+      maxRetriesPerRequest: 1,
+    });
+    console.log(`> route-hint Redis configured`);
+  } catch (err) {
+    // Non-fatal: resume reconnects fall back to Service.
+    console.error(`[WS Proxy] Failed to init route-hint Redis: ${err.message}`);
+  }
+}
 
 // Refuse to start if we're configured to run unauthenticated in what looks
 // like production. Mirrors the Helm chart's render-time check
@@ -147,6 +169,36 @@ async function resolveEndUserId(req) {
     console.error(`[WS Proxy] end-user identity resolve failed: ${err.message}`);
     return null;
   }
+}
+
+// resolveAgentWorkspace computes the workspace NAME the facade expects in the
+// mgmt-plane JWT's `workspace` claim — the AgentRuntime's
+// `omnia.altairalabs.ai/workspace` label, falling back to the namespace's
+// label (mirrors Go pkg/k8s ResolveWorkspaceName). Returns the resolved name
+// (possibly "" when nothing is labelled, which the facade computes too) or
+// `undefined` on a lookup failure, so the caller can fall back to the
+// namespace as a best-effort last resort rather than dropping the upgrade.
+// Minting with the namespace (the old #1552 bug) 401s whenever name !=
+// namespace, so this resolution is required before minting.
+async function resolveAgentWorkspace(namespace, name) {
+  try {
+    return await resolveWorkspaceName(namespace, name);
+  } catch (err) {
+    console.error(
+      `[WS Proxy] workspace resolve failed for ${namespace}/${name}: ${err.message}`,
+    );
+    return undefined;
+  }
+}
+
+// workspaceClaimForRequest returns the workspace name stashed on the request
+// pre-upgrade. A resolved string (even "") is authoritative; an absent value
+// (resolution failed) falls back to the namespace.
+function workspaceClaimForRequest(req, namespace) {
+  if (req && typeof req.omniaWorkspace === "string") {
+    return req.omniaWorkspace;
+  }
+  return namespace;
 }
 
 // OMNIA_MGMT_PLANE_TOKEN_TTL_SECONDS overrides the mgmt-plane JWT TTL
@@ -306,9 +358,34 @@ function sendError(clientSocket, message, code = "CONNECTION_ERROR") {
 
 /**
  * Proxy a WebSocket connection to an agent's facade.
+ *
+ * @param {WebSocket} clientSocket
+ * @param {string} namespace
+ * @param {string} name
+ * @param {Object} clientParams - forwarded query params
+ * @param {Object|null} req - original HTTP upgrade request
+ * @param {{ host: string, port: number }|null} podTarget - direct pod IP from
+ *   route hint (Task 9). When set, the proxy dials this host:port first; on
+ *   any connect error it retries against the Service target (stale-hint guard).
+ * @param {number|null} mgmtWsPort - the agent's internal management-plane WS
+ *   port (from status.managementEndpoints.ws). When set (and no podTarget),
+ *   the proxy dials this mgmt-plane-only listener; on a connect error before
+ *   the upstream opens it falls back once to the external facade port (skew
+ *   with an agent that predates the internal listener). Null => dial the
+ *   external port directly.
  */
-function proxyWebSocket(clientSocket, namespace, name, clientParams = {}, req = null) {
-  const upstreamUrl = getAgentWsUrl(namespace, name, clientParams);
+function proxyWebSocket(clientSocket, namespace, name, clientParams = {}, req = null, podTarget = null, mgmtWsPort = null) {
+  // Dial the internal management-plane port when known; otherwise the external
+  // facade port. The pod-target (resume route hint) path keeps its own port.
+  const serviceUrl = getAgentWsUrl(namespace, name, clientParams, mgmtWsPort || DEFAULT_FACADE_PORT);
+
+  // When a pod target is supplied (resume + route hint), dial the pod IP
+  // directly. Build an equivalent ws:// URL for that pod using the same
+  // query-string as the Service URL.
+  const upstreamUrl = podTarget
+    ? `ws://${podTarget.host}:${podTarget.port}/ws?${serviceUrl.split("?")[1] || ""}`
+    : serviceUrl;
+
   console.log(`[WS Proxy] Connecting to upstream: ${upstreamUrl}`);
   console.log(`[WS Proxy] SERVICE_DOMAIN=${SERVICE_DOMAIN}, DEFAULT_FACADE_PORT=${DEFAULT_FACADE_PORT}`);
 
@@ -326,7 +403,7 @@ function proxyWebSocket(clientSocket, namespace, name, clientParams = {}, req = 
         key: mgmtPlaneSigningKey,
         subject: mgmtPlaneSubjectForRequest(req),
         agent: name,
-        workspace: namespace,
+        workspace: workspaceClaimForRequest(req, namespace),
         ttlSeconds: MGMT_PLANE_TTL_SECONDS,
       });
       upstreamHeaders.Authorization = `Bearer ${token}`;
@@ -396,6 +473,30 @@ function proxyWebSocket(clientSocket, namespace, name, clientParams = {}, req = 
       console.error(`[WS Proxy]   syscall: ${err.syscall}`);
       console.error(`[WS Proxy]   address: ${err.address}`);
       console.error(`[WS Proxy]   port: ${err.port}`);
+
+      // Stale route-hint guard (Task 9): if we dialled a pod IP directly and
+      // the connection failed before it was established, retry once against the
+      // Service target. Covers the window between pod eviction and Redis TTL
+      // expiry. Only retry on connection-level errors, not on protocol errors
+      // that happen after the connection is open.
+      if (podTarget && !upstreamConnected) {
+        console.warn(`[WS Proxy] Stale route hint for ${namespace}/${name} — retrying via Service`);
+        // Re-run the whole proxy logic against the Service (podTarget=null).
+        proxyWebSocket(clientSocket, namespace, name, clientParams, req, null, mgmtWsPort);
+        return;
+      }
+
+      // Internal mgmt-plane port unreachable before the upstream opened — the
+      // agent pod predates the internal listener (version skew) or it isn't
+      // serving the mgmt plane. Fall back once to the external facade port,
+      // which still accepts the mgmt-plane JWT in this milestone.
+      if (mgmtWsPort && !podTarget && !upstreamConnected) {
+        console.warn(
+          `[WS Proxy] internal mgmt port ${mgmtWsPort} unreachable for ${namespace}/${name} — falling back to external facade port`,
+        );
+        proxyWebSocket(clientSocket, namespace, name, clientParams, req, null, null);
+        return;
+      }
 
       // Provide more helpful error messages based on error type
       let errorMessage = `Failed to connect to agent ${name}`;
@@ -780,7 +881,9 @@ app.prepare().then(() => {
 
     if (agent) {
       const clientParams = parseQueryParams(req.url);
-      proxyWebSocket(ws, agent.namespace, agent.name, clientParams, req);
+      // omniaRouteTarget is set by the upgrade handler when a resume lookup
+      // resolves to a pod IP (Task 9). Falls back to null → Service target.
+      proxyWebSocket(ws, agent.namespace, agent.name, clientParams, req, req.omniaRouteTarget || null, req.omniaMgmtWsPort || null);
     } else if (isLspPath(pathname)) {
       // Parse query params for LSP context
       const params = parseQueryParams(req.url);
@@ -804,11 +907,45 @@ app.prepare().then(() => {
 
     if (agent) {
       console.log(`[WS Upgrade] Parsed agent: namespace=${agent.namespace}, name=${agent.name}`);
-      // Resolve the authenticated end-user id BEFORE completing the
-      // upgrade (no WebSocket exists yet, so no client message can be
-      // missed while we await) and stash it on req for proxyWebSocket.
-      resolveEndUserId(req).then((endUserId) => {
+      // Resolve the authenticated end-user id, the workspace name, AND the pod
+      // route-hint BEFORE completing the upgrade (no WebSocket exists yet, so no
+      // client message can be missed while we await). All three are stashed on
+      // req for proxyWebSocket. Workspace resolution never rejects
+      // (resolveAgentWorkspace swallows lookup errors) and the route-hint
+      // resolver fails open to the Service target, so only an identity-resolve
+      // failure drops the upgrade.
+      const clientParams = parseQueryParams(req.url);
+      const serviceTarget = {
+        host: `${agent.name}.${agent.namespace}.${SERVICE_DOMAIN}`,
+        port: DEFAULT_FACADE_PORT,
+      };
+      Promise.all([
+        resolveEndUserId(req),
+        resolveAgentWorkspace(agent.namespace, agent.name),
+        resolveUpstreamTarget(
+          { resume: clientParams.resume || null, service: serviceTarget },
+          routeRedis,
+          { timeoutMs: 200 },
+        ),
+        // Discover the agent's internal management-plane WS port (fails soft to
+        // null → dial the external port). The proxy dials the internal listener
+        // and falls back to external on connect failure (agent-pod skew).
+        resolveAgentMgmtWsPort(agent.namespace, agent.name),
+      ]).then(([endUserId, workspace, routeTarget, mgmtWsPort]) => {
         req.omniaEndUserId = endUserId;
+        req.omniaMgmtWsPort = mgmtWsPort;
+        if (typeof workspace === "string") {
+          req.omniaWorkspace = workspace;
+        }
+        // Only stash a pod-IP target when it differs from the Service (i.e. a
+        // real route hint was returned). proxyWebSocket treats null as "use Service".
+        const isPodTarget =
+          routeTarget.host !== serviceTarget.host ||
+          routeTarget.port !== serviceTarget.port;
+        req.omniaRouteTarget = isPodTarget ? routeTarget : null;
+        if (req.omniaRouteTarget) {
+          console.log(`[WS Upgrade] Routing resume to pod: ${routeTarget.host}:${routeTarget.port}`);
+        }
         wss.handleUpgrade(req, socket, head, (ws) => {
           wss.emit("connection", ws, req);
         });

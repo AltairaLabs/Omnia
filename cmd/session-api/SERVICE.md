@@ -14,7 +14,7 @@
 - Audit logging (enterprise)
 - PII redaction middleware — intercepts all write requests and redacts PII from message content, tool call arguments/results, provider call payloads, event metadata, and eval results based on the effective SessionPrivacyPolicy (enterprise)
 - Privacy opt-out enforcement — silently drops writes (204 No Content) when the user has opted out via preferences (enterprise)
-- Recording-flag enforcement — when the effective `SessionPrivacyPolicy.Recording.Enabled=false`, write endpoints return 204; when `RichData=false`, the middleware blocks assistant messages, tool calls, runtime events, and provider calls while allowing user messages, status updates, and TTL refreshes (enterprise)
+- Recording-flag enforcement — when the effective `SessionPrivacyPolicy.Recording.Enabled=false`, write endpoints return 204; when `runtimeData=false`, the middleware blocks runtime-emitted assistant message content while still allowing user messages, tool calls, provider calls (metering), runtime events, status updates, and TTL refreshes (enterprise)
 - SessionPrivacyPolicy CRD watching — `PolicyWatcher` polls `SessionPrivacyPolicy`, `Workspace`, and `AgentRuntime` CRDs every 30 s and maintains in-memory sync.Map caches; `GetEffectivePolicy(namespace, agentName)` resolves the policy using a deterministic chain (AgentRuntime override → service group → global default at `omnia-system/default`); the resolved policy drives PII redaction, opt-out enforcement, and recording gating (enterprise)
 - Per-request encryption resolver — on each session-api write, the `PolicyWatcher`-resolved `EncryptionConfig` is used to select a `(kmsProvider, keyID)` pair; the `Encryptor` wraps AES-256-GCM data keys via the selected KMS provider; results are cached per `(kmsProvider, keyID)` tuple (enterprise)
 - Privacy/GDPR deletion with media artifact cleanup, batch processing, and progress tracking (enterprise)
@@ -49,7 +49,7 @@
   - `PATCH /api/v1/sessions/{id}/decorate` — decorate a session (labels/metadata)
   - `DELETE /api/v1/sessions/{id}` — delete a single session
   - `DELETE /api/v1/sessions?namespace={ns}` — bulk purge sessions by scope (optional `agent`/`before` filters). Note: purged sessions stay readable by ID until the hot-cache TTL expires (see service.go `DeleteSessionsByScope`).
-  - `GET /api/v1/privacy-policy?namespace={ns}&agent={agent}` — returns the facade-visible subset of the effective SessionPrivacyPolicy (`{"recording":{"enabled","facadeData","richData"}}`); 204 when no policy applies
+  - `GET /api/v1/privacy-policy?namespace={ns}&agent={agent}` — returns the facade-visible subset of the effective SessionPrivacyPolicy (`{"recording":{"enabled","facadeData","runtimeData"}}`); 204 when no policy applies
 - **gRPC/HTTP** OTLP trace ingestion (optional)
 
 ## Authentication (internal service-to-service)

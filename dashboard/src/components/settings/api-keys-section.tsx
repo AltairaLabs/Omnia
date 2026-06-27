@@ -2,7 +2,7 @@
 
 import { useState, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Key, Plus, Trash2, Copy, Check, AlertCircle, Clock, Info } from "lucide-react";
+import { Key, Plus, Copy, Check, Info } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -11,14 +11,6 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import {
   Dialog,
   DialogContent,
@@ -39,7 +31,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Select,
   SelectContent,
@@ -47,20 +39,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Skeleton } from "@/components/ui/skeleton";
 import { usePermissions, Permission } from "@/hooks";
-import { formatDistanceToNow } from "date-fns";
-
-interface ApiKeyInfo {
-  id: string;
-  name: string;
-  keyPrefix: string;
-  role: string;
-  expiresAt: string | null;
-  createdAt: string;
-  lastUsedAt: string | null;
-  isExpired: boolean;
-}
+import { useWorkspaces } from "@/hooks/use-workspaces";
+import { ApiKeysContent, type ApiKeyInfo } from "./api-keys-table";
 
 interface NewApiKey extends ApiKeyInfo {
   key: string;
@@ -87,6 +68,7 @@ async function fetchApiKeys(): Promise<ApiKeysResponse> {
 async function createApiKey(data: {
   name: string;
   expiresInDays: number | null;
+  workspaces?: string[];
 }): Promise<{ key: NewApiKey }> {
   const response = await fetch("/api/settings/api-keys", {
     method: "POST",
@@ -109,134 +91,6 @@ async function deleteApiKey(id: string): Promise<void> {
   }
 }
 
-/** Renders the expiration status for an API key */
-function KeyExpiration({ isExpired, expiresAt }: Readonly<{ isExpired: boolean; expiresAt: string | null }>) {
-  if (isExpired) {
-    return <Badge variant="destructive">Expired</Badge>;
-  }
-  if (expiresAt) {
-    return (
-      <span className="text-sm text-muted-foreground flex items-center gap-1">
-        <Clock className="h-3 w-3" />
-        {formatDistanceToNow(new Date(expiresAt), { addSuffix: true })}
-      </span>
-    );
-  }
-  return <span className="text-sm text-muted-foreground">Never</span>;
-}
-
-/** Renders the API keys content based on loading/error/data state */
-function ApiKeysContent({
-  isLoading,
-  error,
-  keys,
-  canCreateDelete,
-  isFileMode,
-  onDeleteKey,
-}: Readonly<{
-  isLoading: boolean;
-  error: Error | null;
-  keys: ApiKeyInfo[] | undefined;
-  canCreateDelete: boolean;
-  isFileMode: boolean;
-  onDeleteKey: (id: string) => void;
-}>) {
-  if (isLoading) {
-    return (
-      <div className="space-y-2">
-        <Skeleton className="h-10 w-full" />
-        <Skeleton className="h-10 w-full" />
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="flex items-center gap-2 text-destructive">
-        <AlertCircle className="h-4 w-4" />
-        <span>Failed to load API keys</span>
-      </div>
-    );
-  }
-
-  if (!keys || keys.length === 0) {
-    return (
-      <div className="text-center py-8 text-muted-foreground">
-        <Key className="h-12 w-12 mx-auto mb-4 opacity-50" />
-        <p>No API keys yet</p>
-        {canCreateDelete && (
-          <p className="text-sm mt-1">
-            Create one to access the API programmatically
-          </p>
-        )}
-        {isFileMode && (
-          <p className="text-sm mt-1">
-            Contact your administrator to provision API keys
-          </p>
-        )}
-      </div>
-    );
-  }
-
-  return (
-    <Table>
-      <TableHeader>
-        <TableRow>
-          <TableHead>Name</TableHead>
-          <TableHead>Key</TableHead>
-          <TableHead>Role</TableHead>
-          <TableHead>Created</TableHead>
-          <TableHead>Last Used</TableHead>
-          <TableHead>Expires</TableHead>
-          {canCreateDelete && <TableHead className="w-[50px]" />}
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {keys.map((key) => (
-          <TableRow key={key.id}>
-            <TableCell className="font-medium">{key.name}</TableCell>
-            <TableCell>
-              <code className="text-xs bg-muted px-1 py-0.5 rounded">
-                {key.keyPrefix}
-              </code>
-            </TableCell>
-            <TableCell>
-              <Badge variant="outline">{key.role}</Badge>
-            </TableCell>
-            <TableCell className="text-muted-foreground text-sm">
-              {formatDistanceToNow(new Date(key.createdAt), {
-                addSuffix: true,
-              })}
-            </TableCell>
-            <TableCell className="text-muted-foreground text-sm">
-              {key.lastUsedAt
-                ? formatDistanceToNow(new Date(key.lastUsedAt), {
-                    addSuffix: true,
-                  })
-                : "Never"}
-            </TableCell>
-            <TableCell>
-              <KeyExpiration isExpired={key.isExpired} expiresAt={key.expiresAt} />
-            </TableCell>
-            {canCreateDelete && (
-              <TableCell>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-8 w-8 text-destructive hover:text-destructive"
-                  onClick={() => onDeleteKey(key.id)}
-                >
-                  <Trash2 className="h-4 w-4" />
-                </Button>
-              </TableCell>
-            )}
-          </TableRow>
-        ))}
-      </TableBody>
-    </Table>
-  );
-}
-
 export function ApiKeysSection() {
   const { can } = usePermissions();
   const queryClient = useQueryClient();
@@ -249,6 +103,8 @@ export function ApiKeysSection() {
 
   const [keyName, setKeyName] = useState("");
   const [expiration, setExpiration] = useState("90");
+  const [selectedWorkspaces, setSelectedWorkspaces] = useState<string[]>([]);
+  const { data: workspaceOptions } = useWorkspaces();
 
   const canManageKeys = can(Permission.API_KEYS_MANAGE_OWN);
 
@@ -275,6 +131,7 @@ export function ApiKeysSection() {
       setShowNewKeyDialog(true);
       setKeyName("");
       setExpiration("90");
+      setSelectedWorkspaces([]);
     },
   });
 
@@ -296,8 +153,18 @@ export function ApiKeysSection() {
 
   const handleCreateKey = useCallback(() => {
     const expiresInDays = expiration === "never" ? null : Number.parseInt(expiration, 10);
-    createMutation.mutate({ name: keyName, expiresInDays });
-  }, [keyName, expiration, createMutation]);
+    createMutation.mutate({
+      name: keyName,
+      expiresInDays,
+      workspaces: selectedWorkspaces.length > 0 ? selectedWorkspaces : undefined,
+    });
+  }, [keyName, expiration, selectedWorkspaces, createMutation]);
+
+  const toggleWorkspace = useCallback((name: string) => {
+    setSelectedWorkspaces((prev) =>
+      prev.includes(name) ? prev.filter((w) => w !== name) : [...prev, name]
+    );
+  }, []);
 
   if (!can(Permission.API_KEYS_VIEW_OWN)) {
     return null;
@@ -399,6 +266,30 @@ export function ApiKeysSection() {
                 </SelectContent>
               </Select>
             </div>
+
+            {workspaceOptions && workspaceOptions.length > 0 && (
+              <div className="space-y-2">
+                <Label>Restrict to workspaces (optional)</Label>
+                <div className="max-h-40 overflow-y-auto space-y-2 rounded-md border p-3">
+                  {workspaceOptions.map((ws) => (
+                    <div key={ws.name} className="flex items-center space-x-2">
+                      <Checkbox
+                        id={`ws-${ws.name}`}
+                        checked={selectedWorkspaces.includes(ws.name)}
+                        onCheckedChange={() => toggleWorkspace(ws.name)}
+                      />
+                      <Label htmlFor={`ws-${ws.name}`} className="text-sm font-normal cursor-pointer">
+                        {ws.displayName}
+                      </Label>
+                    </div>
+                  ))}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Leave all unchecked to allow every workspace you can access. The key
+                  always acts with your own role in each workspace.
+                </p>
+              </div>
+            )}
           </div>
 
           <DialogFooter>

@@ -1035,3 +1035,13 @@ func TestClientMessage_SessionConsentGrants_MarshalsEmptyAsAbsent(t *testing.T) 
 		t.Errorf("marshalled %q includes session_consent_grants for empty slice", string(b))
 	}
 }
+
+func TestNewConnectedMessageResumed_SetsFlag(t *testing.T) {
+	m := NewConnectedMessageResumed(testParkSessionID, &ConnectionCapabilities{}, true)
+	if m.Type != MessageTypeConnected || m.SessionID != testParkSessionID {
+		t.Fatalf("unexpected message: %+v", m)
+	}
+	if m.Connected == nil || !m.Connected.Resumed {
+		t.Fatalf("Resumed not set")
+	}
+}

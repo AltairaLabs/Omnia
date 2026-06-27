@@ -19,7 +19,9 @@ package controller
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -33,6 +35,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
+	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 	eev1alpha1 "github.com/altairalabs/omnia/ee/api/v1alpha1"
@@ -48,7 +51,32 @@ var (
 	testEnv   *envtest.Environment
 	cfg       *rest.Config
 	k8sClient client.Client
+	// gatewayCRDsInstalled records whether the Gateway API standard CRDs were
+	// located in the module cache and loaded into envtest. Specs that need
+	// HTTPRoute/Gateway gate on it.
+	gatewayCRDsInstalled bool
 )
+
+// gatewayAPICRDDir resolves the sigs.k8s.io/gateway-api standard CRD directory
+// by asking the Go toolchain for the module's on-disk location via
+// `go list -m -f '{{.Dir}}' sigs.k8s.io/gateway-api`. Returns "" when the
+// directory cannot be located so dependent specs can skip rather than fail the
+// whole suite.
+func gatewayAPICRDDir() string {
+	out, err := exec.Command("go", "list", "-m", "-f", "{{.Dir}}", "sigs.k8s.io/gateway-api").Output()
+	if err != nil {
+		return ""
+	}
+	moduleDir := strings.TrimSpace(string(out))
+	if moduleDir == "" {
+		return ""
+	}
+	dir := filepath.Join(moduleDir, "config", "crd", "standard")
+	if _, err := os.Stat(dir); err != nil {
+		return ""
+	}
+	return dir
+}
 
 func TestControllers(t *testing.T) {
 	RegisterFailHandler(Fail)
@@ -68,11 +96,19 @@ var _ = BeforeSuite(func() {
 	err = eev1alpha1.AddToScheme(scheme.Scheme)
 	Expect(err).NotTo(HaveOccurred())
 
+	err = gatewayv1.Install(scheme.Scheme)
+	Expect(err).NotTo(HaveOccurred())
+
 	// +kubebuilder:scaffold:scheme
 
 	By("bootstrapping test environment")
+	crdPaths := []string{filepath.Join("..", "..", "config", "crd", "bases")}
+	if dir := gatewayAPICRDDir(); dir != "" {
+		crdPaths = append(crdPaths, dir)
+		gatewayCRDsInstalled = true
+	}
 	testEnv = &envtest.Environment{
-		CRDDirectoryPaths:     []string{filepath.Join("..", "..", "config", "crd", "bases")},
+		CRDDirectoryPaths:     crdPaths,
 		ErrorIfCRDPathMissing: true,
 		CRDs:                  minimalIstioCRDs(),
 	}

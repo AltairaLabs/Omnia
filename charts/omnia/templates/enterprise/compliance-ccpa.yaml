@@ -15,7 +15,7 @@ spec:
   recording:
     enabled: true
     facadeData: true
-    richData: false
+    runtimeData: false
     pii:
       redact: true
       encrypt: false

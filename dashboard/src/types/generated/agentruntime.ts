@@ -151,6 +151,10 @@ export interface AgentRuntimeSpec {
     mediaRequirements?: {
       /** audio defines requirements for audio files. */
       audio?: {
+        /** channels is the audio channel count the client should capture/play (1=mono). */
+        channels?: number;
+        /** format is the PCM sample format the client should send, e.g. "pcm16". */
+        format?: string;
         /** maxDurationSeconds is the maximum audio duration. */
         maxDurationSeconds?: number;
         /** recommendedSampleRate is the optimal sample rate in Hz. */
@@ -204,6 +208,31 @@ export interface AgentRuntimeSpec {
         supportsSegmentSelection?: boolean;
       };
     };
+  };
+  /** context configures the runtime context store. */
+  context?: {
+    /** storeRef references a secret containing connection details for the context store.
+     * Required for the redis store type (the secret must hold a "url" key). */
+    storeRef?: {
+      /** Name of the referent.
+       * This field is effectively required, but due to backwards compatibility is
+       * allowed to be empty. Instances of this type with an empty value here are
+       * almost certainly wrong.
+       * More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names */
+      name?: string;
+    };
+    /** ttl is the time-to-live for context entries in duration format (e.g., "24h", "30m"). */
+    ttl?: string;
+    /** type specifies the context store backend. */
+    type: "memory" | "redis";
+  };
+  /** duplex configures the realtime voice/duplex console for this agent. */
+  duplex?: {
+    /** enabled turns on the realtime voice console for this agent. */
+    enabled?: boolean;
+    /** mode is the duplex modality. "audio" (default) streams voice only;
+     * "audiovideo" additionally streams the browser camera (not yet implemented). */
+    mode?: "audio" | "audiovideo";
   };
   /** evals configures realtime eval execution for this agent's sessions. */
   evals?: {
@@ -2425,6 +2454,29 @@ export interface AgentRuntimeSpec {
     /** clientToolTimeout is the max time to wait for client tool responses per turn.
      * Defaults to 60s. */
     clientToolTimeout?: string;
+    /** drainTimeout is how long the facade keeps serving active realtime calls
+     * after receiving SIGTERM (rollout/drain/scale-down) before cleanly tearing
+     * down the remainder. Duration format (e.g. "30s", "2m"). New calls stop
+     * immediately on drain regardless. Defaults to 30s when unset. */
+    drainTimeout?: string;
+    /** expose opts this agent into operator-provisioned external exposure.
+     * Opt-in: an agent is never externally reachable unless this is set AND the
+     * platform has a default-exposure Gateway configured (Helm
+     * `defaultExposure`). When both hold, the operator creates a host-based
+     * HTTPRoute targeting this agent's facade Service, surfaced via
+     * status.facade.endpoints (#1553). Exposure does NOT add authentication —
+     * spec.externalAuth is still the gate; an exposed agent with no externalAuth
+     * validators is management-plane-only at the facade. */
+    expose?: {
+      /** enabled creates an external HTTPRoute for this agent. Requires the platform
+       * to have a default-exposure Gateway configured (Helm `defaultExposure`);
+       * when no Gateway is configured this is a no-op. Defaults to false. */
+      enabled?: boolean;
+      /** host overrides the generated hostname (`{name}.{namespace}.{baseDomain}`).
+       * Set for a custom domain on an individual agent. Must be a hostname the
+       * configured Gateway's listener accepts (e.g. covered by its TLS cert). */
+      host?: string;
+    };
     /** extraEnv defines additional environment variables for the facade container.
      * Use this for debugging (e.g., LOG_LEVEL=debug) or custom configuration. */
     extraEnv?: {
@@ -6537,23 +6589,6 @@ export interface AgentRuntimeSpec {
    * The controller resolves the session-api and memory-api endpoints from that group.
    * Defaults to "default". */
   serviceGroup?: string;
-  /** session configures session management and storage. */
-  session?: {
-    /** storeRef references a secret containing connection details for the session store.
-     * Required for redis and postgres store types. */
-    storeRef?: {
-      /** Name of the referent.
-       * This field is effectively required, but due to backwards compatibility is
-       * allowed to be empty. Instances of this type with an empty value here are
-       * almost certainly wrong.
-       * More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names */
-      name?: string;
-    };
-    /** ttl is the time-to-live for sessions in duration format (e.g., "24h", "30m"). */
-    ttl?: string;
-    /** type specifies the session store backend. */
-    type: "memory" | "redis" | "postgres";
-  };
   /** toolRegistryRef optionally references a ToolRegistry for available tools. */
   toolRegistryRef?: {
     /** name is the name of the ToolRegistry resource. */
@@ -6608,6 +6643,49 @@ export interface AgentRuntimeStatus {
     /** type of condition in CamelCase or in foo.example.com/CamelCase. */
     type: string;
   }[];
+  /** facade reports externally-reachable endpoints derived from observed
+   * Gateway API HTTPRoutes. Empty => the agent is reachable only in-cluster. */
+  facade?: {
+    /** endpoints are the external URLs derived from HTTPRoutes that target this
+     * agent's facade Service. Empty => cluster-internal only. */
+    endpoints?: {
+      /** host is the route hostname. */
+      host: string;
+      /** path is the external path including the protocol's canonical suffix. */
+      path: string;
+      /** port is the Service backend port the route targets. */
+      port: number;
+      /** protocol is the facade protocol this endpoint serves. */
+      protocol: "websocket" | "a2a" | "mcp" | "rest";
+      /** reason explains why valid is false. */
+      reason?: string;
+      /** routeName is the name of the HTTPRoute this endpoint was derived from. */
+      routeName: string;
+      /** routeNamespace is the namespace of that HTTPRoute. */
+      routeNamespace: string;
+      /** scheme is the URL scheme: ws, wss, http, or https. */
+      scheme: string;
+      /** url is the client-facing connection URL, e.g. wss://agents.example.com/my-agent/ws */
+      url: string;
+      /** valid is false when the endpoint is advertised but will not actually
+       * connect (e.g. a path prefix that is not stripped before the facade). */
+      valid: boolean;
+    }[];
+  };
+  /** managementEndpoints reports the internal (management-plane) listener ports
+   * the facade serves when externalAuth.allowManagementPlane is enabled. A nil
+   * value means the management plane is disabled and no internal listener
+   * exists. The dashboard and in-cluster callers read these to dial the agent
+   * over the management plane — they never compute the port from the external
+   * port. */
+  managementEndpoints?: {
+    /** a2a is the internal A2A management-plane port (dual-protocol agents). */
+    a2a?: number;
+    /** mcp is the internal MCP management-plane port (function-mode agents). */
+    mcp?: number;
+    /** ws is the internal WebSocket management-plane port. */
+    ws?: number;
+  };
   /** observedGeneration is the most recent generation observed by the controller. */
   observedGeneration?: number;
   /** phase represents the current lifecycle phase of the AgentRuntime. */

@@ -586,7 +586,7 @@ func TestBuildA2AConfigEnvVars_FullConfig(t *testing.T) {
 	taskTTL := "1h"
 	convTTL := "30m"
 	secretRef := &corev1.LocalObjectReference{Name: "auth-secret"}
-	redisSecretRef := &corev1.LocalObjectReference{Name: "redis-secret"}
+	redisSecretRef := &corev1.LocalObjectReference{Name: testRedisSecretName}
 
 	a2a := &omniav1alpha1.A2AConfig{
 		TaskTTL:         &taskTTL,
@@ -669,7 +669,7 @@ func countRedisURLEnvVars(envVars []corev1.EnvVar) int {
 }
 
 func TestBuildA2AConfigEnvVars_RedisURL_BothSet(t *testing.T) {
-	redisSecretRef := &corev1.LocalObjectReference{Name: "redis-secret"}
+	redisSecretRef := &corev1.LocalObjectReference{Name: testRedisSecretName}
 	a2a := &omniav1alpha1.A2AConfig{
 		TaskStore: &omniav1alpha1.A2ATaskStoreConfig{
 			Type:           omniav1alpha1.A2ATaskStoreRedis,
@@ -689,15 +689,15 @@ func TestBuildA2AConfigEnvVars_RedisURL_BothSet(t *testing.T) {
 			if ev.ValueFrom == nil || ev.ValueFrom.SecretKeyRef == nil {
 				t.Error("expected OMNIA_A2A_REDIS_URL from secret ref, got plain value")
 			}
-			if ev.ValueFrom != nil && ev.ValueFrom.SecretKeyRef.Name != "redis-secret" {
-				t.Errorf("secret name = %q, want %q", ev.ValueFrom.SecretKeyRef.Name, "redis-secret")
+			if ev.ValueFrom != nil && ev.ValueFrom.SecretKeyRef.Name != testRedisSecretName {
+				t.Errorf("secret name = %q, want %q", ev.ValueFrom.SecretKeyRef.Name, testRedisSecretName)
 			}
 		}
 	}
 }
 
 func TestBuildA2AConfigEnvVars_RedisURL_OnlySecretRef(t *testing.T) {
-	redisSecretRef := &corev1.LocalObjectReference{Name: "redis-secret"}
+	redisSecretRef := &corev1.LocalObjectReference{Name: testRedisSecretName}
 	a2a := &omniav1alpha1.A2AConfig{
 		TaskStore: &omniav1alpha1.A2ATaskStoreConfig{
 			Type:           omniav1alpha1.A2ATaskStoreRedis,
@@ -743,7 +743,7 @@ func TestBuildA2AConfigEnvVars_RedisURL_OnlyPlainURL(t *testing.T) {
 
 func TestBuildA2ADualProtocolEnvVars_RedisURL_BothSet(t *testing.T) {
 	r := &AgentRuntimeReconciler{}
-	redisSecretRef := &corev1.LocalObjectReference{Name: "redis-secret"}
+	redisSecretRef := &corev1.LocalObjectReference{Name: testRedisSecretName}
 	ar := &omniav1alpha1.AgentRuntime{}
 	ar.Spec.A2A = &omniav1alpha1.A2AConfig{
 		TaskStore: &omniav1alpha1.A2ATaskStoreConfig{
@@ -769,7 +769,7 @@ func TestBuildA2ADualProtocolEnvVars_RedisURL_BothSet(t *testing.T) {
 
 func TestBuildA2ADualProtocolEnvVars_RedisURL_OnlySecretRef(t *testing.T) {
 	r := &AgentRuntimeReconciler{}
-	redisSecretRef := &corev1.LocalObjectReference{Name: "redis-secret"}
+	redisSecretRef := &corev1.LocalObjectReference{Name: testRedisSecretName}
 	ar := &omniav1alpha1.AgentRuntime{}
 	ar.Spec.A2A = &omniav1alpha1.A2AConfig{
 		TaskStore: &omniav1alpha1.A2ATaskStoreConfig{
@@ -897,6 +897,55 @@ func TestBuildRuntimeEnvVars_MemoryDisabled(t *testing.T) {
 		if strings.HasPrefix(ev.Name, "OMNIA_MEMORY_") {
 			t.Errorf("unexpected env var %q: no memory config should produce no OMNIA_MEMORY_* vars", ev.Name)
 		}
+	}
+}
+
+// TestRuntimeEnv_ContextURLFromStoreRef verifies that when spec.context is
+// configured with a Redis store and a storeRef secret, buildRuntimeEnvVars
+// injects OMNIA_CONTEXT_URL sourced from that secret so the runtime can
+// connect to Redis for durable context state.
+func TestRuntimeEnv_ContextURLFromStoreRef(t *testing.T) {
+	r := &AgentRuntimeReconciler{}
+	ar := &omniav1alpha1.AgentRuntime{
+		Spec: omniav1alpha1.AgentRuntimeSpec{
+			Context: &omniav1alpha1.ContextConfig{
+				Type: omniav1alpha1.ContextStoreTypeRedis,
+				StoreRef: &corev1.LocalObjectReference{
+					Name: testRedisSecretName,
+				},
+			},
+		},
+	}
+	env := r.buildRuntimeEnvVars(ar, nil)
+
+	e := findEnvVar(env, "OMNIA_CONTEXT_URL")
+	if e == nil || e.ValueFrom == nil || e.ValueFrom.SecretKeyRef == nil {
+		t.Fatalf("OMNIA_CONTEXT_URL not sourced from secret: %+v", e)
+	}
+	if e.ValueFrom.SecretKeyRef.Name != testRedisSecretName {
+		t.Fatalf("wrong secret: got %q, want %q",
+			e.ValueFrom.SecretKeyRef.Name, testRedisSecretName)
+	}
+	if e.ValueFrom.SecretKeyRef.Key != testRedisSecretKey {
+		t.Fatalf("wrong secret key: got %q, want %q",
+			e.ValueFrom.SecretKeyRef.Key, testRedisSecretKey)
+	}
+}
+
+// TestRuntimeEnv_NoContextURLForMemory verifies that a memory-backed context
+// store does not inject OMNIA_CONTEXT_URL — there is no Redis to connect to.
+func TestRuntimeEnv_NoContextURLForMemory(t *testing.T) {
+	r := &AgentRuntimeReconciler{}
+	ar := &omniav1alpha1.AgentRuntime{
+		Spec: omniav1alpha1.AgentRuntimeSpec{
+			Context: &omniav1alpha1.ContextConfig{
+				Type: omniav1alpha1.ContextStoreTypeMemory,
+			},
+		},
+	}
+	env := r.buildRuntimeEnvVars(ar, nil)
+	if findEnvVar(env, "OMNIA_CONTEXT_URL") != nil {
+		t.Fatal("OMNIA_CONTEXT_URL must not be set for memory store")
 	}
 }
 
@@ -1549,4 +1598,90 @@ func TestBuildDeploymentSpec_MetricsPortContract(t *testing.T) {
 		fmt.Sprintf("%d,%d", DefaultFacadeHealthPort, DefaultRuntimeHealthPort),
 		anno["traffic.sidecar.istio.io/excludeInboundPorts"],
 		"both metrics ports must be excluded from sidecar inbound interception")
+}
+
+func TestDeployment_GracePeriodFromDrainTimeout(t *testing.T) {
+	r := &AgentRuntimeReconciler{}
+	ar := &omniav1alpha1.AgentRuntime{}
+	ar.Name = "drain-timeout-test"
+	ar.Namespace = "ns"
+	ar.Spec.Facade.Type = omniav1alpha1.FacadeTypeWebSocket
+	ar.Spec.PromptPackRef.Name = "p"
+	d := "2m"
+	ar.Spec.Facade.DrainTimeout = &d
+
+	dep := &appsv1.Deployment{}
+	r.buildDeploymentSpec(context.Background(), dep, ar, newTestPromptPack(), nil, "", nil)
+
+	require.NotNil(t, dep.Spec.Template.Spec.TerminationGracePeriodSeconds)
+	got := *dep.Spec.Template.Spec.TerminationGracePeriodSeconds
+	want := int64(120 + drainGraceBufferSeconds)
+	if got != want {
+		t.Fatalf("TerminationGracePeriodSeconds = %d, want %d", got, want)
+	}
+}
+
+func TestDeployment_GracePeriodDefaultWhenUnset(t *testing.T) {
+	r := &AgentRuntimeReconciler{}
+	ar := &omniav1alpha1.AgentRuntime{}
+	ar.Name = "drain-default-test"
+	ar.Namespace = "ns"
+	ar.Spec.Facade.Type = omniav1alpha1.FacadeTypeWebSocket
+	ar.Spec.PromptPackRef.Name = "p"
+	// DrainTimeout intentionally not set
+
+	dep := &appsv1.Deployment{}
+	r.buildDeploymentSpec(context.Background(), dep, ar, newTestPromptPack(), nil, "", nil)
+
+	require.NotNil(t, dep.Spec.Template.Spec.TerminationGracePeriodSeconds)
+	got := *dep.Spec.Template.Spec.TerminationGracePeriodSeconds
+	want := int64(defaultDrainTimeoutSeconds + drainGraceBufferSeconds)
+	if got != want {
+		t.Fatalf("TerminationGracePeriodSeconds = %d, want %d", got, want)
+	}
+}
+
+func TestDeployment_GracePeriodDefaultWhenSubSecond(t *testing.T) {
+	r := &AgentRuntimeReconciler{}
+	ar := &omniav1alpha1.AgentRuntime{}
+	ar.Name = "drain-subsecond-test"
+	ar.Namespace = "ns"
+	ar.Spec.Facade.Type = omniav1alpha1.FacadeTypeWebSocket
+	ar.Spec.PromptPackRef.Name = "p"
+	// Sub-second drain timeout: positive but truncates to 0 seconds — must fall to default.
+	d := "500ms"
+	ar.Spec.Facade.DrainTimeout = &d
+
+	dep := &appsv1.Deployment{}
+	r.buildDeploymentSpec(context.Background(), dep, ar, newTestPromptPack(), nil, "", nil)
+
+	require.NotNil(t, dep.Spec.Template.Spec.TerminationGracePeriodSeconds)
+	got := *dep.Spec.Template.Spec.TerminationGracePeriodSeconds
+	want := int64(defaultDrainTimeoutSeconds + drainGraceBufferSeconds)
+	if got != want {
+		t.Fatalf("TerminationGracePeriodSeconds = %d, want %d (sub-second drainTimeout must fall to default)", got, want)
+	}
+}
+
+func TestDeployment_GracePeriodClampedAtMax(t *testing.T) {
+	r := &AgentRuntimeReconciler{}
+	ar := &omniav1alpha1.AgentRuntime{}
+	ar.Name = "drain-clamp-test"
+	ar.Namespace = "ns"
+	ar.Spec.Facade.Type = omniav1alpha1.FacadeTypeWebSocket
+	ar.Spec.PromptPackRef.Name = "p"
+	// A misconfigured huge drainTimeout must not stall teardown: the drain
+	// window is clamped to maxDrainTimeoutSeconds before adding the buffer.
+	d := "1h"
+	ar.Spec.Facade.DrainTimeout = &d
+
+	dep := &appsv1.Deployment{}
+	r.buildDeploymentSpec(context.Background(), dep, ar, newTestPromptPack(), nil, "", nil)
+
+	require.NotNil(t, dep.Spec.Template.Spec.TerminationGracePeriodSeconds)
+	got := *dep.Spec.Template.Spec.TerminationGracePeriodSeconds
+	want := int64(maxDrainTimeoutSeconds + drainGraceBufferSeconds)
+	if got != want {
+		t.Fatalf("TerminationGracePeriodSeconds = %d, want %d (1h drainTimeout must clamp to max)", got, want)
+	}
 }

@@ -331,6 +331,42 @@ type WorkspaceStorageStatus struct {
 	MountPath string `json:"mountPath,omitempty"`
 }
 
+// RuntimeDefaults are workspace-wide pod defaults applied to every AgentRuntime
+// in the workspace. Its purpose is hyperscaler-agnostic cloud identity: the SA
+// and pod labels needed to bind a runtime pod to a cloud workload identity
+// (Azure Workload Identity, AWS IRSA, GKE Workload Identity) so keyless
+// providers authenticate without a secret.
+//
+// Omnia treats these as opaque passthrough — it never interprets the values or
+// branches on cloud provider. The annotated ServiceAccount and the cloud-side
+// federated trust are provisioned out of band (IaC); the Workspace only
+// references the SA by name and lists the pod labels the cloud's webhook needs.
+//
+// Precedence: an AgentRuntime that sets its own spec.podOverrides.serviceAccountName
+// is bringing its own identity (its own annotated SA), so it opts OUT of these
+// defaults as a unit — neither the workspace SA nor the workspace pod labels are
+// applied to it. Agents that set no SA inherit these defaults.
+type RuntimeDefaults struct {
+	// serviceAccountName is the ServiceAccount every agent runtime pod in this
+	// workspace runs as. Provisioned out of band (IaC) with the cloud identity
+	// annotations (e.g. azure.workload.identity/client-id,
+	// eks.amazonaws.com/role-arn, iam.gke.io/gcp-service-account). Empty = no
+	// default; agents fall back to the operator-created per-agent SA.
+	// +optional
+	ServiceAccountName string `json:"serviceAccountName,omitempty"`
+
+	// podLabels are added to every agent runtime pod, e.g.
+	// {azure.workload.identity/use: "true"} to opt into the Azure webhook.
+	// AWS IRSA and GKE WLI need none. Opaque to Omnia.
+	// +optional
+	PodLabels map[string]string `json:"podLabels,omitempty"`
+
+	// podAnnotations are added to every agent runtime pod. Reserved for parity
+	// with podLabels; rarely needed. Opaque to Omnia.
+	// +optional
+	PodAnnotations map[string]string `json:"podAnnotations,omitempty"`
+}
+
 // WorkspaceSpec defines the desired state of Workspace.
 type WorkspaceSpec struct {
 	// displayName is the human-readable name for this workspace.
@@ -356,6 +392,15 @@ type WorkspaceSpec struct {
 	// namespace configures the Kubernetes namespace for this workspace.
 	// +kubebuilder:validation:Required
 	Namespace NamespaceConfig `json:"namespace"`
+
+	// runtime are workspace-wide pod defaults applied to every AgentRuntime in
+	// this workspace — primarily the cloud workload-identity SA + pod labels so
+	// agents (including those provisioned via the deploy API, which can't carry
+	// cloud-specific SA names) authenticate to keyless providers. Per-agent
+	// spec.podOverrides.serviceAccountName overrides this as a unit. See
+	// RuntimeDefaults.
+	// +optional
+	Runtime *RuntimeDefaults `json:"runtime,omitempty"`
 
 	// roleBindings maps IdP groups and ServiceAccounts to workspace roles.
 	// +optional
@@ -624,6 +669,16 @@ type WorkspaceServiceGroup struct {
 	// evalWorker opts this service group into the out-of-band eval-worker.
 	// +optional
 	EvalWorker *ServiceGroupEvalWorker `json:"evalWorker,omitempty"`
+
+	// autoscaling is the default autoscaling policy for every AgentRuntime in
+	// this service group. An agent that omits spec.runtime.autoscaling inherits
+	// this policy whole; an agent that sets its own block fully owns autoscaling
+	// and this default is ignored (explicit agent spec wins as a unit). When the
+	// resolved policy requests type "keda" but KEDA is not installed in the
+	// cluster, the agent surfaces an AutoscalingReady=False condition and stays
+	// at static replicas rather than failing.
+	// +optional
+	Autoscaling *AutoscalingConfig `json:"autoscaling,omitempty"`
 }
 
 // ServiceGroupEvalWorker configures the per-service-group eval-worker.

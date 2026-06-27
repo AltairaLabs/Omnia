@@ -78,20 +78,20 @@ export const AgentPromptPackNode = memo(function AgentPromptPackNode({ data }: {
   );
 });
 
-export interface SessionNodeData {
-  sessionType?: string;
+export interface ContextNodeData {
+  contextType?: string;
   ttl?: string;
 }
 
-export const AgentSessionNode = memo(function AgentSessionNode({ data }: { data: SessionNodeData }) {
+export const AgentContextNode = memo(function AgentContextNode({ data }: { data: ContextNodeData }) {
   return (
     <div className={cn(boxBase, "border-slate-400/40")}>
       <p className={labelCls}>
         <Database className="h-3 w-3" />
-        Session
+        Context
       </p>
       <p className="text-xs font-medium">
-        <span className="capitalize">{data.sessionType ?? "memory"}</span>
+        <span className="capitalize">{data.contextType ?? "memory"}</span>
         {data.ttl && <span className="text-muted-foreground"> · {data.ttl}</span>}
       </p>
     </div>
@@ -141,6 +141,6 @@ export const agentTopologyNodeTypes = {
   agentFacade: AgentFacadeNode,
   agentRuntime: AgentRuntimeNode,
   agentPromptPack: AgentPromptPackNode,
-  agentSession: AgentSessionNode,
+  agentContext: AgentContextNode,
   agentMemory: AgentMemoryNode,
 };

@@ -13,6 +13,7 @@ import { OverviewTab } from "./overview-tab";
 import { ServicesTab } from "./services-tab";
 import { AccessTab } from "./access-tab";
 import { AdminTab } from "./admin-tab";
+import { DeployTab } from "./deploy-tab";
 
 export default function WorkspaceSettingsPage() {
   const { name } = useParams<{ name: string }>();
@@ -67,6 +68,7 @@ export default function WorkspaceSettingsPage() {
           <TabsList>
             <TabsTrigger value="overview">Overview</TabsTrigger>
             <TabsTrigger value="services">Services</TabsTrigger>
+            <TabsTrigger value="deploy">Deploy</TabsTrigger>
             <TabsTrigger value="access">Access</TabsTrigger>
             {isOwner && <TabsTrigger value="advanced">Advanced</TabsTrigger>}
           </TabsList>
@@ -75,6 +77,9 @@ export default function WorkspaceSettingsPage() {
           </TabsContent>
           <TabsContent value="services" className="mt-4">
             <ServicesTab workspace={workspace} />
+          </TabsContent>
+          <TabsContent value="deploy" className="mt-4">
+            <DeployTab workspaceName={name} />
           </TabsContent>
           <TabsContent value="access" className="mt-4">
             <AccessTab workspace={workspace} onPatch={mutate} />

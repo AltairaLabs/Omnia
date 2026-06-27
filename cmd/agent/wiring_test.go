@@ -96,11 +96,11 @@ func mustBuildWS(
 	handler facade.MessageHandler, metrics *agent.Metrics, ms media.Storage,
 ) (*facade.Server, *http.ServeMux) {
 	t.Helper()
-	srv, mux, err := buildWebSocketServer(cfg, logr.Discard(), store, handler, metrics, nil, ms)
+	servers, err := buildWebSocketServer(cfg, logr.Discard(), store, handler, metrics, nil, nil, ms)
 	if err != nil {
 		t.Fatalf("buildWebSocketServer: %v", err)
 	}
-	return srv, mux
+	return servers.external, servers.externalMux
 }
 
 // TestBuildWebSocketServer_PseudonymizesUserIDHeader verifies the wiring
@@ -235,9 +235,9 @@ func TestBuildWebSocketServer_WiresMediaStorage(t *testing.T) {
 	store := session.NewMemoryStore()
 	t.Cleanup(func() { _ = store.Close() })
 
-	cfg := &agent.Config{AgentName: "probe", Namespace: "ns"}
+	cfg := &agent.Config{AgentName: probeAgentName, Namespace: "ns"}
 	metrics := agent.NewMetrics(cfg.AgentName, cfg.Namespace)
-	handler := &captureHandler{name: "probe"}
+	handler := &captureHandler{name: probeAgentName}
 
 	// With nil media storage: facade reports none wired.
 	nilServer, _ := mustBuildWS(t, cfg, store, handler, metrics, nil)
@@ -268,9 +268,9 @@ func TestBuildWebSocketServer_RegistersWebSocketRoutes(t *testing.T) {
 	store := session.NewMemoryStore()
 	t.Cleanup(func() { _ = store.Close() })
 
-	cfg := &agent.Config{AgentName: "probe", Namespace: "ns"}
+	cfg := &agent.Config{AgentName: probeAgentName, Namespace: "ns"}
 	metrics := agent.NewMetrics(cfg.AgentName, cfg.Namespace)
-	handler := &captureHandler{name: "probe"}
+	handler := &captureHandler{name: probeAgentName}
 
 	_, mux := mustBuildWS(t, cfg, store, handler, metrics, nil)
 
@@ -288,5 +288,53 @@ func TestBuildWebSocketServer_RegistersWebSocketRoutes(t *testing.T) {
 	mux.ServeHTTP(rr, req)
 	if rr.Code == http.StatusNotFound {
 		t.Errorf("/api/agents/ route not registered on buildWebSocketServer mux")
+	}
+}
+
+// TestBuildWebSocketServer_InternalTwinEnabled verifies that when an internal
+// management-plane port is configured, buildWebSocketServer builds the internal
+// twin server and mounts /ws on its mux.
+func TestBuildWebSocketServer_InternalTwinEnabled(t *testing.T) {
+	freshPromRegistry(t)
+	store := session.NewMemoryStore()
+	t.Cleanup(func() { _ = store.Close() })
+
+	cfg := &agent.Config{AgentName: probeAgentName, Namespace: "ns", InternalFacadePort: agent.DefaultInternalFacadePort}
+	metrics := agent.NewMetrics(cfg.AgentName, cfg.Namespace)
+	handler := &captureHandler{name: probeAgentName}
+
+	servers, err := buildWebSocketServer(cfg, logr.Discard(), store, handler, metrics, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("buildWebSocketServer: %v", err)
+	}
+	if servers.internal == nil || servers.internalMux == nil {
+		t.Fatal("internal twin server/mux is nil; want it built when InternalFacadePort is set")
+	}
+	req := httptest.NewRequest(http.MethodGet, "/ws", nil)
+	rr := httptest.NewRecorder()
+	servers.internalMux.ServeHTTP(rr, req)
+	if rr.Code == http.StatusNotFound {
+		t.Error("/ws route not registered on the internal management-plane mux")
+	}
+}
+
+// TestBuildWebSocketServer_InternalTwinDisabled verifies that without an internal
+// port the twin is not built (the mgmt plane is reached via the external chain
+// in Milestone A, or disabled entirely).
+func TestBuildWebSocketServer_InternalTwinDisabled(t *testing.T) {
+	freshPromRegistry(t)
+	store := session.NewMemoryStore()
+	t.Cleanup(func() { _ = store.Close() })
+
+	cfg := &agent.Config{AgentName: probeAgentName, Namespace: "ns"} // InternalFacadePort: 0
+	metrics := agent.NewMetrics(cfg.AgentName, cfg.Namespace)
+	handler := &captureHandler{name: probeAgentName}
+
+	servers, err := buildWebSocketServer(cfg, logr.Discard(), store, handler, metrics, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("buildWebSocketServer: %v", err)
+	}
+	if servers.internal != nil || servers.internalMux != nil {
+		t.Error("internal twin server should be nil when InternalFacadePort is 0")
 	}
 }

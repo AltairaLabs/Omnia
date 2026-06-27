@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
 import { MemorySessionStore } from "./memory-store";
-import type { SessionRecord, PkceRecord } from "./types";
+import type { SessionRecord, PkceRecord, CliFlowRecord, CliCodeRecord } from "./types";
 
 const SID = "sid-abc";
 const STATE = "state-xyz";
@@ -88,5 +88,38 @@ describe("MemorySessionStore", () => {
 
   it("rejects non-positive TTLs for pkce", async () => {
     await expect(store.putPkce(STATE, samplePkce, 0)).rejects.toThrow();
+  });
+});
+
+const flow: CliFlowRecord = { callback: "http://127.0.0.1:5000/cb", cliState: "abc123xy", createdAt: 1 };
+const codeRec: CliCodeRecord = {
+  userId: "u1", email: "u@e.com", groups: ["g"], userRole: "editor",
+  workspace: "team-acme", workspaceRole: "editor", createdAt: 1,
+};
+
+describe("CLI flow + code", () => {
+  it("peeks a flow without consuming it, then consumes it once", async () => {
+    const s = new MemorySessionStore();
+    await s.putCliFlow("f1", flow, 60);
+    expect(await s.getCliFlow("f1")).toEqual(flow);
+    expect(await s.getCliFlow("f1")).toEqual(flow); // peek is repeatable
+    expect(await s.consumeCliFlow("f1")).toEqual(flow);
+    expect(await s.getCliFlow("f1")).toBeNull(); // gone after consume
+  });
+
+  it("consumes a code exactly once (replay → null)", async () => {
+    const s = new MemorySessionStore();
+    await s.putCliCode("c1", codeRec, 60);
+    expect(await s.consumeCliCode("c1")).toEqual(codeRec);
+    expect(await s.consumeCliCode("c1")).toBeNull();
+  });
+
+  it("returns null for an expired code", async () => {
+    const s = new MemorySessionStore();
+    await s.putCliCode("c2", codeRec, 60);
+    vi.useFakeTimers();
+    vi.advanceTimersByTime(61_000);
+    expect(await s.consumeCliCode("c2")).toBeNull();
+    vi.useRealTimers();
   });
 });

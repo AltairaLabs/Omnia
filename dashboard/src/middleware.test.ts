@@ -36,6 +36,7 @@ beforeEach(() => {
   process.env.OMNIA_AUTH_MODE = "oauth";
   process.env.OMNIA_SESSION_SECRET = SECRET;
   process.env.OMNIA_SESSION_COOKIE_NAME = "omnia_session";
+  delete process.env.OMNIA_AUTH_API_KEYS_ENABLED;
 });
 
 async function reqWithSid(sid: string | null, path = "/dashboard"): Promise<NextRequest> {
@@ -46,6 +47,13 @@ async function reqWithSid(sid: string | null, path = "/dashboard"): Promise<Next
     req.cookies.set("omnia_session", sealed);
   }
   return req;
+}
+
+const API_KEY = "omnia_sk_test123";
+const WORKSPACES_API = "/api/workspaces/default/agents";
+
+function reqWithHeaders(headers: Record<string, string>, path = WORKSPACES_API): NextRequest {
+  return new NextRequest(`https://omnia.example${path}`, { headers });
 }
 
 describe("middleware", () => {
@@ -104,5 +112,60 @@ describe("middleware", () => {
     expect(res.status).toBe(401);
     const body = await res.json();
     expect(body.error).toBe("unauthenticated");
+  });
+
+  // CLI browser-login entry points self-authenticate, so the middleware must let
+  // them run unauthenticated rather than 401 before the route (otherwise
+  // authorize never writes the flow record → grant fails invalid_or_expired_flow).
+  it("lets /api/cli/authorize through unauthenticated (self-authenticating)", async () => {
+    const { middleware } = await import("./middleware");
+    const res = await middleware(await reqWithSid(null, "/api/cli/authorize"));
+    expect(res.status).toBe(200);
+  });
+
+  it("lets /api/cli/token through unauthenticated (one-time code, no session)", async () => {
+    const { middleware } = await import("./middleware");
+    const res = await middleware(await reqWithSid(null, "/api/cli/token"));
+    expect(res.status).toBe(200);
+  });
+
+  it("still 401s /api/cli/grant unauthenticated (requires the browser session)", async () => {
+    const { middleware } = await import("./middleware");
+    const res = await middleware(await reqWithSid(null, "/api/cli/grant"));
+    expect(res.status).toBe(401);
+  });
+
+  // #1556 — programmatic clients authenticate with an API key, not a session
+  // cookie. The middleware must let them past the cookie gate so the route
+  // handlers (getUser -> authenticateApiKey) can validate + authorize them.
+  it("lets a Bearer API-key /api request past the cookie gate", async () => {
+    const { middleware } = await import("./middleware");
+    const res = await middleware(reqWithHeaders({ authorization: `Bearer ${API_KEY}` }));
+    expect(res.status).toBe(200);
+  });
+
+  it("lets an X-API-Key /api request past the cookie gate", async () => {
+    const { middleware } = await import("./middleware");
+    const res = await middleware(reqWithHeaders({ "x-api-key": API_KEY }));
+    expect(res.status).toBe(200);
+  });
+
+  it("still 401s an API-key request when API keys are disabled", async () => {
+    process.env.OMNIA_AUTH_API_KEYS_ENABLED = "false";
+    const { middleware } = await import("./middleware");
+    const res = await middleware(reqWithHeaders({ authorization: `Bearer ${API_KEY}` }));
+    expect(res.status).toBe(401);
+  });
+
+  it("does not treat a non-omnia_sk_ Bearer token as an API key", async () => {
+    const { middleware } = await import("./middleware");
+    const res = await middleware(reqWithHeaders({ authorization: "Bearer eyJhbGci.fake.jwt" }));
+    expect(res.status).toBe(401);
+  });
+
+  it("does not bypass the gate for non-/api paths carrying an API key", async () => {
+    const { middleware } = await import("./middleware");
+    const res = await middleware(reqWithHeaders({ authorization: `Bearer ${API_KEY}` }, "/dashboard"));
+    expect(res.status).toBe(307);
   });
 });

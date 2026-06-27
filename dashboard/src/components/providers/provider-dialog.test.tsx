@@ -5,6 +5,37 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ProviderDialog } from "./provider-dialog";
 import type { Provider } from "@/types/generated/provider";
 
+// Mock @/hooks/resources — must be hoisted before importing the component.
+// provider-dialog.tsx imports useProviderMutations from @/hooks/resources.
+// SecretKeySelect imports useSecrets from @/hooks/resources.
+// AddCredentialSecretDialog uses useCreateSecret from @/hooks/resources.
+vi.mock("@/hooks/resources", () => ({
+  useSecrets: vi.fn(),
+  useProviderMutations: vi.fn(),
+  useCreateSecret: vi.fn(),
+  useNamespaces: vi.fn(),
+}));
+
+import { useSecrets, useProviderMutations, useCreateSecret, useNamespaces } from "@/hooks/resources";
+
+// Default secrets list used by most tests
+const DEFAULT_TEST_SECRETS = [
+  { name: "my-api-key", namespace: "test-namespace", keys: ["ANTHROPIC_API_KEY"] },
+  { name: "my-secret", namespace: "test-namespace", keys: ["API_KEY"] },
+  { name: "my-key", namespace: "test-namespace", keys: [] },
+  { name: "k", namespace: "test-namespace", keys: [] },
+  { name: "openai-key", namespace: "test-namespace", keys: [] },
+  { name: "voyage-key", namespace: "test-namespace", keys: [] },
+  { name: "hf-token", namespace: "test-namespace", keys: [] },
+  { name: "azure-creds", namespace: "test-namespace", keys: [] },
+];
+
+function setMockSecrets(
+  secrets: Array<{ name: string; namespace: string; keys: string[] }> = DEFAULT_TEST_SECRETS
+) {
+  vi.mocked(useSecrets).mockReturnValue({ data: secrets, isLoading: false, error: null } as never);
+}
+
 // Mock workspace context
 const mockCurrentWorkspace = {
   name: "test-workspace",
@@ -23,18 +54,26 @@ vi.mock("@/contexts/workspace-context", () => ({
   }),
 }));
 
-// Mock provider mutations
 const mockCreateProvider = vi.fn();
 const mockUpdateProvider = vi.fn();
 
-vi.mock("@/hooks/use-provider-mutations", () => ({
-  useProviderMutations: () => ({
+function setMockMutations() {
+  vi.mocked(useProviderMutations).mockReturnValue({
     createProvider: mockCreateProvider,
     updateProvider: mockUpdateProvider,
     loading: false,
     error: null,
-  }),
-}));
+  });
+}
+
+function setDefaultResourceMocks() {
+  vi.mocked(useNamespaces).mockReturnValue({ data: ["default", "test-namespace"] } as never);
+  vi.mocked(useCreateSecret).mockReturnValue({
+    mutateAsync: vi.fn().mockResolvedValue({}),
+    isPending: false,
+    error: null,
+  } as never);
+}
 
 // Helper to create a mock Provider
 function createMockProvider(overrides?: Partial<Provider>): Provider {
@@ -73,6 +112,9 @@ function TestWrapper({ children }: { children: React.ReactNode }) {
 describe("ProviderDialog", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    setMockSecrets();
+    setMockMutations();
+    setDefaultResourceMocks();
     mockCreateProvider.mockResolvedValue(createMockProvider());
     mockUpdateProvider.mockResolvedValue(createMockProvider());
   });
@@ -243,17 +285,25 @@ describe("ProviderDialog", () => {
           <ProviderDialog open onOpenChange={() => {}} />
         </TestWrapper>
       );
+      await user.type(screen.getByLabelText(/^name$/i), "env-pattern-provider");
       // Switch to envVar credential source
       fireEvent.click(screen.getByLabelText("Env Variable"));
-      const envInput = screen.getByLabelText("Environment Variable");
+      const envInput = screen.getByLabelText("Environment variable name");
       await user.type(envInput, "123_INVALID");
-      // Pattern validation fires on change; env var input should be marked invalid
+      // The adopted UX shows the format error inline as a <p>, not via aria-invalid.
       await waitFor(() => {
-        expect(envInput).toHaveAttribute("aria-invalid", "true");
+        expect(
+          screen.getAllByText(/enter a variable name.*not a key=value/i).length
+        ).toBeGreaterThan(0);
       });
-      expect(
-        screen.getByRole("button", { name: /create provider/i })
-      ).toBeDisabled();
+      // An invalid env var name must block submit (validateActiveCredential).
+      fireEvent.click(screen.getByRole("button", { name: /create provider/i }));
+      await waitFor(() => {
+        expect(
+          screen.getAllByText(/enter a variable name.*not a key=value/i).length
+        ).toBeGreaterThan(0);
+      });
+      expect(mockCreateProvider).not.toHaveBeenCalled();
     });
 
     it("blocks submit and shows Alert when envVar source is selected but field is empty (I-1)", async () => {
@@ -362,9 +412,9 @@ describe("ProviderDialog", () => {
       const modelInput = screen.getByLabelText("Model");
       await user.type(modelInput, "claude-sonnet-4-20250514");
 
-      // Fill credential secret name
-      const secretInput = screen.getByLabelText("Secret Name");
-      await user.type(secretInput, "my-api-key");
+      // Select credential secret from dropdown
+      fireEvent.click(document.getElementById("cred-secret-select")!);
+      fireEvent.click(await screen.findByRole("option", { name: "my-api-key" }));
 
       // Submit
       const submitButton = screen.getByRole("button", { name: /create provider/i });
@@ -448,9 +498,9 @@ describe("ProviderDialog", () => {
       const nameInput = screen.getByLabelText("Name");
       await user.type(nameInput, "my-provider");
 
-      // Fill credential secret name
-      const secretInput = screen.getByLabelText("Secret Name");
-      await user.type(secretInput, "my-api-key");
+      // Select credential secret from dropdown
+      fireEvent.click(document.getElementById("cred-secret-select")!);
+      fireEvent.click(await screen.findByRole("option", { name: "my-api-key" }));
 
       const submitButton = screen.getByRole("button", { name: /create provider/i });
       fireEvent.click(submitButton);
@@ -480,7 +530,7 @@ describe("ProviderDialog", () => {
       fireEvent.click(screen.getByLabelText("Env Variable"));
 
       // Fill env var
-      await user.type(screen.getByLabelText("Environment Variable"), "MY_API_KEY");
+      await user.type(screen.getByLabelText("Environment variable name"), "MY_API_KEY");
 
       // Submit
       fireEvent.click(screen.getByRole("button", { name: /create provider/i }));
@@ -537,7 +587,8 @@ describe("ProviderDialog", () => {
       );
 
       await user.type(screen.getByLabelText("Name"), "cap-provider");
-      await user.type(screen.getByLabelText("Secret Name"), "my-secret");
+      fireEvent.click(document.getElementById("cred-secret-select")!);
+      fireEvent.click(await screen.findByRole("option", { name: "my-secret" }));
 
       // Expand the capabilities collapsible
       fireEvent.click(screen.getByRole("button", { name: /capabilities/i }));
@@ -598,7 +649,8 @@ describe("ProviderDialog", () => {
       );
 
       await user.type(screen.getByLabelText("Name"), "defaults-provider");
-      await user.type(screen.getByLabelText("Secret Name"), "my-secret");
+      fireEvent.click(document.getElementById("cred-secret-select")!);
+      fireEvent.click(await screen.findByRole("option", { name: "my-secret" }));
 
       // Open defaults collapsible
       fireEvent.click(screen.getByRole("button", { name: /defaults/i }));
@@ -637,7 +689,8 @@ describe("ProviderDialog", () => {
       );
 
       await user.type(screen.getByLabelText("Name"), "pricing-provider");
-      await user.type(screen.getByLabelText("Secret Name"), "my-secret");
+      fireEvent.click(document.getElementById("cred-secret-select")!);
+      fireEvent.click(await screen.findByRole("option", { name: "my-secret" }));
 
       // Open pricing collapsible
       fireEvent.click(screen.getByRole("button", { name: /pricing/i }));
@@ -666,7 +719,6 @@ describe("ProviderDialog", () => {
   describe("provider type change resets fields", () => {
     it("resets credential fields when switching to local-only type", async () => {
       vi.useRealTimers();
-      const user = userEvent.setup();
 
       render(
         <TestWrapper>
@@ -677,8 +729,9 @@ describe("ProviderDialog", () => {
       // Default type is "claude" - should show credential section
       expect(screen.getByText("Credentials")).toBeInTheDocument();
 
-      // Enter a credential secret so there is state to reset
-      await user.type(screen.getByLabelText("Secret Name"), "some-secret");
+      // Select a credential secret so there is state to reset
+      fireEvent.click(document.getElementById("cred-secret-select")!);
+      fireEvent.click(await screen.findByRole("option", { name: "my-secret" }));
 
       // Switch to ollama (local type, no credentials needed)
       const typeSelect = screen.getByLabelText("Provider Type");
@@ -1031,7 +1084,8 @@ describe("ProviderDialog", () => {
       fireEvent.click(screen.getByLabelText("Auth"));
       fireEvent.click(await screen.findByRole("option", { name: "servicePrincipal" }));
 
-      await user.type(screen.getByLabelText("Credentials Secret Name"), "azure-creds");
+      fireEvent.click(document.getElementById("auth-secret-select")!);
+      fireEvent.click(await screen.findByRole("option", { name: "azure-creds" }));
 
       fireEvent.click(screen.getByRole("button", { name: /create provider/i }));
 
@@ -1116,6 +1170,31 @@ describe("ProviderDialog", () => {
       expect(screen.queryByRole("option", { name: "servicePrincipal" })).not.toBeInTheDocument();
     });
 
+    it("renders secret dropdowns (auth-secret-select / auth-key-select) for auth ref, not free-text inputs", async () => {
+      setMockSecrets([
+        { name: "azure-creds", namespace: "test-namespace", keys: ["CLIENT_SECRET"] },
+      ]);
+
+      render(
+        <TestWrapper>
+          <ProviderDialog open={true} onOpenChange={vi.fn()} />
+        </TestWrapper>
+      );
+
+      fireEvent.click(screen.getByLabelText("Platform"));
+      fireEvent.click(await screen.findByRole("option", { name: /Azure AI Foundry/i }));
+
+      fireEvent.click(screen.getByLabelText("Auth"));
+      fireEvent.click(await screen.findByRole("option", { name: "servicePrincipal" }));
+
+      // Dropdowns must be present
+      expect(document.getElementById("auth-secret-select")).toBeTruthy();
+      expect(document.getElementById("auth-key-select")).toBeTruthy();
+      // Old free-text inputs must NOT be present
+      expect(document.getElementById("auth-secret-name")).toBeNull();
+      expect(document.getElementById("auth-secret-key")).toBeNull();
+    });
+
   });
 
   describe("HTTP headers", () => {
@@ -1176,7 +1255,8 @@ describe("ProviderDialog", () => {
       );
 
       await user.type(screen.getByLabelText("Name"), "gw-provider");
-      await user.type(screen.getByLabelText("Secret Name"), "my-key");
+      fireEvent.click(document.getElementById("cred-secret-select")!);
+      fireEvent.click(await screen.findByRole("option", { name: "my-key" }));
 
       // Expand the HTTP Headers section
       fireEvent.click(screen.getByRole("button", { name: /http headers/i }));
@@ -1226,7 +1306,8 @@ describe("ProviderDialog", () => {
       );
 
       await user.type(screen.getByLabelText("Name"), "no-headers-provider");
-      await user.type(screen.getByLabelText("Secret Name"), "my-key");
+      fireEvent.click(document.getElementById("cred-secret-select")!);
+      fireEvent.click(await screen.findByRole("option", { name: "my-key" }));
 
       fireEvent.click(screen.getByRole("button", { name: /create provider/i }));
 
@@ -1250,7 +1331,8 @@ describe("ProviderDialog", () => {
       );
 
       await user.type(screen.getByLabelText("Name"), "default-role-provider");
-      await user.type(screen.getByLabelText("Secret Name"), "k");
+      fireEvent.click(document.getElementById("cred-secret-select")!);
+      fireEvent.click(await screen.findByRole("option", { name: "k" }));
       fireEvent.click(screen.getByRole("button", { name: /create provider/i }));
 
       await waitFor(() => {
@@ -1319,7 +1401,8 @@ describe("ProviderDialog", () => {
 
       // Provider Type should have snapped to openai (first vendor allowed for tts).
       await user.type(screen.getByLabelText("Voice"), "alloy");
-      await user.type(screen.getByLabelText("Secret Name"), "openai-key");
+      fireEvent.click(document.getElementById("cred-secret-select")!);
+      fireEvent.click(await screen.findByRole("option", { name: "openai-key" }));
 
       fireEvent.click(screen.getByRole("button", { name: /create provider/i }));
 
@@ -1351,7 +1434,8 @@ describe("ProviderDialog", () => {
       await user.click(screen.getByRole("option", { name: /voyage/i }));
 
       await user.type(screen.getByLabelText("Dimensions"), "1024");
-      await user.type(screen.getByLabelText("Secret Name"), "voyage-key");
+      fireEvent.click(document.getElementById("cred-secret-select")!);
+      fireEvent.click(await screen.findByRole("option", { name: "voyage-key" }));
 
       fireEvent.click(screen.getByRole("button", { name: /create provider/i }));
 
@@ -1421,7 +1505,8 @@ describe("ProviderDialog", () => {
       await user.type(screen.getByLabelText("Sample Rate (Hz)"), "24000");
       await user.click(screen.getByLabelText("Format"));
       await user.click(screen.getByRole("option", { name: "mp3" }));
-      await user.type(screen.getByLabelText("Secret Name"), "k");
+      fireEvent.click(document.getElementById("cred-secret-select")!);
+      fireEvent.click(await screen.findByRole("option", { name: "k" }));
 
       fireEvent.click(screen.getByRole("button", { name: /create provider/i }));
 
@@ -1451,7 +1536,8 @@ describe("ProviderDialog", () => {
 
       await user.type(screen.getByLabelText("Language (ISO-639-1)"), "en");
       await user.type(screen.getByLabelText("Sample Rate (Hz)"), "16000");
-      await user.type(screen.getByLabelText("Secret Name"), "k");
+      fireEvent.click(document.getElementById("cred-secret-select")!);
+      fireEvent.click(await screen.findByRole("option", { name: "k" }));
 
       fireEvent.click(screen.getByRole("button", { name: /create provider/i }));
 
@@ -1479,7 +1565,8 @@ describe("ProviderDialog", () => {
 
       await user.click(screen.getByLabelText("Distance metric"));
       await user.click(screen.getByRole("option", { name: "cosine" }));
-      await user.type(screen.getByLabelText("Secret Name"), "k");
+      fireEvent.click(document.getElementById("cred-secret-select")!);
+      fireEvent.click(await screen.findByRole("option", { name: "k" }));
 
       fireEvent.click(screen.getByRole("button", { name: /create provider/i }));
 
@@ -1516,7 +1603,8 @@ describe("ProviderDialog", () => {
 
       // The form must have a valid huggingface state on submit.
       await user.type(screen.getByLabelText("Name"), "hf-classifier");
-      await user.type(screen.getByLabelText("Secret Name"), "hf-token");
+      fireEvent.click(document.getElementById("cred-secret-select")!);
+      fireEvent.click(await screen.findByRole("option", { name: "hf-token" }));
       fireEvent.click(screen.getByRole("button", { name: /create provider/i }));
 
       await waitFor(() => {
@@ -1541,6 +1629,173 @@ describe("ProviderDialog", () => {
       // matrix and must not appear in the Provider Type list.
       await user.click(screen.getByLabelText("Provider Type"));
       expect(screen.queryByRole("option", { name: /voyage/i })).toBeNull();
+    });
+  });
+
+  describe("credential secret dropdowns (Task 4)", () => {
+    it("renders secret dropdown (cred-secret-select) and key dropdown (cred-key-select) for secret source, no free-text input", () => {
+      setMockSecrets([
+        { name: "anthropic-creds", namespace: "test-namespace", keys: ["ANTHROPIC_API_KEY"] },
+      ]);
+
+      render(
+        <TestWrapper>
+          <ProviderDialog open={true} onOpenChange={vi.fn()} />
+        </TestWrapper>
+      );
+
+      // Secret dropdown must be present
+      expect(document.getElementById("cred-secret-select")).toBeTruthy();
+      // Key dropdown must be present
+      expect(document.getElementById("cred-key-select")).toBeTruthy();
+      // Old free-text inputs must NOT be present
+      expect(document.getElementById("cred-secret-name")).toBeNull();
+      expect(document.getElementById("cred-secret-key")).toBeNull();
+    });
+
+    it("shows envVar validation error on key=value input and clears on valid name", async () => {
+      vi.useRealTimers();
+      const user = userEvent.setup();
+
+      render(
+        <TestWrapper>
+          <ProviderDialog open={true} onOpenChange={vi.fn()} />
+        </TestWrapper>
+      );
+
+      await user.type(screen.getByLabelText("Name"), "env-val-provider");
+
+      // Switch to envVar credential source
+      fireEvent.click(screen.getByLabelText("Env Variable"));
+
+      // Enter a key=value — should show error
+      const envInput = screen.getByLabelText("Environment variable name");
+      await user.type(envInput, "ANTHROPIC_API_KEY=sk-x");
+
+      // Try to submit — should be blocked
+      fireEvent.click(screen.getByRole("button", { name: /create provider/i }));
+
+      await waitFor(() => {
+        // The error appears both inline and in the submit Alert — check at least one
+        expect(
+          screen.getAllByText(/enter a variable name.*not a key=value/i).length
+        ).toBeGreaterThan(0);
+      });
+      expect(mockCreateProvider).not.toHaveBeenCalled();
+
+      // Clear and enter a valid name — inline error should disappear
+      await user.clear(envInput);
+      await user.type(envInput, "ANTHROPIC_API_KEY");
+
+      // The inline error (in the form field) should be gone now
+      const inlineErrors = screen.queryAllByText(/enter a variable name.*not a key=value/i);
+      // After clearing bad input, there should be no inline error (only possibly the stale Alert)
+      // The Alert clears on next submit attempt; the inline one clears immediately
+      expect(inlineErrors.filter(el => el.tagName === "P").length).toBe(0);
+
+      fireEvent.click(screen.getByRole("button", { name: /create provider/i }));
+
+      await waitFor(() => {
+        expect(mockCreateProvider).toHaveBeenCalledWith(
+          "env-val-provider",
+          expect.objectContaining({
+            credential: { envVar: "ANTHROPIC_API_KEY" },
+          })
+        );
+      });
+    });
+  });
+
+  describe("inline add-secret (Task 6)", () => {
+    it("shows 'Add credential secret' button when no secrets exist and clicking it opens the add dialog", async () => {
+      vi.useRealTimers();
+
+      // Return empty secrets so SecretKeySelect renders the empty state
+      vi.mocked(useSecrets).mockReturnValue({ data: [], isLoading: false, error: null } as never);
+
+      render(
+        <TestWrapper>
+          <ProviderDialog open={true} onOpenChange={vi.fn()} />
+        </TestWrapper>
+      );
+
+      // The empty-state button from SecretKeySelect
+      const addBtn = screen.getByRole("button", { name: /add credential secret/i });
+      expect(addBtn).toBeInTheDocument();
+
+      // Clicking opens the AddCredentialSecretDialog
+      fireEvent.click(addBtn);
+
+      // The dialog title should appear
+      await waitFor(() => {
+        expect(screen.getByRole("heading", { name: /add provider credentials/i })).toBeInTheDocument();
+      });
+    });
+
+    it("on create, the new secret name becomes credentialSecretName and the add dialog closes", async () => {
+      vi.useRealTimers();
+      const user = userEvent.setup();
+
+      // Start with no secrets so the empty-state trigger renders
+      vi.mocked(useSecrets).mockReturnValue({ data: [], isLoading: false, error: null } as never);
+
+      const mockMutateAsync = vi.fn().mockResolvedValue({});
+      vi.mocked(useCreateSecret).mockReturnValue({
+        mutateAsync: mockMutateAsync,
+        isPending: false,
+        error: null,
+      } as never);
+
+      render(
+        <TestWrapper>
+          <ProviderDialog open={true} onOpenChange={vi.fn()} />
+        </TestWrapper>
+      );
+
+      // Open the add-secret dialog
+      fireEvent.click(screen.getByRole("button", { name: /add credential secret/i }));
+
+      await waitFor(() => {
+        expect(screen.getByRole("heading", { name: /add provider credentials/i })).toBeInTheDocument();
+      });
+
+      // Fill in the secret name
+      const secretNameInput = screen.getByPlaceholderText(/e\.g\., anthropic-credentials/i);
+      await user.type(secretNameInput, "my-new-secret");
+
+      // Fill in a key-value pair
+      const keyInput = screen.getByPlaceholderText(/key.*openai_api_key/i);
+      await user.type(keyInput, "ANTHROPIC_API_KEY");
+
+      const valueInput = screen.getByPlaceholderText(/value/i);
+      await user.type(valueInput, "sk-test-key");
+
+      // Submit the create dialog
+      fireEvent.click(screen.getByRole("button", { name: /^create$/i }));
+
+      await waitFor(() => {
+        expect(mockMutateAsync).toHaveBeenCalledWith(
+          expect.objectContaining({ name: "my-new-secret" })
+        );
+      });
+
+      // After creation, the add dialog should close
+      await waitFor(() => {
+        expect(screen.queryByRole("heading", { name: /add provider credentials/i })).not.toBeInTheDocument();
+      });
+    });
+
+    it("renders the 'How to add credentials' docs link", () => {
+      render(
+        <TestWrapper>
+          <ProviderDialog open={true} onOpenChange={vi.fn()} />
+        </TestWrapper>
+      );
+
+      const link = screen.getByRole("link", { name: /how to add credentials/i });
+      expect(link).toBeInTheDocument();
+      expect(link).toHaveAttribute("href", "https://omnia.altairalabs.ai/docs/how-to/manage-credentials");
+      expect(link).toHaveAttribute("target", "_blank");
     });
   });
 });

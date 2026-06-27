@@ -175,9 +175,9 @@ kubectl config use-context omnia-dev
 
 For minikube, you'll use `minikube service` or `minikube tunnel` to access services.
 
-## Deploy Redis (Session Store)
+## Deploy Redis (Context Store)
 
-The AgentRuntime supports Redis for distributed session storage. For local development, deploy a simple Redis instance:
+The AgentRuntime supports Redis for distributed context storage. For local development, deploy a simple Redis instance:
 
 ```bash
 # Create the cache namespace
@@ -386,7 +386,7 @@ spec:
   facade:
     type: websocket
     port: 8080
-  session:
+  context:
     type: redis
     storeRef:
       name: redis-credentials

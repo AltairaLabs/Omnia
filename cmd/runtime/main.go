@@ -52,6 +52,7 @@ import (
 	pkruntime "github.com/altairalabs/omnia/internal/runtime"
 	"github.com/altairalabs/omnia/internal/runtime/tools"
 	"github.com/altairalabs/omnia/internal/schema"
+	"github.com/altairalabs/omnia/internal/session"
 	"github.com/altairalabs/omnia/internal/session/httpclient"
 	"github.com/altairalabs/omnia/internal/tracing"
 	"github.com/altairalabs/omnia/pkg/k8s"
@@ -86,6 +87,12 @@ func main() {
 		log.Error(err, "failed to load configuration")
 		os.Exit(1)
 	}
+
+	// Resolve the pack's entry point from the pack itself (workflow.entry /
+	// agents.entry / sole prompt) rather than relying on a hardcoded prompt name.
+	// A pack whose entry isn't literally "default" then serves without renaming
+	// (#1595); multi-prompt plain packs still fall back to cfg.PromptName.
+	cfg.PromptName = pkruntime.ResolvePackEntry(cfg.PromptPackPath, cfg.PromptName, log)
 
 	log.Info("starting runtime",
 		"agent", cfg.AgentName,
@@ -158,13 +165,13 @@ func main() {
 
 	// Create state store for conversation persistence
 	var store statestore.Store
-	switch cfg.SessionType {
-	case pkruntime.SessionTypeMemory:
+	switch cfg.ContextType {
+	case pkruntime.ContextTypeMemory:
 		store = statestore.NewMemoryStore()
 		log.Info("using in-memory state store")
-	case pkruntime.SessionTypeRedis:
+	case pkruntime.ContextTypeRedis:
 		// Parse Redis URL
-		opts, err := redis.ParseURL(cfg.SessionURL)
+		opts, err := redis.ParseURL(cfg.ContextURL)
 		if err != nil {
 			log.Error(err, "failed to parse Redis URL")
 			os.Exit(1)
@@ -184,7 +191,7 @@ func main() {
 		cancel()
 
 		store = statestore.NewRedisStore(client)
-		log.Info("using Redis state store", "url", cfg.SessionURL)
+		log.Info("using Redis state store", "url", cfg.ContextURL)
 	}
 
 	// Initialize tracing if enabled
@@ -251,7 +258,7 @@ func main() {
 	}
 	// Wire session recording via session-api when URL is configured
 	if cfg.SessionAPIURL != "" {
-		sessionStore := httpclient.NewStore(cfg.SessionAPIURL, log)
+		sessionStore := httpclient.NewStore(cfg.SessionAPIURL, log, httpclient.WithSource(session.SourceRuntime))
 		serverOpts = append(serverOpts, pkruntime.WithSessionStore(sessionStore))
 		log.Info("session recording enabled", "sessionAPIURL", cfg.SessionAPIURL)
 	}

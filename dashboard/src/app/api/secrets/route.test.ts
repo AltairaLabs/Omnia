@@ -280,4 +280,25 @@ describe("POST /api/secrets", () => {
 
     expect(response.status).toBe(400);
   });
+
+  it("should surface real k8s 403 error status and message", async () => {
+    const forbiddenErr = new Error("HTTP-Code: 403\nBody: ...");
+    (forbiddenErr as unknown as { statusCode: number }).statusCode = 403;
+    mockCreateOrUpdateSecret.mockRejectedValue(forbiddenErr);
+
+    const request = createRequest("/api/secrets", {
+      method: "POST",
+      body: {
+        namespace: "default",
+        name: "new-secret",
+        data: { API_KEY: "test-value" },
+      },
+    });
+
+    const response = await POST(request);
+    const data = await response.json();
+
+    expect(response.status).toBe(403);
+    expect(data.error).toContain("HTTP-Code: 403");
+  });
 });

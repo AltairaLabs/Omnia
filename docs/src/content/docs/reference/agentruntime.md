@@ -272,29 +272,28 @@ spec:
     namespace: tools  # Optional
 ```
 
-### `session`
+### `context`
 
-Session storage configuration.
+Runtime context store configuration (working LLM context across turns).
 
 | Field | Type | Default | Required |
 |-------|------|---------|----------|
-| `session.type` | string | memory | No |
-| `session.ttl` | duration | 24h | No |
-| `session.storeRef.name` | string | - | No |
+| `context.type` | string | memory | No |
+| `context.ttl` | duration | 24h | No |
+| `context.storeRef.name` | string | - | No |
 
 ```yaml
 spec:
-  session:
+  context:
     type: redis
     ttl: 24h
     storeRef:
       name: redis-credentials
 ```
 
-Session store types:
+Context store types:
 - `memory` - In-memory (not recommended for production)
 - `redis` - Redis backend (recommended)
-- `postgres` - PostgreSQL backend
 
 ### `media`
 
@@ -695,7 +694,7 @@ spec:
     port: 8080
     handler: runtime
 
-  session:
+  context:
     type: redis
     ttl: 24h
     storeRef:

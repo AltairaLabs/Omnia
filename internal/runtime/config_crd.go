@@ -63,7 +63,7 @@ func LoadFromCRD(ctx context.Context, c client.Client, name, namespace string) (
 		PromptName:     getEnvOrDefault(envPromptName, defaultPromptName),
 		GRPCPort:       defaultGRPCPort,
 		HealthPort:     defaultHealthPort,
-		SessionTTL:     defaultSessionTTL,
+		ContextTTL:     defaultContextTTL,
 		MediaBasePath:  defaultMediaBasePath,
 	}
 
@@ -81,8 +81,8 @@ func LoadFromCRD(ctx context.Context, c client.Client, name, namespace string) (
 		cfg.OutputSchemaJSON = ar.Spec.OutputSchema.Raw
 	}
 
-	// Session config from CRD
-	if err := loadRuntimeSessionFromCRD(cfg, ar); err != nil {
+	// Context store config from CRD
+	if err := loadRuntimeContextFromCRD(cfg, ar); err != nil {
 		return nil, err
 	}
 
@@ -203,25 +203,25 @@ func resolveWorkspaceUID(ctx context.Context, c client.Client, namespace string)
 	return "", nil
 }
 
-// loadRuntimeSessionFromCRD populates session config from the AgentRuntime CRD.
-func loadRuntimeSessionFromCRD(cfg *Config, ar *v1alpha1.AgentRuntime) error {
-	if ar.Spec.Session == nil {
-		cfg.SessionType = defaultSessionType
+// loadRuntimeContextFromCRD populates context store config from the AgentRuntime CRD.
+func loadRuntimeContextFromCRD(cfg *Config, ar *v1alpha1.AgentRuntime) error {
+	if ar.Spec.Context == nil {
+		cfg.ContextType = defaultContextType
 		return nil
 	}
 
-	cfg.SessionType = string(ar.Spec.Session.Type)
+	cfg.ContextType = string(ar.Spec.Context.Type)
 
-	if ar.Spec.Session.TTL != nil {
-		ttl, err := time.ParseDuration(*ar.Spec.Session.TTL)
+	if ar.Spec.Context.TTL != nil {
+		ttl, err := time.ParseDuration(*ar.Spec.Context.TTL)
 		if err != nil {
-			return fmt.Errorf("parse session TTL %q: %w", *ar.Spec.Session.TTL, err)
+			return fmt.Errorf("parse context TTL %q: %w", *ar.Spec.Context.TTL, err)
 		}
-		cfg.SessionTTL = ttl
+		cfg.ContextTTL = ttl
 	}
 
-	// Session store URL still comes from env (secret-backed)
-	cfg.SessionURL = os.Getenv(envSessionURL)
+	// Context store URL still comes from env (secret-backed)
+	cfg.ContextURL = os.Getenv(envContextURL)
 	return nil
 }
 

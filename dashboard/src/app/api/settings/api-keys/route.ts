@@ -85,7 +85,7 @@ export async function POST(request: NextRequest) {
   }
 
   // Parse request body
-  let body: { name?: string; expiresInDays?: number | null };
+  let body: { name?: string; expiresInDays?: number | null; workspaces?: string[] };
   try {
     body = await request.json();
   } catch {
@@ -103,6 +103,12 @@ export async function POST(request: NextRequest) {
       { status: 400 }
     );
   }
+
+  // Validate workspaces
+  const workspaces =
+    Array.isArray(body.workspaces) && body.workspaces.every((w) => typeof w === "string")
+      ? body.workspaces
+      : undefined;
 
   // Check max keys limit
   const store = getApiKeyStore();
@@ -127,6 +133,9 @@ export async function POST(request: NextRequest) {
     name,
     role: user.role,
     expiresInDays: expiresInDays === 0 ? null : expiresInDays,
+    workspaces,
+    ownerEmail: user.email || user.username,
+    ownerGroups: user.groups,
   });
 
   return NextResponse.json({ key: newKey }, { status: 201 });

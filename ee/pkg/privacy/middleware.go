@@ -14,13 +14,42 @@ import (
 	"io"
 	"net/http"
 	"regexp"
+	"sync"
 
 	"github.com/go-logr/logr"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
 
 	"github.com/altairalabs/omnia/ee/pkg/audit"
 	"github.com/altairalabs/omnia/ee/pkg/redaction"
+	"github.com/altairalabs/omnia/internal/session"
 	"github.com/altairalabs/omnia/internal/session/api"
 )
+
+// Drop reasons, used as the "reason" label on writesDropped and in the warning.
+const (
+	dropReasonRecordingDisabled = "recording-disabled"
+	dropReasonRuntimeData       = "runtime-data-disabled"
+	dropReasonUserOptedOut      = "user-opted-out"
+	dropReasonRedactionFailed   = "redaction-failed"
+
+	remediationRecording   = "recording.enabled is false in the effective SessionPrivacyPolicy"
+	remediationRuntimeData = "recording.runtimeData is false; set runtimeData:true " +
+		"(or attach a privacyPolicyRef) to record assistant message content"
+)
+
+// writesDropped counts session-api write requests dropped by the privacy
+// middleware, labelled by reason. A non-zero rate means recorded data is being
+// silently discarded — pair with the warning log to find the agent + policy.
+var writesDropped = promauto.NewCounterVec(prometheus.CounterOpts{
+	Name: "omnia_session_api_writes_dropped_total",
+	Help: "Session-api write requests dropped by the privacy middleware, by reason.",
+}, []string{"reason"})
+
+// dropWarned dedupes the drop warning to once per namespace/agent + reason. A
+// drop is a property of the agent's effective policy, not the session, so this
+// stays bounded by the number of agents and avoids per-write log spam.
+var dropWarned sync.Map // key: ns + "/" + agent + "|" + reason
 
 // UserIDHeader is the HTTP header carrying the originating subject's
 // pseudonymous virtual-user identity (not a raw user ID). The facade and
@@ -30,43 +59,63 @@ const UserIDHeader = "X-Omnia-User-ID"
 // sessionIDPattern extracts the session ID from write endpoint paths.
 var sessionIDPattern = regexp.MustCompile(`/api/v1/sessions/([^/]+)`)
 
-var (
-	messageEndpointRe  = regexp.MustCompile(`/api/v1/sessions/[^/]+/messages$`)
-	toolCallEndpointRe = regexp.MustCompile(`/api/v1/sessions/[^/]+/tool-calls$`)
-	runtimeEventRe     = regexp.MustCompile(`/api/v1/sessions/[^/]+/events$`)
-	providerCallRe     = regexp.MustCompile(`/api/v1/sessions/[^/]+/provider-calls$`)
-)
+// messageEndpointRe matches the only endpoint carrying conversation content.
+// Metering (provider calls), tool calls, runtime events and eval results are
+// recorded whenever recording is enabled — only message content is gated.
+var messageEndpointRe = regexp.MustCompile(`/api/v1/sessions/[^/]+/messages$`)
 
-// isRichDataEndpoint returns true for paths that always carry rich content
-// (tool call payloads, runtime event data, provider call data).
-func isRichDataEndpoint(path string) bool {
-	return toolCallEndpointRe.MatchString(path) ||
-		runtimeEventRe.MatchString(path) ||
-		providerCallRe.MatchString(path)
+// reportPolicyDrop increments the drop metric and emits the warning once per
+// namespace/agent + reason, so a silently-dropped write is visible without
+// flooding the log on every write of a session.
+func (m *PrivacyMiddleware) reportPolicyDrop(sessionID, ns, agent, path, reason, remediation string) {
+	writesDropped.WithLabelValues(reason).Inc()
+	if _, loaded := dropWarned.LoadOrStore(ns+"/"+agent+"|"+reason, struct{}{}); loaded {
+		return
+	}
+	m.log.Info("session write dropped by privacy policy",
+		"namespace", ns, "agent", agent, "reason", reason,
+		"endpoint", path, "sessionID", sessionID, "remediation", remediation)
 }
 
-// checkRecordingPolicy enforces Recording.Enabled and RichData flags.
-// Returns true if the request was blocked (response already written).
+// checkRecordingPolicy enforces recording for the write. Returns true if the
+// request was blocked (response already written). Only message CONTENT is gated
+// by runtimeData; provider-call metering, tool calls, runtime events and eval
+// results are recorded whenever recording is enabled — they carry no
+// conversation content.
 func (m *PrivacyMiddleware) checkRecordingPolicy(
-	w http.ResponseWriter, r *http.Request, policy *EffectivePolicy,
+	w http.ResponseWriter, r *http.Request, policy *EffectivePolicy, ns, agent, sessionID string,
 ) bool {
 	if !policy.Recording.Enabled {
+		m.reportPolicyDrop(sessionID, ns, agent, r.URL.Path, dropReasonRecordingDisabled, remediationRecording)
 		w.WriteHeader(http.StatusNoContent)
 		return true
 	}
-	if policy.Recording.RichData {
+	// Non-message records are never gated by content flags.
+	if !messageEndpointRe.MatchString(r.URL.Path) {
 		return false
 	}
-	// RichData disabled: block rich content endpoints.
-	if isRichDataEndpoint(r.URL.Path) {
-		w.WriteHeader(http.StatusNoContent)
-		return true
+	if m.messageContentAllowed(r, policy) {
+		return false
 	}
-	if messageEndpointRe.MatchString(r.URL.Path) && isRichMessage(r) {
-		w.WriteHeader(http.StatusNoContent)
+	m.reportPolicyDrop(sessionID, ns, agent, r.URL.Path, dropReasonRuntimeData, remediationRuntimeData)
+	w.WriteHeader(http.StatusNoContent)
+	return true
+}
+
+// messageContentAllowed reports whether a /messages write may be recorded.
+// Facade-emitted content (user turns; the facade is Omnia-controlled) is always
+// allowed; runtime-emitted content (assistant turns) requires runtimeData. When
+// the writer doesn't set X-Omnia-Source (pre-source-header build), fall back to
+// the legacy role heuristic so rollout is seamless.
+func (m *PrivacyMiddleware) messageContentAllowed(r *http.Request, policy *EffectivePolicy) bool {
+	switch r.Header.Get(session.SourceHeader) {
+	case session.SourceFacade:
 		return true
+	case session.SourceRuntime:
+		return policy.Recording.RuntimeData
+	default:
+		return !isRichMessage(r) || policy.Recording.RuntimeData
 	}
-	return false
 }
 
 // isRichMessage peeks at the request body to determine if a message is
@@ -164,7 +213,7 @@ func (m *PrivacyMiddleware) Wrap(next http.Handler) http.Handler {
 		}
 
 		// Check recording policy (safety net for stale facade images).
-		if m.checkRecordingPolicy(w, r, policy) {
+		if m.checkRecordingPolicy(w, r, policy, ns, agent, sessionID) {
 			return
 		}
 
@@ -231,6 +280,7 @@ func (m *PrivacyMiddleware) applyRedaction(
 		r.Body, r.URL.Path, m.redactor, policy.Recording.PII,
 	)
 	if err != nil {
+		writesDropped.WithLabelValues(dropReasonRedactionFailed).Inc()
 		m.log.Error(err, "body redaction failed, blocking request", "sessionID", sessionID)
 		http.Error(w, "redaction failed", http.StatusInternalServerError)
 		return false
@@ -257,6 +307,9 @@ func (m *PrivacyMiddleware) checkOptOut(
 	}
 
 	if !ShouldRecord(r.Context(), m.prefStore, userID, ns, agent) {
+		writesDropped.WithLabelValues(dropReasonUserOptedOut).Inc()
+		m.log.V(1).Info("session write skipped: user opted out",
+			"namespace", ns, "agent", agent, "sessionID", extractSessionID(r.URL.Path))
 		w.WriteHeader(http.StatusNoContent)
 		return errOptedOut
 	}

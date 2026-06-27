@@ -496,6 +496,55 @@ type ProviderList struct {
 	Items           []Provider `json:"items"`
 }
 
+// providerSecretKeyAPIKey is the common secret key name for API keys.
+// Credential secret key names. Matches the controller's constants (kept in sync).
+const (
+	providerSecretKeyAPIKey  = "api-key"
+	secretKeyAnthropicAPIKey = "ANTHROPIC_API_KEY"
+	secretKeyOpenAIAPIKey    = "OPENAI_API_KEY"
+	secretKeyGeminiAPIKey    = "GEMINI_API_KEY"
+)
+
+// ExpectedKeysForProvider returns the credential secret keys a Provider of the
+// given role/type accepts when credential.secretRef.key is omitted, in priority
+// order. Shared by the controller (credential extraction) and the validating
+// webhook (admission warnings).
+//
+//nolint:revive,unparam // role parameter is forward-looking; kept for symmetry with providerRequiresCredentials.
+func ExpectedKeysForProvider(role ProviderRole, t ProviderType) []string {
+	_ = role
+	switch t {
+	case ProviderTypeClaude:
+		return []string{secretKeyAnthropicAPIKey, "CLAUDE_API_KEY", providerSecretKeyAPIKey}
+	case ProviderTypeOpenAI:
+		return []string{secretKeyOpenAIAPIKey, "OPENAI_TOKEN", providerSecretKeyAPIKey}
+	case ProviderTypeGemini:
+		return []string{secretKeyGeminiAPIKey, "GOOGLE_API_KEY", providerSecretKeyAPIKey}
+	case ProviderTypeVoyageAI:
+		return []string{"VOYAGE_API_KEY", providerSecretKeyAPIKey}
+	default:
+		return []string{providerSecretKeyAPIKey, secretKeyAnthropicAPIKey, secretKeyOpenAIAPIKey, secretKeyGeminiAPIKey}
+	}
+}
+
+// ExpectedPlatformSecretKeys returns the keys that must be present in the
+// auth.credentialsSecretRef secret for each supported platform/auth combo.
+// workloadIdentity combos do not use a secret and are not listed here.
+// Shared by the controller (auth validation) and the validating webhook
+// (admission warnings).
+func ExpectedPlatformSecretKeys(platform PlatformType, auth AuthMethod) []string {
+	switch {
+	case platform == PlatformTypeBedrock && auth == AuthMethodAccessKey:
+		return []string{"AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"}
+	case platform == PlatformTypeVertex && auth == AuthMethodServiceAccount:
+		return []string{"credentials.json"}
+	case platform == PlatformTypeAzure && auth == AuthMethodServicePrincipal:
+		return []string{"AZURE_TENANT_ID", "AZURE_CLIENT_ID", "AZURE_CLIENT_SECRET"}
+	default:
+		return nil
+	}
+}
+
 func init() {
 	SchemeBuilder.Register(&Provider{}, &ProviderList{})
 }

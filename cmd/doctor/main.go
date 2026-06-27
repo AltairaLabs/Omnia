@@ -15,7 +15,10 @@ import (
 
 	"github.com/go-logr/logr"
 	goredis "github.com/redis/go-redis/v9"
+	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/altairalabs/omnia/api/v1alpha1"
 	"github.com/altairalabs/omnia/internal/doctor"
 	"github.com/altairalabs/omnia/internal/doctor/checks"
 	memoryhttpclient "github.com/altairalabs/omnia/internal/memory/httpclient"
@@ -46,6 +49,24 @@ const (
 
 func discoverServiceURL(namespace, service string, port int) string {
 	return fmt.Sprintf("http://%s.%s.svc.cluster.local:%d", service, namespace, port)
+}
+
+// resolveAgentMgmtWSPort returns the agent's internal management-plane WebSocket
+// port from status.managementEndpoints.ws, so Doctor's mgmt-plane WS check
+// targets the isolated internal listener. Falls back to the external facade port
+// when the agent advertises no management endpoints (mgmt plane disabled, or an
+// agent that predates the field) or the lookup fails.
+func resolveAgentMgmtWSPort(ctx context.Context, c client.Client, namespace, name string, log logr.Logger) int {
+	ar := &v1alpha1.AgentRuntime{}
+	if err := c.Get(ctx, types.NamespacedName{Namespace: namespace, Name: name}, ar); err != nil {
+		log.V(1).Info("could not read AgentRuntime for mgmt port; using external facade port",
+			"agent", name, "namespace", namespace, "error", err.Error())
+		return defaultAPIPort
+	}
+	if me := ar.Status.ManagementEndpoints; me != nil && me.WS != nil && *me.WS > 0 {
+		return int(*me.WS)
+	}
+	return defaultAPIPort
 }
 
 func main() {
@@ -274,7 +295,6 @@ func buildRunner(cfg runnerConfig) (*doctor.Runner, error) {
 		resolveWorkspaceURLs(cfg.log, cfg.workspace, cfg.serviceGroup, &sessionAPIURL, &memoryAPIURL)
 	}
 
-	agentFacadeURL := discoverServiceURL(cfg.agentNamespace, cfg.agentName, defaultAPIPort)
 	sessionStore := httpclient.NewStore(sessionAPIURL, cfg.log, httpclient.WithBufferCapacity(0))
 
 	runner := doctor.NewRunner()
@@ -302,6 +322,15 @@ func buildRunner(cfg runnerConfig) (*doctor.Runner, error) {
 		crdChecker := checks.NewCRDChecker(k8sClient)
 		runner.Register(crdChecker.Checks()...)
 	}
+
+	// Target the agent's internal management-plane WS port when it advertises
+	// one (post plane-isolation), else the external facade port. Resolved here
+	// because it needs the k8s client built above.
+	agentPort := defaultAPIPort
+	if k8sClient != nil {
+		agentPort = resolveAgentMgmtWSPort(context.Background(), k8sClient, cfg.agentNamespace, cfg.agentName, cfg.log)
+	}
+	agentFacadeURL := discoverServiceURL(cfg.agentNamespace, cfg.agentName, agentPort)
 
 	// agentChecker.MgmtPlaneTokenSource accepts the *MgmtPlaneTokenMinter
 	// agentChecker.MgmtPlaneTokenSource accepts the *MgmtPlaneTokenFetcher

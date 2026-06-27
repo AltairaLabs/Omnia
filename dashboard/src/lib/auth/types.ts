@@ -31,6 +31,10 @@ export interface User {
   role: UserRole;
   /** Authentication provider */
   provider: AuthProvider;
+  /** Set only for API-key-authenticated users: the key's workspace allowlist
+   *  (empty/undefined workspaces = unrestricted). Used by checkWorkspaceAccess
+   *  to confine the key and suppress platform-admin for scoped keys (#1561). */
+  apiKeyScope?: { workspaces?: string[] };
 }
 
 /**

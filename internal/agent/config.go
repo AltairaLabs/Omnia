@@ -76,6 +76,15 @@ const (
 	// MCP configuration.
 	EnvMCPEnabled = "OMNIA_MCP_ENABLED"
 	EnvMCPPort    = "OMNIA_MCP_PORT"
+
+	// Internal management-plane twin-listener ports. The facade serves each
+	// surface a second time on these ports behind a mgmt-plane-only auth chain
+	// (see facade plane-isolation design). In-cluster these are derived from the
+	// CRD (gated on externalAuth.allowManagementPlane); these env vars are the
+	// demo/E2E fallback. Zero means "no internal listener for that surface".
+	EnvInternalFacadePort = "OMNIA_INTERNAL_FACADE_PORT"
+	EnvInternalA2APort    = "OMNIA_INTERNAL_A2A_PORT"
+	EnvInternalMCPPort    = "OMNIA_INTERNAL_MCP_PORT"
 )
 
 // Default values.
@@ -92,6 +101,13 @@ const (
 	DefaultA2AConversationTTL  = 30 * time.Minute
 	DefaultA2APort             = 9999
 	DefaultMCPPort             = 9998
+
+	// Internal management-plane twin-listener port defaults. Independently
+	// declared (not derived from the external port by an offset). Used when
+	// externalAuth.allowManagementPlane is enabled.
+	DefaultInternalFacadePort = 18080
+	DefaultInternalA2APort    = 19999
+	DefaultInternalMCPPort    = 19998
 )
 
 // Error format strings.
@@ -197,6 +213,12 @@ type Config struct {
 	// Zero means "use RuntimeHandler default".
 	ClientToolTimeout time.Duration
 
+	// DrainTimeout is how long the facade keeps serving active realtime calls
+	// after SIGTERM before tearing down remaining connections.
+	// Sourced from AgentRuntime.spec.facade.drainTimeout. Zero means "use
+	// facade.DefaultServerConfig default (30s)".
+	DrainTimeout time.Duration
+
 	// Media storage configuration.
 	MediaStorageType MediaStorageType
 	MediaStoragePath string
@@ -239,6 +261,14 @@ type Config struct {
 	// validation rejects MCPEnabled=true on agent-mode runtimes.
 	MCPEnabled bool
 	MCPPort    int
+
+	// Internal management-plane twin-listener ports. Each surface (WS/A2A/MCP)
+	// is served a second time on its internal port behind a mgmt-plane-only
+	// auth chain. Zero means "no internal listener for that surface" (mgmt plane
+	// disabled, or the surface itself disabled). See plane-isolation design.
+	InternalFacadePort int
+	InternalA2APort    int
+	InternalMCPPort    int
 
 	// Health check port.
 	HealthPort int

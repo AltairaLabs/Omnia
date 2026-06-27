@@ -82,7 +82,7 @@ func TestEnsureAudioSession_ShedsOverCap(t *testing.T) {
 	// nil in this test (no WS upgrade), so sendMessage returns nil silently;
 	// what matters is ensureAudioSession returns nil and no sink is started.
 	conn2 := &Connection{sessionID: "sess-cap-2"}
-	as2 := srv.ensureAudioSession(context.Background(), conn2, testLoggerDiscard())
+	as2 := srv.ensureAudioSession(context.Background(), conn2, nil, testLoggerDiscard())
 	assert.Nil(t, as2, "second session should be shed (nil returned)")
 	// No second sink should have been created.
 	assert.Equal(t, 0, fc2.startCalls, "factory sink for conn2 should not be started")
@@ -98,7 +98,7 @@ func TestEnsureAudioSession_ShedsOverCap(t *testing.T) {
 
 	// A new session should now succeed.
 	conn3 := &Connection{sessionID: "sess-cap-3"}
-	as3 := srv.ensureAudioSession(context.Background(), conn3, testLoggerDiscard())
+	as3 := srv.ensureAudioSession(context.Background(), conn3, nil, testLoggerDiscard())
 	assert.NotNil(t, as3, "third session should succeed after slot freed")
 	assert.Equal(t, 2, m.started, "gauge should increment for third session")
 }
@@ -118,7 +118,7 @@ func TestEnsureAudioSession_ClosedConnectionNoCreate(t *testing.T) {
 	)
 
 	conn := &Connection{sessionID: "sess-closed", closed: true}
-	as := srv.ensureAudioSession(context.Background(), conn, testLoggerDiscard())
+	as := srv.ensureAudioSession(context.Background(), conn, nil, testLoggerDiscard())
 	assert.Nil(t, as, "closed connection should return nil")
 	assert.False(t, factoryCalled, "factory must not be called for closed connection")
 }
@@ -139,7 +139,7 @@ func TestEnsureAudioSession_NilFactorySendsError(t *testing.T) {
 	conn := &Connection{sessionID: "sess-nil-factory"}
 	// Must not panic and must return nil (caller skips forward).
 	assert.NotPanics(t, func() {
-		as := srv.ensureAudioSession(context.Background(), conn, testLoggerDiscard())
+		as := srv.ensureAudioSession(context.Background(), conn, nil, testLoggerDiscard())
 		assert.Nil(t, as)
 	})
 }

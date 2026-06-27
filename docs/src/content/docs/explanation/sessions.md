@@ -50,7 +50,7 @@ While active, a session:
 
 ### Expiration
 
-Sessions expire after a period of inactivity defined by `session.ttl`. When expired:
+Sessions expire after a period of inactivity defined by `context.ttl`. When expired:
 
 - The session data is deleted
 - Attempting to resume creates a new session
@@ -63,7 +63,7 @@ Sessions expire after a period of inactivity defined by `session.ttl`. When expi
 The simplest option, suitable for development:
 
 ```yaml
-session:
+context:
   type: memory
   ttl: 1h
 ```
@@ -79,7 +79,7 @@ Characteristics:
 Production-ready distributed storage:
 
 ```yaml
-session:
+context:
   type: redis
   ttl: 24h
   storeRef:
@@ -223,7 +223,7 @@ With one replica, in-memory sessions work fine. But:
 With multiple replicas, you must use Redis:
 
 1. Install Redis in your cluster
-2. Configure `session.type: redis`
+2. Configure `context.type: redis`
 3. All replicas share session state
 
 ### Session Affinity Alternative

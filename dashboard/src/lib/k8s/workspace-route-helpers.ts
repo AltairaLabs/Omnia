@@ -12,6 +12,7 @@ import { getWorkspace } from "./workspace-client";
 // Re-export getWorkspace for use by content API routes
 export { getWorkspace };
 import { extractK8sErrorMessage, isForbiddenError } from "./crd-operations";
+import { extractStatusCode, extractStatusMessage } from "./k8s-errors";
 import { getUser } from "@/lib/auth";
 import {
   logCrdSuccess,
@@ -127,13 +128,31 @@ export async function requireAuth(): Promise<AuthResult> {
   return { ok: true, user };
 }
 
+// k8s statuses whose Status.message is user-actionable and safe to surface
+// verbatim — bad input, not found, conflict, validation. 401/403 stay generic
+// (handled separately / below); everything else is an internal 500.
+const surfaceableK8sStatus = new Set([400, 404, 409, 422]);
+
 /**
  * Handle K8s API errors with appropriate HTTP responses.
- * Returns a 403 for permission errors, 500 for others.
+ *
+ * 403 → a generic forbidden message (don't leak RBAC internals). 400/404/409/422
+ * → the real Kubernetes Status.message at the matching status, so callers see
+ * "… is invalid: spec.x …" or "… already exists" instead of an opaque 500
+ * "Unknown API Status Code" (#1600 handled 404 in getWorkspace; this covers the
+ * create/update/delete paths and the rest of the surfaceable class). Everything
+ * else → 500.
  */
 export function handleK8sError(error: unknown, context: string): NextResponse {
   if (isForbiddenError(error)) {
     return forbiddenResponse(`Insufficient permissions to ${context}`);
+  }
+  const code = extractStatusCode(error);
+  if (code !== null && surfaceableK8sStatus.has(code)) {
+    return NextResponse.json(
+      { error: extractStatusMessage(error, `Failed to ${context}`) },
+      { status: code }
+    );
   }
   return serverErrorResponse(error, `Failed to ${context}`);
 }

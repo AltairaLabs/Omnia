@@ -92,6 +92,36 @@ type Metrics struct {
 	// AudioIngestDuration is the histogram of facade-receive→sink-send latency
 	// per inbound audio frame, in seconds.
 	AudioIngestDuration prometheus.Histogram
+
+	// Realtime blip-resume counters
+
+	// RealtimeSessionsParkedTotal is the total number of realtime sessions parked
+	// after a client disconnect, awaiting reconnect within the grace window.
+	RealtimeSessionsParkedTotal prometheus.Counter
+
+	// RealtimeReattachTotal is the total number of successful reattaches to
+	// a parked realtime session.
+	RealtimeReattachTotal prometheus.Counter
+
+	// RealtimeParkExpiredTotal is the total number of parked realtime sessions
+	// that expired without a client reconnecting within the grace window.
+	RealtimeParkExpiredTotal prometheus.Counter
+
+	// Realtime drain metrics
+
+	// RealtimeDraining is 1 while the facade is in drain mode, 0 otherwise.
+	RealtimeDraining prometheus.Gauge
+
+	// RealtimeDrainDuration is the histogram of drain durations in seconds.
+	RealtimeDrainDuration *prometheus.HistogramVec
+
+	// RealtimeCallsDrainedTotal is the total number of realtime calls that
+	// completed gracefully during a drain.
+	RealtimeCallsDrainedTotal prometheus.Counter
+
+	// RealtimeCallsForceEndedTotal is the total number of realtime calls that
+	// were still live when the drain timeout or context cancellation fired.
+	RealtimeCallsForceEndedTotal prometheus.Counter
 }
 
 // NewMetrics creates and registers all Prometheus metrics.
@@ -220,6 +250,51 @@ func NewMetrics(agentName, namespace string) *Metrics {
 			ConstLabels: labels,
 			// Sub-millisecond buckets for audio (10ms frame budgets are typical).
 			Buckets: []float64{0.0001, 0.0005, 0.001, 0.005, 0.01, 0.025, 0.05, 0.1},
+		}),
+
+		// Realtime blip-resume counters
+		RealtimeSessionsParkedTotal: promauto.NewCounter(prometheus.CounterOpts{
+			Name:        "omnia_facade_realtime_sessions_parked_total",
+			Help:        "Total number of realtime sessions parked after a client disconnect",
+			ConstLabels: labels,
+		}),
+
+		RealtimeReattachTotal: promauto.NewCounter(prometheus.CounterOpts{
+			Name:        "omnia_facade_realtime_reattach_total",
+			Help:        "Total number of successful reattaches to a parked realtime session",
+			ConstLabels: labels,
+		}),
+
+		RealtimeParkExpiredTotal: promauto.NewCounter(prometheus.CounterOpts{
+			Name:        "omnia_facade_realtime_park_expired_total",
+			Help:        "Total number of parked realtime sessions that expired without reconnect",
+			ConstLabels: labels,
+		}),
+
+		// Realtime drain metrics
+		RealtimeDraining: promauto.NewGauge(prometheus.GaugeOpts{
+			Name:        "omnia_facade_realtime_draining",
+			Help:        "1 while the facade is in drain mode, 0 otherwise",
+			ConstLabels: labels,
+		}),
+
+		RealtimeDrainDuration: promauto.NewHistogramVec(prometheus.HistogramOpts{
+			Name:        "omnia_facade_realtime_drain_duration_seconds",
+			Help:        "Duration of realtime drain operations in seconds",
+			ConstLabels: labels,
+			Buckets:     []float64{1, 5, 10, 15, 20, 30, 45, 60},
+		}, []string{"reason"}),
+
+		RealtimeCallsDrainedTotal: promauto.NewCounter(prometheus.CounterOpts{
+			Name:        "omnia_facade_realtime_calls_drained_total",
+			Help:        "Total number of realtime calls that completed gracefully during drain",
+			ConstLabels: labels,
+		}),
+
+		RealtimeCallsForceEndedTotal: promauto.NewCounter(prometheus.CounterOpts{
+			Name:        "omnia_facade_realtime_calls_force_ended_total",
+			Help:        "Total number of realtime calls still live when drain timeout or context cancellation fired",
+			ConstLabels: labels,
 		}),
 	}
 }
@@ -388,4 +463,43 @@ func (m *Metrics) AudioSessionEnded() {
 // an inbound audio frame, in seconds.
 func (m *Metrics) AudioIngestLatency(seconds float64) {
 	m.AudioIngestDuration.Observe(seconds)
+}
+
+// RealtimeSessionParked records that a realtime session was parked after
+// a client disconnect, awaiting reconnect within the grace window.
+func (m *Metrics) RealtimeSessionParked() {
+	m.RealtimeSessionsParkedTotal.Inc()
+}
+
+// RealtimeSessionReattached records that a client successfully reattached
+// to a parked realtime session.
+func (m *Metrics) RealtimeSessionReattached() {
+	m.RealtimeReattachTotal.Inc()
+}
+
+// RealtimeSessionParkExpired records that a parked realtime session expired
+// without a client reconnecting within the grace window.
+func (m *Metrics) RealtimeSessionParkExpired() {
+	m.RealtimeParkExpiredTotal.Inc()
+}
+
+// RealtimeDrainStarted records that the facade has entered drain mode.
+func (m *Metrics) RealtimeDrainStarted() {
+	m.RealtimeDraining.Set(1)
+}
+
+// RealtimeDrainCompleted records the outcome of a drain operation.
+// reason is one of "all_drained", "deadline", or "ctx_canceled".
+// durationSeconds is the elapsed time since drain started.
+// drained is the count of sessions that completed gracefully;
+// forceEnded is the count still live at drain exit.
+func (m *Metrics) RealtimeDrainCompleted(reason string, durationSeconds float64, drained, forceEnded int) {
+	m.RealtimeDraining.Set(0)
+	m.RealtimeDrainDuration.WithLabelValues(reason).Observe(durationSeconds)
+	if drained > 0 {
+		m.RealtimeCallsDrainedTotal.Add(float64(drained))
+	}
+	if forceEnded > 0 {
+		m.RealtimeCallsForceEndedTotal.Add(float64(forceEnded))
+	}
 }

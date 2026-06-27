@@ -117,6 +117,30 @@ describe("workspace-client", () => {
       expect(result).toBeNull();
     });
 
+    // #1600: the fetch-based @kubernetes/client-node ApiException carries the
+    // HTTP status in `code` (numeric), not `statusCode`. This is the SHAPE the
+    // real client throws — mocking the contract, not the old `statusCode` shape
+    // the previous tests used. Before the fix this 404 re-threw and the
+    // workspace-scoped route returned a bodyless 500.
+    it("should return null when workspace not found (ApiException code 404)", async () => {
+      mockGetClusterCustomObject.mockRejectedValue({
+        code: 404,
+        body: '{"reason":"NotFound","message":"workspaces \\"Default\\" not found"}',
+      });
+
+      const result = await getWorkspace("nonexistent");
+
+      expect(result).toBeNull();
+    });
+
+    it("should throw for a non-404 ApiException (code 500)", async () => {
+      mockGetClusterCustomObject.mockRejectedValue({ code: 500, body: "boom" });
+
+      await expect(getWorkspace("test-workspace")).rejects.toMatchObject({
+        code: 500,
+      });
+    });
+
     it("should throw for non-404 errors", async () => {
       const error = new Error("Connection failed");
       mockGetClusterCustomObject.mockRejectedValue(error);

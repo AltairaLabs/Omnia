@@ -94,6 +94,15 @@ func WithHTTPClient(c *http.Client) StoreOption {
 	}
 }
 
+// WithSource sets the emitting component (session.SourceFacade or
+// session.SourceRuntime) sent as the X-Omnia-Source header on writes, so the
+// privacy middleware can gate runtime content separately from facade content.
+func WithSource(source string) StoreOption {
+	return func(s *Store) {
+		s.source = source
+	}
+}
+
 // WithBufferCapacity sets the write buffer capacity. Set to 0 to disable
 // buffering entirely (failed writes return errors immediately). Defaults to 1000.
 func WithBufferCapacity(n int) StoreOption {
@@ -130,6 +139,7 @@ type Store struct {
 	cb           *gobreaker.CircuitBreaker[*http.Response]
 	log          logr.Logger
 	tokenSource  *serviceauth.TokenSource // SA token for session-api auth; no-op when token file absent
+	source       string                   // emitting component (facade/runtime) sent as X-Omnia-Source
 
 	// Write buffer for transient failures.
 	buf           *writeBuffer
@@ -230,7 +240,7 @@ func (s *Store) CreateSession(ctx context.Context, opts session.CreateSessionOpt
 		return s.GetSession(ctx, id)
 	}
 
-	if resp.StatusCode != http.StatusCreated {
+	if !isSuccessStatus(resp.StatusCode) {
 		return nil, s.readError(resp)
 	}
 
@@ -281,7 +291,7 @@ func (s *Store) AppendMessage(ctx context.Context, sessionID string, msg session
 	if resp.StatusCode == http.StatusNotFound {
 		return session.ErrSessionNotFound
 	}
-	if resp.StatusCode != http.StatusCreated {
+	if !isSuccessStatus(resp.StatusCode) {
 		return s.readError(resp)
 	}
 	return nil
@@ -385,7 +395,7 @@ func (s *Store) RecordToolCall(ctx context.Context, sessionID string, tc session
 	if resp.StatusCode == http.StatusNotFound {
 		return session.ErrSessionNotFound
 	}
-	if resp.StatusCode != http.StatusCreated {
+	if !isSuccessStatus(resp.StatusCode) {
 		return s.readError(resp)
 	}
 	return nil
@@ -409,7 +419,7 @@ func (s *Store) RecordProviderCall(ctx context.Context, sessionID string, pc ses
 	if resp.StatusCode == http.StatusNotFound {
 		return session.ErrSessionNotFound
 	}
-	if resp.StatusCode != http.StatusCreated {
+	if !isSuccessStatus(resp.StatusCode) {
 		return s.readError(resp)
 	}
 	return nil
@@ -430,7 +440,7 @@ func (s *Store) RecordEvalResult(ctx context.Context, sessionID string, result s
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	if resp.StatusCode != http.StatusCreated {
+	if !isSuccessStatus(resp.StatusCode) {
 		return s.readError(resp)
 	}
 	return nil
@@ -454,7 +464,7 @@ func (s *Store) RecordRuntimeEvent(ctx context.Context, sessionID string, evt se
 	if resp.StatusCode == http.StatusNotFound {
 		return session.ErrSessionNotFound
 	}
-	if resp.StatusCode != http.StatusCreated {
+	if !isSuccessStatus(resp.StatusCode) {
 		return s.readError(resp)
 	}
 	return nil
@@ -731,6 +741,9 @@ func (s *Store) doRequest(ctx context.Context, method, path string, body []byte)
 	if uid := UserIDFromContext(ctx); uid != "" {
 		req.Header.Set("X-Omnia-User-ID", uid)
 	}
+	if s.source != "" {
+		req.Header.Set(session.SourceHeader, s.source)
+	}
 	if err := s.tokenSource.Authorize(req); err != nil {
 		return nil, fmt.Errorf("authorize request: %w", err)
 	}
@@ -775,6 +788,16 @@ func (s *Store) readError(resp *http.Response) error {
 	return fmt.Errorf("HTTP %d: %s", resp.StatusCode, errResp.Error)
 }
 
+// isSuccessStatus reports whether code is in the 2xx success range. POST writes
+// to session-api succeed with whichever 2xx the server returns — 201 Created, or
+// 204 No Content when an event accept has no body. Hard-requiring a single code
+// makes a deployed server returning a different 2xx log a spurious error on
+// every write and silently drop telemetry (#1599 — the runtime saw "HTTP 204"
+// and recorded 0 tokens/cost).
+func isSuccessStatus(code int) bool {
+	return code >= 200 && code < 300
+}
+
 // PrivacyPolicyResponse is the minimal shape of GET /api/v1/privacy-policy
 // that the facade needs for recording decisions. Encryption config is filtered
 // out server-side before this response is returned.
@@ -782,7 +805,8 @@ type PrivacyPolicyResponse struct {
 	Recording struct {
 		Enabled    bool `json:"enabled"`
 		FacadeData bool `json:"facadeData"`
-		RichData   bool `json:"richData"`
+		// RuntimeData gates runtime-emitted message content (assistant turns).
+		RuntimeData bool `json:"runtimeData"`
 	} `json:"recording"`
 }
 

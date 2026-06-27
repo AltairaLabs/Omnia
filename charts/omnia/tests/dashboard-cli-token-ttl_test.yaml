@@ -1,0 +1,26 @@
+suite: dashboard CLI token TTL wiring
+release:
+  name: omnia
+values:
+  - ../values-chart-tests.yaml
+templates:
+  - templates/dashboard/configmap.yaml
+tests:
+  - it: emits the CLI token TTL default
+    template: templates/dashboard/configmap.yaml
+    set:
+      dashboard.enabled: true
+    asserts:
+      - equal:
+          path: data.OMNIA_AUTH_CLI_TOKEN_TTL_SECONDS
+          value: "3600"
+
+  - it: emits an overridden CLI token TTL
+    template: templates/dashboard/configmap.yaml
+    set:
+      dashboard.enabled: true
+      dashboard.auth.cliTokenTtlSeconds: 900
+    asserts:
+      - equal:
+          path: data.OMNIA_AUTH_CLI_TOKEN_TTL_SECONDS
+          value: "900"

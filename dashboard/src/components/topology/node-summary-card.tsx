@@ -12,6 +12,7 @@ import { useAgentCost } from "@/hooks/agents";
 import { useProvider, useProviderMetrics } from "@/hooks/resources";
 import type { AgentRuntime, PromptPack, ToolRegistry, Provider, ProviderType } from "@/types";
 import { getDefaultProviderRef } from "@/types/agent-runtime";
+import { useWorkspace } from "@/contexts/workspace-context";
 
 /** Selected node info for rendering the appropriate card */
 export interface SelectedNode {
@@ -171,7 +172,10 @@ function AgentSummaryCard({ agent, onClose }: Readonly<{ agent: AgentRuntime; on
   const { metadata, spec, status } = agent;
   const defaultProviderRef = getDefaultProviderRef(spec);
   const { data: provider } = useProvider(defaultProviderRef?.name, metadata.namespace || "default");
-  const { data: costData } = useAgentCost(metadata.namespace || "default", metadata.name);
+  const { currentWorkspace } = useWorkspace();
+  // Cost is keyed by workspace NAME (the API resolves the backing namespace);
+  // passing the namespace 404s when namespace != workspace name (#1572).
+  const { data: costData } = useAgentCost(currentWorkspace?.name ?? "", metadata.name);
 
   const sparklineData = costData?.timeSeries || [];
   const totalCost = costData?.totalCost || 0;

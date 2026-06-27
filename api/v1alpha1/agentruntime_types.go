@@ -96,6 +96,13 @@ type FacadeConfig struct {
 	// +optional
 	Port *int32 `json:"port,omitempty"`
 
+	// drainTimeout is how long the facade keeps serving active realtime calls
+	// after receiving SIGTERM (rollout/drain/scale-down) before cleanly tearing
+	// down the remainder. Duration format (e.g. "30s", "2m"). New calls stop
+	// immediately on drain regardless. Defaults to 30s when unset.
+	// +optional
+	DrainTimeout *string `json:"drainTimeout,omitempty"`
+
 	// handler specifies the message handler mode.
 	// "echo" returns input messages back (for testing connectivity).
 	// "demo" provides streaming responses with simulated tool calls (for demos).
@@ -135,6 +142,33 @@ type FacadeConfig struct {
 	// HTTP route on facade.port.
 	// +optional
 	MCP *MCPConfig `json:"mcp,omitempty"`
+
+	// expose opts this agent into operator-provisioned external exposure.
+	// Opt-in: an agent is never externally reachable unless this is set AND the
+	// platform has a default-exposure Gateway configured (Helm
+	// `defaultExposure`). When both hold, the operator creates a host-based
+	// HTTPRoute targeting this agent's facade Service, surfaced via
+	// status.facade.endpoints (#1553). Exposure does NOT add authentication —
+	// spec.externalAuth is still the gate; an exposed agent with no externalAuth
+	// validators is management-plane-only at the facade.
+	// +optional
+	Expose *FacadeExposeConfig `json:"expose,omitempty"`
+}
+
+// FacadeExposeConfig opts an agent into operator-provisioned external exposure
+// (#1553). See FacadeConfig.expose.
+type FacadeExposeConfig struct {
+	// enabled creates an external HTTPRoute for this agent. Requires the platform
+	// to have a default-exposure Gateway configured (Helm `defaultExposure`);
+	// when no Gateway is configured this is a no-op. Defaults to false.
+	// +optional
+	Enabled bool `json:"enabled,omitempty"`
+
+	// host overrides the generated hostname (`{name}.{namespace}.{baseDomain}`).
+	// Set for a custom domain on an individual agent. Must be a hostname the
+	// configured Gateway's listener accepts (e.g. covered by its TLS cert).
+	// +optional
+	Host string `json:"host,omitempty"`
 }
 
 // ToolRegistryRef references a ToolRegistry resource.
@@ -150,32 +184,35 @@ type ToolRegistryRef struct {
 	Namespace *string `json:"namespace,omitempty"`
 }
 
-// SessionStoreType defines the type of session store.
-// +kubebuilder:validation:Enum=memory;redis;postgres
-type SessionStoreType string
+// ContextStoreType defines the type of context store. The runtime context is
+// the working LLM context (turns concatenated into each provider call); a
+// durable backend lets a fresh pod resume it via sdk.Resume. Only fast/instant
+// stores are supported here — NOT a relational DB. (Long-term conversation
+// archival is a separate concern owned by session-api, not this field.)
+// +kubebuilder:validation:Enum=memory;redis
+type ContextStoreType string
 
 const (
-	// SessionStoreTypeMemory uses in-memory storage (not recommended for production).
-	SessionStoreTypeMemory SessionStoreType = "memory"
-	// SessionStoreTypeRedis uses Redis for session storage.
-	SessionStoreTypeRedis SessionStoreType = "redis"
-	// SessionStoreTypePostgres uses PostgreSQL for session storage.
-	SessionStoreTypePostgres SessionStoreType = "postgres"
+	// ContextStoreTypeMemory uses in-memory storage (ephemeral; lost on pod restart).
+	ContextStoreTypeMemory ContextStoreType = "memory"
+	// ContextStoreTypeRedis uses Redis for durable, cross-pod-resumable context storage.
+	ContextStoreTypeRedis ContextStoreType = "redis"
 )
 
-// SessionConfig defines the configuration for session management.
-type SessionConfig struct {
-	// type specifies the session store backend.
+// ContextConfig defines the configuration for the runtime context store.
+// +kubebuilder:validation:XValidation:rule="self.type == 'memory' || has(self.storeRef)",message="spec.context.storeRef is required when context.type is 'redis'"
+type ContextConfig struct {
+	// type specifies the context store backend.
 	// +kubebuilder:validation:Required
 	// +kubebuilder:default="memory"
-	Type SessionStoreType `json:"type"`
+	Type ContextStoreType `json:"type"`
 
-	// storeRef references a secret containing connection details for the session store.
-	// Required for redis and postgres store types.
+	// storeRef references a secret containing connection details for the context store.
+	// Required for the redis store type (the secret must hold a "url" key).
 	// +optional
 	StoreRef *corev1.LocalObjectReference `json:"storeRef,omitempty"`
 
-	// ttl is the time-to-live for sessions in duration format (e.g., "24h", "30m").
+	// ttl is the time-to-live for context entries in duration format (e.g., "24h", "30m").
 	// +kubebuilder:default="24h"
 	// +optional
 	TTL *string `json:"ttl,omitempty"`
@@ -652,6 +689,26 @@ type AudioRequirements struct {
 	// supportsSegmentSelection indicates if the provider supports selecting audio segments.
 	// +optional
 	SupportsSegmentSelection bool `json:"supportsSegmentSelection,omitempty"`
+
+	// channels is the audio channel count the client should capture/play (1=mono).
+	Channels *int32 `json:"channels,omitempty"`
+
+	// format is the PCM sample format the client should send, e.g. "pcm16".
+	Format string `json:"format,omitempty"`
+}
+
+// DuplexConfig declares that an agent supports realtime bidirectional
+// (duplex) media. The dashboard renders the voice "call" console instead of
+// the text composer when Enabled is true. Mode reserves video for the future.
+type DuplexConfig struct {
+	// enabled turns on the realtime voice console for this agent.
+	Enabled bool `json:"enabled,omitempty"`
+
+	// mode is the duplex modality. "audio" (default) streams voice only;
+	// "audiovideo" additionally streams the browser camera (not yet implemented).
+	// +kubebuilder:validation:Enum=audio;audiovideo
+	// +kubebuilder:default=audio
+	Mode string `json:"mode,omitempty"`
 }
 
 // DocumentRequirements defines requirements for document media.
@@ -1235,9 +1292,9 @@ type AgentRuntimeSpec struct {
 	// +optional
 	ToolRegistryRef *ToolRegistryRef `json:"toolRegistryRef,omitempty"`
 
-	// session configures session management and storage.
+	// context configures the runtime context store.
 	// +optional
-	Session *SessionConfig `json:"session,omitempty"`
+	Context *ContextConfig `json:"context,omitempty"`
 
 	// runtime configures deployment settings like replicas and resources.
 	// +optional
@@ -1263,6 +1320,10 @@ type AgentRuntimeSpec struct {
 	// Use this to customize allowed file attachment types and size limits.
 	// +optional
 	Console *ConsoleConfig `json:"console,omitempty"`
+
+	// duplex configures the realtime voice/duplex console for this agent.
+	// +optional
+	Duplex *DuplexConfig `json:"duplex,omitempty"`
 
 	// a2a configures the A2A (Agent-to-Agent) protocol.
 	//
@@ -1370,9 +1431,23 @@ type AgentRuntimeStatus struct {
 	// +optional
 	ServiceEndpoint string `json:"serviceEndpoint,omitempty"`
 
+	// managementEndpoints reports the internal (management-plane) listener ports
+	// the facade serves when externalAuth.allowManagementPlane is enabled. A nil
+	// value means the management plane is disabled and no internal listener
+	// exists. The dashboard and in-cluster callers read these to dial the agent
+	// over the management plane — they never compute the port from the external
+	// port.
+	// +optional
+	ManagementEndpoints *ManagementEndpoints `json:"managementEndpoints,omitempty"`
+
 	// a2a holds A2A-specific status information when facade.type is "a2a".
 	// +optional
 	A2A *A2AStatus `json:"a2a,omitempty"`
+
+	// facade reports externally-reachable endpoints derived from observed
+	// Gateway API HTTPRoutes. Empty => the agent is reachable only in-cluster.
+	// +optional
+	Facade *FacadeStatus `json:"facade,omitempty"`
 
 	// rollout reports the current state of an active rollout, if any.
 	// +optional
@@ -1387,6 +1462,75 @@ type AgentRuntimeStatus struct {
 	// observedGeneration is the most recent generation observed by the controller.
 	// +optional
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
+}
+
+// ManagementEndpoints holds the internal management-plane listener ports the
+// facade serves (in-cluster only) when allowManagementPlane is enabled. A
+// surface's field is nil when that surface is disabled. Callers read these to
+// reach the agent over the management plane.
+type ManagementEndpoints struct {
+	// ws is the internal WebSocket management-plane port.
+	// +optional
+	WS *int32 `json:"ws,omitempty"`
+
+	// a2a is the internal A2A management-plane port (dual-protocol agents).
+	// +optional
+	A2A *int32 `json:"a2a,omitempty"`
+
+	// mcp is the internal MCP management-plane port (function-mode agents).
+	// +optional
+	MCP *int32 `json:"mcp,omitempty"`
+}
+
+// Facade protocol values for FacadeEndpoint.Protocol.
+const (
+	FacadeProtocolWebSocket = "websocket"
+	FacadeProtocolA2A       = "a2a"
+	FacadeProtocolMCP       = "mcp"
+	FacadeProtocolREST      = "rest"
+)
+
+// FacadeEndpointReasonPrefixNotStripped is set on Valid=false endpoints whose
+// route uses a non-root PathPrefix without a URLRewrite ReplacePrefixMatch filter.
+const FacadeEndpointReasonPrefixNotStripped = "path prefix not stripped before facade"
+
+// FacadeStatus holds externally-reachable endpoints derived from observed
+// Gateway API HTTPRoutes. An empty Endpoints list means the agent is reachable
+// only inside the cluster.
+type FacadeStatus struct {
+	// endpoints are the external URLs derived from HTTPRoutes that target this
+	// agent's facade Service. Empty => cluster-internal only.
+	// +optional
+	Endpoints []FacadeEndpoint `json:"endpoints,omitempty"`
+}
+
+// FacadeEndpoint is one externally-reachable URL for the agent's facade,
+// derived from an observed HTTPRoute. Auth is NOT included here; it is read
+// from spec.externalAuth (agent-global) by consumers.
+type FacadeEndpoint struct {
+	// protocol is the facade protocol this endpoint serves.
+	// +kubebuilder:validation:Enum=websocket;a2a;mcp;rest
+	Protocol string `json:"protocol"`
+	// url is the client-facing connection URL, e.g. wss://agents.example.com/my-agent/ws
+	URL string `json:"url"`
+	// scheme is the URL scheme: ws, wss, http, or https.
+	Scheme string `json:"scheme"`
+	// host is the route hostname.
+	Host string `json:"host"`
+	// path is the external path including the protocol's canonical suffix.
+	Path string `json:"path"`
+	// port is the Service backend port the route targets.
+	Port int32 `json:"port"`
+	// routeName is the name of the HTTPRoute this endpoint was derived from.
+	RouteName string `json:"routeName"`
+	// routeNamespace is the namespace of that HTTPRoute.
+	RouteNamespace string `json:"routeNamespace"`
+	// valid is false when the endpoint is advertised but will not actually
+	// connect (e.g. a path prefix that is not stripped before the facade).
+	Valid bool `json:"valid"`
+	// reason explains why valid is false.
+	// +optional
+	Reason string `json:"reason,omitempty"`
 }
 
 // +kubebuilder:object:root=true

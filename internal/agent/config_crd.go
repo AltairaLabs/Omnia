@@ -63,14 +63,8 @@ func LoadFromCRD(ctx context.Context, c client.Client, name, namespace string) (
 	cfg.PromptPackPath = getEnvOrDefault(EnvPromptPackMountPath, DefaultPromptPackMountPath)
 
 	// Facade config from CRD
-	cfg.FacadeType = FacadeType(ar.Spec.Facade.Type)
-	if ar.Spec.Facade.Port != nil {
-		cfg.FacadePort = int(*ar.Spec.Facade.Port)
-	} else {
-		cfg.FacadePort = DefaultFacadePort
-	}
-	if ar.Spec.Facade.ClientToolTimeout != nil {
-		cfg.ClientToolTimeout = ar.Spec.Facade.ClientToolTimeout.Duration
+	if err := loadFacadeConfigFromCRD(cfg, ar); err != nil {
+		return nil, err
 	}
 
 	// Mode + Function-specific config (Functions Phase 1, #1102 / #1103).
@@ -97,7 +91,7 @@ func LoadFromCRD(ctx context.Context, c client.Client, name, namespace string) (
 	}
 	cfg.HealthPort = healthPort
 
-	if err := loadSessionConfigFromCRD(cfg, ar, namespace); err != nil {
+	if err := loadContextConfigFromCRD(cfg, ar, namespace); err != nil {
 		return nil, err
 	}
 	loadMediaConfigFromCRD(cfg, ar)
@@ -112,7 +106,48 @@ func LoadFromCRD(ctx context.Context, c client.Client, name, namespace string) (
 
 	loadMCPConfigFromCRD(cfg, ar)
 
+	applyManagementPlanePorts(cfg, ar.Spec.ExternalAuth)
+
 	return cfg, nil
+}
+
+// applyManagementPlanePorts sets the internal twin-listener ports the facade
+// serves behind the mgmt-plane-only chain. They are infrastructure constants
+// (not CRD fields), gated on externalAuth.allowManagementPlane and on whether
+// each surface is enabled. When the management plane is disabled the ports stay
+// zero and no internal listener is started.
+func applyManagementPlanePorts(cfg *Config, ext *v1alpha1.AgentExternalAuth) {
+	if !ext.ManagementPlaneAllowed() {
+		return
+	}
+	cfg.InternalFacadePort = DefaultInternalFacadePort
+	if cfg.A2AEnabled {
+		cfg.InternalA2APort = DefaultInternalA2APort
+	}
+	if cfg.MCPEnabled {
+		cfg.InternalMCPPort = DefaultInternalMCPPort
+	}
+}
+
+// loadInternalPortsFromEnv reads the internal twin-listener ports from the
+// environment (demo/E2E fallback path, where there is no CRD to derive them
+// from). Unset means zero — no internal listener for that surface.
+func loadInternalPortsFromEnv(cfg *Config) error {
+	for _, p := range []struct {
+		env string
+		dst *int
+	}{
+		{EnvInternalFacadePort, &cfg.InternalFacadePort},
+		{EnvInternalA2APort, &cfg.InternalA2APort},
+		{EnvInternalMCPPort, &cfg.InternalMCPPort},
+	} {
+		v, err := getEnvAsInt(p.env, 0)
+		if err != nil {
+			return fmt.Errorf(errFmtInvalidEnv, p.env, err)
+		}
+		*p.dst = v
+	}
+	return nil
 }
 
 // loadA2AConfigFromCRD populates A2A-related config fields from the AgentRuntime CRD.
@@ -192,12 +227,33 @@ func loadA2ATaskStoreFromCRD(cfg *Config, a2a *v1alpha1.A2AConfig) {
 	}
 }
 
-// loadSessionConfigFromCRD populates session-related config fields from the AgentRuntime CRD.
-func loadSessionConfigFromCRD(cfg *Config, ar *v1alpha1.AgentRuntime, namespace string) error {
-	if ar.Spec.Session != nil && ar.Spec.Session.TTL != nil {
-		ttl, err := time.ParseDuration(*ar.Spec.Session.TTL)
+// loadFacadeConfigFromCRD populates facade-related config fields from the AgentRuntime CRD.
+func loadFacadeConfigFromCRD(cfg *Config, ar *v1alpha1.AgentRuntime) error {
+	cfg.FacadeType = FacadeType(ar.Spec.Facade.Type)
+	if ar.Spec.Facade.Port != nil {
+		cfg.FacadePort = int(*ar.Spec.Facade.Port)
+	} else {
+		cfg.FacadePort = DefaultFacadePort
+	}
+	if ar.Spec.Facade.ClientToolTimeout != nil {
+		cfg.ClientToolTimeout = ar.Spec.Facade.ClientToolTimeout.Duration
+	}
+	if ar.Spec.Facade.DrainTimeout != nil {
+		d, err := time.ParseDuration(*ar.Spec.Facade.DrainTimeout)
 		if err != nil {
-			return fmt.Errorf("invalid session TTL %q: %w", *ar.Spec.Session.TTL, err)
+			return fmt.Errorf("invalid drain timeout %q: %w", *ar.Spec.Facade.DrainTimeout, err)
+		}
+		cfg.DrainTimeout = d
+	}
+	return nil
+}
+
+// loadContextConfigFromCRD populates context-store-related config fields from the AgentRuntime CRD.
+func loadContextConfigFromCRD(cfg *Config, ar *v1alpha1.AgentRuntime, namespace string) error {
+	if ar.Spec.Context != nil && ar.Spec.Context.TTL != nil {
+		ttl, err := time.ParseDuration(*ar.Spec.Context.TTL)
+		if err != nil {
+			return fmt.Errorf("invalid context TTL %q: %w", *ar.Spec.Context.TTL, err)
 		}
 		cfg.SessionTTL = ttl
 	} else {
@@ -311,6 +367,10 @@ func loadFromEnvFallback(name, namespace string) (*Config, error) {
 	}
 
 	if err := loadMCPConfigFromEnv(cfg); err != nil {
+		return nil, err
+	}
+
+	if err := loadInternalPortsFromEnv(cfg); err != nil {
 		return nil, err
 	}
 

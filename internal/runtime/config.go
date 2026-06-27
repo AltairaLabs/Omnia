@@ -48,10 +48,10 @@ type Config struct {
 	OutputFormat     string // spec.outputFormat ("", "text", "json", "json_schema"); "" resolves to the default
 	OutputSchemaJSON []byte // raw spec.outputSchema bytes, used as the json_schema response-format schema
 
-	// Session configuration
-	SessionType string        // "memory" or "redis"
-	SessionURL  string        // Redis URL for session store
-	SessionTTL  time.Duration // Session TTL
+	// Context store configuration
+	ContextType string        // "memory" or "redis"
+	ContextURL  string        // Redis URL for context store
+	ContextTTL  time.Duration // Context TTL
 
 	// Provider configuration
 	ProviderType         string // "claude", "openai", "gemini", "ollama", "mock", "vllm", "voyageai"
@@ -160,8 +160,8 @@ const (
 	envNamespace         = "OMNIA_NAMESPACE"
 	envPromptPackPath    = "OMNIA_PROMPTPACK_PATH"
 	envPromptName        = "OMNIA_PROMPT_NAME"
-	envSessionURL        = "OMNIA_SESSION_URL"
-	envSessionTTL        = "OMNIA_SESSION_TTL"
+	envContextURL        = "OMNIA_CONTEXT_URL"
+	envContextTTL        = "OMNIA_CONTEXT_TTL"
 	envTracingEnabled    = "OMNIA_TRACING_ENABLED"
 	envTracingEndpoint   = "OMNIA_TRACING_ENDPOINT"
 	envTracingSampleRate = "OMNIA_TRACING_SAMPLE_RATE"
@@ -177,8 +177,8 @@ const (
 const (
 	defaultPromptPackPath     = "/etc/omnia/pack/pack.json"
 	defaultPromptName         = "default"
-	defaultSessionType        = "memory"
-	defaultSessionTTL         = 24 * time.Hour
+	defaultContextType        = "memory"
+	defaultContextTTL         = 24 * time.Hour
 	defaultMediaBasePath      = "/etc/omnia/media"
 	defaultToolsMountPath     = "/etc/omnia/tools"
 	defaultToolsConfigFile    = "tools.yaml"
@@ -192,10 +192,10 @@ const (
 	errFmtInvalidEnvVar = "invalid %s: %w"
 )
 
-// Session type constants.
+// Context store type constants.
 const (
-	SessionTypeMemory = "memory"
-	SessionTypeRedis  = "redis"
+	ContextTypeMemory = "memory"
+	ContextTypeRedis  = "redis"
 )
 
 // parseEnvironmentOverrides parses optional environment variable overrides.
@@ -208,7 +208,7 @@ func (cfg *Config) parseEnvironmentOverrides() error {
 	if err := cfg.parsePorts(); err != nil {
 		return err
 	}
-	return cfg.parseSessionTTL()
+	return cfg.parseContextTTL()
 }
 
 // parseTracingSampleRate parses the tracing sample rate from environment.
@@ -247,17 +247,19 @@ func (cfg *Config) parsePorts() error {
 	return nil
 }
 
-// parseSessionTTL parses the session TTL from environment.
-func (cfg *Config) parseSessionTTL() error {
-	ttl := os.Getenv(envSessionTTL)
+// parseContextTTL parses the context store TTL from the OMNIA_CONTEXT_TTL
+// environment variable. (Distinct from the dashboard's OMNIA_SESSION_TTL auth
+// cookie TTL, which is an unrelated concern and never set on the runtime pod.)
+func (cfg *Config) parseContextTTL() error {
+	ttl := os.Getenv(envContextTTL)
 	if ttl == "" {
 		return nil
 	}
 	d, err := time.ParseDuration(ttl)
 	if err != nil {
-		return fmt.Errorf(errFmtInvalidEnvVar, envSessionTTL, err)
+		return fmt.Errorf(errFmtInvalidEnvVar, envContextTTL, err)
 	}
-	cfg.SessionTTL = d
+	cfg.ContextTTL = d
 	return nil
 }
 

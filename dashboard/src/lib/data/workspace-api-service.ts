@@ -20,6 +20,7 @@ import type {
   K8sEvent,
   Stats,
 } from "./types";
+import type { DeployProfile } from "@/types/deploy-profile";
 
 /**
  * Workspace API service that calls workspace-scoped endpoints.
@@ -234,6 +235,20 @@ export class WorkspaceApiService {
         return undefined;
       }
       throw new Error(`Failed to fetch provider: ${response.statusText}`);
+    }
+    return response.json();
+  }
+
+  // ============================================================
+  // Deploy profile (issue #1519)
+  // ============================================================
+
+  async getDeployProfile(workspace: string): Promise<DeployProfile> {
+    const response = await fetch(
+      `/api/workspaces/${encodeURIComponent(workspace)}/deploy-profile`
+    );
+    if (!response.ok) {
+      throw new Error(`Failed to fetch deploy profile: ${response.statusText}`);
     }
     return response.json();
   }
