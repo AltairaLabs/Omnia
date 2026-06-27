@@ -498,7 +498,10 @@ function RuntimeStep({ formData, updateField, errors, validate }: Readonly<Runti
             }}
             disabled={formData.mode === "function"}
           >
-            <SelectTrigger aria-invalid={!!errors["spec.facade.type"]}>
+            <SelectTrigger
+              aria-invalid={!!errors["spec.facade.type"]}
+              aria-describedby={errors["spec.facade.type"] ? "facade-type-error" : undefined}
+            >
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -512,7 +515,7 @@ function RuntimeStep({ formData, updateField, errors, validate }: Readonly<Runti
               )}
             </SelectContent>
           </Select>
-          <FieldError message={errors["spec.facade.type"]} />
+          <FieldError id="facade-type-error" message={errors["spec.facade.type"]} />
           {formData.mode === "function" && (
             <p className="text-xs text-muted-foreground">
               Function mode uses the REST (HTTP) facade.
@@ -612,6 +615,17 @@ function allConstrainedFields(formData: WizardFormData): FieldInput[] {
   return [...step0Fields(formData), ...step5Fields(formData)];
 }
 
+/**
+ * Returns the constrained fields for the currently visible step.
+ * Used to scope the Next-button disabled check to the active step only,
+ * preventing stale errors from a different step from blocking navigation.
+ */
+function currentStepFields(step: number, formData: WizardFormData): FieldInput[] {
+  if (step === 0) return step0Fields(formData);
+  if (step === 5) return step5Fields(formData);
+  return [];
+}
+
 export function DeployWizard({ open, onOpenChange }: Readonly<DeployWizardProps>) {
   const [step, setStep] = useState(0);
   const [formData, setFormData] = useState<WizardFormData>(INITIAL_FORM_DATA);
@@ -619,7 +633,7 @@ export function DeployWizard({ open, onOpenChange }: Readonly<DeployWizardProps>
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
 
-  const { errors, validate, validateAll, hasErrors } = useFieldValidation(crdConstraints.AgentRuntime);
+  const { errors, validate, validateAll } = useFieldValidation(crdConstraints.AgentRuntime);
 
   const { isReadOnly, message: readOnlyMessage } = useReadOnly();
   const { can } = usePermissions();
@@ -682,6 +696,12 @@ export function DeployWizard({ open, onOpenChange }: Readonly<DeployWizardProps>
         return false;
     }
   }, [step, formData]);
+
+  // Scope error-gating to only the fields on the current step so that
+  // stale errors from a different step cannot block navigation.
+  const currentStepHasErrors = currentStepFields(step, formData).some(
+    (f) => !!errors[f.path],
+  );
 
   const generateYaml = useCallback(
     () => composeAgentYaml(formData, currentWorkspace?.namespace),
@@ -1145,7 +1165,7 @@ export function DeployWizard({ open, onOpenChange }: Readonly<DeployWizardProps>
           {step < STEPS.length - 1 ? (
             <Button
               onClick={handleNext}
-              disabled={!canProceed() || hasErrors}
+              disabled={!canProceed() || currentStepHasErrors}
             >
               Next
               <ChevronRight className="h-4 w-4 ml-1" />

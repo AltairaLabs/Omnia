@@ -11,12 +11,55 @@
 
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   isValidJsonObject,
   BasicInfoStep,
   FunctionSchemaEditors,
   composeAgentYaml,
+  DeployWizard,
 } from "./deploy-wizard";
+
+// ---------------------------------------------------------------------------
+// Module-level mocks — must be at the top level so vitest hoists them before
+// imports. Each mock is kept minimal: only what DeployWizard actually reads.
+// ---------------------------------------------------------------------------
+
+vi.mock("@/hooks/core", () => ({
+  useReadOnly: vi.fn(() => ({ isReadOnly: false, message: "" })),
+}));
+
+vi.mock("@/hooks/auth", () => ({
+  usePermissions: vi.fn(() => ({ can: () => true })),
+  Permission: { AGENTS_DEPLOY: "agents:deploy" },
+}));
+
+vi.mock("@/hooks/resources", () => ({
+  usePromptPacks: vi.fn(() => ({ data: [] })),
+  useToolRegistries: vi.fn(() => ({ data: [] })),
+  useProviders: vi.fn(() => ({ data: [] })),
+}));
+
+vi.mock("@/contexts/workspace-context", () => ({
+  useWorkspace: vi.fn(() => ({
+    currentWorkspace: { name: "ws", namespace: "ns-a", displayName: "Workspace A" },
+  })),
+}));
+
+vi.mock("@/lib/data", () => ({
+  useDataService: vi.fn(() => ({
+    createAgent: vi.fn().mockResolvedValue({}),
+  })),
+}));
+
+function renderWizard() {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <DeployWizard open={true} onOpenChange={vi.fn()} />
+    </QueryClientProvider>,
+  );
+}
 
 describe("isValidJsonObject", () => {
   it("accepts a JSON object", () => {
@@ -331,5 +374,29 @@ describe("composeAgentYaml", () => {
     const yaml = composeAgentYaml({ ...baseForm, replicas: 3 }, "ns-a");
     const spec = (yaml as { spec: { runtime?: { replicas?: number } } }).spec;
     expect(spec.runtime?.replicas).toBe(3);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// I-1: Full-wizard integration — validate → error → Next disabled
+// ---------------------------------------------------------------------------
+describe("DeployWizard integration", () => {
+  it("shows inline error and disables Next when an invalid name is typed", async () => {
+    renderWizard();
+
+    const nameInput = screen.getByLabelText(/Agent Name/i);
+    // The wizard auto-formats on input (toLowerCase + replaceAll); type a
+    // value that is invalid even after auto-format (a leading hyphen triggers
+    // the CRD constraint that names must start with a letter or number).
+    fireEvent.change(nameInput, { target: { value: "-bad" } });
+
+    // (a) Inline error must be visible — role="alert" is the FieldError element
+    const errorAlert = await screen.findByRole("alert");
+    expect(errorAlert).toBeInTheDocument();
+    expect(errorAlert).toHaveTextContent(/lowercase letters/i);
+
+    // (b) Next button must be disabled
+    const nextBtn = screen.getByRole("button", { name: /next/i });
+    expect(nextBtn).toBeDisabled();
   });
 });
