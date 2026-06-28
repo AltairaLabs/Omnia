@@ -337,6 +337,77 @@ func TestResolveByWorkspaceName_EnvVarOverride(t *testing.T) {
 	}
 }
 
+func TestResolveServiceURLs_PrivacyURLEnvVar(t *testing.T) {
+	t.Setenv(envSessionAPIURL, "http://session-override.example.com")
+	t.Setenv(envMemoryAPIURL, "http://memory-override.example.com")
+	t.Setenv(envPrivacyAPIURL, "http://privacy-override.example.com")
+
+	r := NewResolver(nil)
+	urls, err := r.ResolveServiceURLs(context.Background(), "default")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if urls.PrivacyURL != "http://privacy-override.example.com" {
+		t.Errorf("expected privacy override, got %s", urls.PrivacyURL)
+	}
+}
+
+func TestResolveServiceURLs_PrivacyURLEnvVarEmpty(t *testing.T) {
+	// Privacy URL is optional — if not set, the struct still returns with empty PrivacyURL.
+	t.Setenv(envSessionAPIURL, "http://session-override.example.com")
+	t.Setenv(envMemoryAPIURL, "http://memory-override.example.com")
+	t.Setenv(envPrivacyAPIURL, "")
+
+	r := NewResolver(nil)
+	urls, err := r.ResolveServiceURLs(context.Background(), "default")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if urls.PrivacyURL != "" {
+		t.Errorf("expected empty privacy URL, got %s", urls.PrivacyURL)
+	}
+}
+
+func TestResolveServiceURLs_PrivacyURLFromWorkspaceStatus(t *testing.T) {
+	t.Setenv(envSessionAPIURL, "")
+	t.Setenv(envMemoryAPIURL, "")
+	t.Setenv(envPrivacyAPIURL, "")
+	t.Setenv(envOmniaNamespace, "workspace-ns")
+
+	ws := &omniav1alpha1.Workspace{
+		ObjectMeta: metav1.ObjectMeta{Name: "my-workspace"},
+		Spec: omniav1alpha1.WorkspaceSpec{
+			DisplayName: "my-workspace",
+			Namespace:   omniav1alpha1.NamespaceConfig{Name: "workspace-ns"},
+		},
+		Status: omniav1alpha1.WorkspaceStatus{
+			PrivacyURL: "http://privacy.workspace-ns.svc.cluster.local",
+			Services: []omniav1alpha1.ServiceGroupStatus{
+				{
+					Name:       "default",
+					SessionURL: "http://session.workspace-ns.svc.cluster.local",
+					MemoryURL:  "http://memory.workspace-ns.svc.cluster.local",
+					Ready:      true,
+				},
+			},
+		},
+	}
+
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(newTestScheme()).
+		WithObjects(ws).
+		Build()
+
+	r := NewResolver(fakeClient)
+	urls, err := r.ResolveServiceURLs(context.Background(), "default")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if urls.PrivacyURL != "http://privacy.workspace-ns.svc.cluster.local" {
+		t.Errorf("unexpected privacy URL: %s", urls.PrivacyURL)
+	}
+}
+
 func TestResolveServiceURLs_NamespaceFileNotFound(t *testing.T) {
 	t.Setenv(envSessionAPIURL, "")
 	t.Setenv(envMemoryAPIURL, "")

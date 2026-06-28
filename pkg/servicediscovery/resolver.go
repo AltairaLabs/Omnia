@@ -34,6 +34,7 @@ import (
 const (
 	envSessionAPIURL  = "SESSION_API_URL"
 	envMemoryAPIURL   = "MEMORY_API_URL"
+	envPrivacyAPIURL  = "PRIVACY_API_URL"
 	envOmniaNamespace = "OMNIA_NAMESPACE"
 )
 
@@ -41,12 +42,15 @@ const (
 // It is a variable so tests can override it.
 var namespaceFilePath = "/var/run/secrets/kubernetes.io/serviceaccount/namespace"
 
-// ServiceURLs holds the resolved URLs for session-api and memory-api.
+// ServiceURLs holds the resolved URLs for session-api, memory-api, and privacy-api.
 type ServiceURLs struct {
 	// SessionURL is the base URL of the session-api.
 	SessionURL string
 	// MemoryURL is the base URL of the memory-api.
 	MemoryURL string
+	// PrivacyURL is the base URL of the per-workspace privacy-api.
+	// Empty string means no privacy-api is configured for this workspace.
+	PrivacyURL string
 }
 
 // Resolver resolves service URLs for a given workspace service group.
@@ -76,8 +80,9 @@ func (r *Resolver) ResolveServiceURLs(ctx context.Context, serviceGroup string) 
 	return r.resolveFromWorkspace(ctx, serviceGroup)
 }
 
-// resolveFromEnv returns ServiceURLs from environment variables if both are set,
-// otherwise returns nil.
+// resolveFromEnv returns ServiceURLs from environment variables if both session and
+// memory URLs are set, otherwise returns nil. PrivacyURL is additive — it is
+// populated if set, but its absence does not block the env-var path.
 func resolveFromEnv() *ServiceURLs {
 	sessionURL := os.Getenv(envSessionAPIURL)
 	memoryURL := os.Getenv(envMemoryAPIURL)
@@ -85,6 +90,7 @@ func resolveFromEnv() *ServiceURLs {
 		return &ServiceURLs{
 			SessionURL: sessionURL,
 			MemoryURL:  memoryURL,
+			PrivacyURL: os.Getenv(envPrivacyAPIURL),
 		}
 	}
 	return nil
@@ -112,6 +118,7 @@ func (r *Resolver) resolveFromWorkspace(ctx context.Context, serviceGroup string
 		return &ServiceURLs{
 			SessionURL: svc.SessionURL,
 			MemoryURL:  svc.MemoryURL,
+			PrivacyURL: ws.Status.PrivacyURL,
 		}, nil
 	}
 	return nil, fmt.Errorf("service group %q not found in workspace %q", serviceGroup, ws.Name)
@@ -146,6 +153,7 @@ func (r *Resolver) ResolveByWorkspaceName(
 		return &ServiceURLs{
 			SessionURL: svc.SessionURL,
 			MemoryURL:  svc.MemoryURL,
+			PrivacyURL: ws.Status.PrivacyURL,
 		}, nil
 	}
 	return nil, fmt.Errorf("service group %q not found in workspace %q", serviceGroup, workspaceName)

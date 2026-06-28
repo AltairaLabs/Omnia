@@ -307,6 +307,67 @@ func TestResolveMemoryConfig_SecretNotFound(t *testing.T) {
 	}
 }
 
+func TestResolvePrivacyConfig(t *testing.T) {
+	ws := &omniav1alpha1.Workspace{
+		ObjectMeta: metav1.ObjectMeta{Name: "my-workspace"},
+		Spec: omniav1alpha1.WorkspaceSpec{
+			DisplayName: "my-workspace",
+			Namespace:   omniav1alpha1.NamespaceConfig{Name: "test-ns"},
+			Privacy: &omniav1alpha1.PrivacyServiceConfig{
+				Database: omniav1alpha1.DatabaseConfig{
+					SecretRef: corev1.LocalObjectReference{Name: "privacy-db"},
+				},
+			},
+		},
+	}
+	secret := makeSecret("privacy-db", "test-ns", "postgres://privacy-host/consent")
+
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(newTestScheme()).
+		WithObjects(ws, secret).
+		Build()
+
+	cr := NewConfigResolver(fakeClient)
+	cfg, err := cr.ResolvePrivacyConfig(context.Background(), "my-workspace", "test-ns")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.PostgresConn != "postgres://privacy-host/consent" {
+		t.Errorf("unexpected postgres conn: %s", cfg.PostgresConn)
+	}
+}
+
+func TestResolvePrivacyConfig_NoPrivacyConfig(t *testing.T) {
+	ws := makeWorkspaceWithServices("my-workspace", nil) // Privacy is nil
+
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(newTestScheme()).
+		WithObjects(ws).
+		Build()
+
+	cr := NewConfigResolver(fakeClient)
+	_, err := cr.ResolvePrivacyConfig(context.Background(), "my-workspace", "test-ns")
+	if err == nil {
+		t.Fatal("expected error when workspace has no privacy configuration")
+	}
+	expected := `workspace "my-workspace" has no privacy configuration`
+	if err.Error() != expected {
+		t.Errorf("unexpected error message: %q, want %q", err.Error(), expected)
+	}
+}
+
+func TestResolvePrivacyConfig_WorkspaceNotFound(t *testing.T) {
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(newTestScheme()).
+		Build()
+
+	cr := NewConfigResolver(fakeClient)
+	_, err := cr.ResolvePrivacyConfig(context.Background(), "nonexistent", "test-ns")
+	if err == nil {
+		t.Fatal("expected error when workspace not found")
+	}
+}
+
 func TestResolveSessionConfig_SecretMissingKey(t *testing.T) {
 	ws := makeWorkspaceWithServices("my-workspace", []omniav1alpha1.WorkspaceServiceGroup{
 		{
