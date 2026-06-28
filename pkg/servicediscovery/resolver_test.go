@@ -87,7 +87,7 @@ func TestResolveServiceURLs_FromWorkspaceStatus(t *testing.T) {
 	t.Setenv(envMemoryAPIURL, "")
 	t.Setenv(envOmniaNamespace, "workspace-ns")
 
-	ws := makeWorkspaceWithStatus("my-workspace", "workspace-ns", []omniav1alpha1.ServiceGroupStatus{
+	ws := makeWorkspaceWithStatus(testWorkspaceName, "workspace-ns", []omniav1alpha1.ServiceGroupStatus{
 		{
 			Name:       "default",
 			SessionURL: "http://session.workspace-ns.svc.cluster.local",
@@ -121,7 +121,7 @@ func TestResolveServiceURLs_ServiceGroupNotReady(t *testing.T) {
 
 	// Ready=false but URLs populated — should succeed. Callers that only
 	// need session-api shouldn't be blocked by memory-api failures.
-	ws := makeWorkspaceWithStatus("my-workspace", "workspace-ns", []omniav1alpha1.ServiceGroupStatus{
+	ws := makeWorkspaceWithStatus(testWorkspaceName, "workspace-ns", []omniav1alpha1.ServiceGroupStatus{
 		{
 			Name:       "default",
 			SessionURL: "http://session.workspace-ns.svc.cluster.local",
@@ -151,7 +151,7 @@ func TestResolveServiceURLs_ServiceGroupNoURLs(t *testing.T) {
 	t.Setenv(envOmniaNamespace, "workspace-ns")
 
 	// No URLs populated — should fail even if the group exists.
-	ws := makeWorkspaceWithStatus("my-workspace", "workspace-ns", []omniav1alpha1.ServiceGroupStatus{
+	ws := makeWorkspaceWithStatus(testWorkspaceName, "workspace-ns", []omniav1alpha1.ServiceGroupStatus{
 		{
 			Name:  "default",
 			Ready: false,
@@ -175,7 +175,7 @@ func TestResolveServiceURLs_ServiceGroupNotFound(t *testing.T) {
 	t.Setenv(envMemoryAPIURL, "")
 	t.Setenv(envOmniaNamespace, "workspace-ns")
 
-	ws := makeWorkspaceWithStatus("my-workspace", "workspace-ns", []omniav1alpha1.ServiceGroupStatus{
+	ws := makeWorkspaceWithStatus(testWorkspaceName, "workspace-ns", []omniav1alpha1.ServiceGroupStatus{
 		{
 			Name:       "other-group",
 			SessionURL: "http://session.workspace-ns.svc.cluster.local",
@@ -229,7 +229,7 @@ func TestResolveServiceURLs_NamespaceFromFile(t *testing.T) {
 	namespaceFilePath = nsFile
 	t.Cleanup(func() { namespaceFilePath = origPath })
 
-	ws := makeWorkspaceWithStatus("my-workspace", "file-ns", []omniav1alpha1.ServiceGroupStatus{
+	ws := makeWorkspaceWithStatus(testWorkspaceName, "file-ns", []omniav1alpha1.ServiceGroupStatus{
 		{
 			Name:       "default",
 			SessionURL: "http://session.svc",
@@ -375,9 +375,9 @@ func TestResolveServiceURLs_PrivacyURLFromWorkspaceStatus(t *testing.T) {
 	t.Setenv(envOmniaNamespace, "workspace-ns")
 
 	ws := &omniav1alpha1.Workspace{
-		ObjectMeta: metav1.ObjectMeta{Name: "my-workspace"},
+		ObjectMeta: metav1.ObjectMeta{Name: testWorkspaceName},
 		Spec: omniav1alpha1.WorkspaceSpec{
-			DisplayName: "my-workspace",
+			DisplayName: testWorkspaceName,
 			Namespace:   omniav1alpha1.NamespaceConfig{Name: "workspace-ns"},
 		},
 		Status: omniav1alpha1.WorkspaceStatus{

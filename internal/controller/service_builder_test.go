@@ -35,6 +35,7 @@ const (
 	testRedisURLEnvName   = "REDIS_URL"
 	testRedisSvcName      = "redis"
 	testRedisSvcNamespace = "data"
+	testPrivacyDeployName = "privacy-myws"
 )
 
 // assertPrometheusAnnotations asserts the annotation-driven metrics
@@ -1018,7 +1019,7 @@ func TestBuildPrivacyDeployment(t *testing.T) {
 	dep := sb.BuildPrivacyDeployment("myws", "myws-ns", cfg)
 
 	require.NotNil(t, dep)
-	assert.Equal(t, "privacy-myws", dep.Name, "deployment must be named privacy-<ws>")
+	assert.Equal(t, testPrivacyDeployName, dep.Name, "deployment must be named privacy-<ws>")
 	assert.Equal(t, "myws-ns", dep.Namespace)
 
 	// Labels — component is "privacy-api", group is empty (per-workspace).
@@ -1036,7 +1037,7 @@ func TestBuildPrivacyDeployment(t *testing.T) {
 	assert.Equal(t, corev1.PullIfNotPresent, container.ImagePullPolicy)
 
 	// ServiceAccount name must match deployment name (standard pattern).
-	assert.Equal(t, "privacy-myws", dep.Spec.Template.Spec.ServiceAccountName)
+	assert.Equal(t, testPrivacyDeployName, dep.Spec.Template.Spec.ServiceAccountName)
 
 	// Args: --workspace present, --service-group absent.
 	assert.Contains(t, container.Args, "--workspace=myws")

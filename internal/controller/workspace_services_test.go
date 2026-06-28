@@ -541,7 +541,7 @@ func TestReconcilePrivacyService_CreatesDeploymentAndService(t *testing.T) {
 
 	// Deployment should exist with the correct name.
 	privDep := &appsv1.Deployment{}
-	err = r.Get(ctx, types.NamespacedName{Name: "privacy-myws", Namespace: "myws-ns"}, privDep)
+	err = r.Get(ctx, types.NamespacedName{Name: testPrivacyDeployName, Namespace: "myws-ns"}, privDep)
 	g.Expect(err).NotTo(HaveOccurred())
 	g.Expect(privDep.Labels[labelComponent]).To(Equal("privacy-api"))
 	g.Expect(privDep.Labels[labelWorkspace]).To(Equal("myws"))
@@ -550,12 +550,12 @@ func TestReconcilePrivacyService_CreatesDeploymentAndService(t *testing.T) {
 
 	// Service should exist.
 	privSvc := &corev1.Service{}
-	err = r.Get(ctx, types.NamespacedName{Name: "privacy-myws", Namespace: "myws-ns"}, privSvc)
+	err = r.Get(ctx, types.NamespacedName{Name: testPrivacyDeployName, Namespace: "myws-ns"}, privSvc)
 	g.Expect(err).NotTo(HaveOccurred())
 
 	// ServiceAccount should exist.
 	privSA := &corev1.ServiceAccount{}
-	err = r.Get(ctx, types.NamespacedName{Name: "privacy-myws", Namespace: "myws-ns"}, privSA)
+	err = r.Get(ctx, types.NamespacedName{Name: testPrivacyDeployName, Namespace: "myws-ns"}, privSA)
 	g.Expect(err).NotTo(HaveOccurred())
 
 	// PrivacyURL must be set.
@@ -582,7 +582,7 @@ func TestReconcilePrivacyService_NilPrivacySpec(t *testing.T) {
 
 	// No privacy deployment should exist.
 	privDep := &appsv1.Deployment{}
-	err = r.Get(ctx, types.NamespacedName{Name: "privacy-myws", Namespace: "myws-ns"}, privDep)
+	err = r.Get(ctx, types.NamespacedName{Name: testPrivacyDeployName, Namespace: "myws-ns"}, privDep)
 	g.Expect(err).To(HaveOccurred(), "no privacy deployment should be created when Spec.Privacy is nil")
 
 	// PrivacyURL must be cleared.
