@@ -417,6 +417,24 @@ arenaDemo:
 sharepointHero:
   enabled: false
 
+  # External exposure of rag-hero (A2A + WebSocket) for non-dashboard clients.
+  # Off by default; the omnia-azure umbrella's agentExposure routes + DNS/cert
+  # publish it under agents.<domain>. a2a.enabled adds a second type:a2a facade
+  # (operator opens the :9999 facade port); externalAuth.apiKeys.enabled switches
+  # the external listeners to strict per-caller API-key auth (keys created in the
+  # dashboard UI). Migrated to the Omnia #1645 facades[] shape. NOTE (#1576 gap):
+  # with a websocket primary the a2a agent card still advertises the in-cluster
+  # URL, not the external route.
+  a2a:
+    enabled: false
+    # agentCard.name is required by the CRD when the a2a facade is present.
+    agentCard:
+      name: "SharePoint Knowledge Assistant"
+      description: ""
+  externalAuth:
+    apiKeys:
+      enabled: false
+
   # Set true to activate the canary rollout (the "ship the change" demo beat).
   # Kept separate from enabled so install is stable and the rollout is triggered
   # on demand. The rag-hero AgentRuntime uses trafficRouting.mode=mesh — the
