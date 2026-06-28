@@ -139,14 +139,15 @@ func replaceDBName(connStr, newDB string) string {
 func TestMigrationFS_ContainsMigrations(t *testing.T) {
 	entries, err := MigrationFS.ReadDir("migrations")
 	require.NoError(t, err)
-	// The historical 000001-000028 chain was collapsed into a single
-	// consolidated initial migration (pre-GA; no data preserved).
-	assert.Len(t, entries, 2, "should have exactly the consolidated up + down migration")
+	// 000001: consolidated initial schema; 000002: drop user_privacy_preferences.
+	assert.Len(t, entries, 4, "should have exactly 4 migration files (2 up + 2 down)")
 
 	// Verify expected migration files exist
 	expected := []string{
 		"000001_initial.up.sql",
 		"000001_initial.down.sql",
+		"000002_drop_privacy_prefs.up.sql",
+		"000002_drop_privacy_prefs.down.sql",
 	}
 	names := make(map[string]bool)
 	for _, e := range entries {
@@ -155,6 +156,51 @@ func TestMigrationFS_ContainsMigrations(t *testing.T) {
 	for _, name := range expected {
 		assert.True(t, names[name], "migration %s should be embedded", name)
 	}
+}
+
+func TestDropMigration_SessionFS_Content(t *testing.T) {
+	data, err := MigrationFS.ReadFile("migrations/000002_drop_privacy_prefs.up.sql")
+	require.NoError(t, err)
+	sql := string(data)
+	assert.Contains(t, sql, "DROP TABLE IF EXISTS user_privacy_preferences",
+		"session drop migration must drop user_privacy_preferences")
+}
+
+func TestDropMigration_UserPrivacyPrefsDropped(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	db, connStr := freshDB(t)
+	logger := zap.New(zap.UseDevMode(true))
+
+	mg, err := NewMigrator(connStr, logger)
+	require.NoError(t, err)
+	defer func() { _ = mg.Close() }()
+
+	require.NoError(t, mg.Up())
+
+	// After all migrations, user_privacy_preferences must not exist.
+	var exists bool
+	err = db.QueryRow(`
+		SELECT EXISTS (
+			SELECT 1 FROM information_schema.tables
+			WHERE table_schema = 'public' AND table_name = 'user_privacy_preferences'
+		)`).Scan(&exists)
+	require.NoError(t, err)
+	assert.False(t, exists, "user_privacy_preferences must be dropped by 000002")
+
+	// Round-trip: down then up should also leave it absent.
+	require.NoError(t, mg.Down())
+	require.NoError(t, mg.Up())
+
+	err = db.QueryRow(`
+		SELECT EXISTS (
+			SELECT 1 FROM information_schema.tables
+			WHERE table_schema = 'public' AND table_name = 'user_privacy_preferences'
+		)`).Scan(&exists)
+	require.NoError(t, err)
+	assert.False(t, exists, "user_privacy_preferences must remain absent after down→up round-trip")
 }
 
 func TestNewMigrator_InvalidConnection(t *testing.T) {

@@ -202,11 +202,11 @@ func TestMigrator_TablesExist(t *testing.T) {
 	err = mg.Up()
 	require.NoError(t, err)
 
+	// user_privacy_preferences is dropped by 000003_drop_privacy_prefs.
 	expectedTables := []string{
 		tableEntities,
 		"memory_relations",
 		tableObservations,
-		"user_privacy_preferences",
 	}
 
 	for _, table := range expectedTables {
@@ -236,10 +236,11 @@ func TestMigrator_CollapsedSchema(t *testing.T) {
 	defer func() { _ = mg.Close() }()
 	require.NoError(t, mg.Up())
 
-	// All tables the collapsed initial must create (the post-000012 set).
+	// All tables that must exist after all migrations are applied.
+	// user_privacy_preferences is NOT here — 000003_drop_privacy_prefs removes it.
 	for _, table := range []string{
 		tableEntities, "memory_relations", tableObservations,
-		"user_privacy_preferences", "memory_workspaces", "audit_log",
+		"memory_workspaces", "audit_log",
 		"consolidation_runs",
 	} {
 		var exists bool
@@ -373,6 +374,66 @@ func TestMigrator_Close(t *testing.T) {
 
 	// Close should return nil on a valid migrator.
 	require.NoError(t, mg.Close())
+}
+
+func TestDropMigration_MemoryFS_Content(t *testing.T) {
+	data, err := MigrationsFS.ReadFile("migrations/000003_drop_privacy_prefs.up.sql")
+	require.NoError(t, err)
+	sqlStr := string(data)
+	assert.Contains(t, sqlStr, "DROP TABLE IF EXISTS user_privacy_preferences",
+		"memory drop migration must drop user_privacy_preferences")
+
+	// Strip comment lines before scanning for consent_category; the comment block
+	// documents what NOT to touch, which is fine — only SQL statements must be clean.
+	var stmtLines []string
+	for _, line := range strings.Split(sqlStr, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if !strings.HasPrefix(trimmed, "--") {
+			stmtLines = append(stmtLines, line)
+		}
+	}
+	stmts := strings.Join(stmtLines, "\n")
+	assert.NotContains(t, stmts, "consent_category",
+		"no SQL statement in memory drop migration may reference memory_entities.consent_category")
+}
+
+func TestDropMigration_ConsentCategorySurvives(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	db, connStr := freshDB(t)
+	logger := zap.New(zap.UseDevMode(true))
+
+	mg, err := NewMigrator(connStr, logger)
+	require.NoError(t, err)
+	defer func() { _ = mg.Close() }()
+
+	require.NoError(t, mg.Up())
+
+	// user_privacy_preferences must be gone.
+	var tableExists bool
+	err = db.QueryRow(`
+		SELECT EXISTS (
+			SELECT 1 FROM information_schema.tables
+			WHERE table_schema = 'public' AND table_name = 'user_privacy_preferences'
+		)`).Scan(&tableExists)
+	require.NoError(t, err)
+	assert.False(t, tableExists, "user_privacy_preferences must be dropped by 000003")
+
+	// memory_entities.consent_category must still exist — it is per-memory
+	// tagging, not a user preference column, and must not be touched.
+	var colExists bool
+	err = db.QueryRow(`
+		SELECT EXISTS (
+			SELECT 1 FROM information_schema.columns
+			WHERE table_schema = 'public'
+			AND table_name = 'memory_entities'
+			AND column_name = 'consent_category'
+		)`).Scan(&colExists)
+	require.NoError(t, err)
+	assert.True(t, colExists,
+		"memory_entities.consent_category must survive the privacy-prefs drop migration")
 }
 
 func TestMigrator_Up_DirtyStateRecovery(t *testing.T) {
