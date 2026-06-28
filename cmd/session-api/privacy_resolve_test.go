@@ -1,17 +1,11 @@
 /*
-Copyright 2025.
+Copyright 2026 Altaira Labs.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
     http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
 */
 
 package main
@@ -22,7 +16,10 @@ import (
 	"testing"
 
 	"github.com/go-logr/logr"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
+	coreomniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 	"github.com/altairalabs/omnia/ee/pkg/privacy"
 	"github.com/altairalabs/omnia/ee/pkg/privacy/httpclient"
 )
@@ -45,6 +42,67 @@ func TestResolvePrivacyPrefStore_NoEnvEmptyWorkspace(t *testing.T) {
 	t.Setenv("PRIVACY_API_URL", "")
 
 	store := resolvePrivacyPrefStore(context.Background(), "", "", nil, logr.Discard())
+	_, err := store.GetPreferences(context.Background(), "some-user")
+	if !errors.Is(err, privacy.ErrPreferencesNotFound) {
+		t.Errorf("expected ErrPreferencesNotFound from permissive store, got %v", err)
+	}
+}
+
+// TestResolvePrivacyPrefStore_WorkspaceStatus_HTTPClient verifies the production
+// in-cluster discovery path: no PRIVACY_API_URL env, a non-empty workspace and
+// serviceGroup, and a Workspace CRD whose status.privacyURL is populated.
+// resolvePrivacyPrefStore must return an *httpclient.Client built from that URL.
+func TestResolvePrivacyPrefStore_WorkspaceStatus_HTTPClient(t *testing.T) {
+	t.Setenv("PRIVACY_API_URL", "")
+	// Clear SESSION_API_URL and MEMORY_API_URL so servicediscovery.resolveFromEnv
+	// does not short-circuit before the k8s workspace lookup.
+	t.Setenv("SESSION_API_URL", "")
+	t.Setenv("MEMORY_API_URL", "")
+
+	ws := &coreomniav1alpha1.Workspace{
+		ObjectMeta: metav1.ObjectMeta{Name: "my-ws"},
+		Status: coreomniav1alpha1.WorkspaceStatus{
+			PrivacyURL: "http://privacy-ws.ns:8080",
+			Services: []coreomniav1alpha1.ServiceGroupStatus{
+				{
+					Name:       "default",
+					SessionURL: "http://session.svc",
+					Ready:      true,
+				},
+			},
+		},
+	}
+
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(newPrivacyWatcherScheme()).
+		WithObjects(ws).
+		Build()
+
+	store := resolvePrivacyPrefStore(context.Background(), "my-ws", "default", fakeClient, logr.Discard())
+	if _, ok := store.(*httpclient.Client); !ok {
+		t.Errorf("expected *httpclient.Client from workspace-status discovery path, got %T", store)
+	}
+}
+
+// TestResolvePrivacyPrefStore_WorkspaceStatus_Permissive verifies that when
+// PRIVACY_API_URL is not set and the workspace resolver fails (no matching
+// Workspace CRD in-cluster), resolvePrivacyPrefStore falls through to the
+// permissive store without crashing.
+func TestResolvePrivacyPrefStore_WorkspaceStatus_Permissive(t *testing.T) {
+	t.Setenv("PRIVACY_API_URL", "")
+	t.Setenv("SESSION_API_URL", "")
+	t.Setenv("MEMORY_API_URL", "")
+
+	// Empty fake client — no Workspace object, so Get returns not-found and the
+	// resolver returns an error, causing the fall-through to the permissive store.
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(newPrivacyWatcherScheme()).
+		Build()
+
+	store := resolvePrivacyPrefStore(context.Background(), "my-ws", "default", fakeClient, logr.Discard())
+	if _, ok := store.(*httpclient.Client); ok {
+		t.Error("expected permissive store when workspace not found, got *httpclient.Client")
+	}
 	_, err := store.GetPreferences(context.Background(), "some-user")
 	if !errors.Is(err, privacy.ErrPreferencesNotFound) {
 		t.Errorf("expected ErrPreferencesNotFound from permissive store, got %v", err)
