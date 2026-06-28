@@ -87,7 +87,7 @@ func TestResolveServiceURLs_FromWorkspaceStatus(t *testing.T) {
 	t.Setenv(envMemoryAPIURL, "")
 	t.Setenv(envOmniaNamespace, "workspace-ns")
 
-	ws := makeWorkspaceWithStatus("my-workspace", "workspace-ns", []omniav1alpha1.ServiceGroupStatus{
+	ws := makeWorkspaceWithStatus(testWorkspaceName, "workspace-ns", []omniav1alpha1.ServiceGroupStatus{
 		{
 			Name:       "default",
 			SessionURL: "http://session.workspace-ns.svc.cluster.local",
@@ -121,7 +121,7 @@ func TestResolveServiceURLs_ServiceGroupNotReady(t *testing.T) {
 
 	// Ready=false but URLs populated — should succeed. Callers that only
 	// need session-api shouldn't be blocked by memory-api failures.
-	ws := makeWorkspaceWithStatus("my-workspace", "workspace-ns", []omniav1alpha1.ServiceGroupStatus{
+	ws := makeWorkspaceWithStatus(testWorkspaceName, "workspace-ns", []omniav1alpha1.ServiceGroupStatus{
 		{
 			Name:       "default",
 			SessionURL: "http://session.workspace-ns.svc.cluster.local",
@@ -151,7 +151,7 @@ func TestResolveServiceURLs_ServiceGroupNoURLs(t *testing.T) {
 	t.Setenv(envOmniaNamespace, "workspace-ns")
 
 	// No URLs populated — should fail even if the group exists.
-	ws := makeWorkspaceWithStatus("my-workspace", "workspace-ns", []omniav1alpha1.ServiceGroupStatus{
+	ws := makeWorkspaceWithStatus(testWorkspaceName, "workspace-ns", []omniav1alpha1.ServiceGroupStatus{
 		{
 			Name:  "default",
 			Ready: false,
@@ -175,7 +175,7 @@ func TestResolveServiceURLs_ServiceGroupNotFound(t *testing.T) {
 	t.Setenv(envMemoryAPIURL, "")
 	t.Setenv(envOmniaNamespace, "workspace-ns")
 
-	ws := makeWorkspaceWithStatus("my-workspace", "workspace-ns", []omniav1alpha1.ServiceGroupStatus{
+	ws := makeWorkspaceWithStatus(testWorkspaceName, "workspace-ns", []omniav1alpha1.ServiceGroupStatus{
 		{
 			Name:       "other-group",
 			SessionURL: "http://session.workspace-ns.svc.cluster.local",
@@ -229,7 +229,7 @@ func TestResolveServiceURLs_NamespaceFromFile(t *testing.T) {
 	namespaceFilePath = nsFile
 	t.Cleanup(func() { namespaceFilePath = origPath })
 
-	ws := makeWorkspaceWithStatus("my-workspace", "file-ns", []omniav1alpha1.ServiceGroupStatus{
+	ws := makeWorkspaceWithStatus(testWorkspaceName, "file-ns", []omniav1alpha1.ServiceGroupStatus{
 		{
 			Name:       "default",
 			SessionURL: "http://session.svc",
@@ -334,6 +334,77 @@ func TestResolveByWorkspaceName_EnvVarOverride(t *testing.T) {
 	}
 	if urls.SessionURL != "http://override-session" {
 		t.Errorf("unexpected session URL: %s", urls.SessionURL)
+	}
+}
+
+func TestResolveServiceURLs_PrivacyURLEnvVar(t *testing.T) {
+	t.Setenv(envSessionAPIURL, "http://session-override.example.com")
+	t.Setenv(envMemoryAPIURL, "http://memory-override.example.com")
+	t.Setenv(envPrivacyAPIURL, "http://privacy-override.example.com")
+
+	r := NewResolver(nil)
+	urls, err := r.ResolveServiceURLs(context.Background(), "default")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if urls.PrivacyURL != "http://privacy-override.example.com" {
+		t.Errorf("expected privacy override, got %s", urls.PrivacyURL)
+	}
+}
+
+func TestResolveServiceURLs_PrivacyURLEnvVarEmpty(t *testing.T) {
+	// Privacy URL is optional — if not set, the struct still returns with empty PrivacyURL.
+	t.Setenv(envSessionAPIURL, "http://session-override.example.com")
+	t.Setenv(envMemoryAPIURL, "http://memory-override.example.com")
+	t.Setenv(envPrivacyAPIURL, "")
+
+	r := NewResolver(nil)
+	urls, err := r.ResolveServiceURLs(context.Background(), "default")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if urls.PrivacyURL != "" {
+		t.Errorf("expected empty privacy URL, got %s", urls.PrivacyURL)
+	}
+}
+
+func TestResolveServiceURLs_PrivacyURLFromWorkspaceStatus(t *testing.T) {
+	t.Setenv(envSessionAPIURL, "")
+	t.Setenv(envMemoryAPIURL, "")
+	t.Setenv(envPrivacyAPIURL, "")
+	t.Setenv(envOmniaNamespace, "workspace-ns")
+
+	ws := &omniav1alpha1.Workspace{
+		ObjectMeta: metav1.ObjectMeta{Name: testWorkspaceName},
+		Spec: omniav1alpha1.WorkspaceSpec{
+			DisplayName: testWorkspaceName,
+			Namespace:   omniav1alpha1.NamespaceConfig{Name: "workspace-ns"},
+		},
+		Status: omniav1alpha1.WorkspaceStatus{
+			PrivacyURL: "http://privacy.workspace-ns.svc.cluster.local",
+			Services: []omniav1alpha1.ServiceGroupStatus{
+				{
+					Name:       "default",
+					SessionURL: "http://session.workspace-ns.svc.cluster.local",
+					MemoryURL:  "http://memory.workspace-ns.svc.cluster.local",
+					Ready:      true,
+				},
+			},
+		},
+	}
+
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(newTestScheme()).
+		WithObjects(ws).
+		Build()
+
+	r := NewResolver(fakeClient)
+	urls, err := r.ResolveServiceURLs(context.Background(), "default")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if urls.PrivacyURL != "http://privacy.workspace-ns.svc.cluster.local" {
+		t.Errorf("unexpected privacy URL: %s", urls.PrivacyURL)
 	}
 }
 

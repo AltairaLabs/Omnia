@@ -453,6 +453,13 @@ type WorkspaceSpec struct {
 	// +optional
 	// +kubebuilder:validation:MaxItems=16
 	MgmtPlaneMintServiceAccounts []string `json:"mgmtPlaneMintServiceAccounts,omitempty"`
+
+	// privacy optionally configures the per-workspace privacy-api service,
+	// which owns consent grants and opt-out preferences for this workspace.
+	// When omitted, no privacy-api is provisioned and the workspace's
+	// session/memory services run without centralized preference enforcement.
+	// +optional
+	Privacy *PrivacyServiceConfig `json:"privacy,omitempty"`
 }
 
 // WorkspacePhase represents the current phase of a Workspace.
@@ -563,6 +570,10 @@ type WorkspaceStatus struct {
 	// services tracks the status of each service group defined in spec.services.
 	// +optional
 	Services []ServiceGroupStatus `json:"services,omitempty"`
+
+	// privacyURL is the resolved URL of the per-workspace privacy-api.
+	// +optional
+	PrivacyURL string `json:"privacyURL,omitempty"`
 
 	// conditions represent the current state of the Workspace resource.
 	// +listType=map
@@ -772,6 +783,21 @@ type SessionServiceConfig struct {
 	// CSI secret-stores, etc.).
 	// +optional
 	PodOverrides *PodOverrides `json:"podOverrides,omitempty"`
+}
+
+// PrivacyServiceConfig configures the per-workspace managed privacy-api service.
+type PrivacyServiceConfig struct {
+	// database configures the PostgreSQL consent database for this workspace.
+	// The Secret must have a key "POSTGRES_CONN".
+	// +kubebuilder:validation:Required
+	Database DatabaseConfig `json:"database"`
+
+	// NOTE: privacy-api intentionally has no podOverrides field. Embedding the
+	// full PodOverrides pod-spec schema a third time (session + memory already
+	// carry it) pushed the bundled Workspace CRD past the 1 MiB Helm release
+	// Secret limit, breaking `helm install` (caught by E2E, not by template/lint).
+	// privacy-api is a simple new service; podOverrides can be added later only
+	// alongside a chart change that stops bundling CRDs into the release Secret.
 }
 
 // DatabaseConfig holds the reference to a Secret containing database connection details.

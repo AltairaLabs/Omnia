@@ -532,6 +532,12 @@
           "properties": {
             "image": { "$ref": "#/$defs/image" }
           }
+        },
+        "privacyApi": {
+          "type": "object",
+          "properties": {
+            "image": { "$ref": "#/$defs/image" }
+          }
         }
       }
     },

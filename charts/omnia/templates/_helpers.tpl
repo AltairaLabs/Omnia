@@ -274,6 +274,14 @@ Workspace Eval Worker image (operator-managed per-service-group worker)
 {{- end }}
 
 {{/*
+Privacy API image (operator-managed per-workspace service)
+*/}}
+{{- define "omnia.privacyApi.image" -}}
+{{- $tag := default .Chart.AppVersion .Values.workspaceServices.privacyApi.image.tag }}
+{{- printf "%s:%s" .Values.workspaceServices.privacyApi.image.repository $tag }}
+{{- end }}
+
+{{/*
 Doctor fullname
 */}}
 {{- define "omnia.doctor.fullname" -}}

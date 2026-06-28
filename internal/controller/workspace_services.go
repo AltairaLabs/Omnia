@@ -90,6 +90,55 @@ func (r *WorkspaceReconciler) reconcileServices(ctx context.Context, workspace *
 		return err
 	}
 
+	if err := r.reconcilePrivacyService(ctx, workspace); err != nil {
+		return fmt.Errorf("privacy service: %w", err)
+	}
+
+	return nil
+}
+
+// reconcilePrivacyService creates or updates the per-workspace privacy-api
+// Deployment, Service, and ServiceAccount. It is called once per workspace
+// reconciliation after the per-service-group loop. The privacy-api is
+// per-workspace (not per-service-group), so it lives outside the group loop.
+//
+// Gate: Spec.Privacy must be non-nil and ServiceBuilder.PrivacyImage must be
+// set. When either condition is false, PrivacyURL is cleared and the function
+// returns without creating any resources.
+func (r *WorkspaceReconciler) reconcilePrivacyService(ctx context.Context, workspace *omniav1alpha1.Workspace) error {
+	if workspace.Spec.Privacy == nil || r.ServiceBuilder == nil || r.ServiceBuilder.PrivacyImage == "" {
+		workspace.Status.PrivacyURL = ""
+		return nil
+	}
+	namespace := workspace.Spec.Namespace.Name
+	depName := fmt.Sprintf("privacy-%s", workspace.Name)
+
+	if err := r.reconcileServicePodSA(ctx, workspace, namespace, depName); err != nil {
+		return fmt.Errorf("service account %s: %w", depName, err)
+	}
+	// privacy-api validates caller tokens via the TokenReview API (same as
+	// session-api), so it needs the tokenreview ClusterRole binding.
+	if err := r.reconcileSessionAPITokenReviewBinding(ctx, namespace, depName); err != nil {
+		return fmt.Errorf("privacy tokenreview binding: %w", err)
+	}
+	if err := r.reconcileEnterpriseReaderBinding(ctx, namespace, depName); err != nil {
+		return fmt.Errorf("privacy enterprise reader binding: %w", err)
+	}
+	if err := r.reconcileServiceAuthNetworkHardening(ctx, workspace, namespace); err != nil {
+		return fmt.Errorf("privacy network hardening: %w", err)
+	}
+
+	dep := r.ServiceBuilder.BuildPrivacyDeployment(workspace.Name, namespace, *workspace.Spec.Privacy)
+	if err := r.reconcileManagedDeployment(ctx, workspace, namespace, dep); err != nil {
+		return fmt.Errorf("privacy deployment: %w", err)
+	}
+
+	svc := BuildService(depName, namespace, "privacy-api", workspace.Name, "")
+	if err := r.reconcileManagedService(ctx, workspace, namespace, svc); err != nil {
+		return fmt.Errorf("privacy service create: %w", err)
+	}
+
+	workspace.Status.PrivacyURL = ServiceURL(depName, namespace)
 	return nil
 }
 

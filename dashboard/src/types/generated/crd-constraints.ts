@@ -6,97 +6,6 @@ import type { FieldConstraint } from "@/lib/validation/constraint-types";
 export const crdConstraints: Record<string, Record<string, FieldConstraint>> =
   {
   "AgentRuntime": {
-    "spec.a2a.agentCard.capabilities.pushNotifications": {
-      "type": "boolean"
-    },
-    "spec.a2a.agentCard.capabilities.streaming": {
-      "type": "boolean"
-    },
-    "spec.a2a.agentCard.defaultInputModes[]": {
-      "type": "string"
-    },
-    "spec.a2a.agentCard.defaultOutputModes[]": {
-      "type": "string"
-    },
-    "spec.a2a.agentCard.description": {
-      "type": "string"
-    },
-    "spec.a2a.agentCard.name": {
-      "type": "string",
-      "minLength": 1,
-      "required": true
-    },
-    "spec.a2a.agentCard.organization": {
-      "type": "string"
-    },
-    "spec.a2a.agentCard.skills[].description": {
-      "type": "string"
-    },
-    "spec.a2a.agentCard.skills[].examples[]": {
-      "type": "string"
-    },
-    "spec.a2a.agentCard.skills[].id": {
-      "type": "string",
-      "minLength": 1,
-      "required": true
-    },
-    "spec.a2a.agentCard.skills[].name": {
-      "type": "string",
-      "minLength": 1,
-      "required": true
-    },
-    "spec.a2a.agentCard.skills[].tags[]": {
-      "type": "string"
-    },
-    "spec.a2a.agentCard.version": {
-      "type": "string"
-    },
-    "spec.a2a.authentication.secretRef.name": {
-      "type": "string"
-    },
-    "spec.a2a.clients[].agentRuntimeRef.name": {
-      "type": "string",
-      "minLength": 1,
-      "required": true
-    },
-    "spec.a2a.clients[].agentRuntimeRef.namespace": {
-      "type": "string"
-    },
-    "spec.a2a.clients[].authentication.secretRef.name": {
-      "type": "string"
-    },
-    "spec.a2a.clients[].exposeAsTools": {
-      "type": "boolean"
-    },
-    "spec.a2a.clients[].name": {
-      "type": "string",
-      "minLength": 1,
-      "required": true
-    },
-    "spec.a2a.clients[].url": {
-      "type": "string"
-    },
-    "spec.a2a.conversationTTL": {
-      "type": "string"
-    },
-    "spec.a2a.enabled": {
-      "type": "boolean"
-    },
-    "spec.a2a.port": {
-      "type": "integer"
-    },
-    "spec.a2a.taskStore.redisSecretRef.name": {
-      "type": "string"
-    },
-    "spec.a2a.taskStore.redisURL": {
-      "type": "string"
-    },
-    "spec.a2a.taskStore.type": {
-      "type": "string"
-    },
-    "spec.a2a.taskTTL": {
-      "type": "string"
-    },
     "spec.console.allowedAttachmentTypes[]": {
       "type": "string"
     },
@@ -1214,9 +1123,6 @@ export const crdConstraints: Record<string, Record<string, FieldConstraint>> =
     "spec.evals.worker.groups[]": {
       "type": "string"
     },
-    "spec.externalAuth.allowManagementPlane": {
-      "type": "boolean"
-    },
     "spec.externalAuth.apiKeys.defaultRole": {
       "type": "string",
       "enum": [
@@ -1268,172 +1174,169 @@ export const crdConstraints: Record<string, Record<string, FieldConstraint>> =
     "spec.externalAuth.sharedToken.trustEndUserHeader": {
       "type": "boolean"
     },
-    "spec.facade": {
+    "spec.facades": {
       "required": true
     },
-    "spec.facade.a2a.agentCard.capabilities.pushNotifications": {
+    "spec.facades[].a2a.agentCard.capabilities.pushNotifications": {
       "type": "boolean"
     },
-    "spec.facade.a2a.agentCard.capabilities.streaming": {
+    "spec.facades[].a2a.agentCard.capabilities.streaming": {
       "type": "boolean"
     },
-    "spec.facade.a2a.agentCard.defaultInputModes[]": {
+    "spec.facades[].a2a.agentCard.defaultInputModes[]": {
       "type": "string"
     },
-    "spec.facade.a2a.agentCard.defaultOutputModes[]": {
+    "spec.facades[].a2a.agentCard.defaultOutputModes[]": {
       "type": "string"
     },
-    "spec.facade.a2a.agentCard.description": {
+    "spec.facades[].a2a.agentCard.description": {
       "type": "string"
     },
-    "spec.facade.a2a.agentCard.name": {
+    "spec.facades[].a2a.agentCard.name": {
       "type": "string",
       "minLength": 1,
       "required": true
     },
-    "spec.facade.a2a.agentCard.organization": {
+    "spec.facades[].a2a.agentCard.organization": {
       "type": "string"
     },
-    "spec.facade.a2a.agentCard.skills[].description": {
+    "spec.facades[].a2a.agentCard.skills[].description": {
       "type": "string"
     },
-    "spec.facade.a2a.agentCard.skills[].examples[]": {
+    "spec.facades[].a2a.agentCard.skills[].examples[]": {
       "type": "string"
     },
-    "spec.facade.a2a.agentCard.skills[].id": {
+    "spec.facades[].a2a.agentCard.skills[].id": {
       "type": "string",
       "minLength": 1,
       "required": true
     },
-    "spec.facade.a2a.agentCard.skills[].name": {
+    "spec.facades[].a2a.agentCard.skills[].name": {
       "type": "string",
       "minLength": 1,
       "required": true
     },
-    "spec.facade.a2a.agentCard.skills[].tags[]": {
+    "spec.facades[].a2a.agentCard.skills[].tags[]": {
       "type": "string"
     },
-    "spec.facade.a2a.agentCard.version": {
+    "spec.facades[].a2a.agentCard.version": {
       "type": "string"
     },
-    "spec.facade.a2a.authentication.secretRef.name": {
-      "type": "string"
-    },
-    "spec.facade.a2a.clients[].agentRuntimeRef.name": {
+    "spec.facades[].a2a.clients[].agentRuntimeRef.name": {
       "type": "string",
       "minLength": 1,
       "required": true
     },
-    "spec.facade.a2a.clients[].agentRuntimeRef.namespace": {
+    "spec.facades[].a2a.clients[].agentRuntimeRef.namespace": {
       "type": "string"
     },
-    "spec.facade.a2a.clients[].authentication.secretRef.name": {
+    "spec.facades[].a2a.clients[].authentication.secretRef.name": {
       "type": "string"
     },
-    "spec.facade.a2a.clients[].exposeAsTools": {
+    "spec.facades[].a2a.clients[].exposeAsTools": {
       "type": "boolean"
     },
-    "spec.facade.a2a.clients[].name": {
+    "spec.facades[].a2a.clients[].name": {
       "type": "string",
       "minLength": 1,
       "required": true
     },
-    "spec.facade.a2a.clients[].url": {
+    "spec.facades[].a2a.clients[].url": {
       "type": "string"
     },
-    "spec.facade.a2a.conversationTTL": {
+    "spec.facades[].a2a.conversationTTL": {
       "type": "string"
     },
-    "spec.facade.a2a.enabled": {
+    "spec.facades[].a2a.enabled": {
       "type": "boolean"
     },
-    "spec.facade.a2a.port": {
+    "spec.facades[].a2a.port": {
       "type": "integer"
     },
-    "spec.facade.a2a.taskStore.redisSecretRef.name": {
+    "spec.facades[].a2a.taskStore.redisSecretRef.name": {
       "type": "string"
     },
-    "spec.facade.a2a.taskStore.redisURL": {
+    "spec.facades[].a2a.taskStore.redisURL": {
       "type": "string"
     },
-    "spec.facade.a2a.taskStore.type": {
+    "spec.facades[].a2a.taskStore.type": {
       "type": "string"
     },
-    "spec.facade.a2a.taskTTL": {
+    "spec.facades[].a2a.taskTTL": {
       "type": "string"
     },
-    "spec.facade.clientToolTimeout": {
+    "spec.facades[].clientToolTimeout": {
       "type": "string"
     },
-    "spec.facade.drainTimeout": {
+    "spec.facades[].drainTimeout": {
       "type": "string"
     },
-    "spec.facade.expose.enabled": {
+    "spec.facades[].expose.enabled": {
       "type": "boolean"
     },
-    "spec.facade.expose.host": {
+    "spec.facades[].expose.host": {
       "type": "string"
     },
-    "spec.facade.extraEnv[].name": {
+    "spec.facades[].extraEnv[].name": {
       "type": "string",
       "required": true
     },
-    "spec.facade.extraEnv[].value": {
+    "spec.facades[].extraEnv[].value": {
       "type": "string"
     },
-    "spec.facade.extraEnv[].valueFrom.configMapKeyRef.key": {
+    "spec.facades[].extraEnv[].valueFrom.configMapKeyRef.key": {
       "type": "string",
       "required": true
     },
-    "spec.facade.extraEnv[].valueFrom.configMapKeyRef.name": {
+    "spec.facades[].extraEnv[].valueFrom.configMapKeyRef.name": {
       "type": "string"
     },
-    "spec.facade.extraEnv[].valueFrom.configMapKeyRef.optional": {
+    "spec.facades[].extraEnv[].valueFrom.configMapKeyRef.optional": {
       "type": "boolean"
     },
-    "spec.facade.extraEnv[].valueFrom.fieldRef.apiVersion": {
+    "spec.facades[].extraEnv[].valueFrom.fieldRef.apiVersion": {
       "type": "string"
     },
-    "spec.facade.extraEnv[].valueFrom.fieldRef.fieldPath": {
+    "spec.facades[].extraEnv[].valueFrom.fieldRef.fieldPath": {
       "type": "string",
       "required": true
     },
-    "spec.facade.extraEnv[].valueFrom.fileKeyRef.key": {
+    "spec.facades[].extraEnv[].valueFrom.fileKeyRef.key": {
       "type": "string",
       "required": true
     },
-    "spec.facade.extraEnv[].valueFrom.fileKeyRef.optional": {
+    "spec.facades[].extraEnv[].valueFrom.fileKeyRef.optional": {
       "type": "boolean"
     },
-    "spec.facade.extraEnv[].valueFrom.fileKeyRef.path": {
+    "spec.facades[].extraEnv[].valueFrom.fileKeyRef.path": {
       "type": "string",
       "required": true
     },
-    "spec.facade.extraEnv[].valueFrom.fileKeyRef.volumeName": {
+    "spec.facades[].extraEnv[].valueFrom.fileKeyRef.volumeName": {
       "type": "string",
       "required": true
     },
-    "spec.facade.extraEnv[].valueFrom.resourceFieldRef.containerName": {
+    "spec.facades[].extraEnv[].valueFrom.resourceFieldRef.containerName": {
       "type": "string"
     },
-    "spec.facade.extraEnv[].valueFrom.resourceFieldRef.divisor": {
+    "spec.facades[].extraEnv[].valueFrom.resourceFieldRef.divisor": {
       "pattern": "^(\\+|-)?(([0-9]+(\\.[0-9]*)?)|(\\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\\+|-)?(([0-9]+(\\.[0-9]*)?)|(\\.[0-9]+))))?$"
     },
-    "spec.facade.extraEnv[].valueFrom.resourceFieldRef.resource": {
+    "spec.facades[].extraEnv[].valueFrom.resourceFieldRef.resource": {
       "type": "string",
       "required": true
     },
-    "spec.facade.extraEnv[].valueFrom.secretKeyRef.key": {
+    "spec.facades[].extraEnv[].valueFrom.secretKeyRef.key": {
       "type": "string",
       "required": true
     },
-    "spec.facade.extraEnv[].valueFrom.secretKeyRef.name": {
+    "spec.facades[].extraEnv[].valueFrom.secretKeyRef.name": {
       "type": "string"
     },
-    "spec.facade.extraEnv[].valueFrom.secretKeyRef.optional": {
+    "spec.facades[].extraEnv[].valueFrom.secretKeyRef.optional": {
       "type": "boolean"
     },
-    "spec.facade.handler": {
+    "spec.facades[].handler": {
       "type": "string",
       "enum": [
         "echo",
@@ -1441,29 +1344,32 @@ export const crdConstraints: Record<string, Record<string, FieldConstraint>> =
         "runtime"
       ]
     },
-    "spec.facade.image": {
+    "spec.facades[].image": {
       "type": "string"
     },
-    "spec.facade.mcp.enabled": {
+    "spec.facades[].managementPlane": {
       "type": "boolean"
     },
-    "spec.facade.mcp.port": {
+    "spec.facades[].mcp.enabled": {
+      "type": "boolean"
+    },
+    "spec.facades[].mcp.port": {
       "type": "integer",
       "minimum": 1,
       "maximum": 65535
     },
-    "spec.facade.port": {
+    "spec.facades[].port": {
       "type": "integer",
       "minimum": 1,
       "maximum": 65535
     },
-    "spec.facade.type": {
+    "spec.facades[].type": {
       "type": "string",
       "enum": [
         "websocket",
-        "grpc",
         "a2a",
-        "rest"
+        "rest",
+        "mcp"
       ],
       "required": true
     },

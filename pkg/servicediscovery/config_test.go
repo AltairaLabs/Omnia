@@ -27,6 +27,9 @@ import (
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 )
 
+// Test constants extracted to satisfy goconst.
+const testWorkspaceName = "my-workspace"
+
 func int32Ptr(v int32) *int32 { return &v }
 
 //nolint:unparam
@@ -57,7 +60,7 @@ func makeSecret(name, namespace, connStr string) *corev1.Secret {
 }
 
 func TestResolveSessionConfig(t *testing.T) {
-	ws := makeWorkspaceWithServices("my-workspace", []omniav1alpha1.WorkspaceServiceGroup{
+	ws := makeWorkspaceWithServices(testWorkspaceName, []omniav1alpha1.WorkspaceServiceGroup{
 		{
 			Name: "default",
 			Session: &omniav1alpha1.SessionServiceConfig{
@@ -76,7 +79,7 @@ func TestResolveSessionConfig(t *testing.T) {
 		Build()
 
 	cr := NewConfigResolver(fakeClient)
-	cfg, err := cr.ResolveSessionConfig(context.Background(), "my-workspace", "default", "test-ns")
+	cfg, err := cr.ResolveSessionConfig(context.Background(), testWorkspaceName, "default", "test-ns")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -98,7 +101,7 @@ func TestResolveSessionConfig_WorkspaceNotFound(t *testing.T) {
 }
 
 func TestResolveSessionConfig_ServiceGroupNotFound(t *testing.T) {
-	ws := makeWorkspaceWithServices("my-workspace", []omniav1alpha1.WorkspaceServiceGroup{
+	ws := makeWorkspaceWithServices(testWorkspaceName, []omniav1alpha1.WorkspaceServiceGroup{
 		{
 			Name: "other-group",
 			Session: &omniav1alpha1.SessionServiceConfig{
@@ -115,14 +118,14 @@ func TestResolveSessionConfig_ServiceGroupNotFound(t *testing.T) {
 		Build()
 
 	cr := NewConfigResolver(fakeClient)
-	_, err := cr.ResolveSessionConfig(context.Background(), "my-workspace", "default", "test-ns")
+	_, err := cr.ResolveSessionConfig(context.Background(), testWorkspaceName, "default", "test-ns")
 	if err == nil {
 		t.Fatal("expected error when service group not found")
 	}
 }
 
 func TestResolveSessionConfig_NoSessionConfig(t *testing.T) {
-	ws := makeWorkspaceWithServices("my-workspace", []omniav1alpha1.WorkspaceServiceGroup{
+	ws := makeWorkspaceWithServices(testWorkspaceName, []omniav1alpha1.WorkspaceServiceGroup{
 		{
 			Name: "default",
 			// Session is nil (external mode, no session config)
@@ -135,14 +138,14 @@ func TestResolveSessionConfig_NoSessionConfig(t *testing.T) {
 		Build()
 
 	cr := NewConfigResolver(fakeClient)
-	_, err := cr.ResolveSessionConfig(context.Background(), "my-workspace", "default", "test-ns")
+	_, err := cr.ResolveSessionConfig(context.Background(), testWorkspaceName, "default", "test-ns")
 	if err == nil {
 		t.Fatal("expected error when session config is nil")
 	}
 }
 
 func TestResolveSessionConfig_SecretNotFound(t *testing.T) {
-	ws := makeWorkspaceWithServices("my-workspace", []omniav1alpha1.WorkspaceServiceGroup{
+	ws := makeWorkspaceWithServices(testWorkspaceName, []omniav1alpha1.WorkspaceServiceGroup{
 		{
 			Name: "default",
 			Session: &omniav1alpha1.SessionServiceConfig{
@@ -159,14 +162,14 @@ func TestResolveSessionConfig_SecretNotFound(t *testing.T) {
 		Build()
 
 	cr := NewConfigResolver(fakeClient)
-	_, err := cr.ResolveSessionConfig(context.Background(), "my-workspace", "default", "test-ns")
+	_, err := cr.ResolveSessionConfig(context.Background(), testWorkspaceName, "default", "test-ns")
 	if err == nil {
 		t.Fatal("expected error when secret not found")
 	}
 }
 
 func TestResolveMemoryConfig(t *testing.T) {
-	ws := makeWorkspaceWithServices("my-workspace", []omniav1alpha1.WorkspaceServiceGroup{
+	ws := makeWorkspaceWithServices(testWorkspaceName, []omniav1alpha1.WorkspaceServiceGroup{
 		{
 			Name: "default",
 			Memory: &omniav1alpha1.MemoryServiceConfig{
@@ -186,7 +189,7 @@ func TestResolveMemoryConfig(t *testing.T) {
 		Build()
 
 	cr := NewConfigResolver(fakeClient)
-	cfg, err := cr.ResolveMemoryConfig(context.Background(), "my-workspace", "default", "test-ns")
+	cfg, err := cr.ResolveMemoryConfig(context.Background(), testWorkspaceName, "default", "test-ns")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -199,7 +202,7 @@ func TestResolveMemoryConfig(t *testing.T) {
 }
 
 func TestResolveMemoryConfig_NoProvider(t *testing.T) {
-	ws := makeWorkspaceWithServices("my-workspace", []omniav1alpha1.WorkspaceServiceGroup{
+	ws := makeWorkspaceWithServices(testWorkspaceName, []omniav1alpha1.WorkspaceServiceGroup{
 		{
 			Name: "default",
 			Memory: &omniav1alpha1.MemoryServiceConfig{
@@ -218,7 +221,7 @@ func TestResolveMemoryConfig_NoProvider(t *testing.T) {
 		Build()
 
 	cr := NewConfigResolver(fakeClient)
-	cfg, err := cr.ResolveMemoryConfig(context.Background(), "my-workspace", "default", "test-ns")
+	cfg, err := cr.ResolveMemoryConfig(context.Background(), testWorkspaceName, "default", "test-ns")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -240,7 +243,7 @@ func TestResolveMemoryConfig_WorkspaceNotFound(t *testing.T) {
 }
 
 func TestResolveMemoryConfig_ServiceGroupNotFound(t *testing.T) {
-	ws := makeWorkspaceWithServices("my-workspace", []omniav1alpha1.WorkspaceServiceGroup{
+	ws := makeWorkspaceWithServices(testWorkspaceName, []omniav1alpha1.WorkspaceServiceGroup{
 		{
 			Name: "other-group",
 			Memory: &omniav1alpha1.MemoryServiceConfig{
@@ -257,14 +260,14 @@ func TestResolveMemoryConfig_ServiceGroupNotFound(t *testing.T) {
 		Build()
 
 	cr := NewConfigResolver(fakeClient)
-	_, err := cr.ResolveMemoryConfig(context.Background(), "my-workspace", "default", "test-ns")
+	_, err := cr.ResolveMemoryConfig(context.Background(), testWorkspaceName, "default", "test-ns")
 	if err == nil {
 		t.Fatal("expected error when service group not found")
 	}
 }
 
 func TestResolveMemoryConfig_NoMemoryConfig(t *testing.T) {
-	ws := makeWorkspaceWithServices("my-workspace", []omniav1alpha1.WorkspaceServiceGroup{
+	ws := makeWorkspaceWithServices(testWorkspaceName, []omniav1alpha1.WorkspaceServiceGroup{
 		{
 			Name: "default",
 			// Memory is nil
@@ -277,14 +280,14 @@ func TestResolveMemoryConfig_NoMemoryConfig(t *testing.T) {
 		Build()
 
 	cr := NewConfigResolver(fakeClient)
-	_, err := cr.ResolveMemoryConfig(context.Background(), "my-workspace", "default", "test-ns")
+	_, err := cr.ResolveMemoryConfig(context.Background(), testWorkspaceName, "default", "test-ns")
 	if err == nil {
 		t.Fatal("expected error when memory config is nil")
 	}
 }
 
 func TestResolveMemoryConfig_SecretNotFound(t *testing.T) {
-	ws := makeWorkspaceWithServices("my-workspace", []omniav1alpha1.WorkspaceServiceGroup{
+	ws := makeWorkspaceWithServices(testWorkspaceName, []omniav1alpha1.WorkspaceServiceGroup{
 		{
 			Name: "default",
 			Memory: &omniav1alpha1.MemoryServiceConfig{
@@ -301,14 +304,75 @@ func TestResolveMemoryConfig_SecretNotFound(t *testing.T) {
 		Build()
 
 	cr := NewConfigResolver(fakeClient)
-	_, err := cr.ResolveMemoryConfig(context.Background(), "my-workspace", "default", "test-ns")
+	_, err := cr.ResolveMemoryConfig(context.Background(), testWorkspaceName, "default", "test-ns")
 	if err == nil {
 		t.Fatal("expected error when secret not found")
 	}
 }
 
+func TestResolvePrivacyConfig(t *testing.T) {
+	ws := &omniav1alpha1.Workspace{
+		ObjectMeta: metav1.ObjectMeta{Name: testWorkspaceName},
+		Spec: omniav1alpha1.WorkspaceSpec{
+			DisplayName: testWorkspaceName,
+			Namespace:   omniav1alpha1.NamespaceConfig{Name: "test-ns"},
+			Privacy: &omniav1alpha1.PrivacyServiceConfig{
+				Database: omniav1alpha1.DatabaseConfig{
+					SecretRef: corev1.LocalObjectReference{Name: "privacy-db"},
+				},
+			},
+		},
+	}
+	secret := makeSecret("privacy-db", "test-ns", "postgres://privacy-host/consent")
+
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(newTestScheme()).
+		WithObjects(ws, secret).
+		Build()
+
+	cr := NewConfigResolver(fakeClient)
+	cfg, err := cr.ResolvePrivacyConfig(context.Background(), testWorkspaceName, "test-ns")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.PostgresConn != "postgres://privacy-host/consent" {
+		t.Errorf("unexpected postgres conn: %s", cfg.PostgresConn)
+	}
+}
+
+func TestResolvePrivacyConfig_NoPrivacyConfig(t *testing.T) {
+	ws := makeWorkspaceWithServices(testWorkspaceName, nil) // Privacy is nil
+
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(newTestScheme()).
+		WithObjects(ws).
+		Build()
+
+	cr := NewConfigResolver(fakeClient)
+	_, err := cr.ResolvePrivacyConfig(context.Background(), testWorkspaceName, "test-ns")
+	if err == nil {
+		t.Fatal("expected error when workspace has no privacy configuration")
+	}
+	expected := `workspace "` + testWorkspaceName + `" has no privacy configuration`
+	if err.Error() != expected {
+		t.Errorf("unexpected error message: %q, want %q", err.Error(), expected)
+	}
+}
+
+func TestResolvePrivacyConfig_WorkspaceNotFound(t *testing.T) {
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(newTestScheme()).
+		Build()
+
+	cr := NewConfigResolver(fakeClient)
+	_, err := cr.ResolvePrivacyConfig(context.Background(), "nonexistent", "test-ns")
+	if err == nil {
+		t.Fatal("expected error when workspace not found")
+	}
+}
+
 func TestResolveSessionConfig_SecretMissingKey(t *testing.T) {
-	ws := makeWorkspaceWithServices("my-workspace", []omniav1alpha1.WorkspaceServiceGroup{
+	ws := makeWorkspaceWithServices(testWorkspaceName, []omniav1alpha1.WorkspaceServiceGroup{
 		{
 			Name: "default",
 			Session: &omniav1alpha1.SessionServiceConfig{
@@ -333,7 +397,7 @@ func TestResolveSessionConfig_SecretMissingKey(t *testing.T) {
 		Build()
 
 	cr := NewConfigResolver(fakeClient)
-	_, err := cr.ResolveSessionConfig(context.Background(), "my-workspace", "default", "test-ns")
+	_, err := cr.ResolveSessionConfig(context.Background(), testWorkspaceName, "default", "test-ns")
 	if err == nil {
 		t.Fatal("expected error when secret has no POSTGRES_CONN key")
 	}

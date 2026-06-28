@@ -44,6 +44,12 @@ type MemoryConfig struct {
 	EmbeddingProviderName string
 }
 
+// PrivacyConfig holds the resolved configuration for a privacy-api instance.
+type PrivacyConfig struct {
+	// PostgresConn is the PostgreSQL connection string for the per-workspace consent DB.
+	PostgresConn string
+}
+
 // ConfigResolver resolves runtime configuration for session-api and memory-api
 // by reading Workspace CRDs and referenced Kubernetes Secrets.
 type ConfigResolver struct {
@@ -97,6 +103,26 @@ func (r *ConfigResolver) ResolveMemoryConfig(
 		cfg.EmbeddingProviderName = group.Memory.ProviderRef.Name
 	}
 	return cfg, nil
+}
+
+// ResolvePrivacyConfig reads the Workspace CRD and returns privacy-api config.
+// privacy-api is per-workspace, so this reads the workspace-level Privacy block,
+// not a service group.
+func (r *ConfigResolver) ResolvePrivacyConfig(
+	ctx context.Context, workspace, namespace string,
+) (*PrivacyConfig, error) {
+	var ws omniav1alpha1.Workspace
+	if err := r.client.Get(ctx, client.ObjectKey{Name: workspace}, &ws); err != nil {
+		return nil, fmt.Errorf("get workspace %q: %w", workspace, err)
+	}
+	if ws.Spec.Privacy == nil {
+		return nil, fmt.Errorf("workspace %q has no privacy configuration", workspace)
+	}
+	conn, err := r.readPostgresConn(ctx, ws.Spec.Privacy.Database.SecretRef.Name, namespace)
+	if err != nil {
+		return nil, err
+	}
+	return &PrivacyConfig{PostgresConn: conn}, nil
 }
 
 // findServiceGroup retrieves a Workspace by name and returns the named service group.

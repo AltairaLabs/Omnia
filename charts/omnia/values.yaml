@@ -1151,6 +1151,15 @@ workspaceServices:
       tag: ""
       # -- Image pull policy
       pullPolicy: IfNotPresent
+  privacyApi:
+    image:
+      # -- Privacy API image repository. The operator reconciles a per-workspace
+      # privacy-api Deployment for every Workspace with spec.privacy set.
+      repository: ghcr.io/altairalabs/omnia-privacy-api
+      # -- Privacy API image tag (defaults to chart appVersion)
+      tag: ""
+      # -- Image pull policy
+      pullPolicy: IfNotPresent
 
 # ============================================================================
 # Internal service-to-service authentication (session-api / memory-api)

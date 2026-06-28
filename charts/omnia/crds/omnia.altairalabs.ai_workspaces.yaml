@@ -404,6 +404,40 @@ spec:
                       When true, a NetworkPolicy is created to restrict traffic.
                     type: boolean
                 type: object
+              privacy:
+                description: |-
+                  privacy optionally configures the per-workspace privacy-api service,
+                  which owns consent grants and opt-out preferences for this workspace.
+                  When omitted, no privacy-api is provisioned and the workspace's
+                  session/memory services run without centralized preference enforcement.
+                properties:
+                  database:
+                    description: |-
+                      database configures the PostgreSQL consent database for this workspace.
+                      The Secret must have a key "POSTGRES_CONN".
+                    properties:
+                      secretRef:
+                        description: |-
+                          secretRef references a Secret containing the database connection string.
+                          The Secret must have a key "POSTGRES_CONN" with a valid PostgreSQL connection string.
+                        properties:
+                          name:
+                            default: ""
+                            description: |-
+                              Name of the referent.
+                              This field is effectively required, but due to backwards compatibility is
+                              allowed to be empty. Instances of this type with an empty value here are
+                              almost certainly wrong.
+                              More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                            type: string
+                        type: object
+                        x-kubernetes-map-type: atomic
+                    required:
+                    - secretRef
+                    type: object
+                required:
+                - database
+                type: object
               roleBindings:
                 description: roleBindings maps IdP groups and ServiceAccounts to workspace
                   roles.
@@ -11563,6 +11597,9 @@ spec:
                 - Ready
                 - Suspended
                 - Error
+                type: string
+              privacyURL:
+                description: privacyURL is the resolved URL of the per-workspace privacy-api.
                 type: string
               serviceAccounts:
                 description: serviceAccounts tracks the workspace ServiceAccounts.
