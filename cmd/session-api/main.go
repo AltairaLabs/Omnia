@@ -52,6 +52,7 @@ import (
 	"github.com/altairalabs/omnia/ee/pkg/audit"
 	"github.com/altairalabs/omnia/ee/pkg/metrics"
 	"github.com/altairalabs/omnia/ee/pkg/privacy"
+	"github.com/altairalabs/omnia/ee/pkg/privacy/httpclient"
 	"github.com/altairalabs/omnia/ee/pkg/redaction"
 	"github.com/altairalabs/omnia/internal/serviceauth"
 	"github.com/altairalabs/omnia/internal/session/api"
@@ -622,7 +623,7 @@ func buildAPIMux(pool *pgxpool.Pool, registry *providers.Registry, f *flags, log
 	// Privacy middleware (enterprise only): PII redaction + user opt-out.
 	var apiHandler http.Handler = mux
 	if f.enterprise {
-		wrapped, watcher, k8sClient := wrapPrivacyMiddleware(apiHandler, registry, pool, auditLogger, log)
+		wrapped, watcher, k8sClient := wrapPrivacyMiddleware(apiHandler, registry, f.workspace, f.serviceGroup, auditLogger, log)
 		apiHandler = wrapped
 
 		if watcher != nil {
@@ -967,10 +968,14 @@ func newPrivacyWatcherScheme() *k8sruntime.Scheme {
 //
 // When the K8s API is unreachable (e.g., in tests), the middleware is skipped
 // and the original handler is returned unchanged, with nil watcher and client.
+//
+// workspace and serviceGroup are used by resolvePrivacyPrefStore to look up
+// the privacy-api URL from the Workspace CRD status when PRIVACY_API_URL is
+// not set as an environment variable.
 func wrapPrivacyMiddleware(
 	next http.Handler,
 	registry *providers.Registry,
-	pool *pgxpool.Pool,
+	workspace, serviceGroup string,
 	auditLogger *audit.Logger,
 	log logr.Logger,
 ) (http.Handler, *privacy.PolicyWatcher, client.Client) {
@@ -998,7 +1003,7 @@ func wrapPrivacyMiddleware(
 	sessionLookup := privacy.NewWarmStoreSessionLookup(registry)
 	sessionCache := privacy.NewSessionMetadataCache(sessionLookup, 10000)
 	redactor := redaction.NewRedactor()
-	prefStore := privacy.NewPreferencesStore(pool)
+	prefStore := resolvePrivacyPrefStore(context.Background(), workspace, serviceGroup, k8sClient, log)
 
 	middleware := privacy.NewPrivacyMiddleware(watcher, sessionCache, redactor, prefStore, log)
 	if auditLogger != nil {
@@ -1006,6 +1011,41 @@ func wrapPrivacyMiddleware(
 	}
 	log.Info("privacy middleware enabled")
 	return middleware.Wrap(next), watcher, k8sClient
+}
+
+// resolvePrivacyPrefStore selects the PreferencesStore implementation for the
+// privacy middleware. Resolution order:
+//
+//  1. PRIVACY_API_URL env var — if set, returns an HTTP client pointing at that URL.
+//  2. Workspace CRD lookup via servicediscovery — reads Workspace.status.privacyURL
+//     when both workspace name and serviceGroup are non-empty and a k8s client is
+//     available.
+//  3. Permissive no-op store — when no URL can be resolved, opt-out is disabled
+//     and all recording proceeds (fail-open).
+func resolvePrivacyPrefStore(
+	ctx context.Context,
+	workspace, serviceGroup string,
+	k8sClient client.Client,
+	log logr.Logger,
+) privacy.PreferencesStore {
+	if privacyURL := os.Getenv("PRIVACY_API_URL"); privacyURL != "" {
+		return httpclient.New(privacyURL, log)
+	}
+
+	if workspace != "" && serviceGroup != "" && k8sClient != nil {
+		resolver := servicediscovery.NewResolver(k8sClient)
+		urls, err := resolver.ResolveByWorkspaceName(ctx, workspace, serviceGroup)
+		if err == nil && urls.PrivacyURL != "" {
+			return httpclient.New(urls.PrivacyURL, log)
+		}
+		if err != nil {
+			log.V(1).Info("privacy-api URL not resolved from workspace",
+				"workspace", workspace, "serviceGroup", serviceGroup, "error", err.Error())
+		}
+	}
+
+	log.V(1).Info("privacy pref store falling back to permissive", "reason", "no-privacy-url")
+	return privacy.NewPermissivePreferencesStore()
 }
 
 // wireEncryptionResolver builds a PerPolicyEncryptorResolver from the policy
