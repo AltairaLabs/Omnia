@@ -23,6 +23,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-logr/logr"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
@@ -267,6 +268,49 @@ func TestNewHealthServer_Healthz(t *testing.T) {
 	}
 	if rec.Body.String() != "ok" {
 		t.Fatalf("healthz: expected 'ok', got %q", rec.Body.String())
+	}
+}
+
+// TestEnterpriseRoutesConsentOptOutNotHosted guards that session-api no longer
+// hosts the consent/opt-out handlers. privacy-api is the sole owner of those
+// routes (#1642 Slice B). The DeletionHandler (DSAR, Phase 2) must stay.
+//
+// Strategy:
+//   - POST /api/v1/privacy/opt-out with an empty JSON body: when the route IS
+//     hosted the handler validates the request and returns 400 (userId required),
+//     so a non-404 response means the route is still registered.
+//   - DELETE /api/v1/privacy/preferences/{userID}/consent: no DELETE handler
+//     was ever registered for that path, so when the GET/PUT handlers ARE
+//     registered the mux returns 405 (path matched, wrong method); when they
+//     are gone it returns 404. No handler body is executed, so a nil pool is safe.
+func TestEnterpriseRoutesConsentOptOutNotHosted(t *testing.T) {
+	// Pass nil pool and nil auditLogger.
+	// The DeletionHandler block is gated on (f.enterprise && auditLogger != nil),
+	// so it is skipped entirely — no registry.WarmStore() panic.
+	// The consent/opt-out block calls NewPreferencesStore(nil), which is safe
+	// because it only stores the pool; the pool is not used during registration.
+	mux := http.NewServeMux()
+	f := &flags{enterprise: true}
+	registerEnterpriseRoutes(mux, nil, nil, nil, f, logr.Discard())
+
+	// POST /api/v1/privacy/opt-out must return 404 (not hosted here).
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/privacy/opt-out",
+		strings.NewReader("{}"))
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("POST /api/v1/privacy/opt-out: want 404 got %d (privacy-api owns this route)", rec.Code)
+	}
+
+	// GET /api/v1/privacy/preferences/{userID}/consent must return 404.
+	// Use DELETE so the mux returns 405 (path known, method wrong) when the
+	// route IS still registered, avoiding any DB-hitting handler body.
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodDelete,
+		"/api/v1/privacy/preferences/testuser/consent", nil)
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("DELETE /api/v1/privacy/preferences/testuser/consent: want 404 got %d (privacy-api owns consent routes)", rec.Code)
 	}
 }
 

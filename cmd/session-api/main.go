@@ -684,14 +684,6 @@ func registerEnterpriseRoutes(mux *http.ServeMux, pool *pgxpool.Pool, registry *
 		deletionHandler.RegisterRoutes(mux)
 	}
 
-	if f.enterprise {
-		privacyStore := privacy.NewPreferencesStore(pool)
-		optOutHandler := privacy.NewOptOutHandler(privacyStore, log)
-		optOutHandler.RegisterRoutes(mux)
-
-		consentHandler := privacy.NewConsentHandler(privacyStore, auditLogger, log)
-		consentHandler.RegisterRoutes(mux)
-	}
 }
 
 // newMetricsServer creates a dedicated HTTP server for Prometheus metrics.
