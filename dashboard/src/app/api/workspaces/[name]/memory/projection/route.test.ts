@@ -82,7 +82,7 @@ async function authedGET() {
   vi.mocked(resolveServiceURLs).mockResolvedValue({
     sessionURL: "https://session-api:8080",
     memoryURL: "https://memory-api:8080",
-    namespace: "omnia-test",
+    namespace: "omnia-test", privacyURL: ""
   });
 
   const { GET } = await import("./route");

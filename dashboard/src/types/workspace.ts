@@ -173,6 +173,11 @@ export interface WorkspaceStatus {
   costUsage?: CostUsage;
   /** Per-workspace service group statuses */
   services?: ServiceGroupStatus[];
+  /**
+   * Workspace-level URL for the privacy-api. One per workspace, unlike
+   * sessionURL/memoryURL which live inside each service group.
+   */
+  privacyURL?: string;
   /** Conditions describing workspace state */
   conditions?: Array<{
     type: string;

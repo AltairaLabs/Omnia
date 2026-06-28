@@ -8,6 +8,7 @@ import { getWorkspace } from "./workspace-route-helpers";
 const ENV_SESSION_API_URL = process.env.SESSION_API_URL;
 const ENV_MEMORY_API_URL = process.env.MEMORY_API_URL;
 const ENV_SESSION_API_NAMESPACE = process.env.SESSION_API_NAMESPACE;
+const ENV_PRIVACY_API_URL = process.env.PRIVACY_API_URL;
 
 export interface ServiceURLs {
   sessionURL: string;
@@ -21,6 +22,11 @@ export interface ServiceURLs {
    * See #1257.
    */
   namespace: string;
+  /**
+   * Workspace-level URL for the privacy-api. One per workspace, resolved from
+   * `Workspace.status.privacyURL` (CRD) or `PRIVACY_API_URL` (env fallback).
+   */
+  privacyURL: string;
 }
 
 /**
@@ -49,6 +55,7 @@ export async function resolveServiceURLs(
             workspace.spec?.namespace?.name ??
             workspace.status?.namespace?.name ??
             workspaceName,
+          privacyURL: workspace.status?.privacyURL ?? "",
         };
       }
     }
@@ -63,6 +70,7 @@ export async function resolveServiceURLs(
       sessionURL: ENV_SESSION_API_URL,
       memoryURL: ENV_MEMORY_API_URL,
       namespace: ENV_SESSION_API_NAMESPACE ?? workspaceName,
+      privacyURL: ENV_PRIVACY_API_URL ?? "",
     };
   }
 

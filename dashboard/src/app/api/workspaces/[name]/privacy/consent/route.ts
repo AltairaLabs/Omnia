@@ -2,10 +2,10 @@
  * Consent proxy route.
  *
  * GET /api/workspaces/{name}/privacy/consent?userId=X
- *   → SESSION_API_URL/api/v1/privacy/preferences/{userId}/consent
+ *   → PRIVACY_API_URL/api/v1/privacy/preferences/{userId}/consent
  *
  * PUT /api/workspaces/{name}/privacy/consent?userId=X
- *   → SESSION_API_URL/api/v1/privacy/preferences/{userId}/consent
+ *   → PRIVACY_API_URL/api/v1/privacy/preferences/{userId}/consent
  *
  * Requires at least viewer role in the workspace.
  */
@@ -19,16 +19,16 @@ import type { User } from "@/lib/auth/types";
 import { pseudonymizeId } from "@/lib/identity";
 import { resolveScopedUserId } from "@/lib/auth/scoped-user";
 
-const ERR_SESSION_API_NOT_CONFIGURED = "Session API not configured";
+const ERR_PRIVACY_API_NOT_CONFIGURED = "Privacy API not configured";
 
-function buildTargetUrl(sessionURL: string, userId: string): string {
-  const base = sessionURL.endsWith("/") ? sessionURL.slice(0, -1) : sessionURL;
+function buildTargetUrl(privacyURL: string, userId: string): string {
+  const base = privacyURL.endsWith("/") ? privacyURL.slice(0, -1) : privacyURL;
   const hashedId = pseudonymizeId(userId);
   return `${base}/api/v1/privacy/preferences/${encodeURIComponent(hashedId)}/consent`;
 }
 
-function sessionApiNotConfigured(): NextResponse {
-  return NextResponse.json({ error: ERR_SESSION_API_NOT_CONFIGURED }, { status: 503 });
+function privacyApiNotConfigured(): NextResponse {
+  return NextResponse.json({ error: ERR_PRIVACY_API_NOT_CONFIGURED }, { status: 503 });
 }
 
 export const GET = withWorkspaceAccess(
@@ -43,7 +43,7 @@ export const GET = withWorkspaceAccess(
 
     const urls = await resolveServiceURLs(name);
     if (!urls) {
-      return sessionApiNotConfigured();
+      return privacyApiNotConfigured();
     }
 
     // Scope to the authenticated session user — never a client-supplied
@@ -53,7 +53,7 @@ export const GET = withWorkspaceAccess(
       return NextResponse.json({ error: "userId is required" }, { status: 400 });
     }
 
-    const targetUrl = buildTargetUrl(urls.sessionURL, userId);
+    const targetUrl = buildTargetUrl(urls.privacyURL, userId);
 
     try {
       const response = await fetch(targetUrl, {
@@ -72,7 +72,7 @@ export const GET = withWorkspaceAccess(
           );
         }
         return NextResponse.json(
-          { error: `Session API returned non-JSON (HTTP ${response.status})` },
+          { error: `Privacy API returned non-JSON (HTTP ${response.status})` },
           { status: 502 }
         );
       }
@@ -80,7 +80,7 @@ export const GET = withWorkspaceAccess(
       console.error("Consent API proxy error:", error);
       return NextResponse.json(
         {
-          error: "Failed to connect to Session API",
+          error: "Failed to connect to Privacy API",
           details: error instanceof Error ? error.message : String(error),
         },
         { status: 502 }
@@ -101,7 +101,7 @@ export const PUT = withWorkspaceAccess(
 
     const urls = await resolveServiceURLs(name);
     if (!urls) {
-      return sessionApiNotConfigured();
+      return privacyApiNotConfigured();
     }
 
     // Scope to the authenticated session user — never a client-supplied
@@ -111,7 +111,7 @@ export const PUT = withWorkspaceAccess(
       return NextResponse.json({ error: "userId is required" }, { status: 400 });
     }
 
-    const targetUrl = buildTargetUrl(urls.sessionURL, userId);
+    const targetUrl = buildTargetUrl(urls.privacyURL, userId);
 
     let body: string;
     try {
@@ -135,7 +135,7 @@ export const PUT = withWorkspaceAccess(
         return NextResponse.json(data, { status: response.status });
       } catch {
         return NextResponse.json(
-          { error: `Session API returned non-JSON (HTTP ${response.status})` },
+          { error: `Privacy API returned non-JSON (HTTP ${response.status})` },
           { status: 502 }
         );
       }
@@ -143,7 +143,7 @@ export const PUT = withWorkspaceAccess(
       console.error("Consent API proxy error:", error);
       return NextResponse.json(
         {
-          error: "Failed to connect to Session API",
+          error: "Failed to connect to Privacy API",
           details: error instanceof Error ? error.message : String(error),
         },
         { status: 502 }
