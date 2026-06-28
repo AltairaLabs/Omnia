@@ -35,10 +35,11 @@ func shouldProceed(ctx context.Context, store PreferencesStore, userID, workspac
 	prefs, err := store.GetPreferences(ctx, userID)
 	if err != nil {
 		if errors.Is(err, ErrPreferencesNotFound) {
-			return true
+			return true // no preferences recorded → opt-in by default
 		}
-		// On unexpected errors, default to allowing to avoid data loss.
-		return true
+		// Fail closed: a preference-store failure must not silently record data
+		// the user may have opted out of. (#1642)
+		return false
 	}
 
 	if prefs.OptOutAll {

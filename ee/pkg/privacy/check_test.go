@@ -44,9 +44,9 @@ func TestShouldRecord_NoPreferences(t *testing.T) {
 }
 
 func TestShouldRecord_UnexpectedError(t *testing.T) {
-	store := &mockPreferencesStore{err: errors.New("db error")}
+	store := &mockPreferencesStore{err: errors.New("privacy-api unreachable")}
 	result := ShouldRecord(context.Background(), store, "user1", "ws1", "agent1")
-	assert.True(t, result, "should default to allowing recording on unexpected errors")
+	assert.False(t, result, "preference-store failure must block recording (fail-closed)")
 }
 
 func TestShouldRecord_OptOutAll(t *testing.T) {
@@ -108,9 +108,9 @@ func TestShouldRemember_NoPreferences(t *testing.T) {
 }
 
 func TestShouldRemember_UnexpectedError(t *testing.T) {
-	store := &mockPreferencesStore{err: errors.New("db error")}
+	store := &mockPreferencesStore{err: errors.New("privacy-api unreachable")}
 	result := ShouldRemember(context.Background(), store, "user1", "ws1", "agent1")
-	assert.True(t, result, "should default to allowing memory storage on unexpected errors")
+	assert.False(t, result, "preference-store failure must block memory storage (fail-closed)")
 }
 
 func TestShouldRemember_OptOutAll(t *testing.T) {
