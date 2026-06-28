@@ -15,8 +15,9 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/prometheus/client_golang/prometheus"
+
+	"github.com/altairalabs/omnia/ee/pkg/privacy"
 )
 
 // Metric name constants for the analytics:aggregate opt-in worker.
@@ -30,6 +31,12 @@ const (
 // queries. Exported so operators can override via a future flag without
 // changing the default behaviour.
 const DefaultAnalyticsOptInInterval = 5 * time.Minute
+
+// ConsentStatsSource is the minimal interface the AnalyticsOptInWorker
+// needs from privacy-api. *httpclient.Client satisfies it.
+type ConsentStatsSource interface {
+	GetConsentStats(ctx context.Context) (*privacy.ConsentStats, error)
+}
 
 // AnalyticsOptInMetrics groups the Prometheus collectors for the
 // analytics:aggregate consent opt-in worker. Construct via
@@ -71,20 +78,23 @@ func RegisterAnalyticsOptInMetrics(reg prometheus.Registerer, m *AnalyticsOptInM
 	return nil
 }
 
-// AnalyticsOptInWorker periodically queries user_privacy_preferences to
-// compute the fraction of users who have granted analytics:aggregate
-// consent, updating AnalyticsOptInMetrics.
+// AnalyticsOptInWorker periodically fetches workspace-wide consent stats
+// from privacy-api to compute the fraction of users who have granted
+// analytics:aggregate consent, updating AnalyticsOptInMetrics.
+// When src is nil (no privacy-api configured) RunOnce is a no-op.
 type AnalyticsOptInWorker struct {
-	pool     *pgxpool.Pool
+	src      ConsentStatsSource
 	metrics  *AnalyticsOptInMetrics
 	interval time.Duration
 	log      logr.Logger
 }
 
 // NewAnalyticsOptInWorker constructs a worker with the default interval.
-func NewAnalyticsOptInWorker(pool *pgxpool.Pool, metrics *AnalyticsOptInMetrics, log logr.Logger) *AnalyticsOptInWorker {
+// src may be nil — when nil, RunOnce is a no-op and no metrics are emitted
+// (used when no privacy-api URL is configured).
+func NewAnalyticsOptInWorker(src ConsentStatsSource, metrics *AnalyticsOptInMetrics, log logr.Logger) *AnalyticsOptInWorker {
 	return &AnalyticsOptInWorker{
-		pool:     pool,
+		src:      src,
 		metrics:  metrics,
 		interval: DefaultAnalyticsOptInInterval,
 		log:      log.WithName("analytics-optin-worker"),
@@ -117,19 +127,22 @@ func (w *AnalyticsOptInWorker) Run(ctx context.Context) {
 	}
 }
 
-// RunOnce executes a single query + metric update. Separated from Run
-// so tests can exercise the computation without a ticker.
+// RunOnce fetches consent stats and updates metrics. When the source is nil
+// (no privacy-api configured), RunOnce is a no-op.
 func (w *AnalyticsOptInWorker) RunOnce(ctx context.Context) error {
-	var granted, total int64
-	err := w.pool.QueryRow(ctx, `
-		SELECT
-			COUNT(*) FILTER (WHERE '`+AnalyticsAggregateCategory+`' = ANY(consent_grants)) AS granted,
-			COUNT(*) AS total
-		FROM user_privacy_preferences`).Scan(&granted, &total)
+	if w.src == nil {
+		w.log.V(1).Info("analytics opt-in worker skipped", "reason", "no-privacy-url")
+		return nil
+	}
+
+	stats, err := w.src.GetConsentStats(ctx)
 	if err != nil {
 		w.metrics.WorkerErrors.WithLabelValues("query").Inc()
 		return err
 	}
+
+	granted := stats.GrantsByCategory[AnalyticsAggregateCategory]
+	total := stats.TotalUsers
 
 	// Leave the ratio gauge unchanged when no users exist — oscillating
 	// to 0 on every empty-DB tick creates misleading dashboards on

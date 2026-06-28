@@ -28,6 +28,82 @@ import (
 	"github.com/altairalabs/omnia/internal/memory/ingestion"
 )
 
+// --- resolvePrivacyURL ---
+
+// TestResolvePrivacyURL_EnvURL verifies that when PRIVACY_API_URL is set,
+// resolvePrivacyURL returns (url, true) without any k8s lookup.
+func TestResolvePrivacyURL_EnvURL(t *testing.T) {
+	t.Setenv("PRIVACY_API_URL", "http://privacy-api.omnia-system:8080")
+
+	url, ok := resolvePrivacyURL(context.Background(), "", "", nil, logr.Discard())
+	if !ok {
+		t.Fatal("expected ok=true when PRIVACY_API_URL is set")
+	}
+	if url != "http://privacy-api.omnia-system:8080" {
+		t.Errorf("url = %q, want %q", url, "http://privacy-api.omnia-system:8080")
+	}
+}
+
+// TestResolvePrivacyURL_NoEnvNoWorkspace verifies that when no env var is set
+// and no workspace is provided, resolvePrivacyURL returns ("", false).
+func TestResolvePrivacyURL_NoEnvNoWorkspace(t *testing.T) {
+	t.Setenv("PRIVACY_API_URL", "")
+
+	url, ok := resolvePrivacyURL(context.Background(), "", "", nil, logr.Discard())
+	if ok {
+		t.Errorf("expected ok=false with no env var and no workspace, got url=%q", url)
+	}
+}
+
+// TestResolvePrivacyURL_WorkspaceStatus verifies that the Workspace CRD lookup
+// path returns (url, true) when status.privacyURL is populated.
+func TestResolvePrivacyURL_WorkspaceStatus(t *testing.T) {
+	t.Setenv("PRIVACY_API_URL", "")
+	t.Setenv("SESSION_API_URL", "")
+	t.Setenv("MEMORY_API_URL", "")
+
+	ws := &coreomniav1alpha1.Workspace{
+		ObjectMeta: metav1.ObjectMeta{Name: "my-ws"},
+		Status: coreomniav1alpha1.WorkspaceStatus{
+			PrivacyURL: "http://privacy-ws.ns:8080",
+			Services: []coreomniav1alpha1.ServiceGroupStatus{
+				{Name: "default", SessionURL: "http://session.svc", Ready: true},
+			},
+		},
+	}
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(newPrivacyMiddlewareScheme()).
+		WithObjects(ws).
+		Build()
+
+	url, ok := resolvePrivacyURL(context.Background(), "my-ws", "default", fakeClient, logr.Discard())
+	if !ok {
+		t.Fatal("expected ok=true from workspace-status discovery path")
+	}
+	if url != "http://privacy-ws.ns:8080" {
+		t.Errorf("url = %q, want %q", url, "http://privacy-ws.ns:8080")
+	}
+}
+
+// TestResolvePrivacyURL_WorkspaceNotFound verifies that when the Workspace CRD
+// is not found, resolvePrivacyURL falls through to ("", false).
+func TestResolvePrivacyURL_WorkspaceNotFound(t *testing.T) {
+	t.Setenv("PRIVACY_API_URL", "")
+	t.Setenv("SESSION_API_URL", "")
+	t.Setenv("MEMORY_API_URL", "")
+
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(newPrivacyMiddlewareScheme()).
+		Build()
+
+	url, ok := resolvePrivacyURL(context.Background(), "my-ws", "default", fakeClient, logr.Discard())
+	if ok {
+		t.Errorf("expected ok=false when workspace not found, got url=%q", url)
+	}
+}
+
+// --- resolvePrivacyPrefStore ---
+
 // TestResolvePrivacyPrefStore_EnvURL verifies that when PRIVACY_API_URL is set,
 // resolvePrivacyPrefStore returns an *httpclient.Client.
 func TestResolvePrivacyPrefStore_EnvURL(t *testing.T) {

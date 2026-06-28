@@ -54,9 +54,10 @@ func TestMarkWorker_FlipsGauge(t *testing.T) {
 // liveness signal — this test fails loudly if anyone removes the
 // MarkWorkerRunning call from the Run loop.
 func TestAnalyticsOptInWorker_FlipsLivenessGauge(t *testing.T) {
-	store := newStore(t)
+	// nil source: RunOnce is a no-op, so the test exercises the
+	// MarkWorkerRunning/MarkWorkerStopped wiring without needing I/O.
 	metrics := NewAnalyticsOptInMetrics()
-	worker := NewAnalyticsOptInWorker(store.Pool(), metrics, logr.Discard())
+	worker := NewAnalyticsOptInWorker(nil, metrics, logr.Discard())
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})

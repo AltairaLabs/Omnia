@@ -504,17 +504,25 @@ func run() error {
 
 	// --- Analytics opt-in metric + worker ---
 	// Computes the fraction of users who have granted the
-	// analytics:aggregate consent category. Runs in any mode (EE or
-	// OSS); in OSS the grant is never set so the ratio reports 0 which
-	// is correct (no cross-user analytics consent).
+	// analytics:aggregate consent category by querying privacy-api.
+	// When no privacy-api URL is configured (permissive / OSS) the
+	// worker starts but RunOnce is a no-op — no metrics are emitted
+	// rather than querying the now-frozen local table.
 	optInMetrics := memory.NewAnalyticsOptInMetrics()
 	if err := memory.RegisterAnalyticsOptInMetrics(prometheus.DefaultRegisterer, optInMetrics); err != nil {
 		log.Error(err, "analytics opt-in metrics registration failed")
 	} else {
-		optInWorker := memory.NewAnalyticsOptInWorker(pool, optInMetrics, log)
+		var statsSource memory.ConsentStatsSource
+		if privacyURL, ok := resolvePrivacyURLForWorker(ctx, f.workspace, f.serviceGroup, log); ok {
+			statsSource = httpclient.New(privacyURL, log)
+		} else {
+			log.V(1).Info("analytics opt-in worker: no privacy-api URL", "reason", "no-privacy-url")
+		}
+		optInWorker := memory.NewAnalyticsOptInWorker(statsSource, optInMetrics, log)
 		go optInWorker.Run(ctx)
 		log.Info("analytics opt-in worker started",
 			"interval", memory.DefaultAnalyticsOptInInterval,
+			"hasPrivacyURL", statsSource != nil,
 		)
 	}
 
@@ -948,6 +956,40 @@ type privacyPrefStore interface {
 	privacy.ConsentSource
 }
 
+// resolvePrivacyURL returns the privacy-api base URL and true if one can be
+// resolved, or ("", false) when the deployment is permissive (no URL configured).
+// Resolution order:
+//
+//  1. PRIVACY_API_URL env var — if set, returns that URL immediately.
+//  2. Workspace CRD lookup via servicediscovery — reads Workspace.status.privacyURL
+//     when both workspace name and serviceGroup are non-empty and a k8s client is
+//     available (k8sClient may be nil to skip this step).
+//  3. Falls back to ("", false).
+func resolvePrivacyURL(
+	ctx context.Context,
+	workspace, serviceGroup string,
+	k8sClient client.Client,
+	log logr.Logger,
+) (string, bool) {
+	if url := os.Getenv("PRIVACY_API_URL"); url != "" {
+		return url, true
+	}
+
+	if workspace != "" && serviceGroup != "" && k8sClient != nil {
+		resolver := servicediscovery.NewResolver(k8sClient)
+		urls, err := resolver.ResolveByWorkspaceName(ctx, workspace, serviceGroup)
+		if err == nil && urls.PrivacyURL != "" {
+			return urls.PrivacyURL, true
+		}
+		if err != nil {
+			log.V(1).Info("privacy-api URL not resolved from workspace",
+				"workspace", workspace, "serviceGroup", serviceGroup, "error", err.Error())
+		}
+	}
+
+	return "", false
+}
+
 // resolvePrivacyPrefStore selects the PreferencesStore+ConsentSource implementation
 // for the privacy middleware. Resolution order:
 //
@@ -963,24 +1005,43 @@ func resolvePrivacyPrefStore(
 	k8sClient client.Client,
 	log logr.Logger,
 ) privacyPrefStore {
-	if privacyURL := os.Getenv("PRIVACY_API_URL"); privacyURL != "" {
-		return httpclient.New(privacyURL, log)
-	}
-
-	if workspace != "" && serviceGroup != "" && k8sClient != nil {
-		resolver := servicediscovery.NewResolver(k8sClient)
-		urls, err := resolver.ResolveByWorkspaceName(ctx, workspace, serviceGroup)
-		if err == nil && urls.PrivacyURL != "" {
-			return httpclient.New(urls.PrivacyURL, log)
-		}
-		if err != nil {
-			log.V(1).Info("privacy-api URL not resolved from workspace",
-				"workspace", workspace, "serviceGroup", serviceGroup, "error", err.Error())
-		}
+	if url, ok := resolvePrivacyURL(ctx, workspace, serviceGroup, k8sClient, log); ok {
+		return httpclient.New(url, log)
 	}
 
 	log.V(1).Info("privacy pref store falling back to permissive", "reason", "no-privacy-url")
 	return privacy.NewPermissivePreferencesStore()
+}
+
+// resolvePrivacyURLForWorker resolves the privacy-api base URL for background
+// workers (e.g. AnalyticsOptInWorker) that run outside the HTTP handler chain
+// and therefore cannot share the middleware's k8s client. It follows the same
+// resolution order as resolvePrivacyURL: env var first, workspace CRD second.
+// A best-effort k8s client is built inline; if in-cluster config is unavailable
+// (local dev, tests) the workspace-CRD step is skipped and only the env var
+// path is used.
+func resolvePrivacyURLForWorker(ctx context.Context, workspace, serviceGroup string, log logr.Logger) (string, bool) {
+	// Fast path: env var is set — no k8s client needed.
+	if url := os.Getenv("PRIVACY_API_URL"); url != "" {
+		return url, true
+	}
+
+	// Slow path: attempt workspace CRD lookup with a best-effort k8s client.
+	if workspace != "" && serviceGroup != "" {
+		kubeConfig, err := rest.InClusterConfig()
+		if err != nil {
+			log.V(1).Info("analytics opt-in k8s client skipped", "reason", "no in-cluster config")
+			return "", false
+		}
+		k8sClient, err := client.New(kubeConfig, client.Options{Scheme: newPrivacyMiddlewareScheme()})
+		if err != nil {
+			log.V(1).Info("analytics opt-in k8s client skipped", "reason", err.Error())
+			return "", false
+		}
+		return resolvePrivacyURL(ctx, workspace, serviceGroup, k8sClient, log)
+	}
+
+	return "", false
 }
 
 // buildConsentValidator constructs the EE Validator used by the privacy

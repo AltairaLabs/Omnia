@@ -12,6 +12,7 @@ package memory
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -19,50 +20,102 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
+
+	"github.com/altairalabs/omnia/ee/pkg/privacy"
 )
 
-func TestAnalyticsOptInWorker_ComputesRatio(t *testing.T) {
-	store := newStore(t)
-	ctx := context.Background()
+// fakeConsentStatsSource is a test double for ConsentStatsSource.
+type fakeConsentStatsSource struct {
+	stats *privacy.ConsentStats
+	err   error
+}
 
-	_, err := store.Pool().Exec(ctx, `
-		INSERT INTO user_privacy_preferences (user_id, consent_grants)
-		VALUES
-			($1, $2),
-			($3, $4),
-			($5, $6),
-			($7, $8)`,
-		"u1", []string{"analytics:aggregate"},
-		"u2", []string{"analytics:aggregate", "memory:preferences"},
-		"u3", []string{"memory:preferences"},
-		"u4", []string{},
-	)
-	require.NoError(t, err)
+func (f *fakeConsentStatsSource) GetConsentStats(_ context.Context) (*privacy.ConsentStats, error) {
+	return f.stats, f.err
+}
+
+func TestAnalyticsOptInWorker_ComputesRatio(t *testing.T) {
+	src := &fakeConsentStatsSource{
+		stats: &privacy.ConsentStats{
+			TotalUsers: 4,
+			GrantsByCategory: map[string]int64{
+				"analytics:aggregate": 3,
+			},
+		},
+	}
 
 	metrics := NewAnalyticsOptInMetrics()
 	reg := prometheus.NewRegistry()
 	require.NoError(t, RegisterAnalyticsOptInMetrics(reg, metrics))
 
-	worker := NewAnalyticsOptInWorker(store.Pool(), metrics, logr.Discard())
-	require.NoError(t, worker.RunOnce(ctx))
+	worker := NewAnalyticsOptInWorker(src, metrics, logr.Discard())
+	require.NoError(t, worker.RunOnce(context.Background()))
 
-	if got := testutil.ToFloat64(metrics.OptInRatio); got != 0.5 {
-		t.Errorf("ratio = %v, want 0.5", got)
+	if got := testutil.ToFloat64(metrics.OptInRatio); got != 0.75 {
+		t.Errorf("ratio = %v, want 0.75", got)
 	}
-	if got := testutil.ToFloat64(metrics.UsersTotal.WithLabelValues("true")); got != 2 {
-		t.Errorf("granted = %v, want 2", got)
+	if got := testutil.ToFloat64(metrics.UsersTotal.WithLabelValues("true")); got != 3 {
+		t.Errorf("granted = %v, want 3", got)
 	}
-	if got := testutil.ToFloat64(metrics.UsersTotal.WithLabelValues("false")); got != 2 {
-		t.Errorf("not granted = %v, want 2", got)
+	if got := testutil.ToFloat64(metrics.UsersTotal.WithLabelValues("false")); got != 1 {
+		t.Errorf("not granted = %v, want 1", got)
 	}
 }
 
-func TestAnalyticsOptInWorker_QueryError_IncrementsCounter(t *testing.T) {
-	store := newStore(t)
-	ctx := context.Background()
+func TestAnalyticsOptInWorker_ZeroUsers_NoDivideByZero(t *testing.T) {
+	src := &fakeConsentStatsSource{
+		stats: &privacy.ConsentStats{
+			TotalUsers:       0,
+			GrantsByCategory: map[string]int64{},
+		},
+	}
 
-	// Close the pool so the query fails, exercising the error path.
-	store.Pool().Close()
+	metrics := NewAnalyticsOptInMetrics()
+	reg := prometheus.NewRegistry()
+	require.NoError(t, RegisterAnalyticsOptInMetrics(reg, metrics))
+
+	// Pre-seed the gauge so we can confirm it stays put when total=0.
+	metrics.OptInRatio.Set(0.7)
+
+	worker := NewAnalyticsOptInWorker(src, metrics, logr.Discard())
+	require.NoError(t, worker.RunOnce(context.Background()))
+
+	// With zero users the ratio gauge MUST stay at 0.7 (not reset to 0).
+	if got := testutil.ToFloat64(metrics.OptInRatio); got != 0.7 {
+		t.Errorf("ratio changed on zero users: got %v, want 0.7 (unchanged)", got)
+	}
+	if got := testutil.ToFloat64(metrics.UsersTotal.WithLabelValues("true")); got != 0 {
+		t.Errorf("granted = %v, want 0", got)
+	}
+	if got := testutil.ToFloat64(metrics.UsersTotal.WithLabelValues("false")); got != 0 {
+		t.Errorf("not granted = %v, want 0", got)
+	}
+}
+
+func TestAnalyticsOptInWorker_NilSource_NoOp(t *testing.T) {
+	metrics := NewAnalyticsOptInMetrics()
+	reg := prometheus.NewRegistry()
+	require.NoError(t, RegisterAnalyticsOptInMetrics(reg, metrics))
+
+	// Pre-seed the gauge to confirm it is not touched when source is nil.
+	metrics.OptInRatio.Set(0.42)
+
+	worker := NewAnalyticsOptInWorker(nil, metrics, logr.Discard())
+	require.NoError(t, worker.RunOnce(context.Background()))
+
+	// Nil source must not panic, must not error, must not touch any gauge.
+	if got := testutil.ToFloat64(metrics.OptInRatio); got != 0.42 {
+		t.Errorf("nil source changed ratio gauge: got %v, want 0.42 (unchanged)", got)
+	}
+	if got := testutil.ToFloat64(metrics.WorkerErrors.WithLabelValues("query")); got != 0 {
+		t.Errorf("nil source incremented error counter: got %v, want 0", got)
+	}
+}
+
+func TestAnalyticsOptInWorker_SourceError_IncrementsCounter(t *testing.T) {
+	src := &fakeConsentStatsSource{
+		err: errors.New("privacy-api unavailable"),
+	}
 
 	metrics := NewAnalyticsOptInMetrics()
 	reg := prometheus.NewRegistry()
@@ -71,9 +124,9 @@ func TestAnalyticsOptInWorker_QueryError_IncrementsCounter(t *testing.T) {
 	// Pre-seed the gauge so we can confirm it stays put on error.
 	metrics.OptInRatio.Set(0.42)
 
-	worker := NewAnalyticsOptInWorker(store.Pool(), metrics, logr.Discard())
-	if err := worker.RunOnce(ctx); err == nil {
-		t.Fatal("RunOnce on closed pool: want error, got nil")
+	worker := NewAnalyticsOptInWorker(src, metrics, logr.Discard())
+	if err := worker.RunOnce(context.Background()); err == nil {
+		t.Fatal("RunOnce with erroring source: want error, got nil")
 	}
 
 	if got := testutil.ToFloat64(metrics.WorkerErrors.WithLabelValues("query")); got != 1 {
@@ -85,12 +138,13 @@ func TestAnalyticsOptInWorker_QueryError_IncrementsCounter(t *testing.T) {
 }
 
 func TestAnalyticsOptInWorker_Run_StopsOnCtxCancel(t *testing.T) {
-	store := newStore(t)
+	// Nil source: RunOnce is a no-op, so Run exercises the ticker/cancel
+	// path without needing any I/O.
 	metrics := NewAnalyticsOptInMetrics()
 	reg := prometheus.NewRegistry()
 	require.NoError(t, RegisterAnalyticsOptInMetrics(reg, metrics))
 
-	worker := NewAnalyticsOptInWorker(store.Pool(), metrics, logr.Discard())
+	worker := NewAnalyticsOptInWorker(nil, metrics, logr.Discard())
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // cancel before Run so the ticker select exits on the first case
 
@@ -105,25 +159,5 @@ func TestAnalyticsOptInWorker_Run_StopsOnCtxCancel(t *testing.T) {
 		// Run returned promptly after ctx cancel.
 	case <-time.After(5 * time.Second):
 		t.Fatal("Run did not return within 5s of context cancellation")
-	}
-}
-
-func TestAnalyticsOptInWorker_EmptyTableLeavesGaugeUnchanged(t *testing.T) {
-	store := newStore(t)
-	ctx := context.Background()
-
-	metrics := NewAnalyticsOptInMetrics()
-	reg := prometheus.NewRegistry()
-	require.NoError(t, RegisterAnalyticsOptInMetrics(reg, metrics))
-
-	// Pre-seed the gauge with a known value.
-	metrics.OptInRatio.Set(0.7)
-
-	worker := NewAnalyticsOptInWorker(store.Pool(), metrics, logr.Discard())
-	require.NoError(t, worker.RunOnce(ctx))
-
-	// Empty user_privacy_preferences → gauge MUST stay at 0.7 (not reset).
-	if got := testutil.ToFloat64(metrics.OptInRatio); got != 0.7 {
-		t.Errorf("ratio changed on empty table: got %v, want 0.7 (unchanged)", got)
 	}
 }
