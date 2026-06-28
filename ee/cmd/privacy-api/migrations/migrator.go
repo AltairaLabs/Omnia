@@ -1,0 +1,98 @@
+/*
+Copyright 2026 Altaira Labs.
+
+SPDX-License-Identifier: FSL-1.1-Apache-2.0
+This file is part of Omnia Enterprise and is subject to the
+Functional Source License. See ee/LICENSE for details.
+*/
+
+package migrations
+
+import (
+	"errors"
+	"fmt"
+
+	"github.com/go-logr/logr"
+	"github.com/golang-migrate/migrate/v4"
+	_ "github.com/golang-migrate/migrate/v4/database/postgres" // Postgres driver for migrate
+	"github.com/golang-migrate/migrate/v4/source/iofs"
+)
+
+// Migrator manages PostgreSQL schema migrations using embedded SQL files.
+type Migrator struct {
+	m      *migrate.Migrate
+	logger logr.Logger
+}
+
+// NewMigrator creates a new Migrator from a PostgreSQL connection string.
+// The connection string should be a valid PostgreSQL URL, e.g.:
+// "postgres://user:pass@host:5432/dbname?sslmode=disable"
+func NewMigrator(connString string, logger logr.Logger) (*Migrator, error) {
+	source, err := iofs.New(MigrationsFS, ".")
+	if err != nil {
+		return nil, fmt.Errorf("creating migration source: %w", err)
+	}
+
+	m, err := migrate.NewWithSourceInstance("iofs", source, connString)
+	if err != nil {
+		return nil, fmt.Errorf("creating migrator: %w", err)
+	}
+
+	return &Migrator{m: m, logger: logger}, nil
+}
+
+// Up applies all pending migrations. If the database is in a dirty state
+// (from a previously failed migration), it forces the version back to the
+// last cleanly applied migration and retries.
+func (mg *Migrator) Up() error {
+	mg.logger.Info("applying migrations")
+
+	// Check for dirty state before attempting migration.
+	if v, dirty, err := mg.m.Version(); err == nil && dirty {
+		// The failed migration was v, so the last clean version is v-1.
+		cleanVersion := int(v) - 1
+		mg.logger.Info("database is dirty, forcing version to last clean migration",
+			"dirtyVersion", v, "forceVersion", cleanVersion)
+		if err := mg.m.Force(cleanVersion); err != nil {
+			return fmt.Errorf("forcing clean version %d: %w", cleanVersion, err)
+		}
+	}
+
+	if err := mg.m.Up(); err != nil && !errors.Is(err, migrate.ErrNoChange) {
+		return fmt.Errorf("applying migrations: %w", err)
+	}
+	v, dirty, _ := mg.m.Version()
+	mg.logger.Info("migrations applied", "version", v, "dirty", dirty)
+	return nil
+}
+
+// Down rolls back all migrations.
+func (mg *Migrator) Down() error {
+	mg.logger.Info("rolling back all migrations")
+	if err := mg.m.Down(); err != nil && !errors.Is(err, migrate.ErrNoChange) {
+		return fmt.Errorf("rolling back migrations: %w", err)
+	}
+	return nil
+}
+
+// Version returns the current migration version and dirty state.
+// Returns 0 and false if no migrations have been applied.
+func (mg *Migrator) Version() (uint, bool, error) {
+	v, dirty, err := mg.m.Version()
+	if err != nil && errors.Is(err, migrate.ErrNoChange) {
+		return 0, false, nil
+	}
+	return v, dirty, err
+}
+
+// Close releases resources held by the migrator.
+func (mg *Migrator) Close() error {
+	srcErr, dbErr := mg.m.Close()
+	if srcErr != nil {
+		return fmt.Errorf("closing source: %w", srcErr)
+	}
+	if dbErr != nil {
+		return fmt.Errorf("closing database: %w", dbErr)
+	}
+	return nil
+}
