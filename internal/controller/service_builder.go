@@ -550,7 +550,8 @@ func (sb *ServiceBuilder) BuildPrivacyDeployment(workspaceName, namespace string
 	if redisURL != "" {
 		args = append(args, fmt.Sprintf("--redis-url=%s", redisURL))
 	}
-	dep := buildServiceDeployment(name, namespace, sb.PrivacyImage, sb.PrivacyImagePullPolicy, args, labels, cfg.PodOverrides)
+	// No podOverrides for privacy-api — see PrivacyServiceConfig (CRD size limit).
+	dep := buildServiceDeployment(name, namespace, sb.PrivacyImage, sb.PrivacyImagePullPolicy, args, labels, nil)
 	addMemoryRedisURLEnv(dep, redisSecret)
 	addEnterpriseEnv(dep, sb.Enterprise)
 	// Server side: enforce ServiceAccount auth when enabled. Empty group is

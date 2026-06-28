@@ -792,9 +792,12 @@ type PrivacyServiceConfig struct {
 	// +kubebuilder:validation:Required
 	Database DatabaseConfig `json:"database"`
 
-	// podOverrides customizes the managed privacy-api Pod.
-	// +optional
-	PodOverrides *PodOverrides `json:"podOverrides,omitempty"`
+	// NOTE: privacy-api intentionally has no podOverrides field. Embedding the
+	// full PodOverrides pod-spec schema a third time (session + memory already
+	// carry it) pushed the bundled Workspace CRD past the 1 MiB Helm release
+	// Secret limit, breaking `helm install` (caught by E2E, not by template/lint).
+	// privacy-api is a simple new service; podOverrides can be added later only
+	// alongside a chart change that stops bundling CRDs into the release Secret.
 }
 
 // DatabaseConfig holds the reference to a Secret containing database connection details.
