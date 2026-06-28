@@ -15,6 +15,8 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/altairalabs/omnia/ee/pkg/privacy"
 )
 
 // AggregateGroupBy enumerates the supported groupBy dimensions.
@@ -75,9 +77,13 @@ type Aggregator interface {
 	Aggregate(ctx context.Context, opts AggregateOptions) ([]AggregateRow, error)
 }
 
-// Aggregate runs a workspace-scoped GROUP BY over memory_entities,
-// composing AggregateConsentJoin so users without analytics:aggregate
-// consent are excluded by construction.
+// Aggregate runs a workspace-scoped GROUP BY over memory_entities.
+// Users without analytics:aggregate consent are excluded by construction:
+// grantor IDs are fetched from the configured consentGrantorSource
+// (privacy-api, cached 30 s) and passed as a bound text[] argument to
+// the query. When no source is configured, only institutional rows
+// (virtual_user_id IS NULL) are counted — the conservative default for
+// deployments without a privacy-api.
 func (s *PostgresMemoryStore) Aggregate(ctx context.Context, opts AggregateOptions) ([]AggregateRow, error) {
 	if opts.Workspace == "" {
 		return nil, errors.New("memory: workspace is required")
@@ -99,10 +105,24 @@ func (s *PostgresMemoryStore) Aggregate(ctx context.Context, opts AggregateOptio
 		return nil, err
 	}
 
-	join, consentWhere := AggregateConsentJoin("e")
+	// Resolve the grantor id-set from privacy-api (cached 30 s by httpclient).
+	// When no source is configured the conservative default applies:
+	// analytics:aggregate is a grant-REQUIRED category, so an absent consent
+	// source means no user is known to have granted — count institutional rows
+	// only (virtual_user_id IS NULL).
+	grantorIDs := []string{}
+	if s.grantorSource != nil {
+		ids, gsErr := s.grantorSource.ListConsentUsers(ctx, privacy.ConsentAnalyticsAggregate, true)
+		if gsErr != nil {
+			return nil, fmt.Errorf("memory: aggregate grantor lookup: %w", gsErr)
+		}
+		grantorIDs = ids
+	}
+
+	consentWhere := AggregateConsentFilter("e", "$5")
 	sql := fmt.Sprintf(`
 		SELECT %s AS key, %s AS value, COUNT(*) AS count
-		FROM memory_entities e %s
+		FROM memory_entities e
 		WHERE e.workspace_id = $1
 		  AND e.forgotten = false
 		  AND %s
@@ -111,7 +131,7 @@ func (s *PostgresMemoryStore) Aggregate(ctx context.Context, opts AggregateOptio
 		GROUP BY 1
 		%s
 		LIMIT $4`,
-		keyExpr, valueExpr, join, consentWhere, extraWhere, orderClause)
+		keyExpr, valueExpr, consentWhere, extraWhere, orderClause)
 
 	var fromArg, toArg any
 	if opts.From != nil {
@@ -121,7 +141,7 @@ func (s *PostgresMemoryStore) Aggregate(ctx context.Context, opts AggregateOptio
 		toArg = *opts.To
 	}
 
-	rows, err := s.pool.Query(ctx, sql, opts.Workspace, fromArg, toArg, limit)
+	rows, err := s.pool.Query(ctx, sql, opts.Workspace, fromArg, toArg, limit, grantorIDs)
 	if err != nil {
 		return nil, fmt.Errorf("memory: aggregate query: %w", err)
 	}
@@ -162,9 +182,9 @@ func groupByFragments(g AggregateGroupBy) (keyExpr, extraWhere, orderClause stri
 		//   neither                      → institutional  (ws, null, null)
 		// Mirrors deriveTier in internal/memory/api/handler.go and the
 		// Tier constants in retrieve_multi_tier.go.
-		// AggregateConsentJoin still filters non-consenting users on the
-		// "user" + "user_for_agent" branches; institutional and agent
-		// rows have virtual_user_id IS NULL and are unaffected.
+		// The aggregate consent filter restricts non-consenting users on
+		// the "user" + "user_for_agent" branches; institutional and agent
+		// rows have virtual_user_id IS NULL and are always included.
 		return `CASE
 			WHEN e.virtual_user_id IS NOT NULL AND e.agent_id IS NOT NULL THEN 'user_for_agent'
 			WHEN e.virtual_user_id IS NOT NULL                            THEN 'user'

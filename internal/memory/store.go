@@ -92,8 +92,9 @@ const (
 // PostgresMemoryStore implements Store against the memory_entities / memory_observations
 // PostgreSQL tables created by the memory database initial schema migration.
 type PostgresMemoryStore struct {
-	pool        *pgxpool.Pool
-	accessTouch *accessTouchBatcher
+	pool          *pgxpool.Pool
+	accessTouch   *accessTouchBatcher
+	grantorSource consentGrantorSource // optional; nil → institutional-only count
 }
 
 // NewPostgresMemoryStore creates a new store backed by the given connection pool.
@@ -118,6 +119,15 @@ func (s *PostgresMemoryStore) Close() {
 // direct DB inspection; production code goes through the typed methods.
 func (s *PostgresMemoryStore) Pool() *pgxpool.Pool {
 	return s.pool
+}
+
+// SetConsentGrantorSource wires the privacy-api client used by Aggregate
+// to resolve users who have granted analytics:aggregate consent. Call once
+// at startup. When nil (the default), Aggregate counts only institutional
+// rows (virtual_user_id IS NULL) — the conservative safe default for
+// deployments without a privacy-api configured.
+func (s *PostgresMemoryStore) SetConsentGrantorSource(src consentGrantorSource) {
+	s.grantorSource = src
 }
 
 // Metadata keys are defined in the leaf metakeys package (which imports

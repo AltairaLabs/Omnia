@@ -508,15 +508,27 @@ func run() error {
 	// When no privacy-api URL is configured (permissive / OSS) the
 	// worker starts but RunOnce is a no-op — no metrics are emitted
 	// rather than querying the now-frozen local table.
+	//
+	// The same privacy-api client is also wired as the aggregate consent
+	// grantor source (reader 3) so both consumers share one cached connection.
 	optInMetrics := memory.NewAnalyticsOptInMetrics()
 	if err := memory.RegisterAnalyticsOptInMetrics(prometheus.DefaultRegisterer, optInMetrics); err != nil {
 		log.Error(err, "analytics opt-in metrics registration failed")
 	} else {
 		var statsSource memory.ConsentStatsSource
 		if privacyURL, ok := resolvePrivacyURLForWorker(ctx, f.workspace, f.serviceGroup, log); ok {
-			statsSource = httpclient.New(privacyURL, log)
+			privacyClient := httpclient.New(privacyURL, log)
+			statsSource = privacyClient
+			// Wire aggregate consent filter (reader 3). Reuses the same
+			// privacy-api client — ListConsentUsers is cached (30 s TTL) and
+			// the Aggregate result is cached by the Redis store wrapper.
+			pgStore.SetConsentGrantorSource(privacyClient)
 		} else {
 			log.V(1).Info("analytics opt-in worker: no privacy-api URL", "reason", "no-privacy-url")
+			// Conservative degradation: pgStore.grantorSource remains nil →
+			// Aggregate counts only institutional rows (virtual_user_id IS NULL).
+			log.V(1).Info("aggregate consent filter degraded",
+				"reason", "no-privacy-url", "behavior", "institutional-only")
 		}
 		optInWorker := memory.NewAnalyticsOptInWorker(statsSource, optInMetrics, log)
 		go optInWorker.Run(ctx)

@@ -24,29 +24,26 @@ const (
 	agentBUUID             = "c1000000-0000-0000-0000-000000000002"
 )
 
-// seedAggregateFixtures inserts a known set of memories + preferences.
+// seedAggregateFixtures inserts a known set of memory_entities and wires a
+// fake consentGrantorSource returning only "agg-user-granted". The filter
+// now reads from privacy-api (consentGrantorSource) rather than the local
+// user_privacy_preferences table, so no rows are inserted there.
+//
+// Fixture summary:
+//   - agg-user-granted (3 memories across 2 agents, 2 categories) — included
+//   - agg-user-denied  (2 memories)                                — excluded
+//   - agg-user-opted-out (1 memory)                               — excluded
+//   - institutional row (virtual_user_id NULL)                    — always included
+//
 // Returns the workspace ID for query convenience.
 func seedAggregateFixtures(t *testing.T, store *PostgresMemoryStore) string {
 	t.Helper()
 	ctx := context.Background()
 	pool := store.Pool()
 
-	// Three users: granted (consents), denied (no consent), opted-out.
-	_, err := pool.Exec(ctx, `
-		INSERT INTO user_privacy_preferences (user_id, consent_grants)
-		VALUES ($1, $2), ($3, $4)
-		ON CONFLICT (user_id) DO UPDATE SET consent_grants = EXCLUDED.consent_grants`,
-		"agg-user-granted", []string{"analytics:aggregate"},
-		"agg-user-denied", []string{"memory:preferences"},
-	)
-	require.NoError(t, err)
-	_, err = pool.Exec(ctx, `
-		INSERT INTO user_privacy_preferences (user_id, opt_out_all)
-		VALUES ($1, TRUE)
-		ON CONFLICT (user_id) DO UPDATE SET opt_out_all = EXCLUDED.opt_out_all`,
-		"agg-user-opted-out",
-	)
-	require.NoError(t, err)
+	// Wire the grantor source: only agg-user-granted has analytics:aggregate
+	// consent. agg-user-denied and agg-user-opted-out are absent from the list.
+	store.SetConsentGrantorSource(&fakeGrantorSource{ids: []string{"agg-user-granted"}})
 
 	insertMem := func(userID, agentID, category string, when time.Time) {
 		var virtualUserID, agent any
@@ -309,7 +306,7 @@ func TestAggregate_EmptyWorkspace_ReturnsEmpty(t *testing.T) {
 
 // TestAggregate_GroupByTier verifies the tier pivot classifies rows by
 // (virtual_user_id, agent_id) into institutional / agent / user /
-// user_for_agent and that the existing AggregateConsentJoin still filters
+// user_for_agent and that the aggregate consent filter still excludes
 // non-consenting users.
 //
 // Baseline from seedAggregateFixtures:

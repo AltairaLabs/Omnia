@@ -10,38 +10,52 @@ You may obtain a copy of the License at
 
 package memory
 
+import (
+	"context"
+
+	"github.com/altairalabs/omnia/ee/pkg/privacy"
+)
+
 // AnalyticsAggregateCategory is the canonical consent category string
-// enforced by AggregateConsentJoin. The memory-api wire contract
+// used by the aggregate consent filter. The memory-api wire contract
 // depends on this exact literal.
 const AnalyticsAggregateCategory = "analytics:aggregate"
 
-// AggregateConsentJoin returns SQL fragments that restrict a cross-user
-// aggregate over memory_entities to users who have granted the
-// analytics:aggregate consent category.
+// consentGrantorSource is the minimal interface Aggregate needs to
+// resolve the set of user IDs that have granted a given consent
+// category. *httpclient.Client (ee/pkg/privacy/httpclient) satisfies
+// this interface. A nil source is treated as "empty grantor set" — only
+// institutional rows (virtual_user_id IS NULL) are counted (conservative
+// safe default for deployments without a privacy-api).
+type consentGrantorSource interface {
+	ListConsentUsers(ctx context.Context, category privacy.ConsentCategory, granted bool) ([]string, error)
+}
+
+// AggregateConsentFilter returns a SQL WHERE fragment that restricts a
+// cross-user aggregate over memory_entities to institutional rows
+// (virtual_user_id IS NULL) and rows belonging to users in grantorParam.
 //
-// entityAlias is the table alias used for memory_entities in the
-// caller's query (e.g. "e" in "FROM memory_entities e"). The returned
-// JOIN clause adds a LEFT JOIN against user_privacy_preferences; the
-// WHERE clause restricts to rows where either:
-//   - virtual_user_id IS NULL (institutional or agent-tier; not user data)
-//   - the user has 'analytics:aggregate' in their consent_grants array
+// grantorParam is the SQL placeholder for a text[] bound argument — e.g.
+// "$5". The caller must pass the grantor-id slice at that position.
 //
-// LEFT JOIN (not inner JOIN) is critical: institutional and agent-tier
-// rows have no matching user_privacy_preferences row, and an inner JOIN
-// would silently drop them.
+// Logic:
+//   - virtual_user_id IS NULL → institutional/agent-tier row; always included
+//   - virtual_user_id = ANY($N::text[]) → user row whose owner granted
+//     the consent category
 //
-// Usage:
+// Empty grantor array semantics: = ANY('{}'::text[]) is false for every
+// non-null user_id, so only institutional rows count — the correct
+// conservative behaviour when no consent-source data is available.
 //
-//	join, where := AggregateConsentJoin("e")
-//	sql := `SELECT COUNT(*) FROM memory_entities e ` + join +
-//	       ` WHERE e.workspace_id = $1 AND ` + where
+// No JOIN is emitted: grantors are resolved from privacy-api before the
+// query and passed as a bound argument, keeping the query plan stable
+// regardless of the grantor-set cardinality.
 //
-// The helper does NOT add workspace / forgotten filters — callers
-// compose those themselves.
-func AggregateConsentJoin(entityAlias string) (joinClause, whereClause string) {
-	joinClause = "LEFT JOIN user_privacy_preferences p ON p.user_id = " +
-		entityAlias + ".virtual_user_id"
-	whereClause = "(" + entityAlias + ".virtual_user_id IS NULL OR " +
-		"'" + AnalyticsAggregateCategory + "' = ANY(p.consent_grants))"
-	return
+// NOTE: the grantor id-set can be large; it is cached by the httpclient
+// (30 s TTL) and the Aggregate result itself is cached in cache.go. The
+// join-via-privacy-api-export model is a known scalability limit and is
+// the target of a future optimisation (out of scope here).
+func AggregateConsentFilter(entityAlias, grantorParam string) string {
+	return "(" + entityAlias + ".virtual_user_id IS NULL OR " +
+		entityAlias + ".virtual_user_id = ANY(" + grantorParam + "::text[]))"
 }

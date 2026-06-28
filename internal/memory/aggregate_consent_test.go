@@ -12,25 +12,19 @@ package memory
 
 import "testing"
 
-func TestAggregateConsentJoin_DefaultAlias(t *testing.T) {
-	join, where := AggregateConsentJoin("e")
-	wantJoin := "LEFT JOIN user_privacy_preferences p ON p.user_id = e.virtual_user_id"
-	wantWhere := "(e.virtual_user_id IS NULL OR 'analytics:aggregate' = ANY(p.consent_grants))"
-	if join != wantJoin {
-		t.Errorf("join = %q, want %q", join, wantJoin)
-	}
-	if where != wantWhere {
-		t.Errorf("where = %q, want %q", where, wantWhere)
+func TestAggregateConsentFilter_DefaultAlias(t *testing.T) {
+	got := AggregateConsentFilter("e", "$5")
+	want := "(e.virtual_user_id IS NULL OR e.virtual_user_id = ANY($5::text[]))"
+	if got != want {
+		t.Errorf("AggregateConsentFilter = %q, want %q", got, want)
 	}
 }
 
-func TestAggregateConsentJoin_CustomAlias(t *testing.T) {
-	join, where := AggregateConsentJoin("entity")
-	if join != "LEFT JOIN user_privacy_preferences p ON p.user_id = entity.virtual_user_id" {
-		t.Errorf("unexpected join for custom alias: %q", join)
-	}
-	if where != "(entity.virtual_user_id IS NULL OR 'analytics:aggregate' = ANY(p.consent_grants))" {
-		t.Errorf("unexpected where for custom alias: %q", where)
+func TestAggregateConsentFilter_CustomAlias(t *testing.T) {
+	got := AggregateConsentFilter("entity", "$3")
+	want := "(entity.virtual_user_id IS NULL OR entity.virtual_user_id = ANY($3::text[]))"
+	if got != want {
+		t.Errorf("AggregateConsentFilter = %q, want %q", got, want)
 	}
 }
 

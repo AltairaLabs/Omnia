@@ -415,7 +415,7 @@ spec:
       assert counts.get("institutional", 0) >= 1, f"missing institutional: {counts}"
       assert counts.get("agent", 0) >= 1, f"missing agent: {counts}"
       # Only the consenting user's row should count toward the user tier.
-      # Non-consenting user is filtered by AggregateConsentJoin.
+      # Non-consenting user is filtered by the aggregate consent filter (privacy-api grantor set).
       user_count = counts.get("user", 0)
       assert user_count == 1, \
           f"expected user tier count == 1 (consenting user only), got {user_count} ({counts})"
