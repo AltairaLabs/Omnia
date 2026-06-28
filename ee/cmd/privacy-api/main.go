@@ -269,6 +269,7 @@ func registerRoutes(
 	privacy.NewConsentHandler(concrete, nil, log).RegisterRoutes(mux)
 	privacy.NewConsentStatsHandler(concrete, log).RegisterRoutes(mux)
 	privacy.NewEnforcementStatsHandler(concrete, log).RegisterRoutes(mux)
+	privacy.NewConsentUsersHandler(concrete, log).RegisterRoutes(mux)
 }
 
 // buildHandler wraps inner with ServiceAccount auth middleware. /healthz is exempt.

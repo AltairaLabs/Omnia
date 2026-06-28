@@ -225,3 +225,48 @@ func (s *PreferencesPostgresStore) removeArrayElement(
 	}
 	return nil
 }
+
+// ListUsersByConsent returns user IDs who have a preferences row and whose
+// consent_grants either include or exclude the given category.
+//
+//   - granted=true:  rows where category IS in consent_grants.
+//   - granted=false: rows where category IS NOT in consent_grants.
+//
+// Users with no preferences row at all are excluded from granted=false results
+// (opt-in-by-default semantics: a silent user is treated as if they would grant).
+func (s *PreferencesPostgresStore) ListUsersByConsent(
+	ctx context.Context, category ConsentCategory, granted bool,
+) ([]string, error) {
+	if _, valid := CategoryInfo(category); !valid {
+		return nil, fmt.Errorf("privacy: unknown consent category: %q", category)
+	}
+
+	var query string
+	if granted {
+		query = `SELECT user_id FROM user_privacy_preferences WHERE $1 = ANY(consent_grants)`
+	} else {
+		query = `SELECT user_id FROM user_privacy_preferences WHERE NOT ($1 = ANY(consent_grants))`
+	}
+
+	rows, err := s.pool.Query(ctx, query, string(category))
+	if err != nil {
+		return nil, fmt.Errorf("privacy: list users by consent: %w", err)
+	}
+	defer rows.Close()
+
+	var userIDs []string
+	for rows.Next() {
+		var userID string
+		if err := rows.Scan(&userID); err != nil {
+			return nil, fmt.Errorf("privacy: list users by consent scan: %w", err)
+		}
+		userIDs = append(userIDs, userID)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("privacy: list users by consent iter: %w", err)
+	}
+	if userIDs == nil {
+		userIDs = []string{}
+	}
+	return userIDs, nil
+}

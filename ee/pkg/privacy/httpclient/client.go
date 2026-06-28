@@ -24,6 +24,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strconv"
 	"sync"
 	"time"
 
@@ -67,6 +68,12 @@ type cacheEntry struct {
 	expiresAt time.Time
 }
 
+// consentUsersCacheEntry holds a cached consent-user list and its expiry time.
+type consentUsersCacheEntry struct {
+	userIDs   []string
+	expiresAt time.Time
+}
+
 // Client calls the privacy-api service. It is concurrency-safe.
 type Client struct {
 	baseURL     string
@@ -77,6 +84,9 @@ type Client struct {
 
 	mu    sync.RWMutex
 	cache map[string]cacheEntry
+
+	cuMu    sync.RWMutex
+	cuCache map[string]consentUsersCacheEntry
 }
 
 // Compile-time interface assertions.
@@ -100,6 +110,7 @@ func New(baseURL string, log logr.Logger, opts ...Option) *Client {
 		tokenSource: serviceauth.NewTokenSource(os.Getenv(tokenPathEnv), 0),
 		cacheTTL:    defaultCacheTTL,
 		cache:       make(map[string]cacheEntry),
+		cuCache:     make(map[string]consentUsersCacheEntry),
 	}
 	for _, opt := range opts {
 		opt(c)
@@ -194,6 +205,86 @@ func (c *Client) evictFromCache(userID string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	delete(c.cache, userID)
+}
+
+// GetConsentStats fetches workspace-wide consent statistics from the privacy-api.
+func (c *Client) GetConsentStats(ctx context.Context) (*privacy.ConsentStats, error) {
+	url := c.baseURL + "/api/v1/privacy/consent/stats?workspace=default"
+	resp, err := c.doRequest(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("privacy: get consent stats: %w", err)
+	}
+	defer func() { _ = drainAndClose(resp.Body) }()
+
+	if !isSuccessStatus(resp.StatusCode) {
+		return nil, readHTTPError(resp)
+	}
+
+	var stats privacy.ConsentStats
+	if err := json.NewDecoder(resp.Body).Decode(&stats); err != nil {
+		return nil, fmt.Errorf("privacy: decode consent stats: %w", err)
+	}
+	return &stats, nil
+}
+
+// ListConsentUsers returns user IDs (pseudonyms) whose consent for the given
+// category matches granted. Results are cached for cacheTTL to reduce load
+// under frequent per-aggregate calls (keyed by category|granted).
+func (c *Client) ListConsentUsers(
+	ctx context.Context, category privacy.ConsentCategory, granted bool,
+) ([]string, error) {
+	key := string(category) + "|" + strconv.FormatBool(granted)
+
+	if ids := c.getConsentUsersFromCache(key); ids != nil {
+		return ids, nil
+	}
+
+	url := fmt.Sprintf("%s/api/v1/privacy/consent/users?category=%s&granted=%s",
+		c.baseURL, string(category), strconv.FormatBool(granted))
+	resp, err := c.doRequest(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("privacy: list consent users: %w", err)
+	}
+	defer func() { _ = drainAndClose(resp.Body) }()
+
+	if !isSuccessStatus(resp.StatusCode) {
+		return nil, readHTTPError(resp)
+	}
+
+	var body struct {
+		UserIDs []string `json:"userIds"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		return nil, fmt.Errorf("privacy: decode consent users: %w", err)
+	}
+
+	ids := body.UserIDs
+	if ids == nil {
+		ids = []string{}
+	}
+	c.putConsentUsersInCache(key, ids)
+	return ids, nil
+}
+
+// --- consent users cache helpers ---
+
+func (c *Client) getConsentUsersFromCache(key string) []string {
+	c.cuMu.RLock()
+	defer c.cuMu.RUnlock()
+	entry, ok := c.cuCache[key]
+	if !ok || time.Now().After(entry.expiresAt) {
+		return nil
+	}
+	return entry.userIDs
+}
+
+func (c *Client) putConsentUsersInCache(key string, userIDs []string) {
+	c.cuMu.Lock()
+	defer c.cuMu.Unlock()
+	c.cuCache[key] = consentUsersCacheEntry{
+		userIDs:   userIDs,
+		expiresAt: time.Now().Add(c.cacheTTL),
+	}
 }
 
 // --- HTTP helpers ---

@@ -365,3 +365,104 @@ func TestSetOptOut_TransportError_ReturnsError(t *testing.T) {
 		t.Fatal("expected transport error, got nil")
 	}
 }
+
+func TestGetConsentStats_DecodesResponse(t *testing.T) {
+	want := privacy.ConsentStats{
+		TotalUsers:       10,
+		OptedOutAll:      2,
+		GrantsByCategory: map[string]int64{"memory:health": 5},
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(want)
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, logr.Discard())
+	got, err := c.GetConsentStats(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.TotalUsers != want.TotalUsers {
+		t.Errorf("TotalUsers: got %d, want %d", got.TotalUsers, want.TotalUsers)
+	}
+	if got.OptedOutAll != want.OptedOutAll {
+		t.Errorf("OptedOutAll: got %d, want %d", got.OptedOutAll, want.OptedOutAll)
+	}
+	if got.GrantsByCategory["memory:health"] != 5 {
+		t.Errorf("GrantsByCategory[memory:health]: got %d, want 5",
+			got.GrantsByCategory["memory:health"])
+	}
+}
+
+func TestGetConsentStats_NonOK_ReturnsError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, logr.Discard())
+	_, err := c.GetConsentStats(context.Background())
+	if err == nil {
+		t.Fatal("expected error on 500, got nil")
+	}
+}
+
+func TestListConsentUsers_DecodesUserIDs(t *testing.T) {
+	want := []string{"u1", "u2", "u3"}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"category": "memory:health",
+			"granted":  true,
+			"userIds":  want,
+		})
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, logr.Discard())
+	got, err := c.ListConsentUsers(context.Background(), privacy.ConsentMemoryHealth, true)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got %d users, want %d", len(got), len(want))
+	}
+	for i, id := range want {
+		if got[i] != id {
+			t.Errorf("userIDs[%d]: got %q, want %q", i, got[i], id)
+		}
+	}
+}
+
+func TestListConsentUsers_Cache_TwoCallsOneServerHit(t *testing.T) {
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits.Add(1)
+		_ = json.NewEncoder(w).Encode(map[string]any{"userIds": []string{"u1"}})
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, logr.Discard(), WithCacheTTL(time.Minute))
+	if _, err := c.ListConsentUsers(context.Background(), privacy.ConsentMemoryHealth, true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.ListConsentUsers(context.Background(), privacy.ConsentMemoryHealth, true); err != nil {
+		t.Fatal(err)
+	}
+	if n := hits.Load(); n != 1 {
+		t.Errorf("expected 1 server hit within TTL, got %d", n)
+	}
+}
+
+func TestListConsentUsers_NonOK_ReturnsError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, logr.Discard())
+	_, err := c.ListConsentUsers(context.Background(), privacy.ConsentMemoryHealth, true)
+	if err == nil {
+		t.Fatal("expected error on 400, got nil")
+	}
+}

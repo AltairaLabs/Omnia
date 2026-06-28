@@ -28,7 +28,7 @@ func (alwaysDenyReviewer) ReviewToken(_ context.Context, _ string) (bool, string
 }
 
 // TestRegisterRoutes_AllMounted is a wiring test (per repo policy §Wiring tests).
-// It asserts that registerRoutes mounts all four handler route groups on the mux
+// It asserts that registerRoutes mounts all five handler route groups on the mux
 // using nil-pool stores so no Postgres connection is required.
 func TestRegisterRoutes_AllMounted(t *testing.T) {
 	mux := http.NewServeMux()
@@ -39,6 +39,7 @@ func TestRegisterRoutes_AllMounted(t *testing.T) {
 		"/api/v1/privacy/preferences/abc123",
 		"/api/v1/privacy/preferences/abc123/consent",
 		"/api/v1/privacy/consent/stats",
+		"/api/v1/privacy/consent/users",
 		"/api/v1/privacy/enforcement-stats",
 	} {
 		req := httptest.NewRequest(http.MethodGet, p, nil)
