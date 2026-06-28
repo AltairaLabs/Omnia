@@ -95,6 +95,15 @@ func (f *flags) applyEnvFallbacks() {
 	envFallback(&f.healthAddr, ":8081", "HEALTH_ADDR")
 	envFallback(&f.metricsAddr, ":9090", "METRICS_ADDR")
 	envBoolFallback(&f.enterprise, "ENTERPRISE_ENABLED")
+
+	// ServiceAccount auth — same env vars the operator stamps via
+	// applySessionAPIServerAuthEnv in internal/controller/service_auth.go.
+	// Mirror session-api's mapping exactly (CLI flag wins when non-default,
+	// env fills in when flag is still at its zero/default value).
+	envBoolFallback(&f.authEnabled, "SESSION_API_AUTH_ENABLED")
+	envFallback(&f.authAllowedSubjects, "", "SESSION_API_AUTH_ALLOWED_SUBJECTS")
+	envFallback(&f.authAllowedNamespaces, "", "SESSION_API_AUTH_ALLOWED_NAMESPACES")
+	envFallback(&f.authAudiences, "", "SESSION_API_AUTH_AUDIENCES")
 }
 
 // envFallback sets *dst from envKey when *dst equals defaultVal and the env var is non-empty.
