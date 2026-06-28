@@ -72,12 +72,12 @@ describe("GET /api/workspaces/[name]/privacy/consent", () => {
     vi.resetAllMocks();
   });
 
-  it("proxies GET consent to session-api with userId in path", async () => {
+  it("proxies GET consent to privacy-api with userId in path", async () => {
     const { getUser } = await import("@/lib/auth");
     const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
     const { resolveServiceURLs } = await import("@/lib/k8s/service-url-resolver");
 
-    vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://session-api:8080", memoryURL: "https://memory-api:8080", namespace: "omnia-test" });
+    vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://session-api:8080", memoryURL: "https://memory-api:8080", privacyURL: "https://privacy-api:8080", namespace: "omnia-test" });
     vi.mocked(getUser).mockResolvedValue(mockUser);
     vi.mocked(checkWorkspaceAccess).mockResolvedValue({
       granted: true,
@@ -102,6 +102,8 @@ describe("GET /api/workspaces/[name]/privacy/consent", () => {
     expect(body.grants).toEqual(["analytics"]);
 
     const fetchUrl = mockFetch.mock.calls[0][0] as string;
+    expect(fetchUrl).toContain("privacy-api");
+    expect(fetchUrl).not.toContain("session-api");
     expect(fetchUrl).toContain(`/api/v1/privacy/preferences/${pseudonymizeId(mockUser.id)}/consent`);
     expect(fetchUrl).not.toContain(pseudonymizeId("user-123"));
   });
@@ -111,7 +113,7 @@ describe("GET /api/workspaces/[name]/privacy/consent", () => {
     const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
     const { resolveServiceURLs } = await import("@/lib/k8s/service-url-resolver");
 
-    vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://session-api:8080", memoryURL: "https://memory-api:8080", namespace: "omnia-test" });
+    vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://session-api:8080", memoryURL: "https://memory-api:8080", privacyURL: "https://privacy-api:8080", namespace: "omnia-test" });
     vi.mocked(getUser).mockResolvedValue(mockUser);
     vi.mocked(checkWorkspaceAccess).mockResolvedValue({
       granted: true,
@@ -138,7 +140,7 @@ describe("GET /api/workspaces/[name]/privacy/consent", () => {
     const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
     const { resolveServiceURLs } = await import("@/lib/k8s/service-url-resolver");
 
-    vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://session-api:8080", memoryURL: "https://memory-api:8080", namespace: "omnia-test" });
+    vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://session-api:8080", memoryURL: "https://memory-api:8080", privacyURL: "https://privacy-api:8080", namespace: "omnia-test" });
     vi.mocked(getUser).mockResolvedValue(anonUser);
     vi.mocked(checkWorkspaceAccess).mockResolvedValue({
       granted: true,
@@ -193,7 +195,7 @@ describe("GET /api/workspaces/[name]/privacy/consent", () => {
     const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
     const { resolveServiceURLs } = await import("@/lib/k8s/service-url-resolver");
 
-    vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://session-api:8080", memoryURL: "https://memory-api:8080", namespace: "omnia-test" });
+    vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://session-api:8080", memoryURL: "https://memory-api:8080", privacyURL: "https://privacy-api:8080", namespace: "omnia-test" });
     vi.mocked(getUser).mockResolvedValue(mockUser);
     vi.mocked(checkWorkspaceAccess).mockResolvedValue({
       granted: true,
@@ -214,7 +216,7 @@ describe("GET /api/workspaces/[name]/privacy/consent", () => {
     const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
     const { resolveServiceURLs } = await import("@/lib/k8s/service-url-resolver");
 
-    vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://session-api:8080", memoryURL: "https://memory-api:8080", namespace: "omnia-test" });
+    vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://session-api:8080", memoryURL: "https://memory-api:8080", privacyURL: "https://privacy-api:8080", namespace: "omnia-test" });
     vi.mocked(getUser).mockResolvedValue(mockUser);
     vi.mocked(checkWorkspaceAccess).mockResolvedValue({
       granted: true,
@@ -245,12 +247,12 @@ describe("PUT /api/workspaces/[name]/privacy/consent", () => {
     vi.resetAllMocks();
   });
 
-  it("proxies PUT consent to session-api with body", async () => {
+  it("proxies PUT consent to privacy-api with body", async () => {
     const { getUser } = await import("@/lib/auth");
     const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
     const { resolveServiceURLs } = await import("@/lib/k8s/service-url-resolver");
 
-    vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://session-api:8080", memoryURL: "https://memory-api:8080", namespace: "omnia-test" });
+    vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://session-api:8080", memoryURL: "https://memory-api:8080", privacyURL: "https://privacy-api:8080", namespace: "omnia-test" });
     vi.mocked(getUser).mockResolvedValue(mockUser);
     vi.mocked(checkWorkspaceAccess).mockResolvedValue({
       granted: true,
@@ -281,6 +283,8 @@ describe("PUT /api/workspaces/[name]/privacy/consent", () => {
     expect(body.grants).toEqual(["analytics", "personalization"]);
 
     const [fetchUrl, fetchOpts] = mockFetch.mock.calls[0] as [string, RequestInit];
+    expect(fetchUrl).toContain("privacy-api");
+    expect(fetchUrl).not.toContain("session-api");
     expect(fetchUrl).toContain(`/api/v1/privacy/preferences/${pseudonymizeId(mockUser.id)}/consent`);
     expect(fetchUrl).not.toContain(pseudonymizeId("user-123"));
     expect(fetchOpts.method).toBe("PUT");
@@ -292,7 +296,7 @@ describe("PUT /api/workspaces/[name]/privacy/consent", () => {
     const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
     const { resolveServiceURLs } = await import("@/lib/k8s/service-url-resolver");
 
-    vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://session-api:8080", memoryURL: "https://memory-api:8080", namespace: "omnia-test" });
+    vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://session-api:8080", memoryURL: "https://memory-api:8080", privacyURL: "https://privacy-api:8080", namespace: "omnia-test" });
     vi.mocked(getUser).mockResolvedValue(mockUser);
     vi.mocked(checkWorkspaceAccess).mockResolvedValue({
       granted: true,
@@ -323,7 +327,7 @@ describe("PUT /api/workspaces/[name]/privacy/consent", () => {
     const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
     const { resolveServiceURLs } = await import("@/lib/k8s/service-url-resolver");
 
-    vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://session-api:8080", memoryURL: "https://memory-api:8080", namespace: "omnia-test" });
+    vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://session-api:8080", memoryURL: "https://memory-api:8080", privacyURL: "https://privacy-api:8080", namespace: "omnia-test" });
     vi.mocked(getUser).mockResolvedValue(anonUser);
     vi.mocked(checkWorkspaceAccess).mockResolvedValue({
       granted: true,
@@ -378,7 +382,7 @@ describe("PUT /api/workspaces/[name]/privacy/consent", () => {
     const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
     const { resolveServiceURLs } = await import("@/lib/k8s/service-url-resolver");
 
-    vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://session-api:8080", memoryURL: "https://memory-api:8080", namespace: "omnia-test" });
+    vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://session-api:8080", memoryURL: "https://memory-api:8080", privacyURL: "https://privacy-api:8080", namespace: "omnia-test" });
     vi.mocked(getUser).mockResolvedValue(mockUser);
     vi.mocked(checkWorkspaceAccess).mockResolvedValue({
       granted: true,

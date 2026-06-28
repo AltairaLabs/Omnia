@@ -27,7 +27,7 @@ const mockWorkspace = { metadata: { uid: "ws-uid-123", name: "test-ws" }, spec: 
 const serviceURLs = {
   sessionURL: "https://session-api:8080",
   memoryURL: "https://memory-api:8080",
-  namespace: "omnia-test",
+  namespace: "omnia-test", privacyURL: ""
 };
 
 function ctx() {
