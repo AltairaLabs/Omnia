@@ -453,6 +453,13 @@ type WorkspaceSpec struct {
 	// +optional
 	// +kubebuilder:validation:MaxItems=16
 	MgmtPlaneMintServiceAccounts []string `json:"mgmtPlaneMintServiceAccounts,omitempty"`
+
+	// privacy optionally configures the per-workspace privacy-api service,
+	// which owns consent grants and opt-out preferences for this workspace.
+	// When omitted, no privacy-api is provisioned and the workspace's
+	// session/memory services run without centralized preference enforcement.
+	// +optional
+	Privacy *PrivacyServiceConfig `json:"privacy,omitempty"`
 }
 
 // WorkspacePhase represents the current phase of a Workspace.
@@ -563,6 +570,10 @@ type WorkspaceStatus struct {
 	// services tracks the status of each service group defined in spec.services.
 	// +optional
 	Services []ServiceGroupStatus `json:"services,omitempty"`
+
+	// privacyURL is the resolved URL of the per-workspace privacy-api.
+	// +optional
+	PrivacyURL string `json:"privacyURL,omitempty"`
 
 	// conditions represent the current state of the Workspace resource.
 	// +listType=map
@@ -770,6 +781,18 @@ type SessionServiceConfig struct {
 
 	// podOverrides customizes the managed session-api Pod (SA, scheduling,
 	// CSI secret-stores, etc.).
+	// +optional
+	PodOverrides *PodOverrides `json:"podOverrides,omitempty"`
+}
+
+// PrivacyServiceConfig configures the per-workspace managed privacy-api service.
+type PrivacyServiceConfig struct {
+	// database configures the PostgreSQL consent database for this workspace.
+	// The Secret must have a key "POSTGRES_CONN".
+	// +kubebuilder:validation:Required
+	Database DatabaseConfig `json:"database"`
+
+	// podOverrides customizes the managed privacy-api Pod.
 	// +optional
 	PodOverrides *PodOverrides `json:"podOverrides,omitempty"`
 }
