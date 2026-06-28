@@ -65,6 +65,7 @@ import (
 	eemetrics "github.com/altairalabs/omnia/ee/pkg/metrics"
 	"github.com/altairalabs/omnia/ee/pkg/privacy"
 	"github.com/altairalabs/omnia/ee/pkg/privacy/classify"
+	"github.com/altairalabs/omnia/ee/pkg/privacy/httpclient"
 	"github.com/altairalabs/omnia/ee/pkg/redaction"
 	"github.com/altairalabs/omnia/internal/memory"
 	memoryapi "github.com/altairalabs/omnia/internal/memory/api"
@@ -633,7 +634,7 @@ func run() error {
 	}()
 
 	// --- Build API mux ---
-	apiMux, cleanup := buildAPIMux(ctx, apiStore, embeddingSvc, svcCfg, eventPublisher, f.enterprise, pool, policyLoader, auditLogger, log, buildIngestOptions(f, log))
+	apiMux, cleanup := buildAPIMux(ctx, apiStore, embeddingSvc, svcCfg, eventPublisher, f.enterprise, pool, policyLoader, auditLogger, log, buildIngestOptions(f, log), f.workspace, f.serviceGroup)
 	defer cleanup()
 
 	// --- Consolidation worker ---
@@ -792,6 +793,7 @@ func buildAPIMux(
 	auditLogger *eeaudit.Logger,
 	log logr.Logger,
 	ingestOpts memoryapi.IngestOptions,
+	workspace, serviceGroup string,
 ) (http.Handler, func()) {
 	httpMetrics := memoryapi.NewHTTPMetrics(nil)
 
@@ -841,26 +843,13 @@ func buildAPIMux(
 	if auditHandler != nil {
 		auditHandler.RegisterMemoryRoutes(mux)
 	}
-	if enterprise {
-		// Consent stats endpoint for the operator dashboard (#1004).
-		// EE-only because the enforcement (Phase D) and grant capture
-		// (Phases B/C) are EE features; OSS counts would always be 0.
-		consentStatsHandler := privacy.NewConsentStatsHandler(privacy.NewPreferencesStore(pool), log)
-		consentStatsHandler.RegisterRoutes(mux)
-		// Enforcement stats endpoint for the operator dashboard (Task 7b).
-		// EE-only: PII redaction + opt-out blocking are EE enforcement, so
-		// OSS counts would always be 0.
-		enforcementStatsHandler := privacy.NewEnforcementStatsHandler(privacy.NewPreferencesStore(pool), log)
-		enforcementStatsHandler.RegisterRoutes(mux)
-	}
-
 	// AuditMiddleware always applied — populates request context with IP/UA.
 	// The service only emits events when an audit logger is configured.
 	apiHandler := memoryapi.AuditMiddleware(mux)
 
 	// Enterprise privacy middleware (opt-out + PII redaction + classifier).
 	if enterprise {
-		apiHandler = wrapPrivacyMiddleware(ctx, apiHandler, pool, embeddingSvc, auditLogger, log)
+		apiHandler = wrapPrivacyMiddleware(ctx, apiHandler, embeddingSvc, auditLogger, workspace, serviceGroup, log)
 	}
 
 	// Rate limiting middleware (per-client-IP token bucket).
@@ -884,7 +873,7 @@ func buildAPIMux(
 // wrapPrivacyMiddleware creates and wires the enterprise privacy middleware.
 // When the K8s API is unreachable (e.g., in tests), the middleware is skipped
 // and the original handler is returned unchanged.
-func wrapPrivacyMiddleware(ctx context.Context, next http.Handler, pool *pgxpool.Pool, embeddingSvc *memory.EmbeddingService, auditLogger *eeaudit.Logger, log logr.Logger) http.Handler {
+func wrapPrivacyMiddleware(ctx context.Context, next http.Handler, embeddingSvc *memory.EmbeddingService, auditLogger *eeaudit.Logger, workspace, serviceGroup string, log logr.Logger) http.Handler {
 	kubeConfig, err := rest.InClusterConfig()
 	if err != nil {
 		log.Info("memory privacy middleware skipped", "reason", reasonNoInClusterKubeconfig)
@@ -907,7 +896,7 @@ func wrapPrivacyMiddleware(ctx context.Context, next http.Handler, pool *pgxpool
 		}
 	}()
 
-	prefStore := privacy.NewPreferencesStore(pool)
+	prefStore := resolvePrivacyPrefStore(ctx, workspace, serviceGroup, k8sClient, log)
 	redactor := redaction.NewRedactor()
 
 	checkOptOut := memoryapi.OptOutChecker(func(ctx context.Context, userID, workspace, category string, consentOverride []string) bool {
@@ -948,6 +937,50 @@ func wrapPrivacyMiddleware(ctx context.Context, next http.Handler, pool *pgxpool
 	}
 	log.Info("memory privacy middleware enabled")
 	return mw.Wrap(next)
+}
+
+// privacyPrefStore is satisfied by both *httpclient.Client and the permissive
+// no-op store returned by privacy.NewPermissivePreferencesStore. memory-api
+// needs both PreferencesStore (for opt-out lookup) and ConsentSource (for
+// consent-grant lookup inside ShouldRememberCategory) from the same value.
+type privacyPrefStore interface {
+	privacy.PreferencesStore
+	privacy.ConsentSource
+}
+
+// resolvePrivacyPrefStore selects the PreferencesStore+ConsentSource implementation
+// for the privacy middleware. Resolution order:
+//
+//  1. PRIVACY_API_URL env var — if set, returns an HTTP client pointing at that URL.
+//  2. Workspace CRD lookup via servicediscovery — reads Workspace.status.privacyURL
+//     when both workspace name and serviceGroup are non-empty and a k8s client is
+//     available.
+//  3. Permissive no-op store — when no URL can be resolved, opt-out is disabled
+//     and all recording proceeds (fail-open).
+func resolvePrivacyPrefStore(
+	ctx context.Context,
+	workspace, serviceGroup string,
+	k8sClient client.Client,
+	log logr.Logger,
+) privacyPrefStore {
+	if privacyURL := os.Getenv("PRIVACY_API_URL"); privacyURL != "" {
+		return httpclient.New(privacyURL, log)
+	}
+
+	if workspace != "" && serviceGroup != "" && k8sClient != nil {
+		resolver := servicediscovery.NewResolver(k8sClient)
+		urls, err := resolver.ResolveByWorkspaceName(ctx, workspace, serviceGroup)
+		if err == nil && urls.PrivacyURL != "" {
+			return httpclient.New(urls.PrivacyURL, log)
+		}
+		if err != nil {
+			log.V(1).Info("privacy-api URL not resolved from workspace",
+				"workspace", workspace, "serviceGroup", serviceGroup, "error", err.Error())
+		}
+	}
+
+	log.V(1).Info("privacy pref store falling back to permissive", "reason", "no-privacy-url")
+	return privacy.NewPermissivePreferencesStore()
 }
 
 // buildConsentValidator constructs the EE Validator used by the privacy

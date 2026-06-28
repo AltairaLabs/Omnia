@@ -150,6 +150,7 @@ func TestBuildAPIMux_POSTMemoryWithoutUserIDReturns400(t *testing.T) {
 		memoryapi.IngestOptions{Fallback: ingestion.Config{
 			Strategy: ingestion.StrategyChunk, ChunkSize: 200, ChunkOverlap: 40,
 		}},
+		"", "", // workspace, serviceGroup — empty in unit tests
 	)
 	defer cleanup()
 
@@ -198,6 +199,7 @@ func TestBuildAPIMux_GETMemoriesWired(t *testing.T) {
 		memoryapi.IngestOptions{Fallback: ingestion.Config{
 			Strategy: ingestion.StrategyChunk, ChunkSize: 200, ChunkOverlap: 40,
 		}},
+		"", "", // workspace, serviceGroup — empty in unit tests
 	)
 	defer cleanup()
 
@@ -407,9 +409,10 @@ func TestWrapPrivacyMiddleware_NoEmbeddingProvider_StillBuildsValidator(t *testi
 	handler := wrapPrivacyMiddleware(
 		context.Background(),
 		next,
-		nil, // pool — function tolerates nil because it skips when no kubeconfig
 		nil, // embeddingSvc nil → regex-only
 		nil, // auditLogger nil → enforcement audit disabled
+		"",  // workspace — empty in unit tests (no in-cluster k8s)
+		"",  // serviceGroup — empty in unit tests
 		logr.Discard(),
 	)
 	if handler == nil {
@@ -444,7 +447,7 @@ func TestWrapPrivacyMiddleware_DoesNotPanicWithNilEmbeddingSvc(t *testing.T) {
 			t.Fatalf("wrapPrivacyMiddleware panicked: %v", r)
 		}
 	}()
-	_ = wrapPrivacyMiddleware(context.Background(), next, nil, nil, nil, logr.Discard())
+	_ = wrapPrivacyMiddleware(context.Background(), next, nil, nil, "", "", logr.Discard())
 }
 
 // TestMemoryAnalyticsOptInMetrics_Registered verifies that the
@@ -496,6 +499,7 @@ func TestBuildAPIMux_EnterpriseAuditRoutesWired(t *testing.T) {
 		memoryapi.IngestOptions{Fallback: ingestion.Config{
 			Strategy: ingestion.StrategyChunk, ChunkSize: 200, ChunkOverlap: 40,
 		}},
+		"", "", // workspace, serviceGroup — empty in unit tests
 	)
 	defer cleanup()
 
@@ -533,6 +537,7 @@ func TestBuildAPIMux_NonEnterpriseAuditRoutesAbsent(t *testing.T) {
 		memoryapi.IngestOptions{Fallback: ingestion.Config{
 			Strategy: ingestion.StrategyChunk, ChunkSize: 200, ChunkOverlap: 40,
 		}},
+		"", "", // workspace, serviceGroup — empty in unit tests
 	)
 	defer cleanup()
 
@@ -800,6 +805,7 @@ func TestBuildAPIMux_IngestRouteWiredWithChunkStrategy(t *testing.T) {
 		memoryapi.IngestOptions{Fallback: ingestion.Config{
 			Strategy: ingestion.StrategyChunk, ChunkSize: 200, ChunkOverlap: 40,
 		}},
+		"", "", // workspace, serviceGroup — empty in unit tests
 	)
 	defer cleanup()
 
@@ -837,6 +843,7 @@ func TestBuildAPIMux_SemanticRouteWired(t *testing.T) {
 		memoryapi.IngestOptions{Fallback: ingestion.Config{
 			Strategy: ingestion.StrategyChunk, ChunkSize: 200, ChunkOverlap: 40,
 		}},
+		"", "", // workspace, serviceGroup — empty in unit tests
 	)
 	defer cleanup()
 
@@ -870,6 +877,7 @@ func TestBuildAPIMux_HealthzAlwaysReachable(t *testing.T) {
 		memoryapi.IngestOptions{Fallback: ingestion.Config{
 			Strategy: ingestion.StrategyChunk, ChunkSize: 200, ChunkOverlap: 40,
 		}},
+		"", "", // workspace, serviceGroup — empty in unit tests
 	)
 	defer cleanup()
 
@@ -894,6 +902,7 @@ func TestBuildAPIMux_SummaryCandidatesWired(t *testing.T) {
 		memoryapi.IngestOptions{Fallback: ingestion.Config{
 			Strategy: ingestion.StrategyChunk, ChunkSize: 200, ChunkOverlap: 40,
 		}},
+		"", "", // workspace, serviceGroup — empty in unit tests
 	)
 	defer cleanup()
 
@@ -917,6 +926,7 @@ func TestBuildAPIMux_SaveSummaryWired(t *testing.T) {
 		memoryapi.IngestOptions{Fallback: ingestion.Config{
 			Strategy: ingestion.StrategyChunk, ChunkSize: 200, ChunkOverlap: 40,
 		}},
+		"", "", // workspace, serviceGroup — empty in unit tests
 	)
 	defer cleanup()
 
