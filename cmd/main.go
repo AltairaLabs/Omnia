@@ -88,6 +88,8 @@ func main() {
 	var sessionAPIImagePullPolicy string
 	var memoryAPIImage string
 	var memoryAPIImagePullPolicy string
+	var privacyAPIImage string
+	var privacyAPIImagePullPolicy string
 	var workspaceStorageClass string
 	var workspaceContentPath string
 	var redisAddr string
@@ -139,6 +141,11 @@ func main() {
 		"Image for per-workspace memory-api containers. Defaults to ghcr.io/altairalabs/omnia-memory-api:latest")
 	flag.StringVar(&memoryAPIImagePullPolicy, "memory-api-image-pull-policy", "",
 		"Image pull policy for memory-api containers. Valid values: Always, Never, IfNotPresent.")
+	flag.StringVar(&privacyAPIImage, "privacy-api-image", "",
+		"Image for per-workspace privacy-api containers. When empty, no privacy-api Deployments are reconciled "+
+			"even if workspace.spec.privacy is set. Defaults to ghcr.io/altairalabs/omnia-privacy-api:latest")
+	flag.StringVar(&privacyAPIImagePullPolicy, "privacy-api-image-pull-policy", "",
+		"Image pull policy for privacy-api containers. Valid values: Always, Never, IfNotPresent.")
 	flag.StringVar(&workspaceStorageClass, "workspace-storage-class", "",
 		"Default storage class for workspace PVCs (e.g., omnia-nfs). If empty, uses cluster default.")
 	flag.StringVar(&workspaceContentPath, "workspace-content-path", "/workspace-content",
@@ -444,6 +451,8 @@ func main() {
 			SessionImagePullPolicy: corev1.PullPolicy(sessionAPIImagePullPolicy),
 			MemoryImage:            memoryAPIImage,
 			MemoryImagePullPolicy:  corev1.PullPolicy(memoryAPIImagePullPolicy),
+			PrivacyImage:           privacyAPIImage,
+			PrivacyImagePullPolicy: corev1.PullPolicy(privacyAPIImagePullPolicy),
 			MemoryRedisURL:         memoryRedisURL,
 			MemoryRedisURLSecret: controller.SecretKeyRef{
 				Name: memoryRedisURLSecretName,

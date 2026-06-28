@@ -57,12 +57,16 @@ const (
 )
 
 // ServiceBuilder builds Deployment and Service objects for per-workspace
-// session-api and memory-api instances.
+// session-api, memory-api, and privacy-api instances.
 type ServiceBuilder struct {
 	SessionImage           string
 	SessionImagePullPolicy corev1.PullPolicy
 	MemoryImage            string
 	MemoryImagePullPolicy  corev1.PullPolicy
+	// PrivacyImage is the image for the per-workspace privacy-api Deployment.
+	// Empty disables privacy-api reconciliation.
+	PrivacyImage           string
+	PrivacyImagePullPolicy corev1.PullPolicy
 
 	// MemoryRedisURL is the operator-wide Redis target threaded into
 	// every per-workspace memory-api Deployment as --redis-url. Empty
@@ -521,6 +525,50 @@ func redisHashDescriptor(r *omniav1alpha1.RedisConfig) string {
 		return fmt.Sprintf("serviceRef:%s/%s:%d", r.ServiceRef.Namespace, r.ServiceRef.Name, r.ServiceRef.Port)
 	}
 	return ""
+}
+
+// BuildPrivacyDeployment builds a per-workspace privacy-api Deployment.
+//
+// Privacy-api is per-workspace (not per-service-group), so it takes a
+// PrivacyServiceConfig rather than a WorkspaceServiceGroup. The service-group
+// label is intentionally left empty ("") so the per-service-group orphan cleanup
+// (which checks groupName != "") never deletes this Deployment. The service
+// selector uses the same label set with empty group, which correctly targets
+// privacy-api pods.
+//
+// Redis: reuse the operator-wide session redis default for now (privacy reads are
+// low-volume); a dedicated privacy redis can come later.
+func (sb *ServiceBuilder) BuildPrivacyDeployment(workspaceName, namespace string, cfg omniav1alpha1.PrivacyServiceConfig) *appsv1.Deployment {
+	name := fmt.Sprintf("privacy-%s", workspaceName)
+	// Empty service-group label is intentional: privacy-api is per-workspace, not per-group.
+	// The orphan cleanup skips deployments with empty group labels, so this deployment
+	// is only removed when the workspace is deleted (via owner reference).
+	labels := serviceLabels("privacy-api", workspaceName, "")
+	args := []string{fmt.Sprintf("--workspace=%s", workspaceName)}
+	// Reuse operator-wide session redis for privacy hot-cache (low volume).
+	redisURL, redisSecret := sb.SessionRedisURL, sb.SessionRedisURLSecret
+	if redisURL != "" {
+		args = append(args, fmt.Sprintf("--redis-url=%s", redisURL))
+	}
+	dep := buildServiceDeployment(name, namespace, sb.PrivacyImage, sb.PrivacyImagePullPolicy, args, labels, cfg.PodOverrides)
+	addMemoryRedisURLEnv(dep, redisSecret)
+	addEnterpriseEnv(dep, sb.Enterprise)
+	// Server side: enforce ServiceAccount auth when enabled. Empty group is
+	// intentional — privacy-api is per-workspace, groupName is not applicable.
+	sb.ServiceAuth.applySessionAPIServerAuthEnv(dep, workspaceName, "", namespace)
+	if dep.Spec.Template.Annotations == nil {
+		dep.Spec.Template.Annotations = map[string]string{}
+	}
+	dep.Spec.Template.Annotations[annotationConfigHash] = privacyConfigHash(cfg)
+	return dep
+}
+
+// privacyConfigHash hashes the runtime-relevant fields of a PrivacyServiceConfig
+// (database SecretRef name) into a short stable string used as a pod annotation to
+// roll the Deployment when the database secret reference changes.
+func privacyConfigHash(cfg omniav1alpha1.PrivacyServiceConfig) string {
+	sum := sha256.Sum256([]byte(cfg.Database.SecretRef.Name))
+	return hex.EncodeToString(sum[:8])
 }
 
 // BuildService builds a ClusterIP Service for the given component.

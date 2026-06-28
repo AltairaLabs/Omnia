@@ -1000,3 +1000,123 @@ func deploymentEnvValue(t *testing.T, dep *appsv1.Deployment, name string) strin
 	t.Fatalf("env %q not found", name)
 	return ""
 }
+
+// TestBuildPrivacyDeployment verifies the core shape of a per-workspace
+// privacy-api Deployment: name, image, args, SA name, and absence of
+// --service-group.
+func TestBuildPrivacyDeployment(t *testing.T) {
+	sb := &ServiceBuilder{
+		PrivacyImage:           "ghcr.io/altairalabs/omnia-privacy-api:test",
+		PrivacyImagePullPolicy: corev1.PullIfNotPresent,
+	}
+	cfg := omniav1alpha1.PrivacyServiceConfig{
+		Database: omniav1alpha1.DatabaseConfig{
+			SecretRef: corev1.LocalObjectReference{Name: "privacy-db"},
+		},
+	}
+
+	dep := sb.BuildPrivacyDeployment("myws", "myws-ns", cfg)
+
+	require.NotNil(t, dep)
+	assert.Equal(t, "privacy-myws", dep.Name, "deployment must be named privacy-<ws>")
+	assert.Equal(t, "myws-ns", dep.Namespace)
+
+	// Labels — component is "privacy-api", group is empty (per-workspace).
+	labels := dep.Labels
+	assert.Equal(t, "privacy-api", labels[labelComponent])
+	assert.Equal(t, "omnia-operator", labels[labelAppManagedBy])
+	assert.Equal(t, "myws", labels[labelWorkspace])
+	assert.Equal(t, "", labels[labelServiceGroup],
+		"service-group label must be empty for per-workspace privacy deployment")
+
+	// Image and pull policy
+	require.Len(t, dep.Spec.Template.Spec.Containers, 1)
+	container := dep.Spec.Template.Spec.Containers[0]
+	assert.Equal(t, sb.PrivacyImage, container.Image)
+	assert.Equal(t, corev1.PullIfNotPresent, container.ImagePullPolicy)
+
+	// ServiceAccount name must match deployment name (standard pattern).
+	assert.Equal(t, "privacy-myws", dep.Spec.Template.Spec.ServiceAccountName)
+
+	// Args: --workspace present, --service-group absent.
+	assert.Contains(t, container.Args, "--workspace=myws")
+	for _, a := range container.Args {
+		assert.NotContains(t, a, "--service-group",
+			"privacy-api is per-workspace; --service-group must not appear in args")
+	}
+
+	// Config-hash annotation must be present.
+	assert.NotEmpty(t, dep.Spec.Template.Annotations[annotationConfigHash],
+		"configHash annotation must be set on privacy-api pod template")
+}
+
+// TestBuildPrivacyDeployment_StampsEnterpriseEnv proves ENTERPRISE_ENABLED
+// flows from ServiceBuilder.Enterprise to the privacy-api pod.
+func TestBuildPrivacyDeployment_StampsEnterpriseEnv(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		enterprise bool
+	}{
+		{"enabled", true},
+		{"disabled", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sb := &ServiceBuilder{
+				PrivacyImage: "privacy:test",
+				Enterprise:   tc.enterprise,
+			}
+			cfg := omniav1alpha1.PrivacyServiceConfig{
+				Database: omniav1alpha1.DatabaseConfig{
+					SecretRef: corev1.LocalObjectReference{Name: "db"},
+				},
+			}
+			dep := sb.BuildPrivacyDeployment("ws", "ns", cfg)
+			assert.Equal(t, strconv.FormatBool(tc.enterprise), deploymentEnvValue(t, dep, "ENTERPRISE_ENABLED"))
+		})
+	}
+}
+
+// TestBuildPrivacyDeployment_SessionRedisThreaded proves that the operator-wide
+// session Redis URL is forwarded to the privacy-api pod as --redis-url.
+func TestBuildPrivacyDeployment_SessionRedisThreaded(t *testing.T) {
+	sb := &ServiceBuilder{
+		PrivacyImage:    "privacy:test",
+		SessionRedisURL: testOperatorRedisURL,
+	}
+	cfg := omniav1alpha1.PrivacyServiceConfig{
+		Database: omniav1alpha1.DatabaseConfig{
+			SecretRef: corev1.LocalObjectReference{Name: "db"},
+		},
+	}
+
+	dep := sb.BuildPrivacyDeployment("ws", "ns", cfg)
+	require.Len(t, dep.Spec.Template.Spec.Containers, 1)
+	assert.Contains(t, dep.Spec.Template.Spec.Containers[0].Args,
+		"--redis-url="+testOperatorRedisURL)
+}
+
+// TestBuildPrivacyDeployment_ConfigHashRollsOnSecretChange proves that
+// changing the database SecretRef name changes the configHash annotation,
+// causing a pod roll.
+func TestBuildPrivacyDeployment_ConfigHashRollsOnSecretChange(t *testing.T) {
+	sb := &ServiceBuilder{PrivacyImage: "privacy:test"}
+
+	cfgA := omniav1alpha1.PrivacyServiceConfig{
+		Database: omniav1alpha1.DatabaseConfig{
+			SecretRef: corev1.LocalObjectReference{Name: "db-a"},
+		},
+	}
+	cfgB := omniav1alpha1.PrivacyServiceConfig{
+		Database: omniav1alpha1.DatabaseConfig{
+			SecretRef: corev1.LocalObjectReference{Name: "db-b"},
+		},
+	}
+
+	depA := sb.BuildPrivacyDeployment("ws", "ns", cfgA)
+	depB := sb.BuildPrivacyDeployment("ws", "ns", cfgB)
+
+	annoA := depA.Spec.Template.Annotations[annotationConfigHash]
+	annoB := depB.Spec.Template.Annotations[annotationConfigHash]
+	assert.NotEqual(t, annoA, annoB,
+		"changing database SecretRef name must alter the configHash so the pod rolls")
+}

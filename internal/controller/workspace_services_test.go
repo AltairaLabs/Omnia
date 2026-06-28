@@ -513,3 +513,78 @@ func TestSetReconcileError(t *testing.T) {
 	}
 	g.Expect(found).To(BeTrue())
 }
+
+// TestReconcilePrivacyService_CreatesDeploymentAndService verifies that when
+// workspace.Spec.Privacy is set and PrivacyImage is configured, the reconciler
+// creates the privacy-<ws> Deployment, Service, and ServiceAccount, and sets
+// Status.PrivacyURL to the expected in-cluster URL.
+func TestReconcilePrivacyService_CreatesDeploymentAndService(t *testing.T) {
+	g := NewWithT(t)
+	scheme := testScheme()
+
+	ws := newTestWorkspace("myws", "myws-ns", nil)
+	ws.Spec.Privacy = &omniav1alpha1.PrivacyServiceConfig{
+		Database: omniav1alpha1.DatabaseConfig{
+			SecretRef: corev1.LocalObjectReference{Name: "privacy-db"},
+		},
+	}
+
+	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "myws-ns"}}
+	r := newTestReconciler(scheme, ws, ns)
+	// Set a privacy image so the gate passes.
+	r.ServiceBuilder.PrivacyImage = "ghcr.io/altairalabs/omnia-privacy-api:test"
+	r.ServiceBuilder.PrivacyImagePullPolicy = corev1.PullIfNotPresent
+
+	ctx := context.Background()
+	err := r.reconcileServices(ctx, ws)
+	g.Expect(err).NotTo(HaveOccurred())
+
+	// Deployment should exist with the correct name.
+	privDep := &appsv1.Deployment{}
+	err = r.Get(ctx, types.NamespacedName{Name: "privacy-myws", Namespace: "myws-ns"}, privDep)
+	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(privDep.Labels[labelComponent]).To(Equal("privacy-api"))
+	g.Expect(privDep.Labels[labelWorkspace]).To(Equal("myws"))
+	g.Expect(privDep.Labels[labelServiceGroup]).To(BeEmpty(),
+		"privacy deployment must have empty service-group label (per-workspace deployment)")
+
+	// Service should exist.
+	privSvc := &corev1.Service{}
+	err = r.Get(ctx, types.NamespacedName{Name: "privacy-myws", Namespace: "myws-ns"}, privSvc)
+	g.Expect(err).NotTo(HaveOccurred())
+
+	// ServiceAccount should exist.
+	privSA := &corev1.ServiceAccount{}
+	err = r.Get(ctx, types.NamespacedName{Name: "privacy-myws", Namespace: "myws-ns"}, privSA)
+	g.Expect(err).NotTo(HaveOccurred())
+
+	// PrivacyURL must be set.
+	g.Expect(ws.Status.PrivacyURL).To(Equal("http://privacy-myws.myws-ns:8080"))
+}
+
+// TestReconcilePrivacyService_NilPrivacySpec verifies that when
+// workspace.Spec.Privacy is nil, no privacy resources are created and
+// Status.PrivacyURL is empty.
+func TestReconcilePrivacyService_NilPrivacySpec(t *testing.T) {
+	g := NewWithT(t)
+	scheme := testScheme()
+
+	ws := newTestWorkspace("myws", "myws-ns", nil)
+	// Spec.Privacy is nil — no privacy-api should be deployed.
+
+	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "myws-ns"}}
+	r := newTestReconciler(scheme, ws, ns)
+	r.ServiceBuilder.PrivacyImage = "ghcr.io/altairalabs/omnia-privacy-api:test"
+
+	ctx := context.Background()
+	err := r.reconcileServices(ctx, ws)
+	g.Expect(err).NotTo(HaveOccurred())
+
+	// No privacy deployment should exist.
+	privDep := &appsv1.Deployment{}
+	err = r.Get(ctx, types.NamespacedName{Name: "privacy-myws", Namespace: "myws-ns"}, privDep)
+	g.Expect(err).To(HaveOccurred(), "no privacy deployment should be created when Spec.Privacy is nil")
+
+	// PrivacyURL must be cleared.
+	g.Expect(ws.Status.PrivacyURL).To(BeEmpty())
+}
