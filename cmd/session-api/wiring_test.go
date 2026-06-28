@@ -56,17 +56,14 @@ func newBogusPool(t *testing.T) *pgxpool.Pool {
 	return pool
 }
 
-// TestBuildAPIMux_EnterpriseConsentRoutesWired verifies the wiring contract
-// that enterprise consent routes are registered on the real server's mux when
-// --enterprise is set. This catches the class of bug where a handler is built
-// and unit-tested but never actually registered.
+// TestBuildAPIMux_EnterpriseConsentRoutesNotHosted verifies that session-api no
+// longer hosts consent routes even when --enterprise is set. Consent ownership
+// was moved to privacy-api in #1642 (Slice B). The route must return 404 here
+// so that the dashboard knows to talk to privacy-api directly.
 //
-// This is a wiring test, not a functional test: it calls the real buildAPIMux
-// (no mocks for the wiring layer) with a bogus pool that never dials. An
-// unregistered route returns 404; a registered route handled by the consent
-// handler will return some other status (the consent handler may 500 because
-// the DB is unreachable, but that still proves wiring).
-func TestBuildAPIMux_EnterpriseConsentRoutesWired(t *testing.T) {
+// This inverts the previous "routes are wired" assertion: an unregistered route
+// returns 404, which is exactly the desired post-migration state.
+func TestBuildAPIMux_EnterpriseConsentRoutesNotHosted(t *testing.T) {
 	freshPromRegistry(t)
 	pool := newBogusPool(t)
 	registry := providers.NewRegistry()
@@ -80,21 +77,17 @@ func TestBuildAPIMux_EnterpriseConsentRoutesWired(t *testing.T) {
 	handler, _, cleanup := buildAPIMux(pool, registry, f, logr.Discard(), nil, nil, nil)
 	defer cleanup()
 
-	// Short deadline so the request can't hang on the unreachable DB.
-	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
-	defer cancel()
-
 	req := httptest.NewRequest(
 		http.MethodGet,
 		"/api/v1/privacy/preferences/alice/consent",
 		nil,
-	).WithContext(ctx)
+	)
 	rr := httptest.NewRecorder()
 	handler.ServeHTTP(rr, req)
 
-	if rr.Code == http.StatusNotFound {
-		t.Errorf("enterprise consent GET route not registered on the real mux; "+
-			"buildAPIMux returned 404. body=%q", rr.Body.String())
+	if rr.Code != http.StatusNotFound {
+		t.Errorf("consent GET route must not be registered in session-api (privacy-api owns it); "+
+			"got %d body=%q", rr.Code, rr.Body.String())
 	}
 }
 
