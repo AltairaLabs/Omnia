@@ -339,6 +339,16 @@ if [ -n "$CHANGED_HELM_FILES" ]; then
 		print_error "Helm validation failed"
 		CHECKS_FAILED=1
 	fi
+
+	# Release-size backstop: fail fast if the rendered release approaches the
+	# 1 MiB Kubernetes Secret limit.  Catches this seconds before push instead
+	# of mid-way through a 15-minute E2E run.
+	if "$REPO_ROOT/hack/check-helm-release-size.sh" 2>&1; then
+		: # script prints its own success line
+	else
+		print_error "Helm release-size check failed"
+		CHECKS_FAILED=1
+	fi
 fi
 
 print_header "Summary"

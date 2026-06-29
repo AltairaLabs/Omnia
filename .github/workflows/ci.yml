@@ -448,6 +448,12 @@ jobs:
           --set redis.enabled=true \
           > /dev/null
 
+    - name: Check Helm release Secret size
+      # Fails if the rendered release would approach the 1 MiB Kubernetes
+      # Secret limit (threshold: 90%).  Catches Secret-size overruns in
+      # seconds rather than mid-way through a 15-minute E2E run.
+      run: bash hack/check-helm-release-size.sh
+
     # Verify kustomize and Helm RBAC are in sync. The drift between these
     # two paths shipped two separate RBAC regressions on main for ~3 weeks
     # (see #733). This check catches any future hand-edit that touches one
