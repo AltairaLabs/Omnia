@@ -24,12 +24,16 @@ import (
 	. "github.com/onsi/gomega"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8sruntime "k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
@@ -40,6 +44,7 @@ func testScheme() *k8sruntime.Scheme {
 	_ = omniav1alpha1.AddToScheme(s)
 	_ = corev1.AddToScheme(s)
 	_ = appsv1.AddToScheme(s)
+	_ = networkingv1.AddToScheme(s)
 	_ = rbacv1.AddToScheme(s)
 	return s
 }
@@ -587,4 +592,165 @@ func TestReconcilePrivacyService_NilPrivacySpec(t *testing.T) {
 
 	// PrivacyURL must be cleared.
 	g.Expect(ws.Status.PrivacyURL).To(BeEmpty())
+}
+
+// TestReconcilePrivacyService_RemovalTearsDownResources verifies that when
+// workspace.Spec.Privacy is removed from a live Workspace, the operator
+// deletes all privacy-<ws> resources: Deployment, Service, ServiceAccount,
+// and both ClusterRoleBindings (tokenreview + enterprise-reader).
+func TestReconcilePrivacyService_RemovalTearsDownResources(t *testing.T) {
+	g := NewWithT(t)
+	scheme := testScheme()
+
+	ws := newTestWorkspace("myws", "myws-ns", nil)
+	ws.Spec.Privacy = &omniav1alpha1.PrivacyServiceConfig{
+		Database: omniav1alpha1.DatabaseConfig{
+			SecretRef: corev1.LocalObjectReference{Name: "privacy-db"},
+		},
+	}
+
+	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "myws-ns"}}
+	r := newTestReconciler(scheme, ws, ns)
+	r.ServiceBuilder.PrivacyImage = "ghcr.io/altairalabs/omnia-privacy-api:test"
+	r.ServiceBuilder.PrivacyImagePullPolicy = corev1.PullIfNotPresent
+	r.ServiceBuilder.ServiceAuth = ServiceAuthConfig{Enabled: true}
+	r.SessionAPITokenReviewClusterRole = "omnia-session-tokenreview"
+	r.MemoryEnterpriseReaderClusterRole = "omnia-enterprise-reader"
+
+	ctx := context.Background()
+
+	// Phase 1: reconcile with Privacy set all resources should exist.
+	err := r.reconcileServices(ctx, ws)
+	g.Expect(err).NotTo(HaveOccurred())
+
+	g.Expect(r.Get(ctx, types.NamespacedName{Name: testPrivacyDeployName, Namespace: "myws-ns"}, &appsv1.Deployment{})).To(Succeed())
+	g.Expect(r.Get(ctx, types.NamespacedName{Name: testPrivacyDeployName, Namespace: "myws-ns"}, &corev1.Service{})).To(Succeed())
+	g.Expect(r.Get(ctx, types.NamespacedName{Name: testPrivacyDeployName, Namespace: "myws-ns"}, &corev1.ServiceAccount{})).To(Succeed())
+
+	tokenReviewCRBName := "session-tokenreview-myws-ns-" + testPrivacyDeployName
+	g.Expect(r.Get(ctx, types.NamespacedName{Name: tokenReviewCRBName}, &rbacv1.ClusterRoleBinding{})).To(Succeed())
+
+	enterpriseReaderCRBName := "memory-enterprise-reader-myws-ns-" + testPrivacyDeployName
+	g.Expect(r.Get(ctx, types.NamespacedName{Name: enterpriseReaderCRBName}, &rbacv1.ClusterRoleBinding{})).To(Succeed())
+
+	// Phase 2: remove Spec.Privacy and reconcile again.
+	ws.Spec.Privacy = nil
+	err = r.reconcileServices(ctx, ws)
+	g.Expect(err).NotTo(HaveOccurred())
+
+	// All privacy resources must be gone.
+	g.Expect(r.Get(ctx, types.NamespacedName{Name: testPrivacyDeployName, Namespace: "myws-ns"}, &appsv1.Deployment{})).
+		To(MatchError(ContainSubstring("not found")), "privacy Deployment must be deleted")
+
+	g.Expect(r.Get(ctx, types.NamespacedName{Name: testPrivacyDeployName, Namespace: "myws-ns"}, &corev1.Service{})).
+		To(MatchError(ContainSubstring("not found")), "privacy Service must be deleted")
+
+	g.Expect(r.Get(ctx, types.NamespacedName{Name: testPrivacyDeployName, Namespace: "myws-ns"}, &corev1.ServiceAccount{})).
+		To(MatchError(ContainSubstring("not found")), "privacy ServiceAccount must be deleted")
+
+	g.Expect(r.Get(ctx, types.NamespacedName{Name: tokenReviewCRBName}, &rbacv1.ClusterRoleBinding{})).
+		To(MatchError(ContainSubstring("not found")), "privacy tokenreview CRB must be deleted")
+
+	g.Expect(r.Get(ctx, types.NamespacedName{Name: enterpriseReaderCRBName}, &rbacv1.ClusterRoleBinding{})).
+		To(MatchError(ContainSubstring("not found")), "privacy enterprise-reader CRB must be deleted")
+
+	// PrivacyURL must be cleared.
+	g.Expect(ws.Status.PrivacyURL).To(BeEmpty())
+}
+
+// TestReconcilePrivacyService_ImageAbsentNoTeardown verifies that when
+// workspace.Spec.Privacy is set but PrivacyImage is empty (operator
+// misconfiguration), reconcilePrivacyService skips resource creation without
+// error and clears Status.PrivacyURL. It does NOT tear down existing resources
+// — an operator upgrade must not destroy a running deployment.
+func TestReconcilePrivacyService_ImageAbsentNoTeardown(t *testing.T) {
+	g := NewWithT(t)
+	scheme := testScheme()
+
+	ws := newTestWorkspace("myws", "myws-ns", nil)
+	ws.Spec.Privacy = &omniav1alpha1.PrivacyServiceConfig{
+		Database: omniav1alpha1.DatabaseConfig{
+			SecretRef: corev1.LocalObjectReference{Name: "privacy-db"},
+		},
+	}
+
+	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "myws-ns"}}
+	r := newTestReconciler(scheme, ws, ns)
+	// PrivacyImage intentionally left empty — operator is misconfigured.
+	r.ServiceBuilder.PrivacyImage = ""
+
+	ctx := context.Background()
+	err := r.reconcilePrivacyService(ctx, ws)
+	g.Expect(err).NotTo(HaveOccurred())
+
+	// No privacy deployment should be created.
+	privDep := &appsv1.Deployment{}
+	err = r.Get(ctx, types.NamespacedName{Name: testPrivacyDeployName, Namespace: "myws-ns"}, privDep)
+	g.Expect(err).To(HaveOccurred(), "no privacy deployment should be created when PrivacyImage is empty")
+
+	// PrivacyURL must be cleared.
+	g.Expect(ws.Status.PrivacyURL).To(BeEmpty())
+}
+
+// TestReconcilePrivacyService_CleanupError verifies that when cleanupPrivacyService
+// returns an error (e.g. Delete returns non-NotFound), reconcilePrivacyService
+// propagates it. This covers the `return err` branch in the nil-privacy path.
+func TestReconcilePrivacyService_CleanupError(t *testing.T) {
+	g := NewWithT(t)
+	scheme := testScheme()
+
+	fc := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithInterceptorFuncs(interceptor.Funcs{
+			Delete: func(_ context.Context, _ client.WithWatch, _ client.Object, _ ...client.DeleteOption) error {
+				return apierrors.NewServiceUnavailable("delete-unavailable")
+			},
+		}).
+		Build()
+
+	r := &WorkspaceReconciler{Client: fc, Scheme: scheme}
+	ws := &omniav1alpha1.Workspace{
+		ObjectMeta: metav1.ObjectMeta{Name: "myws"},
+		Spec: omniav1alpha1.WorkspaceSpec{
+			Namespace: omniav1alpha1.NamespaceConfig{Name: "ns"},
+		},
+	}
+	// Spec.Privacy is nil so reconcilePrivacyService will call cleanupPrivacyService,
+	// which will hit the intercepted Delete and return an error.
+	ws.Spec.Privacy = nil
+
+	ctx := context.Background()
+	err := r.reconcilePrivacyService(ctx, ws)
+	g.Expect(err).To(HaveOccurred())
+	g.Expect(err.Error()).To(ContainSubstring("cleanup privacy resource"))
+}
+
+// TestCleanupPrivacyService_DeleteError verifies that when a Delete call
+// returns a non-NotFound error, cleanupPrivacyService propagates it wrapped
+// with "cleanup privacy resource".
+func TestCleanupPrivacyService_DeleteError(t *testing.T) {
+	g := NewWithT(t)
+	scheme := testScheme()
+
+	fc := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithInterceptorFuncs(interceptor.Funcs{
+			Delete: func(_ context.Context, _ client.WithWatch, _ client.Object, _ ...client.DeleteOption) error {
+				return apierrors.NewServiceUnavailable("boom")
+			},
+		}).
+		Build()
+
+	r := &WorkspaceReconciler{Client: fc, Scheme: scheme}
+	ws := &omniav1alpha1.Workspace{
+		ObjectMeta: metav1.ObjectMeta{Name: "myws"},
+		Spec: omniav1alpha1.WorkspaceSpec{
+			Namespace: omniav1alpha1.NamespaceConfig{Name: "ns"},
+		},
+	}
+
+	ctx := context.Background()
+	err := r.cleanupPrivacyService(ctx, ws)
+	g.Expect(err).To(HaveOccurred())
+	g.Expect(err.Error()).To(ContainSubstring("cleanup privacy resource"))
 }
