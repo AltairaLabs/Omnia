@@ -239,6 +239,46 @@ func TestOutboxStore_PruneDeliveredOutbox_RealPostgres(t *testing.T) {
 	assert.Equal(t, int64(1), outboxRowCount(t, pool), "undelivered row must survive prune")
 }
 
+// TestOutboxStore_RemoveConsentGrantWithOutbox_RollbackOnInsertFailure_RealPostgres
+// verifies that when the INSERT into consent_revocation_outbox fails (here forced
+// by dropping the table before the call), the UPDATE to consent_grants is also
+// rolled back — the category is still present in the prefs row after the error.
+func TestOutboxStore_RemoveConsentGrantWithOutbox_RollbackOnInsertFailure_RealPostgres(t *testing.T) {
+	pool := outboxTestPool(t)
+	ctx := context.Background()
+	store := NewPreferencesStore(pool)
+
+	const (
+		rollbackUser     = "user-outbox-rollback"
+		rollbackCategory = ConsentMemoryHealth
+	)
+
+	// Seed a prefs row with the category granted.
+	seedConsentGrant(t, pool, rollbackUser, rollbackCategory)
+
+	// Verify the category is present before the test runs.
+	grantsBefore, err := store.GetConsentGrants(ctx, rollbackUser)
+	require.NoError(t, err)
+	require.Contains(t, grantsBefore, rollbackCategory, "setup: category must be granted before the call")
+
+	// Force the outbox INSERT to fail by dropping the table.
+	// This container is isolated to this test, so the DROP does not affect siblings.
+	_, err = pool.Exec(ctx, `DROP TABLE consent_revocation_outbox`)
+	require.NoError(t, err)
+
+	// The call must return an error (INSERT fails → tx rolls back).
+	outboxID, callErr := store.RemoveConsentGrantWithOutbox(ctx, rollbackUser, rollbackCategory)
+	require.Error(t, callErr, "expected an error when the outbox INSERT fails")
+	assert.Empty(t, outboxID, "expected empty outbox id on failure")
+
+	// Critical assertion: the UPDATE must have been rolled back.
+	// consent_grants must still contain the category.
+	grantsAfter, err := store.GetConsentGrants(ctx, rollbackUser)
+	require.NoError(t, err)
+	assert.Contains(t, grantsAfter, rollbackCategory,
+		"consent_grants must still contain the category — UPDATE must have rolled back")
+}
+
 func TestOutboxStore_CountStuckOutbox_RealPostgres(t *testing.T) {
 	pool := outboxTestPool(t)
 	ctx := context.Background()
