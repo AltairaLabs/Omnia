@@ -291,7 +291,15 @@ func run() error {
 		// Resolve memory URLs from workspace status; MEMORY_API_URLS env overrides at
 		// notifier construction time (if set, the notifier ignores memoryURLs).
 		memoryURLs := resolveMemoryURLs(f, log)
-		log.V(1).Info("consent notifier configured", "memoryURLCount", len(memoryURLs))
+		if len(memoryURLs) == 0 {
+			// No fan-out targets: revocations are recorded then immediately marked
+			// delivered without any prune, and the stuck gauge stays 0 — the backstop
+			// is inert. Surface this at Info so an empty-target misconfiguration in an
+			// enterprise deploy is visible rather than hidden behind delivered=true.
+			log.Info("consent fan-out has no memory targets; revocations will not be pushed (check workspace status / MEMORY_API_URLS)")
+		} else {
+			log.V(1).Info("consent notifier configured", "memoryURLCount", len(memoryURLs))
+		}
 		tokenSrc := serviceauth.NewTokenSource("", 0)
 		notifier = privacy.NewMemoryAPINotifier(memoryURLs, f.workspace, tokenSrc, log)
 
