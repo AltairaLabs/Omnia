@@ -338,13 +338,20 @@ type LinkResponse struct {
 	ID string `json:"id"`
 }
 
+// CategoryRegisteredFunc is a predicate that reports whether a consent
+// category string is a valid platform-defined category. When non-nil,
+// the save handler rejects writes that carry an unregistered category
+// with HTTP 400. When nil the check is skipped (OSS path).
+type CategoryRegisteredFunc func(category string) bool
+
 // Handler provides HTTP endpoints for the memory API.
 type Handler struct {
-	service          *MemoryService
-	log              logr.Logger
-	maxBodySize      int64
-	recordDimConsent DimensionConsentRecorder
-	enterprise       bool
+	service            *MemoryService
+	log                logr.Logger
+	maxBodySize        int64
+	recordDimConsent   DimensionConsentRecorder
+	enterprise         bool
+	categoryRegistered CategoryRegisteredFunc
 }
 
 // NewHandler creates a new memory API handler.
@@ -367,6 +374,14 @@ func (h *Handler) WithDimensionConsentRecorder(r DimensionConsentRecorder) *Hand
 // analytics). When false they return 403 enterprise_required.
 func (h *Handler) WithEnterprise(enterprise bool) *Handler {
 	h.enterprise = enterprise
+	return h
+}
+
+// WithCategoryRegistration wires a predicate that validates consent
+// categories at write time. When set, saves carrying an unregistered
+// category return HTTP 400. Pass nil to disable (OSS default).
+func (h *Handler) WithCategoryRegistration(fn CategoryRegisteredFunc) *Handler {
+	h.categoryRegistered = fn
 	return h
 }
 
@@ -567,6 +582,9 @@ func writeError(w http.ResponseWriter, err error) {
 	case errors.Is(err, ErrAboutRequired):
 		status = http.StatusBadRequest
 		msg = ErrAboutRequired.Error()
+	case errors.Is(err, ErrUnknownConsentCategory):
+		status = http.StatusBadRequest
+		msg = ErrUnknownConsentCategory.Error()
 	case errors.Is(err, memory.ErrNotFound):
 		status = http.StatusNotFound
 		msg = "memory not found"

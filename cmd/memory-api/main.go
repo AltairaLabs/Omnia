@@ -826,6 +826,15 @@ func buildAPIMux(
 		WithDimensionConsentRecorder(func(ctx context.Context, targetDim int, createdBy string) error {
 			return memorypg.InsertDimensionChangeConsent(ctx, pool, targetDim, createdBy)
 		})
+	if enterprise {
+		// Validate consent_category against the platform registry at write time.
+		// privacy.CategoryInfo is the authoritative source; only registered
+		// categories (memory:*, analytics:aggregate) are accepted.
+		handler = handler.WithCategoryRegistration(func(category string) bool {
+			_, valid := privacy.CategoryInfo(privacy.ConsentCategory(category))
+			return valid
+		})
+	}
 
 	mux := http.NewServeMux()
 	handler.RegisterRoutes(mux)

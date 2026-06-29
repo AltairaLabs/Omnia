@@ -76,6 +76,11 @@ var (
 	// — the agent must retry with about populated so the structured-
 	// key dedup path can engage.
 	ErrAboutRequired = errors.New("about={kind, key} is required for this memory kind — supply about in the request body")
+	// ErrUnknownConsentCategory fires when a Save carries a consent_category
+	// that is not in the platform-registered category set. The handler maps
+	// this to 400. Only enforced when a CategoryRegisteredFunc predicate is
+	// wired (enterprise path); OSS builds skip validation.
+	ErrUnknownConsentCategory = errors.New("unknown consent category")
 )
 
 // MemoryServiceConfig holds runtime configuration for the MemoryService.

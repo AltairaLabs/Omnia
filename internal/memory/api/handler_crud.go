@@ -138,6 +138,18 @@ func (h *Handler) handleSaveMemory(w http.ResponseWriter, r *http.Request) {
 
 	applySaveRequestMetadata(mem, &req)
 
+	// Validate the resolved consent category against the registered set.
+	// The predicate is wired only in the enterprise path; nil skips the check
+	// (OSS default). We read from metadata rather than req.Category so both
+	// the top-level field and an explicit metadata["consent_category"] value
+	// are covered after applySaveRequestMetadata has merged them.
+	if cat, ok := mem.Metadata[memory.MetaKeyConsentCategory].(string); ok && cat != "" {
+		if h.categoryRegistered != nil && !h.categoryRegistered(cat) {
+			writeError(w, ErrUnknownConsentCategory)
+			return
+		}
+	}
+
 	res, err := h.service.SaveMemoryWithResult(r.Context(), mem)
 	if err != nil {
 		h.log.Error(err, "SaveMemory failed")
