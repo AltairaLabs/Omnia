@@ -61,7 +61,7 @@ describe("GET /api/workspaces/[name]/privacy/consent/stats", () => {
     vi.resetAllMocks();
   });
 
-  it("proxies to memory-api consent stats endpoint", async () => {
+  it("proxies to privacy-api consent stats endpoint", async () => {
     const { getUser } = await import("@/lib/auth");
     const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
     const { getWorkspace } = await import("@/lib/k8s/workspace-route-helpers");
@@ -76,7 +76,9 @@ describe("GET /api/workspaces/[name]/privacy/consent/stats", () => {
     vi.mocked(getWorkspace).mockResolvedValue(mockWorkspace as never);
     vi.mocked(resolveServiceURLs).mockResolvedValue({
       sessionURL: "https://session-api:8080",
-      memoryURL: "https://memory-api:8080", namespace: "omnia-test", privacyURL: ""
+      memoryURL: "https://memory-api:8080",
+      namespace: "omnia-test",
+      privacyURL: "https://privacy-api:8080",
     });
 
     const stats = {
@@ -98,8 +100,126 @@ describe("GET /api/workspaces/[name]/privacy/consent/stats", () => {
     expect(body).toEqual(stats);
 
     const fetchUrl = mockFetch.mock.calls[0][0] as string;
+    expect(fetchUrl).toContain("https://privacy-api:8080");
     expect(fetchUrl).toContain("/api/v1/privacy/consent/stats");
     expect(fetchUrl).toContain("workspace=workspace-uid-123");
+    expect(fetchUrl).not.toContain("memory-api");
+  });
+
+  it("returns 503 when privacyURL is not configured", async () => {
+    const { getUser } = await import("@/lib/auth");
+    const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
+    const { resolveServiceURLs } = await import("@/lib/k8s/service-url-resolver");
+
+    vi.mocked(getUser).mockResolvedValue(mockUser);
+    vi.mocked(checkWorkspaceAccess).mockResolvedValue({
+      granted: true,
+      role: "viewer",
+      permissions: viewerPermissions,
+    });
+    vi.mocked(resolveServiceURLs).mockResolvedValue({
+      sessionURL: "https://session-api:8080",
+      memoryURL: "https://memory-api:8080",
+      namespace: "omnia-test",
+      privacyURL: "",
+    });
+
+    const { GET } = await import("./route");
+    const response = await GET(createRequest(), createMockContext());
+
+    expect(response.status).toBe(503);
+    const body = await response.json();
+    expect(body).toHaveProperty("error");
+  });
+
+  it("returns 404 when workspace has no UID", async () => {
+    const { getUser } = await import("@/lib/auth");
+    const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
+    const { getWorkspace } = await import("@/lib/k8s/workspace-route-helpers");
+    const { resolveServiceURLs } = await import("@/lib/k8s/service-url-resolver");
+
+    vi.mocked(getUser).mockResolvedValue(mockUser);
+    vi.mocked(checkWorkspaceAccess).mockResolvedValue({
+      granted: true,
+      role: "viewer",
+      permissions: viewerPermissions,
+    });
+    vi.mocked(getWorkspace).mockResolvedValue(null as never);
+    vi.mocked(resolveServiceURLs).mockResolvedValue({
+      sessionURL: "https://session-api:8080",
+      memoryURL: "https://memory-api:8080",
+      namespace: "omnia-test",
+      privacyURL: "https://privacy-api:8080",
+    });
+
+    const { GET } = await import("./route");
+    const response = await GET(createRequest(), createMockContext());
+
+    expect(response.status).toBe(404);
+  });
+
+  it("returns 502 when privacy-api returns non-JSON", async () => {
+    const { getUser } = await import("@/lib/auth");
+    const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
+    const { getWorkspace } = await import("@/lib/k8s/workspace-route-helpers");
+    const { resolveServiceURLs } = await import("@/lib/k8s/service-url-resolver");
+
+    vi.mocked(getUser).mockResolvedValue(mockUser);
+    vi.mocked(checkWorkspaceAccess).mockResolvedValue({
+      granted: true,
+      role: "viewer",
+      permissions: viewerPermissions,
+    });
+    vi.mocked(getWorkspace).mockResolvedValue(mockWorkspace as never);
+    vi.mocked(resolveServiceURLs).mockResolvedValue({
+      sessionURL: "https://session-api:8080",
+      memoryURL: "https://memory-api:8080",
+      namespace: "omnia-test",
+      privacyURL: "https://privacy-api:8080",
+    });
+
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 503,
+      text: () => Promise.resolve("<html>Service Unavailable</html>"),
+    });
+
+    const { GET } = await import("./route");
+    const response = await GET(createRequest(), createMockContext());
+
+    expect(response.status).toBe(502);
+    const body = await response.json();
+    expect(body).toHaveProperty("error");
+  });
+
+  it("returns 502 when privacy-api connection fails", async () => {
+    const { getUser } = await import("@/lib/auth");
+    const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
+    const { getWorkspace } = await import("@/lib/k8s/workspace-route-helpers");
+    const { resolveServiceURLs } = await import("@/lib/k8s/service-url-resolver");
+
+    vi.mocked(getUser).mockResolvedValue(mockUser);
+    vi.mocked(checkWorkspaceAccess).mockResolvedValue({
+      granted: true,
+      role: "viewer",
+      permissions: viewerPermissions,
+    });
+    vi.mocked(getWorkspace).mockResolvedValue(mockWorkspace as never);
+    vi.mocked(resolveServiceURLs).mockResolvedValue({
+      sessionURL: "https://session-api:8080",
+      memoryURL: "https://memory-api:8080",
+      namespace: "omnia-test",
+      privacyURL: "https://privacy-api:8080",
+    });
+
+    mockFetch.mockRejectedValueOnce(new Error("Connection refused"));
+
+    const { GET } = await import("./route");
+    const response = await GET(createRequest(), createMockContext());
+
+    expect(response.status).toBe(502);
+    const body = await response.json();
+    expect(body.error).toBe("Failed to connect to Privacy API");
   });
 
   it("returns 403 when user lacks workspace access", async () => {
