@@ -794,6 +794,11 @@ func buildAPIMux(
 		// Retrieval consults the loader to build a per-tier ranker from
 		// the workspace's bound MemoryPolicy.spec.tierPrecedence.
 		svc.SetPolicyLoader(policyLoader)
+		// Enterprise tier-ranking factories: the constructors live in ee
+		// (policy -> weights/half-life); core consumes them via injected
+		// factories so internal/memory/api no longer imports ee (#1669).
+		svc.SetTierRankerFactory(eememory.NewTierRanker)
+		svc.SetTierHalfLifeFactory(eememory.NewTierHalfLife)
 	}
 	if consentPruner != nil {
 		// CE1: per-user/category consent-event prune endpoint.

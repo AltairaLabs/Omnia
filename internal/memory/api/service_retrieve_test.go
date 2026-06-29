@@ -215,6 +215,7 @@ func TestRetrieveMultiTier_BuildsHalfLifeFromPolicyLoader(t *testing.T) {
 	}
 	svc := NewMemoryService(store, nil, MemoryServiceConfig{Enterprise: true}, logr.Discard())
 	svc.SetPolicyLoader(loader)
+	svc.SetTierHalfLifeFactory(eememory.NewTierHalfLife)
 
 	_, err := svc.RetrieveMultiTier(context.Background(), memory.MultiTierRequest{WorkspaceID: testWS})
 	require.NoError(t, err)
@@ -257,6 +258,7 @@ func TestRetrieveMultiTier_BuildsRankerFromPolicyLoader(t *testing.T) {
 	}
 	svc := NewMemoryService(store, nil, MemoryServiceConfig{Enterprise: true}, logr.Discard())
 	svc.SetPolicyLoader(loader)
+	svc.SetTierRankerFactory(eememory.NewTierRanker)
 
 	_, err := svc.RetrieveMultiTier(context.Background(), memory.MultiTierRequest{WorkspaceID: testWS})
 	require.NoError(t, err)
@@ -278,6 +280,7 @@ func TestRetrieveMultiTier_PolicyLoaderErrorFallsBackToIdentity(t *testing.T) {
 	loader := &stubPolicyLoader{err: errors.New("api outage")}
 	svc := NewMemoryService(store, nil, MemoryServiceConfig{Enterprise: true}, logr.Discard())
 	svc.SetPolicyLoader(loader)
+	svc.SetTierRankerFactory(eememory.NewTierRanker) // factory called with nil policy on error → IdentityTierRanker
 
 	_, err := svc.RetrieveMultiTier(context.Background(), memory.MultiTierRequest{WorkspaceID: testWS})
 	require.NoError(t, err, "loader errors must not fail retrieval")
