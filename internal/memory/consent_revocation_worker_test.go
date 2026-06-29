@@ -39,13 +39,20 @@ func TestRetentionWorker_ConsentCascade_SoftDeleteAction(t *testing.T) {
 	ctx := context.Background()
 
 	userID := "user-cascade-soft"
-	seedPrivacyPrefs(t, store, userID, []string{"memory:context"})
 	revokedID := saveUserMemWithCategory(t, store, userID, "memory:health")
 	keptID := saveUserMemWithCategory(t, store, userID, "memory:context")
+
+	// userID grants memory:context (absent from non-grantors) but not memory:health.
+	src := &fakeConsentRevocationSource{
+		nonGrantors: map[string][]string{
+			"memory:health": {userID},
+		},
+	}
 
 	w := NewRetentionWorker(store,
 		&StaticPolicyLoader{Policy: revocationPolicy(omniav1alpha1.ConsentRevocationSoftDelete)},
 		zap.New(zap.UseDevMode(true)))
+	w.SetConsentRevocationSource(src)
 	w.runOnce(ctx)
 
 	assert.True(t, mustFetchEntityForgotten(t, store, revokedID),
@@ -59,12 +66,19 @@ func TestRetentionWorker_ConsentCascade_HardDeleteAction(t *testing.T) {
 	ctx := context.Background()
 
 	userID := "user-cascade-hard"
-	seedPrivacyPrefs(t, store, userID, []string{})
 	id := saveUserMemWithCategory(t, store, userID, "memory:location")
+
+	// userID has no grants — appears in non-grantors for memory:location.
+	src := &fakeConsentRevocationSource{
+		nonGrantors: map[string][]string{
+			"memory:location": {userID},
+		},
+	}
 
 	w := NewRetentionWorker(store,
 		&StaticPolicyLoader{Policy: revocationPolicy(omniav1alpha1.ConsentRevocationHardDelete)},
 		zap.New(zap.UseDevMode(true)))
+	w.SetConsentRevocationSource(src)
 	w.runOnce(ctx)
 
 	assert.False(t, mustFetchEntityExists(t, store, id),
@@ -78,9 +92,9 @@ func TestRetentionWorker_ConsentCascade_StopAction(t *testing.T) {
 	ctx := context.Background()
 
 	userID := "user-cascade-stop"
-	seedPrivacyPrefs(t, store, userID, []string{})
 	id := saveUserMemWithCategory(t, store, userID, "memory:location")
 
+	// No source needed: Stop action short-circuits before the source is used.
 	w := NewRetentionWorker(store,
 		&StaticPolicyLoader{Policy: revocationPolicy(omniav1alpha1.ConsentRevocationStop)},
 		zap.New(zap.UseDevMode(true)))
@@ -91,6 +105,25 @@ func TestRetentionWorker_ConsentCascade_StopAction(t *testing.T) {
 	assert.True(t, mustFetchEntityExists(t, store, id))
 }
 
+func TestRetentionWorker_ConsentCascade_NilSourceIsNoOp(t *testing.T) {
+	// When no consent source is configured, the revocation pass must
+	// skip entirely — never delete without verified consent state.
+	store := newStore(t)
+	ctx := context.Background()
+
+	userID := "user-cascade-nil-src"
+	id := saveUserMemWithCategory(t, store, userID, "memory:health")
+
+	w := NewRetentionWorker(store,
+		&StaticPolicyLoader{Policy: revocationPolicy(omniav1alpha1.ConsentRevocationSoftDelete)},
+		zap.New(zap.UseDevMode(true)))
+	// Deliberately do not call SetConsentRevocationSource — worker defaults to nil.
+	w.runOnce(ctx)
+
+	assert.False(t, mustFetchEntityForgotten(t, store, id),
+		"nil source must not soft-delete any rows")
+}
+
 func TestRetentionWorker_ConsentCascade_SoftDeleteGraceCleanup(t *testing.T) {
 	// A row already soft-deleted by the cascade, with forgotten_at
 	// backdated beyond grace, should be hard-deleted on the same
@@ -99,7 +132,6 @@ func TestRetentionWorker_ConsentCascade_SoftDeleteGraceCleanup(t *testing.T) {
 	ctx := context.Background()
 
 	userID := "user-cascade-grace"
-	seedPrivacyPrefs(t, store, userID, []string{"memory:context"})
 	expired := saveUserMemWithCategory(t, store, userID, "memory:health")
 	_, err := store.pool.Exec(ctx,
 		`UPDATE memory_entities
@@ -108,9 +140,19 @@ func TestRetentionWorker_ConsentCascade_SoftDeleteGraceCleanup(t *testing.T) {
 		 WHERE id = $1`, expired)
 	require.NoError(t, err)
 
+	// Source returns userID as non-granter for health — but the row is already
+	// forgotten=true so SoftDelete won't touch it. The grace-cleanup pass then
+	// hard-deletes it (forgotten_at 30 days > 7-day grace).
+	src := &fakeConsentRevocationSource{
+		nonGrantors: map[string][]string{
+			"memory:health": {userID},
+		},
+	}
+
 	w := NewRetentionWorker(store,
 		&StaticPolicyLoader{Policy: revocationPolicy(omniav1alpha1.ConsentRevocationSoftDelete)},
 		zap.New(zap.UseDevMode(true)))
+	w.SetConsentRevocationSource(src)
 	w.runOnce(ctx)
 
 	assert.False(t, mustFetchEntityExists(t, store, expired),

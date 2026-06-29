@@ -35,9 +35,10 @@ const logRetentionWorkerNotStarted = "retention worker not started"
 // logged as not-yet-implemented until a follow-up wires the score
 // formula.
 type RetentionWorker struct {
-	store  *PostgresMemoryStore
-	loader PolicyLoader
-	log    logr.Logger
+	store                *PostgresMemoryStore
+	loader               PolicyLoader
+	log                  logr.Logger
+	consentRevocationSrc ConsentRevocationSource // nil → skip revocation pass
 
 	// testHook fires at the end of every run so tests can synchronise
 	// without sleeping.
@@ -53,6 +54,15 @@ func NewRetentionWorker(store *PostgresMemoryStore, loader PolicyLoader, log log
 		loader: loader,
 		log:    log,
 	}
+}
+
+// SetConsentRevocationSource wires the privacy-api client used by the consent
+// revocation cascade (SoftDeleteRevokedConsent / HardDeleteRevokedConsent).
+// When nil (the default), the revocation pass is skipped entirely — a safe
+// no-op for deployments without a privacy-api configured. Call once at startup
+// before the worker is started.
+func (w *RetentionWorker) SetConsentRevocationSource(src ConsentRevocationSource) {
+	w.consentRevocationSrc = src
 }
 
 // Run blocks until ctx is cancelled, firing a pass on every tick of
@@ -216,6 +226,10 @@ func resolveSupersessionGraceDays(cfg *omniav1alpha1.MemorySupersessionConfig) i
 // action=HardDelete it removes rows immediately. action=Stop is a
 // no-op — operators chose it explicitly to keep existing rows.
 //
+// When consentRevocationSrc is nil (no privacy-api configured), the
+// revocation pass is skipped and (0, 0, nil) is returned — deleting
+// rows without verified consent state would be unsafe (fail-safe).
+//
 // Returns (softCount, hardCount, err) so callers can log totals
 // without re-querying.
 func (w *RetentionWorker) runConsentRevocation(
@@ -223,13 +237,19 @@ func (w *RetentionWorker) runConsentRevocation(
 	cfg *omniav1alpha1.MemoryConsentRevocationConfig,
 	batchSize int32,
 ) (int64, int64, error) {
-	metrics := defaultRetentionMetrics.Load()
 	action := resolveConsentAction(cfg)
-	switch action {
-	case omniav1alpha1.ConsentRevocationStop:
+	if action == omniav1alpha1.ConsentRevocationStop {
 		return 0, 0, nil
-	case omniav1alpha1.ConsentRevocationHardDelete:
-		n, err := w.store.HardDeleteRevokedConsent(ctx, int(batchSize))
+	}
+
+	if w.consentRevocationSrc == nil {
+		w.log.V(1).Info("consent revocation skipped", "reason", "no consent source")
+		return 0, 0, nil
+	}
+
+	metrics := defaultRetentionMetrics.Load()
+	if action == omniav1alpha1.ConsentRevocationHardDelete {
+		n, err := w.store.HardDeleteRevokedConsent(ctx, w.consentRevocationSrc, int(batchSize))
 		if err != nil {
 			metrics.observeBranchError(TierUser, BranchConsentRevoke)
 			w.log.Error(err, "consent revocation hard-delete failed")
@@ -243,7 +263,7 @@ func (w *RetentionWorker) runConsentRevocation(
 	}
 
 	// SoftDelete path (default).
-	soft, err := w.store.SoftDeleteRevokedConsent(ctx, int(batchSize))
+	soft, err := w.store.SoftDeleteRevokedConsent(ctx, w.consentRevocationSrc, int(batchSize))
 	if err != nil {
 		metrics.observeBranchError(TierUser, BranchConsentRevoke)
 		w.log.Error(err, "consent revocation soft-delete failed")

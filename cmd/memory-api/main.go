@@ -500,7 +500,18 @@ func run() error {
 	if err := memory.RegisterRetentionMetrics(prometheus.DefaultRegisterer); err != nil {
 		log.Error(err, "memory retention metrics registration failed")
 	}
-	startRetentionWorkerWithLoader(ctx, pgStore, policyLoader, log)
+	// Resolve the privacy-api URL for the consent-revocation cascade (reader 2).
+	// When no URL is available the source is nil and the revocation pass is
+	// skipped (fail-safe — never delete without verified consent state).
+	var revocationSrc memory.ConsentRevocationSource
+	if privacyURL, ok := resolvePrivacyURLForWorker(ctx, f.workspace, f.serviceGroup, log); ok {
+		revocationSrc = httpclient.New(privacyURL, log)
+	} else {
+		log.V(1).Info("consent revocation degraded",
+			"reason", "no-privacy-url",
+			"behavior", "revocation-pass-skipped")
+	}
+	startRetentionWorkerWithLoader(ctx, pgStore, policyLoader, revocationSrc, log)
 
 	// --- Analytics opt-in metric + worker ---
 	// Computes the fraction of users who have granted the
@@ -1179,11 +1190,20 @@ func (a *embeddingProviderAdapter) Dimensions() int {
 // startRetentionWorkerWithLoader spawns the composite retention worker
 // using the supplied loader. No-op when loader is nil so callers can
 // share one loader between the worker and the retrieval ranker.
-func startRetentionWorkerWithLoader(ctx context.Context, store *memory.PostgresMemoryStore, loader memory.PolicyLoader, log logr.Logger) {
+// src is the privacy-api client for the consent-revocation cascade (reader 2);
+// a nil src causes the revocation pass to be skipped safely.
+func startRetentionWorkerWithLoader(
+	ctx context.Context,
+	store *memory.PostgresMemoryStore,
+	loader memory.PolicyLoader,
+	src memory.ConsentRevocationSource,
+	log logr.Logger,
+) {
 	if loader == nil {
 		return
 	}
 	worker := memory.NewRetentionWorker(store, loader, log)
+	worker.SetConsentRevocationSource(src)
 	go worker.Run(ctx)
 }
 
