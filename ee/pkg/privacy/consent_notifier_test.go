@@ -70,8 +70,14 @@ func (s *captureServer) authHeaderAt(i int) string {
 	return s.requests[i].Header.Get("Authorization")
 }
 
-func newTestNotifier(urls []string) *MemoryAPINotifier {
-	return NewMemoryAPINotifier(urls, nil, zap.New(zap.UseDevMode(true)))
+func (s *captureServer) workspaceParamAt(i int) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.requests[i].URL.Query().Get("workspace")
+}
+
+func newTestNotifier(urls []string, workspace string) *MemoryAPINotifier {
+	return NewMemoryAPINotifier(urls, workspace, nil, zap.New(zap.UseDevMode(true)))
 }
 
 // TestConsentNotifier_FanOutToMultipleURLs asserts that NotifyRevocation POSTs
@@ -84,7 +90,7 @@ func TestConsentNotifier_FanOutToMultipleURLs(t *testing.T) {
 	defer ts1.Close()
 	defer ts2.Close()
 
-	n := newTestNotifier([]string{ts1.URL, ts2.URL})
+	n := newTestNotifier([]string{ts1.URL, ts2.URL}, "test-workspace")
 	err := n.NotifyRevocation(t.Context(), "user-123", ConsentMemoryIdentity)
 
 	require.NoError(t, err)
@@ -108,7 +114,7 @@ func TestConsentNotifier_PartialFailure(t *testing.T) {
 	defer tsOK.Close()
 	defer tsFail.Close()
 
-	n := newTestNotifier([]string{tsOK.URL, tsFail.URL})
+	n := newTestNotifier([]string{tsOK.URL, tsFail.URL}, "test-workspace")
 	err := n.NotifyRevocation(t.Context(), "user-abc", ConsentMemoryHealth)
 
 	// Best-effort: error is logged per target but nil is returned to caller.
@@ -119,7 +125,7 @@ func TestConsentNotifier_PartialFailure(t *testing.T) {
 
 // TestConsentNotifier_EmptyURLList asserts that an empty URL list is a no-op.
 func TestConsentNotifier_EmptyURLList(t *testing.T) {
-	n := newTestNotifier(nil)
+	n := newTestNotifier(nil, "test-workspace")
 	err := n.NotifyRevocation(t.Context(), "user-xyz", ConsentMemoryLocation)
 	assert.NoError(t, err)
 }
@@ -136,7 +142,7 @@ func TestConsentNotifier_SATokenAttached(t *testing.T) {
 	require.NoError(t, writeFile(tokenFile, "test-sa-token"))
 	tokenSrc := serviceauth.NewTokenSource(tokenFile, 0)
 
-	n := NewMemoryAPINotifier([]string{ts.URL}, tokenSrc, zap.New(zap.UseDevMode(true)))
+	n := NewMemoryAPINotifier([]string{ts.URL}, "test-workspace", tokenSrc, zap.New(zap.UseDevMode(true)))
 	require.NoError(t, n.NotifyRevocation(t.Context(), "user-tok", ConsentMemoryPreferences))
 
 	assert.Equal(t, "Bearer test-sa-token", srv.authHeaderAt(0))
@@ -156,7 +162,7 @@ func TestConsentNotifier_EnvOverride(t *testing.T) {
 	tsIgnored := httptest.NewServer(srvIgnored.handler())
 	defer tsIgnored.Close()
 
-	n := newTestNotifier([]string{tsIgnored.URL})
+	n := newTestNotifier([]string{tsIgnored.URL}, "test-workspace")
 	require.NoError(t, n.NotifyRevocation(t.Context(), "user-env", ConsentMemoryContext))
 
 	assert.Equal(t, 1, srvEnv.callCount(), "env-var server must be called")
@@ -167,6 +173,37 @@ func TestConsentNotifier_EnvOverride(t *testing.T) {
 func TestNoopConsentNotifier_AlwaysNil(t *testing.T) {
 	var n ConsentNotifier = NoopConsentNotifier{}
 	assert.NoError(t, n.NotifyRevocation(t.Context(), "u", ConsentMemoryIdentity))
+}
+
+// TestConsentNotifier_WorkspaceQueryParam asserts that every POST carries a
+// non-empty ?workspace= query parameter. The memory-api consent-events endpoint
+// calls parseWorkspaceScope which returns 400 ErrMissingWorkspace when it is absent.
+func TestConsentNotifier_WorkspaceQueryParam(t *testing.T) {
+	srv := newCaptureServer(http.StatusOK)
+	ts := httptest.NewServer(srv.handler())
+	defer ts.Close()
+
+	n := newTestNotifier([]string{ts.URL}, "my-workspace")
+	require.NoError(t, n.NotifyRevocation(t.Context(), "user-ws", ConsentMemoryIdentity))
+
+	require.Equal(t, 1, srv.callCount(), "server must receive exactly one POST")
+	assert.Equal(t, "my-workspace", srv.workspaceParamAt(0),
+		"?workspace query param must match the workspace passed to NewMemoryAPINotifier")
+}
+
+// TestConsentNotifier_EmptyWorkspaceOmitsParam asserts that when workspace is
+// empty the URL is sent without a ?workspace= query parameter (edge case: env
+// override with no workspace configured).
+func TestConsentNotifier_EmptyWorkspaceOmitsParam(t *testing.T) {
+	srv := newCaptureServer(http.StatusOK)
+	ts := httptest.NewServer(srv.handler())
+	defer ts.Close()
+
+	n := newTestNotifier([]string{ts.URL}, "")
+	require.NoError(t, n.NotifyRevocation(t.Context(), "user-no-ws", ConsentMemoryIdentity))
+
+	require.Equal(t, 1, srv.callCount())
+	assert.Equal(t, "", srv.workspaceParamAt(0), "empty workspace must not set ?workspace= param")
 }
 
 // writeFile is a small helper to write a string to a file.

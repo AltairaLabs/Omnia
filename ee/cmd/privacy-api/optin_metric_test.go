@@ -40,6 +40,28 @@ func readGauge(t *testing.T, g prometheus.Gauge) float64 {
 	return m.GetGauge().GetValue()
 }
 
+// readGaugeVec extracts the current float64 value from a prometheus.GaugeVec
+// for the given label values.
+func readGaugeVec(t *testing.T, gv *prometheus.GaugeVec, labelValues ...string) float64 {
+	t.Helper()
+	g, err := gv.GetMetricWithLabelValues(labelValues...)
+	require.NoError(t, err)
+	m := &dto.Metric{}
+	require.NoError(t, g.Write(m))
+	return m.GetGauge().GetValue()
+}
+
+// readCounterVec extracts the current float64 value from a prometheus.CounterVec
+// for the given label values.
+func readCounterVec(t *testing.T, cv *prometheus.CounterVec, labelValues ...string) float64 {
+	t.Helper()
+	c, err := cv.GetMetricWithLabelValues(labelValues...)
+	require.NoError(t, err)
+	m := &dto.Metric{}
+	require.NoError(t, c.Write(m))
+	return m.GetCounter().GetValue()
+}
+
 // newTestWorker creates an OptInMetricWorker with a fresh registry.
 func newTestWorker(t *testing.T, store privacy.ConsentStatsReader) *OptInMetricWorker {
 	t.Helper()
@@ -49,6 +71,7 @@ func newTestWorker(t *testing.T, store privacy.ConsentStatsReader) *OptInMetricW
 
 // TestOptInMetricWorker_KnownStats asserts that collect() sets the correct
 // gauge values from a known consent-stats snapshot.
+// Specifically: 4 granted out of 10 total → ratio = 0.4; granted vec = 4; not-granted = 6.
 func TestOptInMetricWorker_KnownStats(t *testing.T) {
 	store := &stubStatsReader{
 		stats: privacy.ConsentStats{
@@ -64,12 +87,14 @@ func TestOptInMetricWorker_KnownStats(t *testing.T) {
 	w := newTestWorker(t, store)
 	w.collect(t.Context())
 
-	assert.InDelta(t, 10.0, readGauge(t, w.usersTotal), 0.001, "usersTotal gauge")
-	assert.InDelta(t, 4.0, readGauge(t, w.optInTotal), 0.001, "optInTotal gauge")
+	assert.InDelta(t, 0.4, readGauge(t, w.optInRatio), 0.001, "optInRatio gauge (4/10=0.4)")
+	assert.InDelta(t, 4.0, readGaugeVec(t, w.usersTotal, "true"), 0.001, "usersTotal{granted=true}")
+	assert.InDelta(t, 6.0, readGaugeVec(t, w.usersTotal, "false"), 0.001, "usersTotal{granted=false}")
 }
 
 // TestOptInMetricWorker_ZeroUsers asserts that with zero users the opt-in
-// gauge stays at its zero-value without any divide-by-zero panic.
+// ratio gauge stays at its zero-value without any divide-by-zero panic, and the
+// user count gauges are set to zero.
 func TestOptInMetricWorker_ZeroUsers(t *testing.T) {
 	store := &stubStatsReader{
 		stats: privacy.ConsentStats{
@@ -84,13 +109,14 @@ func TestOptInMetricWorker_ZeroUsers(t *testing.T) {
 	assert.NotPanics(t, func() {
 		w.collect(t.Context())
 	})
-	assert.InDelta(t, 0.0, readGauge(t, w.usersTotal), 0.001)
-	// opt-in gauge is not updated when users == 0 (guard divide-by-zero path).
-	assert.InDelta(t, 0.0, readGauge(t, w.optInTotal), 0.001)
+	// Ratio gauge is not updated when users == 0 (guard divide-by-zero path).
+	assert.InDelta(t, 0.0, readGauge(t, w.optInRatio), 0.001, "optInRatio must stay 0 when no users")
+	assert.InDelta(t, 0.0, readGaugeVec(t, w.usersTotal, "true"), 0.001, "usersTotal{granted=true} == 0")
+	assert.InDelta(t, 0.0, readGaugeVec(t, w.usersTotal, "false"), 0.001, "usersTotal{granted=false} == 0")
 }
 
 // TestOptInMetricWorker_NoAnalyticsGrants asserts correct gauge values when
-// users exist but none have analytics:aggregate granted.
+// users exist but none have analytics:aggregate granted (ratio == 0.0).
 func TestOptInMetricWorker_NoAnalyticsGrants(t *testing.T) {
 	store := &stubStatsReader{
 		stats: privacy.ConsentStats{
@@ -105,12 +131,13 @@ func TestOptInMetricWorker_NoAnalyticsGrants(t *testing.T) {
 	w := newTestWorker(t, store)
 	w.collect(t.Context())
 
-	assert.InDelta(t, 5.0, readGauge(t, w.usersTotal), 0.001)
-	assert.InDelta(t, 0.0, readGauge(t, w.optInTotal), 0.001)
+	assert.InDelta(t, 0.0, readGauge(t, w.optInRatio), 0.001, "optInRatio == 0 when no analytics grants")
+	assert.InDelta(t, 0.0, readGaugeVec(t, w.usersTotal, "true"), 0.001, "usersTotal{granted=true} == 0")
+	assert.InDelta(t, 5.0, readGaugeVec(t, w.usersTotal, "false"), 0.001, "usersTotal{granted=false} == 5")
 }
 
-// TestOptInMetricWorker_StoreError asserts that a stats error is logged and
-// gauges are left unchanged (worker does not panic or stop).
+// TestOptInMetricWorker_StoreError asserts that a stats error is logged,
+// the worker-errors counter is incremented, and gauges are left unchanged.
 func TestOptInMetricWorker_StoreError(t *testing.T) {
 	store := &stubStatsReader{err: assert.AnError}
 
@@ -120,7 +147,10 @@ func TestOptInMetricWorker_StoreError(t *testing.T) {
 		w.collect(t.Context())
 	})
 	// Gauges remain at their initial zero value.
-	assert.InDelta(t, 0.0, readGauge(t, w.usersTotal), 0.001)
+	assert.InDelta(t, 0.0, readGauge(t, w.optInRatio), 0.001, "optInRatio unchanged on error")
+	// Worker-errors counter must be incremented with reason=query.
+	assert.InDelta(t, 1.0, readCounterVec(t, w.workerErrors, "query"), 0.001,
+		"workerErrors{reason=query} must be incremented on Stats() error")
 }
 
 // TestOptInMetricWorker_RunStopsOnContextCancel asserts that Run returns when

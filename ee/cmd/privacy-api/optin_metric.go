@@ -18,20 +18,31 @@ import (
 	"github.com/altairalabs/omnia/ee/pkg/privacy"
 )
 
+// Metric name constants for the analytics:aggregate opt-in worker.
+// These names match the originals from internal/memory/analytics_optin_metric.go
+// (deleted in CE2); CE3 re-homes the metrics here where the source-of-truth
+// consent data lives.
+const (
+	metricAnalyticsOptInRatio   = "omnia_memory_consent_analytics_optin_ratio"
+	metricAnalyticsUsersTotal   = "omnia_memory_consent_analytics_users_total"
+	metricAnalyticsWorkerErrors = "omnia_memory_consent_analytics_worker_errors_total"
+)
+
 // OptInMetricWorker periodically reads consent stats from the privacy store
 // and updates Prometheus gauges for the analytics opt-in ratio. It relocates
 // the metrics previously owned by the memory-api AnalyticsOptInWorker (CE2
 // deleted that worker; CE3 re-homes the metrics here where the source-of-truth
 // consent data lives).
 type OptInMetricWorker struct {
-	store      privacy.ConsentStatsReader
-	interval   time.Duration
-	log        logr.Logger
-	optInTotal prometheus.Gauge
-	usersTotal prometheus.Gauge
+	store        privacy.ConsentStatsReader
+	interval     time.Duration
+	log          logr.Logger
+	optInRatio   prometheus.Gauge
+	usersTotal   *prometheus.GaugeVec
+	workerErrors *prometheus.CounterVec
 }
 
-// NewOptInMetricWorker creates an OptInMetricWorker and registers its gauges
+// NewOptInMetricWorker creates an OptInMetricWorker and registers its collectors
 // with reg. MustRegister panics on duplicate registration, consistent with
 // one-shot binary startup wiring.
 func NewOptInMetricWorker(
@@ -40,22 +51,27 @@ func NewOptInMetricWorker(
 	reg prometheus.Registerer,
 	log logr.Logger,
 ) *OptInMetricWorker {
-	optIn := prometheus.NewGauge(prometheus.GaugeOpts{
-		Name: "omnia_memory_analytics_optin_total",
-		Help: "Number of users with analytics:aggregate consent granted.",
+	optInRatio := prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: metricAnalyticsOptInRatio,
+		Help: `Fraction of users who have granted the analytics:aggregate consent category (0..1). Global across all workspaces.`,
 	})
-	users := prometheus.NewGauge(prometheus.GaugeOpts{
-		Name: "omnia_memory_users_total",
-		Help: "Total number of users with a privacy-preferences record.",
-	})
-	reg.MustRegister(optIn, users)
+	users := prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: metricAnalyticsUsersTotal,
+		Help: `Absolute count of users with / without the analytics:aggregate consent category. Labels: granted ("true"|"false").`,
+	}, []string{"granted"})
+	workerErrors := prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: metricAnalyticsWorkerErrors,
+		Help: "Errors observed by the analytics opt-in worker. Labels: reason.",
+	}, []string{"reason"})
+	reg.MustRegister(optInRatio, users, workerErrors)
 
 	return &OptInMetricWorker{
-		store:      store,
-		interval:   interval,
-		log:        log.WithName("optin-metric"),
-		optInTotal: optIn,
-		usersTotal: users,
+		store:        store,
+		interval:     interval,
+		log:          log.WithName("optin-metric"),
+		optInRatio:   optInRatio,
+		usersTotal:   users,
+		workerErrors: workerErrors,
 	}
 }
 
@@ -75,19 +91,24 @@ func (w *OptInMetricWorker) Run(ctx context.Context) {
 }
 
 // collect reads the current consent stats and updates the gauges. Errors are
-// logged but do not stop the worker.
+// logged and counted but do not stop the worker.
 func (w *OptInMetricWorker) collect(ctx context.Context) {
 	stats, err := w.store.Stats(ctx)
 	if err != nil {
 		w.log.Error(err, "consent stats query failed")
+		w.workerErrors.WithLabelValues("query").Inc()
 		return
 	}
 
-	w.usersTotal.Set(float64(stats.TotalUsers))
+	granted := stats.GrantsByCategory[string(privacy.ConsentAnalyticsAggregate)]
+	total := stats.TotalUsers
 
-	// Guard divide-by-zero: only set opt-in count when there are users.
-	if stats.TotalUsers > 0 {
-		n := stats.GrantsByCategory[string(privacy.ConsentAnalyticsAggregate)]
-		w.optInTotal.Set(float64(n))
+	w.usersTotal.WithLabelValues("true").Set(float64(granted))
+	w.usersTotal.WithLabelValues("false").Set(float64(total - granted))
+
+	// Leave the ratio gauge unchanged when no users exist — oscillating to 0 on
+	// every empty-DB tick creates misleading dashboards on fresh deployments.
+	if total > 0 {
+		w.optInRatio.Set(float64(granted) / float64(total))
 	}
 }

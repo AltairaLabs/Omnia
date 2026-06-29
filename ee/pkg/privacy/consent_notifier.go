@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -50,27 +51,36 @@ type consentEventBody struct {
 // target never aborts others, and the overall return is always nil so callers
 // never fail a consent write because of a push failure.
 type MemoryAPINotifier struct {
-	urls   []string
-	ts     *serviceauth.TokenSource
-	client *http.Client
-	log    logr.Logger
+	urls      []string
+	workspace string
+	ts        *serviceauth.TokenSource
+	client    *http.Client
+	log       logr.Logger
 }
 
 // NewMemoryAPINotifier creates a MemoryAPINotifier. memoryURLs is the set of
 // memory-api base URLs to fan out to; if MEMORY_API_URLS is non-empty at
-// construction time it overrides memoryURLs entirely (comma-separated). ts is
-// the SA token source used to attach an Authorization: Bearer header; pass nil
-// to send requests unauthenticated (development / tests). An empty URL set is
-// valid and causes NotifyRevocation to be a no-op.
-func NewMemoryAPINotifier(memoryURLs []string, ts *serviceauth.TokenSource, log logr.Logger) *MemoryAPINotifier {
+// construction time it overrides memoryURLs entirely (comma-separated). workspace
+// is appended as a required ?workspace= query parameter on every POST — the
+// memory-api consent-events endpoint returns 400 without it. ts is the SA token
+// source used to attach an Authorization: Bearer header; pass nil to send requests
+// unauthenticated (development / tests). An empty URL set is valid and causes
+// NotifyRevocation to be a no-op.
+func NewMemoryAPINotifier(
+	memoryURLs []string,
+	workspace string,
+	ts *serviceauth.TokenSource,
+	log logr.Logger,
+) *MemoryAPINotifier {
 	if override := os.Getenv("MEMORY_API_URLS"); override != "" {
 		memoryURLs = splitURLList(override)
 	}
 	return &MemoryAPINotifier{
-		urls:   memoryURLs,
-		ts:     ts,
-		client: &http.Client{Timeout: 10 * time.Second},
-		log:    log.WithName("consent-notifier"),
+		urls:      memoryURLs,
+		workspace: workspace,
+		ts:        ts,
+		client:    &http.Client{Timeout: 10 * time.Second},
+		log:       log.WithName("consent-notifier"),
 	}
 }
 
@@ -111,9 +121,12 @@ func (n *MemoryAPINotifier) pushOne(
 	userID string,
 	category ConsentCategory,
 ) error {
-	url := baseURL + "/api/v1/memories/consent-events"
+	target := baseURL + "/api/v1/memories/consent-events"
+	if n.workspace != "" {
+		target = target + "?" + url.Values{"workspace": {n.workspace}}.Encode()
+	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, target, bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("build request: %w", err)
 	}
@@ -127,12 +140,12 @@ func (n *MemoryAPINotifier) pushOne(
 
 	resp, err := n.client.Do(req)
 	if err != nil {
-		return fmt.Errorf("POST %s: %w", url, err)
+		return fmt.Errorf("POST %s: %w", target, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return fmt.Errorf("POST %s returned status %d", url, resp.StatusCode)
+		return fmt.Errorf("POST %s returned status %d", target, resp.StatusCode)
 	}
 
 	n.log.V(1).Info("consent notify sent",

@@ -220,7 +220,7 @@ func run() error {
 	memoryURLs := resolveMemoryURLs(f, log)
 	log.V(1).Info("consent notifier configured", "memoryURLCount", len(memoryURLs))
 	tokenSrc := serviceauth.NewTokenSource("", 0)
-	notifier := privacy.NewMemoryAPINotifier(memoryURLs, tokenSrc, log)
+	notifier := privacy.NewMemoryAPINotifier(memoryURLs, f.workspace, tokenSrc, log)
 
 	// --- Analytics opt-in metric (relocated from memory-api CE2) ---
 	optInWorker := NewOptInMetricWorker(
