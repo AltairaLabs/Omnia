@@ -439,11 +439,11 @@ type notifyCall struct {
 	category ConsentCategory
 }
 
-func (s *spyNotifier) NotifyRevocation(_ context.Context, userID string, category ConsentCategory) error {
+func (s *spyNotifier) NotifyRevocation(_ context.Context, userID string, category ConsentCategory) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.calls = append(s.calls, notifyCall{userID: userID, category: category})
-	return nil
+	return true, nil
 }
 
 func (s *spyNotifier) callCount() int {
@@ -563,8 +563,8 @@ func TestConsentHandlerPUT_NotifierErrorIsSwallowed(t *testing.T) {
 // errorNotifier always returns an error from NotifyRevocation.
 type errorNotifier struct{}
 
-func (errorNotifier) NotifyRevocation(_ context.Context, _ string, _ ConsentCategory) error {
-	return errors.New("simulated notifier failure")
+func (errorNotifier) NotifyRevocation(_ context.Context, _ string, _ ConsentCategory) (bool, error) {
+	return false, errors.New("simulated notifier failure")
 }
 
 func TestConsentHandlerPUT_MixedGrantsAndRevocations(t *testing.T) {

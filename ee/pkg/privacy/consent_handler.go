@@ -162,7 +162,8 @@ func (h *ConsentHandler) applyRevocations(r *http.Request, userID string, revoca
 		}
 		h.emitAudit(r, "consent_revoked", userID, cat)
 		if h.notifier != nil {
-			if notifyErr := h.notifier.NotifyRevocation(r.Context(), userID, cat); notifyErr != nil {
+			_, notifyErr := h.notifier.NotifyRevocation(r.Context(), userID, cat)
+			if notifyErr != nil {
 				// Best-effort: log but do not fail the request.
 				h.log.Error(notifyErr, "consent notify error",
 					"userHash", logging.HashID(userID),

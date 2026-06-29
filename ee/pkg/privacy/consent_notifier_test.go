@@ -91,9 +91,10 @@ func TestConsentNotifier_FanOutToMultipleURLs(t *testing.T) {
 	defer ts2.Close()
 
 	n := newTestNotifier([]string{ts1.URL, ts2.URL}, "test-workspace")
-	err := n.NotifyRevocation(t.Context(), "user-123", ConsentMemoryIdentity)
+	delivered, err := n.NotifyRevocation(t.Context(), "user-123", ConsentMemoryIdentity)
 
 	require.NoError(t, err)
+	assert.True(t, delivered, "all targets 2xx → delivered must be true")
 	assert.Equal(t, 1, srv1.callCount(), "server 1 should receive exactly one POST")
 	assert.Equal(t, 1, srv2.callCount(), "server 2 should receive exactly one POST")
 
@@ -105,7 +106,8 @@ func TestConsentNotifier_FanOutToMultipleURLs(t *testing.T) {
 }
 
 // TestConsentNotifier_PartialFailure asserts that a 500 from one target does
-// not abort the fan-out to the other target, and that nil is returned.
+// not abort the fan-out to the other target, that nil error is returned, and
+// that delivered is false when any target fails.
 func TestConsentNotifier_PartialFailure(t *testing.T) {
 	srvOK := newCaptureServer(http.StatusOK)
 	srvFail := newCaptureServer(http.StatusInternalServerError)
@@ -115,19 +117,23 @@ func TestConsentNotifier_PartialFailure(t *testing.T) {
 	defer tsFail.Close()
 
 	n := newTestNotifier([]string{tsOK.URL, tsFail.URL}, "test-workspace")
-	err := n.NotifyRevocation(t.Context(), "user-abc", ConsentMemoryHealth)
+	delivered, err := n.NotifyRevocation(t.Context(), "user-abc", ConsentMemoryHealth)
 
 	// Best-effort: error is logged per target but nil is returned to caller.
 	assert.NoError(t, err, "partial failure must not surface as an error")
+	assert.False(t, delivered, "any target failure → delivered must be false")
+	// Fan-out must continue to remaining targets despite the failure.
 	assert.Equal(t, 1, srvOK.callCount(), "healthy server must still be called")
 	assert.Equal(t, 1, srvFail.callCount(), "failing server must be called too")
 }
 
-// TestConsentNotifier_EmptyURLList asserts that an empty URL list is a no-op.
+// TestConsentNotifier_EmptyURLList asserts that an empty URL list is a no-op
+// and reports delivered=true (nothing to deliver → vacuously delivered).
 func TestConsentNotifier_EmptyURLList(t *testing.T) {
 	n := newTestNotifier(nil, "test-workspace")
-	err := n.NotifyRevocation(t.Context(), "user-xyz", ConsentMemoryLocation)
+	delivered, err := n.NotifyRevocation(t.Context(), "user-xyz", ConsentMemoryLocation)
 	assert.NoError(t, err)
+	assert.True(t, delivered, "empty URL set → delivered must be true")
 }
 
 // TestConsentNotifier_SATokenAttached asserts that the Authorization header is
@@ -143,7 +149,9 @@ func TestConsentNotifier_SATokenAttached(t *testing.T) {
 	tokenSrc := serviceauth.NewTokenSource(tokenFile, 0)
 
 	n := NewMemoryAPINotifier([]string{ts.URL}, "test-workspace", tokenSrc, zap.New(zap.UseDevMode(true)))
-	require.NoError(t, n.NotifyRevocation(t.Context(), "user-tok", ConsentMemoryPreferences))
+	delivered, err := n.NotifyRevocation(t.Context(), "user-tok", ConsentMemoryPreferences)
+	require.NoError(t, err)
+	assert.True(t, delivered)
 
 	assert.Equal(t, "Bearer test-sa-token", srv.authHeaderAt(0))
 }
@@ -163,16 +171,20 @@ func TestConsentNotifier_EnvOverride(t *testing.T) {
 	defer tsIgnored.Close()
 
 	n := newTestNotifier([]string{tsIgnored.URL}, "test-workspace")
-	require.NoError(t, n.NotifyRevocation(t.Context(), "user-env", ConsentMemoryContext))
+	_, err := n.NotifyRevocation(t.Context(), "user-env", ConsentMemoryContext)
+	require.NoError(t, err)
 
 	assert.Equal(t, 1, srvEnv.callCount(), "env-var server must be called")
 	assert.Equal(t, 0, srvIgnored.callCount(), "constructor URL must be ignored when env var is set")
 }
 
-// TestNoopConsentNotifier_AlwaysNil confirms the no-op notifier never errors.
-func TestNoopConsentNotifier_AlwaysNil(t *testing.T) {
+// TestNoopConsentNotifier_AlwaysDelivered confirms the no-op notifier returns
+// delivered=true and a nil error.
+func TestNoopConsentNotifier_AlwaysDelivered(t *testing.T) {
 	var n ConsentNotifier = NoopConsentNotifier{}
-	assert.NoError(t, n.NotifyRevocation(t.Context(), "u", ConsentMemoryIdentity))
+	delivered, err := n.NotifyRevocation(t.Context(), "u", ConsentMemoryIdentity)
+	assert.NoError(t, err)
+	assert.True(t, delivered, "noop → vacuously delivered")
 }
 
 // TestConsentNotifier_WorkspaceQueryParam asserts that every POST carries a
@@ -184,7 +196,8 @@ func TestConsentNotifier_WorkspaceQueryParam(t *testing.T) {
 	defer ts.Close()
 
 	n := newTestNotifier([]string{ts.URL}, "my-workspace")
-	require.NoError(t, n.NotifyRevocation(t.Context(), "user-ws", ConsentMemoryIdentity))
+	_, err := n.NotifyRevocation(t.Context(), "user-ws", ConsentMemoryIdentity)
+	require.NoError(t, err)
 
 	require.Equal(t, 1, srv.callCount(), "server must receive exactly one POST")
 	assert.Equal(t, "my-workspace", srv.workspaceParamAt(0),
@@ -200,7 +213,8 @@ func TestConsentNotifier_EmptyWorkspaceOmitsParam(t *testing.T) {
 	defer ts.Close()
 
 	n := newTestNotifier([]string{ts.URL}, "")
-	require.NoError(t, n.NotifyRevocation(t.Context(), "user-no-ws", ConsentMemoryIdentity))
+	_, err := n.NotifyRevocation(t.Context(), "user-no-ws", ConsentMemoryIdentity)
+	require.NoError(t, err)
 
 	require.Equal(t, 1, srv.callCount())
 	assert.Equal(t, "", srv.workspaceParamAt(0), "empty workspace must not set ?workspace= param")
