@@ -28,7 +28,6 @@ import (
 	"github.com/go-logr/logr"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
-	eememory "github.com/altairalabs/omnia/ee/pkg/memory"
 	"github.com/altairalabs/omnia/internal/memory"
 	"github.com/altairalabs/omnia/internal/memory/ingestion"
 )
@@ -127,14 +126,14 @@ type MemoryAuditEntry struct {
 // MemoryService wraps the memory store with business logic for the HTTP layer.
 type MemoryService struct {
 	store              memory.Store
-	institutional      eememory.InstitutionalStore // nil unless enterprise (set via SetInstitutionalStore)
-	embeddingSvc       *memory.EmbeddingService    // nil if embeddings not configured
-	eventPublisher     MemoryEventPublisher        // nil if event publishing not configured
-	auditLogger        MemoryAuditLogger           // nil if audit logging not configured
-	policyLoader       memory.PolicyLoader         // nil if no MemoryPolicy resolution wired
-	consentEventPruner memory.ConsentEventPruner   // nil if not wired; used by PruneUserConsentCategory
-	ingestFallback     ingestion.Config            // default ingestion config (from --ingest-* flags)
-	summaryQueue       ingestion.SummaryQueue      // nil disables the agent path (falls back to extractive)
+	institutional      memory.InstitutionalStore // nil unless enterprise (set via SetInstitutionalStore)
+	embeddingSvc       *memory.EmbeddingService  // nil if embeddings not configured
+	eventPublisher     MemoryEventPublisher      // nil if event publishing not configured
+	auditLogger        MemoryAuditLogger         // nil if audit logging not configured
+	policyLoader       memory.PolicyLoader       // nil if no MemoryPolicy resolution wired
+	consentEventPruner memory.ConsentEventPruner // nil if not wired; used by PruneUserConsentCategory
+	ingestFallback     ingestion.Config          // default ingestion config (from --ingest-* flags)
+	summaryQueue       ingestion.SummaryQueue    // nil disables the agent path (falls back to extractive)
 	config             MemoryServiceConfig
 	log                logr.Logger
 	enterprise         bool
@@ -161,7 +160,7 @@ func (s *MemoryService) SetEventPublisher(p MemoryEventPublisher) {
 // SetInstitutionalStore wires the enterprise institutional admin store. Called
 // once at startup under --enterprise; left nil otherwise (the institutional
 // HTTP routes are requireEnterprise-gated so they never reach a nil store).
-func (s *MemoryService) SetInstitutionalStore(store eememory.InstitutionalStore) {
+func (s *MemoryService) SetInstitutionalStore(store memory.InstitutionalStore) {
 	s.institutional = store
 }
 

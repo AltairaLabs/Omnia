@@ -17,7 +17,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	eememory "github.com/altairalabs/omnia/ee/pkg/memory"
 	"github.com/altairalabs/omnia/internal/memory"
 )
 
@@ -159,12 +158,12 @@ func TestDeleteInstitutionalMemory_ForwardsAndEmitsAudit(t *testing.T) {
 }
 
 func TestDeleteInstitutionalMemory_PropagatesNotInstitutional(t *testing.T) {
-	store := &institutionalStub{deleteErr: eememory.ErrNotInstitutional}
+	store := &institutionalStub{deleteErr: memory.ErrNotInstitutional}
 	svc, audit := newInstitutionalService(t, store)
 
 	err := svc.DeleteInstitutionalMemory(context.Background(), "ws-1", "m-1")
 	require.Error(t, err)
-	assert.ErrorIs(t, err, eememory.ErrNotInstitutional)
+	assert.ErrorIs(t, err, memory.ErrNotInstitutional)
 
 	select {
 	case e := <-audit.entries:

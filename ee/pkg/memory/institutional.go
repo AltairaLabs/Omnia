@@ -29,20 +29,7 @@ const (
 	institutionalSourceType = "operator_curated"
 )
 
-// ErrNotInstitutional is returned when DeleteInstitutional is called with a
-// memory ID that belongs to a user- or agent-scoped row. Callers MUST use
-// errors.Is against this sentinel so the HTTP handler in the institutional
-// admin API can map it to a 400 response rather than a 500.
-var ErrNotInstitutional = errors.New("memory: target is not an institutional memory")
-
-// InstitutionalStore is the enterprise admin surface for workspace-scoped memories.
-type InstitutionalStore interface {
-	SaveInstitutional(ctx context.Context, mem *ossmemory.Memory) error
-	ListInstitutional(ctx context.Context, workspaceID string, opts ossmemory.ListOptions) ([]*ossmemory.Memory, error)
-	DeleteInstitutional(ctx context.Context, workspaceID, memoryID string) error
-}
-
-// PostgresInstitutionalStore implements InstitutionalStore directly against the pool.
+// PostgresInstitutionalStore implements ossmemory.InstitutionalStore directly against the pool.
 type PostgresInstitutionalStore struct {
 	pool *pgxpool.Pool
 	log  logr.Logger
@@ -53,8 +40,8 @@ func NewInstitutionalStore(pool *pgxpool.Pool, log logr.Logger) *PostgresInstitu
 	return &PostgresInstitutionalStore{pool: pool, log: log.WithName("institutional-store")}
 }
 
-// var assertion so the concrete type provably satisfies the interface.
-var _ InstitutionalStore = (*PostgresInstitutionalStore)(nil)
+// var assertion so the concrete type provably satisfies the core interface.
+var _ ossmemory.InstitutionalStore = (*PostgresInstitutionalStore)(nil)
 
 // SaveInstitutional persists a workspace-scoped memory with no user_id and no
 // agent_id. Provenance is forced to operator_curated and trust_model to
@@ -245,7 +232,7 @@ func (s *PostgresInstitutionalStore) DeleteInstitutional(ctx context.Context, wo
 		return fmt.Errorf("memory: lookup institutional: %w", err)
 	}
 	if userID != nil || agentID != nil {
-		return ErrNotInstitutional
+		return ossmemory.ErrNotInstitutional
 	}
 	tag, err := s.pool.Exec(ctx, `
 		UPDATE memory_entities SET forgotten = true, updated_at = now()

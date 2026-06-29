@@ -20,6 +20,7 @@ package memory
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -31,6 +32,21 @@ import (
 // the relocated tier ranker needs, WITHOUT exposing the concrete store. The
 // helpers themselves stay OSS (they are shared with the Save/agent-scoped
 // paths); only the institutional/ranking *callers* moved to EE.
+
+// InstitutionalStore is the enterprise admin surface for workspace-scoped
+// memories. Defined here (OSS core) so the enterprise implementation in
+// ee/pkg/memory satisfies it without inverting the core→EE dependency direction.
+type InstitutionalStore interface {
+	SaveInstitutional(ctx context.Context, mem *Memory) error
+	ListInstitutional(ctx context.Context, workspaceID string, opts ListOptions) ([]*Memory, error)
+	DeleteInstitutional(ctx context.Context, workspaceID, memoryID string) error
+}
+
+// ErrNotInstitutional is returned when DeleteInstitutional is called with a
+// memory ID that belongs to a user- or agent-scoped row. Callers MUST use
+// errors.Is against this sentinel so the HTTP handler can map it to a 400
+// response rather than a 500.
+var ErrNotInstitutional = errors.New("memory: target is not an institutional memory")
 
 // HasAboutKey reports whether the memory carries both about_kind and about_key
 // metadata (the structured-dedup signal). Exported for the EE institutional store.

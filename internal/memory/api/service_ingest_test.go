@@ -37,7 +37,7 @@ const (
 	testTwoSentences = "First sentence. Second sentence."
 )
 
-// recordingInstitutionalStore implements eememory.InstitutionalStore and
+// recordingInstitutionalStore implements InstitutionalStore and
 // records SaveInstitutional calls for assertion.
 type recordingInstitutionalStore struct {
 	saved []*memory.Memory

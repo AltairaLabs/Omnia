@@ -174,7 +174,7 @@ type SaveResult struct {
 // RetrieveMultiTier runs a single query across institutional, agent, user and
 // user-for-agent tiers and returns ranked results for RAG context injection.
 // The institutional admin path (workspace-scoped memories, no user_id/agent_id)
-// is not part of this OSS interface — it lives in ee/pkg/memory (InstitutionalStore).
+// is not part of this OSS Store interface — it is served by InstitutionalStore (ee_seam.go).
 // The three AgentScoped methods mirror the institutional admin path but for
 // (workspace, agent) rows (user_id IS NULL, agent_id = X) — see
 // agent_scoped.go. They power operator-curated agent policies and training
