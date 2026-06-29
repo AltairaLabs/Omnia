@@ -102,11 +102,20 @@ func (r *WorkspaceReconciler) reconcileServices(ctx context.Context, workspace *
 // reconciliation after the per-service-group loop. The privacy-api is
 // per-workspace (not per-service-group), so it lives outside the group loop.
 //
-// Gate: Spec.Privacy must be non-nil and ServiceBuilder.PrivacyImage must be
-// set. When either condition is false, PrivacyURL is cleared and the function
-// returns without creating any resources.
+// Gate: when Spec.Privacy is nil, any existing privacy-<ws> resources are
+// torn down (cleanupPrivacyService). When PrivacyImage is absent (operator
+// misconfig), we skip without teardown — an operator upgrade should not
+// destroy a running deployment. When both gates pass, resources are
+// created/updated.
 func (r *WorkspaceReconciler) reconcilePrivacyService(ctx context.Context, workspace *omniav1alpha1.Workspace) error {
-	if workspace.Spec.Privacy == nil || r.ServiceBuilder == nil || r.ServiceBuilder.PrivacyImage == "" {
+	if workspace.Spec.Privacy == nil {
+		if err := r.cleanupPrivacyService(ctx, workspace); err != nil {
+			return err
+		}
+		workspace.Status.PrivacyURL = ""
+		return nil
+	}
+	if r.ServiceBuilder == nil || r.ServiceBuilder.PrivacyImage == "" {
 		workspace.Status.PrivacyURL = ""
 		return nil
 	}
@@ -139,6 +148,66 @@ func (r *WorkspaceReconciler) reconcilePrivacyService(ctx context.Context, works
 	}
 
 	workspace.Status.PrivacyURL = ServiceURL(depName, namespace)
+	return nil
+}
+
+// cleanupPrivacyService deletes all per-workspace privacy-<ws> resources when
+// spec.privacy is removed from a live Workspace. The Deployment, Service, and
+// ServiceAccount carry owner-references to the Workspace and would be GC'd on
+// Workspace deletion, but they are NOT cleaned up when only spec.privacy is
+// removed. The two ClusterRoleBindings are cluster-scoped and are never
+// covered by owner-ref GC, so they must always be deleted explicitly here.
+// NotFound errors are ignored so the function is idempotent.
+func (r *WorkspaceReconciler) cleanupPrivacyService(ctx context.Context, workspace *omniav1alpha1.Workspace) error {
+	namespace := workspace.Spec.Namespace.Name
+	depName := fmt.Sprintf("privacy-%s", workspace.Name)
+
+	if err := r.deletePrivacyNamespacedResource(ctx, &appsv1.Deployment{}, depName, namespace); err != nil {
+		return fmt.Errorf("delete privacy deployment: %w", err)
+	}
+	if err := r.deletePrivacyNamespacedResource(ctx, &corev1.Service{}, depName, namespace); err != nil {
+		return fmt.Errorf("delete privacy service: %w", err)
+	}
+	if err := r.deletePrivacyNamespacedResource(ctx, &corev1.ServiceAccount{}, depName, namespace); err != nil {
+		return fmt.Errorf("delete privacy service account: %w", err)
+	}
+
+	tokenReviewCRBName := fmt.Sprintf("session-tokenreview-%s-%s", namespace, depName)
+	if err := r.deletePrivacyCRB(ctx, tokenReviewCRBName); err != nil {
+		return fmt.Errorf("delete privacy tokenreview CRB: %w", err)
+	}
+
+	enterpriseReaderCRBName := fmt.Sprintf("memory-enterprise-reader-%s-%s", namespace, depName)
+	if err := r.deletePrivacyCRB(ctx, enterpriseReaderCRBName); err != nil {
+		return fmt.Errorf("delete privacy enterprise-reader CRB: %w", err)
+	}
+
+	return nil
+}
+
+// deletePrivacyNamespacedResource deletes a namespaced Kubernetes object,
+// ignoring NotFound errors so the cleanup is idempotent.
+func (r *WorkspaceReconciler) deletePrivacyNamespacedResource(
+	ctx context.Context,
+	obj client.Object,
+	name, namespace string,
+) error {
+	obj.SetName(name)
+	obj.SetNamespace(namespace)
+	if err := r.Delete(ctx, obj); err != nil && !apierrors.IsNotFound(err) {
+		return err
+	}
+	return nil
+}
+
+// deletePrivacyCRB deletes a ClusterRoleBinding by name, ignoring NotFound so
+// the cleanup is idempotent.
+func (r *WorkspaceReconciler) deletePrivacyCRB(ctx context.Context, name string) error {
+	crb := &rbacv1.ClusterRoleBinding{}
+	crb.Name = name
+	if err := r.Delete(ctx, crb); err != nil && !apierrors.IsNotFound(err) {
+		return err
+	}
 	return nil
 }
 

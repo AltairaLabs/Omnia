@@ -24,6 +24,7 @@ import (
 	. "github.com/onsi/gomega"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8sruntime "k8s.io/apimachinery/pkg/runtime"
@@ -40,6 +41,7 @@ func testScheme() *k8sruntime.Scheme {
 	_ = omniav1alpha1.AddToScheme(s)
 	_ = corev1.AddToScheme(s)
 	_ = appsv1.AddToScheme(s)
+	_ = networkingv1.AddToScheme(s)
 	_ = rbacv1.AddToScheme(s)
 	return s
 }
@@ -584,6 +586,70 @@ func TestReconcilePrivacyService_NilPrivacySpec(t *testing.T) {
 	privDep := &appsv1.Deployment{}
 	err = r.Get(ctx, types.NamespacedName{Name: testPrivacyDeployName, Namespace: "myws-ns"}, privDep)
 	g.Expect(err).To(HaveOccurred(), "no privacy deployment should be created when Spec.Privacy is nil")
+
+	// PrivacyURL must be cleared.
+	g.Expect(ws.Status.PrivacyURL).To(BeEmpty())
+}
+
+// TestReconcilePrivacyService_RemovalTearsDownResources verifies that when
+// workspace.Spec.Privacy is removed from a live Workspace, the operator
+// deletes all privacy-<ws> resources: Deployment, Service, ServiceAccount,
+// and both ClusterRoleBindings (tokenreview + enterprise-reader).
+func TestReconcilePrivacyService_RemovalTearsDownResources(t *testing.T) {
+	g := NewWithT(t)
+	scheme := testScheme()
+
+	ws := newTestWorkspace("myws", "myws-ns", nil)
+	ws.Spec.Privacy = &omniav1alpha1.PrivacyServiceConfig{
+		Database: omniav1alpha1.DatabaseConfig{
+			SecretRef: corev1.LocalObjectReference{Name: "privacy-db"},
+		},
+	}
+
+	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "myws-ns"}}
+	r := newTestReconciler(scheme, ws, ns)
+	r.ServiceBuilder.PrivacyImage = "ghcr.io/altairalabs/omnia-privacy-api:test"
+	r.ServiceBuilder.PrivacyImagePullPolicy = corev1.PullIfNotPresent
+	r.ServiceBuilder.ServiceAuth = ServiceAuthConfig{Enabled: true}
+	r.SessionAPITokenReviewClusterRole = "omnia-session-tokenreview"
+	r.MemoryEnterpriseReaderClusterRole = "omnia-enterprise-reader"
+
+	ctx := context.Background()
+
+	// Phase 1: reconcile with Privacy set all resources should exist.
+	err := r.reconcileServices(ctx, ws)
+	g.Expect(err).NotTo(HaveOccurred())
+
+	g.Expect(r.Get(ctx, types.NamespacedName{Name: testPrivacyDeployName, Namespace: "myws-ns"}, &appsv1.Deployment{})).To(Succeed())
+	g.Expect(r.Get(ctx, types.NamespacedName{Name: testPrivacyDeployName, Namespace: "myws-ns"}, &corev1.Service{})).To(Succeed())
+	g.Expect(r.Get(ctx, types.NamespacedName{Name: testPrivacyDeployName, Namespace: "myws-ns"}, &corev1.ServiceAccount{})).To(Succeed())
+
+	tokenReviewCRBName := "session-tokenreview-myws-ns-" + testPrivacyDeployName
+	g.Expect(r.Get(ctx, types.NamespacedName{Name: tokenReviewCRBName}, &rbacv1.ClusterRoleBinding{})).To(Succeed())
+
+	enterpriseReaderCRBName := "memory-enterprise-reader-myws-ns-" + testPrivacyDeployName
+	g.Expect(r.Get(ctx, types.NamespacedName{Name: enterpriseReaderCRBName}, &rbacv1.ClusterRoleBinding{})).To(Succeed())
+
+	// Phase 2: remove Spec.Privacy and reconcile again.
+	ws.Spec.Privacy = nil
+	err = r.reconcileServices(ctx, ws)
+	g.Expect(err).NotTo(HaveOccurred())
+
+	// All privacy resources must be gone.
+	g.Expect(r.Get(ctx, types.NamespacedName{Name: testPrivacyDeployName, Namespace: "myws-ns"}, &appsv1.Deployment{})).
+		To(MatchError(ContainSubstring("not found")), "privacy Deployment must be deleted")
+
+	g.Expect(r.Get(ctx, types.NamespacedName{Name: testPrivacyDeployName, Namespace: "myws-ns"}, &corev1.Service{})).
+		To(MatchError(ContainSubstring("not found")), "privacy Service must be deleted")
+
+	g.Expect(r.Get(ctx, types.NamespacedName{Name: testPrivacyDeployName, Namespace: "myws-ns"}, &corev1.ServiceAccount{})).
+		To(MatchError(ContainSubstring("not found")), "privacy ServiceAccount must be deleted")
+
+	g.Expect(r.Get(ctx, types.NamespacedName{Name: tokenReviewCRBName}, &rbacv1.ClusterRoleBinding{})).
+		To(MatchError(ContainSubstring("not found")), "privacy tokenreview CRB must be deleted")
+
+	g.Expect(r.Get(ctx, types.NamespacedName{Name: enterpriseReaderCRBName}, &rbacv1.ClusterRoleBinding{})).
+		To(MatchError(ContainSubstring("not found")), "privacy enterprise-reader CRB must be deleted")
 
 	// PrivacyURL must be cleared.
 	g.Expect(ws.Status.PrivacyURL).To(BeEmpty())
