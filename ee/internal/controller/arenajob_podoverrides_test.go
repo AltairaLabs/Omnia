@@ -75,6 +75,7 @@ func TestApplyWorkerPodOverrides_AllFields(t *testing.T) {
 	require.Equal(t, "batch", spec.NodeSelector["workload"])
 	require.NotEmpty(t, spec.ImagePullSecrets)
 	require.Equal(t, "regcred", spec.ImagePullSecrets[0].Name)
+	require.NotEmpty(t, spec.Volumes)
 	require.Equal(t, "kv", spec.Volumes[0].Name)
 
 	c := spec.Containers[0]

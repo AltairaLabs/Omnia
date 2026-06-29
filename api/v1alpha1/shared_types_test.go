@@ -15,14 +15,10 @@ func TestPodOverridesDeepCopy(t *testing.T) {
 		Tolerations: []corev1.Toleration{{
 			Key: "nvidia.com/gpu", Operator: corev1.TolerationOpExists,
 		}},
-		Affinity:                  &corev1.Affinity{NodeAffinity: &corev1.NodeAffinity{}},
-		PriorityClassName:         "high-priority",
-		TopologySpreadConstraints: []corev1.TopologySpreadConstraint{{MaxSkew: 1}},
-		ImagePullSecrets:          []corev1.LocalObjectReference{{Name: "regcred"}},
-		ExtraEnv:                  []corev1.EnvVar{{Name: "FOO", Value: "bar"}},
-		ExtraEnvFrom:              []corev1.EnvFromSource{{SecretRef: &corev1.SecretEnvSource{LocalObjectReference: corev1.LocalObjectReference{Name: "kv-secret"}}}},
-		ExtraVolumes:              []corev1.Volume{{Name: "kv"}},
-		ExtraVolumeMounts:         []corev1.VolumeMount{{Name: "kv", MountPath: "/mnt/kv"}},
+		PriorityClassName: "high-priority",
+		ImagePullSecrets:  []corev1.LocalObjectReference{{Name: "regcred"}},
+		ExtraEnv:          []corev1.EnvVar{{Name: "FOO", Value: "bar"}},
+		ExtraEnvFrom:      []corev1.EnvFromSource{{SecretRef: &corev1.SecretEnvSource{LocalObjectReference: corev1.LocalObjectReference{Name: "kv-secret"}}}},
 	}
 
 	out := in.DeepCopy()

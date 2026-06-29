@@ -3421,18 +3421,6 @@ func (in *PodOverrides) DeepCopyInto(out *PodOverrides) {
 			(*in)[i].DeepCopyInto(&(*out)[i])
 		}
 	}
-	if in.Affinity != nil {
-		in, out := &in.Affinity, &out.Affinity
-		*out = new(corev1.Affinity)
-		(*in).DeepCopyInto(*out)
-	}
-	if in.TopologySpreadConstraints != nil {
-		in, out := &in.TopologySpreadConstraints, &out.TopologySpreadConstraints
-		*out = make([]corev1.TopologySpreadConstraint, len(*in))
-		for i := range *in {
-			(*in)[i].DeepCopyInto(&(*out)[i])
-		}
-	}
 	if in.ImagePullSecrets != nil {
 		in, out := &in.ImagePullSecrets, &out.ImagePullSecrets
 		*out = make([]corev1.LocalObjectReference, len(*in))

@@ -22,12 +22,11 @@ import corev1 "k8s.io/api/core/v1"
 // overrides applied to every operator-generated Pod. All fields optional.
 //
 // Pod-level fields (serviceAccountName, labels, annotations, nodeSelector,
-// tolerations, affinity, priorityClassName, topologySpreadConstraints,
-// imagePullSecrets) are merged into the PodSpec.
+// tolerations, priorityClassName, imagePullSecrets, extraVolumes) are merged
+// into the PodSpec.
 //
 // Container-level fields (extraEnv, extraEnvFrom, extraVolumeMounts) are
-// appended to every non-operator-injected container in the pod. extraVolumes
-// are appended to the PodSpec and available to all containers.
+// appended to every non-operator-injected container in the pod.
 //
 // Existing per-CRD hooks (e.g. FacadeConfig.ExtraEnv, RuntimeConfig.NodeSelector)
 // take precedence; PodOverrides values are merged/concatenated after them.
@@ -54,17 +53,9 @@ type PodOverrides struct {
 	// +optional
 	Tolerations []corev1.Toleration `json:"tolerations,omitempty"`
 
-	// affinity replaces the operator-default affinity when set.
-	// +optional
-	Affinity *corev1.Affinity `json:"affinity,omitempty"`
-
 	// priorityClassName overrides the operator-default priority class when set.
 	// +optional
 	PriorityClassName string `json:"priorityClassName,omitempty"`
-
-	// topologySpreadConstraints are appended to the pod's constraints.
-	// +optional
-	TopologySpreadConstraints []corev1.TopologySpreadConstraint `json:"topologySpreadConstraints,omitempty"`
 
 	// imagePullSecrets are appended to the pod's imagePullSecrets.
 	// +optional
@@ -78,11 +69,18 @@ type PodOverrides struct {
 	// +optional
 	ExtraEnvFrom []corev1.EnvFromSource `json:"extraEnvFrom,omitempty"`
 
-	// extraVolumes are appended to the PodSpec.Volumes.
+	// extraVolumes are appended to the PodSpec.Volumes. Schemaless to avoid
+	// inlining the full corev1.Volume union (~30 volume types) into the CRD;
+	// validated by the apiserver at Deployment apply.
+	// +kubebuilder:validation:Schemaless
+	// +kubebuilder:pruning:PreserveUnknownFields
 	// +optional
 	ExtraVolumes []corev1.Volume `json:"extraVolumes,omitempty"`
 
-	// extraVolumeMounts are appended to every non-operator-injected container's volumeMounts.
+	// extraVolumeMounts are appended to every non-operator-injected container's
+	// volumeMounts. Schemaless (see extraVolumes).
+	// +kubebuilder:validation:Schemaless
+	// +kubebuilder:pruning:PreserveUnknownFields
 	// +optional
 	ExtraVolumeMounts []corev1.VolumeMount `json:"extraVolumeMounts,omitempty"`
 }

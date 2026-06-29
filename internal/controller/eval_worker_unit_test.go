@@ -65,9 +65,9 @@ func TestBuildEvalWorkerDeployment_PodOverrides(t *testing.T) {
 				PodOverrides: &omniav1alpha1.PodOverrides{
 					ServiceAccountName: "eval-sa",
 					NodeSelector:       map[string]string{"workload": "batch"},
-					ExtraEnv:           []corev1.EnvVar{{Name: "JUDGE_API_KEY_FILE", Value: "/mnt/kv/key"}},
 					ExtraVolumes:       []corev1.Volume{{Name: "kv"}},
 					ExtraVolumeMounts:  []corev1.VolumeMount{{Name: "kv", MountPath: "/mnt/kv"}},
+					ExtraEnv:           []corev1.EnvVar{{Name: "JUDGE_API_KEY_FILE", Value: "/mnt/kv/key"}},
 				},
 			},
 		},
