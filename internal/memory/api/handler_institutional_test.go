@@ -20,7 +20,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	eememory "github.com/altairalabs/omnia/ee/pkg/memory"
 	"github.com/altairalabs/omnia/internal/memory"
 )
 
@@ -226,7 +225,7 @@ func TestHandleDeleteInstitutional_RejectsMissingWorkspace(t *testing.T) {
 }
 
 func TestHandleDeleteInstitutional_NonInstitutionalReturns400(t *testing.T) {
-	stub := &institutionalStub{deleteErr: eememory.ErrNotInstitutional}
+	stub := &institutionalStub{deleteErr: memory.ErrNotInstitutional}
 	mux := newInstitutionalHandler(t, stub)
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/v1/institutional/memories/m-1?workspace=ws-1", nil)

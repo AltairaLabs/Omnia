@@ -24,7 +24,6 @@ import (
 	"net/http"
 	"time"
 
-	eememory "github.com/altairalabs/omnia/ee/pkg/memory"
 	"github.com/altairalabs/omnia/internal/httputil"
 	"github.com/altairalabs/omnia/internal/memory"
 )
@@ -142,7 +141,7 @@ func (h *Handler) handleDeleteInstitutional(w http.ResponseWriter, r *http.Reque
 
 	err := h.service.DeleteInstitutionalMemory(r.Context(), workspace, id)
 	if err != nil {
-		if errors.Is(err, eememory.ErrNotInstitutional) {
+		if errors.Is(err, memory.ErrNotInstitutional) {
 			writeNotInstitutionalError(w)
 			return
 		}
@@ -159,5 +158,5 @@ func (h *Handler) handleDeleteInstitutional(w http.ResponseWriter, r *http.Reque
 func writeNotInstitutionalError(w http.ResponseWriter) {
 	w.Header().Set(httputil.HeaderContentType, httputil.ContentTypeJSON)
 	w.WriteHeader(http.StatusBadRequest)
-	_ = json.NewEncoder(w).Encode(ErrorResponse{Error: eememory.ErrNotInstitutional.Error()})
+	_ = json.NewEncoder(w).Encode(ErrorResponse{Error: memory.ErrNotInstitutional.Error()})
 }

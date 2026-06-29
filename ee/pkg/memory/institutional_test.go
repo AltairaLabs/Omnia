@@ -190,8 +190,8 @@ func TestDeleteInstitutional_SoftDeletesOnlyInstitutional(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected DeleteInstitutional to refuse user-scoped row")
 	}
-	if !errors.Is(err, ErrNotInstitutional) {
-		t.Errorf("err=%v, want ErrNotInstitutional (errors.Is)", err)
+	if !errors.Is(err, ossmemory.ErrNotInstitutional) {
+		t.Errorf("err=%v, want ossmemory.ErrNotInstitutional (errors.Is)", err)
 	}
 }
 
