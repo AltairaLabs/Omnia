@@ -151,6 +151,7 @@ func TestBuildAPIMux_POSTMemoryWithoutUserIDReturns400(t *testing.T) {
 			Strategy: ingestion.StrategyChunk, ChunkSize: 200, ChunkOverlap: 40,
 		}},
 		"", "", // workspace, serviceGroup — empty in unit tests
+		nil, // consentPruner — not needed in wiring tests
 	)
 	defer cleanup()
 
@@ -200,6 +201,7 @@ func TestBuildAPIMux_GETMemoriesWired(t *testing.T) {
 			Strategy: ingestion.StrategyChunk, ChunkSize: 200, ChunkOverlap: 40,
 		}},
 		"", "", // workspace, serviceGroup — empty in unit tests
+		nil, // consentPruner — not needed in wiring tests
 	)
 	defer cleanup()
 
@@ -500,6 +502,7 @@ func TestBuildAPIMux_EnterpriseAuditRoutesWired(t *testing.T) {
 			Strategy: ingestion.StrategyChunk, ChunkSize: 200, ChunkOverlap: 40,
 		}},
 		"", "", // workspace, serviceGroup — empty in unit tests
+		nil, // consentPruner — not needed in wiring tests
 	)
 	defer cleanup()
 
@@ -538,6 +541,7 @@ func TestBuildAPIMux_NonEnterpriseAuditRoutesAbsent(t *testing.T) {
 			Strategy: ingestion.StrategyChunk, ChunkSize: 200, ChunkOverlap: 40,
 		}},
 		"", "", // workspace, serviceGroup — empty in unit tests
+		nil, // consentPruner — not needed in wiring tests
 	)
 	defer cleanup()
 
@@ -806,6 +810,7 @@ func TestBuildAPIMux_IngestRouteWiredWithChunkStrategy(t *testing.T) {
 			Strategy: ingestion.StrategyChunk, ChunkSize: 200, ChunkOverlap: 40,
 		}},
 		"", "", // workspace, serviceGroup — empty in unit tests
+		nil, // consentPruner — not needed in wiring tests
 	)
 	defer cleanup()
 
@@ -844,6 +849,7 @@ func TestBuildAPIMux_SemanticRouteWired(t *testing.T) {
 			Strategy: ingestion.StrategyChunk, ChunkSize: 200, ChunkOverlap: 40,
 		}},
 		"", "", // workspace, serviceGroup — empty in unit tests
+		nil, // consentPruner — not needed in wiring tests
 	)
 	defer cleanup()
 
@@ -878,6 +884,7 @@ func TestBuildAPIMux_HealthzAlwaysReachable(t *testing.T) {
 			Strategy: ingestion.StrategyChunk, ChunkSize: 200, ChunkOverlap: 40,
 		}},
 		"", "", // workspace, serviceGroup — empty in unit tests
+		nil, // consentPruner — not needed in wiring tests
 	)
 	defer cleanup()
 
@@ -903,6 +910,7 @@ func TestBuildAPIMux_SummaryCandidatesWired(t *testing.T) {
 			Strategy: ingestion.StrategyChunk, ChunkSize: 200, ChunkOverlap: 40,
 		}},
 		"", "", // workspace, serviceGroup — empty in unit tests
+		nil, // consentPruner — not needed in wiring tests
 	)
 	defer cleanup()
 
@@ -927,6 +935,7 @@ func TestBuildAPIMux_SaveSummaryWired(t *testing.T) {
 			Strategy: ingestion.StrategyChunk, ChunkSize: 200, ChunkOverlap: 40,
 		}},
 		"", "", // workspace, serviceGroup — empty in unit tests
+		nil, // consentPruner — not needed in wiring tests
 	)
 	defer cleanup()
 

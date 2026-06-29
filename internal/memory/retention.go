@@ -224,7 +224,7 @@ func (w *RetentionWorker) runConsentRevocation(
 	batchSize int32,
 ) (int64, int64, error) {
 	metrics := defaultRetentionMetrics.Load()
-	action := resolveConsentAction(cfg)
+	action := ResolveConsentAction(cfg)
 	switch action {
 	case omniav1alpha1.ConsentRevocationStop:
 		return 0, 0, nil
@@ -269,9 +269,11 @@ func (w *RetentionWorker) runConsentRevocation(
 	return soft, hard, nil
 }
 
-// resolveConsentAction returns the policy's action, defaulting to
-// SoftDelete so absent config doesn't silently skip the cascade.
-func resolveConsentAction(cfg *omniav1alpha1.MemoryConsentRevocationConfig) omniav1alpha1.ConsentRevocationAction {
+// ResolveConsentAction returns the policy's consent-revocation action,
+// defaulting to SoftDelete so absent config doesn't silently skip the
+// cascade. Exported so the memory-api handler layer can apply the same
+// policy decision for inbound per-user consent events (CE1).
+func ResolveConsentAction(cfg *omniav1alpha1.MemoryConsentRevocationConfig) omniav1alpha1.ConsentRevocationAction {
 	if cfg != nil && cfg.Action != "" {
 		return cfg.Action
 	}

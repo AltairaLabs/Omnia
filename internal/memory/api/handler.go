@@ -423,6 +423,10 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/compaction/candidates", h.handleListCompactionCandidates)
 	mux.HandleFunc("POST /api/v1/compaction/summaries", h.handleSaveCompactionSummary)
 
+	// Consent events: per-user/category prune on consent revocation (CE1).
+	// Enterprise-gated: privacy-api calls this after removing a consent grant.
+	mux.HandleFunc("POST /api/v1/memories/consent-events", h.requireEnterprise(h.handleConsentEvent))
+
 	// Admin: record one-shot consent for a destructive embedding-dimension
 	// change (#1309). Consumed by the startup reconciler on the next reshape.
 	mux.HandleFunc("POST /admin/embedding-dimension-change", h.handleEmbeddingDimensionChange)

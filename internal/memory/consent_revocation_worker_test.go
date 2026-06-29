@@ -120,15 +120,15 @@ func TestRetentionWorker_ConsentCascade_SoftDeleteGraceCleanup(t *testing.T) {
 func TestResolveConsentAction(t *testing.T) {
 	// Nil config defaults to SoftDelete so a policy with consentRevocation
 	// unset still cascades safely rather than silently skipping.
-	assert.Equal(t, omniav1alpha1.ConsentRevocationSoftDelete, resolveConsentAction(nil))
+	assert.Equal(t, omniav1alpha1.ConsentRevocationSoftDelete, ResolveConsentAction(nil))
 
 	// Empty Action defaults to SoftDelete.
 	assert.Equal(t, omniav1alpha1.ConsentRevocationSoftDelete,
-		resolveConsentAction(&omniav1alpha1.MemoryConsentRevocationConfig{}))
+		ResolveConsentAction(&omniav1alpha1.MemoryConsentRevocationConfig{}))
 
 	// Explicit action round-trips.
 	assert.Equal(t, omniav1alpha1.ConsentRevocationHardDelete,
-		resolveConsentAction(&omniav1alpha1.MemoryConsentRevocationConfig{
+		ResolveConsentAction(&omniav1alpha1.MemoryConsentRevocationConfig{
 			Action: omniav1alpha1.ConsentRevocationHardDelete,
 		}))
 }

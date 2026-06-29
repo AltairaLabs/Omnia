@@ -634,7 +634,7 @@ func run() error {
 	}()
 
 	// --- Build API mux ---
-	apiMux, cleanup := buildAPIMux(ctx, apiStore, embeddingSvc, svcCfg, eventPublisher, f.enterprise, pool, policyLoader, auditLogger, log, buildIngestOptions(f, log), f.workspace, f.serviceGroup)
+	apiMux, cleanup := buildAPIMux(ctx, apiStore, embeddingSvc, svcCfg, eventPublisher, f.enterprise, pool, policyLoader, auditLogger, log, buildIngestOptions(f, log), f.workspace, f.serviceGroup, pgStore)
 	defer cleanup()
 
 	// --- Consolidation worker ---
@@ -794,6 +794,7 @@ func buildAPIMux(
 	log logr.Logger,
 	ingestOpts memoryapi.IngestOptions,
 	workspace, serviceGroup string,
+	consentPruner memory.ConsentEventPruner,
 ) (http.Handler, func()) {
 	httpMetrics := memoryapi.NewHTTPMetrics(nil)
 
@@ -809,6 +810,10 @@ func buildAPIMux(
 		// Retrieval consults the loader to build a per-tier ranker from
 		// the workspace's bound MemoryPolicy.spec.tierPrecedence.
 		svc.SetPolicyLoader(policyLoader)
+	}
+	if consentPruner != nil {
+		// CE1: per-user/category consent-event prune endpoint.
+		svc.SetConsentEventPruner(consentPruner)
 	}
 
 	// Wire ingestion: a flag-derived fallback Config + an optional async

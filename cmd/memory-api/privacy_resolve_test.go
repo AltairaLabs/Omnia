@@ -133,6 +133,7 @@ func TestBuildAPIMux_ConsentStatsRouteGone(t *testing.T) {
 			Strategy: ingestion.StrategyChunk, ChunkSize: 200, ChunkOverlap: 40,
 		}},
 		"", "", // workspace, serviceGroup
+		nil, // consentPruner — not needed in this test
 	)
 	defer cleanup()
 
@@ -165,6 +166,7 @@ func TestBuildAPIMux_EnforcementStatsRouteGone(t *testing.T) {
 			Strategy: ingestion.StrategyChunk, ChunkSize: 200, ChunkOverlap: 40,
 		}},
 		"", "", // workspace, serviceGroup
+		nil, // consentPruner — not needed in this test
 	)
 	defer cleanup()
 
