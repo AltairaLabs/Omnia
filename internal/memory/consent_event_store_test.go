@@ -51,13 +51,13 @@ func TestSoftDeleteUserConsentCategory(t *testing.T) {
 
 	// Seed rows: X/C (target), X/D (keep — different category),
 	// Y/C (keep — different user), institutional with C (keep — no virtual_user_id).
-	xCRow1 := insertMemoryEntity(t, pool, ws, ptr(userX), nil, ptr(catC))
-	xCRow2 := insertMemoryEntity(t, pool, ws, ptr(userX), nil, ptr(catC))
-	xDRow := insertMemoryEntity(t, pool, ws, ptr(userX), nil, ptr(catD))
-	yCRow := insertMemoryEntity(t, pool, ws, ptr(userY), nil, ptr(catC))
-	instRow := insertMemoryEntity(t, pool, ws, nil, nil, ptr(catC))
+	xCRow1 := insertMemoryEntity(t, pool, ws, ptr(userX), ptr(catC))
+	xCRow2 := insertMemoryEntity(t, pool, ws, ptr(userX), ptr(catC))
+	xDRow := insertMemoryEntity(t, pool, ws, ptr(userX), ptr(catD))
+	yCRow := insertMemoryEntity(t, pool, ws, ptr(userY), ptr(catC))
+	instRow := insertMemoryEntity(t, pool, ws, nil, ptr(catC))
 	// Row in a different workspace (same user/category) — must not be touched.
-	otherWsRow := insertMemoryEntity(t, pool, wsOther, ptr(userX), nil, ptr(catC))
+	otherWsRow := insertMemoryEntity(t, pool, wsOther, ptr(userX), ptr(catC))
 
 	n, err := store.SoftDeleteUserConsentCategory(ctx, ws, userX, catC)
 	require.NoError(t, err)
@@ -82,7 +82,7 @@ func TestSoftDeleteUserConsentCategory_Idempotent(t *testing.T) {
 	ctx := context.Background()
 
 	ws := insertWorkspace(t, pool)
-	row := insertMemoryEntity(t, pool, ws, ptr("user-idem"), nil, ptr(healthCat))
+	row := insertMemoryEntity(t, pool, ws, ptr("user-idem"), ptr(healthCat))
 
 	n1, err := store.SoftDeleteUserConsentCategory(ctx, ws, "user-idem", healthCat)
 	require.NoError(t, err)
@@ -140,12 +140,12 @@ func TestHardDeleteUserConsentCategory(t *testing.T) {
 	catC := healthCat
 	catD := prefsCat
 
-	xCRow1 := insertMemoryEntity(t, pool, ws, ptr(userX), nil, ptr(catC))
-	xCRow2 := insertMemoryEntity(t, pool, ws, ptr(userX), nil, ptr(catC))
-	xDRow := insertMemoryEntity(t, pool, ws, ptr(userX), nil, ptr(catD))
-	yCRow := insertMemoryEntity(t, pool, ws, ptr(userY), nil, ptr(catC))
-	instRow := insertMemoryEntity(t, pool, ws, nil, nil, ptr(catC))
-	otherWsRow := insertMemoryEntity(t, pool, wsOther, ptr(userX), nil, ptr(catC))
+	xCRow1 := insertMemoryEntity(t, pool, ws, ptr(userX), ptr(catC))
+	xCRow2 := insertMemoryEntity(t, pool, ws, ptr(userX), ptr(catC))
+	xDRow := insertMemoryEntity(t, pool, ws, ptr(userX), ptr(catD))
+	yCRow := insertMemoryEntity(t, pool, ws, ptr(userY), ptr(catC))
+	instRow := insertMemoryEntity(t, pool, ws, nil, ptr(catC))
+	otherWsRow := insertMemoryEntity(t, pool, wsOther, ptr(userX), ptr(catC))
 
 	n, err := store.HardDeleteUserConsentCategory(ctx, ws, userX, catC)
 	require.NoError(t, err)

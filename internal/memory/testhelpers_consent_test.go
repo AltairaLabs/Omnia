@@ -39,26 +39,23 @@ func insertWorkspace(t *testing.T, _ *pgxpool.Pool) string {
 // userID, agentID, and category are optional (pass nil to omit).
 func insertMemoryEntity(
 	t *testing.T, pool *pgxpool.Pool,
-	workspaceID string, userID, agentID, category *string,
+	workspaceID string, userID, category *string,
 ) string {
 	t.Helper()
-	var catArg, userArg, agentArg any
+	var catArg, userArg any
 	if category != nil {
 		catArg = *category
 	}
 	if userID != nil {
 		userArg = *userID
 	}
-	if agentID != nil {
-		agentArg = *agentID
-	}
 
 	var id string
 	err := pool.QueryRow(context.Background(), `
 INSERT INTO memory_entities (workspace_id, virtual_user_id, agent_id, name, kind, metadata, consent_category)
-VALUES ($1, $2, $3, 'test', 'fact', '{}', $4)
+VALUES ($1, $2, NULL, 'test', 'fact', '{}', $3)
 RETURNING id`,
-		workspaceID, userArg, agentArg, catArg,
+		workspaceID, userArg, catArg,
 	).Scan(&id)
 	require.NoError(t, err)
 	return id
