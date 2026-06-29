@@ -69,9 +69,9 @@ func TestSoftDeleteRevokedConsent_DeletesNonGrantorRows(t *testing.T) {
 	nonGrantingUser := "user-no-health"
 	noRecordUser := "user-no-prefs-record" // never appears in nonGrantors
 
-	healthKept := saveUserMemWithCategory(t, store, grantingUser, "memory:health")
-	healthDeleted := saveUserMemWithCategory(t, store, nonGrantingUser, "memory:health")
-	healthNoRecord := saveUserMemWithCategory(t, store, noRecordUser, "memory:health")
+	healthKept := saveUserMemWithCategory(t, store, grantingUser, healthCat)
+	healthDeleted := saveUserMemWithCategory(t, store, nonGrantingUser, healthCat)
+	healthNoRecord := saveUserMemWithCategory(t, store, noRecordUser, healthCat)
 
 	inst := &Memory{
 		Type: projTypePolicy, Content: "institutional", Confidence: 1.0,
@@ -85,7 +85,7 @@ func TestSoftDeleteRevokedConsent_DeletesNonGrantorRows(t *testing.T) {
 	// don't grant the category).
 	src := &fakeConsentRevocationSource{
 		nonGrantors: map[string][]string{
-			"memory:health": {nonGrantingUser},
+			healthCat: {nonGrantingUser},
 		},
 	}
 
@@ -113,11 +113,11 @@ func TestSoftDeleteRevokedConsent_MultiCategory(t *testing.T) {
 	userB := "user-multi-b"
 
 	// userA has memory:identity row; userB has memory:location row
-	idRow := saveUserMemWithCategory(t, store, userA, "memory:identity")
-	locRow := saveUserMemWithCategory(t, store, userB, "memory:location")
+	idRow := saveUserMemWithCategory(t, store, userA, identityCat)
+	locRow := saveUserMemWithCategory(t, store, userB, locationCat)
 	// userA also has memory:location row — should survive because userA is not
 	// in the memory:location non-grantors list
-	alsoAlive := saveUserMemWithCategory(t, store, userA, "memory:location")
+	alsoAlive := saveUserMemWithCategory(t, store, userA, locationCat)
 
 	src := &fakeConsentRevocationSource{
 		nonGrantors: map[string][]string{
@@ -142,7 +142,7 @@ func TestSoftDeleteRevokedConsent_NilSourceIsNoOp(t *testing.T) {
 	store := newStore(t)
 	ctx := context.Background()
 
-	id := saveUserMemWithCategory(t, store, "user-nil-src", "memory:health")
+	id := saveUserMemWithCategory(t, store, "user-nil-src", healthCat)
 	n, err := store.SoftDeleteRevokedConsent(ctx, nil, 100)
 	require.NoError(t, err)
 	assert.Equal(t, int64(0), n)
@@ -153,7 +153,7 @@ func TestSoftDeleteRevokedConsent_NilSourceIsNoOp(t *testing.T) {
 func TestSoftDeleteRevokedConsent_BatchSizeZeroIsNoOp(t *testing.T) {
 	store := newStore(t)
 	src := &fakeConsentRevocationSource{
-		nonGrantors: map[string][]string{"memory:health": {"user-bz"}},
+		nonGrantors: map[string][]string{healthCat: {"user-bz"}},
 	}
 	n, err := store.SoftDeleteRevokedConsent(context.Background(), src, 0)
 	require.NoError(t, err)
@@ -167,10 +167,10 @@ func TestSoftDeleteRevokedConsent_SetsForgottenFields(t *testing.T) {
 	ctx := context.Background()
 
 	userID := "user-forgotten-fields"
-	id := saveUserMemWithCategory(t, store, userID, "memory:health")
+	id := saveUserMemWithCategory(t, store, userID, healthCat)
 
 	src := &fakeConsentRevocationSource{
-		nonGrantors: map[string][]string{"memory:health": {userID}},
+		nonGrantors: map[string][]string{healthCat: {userID}},
 	}
 	n, err := store.SoftDeleteRevokedConsent(ctx, src, 100)
 	require.NoError(t, err)
@@ -206,9 +206,9 @@ func TestSoftDeleteRevokedConsent_SkipsRowsWithoutCategory(t *testing.T) {
 	// has no consent_category — consent_category = $1 never matches NULL.
 	src := &fakeConsentRevocationSource{
 		nonGrantors: map[string][]string{
-			"memory:health":   {userID},
-			"memory:identity": {userID},
-			"memory:location": {userID},
+			healthCat:   {userID},
+			identityCat: {userID},
+			locationCat: {userID},
 		},
 	}
 	n, err := store.SoftDeleteRevokedConsent(ctx, src, 100)
@@ -229,13 +229,13 @@ func TestHardDeleteRevokedConsent_RemovesNonGrantorRows(t *testing.T) {
 	grantingUser := "user-hard-granter"
 	noRecordUser := "user-hard-norecord"
 
-	deletedID := saveUserMemWithCategory(t, store, nonGrantingUser, "memory:location")
-	keptGrantID := saveUserMemWithCategory(t, store, grantingUser, "memory:location")
-	keptNoRecordID := saveUserMemWithCategory(t, store, noRecordUser, "memory:location")
+	deletedID := saveUserMemWithCategory(t, store, nonGrantingUser, locationCat)
+	keptGrantID := saveUserMemWithCategory(t, store, grantingUser, locationCat)
+	keptNoRecordID := saveUserMemWithCategory(t, store, noRecordUser, locationCat)
 
 	src := &fakeConsentRevocationSource{
 		nonGrantors: map[string][]string{
-			"memory:location": {nonGrantingUser},
+			locationCat: {nonGrantingUser},
 		},
 	}
 
@@ -256,7 +256,7 @@ func TestHardDeleteRevokedConsent_NilSourceIsNoOp(t *testing.T) {
 	store := newStore(t)
 	ctx := context.Background()
 
-	id := saveUserMemWithCategory(t, store, "user-nil-hard", "memory:health")
+	id := saveUserMemWithCategory(t, store, "user-nil-hard", healthCat)
 	n, err := store.HardDeleteRevokedConsent(ctx, nil, 100)
 	require.NoError(t, err)
 	assert.Equal(t, int64(0), n)
@@ -267,7 +267,7 @@ func TestHardDeleteRevokedConsent_NilSourceIsNoOp(t *testing.T) {
 func TestHardDeleteRevokedConsent_BatchSizeZeroIsNoOp(t *testing.T) {
 	store := newStore(t)
 	src := &fakeConsentRevocationSource{
-		nonGrantors: map[string][]string{"memory:health": {"user-bz-hard"}},
+		nonGrantors: map[string][]string{healthCat: {"user-bz-hard"}},
 	}
 	n, err := store.HardDeleteRevokedConsent(context.Background(), src, 0)
 	require.NoError(t, err)
@@ -281,7 +281,7 @@ func TestHardDeleteForgottenByConsentOlderThan_UsesForgottenAt(t *testing.T) {
 	// hard-delete the row. updated_at is not consulted — the test
 	// leaves it at now() to guard against regressions.
 	store := newStore(t)
-	id := saveUserMemWithCategory(t, store, "user-phase4-e", "memory:location")
+	id := saveUserMemWithCategory(t, store, "user-phase4-e", locationCat)
 	_, err := store.pool.Exec(context.Background(),
 		"UPDATE memory_entities SET forgotten = true, forgotten_at = now() - interval '30 days' WHERE id = $1",
 		id)
@@ -331,14 +331,14 @@ func TestConsentCategoryPersistsOnWrite(t *testing.T) {
 	// Round-trips MetaKeyConsentCategory through the store to confirm
 	// insertEntity writes the column (not just the metadata JSON).
 	store := newStore(t)
-	id := saveUserMemWithCategory(t, store, "user-persist", "memory:health")
+	id := saveUserMemWithCategory(t, store, "user-persist", healthCat)
 
 	var got *string
 	err := store.pool.QueryRow(context.Background(),
 		"SELECT consent_category FROM memory_entities WHERE id = $1", id).Scan(&got)
 	require.NoError(t, err)
 	require.NotNil(t, got)
-	assert.Equal(t, "memory:health", *got)
+	assert.Equal(t, healthCat, *got)
 }
 
 func TestConsentCategoryNilWhenMetadataMissing(t *testing.T) {

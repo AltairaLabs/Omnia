@@ -39,7 +39,7 @@ func TestRetentionWorker_ConsentCascade_SoftDeleteAction(t *testing.T) {
 	ctx := context.Background()
 
 	userID := "user-cascade-soft"
-	revokedID := saveUserMemWithCategory(t, store, userID, "memory:health")
+	revokedID := saveUserMemWithCategory(t, store, userID, healthCat)
 	keptID := saveUserMemWithCategory(t, store, userID, "memory:context")
 
 	// userID grants memory:context (absent from non-grantors) but not memory:health.
@@ -66,7 +66,7 @@ func TestRetentionWorker_ConsentCascade_HardDeleteAction(t *testing.T) {
 	ctx := context.Background()
 
 	userID := "user-cascade-hard"
-	id := saveUserMemWithCategory(t, store, userID, "memory:location")
+	id := saveUserMemWithCategory(t, store, userID, locationCat)
 
 	// userID has no grants — appears in non-grantors for memory:location.
 	src := &fakeConsentRevocationSource{
@@ -92,7 +92,7 @@ func TestRetentionWorker_ConsentCascade_StopAction(t *testing.T) {
 	ctx := context.Background()
 
 	userID := "user-cascade-stop"
-	id := saveUserMemWithCategory(t, store, userID, "memory:location")
+	id := saveUserMemWithCategory(t, store, userID, locationCat)
 
 	// No source needed: Stop action short-circuits before the source is used.
 	w := NewRetentionWorker(store,
@@ -112,7 +112,7 @@ func TestRetentionWorker_ConsentCascade_NilSourceIsNoOp(t *testing.T) {
 	ctx := context.Background()
 
 	userID := "user-cascade-nil-src"
-	id := saveUserMemWithCategory(t, store, userID, "memory:health")
+	id := saveUserMemWithCategory(t, store, userID, healthCat)
 
 	w := NewRetentionWorker(store,
 		&StaticPolicyLoader{Policy: revocationPolicy(omniav1alpha1.ConsentRevocationSoftDelete)},
@@ -132,7 +132,7 @@ func TestRetentionWorker_ConsentCascade_SoftDeleteGraceCleanup(t *testing.T) {
 	ctx := context.Background()
 
 	userID := "user-cascade-grace"
-	expired := saveUserMemWithCategory(t, store, userID, "memory:health")
+	expired := saveUserMemWithCategory(t, store, userID, healthCat)
 	_, err := store.pool.Exec(ctx,
 		`UPDATE memory_entities
 		 SET forgotten = true,
@@ -145,7 +145,7 @@ func TestRetentionWorker_ConsentCascade_SoftDeleteGraceCleanup(t *testing.T) {
 	// hard-deletes it (forgotten_at 30 days > 7-day grace).
 	src := &fakeConsentRevocationSource{
 		nonGrantors: map[string][]string{
-			"memory:health": {userID},
+			healthCat: {userID},
 		},
 	}
 
