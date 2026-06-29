@@ -203,7 +203,10 @@ func currentNamespace() (string, error) {
 func DetectNamespace() string {
 	ns, err := currentNamespace()
 	if err != nil {
-		return "default"
+		return defaultNamespaceFallback
 	}
 	return ns
 }
+
+// defaultNamespaceFallback is used when the running namespace can't be detected.
+const defaultNamespaceFallback = "default"

@@ -259,7 +259,7 @@ func run() error {
 			if pingErr := redisClient.Ping(ctx).Err(); pingErr != nil {
 				return fmt.Errorf("redis ping failed: %w", pingErr)
 			}
-			defer redisClient.Close()
+			defer func() { _ = redisClient.Close() }()
 			kv := &redisKV{client: redisClient, prefix: "privacy:"}
 			optOutStore = privacy.NewCachedPreferencesStore(base, kv, cacheTTL, log)
 			log.V(1).Info("redis warm cache enabled", "addr", opts.Addr, "ttl", cacheTTL)
