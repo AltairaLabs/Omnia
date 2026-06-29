@@ -66,8 +66,6 @@ func TestBuildEvalWorkerDeployment_PodOverrides(t *testing.T) {
 					ServiceAccountName: "eval-sa",
 					NodeSelector:       map[string]string{"workload": "batch"},
 					ExtraEnv:           []corev1.EnvVar{{Name: "JUDGE_API_KEY_FILE", Value: "/mnt/kv/key"}},
-					ExtraVolumes:       []corev1.Volume{{Name: "kv"}},
-					ExtraVolumeMounts:  []corev1.VolumeMount{{Name: "kv", MountPath: "/mnt/kv"}},
 				},
 			},
 		},
@@ -78,8 +76,6 @@ func TestBuildEvalWorkerDeployment_PodOverrides(t *testing.T) {
 
 	require.Equal(t, "eval-sa", spec.ServiceAccountName)
 	require.Equal(t, "batch", spec.NodeSelector["workload"])
-	require.NotEmpty(t, spec.Volumes)
-	require.Equal(t, "kv", spec.Volumes[0].Name)
 
 	c := spec.Containers[0]
 	hasEnv := false
@@ -89,8 +85,6 @@ func TestBuildEvalWorkerDeployment_PodOverrides(t *testing.T) {
 		}
 	}
 	require.True(t, hasEnv, "extraEnv must be applied on eval-worker container")
-	require.NotEmpty(t, c.VolumeMounts)
-	require.Equal(t, "kv", c.VolumeMounts[0].Name)
 }
 
 func TestBuildEvalWorkerDeployment_ImagePullPolicy(t *testing.T) {

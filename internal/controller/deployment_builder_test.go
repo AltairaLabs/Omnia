@@ -1335,12 +1335,6 @@ func TestBuildDeploymentSpec_PodOverrides(t *testing.T) {
 		Annotations:        map[string]string{"azure.workload.identity/use": "true"},
 		NodeSelector:       map[string]string{"gpu": "a100"},
 		ImagePullSecrets:   []corev1.LocalObjectReference{{Name: "regcred"}},
-		ExtraVolumes: []corev1.Volume{{
-			Name: "kv",
-			VolumeSource: corev1.VolumeSource{
-				CSI: &corev1.CSIVolumeSource{Driver: "secrets-store.csi.k8s.io"},
-			},
-		}},
 		ExtraEnvFrom: []corev1.EnvFromSource{{
 			SecretRef: &corev1.SecretEnvSource{LocalObjectReference: corev1.LocalObjectReference{Name: "kv-secret"}},
 		}},
@@ -1355,14 +1349,6 @@ func TestBuildDeploymentSpec_PodOverrides(t *testing.T) {
 	require.Equal(t, "a100", spec.NodeSelector["gpu"], "nodeSelector")
 	require.NotEmpty(t, spec.ImagePullSecrets, "imagePullSecrets")
 	require.Equal(t, "regcred", spec.ImagePullSecrets[0].Name)
-
-	foundVol := false
-	for _, v := range spec.Volumes {
-		if v.Name == "kv" && v.CSI != nil {
-			foundVol = true
-		}
-	}
-	require.True(t, foundVol, "extraVolume kv must be appended")
 
 	require.GreaterOrEqual(t, len(spec.Containers), 2, "facade+runtime containers")
 	for _, c := range spec.Containers {

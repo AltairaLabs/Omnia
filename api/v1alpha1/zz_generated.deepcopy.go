@@ -3421,18 +3421,6 @@ func (in *PodOverrides) DeepCopyInto(out *PodOverrides) {
 			(*in)[i].DeepCopyInto(&(*out)[i])
 		}
 	}
-	if in.Affinity != nil {
-		in, out := &in.Affinity, &out.Affinity
-		*out = new(corev1.Affinity)
-		(*in).DeepCopyInto(*out)
-	}
-	if in.TopologySpreadConstraints != nil {
-		in, out := &in.TopologySpreadConstraints, &out.TopologySpreadConstraints
-		*out = make([]corev1.TopologySpreadConstraint, len(*in))
-		for i := range *in {
-			(*in)[i].DeepCopyInto(&(*out)[i])
-		}
-	}
 	if in.ImagePullSecrets != nil {
 		in, out := &in.ImagePullSecrets, &out.ImagePullSecrets
 		*out = make([]corev1.LocalObjectReference, len(*in))
@@ -3448,20 +3436,6 @@ func (in *PodOverrides) DeepCopyInto(out *PodOverrides) {
 	if in.ExtraEnvFrom != nil {
 		in, out := &in.ExtraEnvFrom, &out.ExtraEnvFrom
 		*out = make([]corev1.EnvFromSource, len(*in))
-		for i := range *in {
-			(*in)[i].DeepCopyInto(&(*out)[i])
-		}
-	}
-	if in.ExtraVolumes != nil {
-		in, out := &in.ExtraVolumes, &out.ExtraVolumes
-		*out = make([]corev1.Volume, len(*in))
-		for i := range *in {
-			(*in)[i].DeepCopyInto(&(*out)[i])
-		}
-	}
-	if in.ExtraVolumeMounts != nil {
-		in, out := &in.ExtraVolumeMounts, &out.ExtraVolumeMounts
-		*out = make([]corev1.VolumeMount, len(*in))
 		for i := range *in {
 			(*in)[i].DeepCopyInto(&(*out)[i])
 		}

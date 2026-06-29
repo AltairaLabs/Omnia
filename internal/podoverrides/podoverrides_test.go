@@ -109,30 +109,11 @@ func TestApplyPod_TolerationsAppend(t *testing.T) {
 	}
 }
 
-func TestApplyPod_AffinityReplace(t *testing.T) {
-	spec := &corev1.PodSpec{Affinity: &corev1.Affinity{NodeAffinity: &corev1.NodeAffinity{}}}
-	custom := &corev1.Affinity{PodAntiAffinity: &corev1.PodAntiAffinity{}}
-	ApplyPod(spec, &metav1.ObjectMeta{}, &omniav1alpha1.PodOverrides{Affinity: custom})
-	if spec.Affinity.PodAntiAffinity == nil {
-		t.Fatal("user affinity must replace operator-default")
-	}
-}
-
 func TestApplyPod_PriorityClass(t *testing.T) {
 	spec := &corev1.PodSpec{}
 	ApplyPod(spec, &metav1.ObjectMeta{}, &omniav1alpha1.PodOverrides{PriorityClassName: "critical"})
 	if spec.PriorityClassName != "critical" {
 		t.Fatalf("priorityClass must be set")
-	}
-}
-
-func TestApplyPod_TopologySpreadAppend(t *testing.T) {
-	spec := &corev1.PodSpec{TopologySpreadConstraints: []corev1.TopologySpreadConstraint{{MaxSkew: 1}}}
-	ApplyPod(spec, &metav1.ObjectMeta{}, &omniav1alpha1.PodOverrides{
-		TopologySpreadConstraints: []corev1.TopologySpreadConstraint{{MaxSkew: 2}},
-	})
-	if len(spec.TopologySpreadConstraints) != 2 {
-		t.Fatalf("topology spread must be appended, got %d", len(spec.TopologySpreadConstraints))
 	}
 }
 
@@ -143,16 +124,6 @@ func TestApplyPod_ImagePullSecretsAppend(t *testing.T) {
 	})
 	if len(spec.ImagePullSecrets) != 2 || spec.ImagePullSecrets[1].Name != "b" {
 		t.Fatalf("imagePullSecrets must be appended, got %+v", spec.ImagePullSecrets)
-	}
-}
-
-func TestApplyPod_ExtraVolumesAppend(t *testing.T) {
-	spec := &corev1.PodSpec{Volumes: []corev1.Volume{{Name: "existing"}}}
-	ApplyPod(spec, &metav1.ObjectMeta{}, &omniav1alpha1.PodOverrides{
-		ExtraVolumes: []corev1.Volume{{Name: "kv"}},
-	})
-	if len(spec.Volumes) != 2 || spec.Volumes[1].Name != "kv" {
-		t.Fatalf("volumes must be appended, got %+v", spec.Volumes)
 	}
 }
 
@@ -185,15 +156,5 @@ func TestApplyContainer_EnvFromAppend(t *testing.T) {
 	})
 	if len(c.EnvFrom) != 1 || c.EnvFrom[0].Prefix != "KV_" {
 		t.Fatalf("extraEnvFrom must be appended, got %+v", c.EnvFrom)
-	}
-}
-
-func TestApplyContainer_VolumeMountsAppend(t *testing.T) {
-	c := &corev1.Container{VolumeMounts: []corev1.VolumeMount{{Name: "tmp"}}}
-	ApplyContainer(c, &omniav1alpha1.PodOverrides{
-		ExtraVolumeMounts: []corev1.VolumeMount{{Name: "kv", MountPath: "/mnt/kv"}},
-	})
-	if len(c.VolumeMounts) != 2 || c.VolumeMounts[1].Name != "kv" {
-		t.Fatalf("extraVolumeMounts must be appended, got %+v", c.VolumeMounts)
 	}
 }

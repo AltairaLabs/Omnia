@@ -34,14 +34,13 @@ import (
 // onto the operator-built PodSpec and pod ObjectMeta. It is nil-safe.
 //
 // Merge semantics:
-//   - ServiceAccountName, Affinity, PriorityClassName: user replaces operator-default when set.
+//   - ServiceAccountName, PriorityClassName: user replaces operator-default when set.
 //   - Labels: operator-set keys always win (service selectors depend on them).
 //   - Annotations: user values override operator defaults.
 //   - NodeSelector: merged by key; user wins on collision.
-//   - Tolerations, TopologySpreadConstraints, ImagePullSecrets, ExtraVolumes: appended.
+//   - Tolerations, ImagePullSecrets: appended.
 //
-// Container-scoped fields (ExtraEnv, ExtraEnvFrom, ExtraVolumeMounts) are handled
-// separately by ApplyContainer.
+// Container-scoped fields (ExtraEnv, ExtraEnvFrom) are handled separately by ApplyContainer.
 func ApplyPod(spec *corev1.PodSpec, meta *metav1.ObjectMeta, overrides *omniav1alpha1.PodOverrides) {
 	if overrides == nil || spec == nil {
 		return
@@ -64,31 +63,19 @@ func ApplyPod(spec *corev1.PodSpec, meta *metav1.ObjectMeta, overrides *omniav1a
 		spec.Tolerations = append(spec.Tolerations, overrides.Tolerations...)
 	}
 
-	if overrides.Affinity != nil {
-		spec.Affinity = overrides.Affinity.DeepCopy()
-	}
-
 	if overrides.PriorityClassName != "" {
 		spec.PriorityClassName = overrides.PriorityClassName
-	}
-
-	if len(overrides.TopologySpreadConstraints) > 0 {
-		spec.TopologySpreadConstraints = append(spec.TopologySpreadConstraints, overrides.TopologySpreadConstraints...)
 	}
 
 	if len(overrides.ImagePullSecrets) > 0 {
 		spec.ImagePullSecrets = append(spec.ImagePullSecrets, overrides.ImagePullSecrets...)
 	}
-
-	if len(overrides.ExtraVolumes) > 0 {
-		spec.Volumes = append(spec.Volumes, overrides.ExtraVolumes...)
-	}
 }
 
 // ApplyContainer appends container-scoped fields from PodOverrides
-// (ExtraEnv, ExtraEnvFrom, ExtraVolumeMounts) onto the given container. It is
-// nil-safe. Callers MUST skip operator-injected sidecars (e.g. policy-proxy)
-// that should not receive user env/mounts.
+// (ExtraEnv, ExtraEnvFrom) onto the given container. It is nil-safe.
+// Callers MUST skip operator-injected sidecars (e.g. policy-proxy)
+// that should not receive user env.
 func ApplyContainer(container *corev1.Container, overrides *omniav1alpha1.PodOverrides) {
 	if overrides == nil || container == nil {
 		return
@@ -98,9 +85,6 @@ func ApplyContainer(container *corev1.Container, overrides *omniav1alpha1.PodOve
 	}
 	if len(overrides.ExtraEnvFrom) > 0 {
 		container.EnvFrom = append(container.EnvFrom, overrides.ExtraEnvFrom...)
-	}
-	if len(overrides.ExtraVolumeMounts) > 0 {
-		container.VolumeMounts = append(container.VolumeMounts, overrides.ExtraVolumeMounts...)
 	}
 }
 
