@@ -122,6 +122,57 @@ func TestApplyEnvFallbacks_AuthEnvSeam(t *testing.T) {
 	}
 }
 
+// TestEnterpriseGate_RoutesRegisteredWhenTrue is a wiring test that confirms all
+// privacy routes are mounted when enterprise=true (the expected production path).
+func TestEnterpriseGate_RoutesRegisteredWhenTrue(t *testing.T) {
+	base := privacy.NewPreferencesStore(nil)
+	mux := buildAPIMux(true, base, base, logr.Discard(), privacy.NoopConsentNotifier{})
+
+	for _, p := range []string{
+		"/api/v1/privacy/preferences/abc123",
+		"/api/v1/privacy/preferences/abc123/consent",
+		"/api/v1/privacy/consent/stats",
+		"/api/v1/privacy/enforcement-stats",
+		"/healthz",
+	} {
+		req := httptest.NewRequest(http.MethodGet, p, nil)
+		_, pattern := mux.Handler(req)
+		if pattern == "" {
+			t.Errorf("enterprise=true: route %q should be registered but has no matching pattern", p)
+		}
+	}
+}
+
+// TestEnterpriseGate_RoutesAbsentWhenFalse is a wiring test that confirms consent
+// and opt-out routes return 404 when enterprise=false, while /healthz still returns 200.
+func TestEnterpriseGate_RoutesAbsentWhenFalse(t *testing.T) {
+	base := privacy.NewPreferencesStore(nil)
+	mux := buildAPIMux(false, base, base, logr.Discard(), privacy.NoopConsentNotifier{})
+
+	// /healthz must still be reachable.
+	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Errorf("enterprise=false: /healthz expected 200, got %d", rec.Code)
+	}
+
+	// Consent/opt-out routes must not be registered.
+	for _, p := range []string{
+		"/api/v1/privacy/preferences/abc123",
+		"/api/v1/privacy/preferences/abc123/consent",
+		"/api/v1/privacy/consent/stats",
+		"/api/v1/privacy/enforcement-stats",
+	} {
+		req := httptest.NewRequest(http.MethodGet, p, nil)
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+		if rec.Code != http.StatusNotFound {
+			t.Errorf("enterprise=false: route %q expected 404, got %d", p, rec.Code)
+		}
+	}
+}
+
 // TestBuildHandler_AuthExemptsHealthz verifies that buildHandler correctly wires
 // RequireServiceAccount: a privacy route without a token returns 401, while
 // /healthz (exempted) returns 200.

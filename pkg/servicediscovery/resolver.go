@@ -194,3 +194,19 @@ func currentNamespace() (string, error) {
 	}
 	return string(data), nil
 }
+
+// DetectNamespace returns the Kubernetes namespace this process is running in.
+// It checks the OMNIA_NAMESPACE env var first, then the in-cluster service
+// account namespace file, and falls back to "default" if neither is available.
+// Use this in cmd binaries that need the current namespace but do not need the
+// full Resolver; it avoids duplicating the detection logic in each binary.
+func DetectNamespace() string {
+	ns, err := currentNamespace()
+	if err != nil {
+		return defaultNamespaceFallback
+	}
+	return ns
+}
+
+// defaultNamespaceFallback is used when the running namespace can't be detected.
+const defaultNamespaceFallback = "default"

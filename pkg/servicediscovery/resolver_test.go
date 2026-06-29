@@ -427,3 +427,20 @@ func TestResolveServiceURLs_NamespaceFileNotFound(t *testing.T) {
 		t.Fatal("expected error when namespace file not found")
 	}
 }
+
+func TestDetectNamespace(t *testing.T) {
+	t.Run("returns OMNIA_NAMESPACE when set", func(t *testing.T) {
+		t.Setenv("OMNIA_NAMESPACE", "my-ns")
+		if got := DetectNamespace(); got != "my-ns" {
+			t.Errorf("DetectNamespace() = %q, want my-ns", got)
+		}
+	})
+	t.Run("falls back to default when env unset and no SA file", func(t *testing.T) {
+		t.Setenv("OMNIA_NAMESPACE", "")
+		// Test/CI environments have no in-cluster SA namespace file, so
+		// currentNamespace errors and DetectNamespace returns the fallback.
+		if got := DetectNamespace(); got != "default" {
+			t.Errorf("DetectNamespace() = %q, want default", got)
+		}
+	})
+}

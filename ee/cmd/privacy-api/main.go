@@ -35,8 +35,12 @@ import (
 	"github.com/altairalabs/omnia/ee/cmd/privacy-api/migrations"
 	"github.com/altairalabs/omnia/ee/pkg/privacy"
 	"github.com/altairalabs/omnia/internal/serviceauth"
+	"github.com/altairalabs/omnia/internal/tracing"
 	"github.com/altairalabs/omnia/pkg/logging"
 	"github.com/altairalabs/omnia/pkg/servicediscovery"
+
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
 )
 
 // Pool configuration defaults — kept low because privacy-api is deployed per-workspace.
@@ -58,6 +62,12 @@ type flags struct {
 	workspace    string
 	enterprise   bool
 
+	// OTLP tracing (optional).
+	tracingEnabled  bool
+	tracingEndpoint string
+	tracingSample   float64
+	tracingInsecure bool
+
 	// ServiceAccount auth (opt-in).
 	authEnabled           bool
 	authAllowedSubjects   string
@@ -74,6 +84,10 @@ func parseFlags() *flags {
 	flag.StringVar(&f.redisURL, "redis-url", "", "Redis URL (redis:// or rediss://); env REDIS_URL fallback")
 	flag.StringVar(&f.workspace, "workspace", "", "Workspace name for K8s CRD config resolution (env OMNIA_WORKSPACE)")
 	flag.BoolVar(&f.enterprise, "enterprise", false, "Enable enterprise features (env ENTERPRISE_ENABLED)")
+	flag.BoolVar(&f.tracingEnabled, "tracing-enabled", false, "Enable OTLP tracing export (env TRACING_ENABLED)")
+	flag.StringVar(&f.tracingEndpoint, "tracing-endpoint", "", "OTLP collector gRPC endpoint host:port (env TRACING_ENDPOINT)")
+	flag.Float64Var(&f.tracingSample, "tracing-sample-rate", 0, "Tracing sample rate 0.0–1.0; 0 → SDK default 0.1 (env TRACING_SAMPLE_RATE)")
+	flag.BoolVar(&f.tracingInsecure, "tracing-insecure", false, "Disable TLS for OTLP connection (env TRACING_INSECURE)")
 	flag.BoolVar(&f.authEnabled, "auth-enabled", false,
 		"Require Kubernetes ServiceAccount bearer-token auth on the JSON API")
 	flag.StringVar(&f.authAllowedSubjects, "auth-allowed-subjects", "",
@@ -96,6 +110,15 @@ func (f *flags) applyEnvFallbacks() {
 	envFallback(&f.healthAddr, ":8081", "HEALTH_ADDR")
 	envFallback(&f.metricsAddr, ":9090", "METRICS_ADDR")
 	envBoolFallback(&f.enterprise, "ENTERPRISE_ENABLED")
+
+	envBoolFallback(&f.tracingEnabled, "TRACING_ENABLED")
+	envBoolFallback(&f.tracingInsecure, "TRACING_INSECURE")
+	envFallback(&f.tracingEndpoint, "", "TRACING_ENDPOINT")
+	if v := os.Getenv("TRACING_SAMPLE_RATE"); v != "" && f.tracingSample == 0 {
+		if rate, err := strconv.ParseFloat(v, 64); err == nil {
+			f.tracingSample = rate
+		}
+	}
 
 	// ServiceAccount auth — same env vars the operator stamps via
 	// applySessionAPIServerAuthEnv in internal/controller/service_auth.go.
@@ -171,6 +194,31 @@ func run() error {
 	)
 	defer cancel()
 
+	// --- Tracing ---
+	// Set propagator so incoming trace context is extracted and spans become
+	// children of the caller's trace.
+	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
+		propagation.TraceContext{},
+		propagation.Baggage{},
+	))
+	if f.tracingEnabled {
+		tracingCfg := tracing.Config{
+			Enabled:     true,
+			Endpoint:    f.tracingEndpoint,
+			ServiceName: "omnia-privacy-api",
+			SampleRate:  f.tracingSample,
+			Insecure:    f.tracingInsecure,
+		}
+		tp, tpErr := tracing.NewProvider(ctx, tracingCfg)
+		if tpErr != nil {
+			log.Error(tpErr, "tracing provider creation failed")
+		} else {
+			otel.SetTracerProvider(tp.TracerProvider())
+			defer func() { _ = tp.Shutdown(ctx) }()
+			log.Info("tracing enabled", "endpoint", f.tracingEndpoint, "sampleRate", f.tracingSample)
+		}
+	}
+
 	// --- Postgres pool ---
 	pool, err := initPool(ctx, f.postgresConn)
 	if err != nil {
@@ -191,21 +239,50 @@ func run() error {
 	// --- Base preferences store ---
 	base := privacy.NewPreferencesStore(pool)
 
-	// --- Optional Redis warm cache ---
-	var optOutStore privacy.PreferencesStore = base
-	cacheTTL := envDuration("PRIVACY_CACHE_TTL", defaultCacheTTL)
-	if f.redisURL != "" {
-		opts, parseErr := goredis.ParseURL(f.redisURL)
-		if parseErr != nil {
-			return fmt.Errorf("parsing redis URL: %w", parseErr)
+	// --- Enterprise features (consent/opt-out, memory fan-out, analytics metric) ---
+	// When enterprise is false, privacy-api is still deployed but serves only /healthz
+	// on the API port (belt-and-suspenders: privacy-api is enterprise-only by design).
+	var (
+		optOutStore privacy.PreferencesStore = base
+		notifier    privacy.ConsentNotifier  = privacy.NoopConsentNotifier{}
+	)
+
+	if f.enterprise {
+		// Optional Redis warm cache.
+		if f.redisURL != "" {
+			cacheTTL := envDuration("PRIVACY_CACHE_TTL", defaultCacheTTL)
+			opts, parseErr := goredis.ParseURL(f.redisURL)
+			if parseErr != nil {
+				return fmt.Errorf("parsing redis URL: %w", parseErr)
+			}
+			redisClient := goredis.NewClient(opts)
+			if pingErr := redisClient.Ping(ctx).Err(); pingErr != nil {
+				return fmt.Errorf("redis ping failed: %w", pingErr)
+			}
+			defer func() { _ = redisClient.Close() }()
+			kv := &redisKV{client: redisClient, prefix: "privacy:"}
+			optOutStore = privacy.NewCachedPreferencesStore(base, kv, cacheTTL, log)
+			log.V(1).Info("redis warm cache enabled", "addr", opts.Addr, "ttl", cacheTTL)
 		}
-		redisClient := goredis.NewClient(opts)
-		if pingErr := redisClient.Ping(ctx).Err(); pingErr != nil {
-			return fmt.Errorf("redis ping failed: %w", pingErr)
-		}
-		kv := &redisKV{client: redisClient, prefix: "privacy:"}
-		optOutStore = privacy.NewCachedPreferencesStore(base, kv, cacheTTL, log)
-		log.V(1).Info("redis warm cache enabled", "addr", opts.Addr, "ttl", cacheTTL)
+
+		// Consent notifier: fan-out revocations to all memory-api service-groups.
+		// Resolve memory URLs from workspace status; MEMORY_API_URLS env overrides at
+		// notifier construction time (if set, the notifier ignores memoryURLs).
+		memoryURLs := resolveMemoryURLs(f, log)
+		log.V(1).Info("consent notifier configured", "memoryURLCount", len(memoryURLs))
+		tokenSrc := serviceauth.NewTokenSource("", 0)
+		notifier = privacy.NewMemoryAPINotifier(memoryURLs, f.workspace, tokenSrc, log)
+
+		// Analytics opt-in metric (relocated from memory-api CE2).
+		optInWorker := NewOptInMetricWorker(
+			base,
+			envDuration("PRIVACY_OPTIN_METRIC_INTERVAL", 5*time.Minute),
+			prometheus.DefaultRegisterer,
+			log,
+		)
+		go optInWorker.Run(ctx)
+	} else {
+		log.Info("privacy-api enterprise features disabled; consent and opt-out routes not registered")
 	}
 
 	// --- ServiceAccount auth (opt-in) ---
@@ -214,31 +291,9 @@ func run() error {
 		return err
 	}
 
-	// --- Consent notifier: fan-out revocations to all memory-api service-groups ---
-	// Resolve memory URLs from workspace status; MEMORY_API_URLS env overrides at
-	// notifier construction time (if set, the notifier ignores memoryURLs).
-	memoryURLs := resolveMemoryURLs(f, log)
-	log.V(1).Info("consent notifier configured", "memoryURLCount", len(memoryURLs))
-	tokenSrc := serviceauth.NewTokenSource("", 0)
-	notifier := privacy.NewMemoryAPINotifier(memoryURLs, f.workspace, tokenSrc, log)
-
-	// --- Analytics opt-in metric (relocated from memory-api CE2) ---
-	optInWorker := NewOptInMetricWorker(
-		base,
-		envDuration("PRIVACY_OPTIN_METRIC_INTERVAL", 5*time.Minute),
-		prometheus.DefaultRegisterer,
-		log,
-	)
-	go optInWorker.Run(ctx)
-
 	// --- Build API mux ---
-	apiMux := http.NewServeMux()
-	// /healthz on the API mux so the auth middleware can exempt it from token checks.
-	apiMux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("ok"))
-	})
-	registerRoutes(apiMux, optOutStore, base, log, notifier)
+	// /healthz is always registered; enterprise routes are gated on f.enterprise.
+	apiMux := buildAPIMux(f.enterprise, optOutStore, base, log, notifier)
 
 	// Wire up auth handler.
 	apiHandler := buildHandler(reviewer, allowedSubjects, allowedNamespaces, apiMux)
@@ -264,6 +319,8 @@ func run() error {
 		"metrics", f.metricsAddr,
 		"workspace", f.workspace,
 		"authEnabled", f.authEnabled,
+		"enterprise", f.enterprise,
+		"tracingEnabled", f.tracingEnabled,
 	)
 
 	// --- Wait for shutdown ---
@@ -290,6 +347,28 @@ func registerRoutes(
 	privacy.NewConsentHandler(concrete, nil, log).WithConsentNotifier(notifier).RegisterRoutes(mux)
 	privacy.NewConsentStatsHandler(concrete, log).RegisterRoutes(mux)
 	privacy.NewEnforcementStatsHandler(concrete, log).RegisterRoutes(mux)
+}
+
+// buildAPIMux creates the HTTP mux for the privacy-api. /healthz is always
+// registered. When enterprise is true, the full consent/opt-out/stats route set
+// is also registered via registerRoutes; when false, only /healthz is served on
+// the API port (belt-and-suspenders for enterprise-only deployments).
+func buildAPIMux(
+	enterprise bool,
+	optOutStore privacy.PreferencesStore,
+	concrete *privacy.PreferencesPostgresStore,
+	log logr.Logger,
+	notifier privacy.ConsentNotifier,
+) *http.ServeMux {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	})
+	if enterprise {
+		registerRoutes(mux, optOutStore, concrete, log, notifier)
+	}
+	return mux
 }
 
 // buildHandler wraps inner with ServiceAccount auth middleware. /healthz is exempt.
@@ -352,7 +431,7 @@ func resolveConfigFromWorkspace(f *flags, log logr.Logger) error {
 		return fmt.Errorf("creating K8s client: %w", err)
 	}
 	cr := servicediscovery.NewConfigResolver(c)
-	namespace := detectNamespace()
+	namespace := servicediscovery.DetectNamespace()
 	privCfg, err := cr.ResolvePrivacyConfig(context.Background(), f.workspace, namespace)
 	if err != nil {
 		return fmt.Errorf("resolving privacy config: %w", err)
@@ -360,18 +439,6 @@ func resolveConfigFromWorkspace(f *flags, log logr.Logger) error {
 	f.postgresConn = privCfg.PostgresConn
 	log.V(1).Info("privacy config resolved", "workspace", f.workspace)
 	return nil
-}
-
-// detectNamespace returns the Kubernetes namespace this process is running in.
-func detectNamespace() string {
-	if ns := os.Getenv("OMNIA_NAMESPACE"); ns != "" {
-		return ns
-	}
-	data, err := os.ReadFile("/var/run/secrets/kubernetes.io/serviceaccount/namespace")
-	if err != nil {
-		return "default"
-	}
-	return string(data)
 }
 
 // buildServiceAuth constructs the TokenReviewer and parses allowlists when
