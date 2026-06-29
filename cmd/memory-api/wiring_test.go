@@ -1010,3 +1010,125 @@ func TestNewProjectionWorker_ReturnsWorker(t *testing.T) {
 		t.Fatal("expected non-nil worker from newProjectionWorker")
 	}
 }
+
+// stubConsentPruner is a minimal memory.ConsentEventPruner test double for the
+// cmd/memory-api wiring test. It records which delete path was taken so the
+// test can prove buildAPIMux called svc.SetConsentEventPruner and wired the
+// pruner all the way through to the service layer.
+type stubConsentPruner struct {
+	softCalled bool
+	hardCalled bool
+}
+
+func (s *stubConsentPruner) SoftDeleteUserConsentCategory(_ context.Context, _, _, _ string) (int64, error) {
+	s.softCalled = true
+	return 1, nil
+}
+
+func (s *stubConsentPruner) HardDeleteUserConsentCategory(_ context.Context, _, _, _ string) (int64, error) {
+	s.hardCalled = true
+	return 1, nil
+}
+
+// TestBuildAPIMux_ConsentEventRouteWired verifies the CE1 wiring contract:
+//
+//  1. POST /api/v1/memories/consent-events is registered on the real mux when
+//     enterprise=true (a 404 proves the route is absent; anything else proves
+//     it is registered and the handler ran).
+//  2. The stub ConsentEventPruner is actually invoked by the service layer —
+//     proving buildAPIMux called svc.SetConsentEventPruner rather than leaving
+//     the pruner nil (which would return 500 "pruner not configured").
+//  3. With enterprise=false the route returns 403 (requireEnterprise gate),
+//     confirming the gate is active even though the route IS registered on the
+//     mux (it is always registered; the gate fires inside the handler).
+//
+// No database is required: policyLoader=nil causes resolveAction to default to
+// SoftDelete, so only stubConsentPruner.SoftDeleteUserConsentCategory is called.
+func TestBuildAPIMux_ConsentEventRouteWired(t *testing.T) {
+	t.Run("enterprise=true route registered and pruner invoked", func(t *testing.T) {
+		freshPromRegistry(t)
+		pruner := &stubConsentPruner{}
+
+		handler, cleanup := buildAPIMux(
+			context.Background(),
+			fakeMemoryStore{},
+			nil,
+			memoryapi.MemoryServiceConfig{},
+			nil,
+			true, // enterprise=true — unlocks the requireEnterprise gate
+			nil,
+			nil, // policyLoader nil → default SoftDelete action
+			nil, // auditLogger optional
+			logr.Discard(),
+			memoryapi.IngestOptions{Fallback: ingestion.Config{
+				Strategy: ingestion.StrategyChunk, ChunkSize: 200, ChunkOverlap: 40,
+			}},
+			"", "", // workspace, serviceGroup — empty in unit tests
+			pruner, // consentPruner — stub records invocation
+		)
+		defer cleanup()
+
+		body, err := json.Marshal(memoryapi.ConsentEventRequest{
+			UserID:   "u1",
+			Category: "memory:health",
+		})
+		if err != nil {
+			t.Fatalf("marshal request: %v", err)
+		}
+
+		req := httptest.NewRequest(http.MethodPost,
+			"/api/v1/memories/consent-events?workspace=ws-1",
+			bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+
+		if rr.Code == http.StatusNotFound {
+			t.Errorf("POST /api/v1/memories/consent-events not registered; buildAPIMux returned 404")
+		}
+		if !pruner.softCalled && !pruner.hardCalled {
+			t.Errorf("consentPruner not invoked: buildAPIMux did not wire svc.SetConsentEventPruner; "+
+				"softCalled=%v hardCalled=%v status=%d body=%q",
+				pruner.softCalled, pruner.hardCalled, rr.Code, rr.Body.String())
+		}
+	})
+
+	t.Run("enterprise=false route returns 403 gate", func(t *testing.T) {
+		freshPromRegistry(t)
+
+		handler, cleanup := buildAPIMux(
+			context.Background(),
+			fakeMemoryStore{},
+			nil,
+			memoryapi.MemoryServiceConfig{},
+			nil,
+			false, // enterprise=false — requireEnterprise gate fires
+			nil,
+			nil,
+			nil,
+			logr.Discard(),
+			memoryapi.IngestOptions{Fallback: ingestion.Config{
+				Strategy: ingestion.StrategyChunk, ChunkSize: 200, ChunkOverlap: 40,
+			}},
+			"", "", // workspace, serviceGroup — empty in unit tests
+			nil, // consentPruner — gate fires before handler; pruner irrelevant
+		)
+		defer cleanup()
+
+		body, _ := json.Marshal(memoryapi.ConsentEventRequest{
+			UserID:   "u1",
+			Category: "memory:health",
+		})
+		req := httptest.NewRequest(http.MethodPost,
+			"/api/v1/memories/consent-events?workspace=ws-1",
+			bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+
+		if rr.Code != http.StatusForbidden {
+			t.Errorf("expected 403 (enterprise_required gate) when enterprise=false, got %d; body=%q",
+				rr.Code, rr.Body.String())
+		}
+	})
+}
