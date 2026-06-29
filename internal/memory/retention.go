@@ -233,7 +233,7 @@ func (w *RetentionWorker) runConsentRevocation(
 	}
 	if hard > 0 {
 		metrics.observeHardDelete(hard)
-		w.emitConsentAudit(ctx, omniav1alpha1.ConsentRevocationSoftDelete, 0, hard)
+		w.emitConsentAudit(ctx, omniav1alpha1.ConsentRevocationHardDelete, 0, hard)
 	}
 	return 0, hard, nil
 }

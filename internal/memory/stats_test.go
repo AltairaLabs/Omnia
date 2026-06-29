@@ -296,10 +296,10 @@ func TestAggregate_EmptyWorkspace_ReturnsEmpty(t *testing.T) {
 
 // TestAggregate_GroupByTier verifies the tier pivot classifies rows by
 // (virtual_user_id, agent_id) into institutional / agent / user /
-// user_for_agent and that the existing AggregateConsentJoin still filters
-// non-consenting users.
+// user_for_agent. As of CE2 (#1642) there is no consent filter — all
+// rows are counted regardless of analytics:aggregate grant status.
 //
-// Baseline from seedAggregateFixtures (no consent filter post-CE2):
+// Baseline from seedAggregateFixtures (all users counted, no consent filter):
 //   - 3 granted-user rows  (user_id + agent_id) → tier=user_for_agent
 //   - 2 denied-user rows   (user_id + agent_id) → tier=user_for_agent
 //   - 1 opted-out user row (user_id + agent_id) → tier=user_for_agent
@@ -353,7 +353,7 @@ func TestAggregate_GroupByTier(t *testing.T) {
 
 // TestAggregate_GroupByTier_DistinctUsers verifies the distinct_users metric
 // against tier — institutional rows have NULL virtual_user_id so count zero;
-// the user / user_for_agent tiers carry the consenting users.
+// the user / user_for_agent tiers carry all users (no consent filter, CE2).
 func TestAggregate_GroupByTier_DistinctUsers(t *testing.T) {
 	store := newStore(t)
 	workspace := seedAggregateFixtures(t, store)

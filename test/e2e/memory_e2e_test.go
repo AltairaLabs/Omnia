@@ -231,21 +231,10 @@ spec:
 			g.Expect(output).To(Equal("True"))
 		}, 4*time.Minute, time.Second).Should(Succeed())
 
-		By("seeding analytics:aggregate consent for the consenting user")
-		// Memory-api ran its migrations on startup → user_privacy_preferences
-		// table exists. We pre-seed a row for the consenting user; the
-		// non-consenting user has no row, so the consent join filters their
-		// memories from the user-tier aggregate by construction.
-		seedSQL := `
-INSERT INTO user_privacy_preferences (user_id, consent_grants)
-VALUES ('e2e-user-consenting', ARRAY['analytics:aggregate'])
-ON CONFLICT (user_id) DO UPDATE SET consent_grants = EXCLUDED.consent_grants;
-`
-		cmd = exec.Command("kubectl", "exec", "-n", memoryE2ENamespace,
-			"deployment/memory-e2e-postgres", "--",
-			"psql", "-U", "omnia", "-d", "omnia_memory", "-c", seedSQL)
-		_, err = utils.Run(cmd)
-		Expect(err).NotTo(HaveOccurred(), "Failed to seed analytics:aggregate consent")
+		// No consent seed needed: as of CE2 (#1642) the aggregate endpoint
+		// counts all tiers unfiltered. The user_privacy_preferences table
+		// is no longer consulted by aggregate queries — consent revocation
+		// is event-driven via POST /api/v1/memories/consent-events.
 	})
 
 	AfterAll(func() {
