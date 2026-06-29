@@ -47,6 +47,10 @@ func (m *prefsMockPool) Query(_ context.Context, _ string, _ ...any) (pgx.Rows, 
 	return nil, nil
 }
 
+func (m *prefsMockPool) Begin(_ context.Context) (pgx.Tx, error) {
+	return nil, errors.New("Begin not supported in mock") // outbox tx paths tested against real Postgres
+}
+
 func TestGetPreferences_Found(t *testing.T) {
 	now := time.Now().UTC()
 	pool := &prefsMockPool{

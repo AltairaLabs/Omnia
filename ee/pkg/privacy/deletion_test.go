@@ -1311,6 +1311,10 @@ func (m *mockDBPool) Query(
 	return nil, errors.New("not implemented")
 }
 
+func (m *mockDBPool) Begin(_ context.Context) (pgx.Tx, error) {
+	return nil, errors.New("Begin not supported in mock") // outbox tx paths tested against real Postgres
+}
+
 // newStoreFromPool creates a PostgresDeletionStore with a mock dbPool.
 func newStoreFromPool(pool dbPool) *PostgresDeletionStore {
 	return &PostgresDeletionStore{pool: pool}
