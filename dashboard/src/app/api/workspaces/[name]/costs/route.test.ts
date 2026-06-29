@@ -50,7 +50,7 @@ beforeEach(() => {
   vi.mocked(resolveServiceURLs).mockResolvedValue({
     sessionURL: "https://session-default:8080",
     memoryURL: "https://memory-default:8080",
-    namespace: "omnia-default",
+    namespace: "omnia-default", privacyURL: ""
   });
   vi.mocked(validateWorkspace).mockResolvedValue({
     ok: true,

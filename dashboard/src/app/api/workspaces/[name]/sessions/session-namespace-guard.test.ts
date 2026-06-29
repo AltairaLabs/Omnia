@@ -26,7 +26,7 @@ describe("verifySessionNamespace", () => {
 
   it("returns ok when session namespace matches workspace namespace", async () => {
     const { resolveServiceURLs } = await import("@/lib/k8s/service-url-resolver");
-    vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://session-api:8080", memoryURL: "https://memory-api:8080", namespace: "omnia-test" });
+    vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://session-api:8080", memoryURL: "https://memory-api:8080", namespace: "omnia-test", privacyURL: "" });
 
     const { getWorkspace } = await import("@/lib/k8s/workspace-route-helpers");
     vi.mocked(getWorkspace).mockResolvedValue({
@@ -52,7 +52,7 @@ describe("verifySessionNamespace", () => {
 
   it("returns 404 when session namespace does not match workspace (IDOR)", async () => {
     const { resolveServiceURLs } = await import("@/lib/k8s/service-url-resolver");
-    vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://session-api:8080", memoryURL: "https://memory-api:8080", namespace: "omnia-test" });
+    vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://session-api:8080", memoryURL: "https://memory-api:8080", namespace: "omnia-test", privacyURL: "" });
 
     const { getWorkspace } = await import("@/lib/k8s/workspace-route-helpers");
     vi.mocked(getWorkspace).mockResolvedValue({
@@ -93,7 +93,7 @@ describe("verifySessionNamespace", () => {
 
   it("returns 404 when workspace does not exist", async () => {
     const { resolveServiceURLs } = await import("@/lib/k8s/service-url-resolver");
-    vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://session-api:8080", memoryURL: "https://memory-api:8080", namespace: "omnia-test" });
+    vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://session-api:8080", memoryURL: "https://memory-api:8080", namespace: "omnia-test", privacyURL: "" });
 
     const { getWorkspace } = await import("@/lib/k8s/workspace-route-helpers");
     vi.mocked(getWorkspace).mockResolvedValue(null);
@@ -111,7 +111,7 @@ describe("verifySessionNamespace", () => {
 
   it("forwards backend 404 when session does not exist", async () => {
     const { resolveServiceURLs } = await import("@/lib/k8s/service-url-resolver");
-    vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://session-api:8080", memoryURL: "https://memory-api:8080", namespace: "omnia-test" });
+    vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://session-api:8080", memoryURL: "https://memory-api:8080", namespace: "omnia-test", privacyURL: "" });
 
     const { getWorkspace } = await import("@/lib/k8s/workspace-route-helpers");
     vi.mocked(getWorkspace).mockResolvedValue({
@@ -136,7 +136,7 @@ describe("verifySessionNamespace", () => {
 
   it("returns 502 when session-api fetch fails", async () => {
     const { resolveServiceURLs } = await import("@/lib/k8s/service-url-resolver");
-    vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://session-api:8080", memoryURL: "https://memory-api:8080", namespace: "omnia-test" });
+    vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://session-api:8080", memoryURL: "https://memory-api:8080", namespace: "omnia-test", privacyURL: "" });
 
     const { getWorkspace } = await import("@/lib/k8s/workspace-route-helpers");
     vi.mocked(getWorkspace).mockResolvedValue({
@@ -157,7 +157,7 @@ describe("verifySessionNamespace", () => {
 
   it("strips trailing slash from session URL", async () => {
     const { resolveServiceURLs } = await import("@/lib/k8s/service-url-resolver");
-    vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://session-api:8080/", memoryURL: "https://memory-api:8080", namespace: "omnia-test" });
+    vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://session-api:8080/", memoryURL: "https://memory-api:8080", namespace: "omnia-test", privacyURL: "" });
 
     const { getWorkspace } = await import("@/lib/k8s/workspace-route-helpers");
     vi.mocked(getWorkspace).mockResolvedValue({
