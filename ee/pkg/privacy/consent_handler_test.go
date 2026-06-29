@@ -17,6 +17,7 @@ import (
 	"net/http/httptest"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -26,6 +27,9 @@ import (
 
 	"github.com/altairalabs/omnia/internal/session/api"
 )
+
+// fakeOutboxID is the outbox row id returned by the test store fakes.
+const fakeOutboxID = "fake-outbox-id"
 
 // mockConsentAuditLogger captures emitted audit events for assertions.
 type mockConsentAuditLogger struct {
@@ -99,7 +103,8 @@ func TestConsentHandlerPUT_ValidGrants(t *testing.T) {
 }
 
 func TestConsentHandlerPUT_ValidRevocations(t *testing.T) {
-	// Exec returns UPDATE 1 for revocation; QueryRow returns no grants.
+	// RemoveConsentGrantWithOutbox: tx.Exec returns UPDATE 1, tx.QueryRow returns a fake outbox id.
+	// No notifier → MarkOutboxDelivered is never called; pool.QueryRow returns no grants.
 	pool := &prefsMockPool{
 		execFn: func(_ context.Context, _ string, _ ...any) (pgconn.CommandTag, error) {
 			return pgconn.NewCommandTag("UPDATE 1"), nil
@@ -109,6 +114,19 @@ func TestConsentHandlerPUT_ValidRevocations(t *testing.T) {
 				*dest[0].(*[]string) = []string{}
 				return nil
 			}}
+		},
+		beginFn: func(_ context.Context) (pgx.Tx, error) {
+			return &mockPgxTx{
+				execFn: func(_ context.Context, _ string, _ ...any) (pgconn.CommandTag, error) {
+					return pgconn.NewCommandTag("UPDATE 1"), nil
+				},
+				queryRowFn: func(_ context.Context, _ string, _ ...any) pgx.Row {
+					return &prefsMockRow{scanFn: func(dest ...any) error {
+						*dest[0].(*string) = fakeOutboxID
+						return nil
+					}}
+				},
+			}, nil
 		},
 	}
 	h := newTestConsentHandler(pool, nil)
@@ -126,7 +144,9 @@ func TestConsentHandlerPUT_ValidRevocations(t *testing.T) {
 }
 
 func TestConsentHandlerPUT_RevocationIgnoresNotFound(t *testing.T) {
-	// removeArrayElement returns UPDATE 0 → ErrPreferencesNotFound, handler must swallow it.
+	// RemoveConsentGrantWithOutbox: tx.Exec returns UPDATE 0 (category not currently
+	// granted). The outbox is a no-op: ("", nil) is returned and the handler must
+	// continue without error, yielding 200.
 	pool := &prefsMockPool{
 		execFn: func(_ context.Context, _ string, _ ...any) (pgconn.CommandTag, error) {
 			return pgconn.NewCommandTag("UPDATE 0"), nil
@@ -136,6 +156,14 @@ func TestConsentHandlerPUT_RevocationIgnoresNotFound(t *testing.T) {
 				*dest[0].(*[]string) = []string{}
 				return nil
 			}}
+		},
+		beginFn: func(_ context.Context) (pgx.Tx, error) {
+			return &mockPgxTx{
+				execFn: func(_ context.Context, _ string, _ ...any) (pgconn.CommandTag, error) {
+					// No rows affected → no-op revocation, no outbox row.
+					return pgconn.NewCommandTag("UPDATE 0"), nil
+				},
+			}, nil
 		},
 	}
 	h := newTestConsentHandler(pool, nil)
@@ -240,28 +268,38 @@ func TestConsentHandlerPUT_StoreErrorOnQueryAfterGrant(t *testing.T) {
 }
 
 func TestConsentHandlerPUT_AuditEventsEmitted(t *testing.T) {
-	pool := successExecPool([]string{
-		string(ConsentMemoryIdentity),
-		string(ConsentMemoryPreferences),
-	})
 	audit := &mockConsentAuditLogger{}
+	// Grants use pool.Exec (INSERT); revocation of ConsentMemoryLocation goes through
+	// RemoveConsentGrantWithOutbox → pool.Begin → tx.Exec. The category is not currently
+	// granted, so tx.Exec returns UPDATE 0 (no-op → outboxID="" → no notification).
+	pool := &prefsMockPool{
+		execFn: func(_ context.Context, _ string, _ ...any) (pgconn.CommandTag, error) {
+			return pgconn.NewCommandTag("INSERT 0 1"), nil
+		},
+		queryRowFn: func(_ context.Context, _ string, _ ...any) pgx.Row {
+			return &prefsMockRow{scanFn: func(dest ...any) error {
+				*dest[0].(*[]string) = []string{
+					string(ConsentMemoryIdentity),
+					string(ConsentMemoryPreferences),
+				}
+				return nil
+			}}
+		},
+		beginFn: func(_ context.Context) (pgx.Tx, error) {
+			return &mockPgxTx{
+				execFn: func(_ context.Context, _ string, _ ...any) (pgconn.CommandTag, error) {
+					// Revocation: category not currently granted → no-op.
+					return pgconn.NewCommandTag("UPDATE 0"), nil
+				},
+			}, nil
+		},
+	}
 	h := newTestConsentHandler(pool, audit)
 
 	body, _ := json.Marshal(ConsentRequest{
 		Grants:      []ConsentCategory{ConsentMemoryIdentity, ConsentMemoryPreferences},
 		Revocations: []ConsentCategory{ConsentMemoryLocation},
 	})
-
-	// Exec: 2 grants succeed (INSERT), then 1 revocation returns UPDATE 0 (ErrPreferencesNotFound, swallowed).
-	callCount := 0
-	pool.execFn = func(_ context.Context, _ string, _ ...any) (pgconn.CommandTag, error) {
-		callCount++
-		if callCount <= 2 {
-			return pgconn.NewCommandTag("INSERT 0 1"), nil
-		}
-		// revocation: UPDATE 0 → ErrPreferencesNotFound, swallowed
-		return pgconn.NewCommandTag("UPDATE 0"), nil
-	}
 
 	rec := serveConsentRequest(h, http.MethodPut,
 		"/api/v1/privacy/preferences/user1/consent", body)
@@ -439,11 +477,11 @@ type notifyCall struct {
 	category ConsentCategory
 }
 
-func (s *spyNotifier) NotifyRevocation(_ context.Context, userID string, category ConsentCategory) error {
+func (s *spyNotifier) NotifyRevocation(_ context.Context, userID string, category ConsentCategory) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.calls = append(s.calls, notifyCall{userID: userID, category: category})
-	return nil
+	return true, nil
 }
 
 func (s *spyNotifier) callCount() int {
@@ -461,6 +499,8 @@ func (s *spyNotifier) callAt(i int) notifyCall {
 // TestConsentHandlerPUT_RevocationTriggersNotifier asserts that a successful
 // revocation fires NotifyRevocation with the correct (userID, category).
 func TestConsentHandlerPUT_RevocationTriggersNotifier(t *testing.T) {
+	// pool.Exec: used by MarkOutboxDelivered after spy returns delivered=true.
+	// pool.Begin/tx: used by RemoveConsentGrantWithOutbox.
 	pool := &prefsMockPool{
 		execFn: func(_ context.Context, _ string, _ ...any) (pgconn.CommandTag, error) {
 			return pgconn.NewCommandTag("UPDATE 1"), nil
@@ -470,6 +510,19 @@ func TestConsentHandlerPUT_RevocationTriggersNotifier(t *testing.T) {
 				*dest[0].(*[]string) = []string{}
 				return nil
 			}}
+		},
+		beginFn: func(_ context.Context) (pgx.Tx, error) {
+			return &mockPgxTx{
+				execFn: func(_ context.Context, _ string, _ ...any) (pgconn.CommandTag, error) {
+					return pgconn.NewCommandTag("UPDATE 1"), nil
+				},
+				queryRowFn: func(_ context.Context, _ string, _ ...any) pgx.Row {
+					return &prefsMockRow{scanFn: func(dest ...any) error {
+						*dest[0].(*string) = fakeOutboxID
+						return nil
+					}}
+				},
+			}, nil
 		},
 	}
 	spy := &spyNotifier{}
@@ -508,6 +561,8 @@ func TestConsentHandlerPUT_GrantDoesNotTriggerNotifier(t *testing.T) {
 // TestConsentHandlerPUT_MultipleRevocationsNotifiedEach asserts that each
 // revocation in a batch is individually forwarded to the notifier.
 func TestConsentHandlerPUT_MultipleRevocationsNotifiedEach(t *testing.T) {
+	// Two revocations: each calls pool.Begin independently; spy is called once per revocation.
+	// spy returns delivered=true for each → MarkOutboxDelivered called twice via pool.Exec.
 	pool := &prefsMockPool{
 		execFn: func(_ context.Context, _ string, _ ...any) (pgconn.CommandTag, error) {
 			return pgconn.NewCommandTag("UPDATE 1"), nil
@@ -517,6 +572,19 @@ func TestConsentHandlerPUT_MultipleRevocationsNotifiedEach(t *testing.T) {
 				*dest[0].(*[]string) = []string{}
 				return nil
 			}}
+		},
+		beginFn: func(_ context.Context) (pgx.Tx, error) {
+			return &mockPgxTx{
+				execFn: func(_ context.Context, _ string, _ ...any) (pgconn.CommandTag, error) {
+					return pgconn.NewCommandTag("UPDATE 1"), nil
+				},
+				queryRowFn: func(_ context.Context, _ string, _ ...any) pgx.Row {
+					return &prefsMockRow{scanFn: func(dest ...any) error {
+						*dest[0].(*string) = fakeOutboxID
+						return nil
+					}}
+				},
+			}, nil
 		},
 	}
 	spy := &spyNotifier{}
@@ -535,6 +603,8 @@ func TestConsentHandlerPUT_MultipleRevocationsNotifiedEach(t *testing.T) {
 // TestConsentHandlerPUT_NotifierErrorIsSwallowed asserts that a notifier that
 // returns an error does not fail the HTTP request (best-effort contract).
 func TestConsentHandlerPUT_NotifierErrorIsSwallowed(t *testing.T) {
+	// errorNotifier returns (false, error). The error is discarded; delivered=false
+	// means MarkOutboxDelivered is skipped. The consent write must still return 200.
 	pool := &prefsMockPool{
 		execFn: func(_ context.Context, _ string, _ ...any) (pgconn.CommandTag, error) {
 			return pgconn.NewCommandTag("UPDATE 1"), nil
@@ -544,6 +614,19 @@ func TestConsentHandlerPUT_NotifierErrorIsSwallowed(t *testing.T) {
 				*dest[0].(*[]string) = []string{}
 				return nil
 			}}
+		},
+		beginFn: func(_ context.Context) (pgx.Tx, error) {
+			return &mockPgxTx{
+				execFn: func(_ context.Context, _ string, _ ...any) (pgconn.CommandTag, error) {
+					return pgconn.NewCommandTag("UPDATE 1"), nil
+				},
+				queryRowFn: func(_ context.Context, _ string, _ ...any) pgx.Row {
+					return &prefsMockRow{scanFn: func(dest ...any) error {
+						*dest[0].(*string) = fakeOutboxID
+						return nil
+					}}
+				},
+			}, nil
 		},
 	}
 	// A notifier that always errors.
@@ -563,11 +646,21 @@ func TestConsentHandlerPUT_NotifierErrorIsSwallowed(t *testing.T) {
 // errorNotifier always returns an error from NotifyRevocation.
 type errorNotifier struct{}
 
-func (errorNotifier) NotifyRevocation(_ context.Context, _ string, _ ConsentCategory) error {
-	return errors.New("simulated notifier failure")
+func (errorNotifier) NotifyRevocation(_ context.Context, _ string, _ ConsentCategory) (bool, error) {
+	return false, errors.New("simulated notifier failure")
+}
+
+// alwaysUndeliveredNotifier returns delivered=false without error — used to test
+// that the outbox row is left undelivered when the notifier does not succeed.
+type alwaysUndeliveredNotifier struct{}
+
+func (alwaysUndeliveredNotifier) NotifyRevocation(_ context.Context, _ string, _ ConsentCategory) (bool, error) {
+	return false, nil
 }
 
 func TestConsentHandlerPUT_MixedGrantsAndRevocations(t *testing.T) {
+	// Grants use pool.Exec; revocations use pool.Begin → tx.Exec (transactional outbox).
+	// No notifier → MarkOutboxDelivered not called; only one pool.Exec call (the grant).
 	execCalls := 0
 	pool := &prefsMockPool{
 		execFn: func(_ context.Context, _ string, _ ...any) (pgconn.CommandTag, error) {
@@ -580,6 +673,19 @@ func TestConsentHandlerPUT_MixedGrantsAndRevocations(t *testing.T) {
 				return nil
 			}}
 		},
+		beginFn: func(_ context.Context) (pgx.Tx, error) {
+			return &mockPgxTx{
+				execFn: func(_ context.Context, _ string, _ ...any) (pgconn.CommandTag, error) {
+					return pgconn.NewCommandTag("UPDATE 1"), nil
+				},
+				queryRowFn: func(_ context.Context, _ string, _ ...any) pgx.Row {
+					return &prefsMockRow{scanFn: func(dest ...any) error {
+						*dest[0].(*string) = fakeOutboxID
+						return nil
+					}}
+				},
+			}, nil
+		},
 	}
 	h := newTestConsentHandler(pool, nil)
 
@@ -591,5 +697,73 @@ func TestConsentHandlerPUT_MixedGrantsAndRevocations(t *testing.T) {
 		"/api/v1/privacy/preferences/user1/consent", body)
 
 	assert.Equal(t, http.StatusOK, rec.Code)
-	assert.Equal(t, 2, execCalls, "expected one exec per grant and one per revocation")
+	assert.Equal(t, 1, execCalls, "grant uses pool.Exec; revocation uses pool.Begin (transactional outbox)")
+}
+
+// ---- outbox integration tests (real Postgres via testcontainers) ----
+
+// TestConsentHandlerPUT_RevocationOutboxMarkedDelivered_RealPostgres verifies that
+// when a revocation succeeds and the notifier returns delivered=true, the handler
+// records an outbox row AND immediately marks it delivered. The PUT returns 200.
+func TestConsentHandlerPUT_RevocationOutboxMarkedDelivered_RealPostgres(t *testing.T) {
+	pool := outboxTestPool(t)
+	const (
+		userID   = "handler-outbox-delivered-user"
+		category = ConsentMemoryIdentity
+	)
+	seedConsentGrant(t, pool, userID, category)
+
+	spy := &spyNotifier{} // NotifyRevocation returns (true, nil)
+	h := newTestConsentHandler(pool, nil).WithConsentNotifier(spy)
+
+	body, _ := json.Marshal(ConsentRequest{
+		Revocations: []ConsentCategory{category},
+	})
+	rec := serveConsentRequest(h, http.MethodPut,
+		"/api/v1/privacy/preferences/"+userID+"/consent", body)
+
+	require.Equal(t, http.StatusOK, rec.Code, "revocation must return 200")
+	require.Equal(t, 1, spy.callCount(), "notifier must be called once")
+
+	assert.Equal(t, int64(1), outboxRowCount(t, pool), "exactly one outbox row must be created")
+
+	var deliveredAt *time.Time
+	err := pool.QueryRow(
+		context.Background(),
+		`SELECT delivered_at FROM consent_revocation_outbox WHERE user_id = $1`, userID,
+	).Scan(&deliveredAt)
+	require.NoError(t, err)
+	assert.NotNil(t, deliveredAt, "delivered_at must be set when notifier returns delivered=true")
+}
+
+// TestConsentHandlerPUT_RevocationOutboxLeftUndelivered_RealPostgres verifies that
+// when the notifier returns delivered=false the outbox row is created but left
+// undelivered (delivered_at is NULL). The PUT still returns 200 (best-effort).
+func TestConsentHandlerPUT_RevocationOutboxLeftUndelivered_RealPostgres(t *testing.T) {
+	pool := outboxTestPool(t)
+	const (
+		userID   = "handler-outbox-undelivered-user"
+		category = ConsentMemoryIdentity
+	)
+	seedConsentGrant(t, pool, userID, category)
+
+	h := newTestConsentHandler(pool, nil).WithConsentNotifier(alwaysUndeliveredNotifier{})
+
+	body, _ := json.Marshal(ConsentRequest{
+		Revocations: []ConsentCategory{category},
+	})
+	rec := serveConsentRequest(h, http.MethodPut,
+		"/api/v1/privacy/preferences/"+userID+"/consent", body)
+
+	require.Equal(t, http.StatusOK, rec.Code, "revocation must return 200 even when delivery fails")
+
+	assert.Equal(t, int64(1), outboxRowCount(t, pool), "exactly one outbox row must be created")
+
+	var deliveredAt *time.Time
+	err := pool.QueryRow(
+		context.Background(),
+		`SELECT delivered_at FROM consent_revocation_outbox WHERE user_id = $1`, userID,
+	).Scan(&deliveredAt)
+	require.NoError(t, err)
+	assert.Nil(t, deliveredAt, "delivered_at must remain NULL when notifier returns delivered=false")
 }

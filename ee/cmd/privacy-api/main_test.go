@@ -13,8 +13,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/go-logr/logr"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/stretchr/testify/require"
 
 	"github.com/altairalabs/omnia/ee/pkg/privacy"
 )
@@ -170,6 +173,53 @@ func TestEnterpriseGate_RoutesAbsentWhenFalse(t *testing.T) {
 		if rec.Code != http.StatusNotFound {
 			t.Errorf("enterprise=false: route %q expected 404, got %d", p, rec.Code)
 		}
+	}
+}
+
+// stubOutboxStore is a no-op outboxStore for use in unit/wiring tests.
+// All methods return zero values and no errors so the worker can be constructed
+// and run without a real database.
+type stubOutboxStore struct{}
+
+func (s *stubOutboxStore) ListUndeliveredOutbox(_ context.Context, _ time.Duration, _ int) ([]privacy.OutboxEntry, error) {
+	return nil, nil
+}
+func (s *stubOutboxStore) MarkOutboxDelivered(_ context.Context, _ string) error { return nil }
+func (s *stubOutboxStore) PruneDeliveredOutbox(_ context.Context, _ time.Duration) (int64, error) {
+	return 0, nil
+}
+func (s *stubOutboxStore) CountStuckOutbox(_ context.Context, _ time.Duration) (int64, error) {
+	return 0, nil
+}
+
+// TestOutboxReplayWorker_GaugeRegistered is a wiring test (per repo policy §Wiring tests)
+// that asserts NewOutboxReplayWorker registers the omnia_privacy_consent_outbox_stuck_total
+// gauge with the supplied registry. This validates the construction path that main.go
+// exercises inside the if f.enterprise { } block when enterprise=true.
+func TestOutboxReplayWorker_GaugeRegistered(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	w := NewOutboxReplayWorker(
+		&stubOutboxStore{},
+		privacy.NoopConsentNotifier{},
+		5*time.Minute,
+		24*time.Hour,
+		reg,
+		logr.Discard(),
+	)
+	require.NotNil(t, w)
+
+	mfs, err := reg.Gather()
+	require.NoError(t, err)
+
+	found := false
+	for _, mf := range mfs {
+		if mf.GetName() == metricConsentOutboxStuck {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected gauge %q to be registered in the Prometheus registry, but it was not found", metricConsentOutboxStuck)
 	}
 }
 

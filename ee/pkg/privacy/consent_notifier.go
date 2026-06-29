@@ -27,8 +27,11 @@ import (
 
 // ConsentNotifier is implemented by types that notify downstream services of
 // a consent revocation for a specific user and category.
+// delivered is true only if every configured target returned 2xx; it is also
+// true when there are zero targets (vacuously delivered). err is always nil —
+// delivery failures are logged per-target and never propagated to the caller.
 type ConsentNotifier interface {
-	NotifyRevocation(ctx context.Context, userID string, category ConsentCategory) error
+	NotifyRevocation(ctx context.Context, userID string, category ConsentCategory) (delivered bool, err error)
 }
 
 // NoopConsentNotifier is a nil-safe ConsentNotifier that does nothing.
@@ -36,8 +39,9 @@ type ConsentNotifier interface {
 type NoopConsentNotifier struct{}
 
 // NotifyRevocation implements ConsentNotifier by doing nothing.
-func (NoopConsentNotifier) NotifyRevocation(_ context.Context, _ string, _ ConsentCategory) error {
-	return nil
+// Nothing to deliver → vacuously delivered.
+func (NoopConsentNotifier) NotifyRevocation(_ context.Context, _ string, _ ConsentCategory) (bool, error) {
+	return true, nil
 }
 
 // consentEventBody is the JSON payload sent to the memory-api consent-events endpoint.
@@ -85,21 +89,26 @@ func NewMemoryAPINotifier(
 }
 
 // NotifyRevocation POSTs a consent-revocation event to every configured
-// memory-api URL. Failures are logged per target; the function always returns
-// nil so the caller's consent write is never rolled back due to push failure.
-func (n *MemoryAPINotifier) NotifyRevocation(ctx context.Context, userID string, category ConsentCategory) error {
+// memory-api URL. Failures are logged per target; err is always nil so the
+// caller's consent write is never rolled back due to a push failure.
+// delivered is true only when every target returned 2xx (or there are none).
+func (n *MemoryAPINotifier) NotifyRevocation(
+	ctx context.Context, userID string, category ConsentCategory,
+) (bool, error) {
 	if len(n.urls) == 0 {
 		n.log.V(1).Info("consent notify skipped", "reason", "no memory URLs configured")
-		return nil
+		return true, nil
 	}
 
 	body, err := json.Marshal(consentEventBody{UserID: userID, Category: string(category)})
 	if err != nil {
-		// JSON marshal of two plain strings cannot fail, but if somehow it does
-		// we return the error so the caller has visibility.
-		return fmt.Errorf("consent notifier: marshal body: %w", err)
+		// JSON marshal of two plain strings cannot fail in practice, but guard
+		// defensively: treat as undelivered, keep err nil per contract.
+		n.log.Error(err, "consent notifier: marshal body failed")
+		return false, nil
 	}
 
+	allOK := true
 	for _, baseURL := range n.urls {
 		if pushErr := n.pushOne(ctx, baseURL, body, userID, category); pushErr != nil {
 			n.log.Error(pushErr, "consent notify failed for target",
@@ -108,9 +117,10 @@ func (n *MemoryAPINotifier) NotifyRevocation(ctx context.Context, userID string,
 				"category", string(category),
 			)
 			// Best-effort: continue to remaining targets regardless of this failure.
+			allOK = false
 		}
 	}
-	return nil
+	return allOK, nil
 }
 
 // pushOne sends a single POST to one memory-api target.
