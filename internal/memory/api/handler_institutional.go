@@ -153,7 +153,7 @@ func (h *Handler) handleDeleteInstitutional(w http.ResponseWriter, r *http.Reque
 }
 
 // writeNotInstitutionalError emits a 400 with the sentinel message. Kept
-// separate from writeError so the sentinel from the ee/pkg/memory package doesn't
+// separate from writeError so the memory.ErrNotInstitutional sentinel doesn't
 // need to be plumbed into the writeError switch.
 func writeNotInstitutionalError(w http.ResponseWriter) {
 	w.Header().Set(httputil.HeaderContentType, httputil.ContentTypeJSON)
