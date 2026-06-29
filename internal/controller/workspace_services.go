@@ -162,51 +162,28 @@ func (r *WorkspaceReconciler) cleanupPrivacyService(ctx context.Context, workspa
 	namespace := workspace.Spec.Namespace.Name
 	depName := fmt.Sprintf("privacy-%s", workspace.Name)
 
-	if err := r.deletePrivacyNamespacedResource(ctx, &appsv1.Deployment{}, depName, namespace); err != nil {
-		return fmt.Errorf("delete privacy deployment: %w", err)
-	}
-	if err := r.deletePrivacyNamespacedResource(ctx, &corev1.Service{}, depName, namespace); err != nil {
-		return fmt.Errorf("delete privacy service: %w", err)
-	}
-	if err := r.deletePrivacyNamespacedResource(ctx, &corev1.ServiceAccount{}, depName, namespace); err != nil {
-		return fmt.Errorf("delete privacy service account: %w", err)
-	}
+	dep := &appsv1.Deployment{}
+	dep.Name = depName
+	dep.Namespace = namespace
 
-	tokenReviewCRBName := fmt.Sprintf("session-tokenreview-%s-%s", namespace, depName)
-	if err := r.deletePrivacyCRB(ctx, tokenReviewCRBName); err != nil {
-		return fmt.Errorf("delete privacy tokenreview CRB: %w", err)
-	}
+	svc := &corev1.Service{}
+	svc.Name = depName
+	svc.Namespace = namespace
 
-	enterpriseReaderCRBName := fmt.Sprintf("memory-enterprise-reader-%s-%s", namespace, depName)
-	if err := r.deletePrivacyCRB(ctx, enterpriseReaderCRBName); err != nil {
-		return fmt.Errorf("delete privacy enterprise-reader CRB: %w", err)
-	}
+	sa := &corev1.ServiceAccount{}
+	sa.Name = depName
+	sa.Namespace = namespace
 
-	return nil
-}
+	trCRB := &rbacv1.ClusterRoleBinding{}
+	trCRB.Name = fmt.Sprintf("session-tokenreview-%s-%s", namespace, depName)
 
-// deletePrivacyNamespacedResource deletes a namespaced Kubernetes object,
-// ignoring NotFound errors so the cleanup is idempotent.
-func (r *WorkspaceReconciler) deletePrivacyNamespacedResource(
-	ctx context.Context,
-	obj client.Object,
-	name, namespace string,
-) error {
-	obj.SetName(name)
-	obj.SetNamespace(namespace)
-	if err := r.Delete(ctx, obj); err != nil && !apierrors.IsNotFound(err) {
-		return err
-	}
-	return nil
-}
+	erCRB := &rbacv1.ClusterRoleBinding{}
+	erCRB.Name = fmt.Sprintf("memory-enterprise-reader-%s-%s", namespace, depName)
 
-// deletePrivacyCRB deletes a ClusterRoleBinding by name, ignoring NotFound so
-// the cleanup is idempotent.
-func (r *WorkspaceReconciler) deletePrivacyCRB(ctx context.Context, name string) error {
-	crb := &rbacv1.ClusterRoleBinding{}
-	crb.Name = name
-	if err := r.Delete(ctx, crb); err != nil && !apierrors.IsNotFound(err) {
-		return err
+	for _, obj := range []client.Object{dep, svc, sa, trCRB, erCRB} {
+		if err := r.Delete(ctx, obj); err != nil && !apierrors.IsNotFound(err) {
+			return fmt.Errorf("cleanup privacy resource %s: %w", obj.GetName(), err)
+		}
 	}
 	return nil
 }
