@@ -57,14 +57,14 @@ func seedAggregateFixtures(t *testing.T, store *PostgresMemoryStore) string {
 	// Granted user: 3 memories spread over 3 days, 2 categories, 2 agents.
 	insertMem("agg-user-granted", agentAUUID, "memory:context", day1)
 	insertMem("agg-user-granted", agentAUUID, "memory:context", day2)
-	insertMem("agg-user-granted", agentBUUID, "memory:health", day3)
+	insertMem("agg-user-granted", agentBUUID, healthCat, day3)
 
 	// Denied user: 2 memories that MUST be excluded by the consent filter.
 	insertMem("agg-user-denied", agentAUUID, "memory:context", day2)
-	insertMem("agg-user-denied", agentBUUID, "memory:identity", day3)
+	insertMem("agg-user-denied", agentBUUID, identityCat, day3)
 
 	// Opted-out user: 1 memory that MUST also be excluded.
-	insertMem("agg-user-opted-out", agentAUUID, "memory:preferences", day3)
+	insertMem("agg-user-opted-out", agentAUUID, prefsCat, day3)
 
 	// One institutional row (no user, no agent) — counted for category/day,
 	// skipped for agent.
@@ -91,10 +91,10 @@ func TestAggregate_GroupByCategory_Count(t *testing.T) {
 	}
 
 	want := map[string]int64{
-		"memory:context":     4, // 2 granted + 1 denied + 1 institutional (no consent filter)
-		"memory:health":      1, // 1 granted
-		"memory:identity":    1, // 1 denied
-		"memory:preferences": 1, // 1 opted-out
+		"memory:context": 4, // 2 granted + 1 denied + 1 institutional (no consent filter)
+		healthCat:        1, // 1 granted
+		identityCat:      1, // 1 denied
+		prefsCat:         1, // 1 opted-out
 	}
 	require.Equal(t, want, got)
 }
@@ -168,8 +168,8 @@ func TestAggregate_DistinctUsers_DiffersFromCount(t *testing.T) {
 
 	require.Equal(t, int64(2), got["memory:context"], "distinct users for context (no consent filter)")
 	require.Equal(t, int64(4), gotCounts["memory:context"], "row count for context")
-	require.Equal(t, int64(1), got["memory:health"], "distinct users for health")
-	require.Equal(t, int64(1), gotCounts["memory:health"], "row count for health")
+	require.Equal(t, int64(1), got[healthCat], "distinct users for health")
+	require.Equal(t, int64(1), gotCounts[healthCat], "row count for health")
 }
 
 func TestAggregate_TimeBounds_FromExcludesEarlier(t *testing.T) {
@@ -192,7 +192,7 @@ func TestAggregate_TimeBounds_FromExcludesEarlier(t *testing.T) {
 		got[r.Key] = r.Value
 	}
 	// Day3 rows only: health×1, identity×1, preferences×1 (no consent filter)
-	require.Equal(t, map[string]int64{"memory:health": 1, "memory:identity": 1, "memory:preferences": 1}, got)
+	require.Equal(t, map[string]int64{healthCat: 1, identityCat: 1, prefsCat: 1}, got)
 }
 
 func TestAggregate_LimitClamping(t *testing.T) {

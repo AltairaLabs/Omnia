@@ -26,6 +26,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+const (
+	healthCat   = "memory:health"
+	identityCat = "memory:identity"
+	prefsCat    = "memory:preferences"
+)
+
 // TestSoftDeleteUserConsentCategory covers the per-user/category soft-delete
 // path and verifies the id-contract: only rows matching the exact
 // (workspace, userID, category) triple are touched; other users, other
@@ -40,8 +46,8 @@ func TestSoftDeleteUserConsentCategory(t *testing.T) {
 
 	userX := "user-x-soft"
 	userY := "user-y-soft"
-	catC := "memory:health"
-	catD := "memory:preferences"
+	catC := healthCat
+	catD := prefsCat
 
 	// Seed rows: X/C (target), X/D (keep — different category),
 	// Y/C (keep — different user), institutional with C (keep — no virtual_user_id).
@@ -76,13 +82,13 @@ func TestSoftDeleteUserConsentCategory_Idempotent(t *testing.T) {
 	ctx := context.Background()
 
 	ws := insertWorkspace(t, pool)
-	row := insertMemoryEntity(t, pool, ws, ptr("user-idem"), nil, ptr("memory:health"))
+	row := insertMemoryEntity(t, pool, ws, ptr("user-idem"), nil, ptr(healthCat))
 
-	n1, err := store.SoftDeleteUserConsentCategory(ctx, ws, "user-idem", "memory:health")
+	n1, err := store.SoftDeleteUserConsentCategory(ctx, ws, "user-idem", healthCat)
 	require.NoError(t, err)
 	assert.EqualValues(t, 1, n1)
 
-	n2, err := store.SoftDeleteUserConsentCategory(ctx, ws, "user-idem", "memory:health")
+	n2, err := store.SoftDeleteUserConsentCategory(ctx, ws, "user-idem", healthCat)
 	require.NoError(t, err)
 	assert.EqualValues(t, 0, n2, "second call should affect 0 rows (already forgotten)")
 	assert.True(t, isForgotten(t, pool, row))
@@ -97,7 +103,7 @@ func TestSoftDeleteUserConsentCategory_UnknownUser(t *testing.T) {
 
 	ws := insertWorkspace(t, pool)
 
-	n, err := store.SoftDeleteUserConsentCategory(ctx, ws, "no-such-user", "memory:health")
+	n, err := store.SoftDeleteUserConsentCategory(ctx, ws, "no-such-user", healthCat)
 	require.NoError(t, err)
 	assert.EqualValues(t, 0, n)
 }
@@ -131,8 +137,8 @@ func TestHardDeleteUserConsentCategory(t *testing.T) {
 
 	userX := "user-x-hard"
 	userY := "user-y-hard"
-	catC := "memory:health"
-	catD := "memory:preferences"
+	catC := healthCat
+	catD := prefsCat
 
 	xCRow1 := insertMemoryEntity(t, pool, ws, ptr(userX), nil, ptr(catC))
 	xCRow2 := insertMemoryEntity(t, pool, ws, ptr(userX), nil, ptr(catC))
@@ -164,7 +170,7 @@ func TestHardDeleteUserConsentCategory_UnknownUser(t *testing.T) {
 
 	ws := insertWorkspace(t, pool)
 
-	n, err := store.HardDeleteUserConsentCategory(ctx, ws, "no-such-user", "memory:health")
+	n, err := store.HardDeleteUserConsentCategory(ctx, ws, "no-such-user", healthCat)
 	require.NoError(t, err)
 	assert.EqualValues(t, 0, n)
 }

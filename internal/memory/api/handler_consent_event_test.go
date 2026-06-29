@@ -114,7 +114,7 @@ func TestConsentEventHandler_SoftDeleteAction(t *testing.T) {
 	pruner := &stubPruner{returnN: 3}
 	h := makeConsentEventHandler(pruner, policyWithAction(omniav1alpha1.ConsentRevocationSoftDelete))
 
-	rr := postConsentEvent(h, "ws-1", ConsentEventRequest{UserID: "u1", Category: "memory:health"})
+	rr := postConsentEvent(h, "ws-1", ConsentEventRequest{UserID: "u1", Category: catHealth})
 
 	require.Equal(t, http.StatusOK, rr.Code)
 	var resp ConsentEventResponse
@@ -125,7 +125,7 @@ func TestConsentEventHandler_SoftDeleteAction(t *testing.T) {
 	assert.False(t, pruner.hardCalled)
 	assert.Equal(t, "ws-1", pruner.lastWorkspace)
 	assert.Equal(t, "u1", pruner.lastUserID)
-	assert.Equal(t, "memory:health", pruner.lastCategory)
+	assert.Equal(t, catHealth, pruner.lastCategory)
 }
 
 func TestConsentEventHandler_HardDeleteAction(t *testing.T) {
@@ -147,7 +147,7 @@ func TestConsentEventHandler_StopAction_NoOp(t *testing.T) {
 	pruner := &stubPruner{}
 	h := makeConsentEventHandler(pruner, policyWithAction(omniav1alpha1.ConsentRevocationStop))
 
-	rr := postConsentEvent(h, "ws-1", ConsentEventRequest{UserID: "u1", Category: "memory:health"})
+	rr := postConsentEvent(h, "ws-1", ConsentEventRequest{UserID: "u1", Category: catHealth})
 
 	require.Equal(t, http.StatusOK, rr.Code)
 	var resp ConsentEventResponse
@@ -159,7 +159,7 @@ func TestConsentEventHandler_StopAction_NoOp(t *testing.T) {
 
 func TestConsentEventHandler_MissingUserID_Returns400(t *testing.T) {
 	h := makeConsentEventHandler(&stubPruner{}, nil)
-	rr := postConsentEvent(h, "ws-1", ConsentEventRequest{Category: "memory:health"})
+	rr := postConsentEvent(h, "ws-1", ConsentEventRequest{Category: catHealth})
 	assert.Equal(t, http.StatusBadRequest, rr.Code)
 }
 
@@ -171,7 +171,7 @@ func TestConsentEventHandler_MissingCategory_Returns400(t *testing.T) {
 
 func TestConsentEventHandler_MissingWorkspace_Returns400(t *testing.T) {
 	h := makeConsentEventHandler(&stubPruner{}, nil)
-	rr := postConsentEvent(h, "", ConsentEventRequest{UserID: "u1", Category: "memory:health"})
+	rr := postConsentEvent(h, "", ConsentEventRequest{UserID: "u1", Category: catHealth})
 	assert.Equal(t, http.StatusBadRequest, rr.Code)
 }
 
@@ -181,7 +181,7 @@ func TestConsentEventHandler_NotEnterprise_Returns403(t *testing.T) {
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 
-	rr := postConsentEvent(mux, "ws-1", ConsentEventRequest{UserID: "u1", Category: "memory:health"})
+	rr := postConsentEvent(mux, "ws-1", ConsentEventRequest{UserID: "u1", Category: catHealth})
 	assert.Equal(t, http.StatusForbidden, rr.Code)
 }
 
@@ -202,7 +202,7 @@ func TestConsentEventHandler_DefaultPolicySoftDelete(t *testing.T) {
 	pruner := &stubPruner{returnN: 1}
 	h := makeConsentEventHandler(pruner, nil) // no loader → default SoftDelete
 
-	rr := postConsentEvent(h, "ws-1", ConsentEventRequest{UserID: "u1", Category: "memory:health"})
+	rr := postConsentEvent(h, "ws-1", ConsentEventRequest{UserID: "u1", Category: catHealth})
 	require.Equal(t, http.StatusOK, rr.Code)
 	assert.True(t, pruner.softCalled)
 }

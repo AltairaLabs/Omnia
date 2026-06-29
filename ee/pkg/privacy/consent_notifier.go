@@ -123,7 +123,7 @@ func (n *MemoryAPINotifier) pushOne(
 ) error {
 	target := baseURL + "/api/v1/memories/consent-events"
 	if n.workspace != "" {
-		target = target + "?" + url.Values{"workspace": {n.workspace}}.Encode()
+		target = target + "?" + url.Values{ScopeWorkspace: {n.workspace}}.Encode()
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, target, bytes.NewReader(body))

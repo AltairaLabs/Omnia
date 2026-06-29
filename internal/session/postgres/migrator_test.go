@@ -161,8 +161,8 @@ func TestMigrationFS_ContainsMigrations(t *testing.T) {
 func TestDropMigration_SessionFS_Content(t *testing.T) {
 	data, err := MigrationFS.ReadFile("migrations/000002_drop_privacy_prefs.up.sql")
 	require.NoError(t, err)
-	sql := string(data)
-	assert.Contains(t, sql, "DROP TABLE IF EXISTS user_privacy_preferences",
+	sqlText := string(data)
+	assert.Contains(t, sqlText, "DROP TABLE IF EXISTS user_privacy_preferences",
 		"session drop migration must drop user_privacy_preferences")
 }
 
