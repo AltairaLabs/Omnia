@@ -1117,6 +1117,120 @@ func TestHandleSaveMemory_BodyTooLarge(t *testing.T) {
 	assert.Equal(t, http.StatusRequestEntityTooLarge, rr.Code)
 }
 
+// TestHandleSaveMemory_UnknownCategory_WithPredicate verifies that a
+// CategoryRegisteredFunc predicate is enforced at save time. An
+// unregistered category → 400; a valid one → 201.
+func TestHandleSaveMemory_UnknownCategory_WithPredicate(t *testing.T) {
+	validCategories := map[string]bool{"memory:health": true}
+	predicate := CategoryRegisteredFunc(func(cat string) bool {
+		return validCategories[cat]
+	})
+
+	t.Run("typo_category_rejected", func(t *testing.T) {
+		store := &mockStore{}
+		svc := NewMemoryService(store, nil, MemoryServiceConfig{}, logr.Discard())
+		h := NewHandler(svc, logr.Discard()).WithCategoryRegistration(predicate)
+		mux := setupMux(h)
+
+		body := SaveMemoryRequest{
+			Type:     "fact",
+			Content:  "user has diabetes",
+			Scope:    map[string]string{memory.ScopeWorkspaceID: "ws1", memory.ScopeUserID: "u1"},
+			Category: "memory:helth", // deliberate typo
+		}
+		b, err := json.Marshal(body)
+		require.NoError(t, err)
+
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/memories", bytes.NewReader(b))
+		req.Header.Set("Content-Type", "application/json")
+		rr := httptest.NewRecorder()
+		mux.ServeHTTP(rr, req)
+
+		assert.Equal(t, http.StatusBadRequest, rr.Code, "typo category must be rejected")
+		assert.Nil(t, store.savedMem, "SaveMemoryWithResult must NOT be called on bad category")
+		var resp ErrorResponse
+		require.NoError(t, json.NewDecoder(rr.Body).Decode(&resp))
+		assert.Equal(t, ErrUnknownConsentCategory.Error(), resp.Error)
+	})
+
+	t.Run("bogus_metadata_category_rejected", func(t *testing.T) {
+		store := &mockStore{}
+		svc := NewMemoryService(store, nil, MemoryServiceConfig{}, logr.Discard())
+		h := NewHandler(svc, logr.Discard()).WithCategoryRegistration(predicate)
+		mux := setupMux(h)
+
+		// Category set only via Metadata (no top-level Category field).
+		body := SaveMemoryRequest{
+			Type:    "fact",
+			Content: "x",
+			Scope:   map[string]string{memory.ScopeWorkspaceID: "ws1", memory.ScopeUserID: "u1"},
+			Metadata: map[string]any{
+				memory.MetaKeyConsentCategory: "bogus",
+			},
+		}
+		b, err := json.Marshal(body)
+		require.NoError(t, err)
+
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/memories", bytes.NewReader(b))
+		req.Header.Set("Content-Type", "application/json")
+		rr := httptest.NewRecorder()
+		mux.ServeHTTP(rr, req)
+
+		assert.Equal(t, http.StatusBadRequest, rr.Code, "bogus metadata category must be rejected")
+		assert.Nil(t, store.savedMem, "SaveMemoryWithResult must NOT be called on bad category")
+	})
+
+	t.Run("valid_category_accepted", func(t *testing.T) {
+		store := &mockStore{}
+		svc := NewMemoryService(store, nil, MemoryServiceConfig{}, logr.Discard())
+		h := NewHandler(svc, logr.Discard()).WithCategoryRegistration(predicate)
+		mux := setupMux(h)
+
+		body := SaveMemoryRequest{
+			Type:     "fact",
+			Content:  "user has diabetes",
+			Scope:    map[string]string{memory.ScopeWorkspaceID: "ws1", memory.ScopeUserID: "u1"},
+			Category: "memory:health",
+		}
+		b, err := json.Marshal(body)
+		require.NoError(t, err)
+
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/memories", bytes.NewReader(b))
+		req.Header.Set("Content-Type", "application/json")
+		rr := httptest.NewRecorder()
+		mux.ServeHTTP(rr, req)
+
+		require.Equal(t, http.StatusCreated, rr.Code, "valid category must be accepted")
+		assert.NotNil(t, store.savedMem, "SaveMemoryWithResult must be called for valid category")
+	})
+}
+
+// TestHandleSaveMemory_NilPredicate verifies the OSS (nil predicate) path:
+// any category value, including unregistered strings, should succeed.
+func TestHandleSaveMemory_NilPredicate(t *testing.T) {
+	store := &mockStore{}
+	// NewHandler leaves categoryRegistered nil by default.
+	h := newTestHandler(store)
+	mux := setupMux(h)
+
+	body := SaveMemoryRequest{
+		Type:     "fact",
+		Content:  "x",
+		Scope:    map[string]string{memory.ScopeWorkspaceID: "ws1", memory.ScopeUserID: "u1"},
+		Category: "totally:unknown:category",
+	}
+	b, err := json.Marshal(body)
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/memories", bytes.NewReader(b))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	require.Equal(t, http.StatusCreated, rr.Code, "OSS path must not reject any category")
+	assert.NotNil(t, store.savedMem)
+}
+
 // --- Delete memory tests ---
 
 func TestHandleDeleteMemory_Success(t *testing.T) {
