@@ -73,6 +73,10 @@ type flags struct {
 	authAllowedSubjects   string
 	authAllowedNamespaces string
 	authAudiences         string
+
+	// Consent-outbox replay worker config.
+	outboxReplayInterval time.Duration
+	outboxRetention      time.Duration
 }
 
 func parseFlags() *flags {
@@ -96,6 +100,10 @@ func parseFlags() *flags {
 		"Comma-separated trusted namespaces; any SA in these namespaces is allowed")
 	flag.StringVar(&f.authAudiences, "auth-audiences", "",
 		"Comma-separated audiences for projected tokens (optional)")
+	flag.DurationVar(&f.outboxReplayInterval, "consent-outbox-replay-interval", 5*time.Minute,
+		"Consent-outbox replay cadence (env CONSENT_OUTBOX_REPLAY_INTERVAL)")
+	flag.DurationVar(&f.outboxRetention, "consent-outbox-retention", 24*time.Hour,
+		"Consent-outbox replay window + delivered-row TTL (env CONSENT_OUTBOX_RETENTION)")
 	flag.Parse()
 
 	f.applyEnvFallbacks()
@@ -128,6 +136,9 @@ func (f *flags) applyEnvFallbacks() {
 	envFallback(&f.authAllowedSubjects, "", "SESSION_API_AUTH_ALLOWED_SUBJECTS")
 	envFallback(&f.authAllowedNamespaces, "", "SESSION_API_AUTH_ALLOWED_NAMESPACES")
 	envFallback(&f.authAudiences, "", "SESSION_API_AUTH_AUDIENCES")
+
+	envDurationFallback(&f.outboxReplayInterval, 5*time.Minute, "CONSENT_OUTBOX_REPLAY_INTERVAL")
+	envDurationFallback(&f.outboxRetention, 24*time.Hour, "CONSENT_OUTBOX_RETENTION")
 }
 
 // envFallback sets *dst from envKey when *dst equals defaultVal and the env var is non-empty.
@@ -143,6 +154,17 @@ func envFallback(dst *string, defaultVal, envKey string) {
 func envBoolFallback(dst *bool, envKey string) {
 	if !*dst && os.Getenv(envKey) == "true" {
 		*dst = true
+	}
+}
+
+// envDurationFallback sets *dst from envKey when *dst equals defaultVal and the env var is a valid duration.
+func envDurationFallback(dst *time.Duration, defaultVal time.Duration, envKey string) {
+	if *dst == defaultVal {
+		if v := os.Getenv(envKey); v != "" {
+			if d, err := time.ParseDuration(v); err == nil {
+				*dst = d
+			}
+		}
 	}
 }
 
@@ -281,6 +303,10 @@ func run() error {
 			log,
 		)
 		go optInWorker.Run(ctx)
+
+		// Consent-outbox replay: re-delivers undelivered revocation rows and prunes old ones.
+		replayWorker := NewOutboxReplayWorker(base, notifier, f.outboxReplayInterval, f.outboxRetention, prometheus.DefaultRegisterer, log)
+		go replayWorker.Run(ctx)
 	} else {
 		log.Info("privacy-api enterprise features disabled; consent and opt-out routes not registered")
 	}
