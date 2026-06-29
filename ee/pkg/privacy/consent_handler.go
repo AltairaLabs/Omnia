@@ -150,25 +150,28 @@ func (h *ConsentHandler) applyGrants(r *http.Request, userID string, grants []Co
 	return nil
 }
 
-// applyRevocations calls RemoveConsentGrant for each category, ignoring ErrPreferencesNotFound.
-// After each successful store write it fans out a notification to all memory-api
-// instances via the configured ConsentNotifier (best-effort; failure is logged but
-// does not abort the revocation or return an error to the caller).
+// applyRevocations revokes each category via the transactional outbox and fans out
+// a notification. Revocations that are no-ops (category not currently granted) are
+// silently skipped. Notification is best-effort: the consent write returns 200
+// regardless of delivery outcome; the outbox row is marked delivered only when
+// every configured target acknowledged the push.
 func (h *ConsentHandler) applyRevocations(r *http.Request, userID string, revocations []ConsentCategory) error {
 	for _, cat := range revocations {
-		err := h.store.RemoveConsentGrant(r.Context(), userID, cat)
-		if err != nil && !errors.Is(err, ErrPreferencesNotFound) {
+		outboxID, err := h.store.RemoveConsentGrantWithOutbox(r.Context(), userID, cat)
+		if err != nil {
 			return err
 		}
 		h.emitAudit(r, "consent_revoked", userID, cat)
+		if outboxID == "" {
+			continue // nothing was revoked → nothing to deliver
+		}
 		if h.notifier != nil {
-			_, notifyErr := h.notifier.NotifyRevocation(r.Context(), userID, cat)
-			if notifyErr != nil {
-				// Best-effort: log but do not fail the request.
-				h.log.Error(notifyErr, "consent notify error",
-					"userHash", logging.HashID(userID),
-					"category", string(cat),
-				)
+			delivered, _ := h.notifier.NotifyRevocation(r.Context(), userID, cat)
+			if delivered {
+				if markErr := h.store.MarkOutboxDelivered(r.Context(), outboxID); markErr != nil {
+					h.log.Error(markErr, "mark outbox delivered failed",
+						"userHash", logging.HashID(userID), "category", string(cat))
+				}
 			}
 		}
 	}

@@ -33,6 +33,7 @@ func (r *prefsMockRow) Scan(dest ...any) error {
 type prefsMockPool struct {
 	execFn     func(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error)
 	queryRowFn func(ctx context.Context, sql string, args ...any) pgx.Row
+	beginFn    func(ctx context.Context) (pgx.Tx, error)
 }
 
 func (m *prefsMockPool) Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error) {
@@ -47,8 +48,73 @@ func (m *prefsMockPool) Query(_ context.Context, _ string, _ ...any) (pgx.Rows, 
 	return nil, nil
 }
 
-func (m *prefsMockPool) Begin(_ context.Context) (pgx.Tx, error) {
-	return nil, errors.New("Begin not supported in mock") // outbox tx paths tested against real Postgres
+func (m *prefsMockPool) Begin(ctx context.Context) (pgx.Tx, error) {
+	if m.beginFn != nil {
+		return m.beginFn(ctx)
+	}
+	return nil, errors.New("Begin not supported in mock") // outbox tx paths use real Postgres
+}
+
+// mockPgxTx satisfies pgx.Tx for unit tests. Only the four methods called by
+// RemoveConsentGrantWithOutbox (Exec, QueryRow, Commit, Rollback) have real
+// implementations; every other pgx.Tx method panics to catch unexpected usage.
+type mockPgxTx struct {
+	execFn     func(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error)
+	queryRowFn func(ctx context.Context, sql string, args ...any) pgx.Row
+	commitFn   func(ctx context.Context) error
+	rollbackFn func(ctx context.Context) error
+}
+
+var _ pgx.Tx = (*mockPgxTx)(nil)
+
+func (m *mockPgxTx) Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error) {
+	return m.execFn(ctx, sql, arguments...)
+}
+
+func (m *mockPgxTx) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
+	return m.queryRowFn(ctx, sql, args...)
+}
+
+func (m *mockPgxTx) Commit(ctx context.Context) error {
+	if m.commitFn != nil {
+		return m.commitFn(ctx)
+	}
+	return nil
+}
+
+func (m *mockPgxTx) Rollback(ctx context.Context) error {
+	if m.rollbackFn != nil {
+		return m.rollbackFn(ctx)
+	}
+	return nil
+}
+
+func (m *mockPgxTx) Begin(_ context.Context) (pgx.Tx, error) {
+	panic("mockPgxTx.Begin: nested transactions not implemented in test mock")
+}
+
+func (m *mockPgxTx) CopyFrom(_ context.Context, _ pgx.Identifier, _ []string, _ pgx.CopyFromSource) (int64, error) {
+	panic("mockPgxTx.CopyFrom: not implemented in test mock")
+}
+
+func (m *mockPgxTx) SendBatch(_ context.Context, _ *pgx.Batch) pgx.BatchResults {
+	panic("mockPgxTx.SendBatch: not implemented in test mock")
+}
+
+func (m *mockPgxTx) LargeObjects() pgx.LargeObjects {
+	panic("mockPgxTx.LargeObjects: not implemented in test mock")
+}
+
+func (m *mockPgxTx) Prepare(_ context.Context, _, _ string) (*pgconn.StatementDescription, error) {
+	panic("mockPgxTx.Prepare: not implemented in test mock")
+}
+
+func (m *mockPgxTx) Query(_ context.Context, _ string, _ ...any) (pgx.Rows, error) {
+	panic("mockPgxTx.Query: not implemented in test mock")
+}
+
+func (m *mockPgxTx) Conn() *pgx.Conn {
+	panic("mockPgxTx.Conn: not implemented in test mock")
 }
 
 func TestGetPreferences_Found(t *testing.T) {
