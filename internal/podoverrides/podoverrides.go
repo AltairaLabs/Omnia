@@ -38,9 +38,9 @@ import (
 //   - Labels: operator-set keys always win (service selectors depend on them).
 //   - Annotations: user values override operator defaults.
 //   - NodeSelector: merged by key; user wins on collision.
-//   - Tolerations, ImagePullSecrets: appended.
+//   - Tolerations, ImagePullSecrets, ExtraVolumes: appended.
 //
-// Container-scoped fields (ExtraEnv, ExtraEnvFrom) are handled separately by ApplyContainer.
+// Container-scoped fields (ExtraEnv, ExtraEnvFrom, ExtraVolumeMounts) are handled separately by ApplyContainer.
 func ApplyPod(spec *corev1.PodSpec, meta *metav1.ObjectMeta, overrides *omniav1alpha1.PodOverrides) {
 	if overrides == nil || spec == nil {
 		return
@@ -70,10 +70,14 @@ func ApplyPod(spec *corev1.PodSpec, meta *metav1.ObjectMeta, overrides *omniav1a
 	if len(overrides.ImagePullSecrets) > 0 {
 		spec.ImagePullSecrets = append(spec.ImagePullSecrets, overrides.ImagePullSecrets...)
 	}
+
+	if len(overrides.ExtraVolumes) > 0 {
+		spec.Volumes = append(spec.Volumes, overrides.ExtraVolumes...)
+	}
 }
 
 // ApplyContainer appends container-scoped fields from PodOverrides
-// (ExtraEnv, ExtraEnvFrom) onto the given container. It is nil-safe.
+// (ExtraEnv, ExtraEnvFrom, ExtraVolumeMounts) onto the given container. It is nil-safe.
 // Callers MUST skip operator-injected sidecars (e.g. policy-proxy)
 // that should not receive user env.
 func ApplyContainer(container *corev1.Container, overrides *omniav1alpha1.PodOverrides) {
@@ -85,6 +89,9 @@ func ApplyContainer(container *corev1.Container, overrides *omniav1alpha1.PodOve
 	}
 	if len(overrides.ExtraEnvFrom) > 0 {
 		container.EnvFrom = append(container.EnvFrom, overrides.ExtraEnvFrom...)
+	}
+	if len(overrides.ExtraVolumeMounts) > 0 {
+		container.VolumeMounts = append(container.VolumeMounts, overrides.ExtraVolumeMounts...)
 	}
 }
 

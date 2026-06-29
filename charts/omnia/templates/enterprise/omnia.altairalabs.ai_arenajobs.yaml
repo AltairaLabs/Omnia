@@ -622,6 +622,17 @@ spec:
                               x-kubernetes-map-type: atomic
                           type: object
                         type: array
+                      extraVolumeMounts:
+                        description: |-
+                          extraVolumeMounts are appended to every non-operator-injected container's
+                          volumeMounts. Schemaless (see extraVolumes).
+                        x-kubernetes-preserve-unknown-fields: true
+                      extraVolumes:
+                        description: |-
+                          extraVolumes are appended to the PodSpec.Volumes. Schemaless to avoid
+                          inlining the full corev1.Volume union (~30 volume types) into the CRD;
+                          validated by the apiserver at Deployment apply.
+                        x-kubernetes-preserve-unknown-fields: true
                       imagePullSecrets:
                         description: imagePullSecrets are appended to the pod's imagePullSecrets.
                         items:

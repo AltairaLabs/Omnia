@@ -22,10 +22,11 @@ import corev1 "k8s.io/api/core/v1"
 // overrides applied to every operator-generated Pod. All fields optional.
 //
 // Pod-level fields (serviceAccountName, labels, annotations, nodeSelector,
-// tolerations, priorityClassName, imagePullSecrets) are merged into the PodSpec.
+// tolerations, priorityClassName, imagePullSecrets, extraVolumes) are merged
+// into the PodSpec.
 //
-// Container-level fields (extraEnv, extraEnvFrom) are appended to every
-// non-operator-injected container in the pod.
+// Container-level fields (extraEnv, extraEnvFrom, extraVolumeMounts) are
+// appended to every non-operator-injected container in the pod.
 //
 // Existing per-CRD hooks (e.g. FacadeConfig.ExtraEnv, RuntimeConfig.NodeSelector)
 // take precedence; PodOverrides values are merged/concatenated after them.
@@ -67,6 +68,21 @@ type PodOverrides struct {
 	// extraEnvFrom is appended to every non-operator-injected container's envFrom.
 	// +optional
 	ExtraEnvFrom []corev1.EnvFromSource `json:"extraEnvFrom,omitempty"`
+
+	// extraVolumes are appended to the PodSpec.Volumes. Schemaless to avoid
+	// inlining the full corev1.Volume union (~30 volume types) into the CRD;
+	// validated by the apiserver at Deployment apply.
+	// +kubebuilder:validation:Schemaless
+	// +kubebuilder:pruning:PreserveUnknownFields
+	// +optional
+	ExtraVolumes []corev1.Volume `json:"extraVolumes,omitempty"`
+
+	// extraVolumeMounts are appended to every non-operator-injected container's
+	// volumeMounts. Schemaless (see extraVolumes).
+	// +kubebuilder:validation:Schemaless
+	// +kubebuilder:pruning:PreserveUnknownFields
+	// +optional
+	ExtraVolumeMounts []corev1.VolumeMount `json:"extraVolumeMounts,omitempty"`
 }
 
 // RedisConfig points a consumer at a Redis instance. Mirrors the chart's

@@ -745,6 +745,8 @@ func TestBuildServiceDeployment_PodOverrides(t *testing.T) {
 	overrides := &omniav1alpha1.PodOverrides{
 		ServiceAccountName: "workload-identity-sa",
 		Annotations:        map[string]string{"azure.workload.identity/use": "true"},
+		ExtraVolumes:       []corev1.Volume{{Name: "kv"}},
+		ExtraVolumeMounts:  []corev1.VolumeMount{{Name: "kv", MountPath: "/mnt/kv"}},
 		ExtraEnvFrom: []corev1.EnvFromSource{{
 			SecretRef: &corev1.SecretEnvSource{LocalObjectReference: corev1.LocalObjectReference{Name: "db-secret"}},
 		}},
@@ -760,8 +762,12 @@ func TestBuildServiceDeployment_PodOverrides(t *testing.T) {
 
 	require.Equal(t, "workload-identity-sa", spec.ServiceAccountName)
 	require.Equal(t, "true", dep.Spec.Template.Annotations["azure.workload.identity/use"])
+	require.NotEmpty(t, spec.Volumes)
+	require.Equal(t, "kv", spec.Volumes[0].Name)
 
 	c := spec.Containers[0]
+	require.NotEmpty(t, c.VolumeMounts)
+	require.Equal(t, "kv", c.VolumeMounts[0].Name)
 	require.NotEmpty(t, c.EnvFrom)
 	require.Equal(t, "db-secret", c.EnvFrom[0].SecretRef.Name)
 }

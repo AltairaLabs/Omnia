@@ -239,6 +239,13 @@ export interface AgentRuntimeSpec {
           optional?: boolean;
         };
       }[];
+      /** extraVolumeMounts are appended to every non-operator-injected container's
+       * volumeMounts. Schemaless (see extraVolumes). */
+      extraVolumeMounts?: unknown;
+      /** extraVolumes are appended to the PodSpec.Volumes. Schemaless to avoid
+       * inlining the full corev1.Volume union (~30 volume types) into the CRD;
+       * validated by the apiserver at Deployment apply. */
+      extraVolumes?: unknown;
       /** imagePullSecrets are appended to the pod's imagePullSecrets. */
       imagePullSecrets?: {
         /** Name of the referent.
@@ -900,6 +907,13 @@ export interface AgentRuntimeSpec {
         optional?: boolean;
       };
     }[];
+    /** extraVolumeMounts are appended to every non-operator-injected container's
+     * volumeMounts. Schemaless (see extraVolumes). */
+    extraVolumeMounts?: unknown;
+    /** extraVolumes are appended to the PodSpec.Volumes. Schemaless to avoid
+     * inlining the full corev1.Volume union (~30 volume types) into the CRD;
+     * validated by the apiserver at Deployment apply. */
+    extraVolumes?: unknown;
     /** imagePullSecrets are appended to the pod's imagePullSecrets. */
     imagePullSecrets?: {
       /** Name of the referent.

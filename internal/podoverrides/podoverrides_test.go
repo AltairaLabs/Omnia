@@ -127,6 +127,16 @@ func TestApplyPod_ImagePullSecretsAppend(t *testing.T) {
 	}
 }
 
+func TestApplyPod_ExtraVolumesAppend(t *testing.T) {
+	spec := &corev1.PodSpec{Volumes: []corev1.Volume{{Name: "existing"}}}
+	ApplyPod(spec, &metav1.ObjectMeta{}, &omniav1alpha1.PodOverrides{
+		ExtraVolumes: []corev1.Volume{{Name: "kv"}},
+	})
+	if len(spec.Volumes) != 2 || spec.Volumes[1].Name != "kv" {
+		t.Fatalf("volumes must be appended, got %+v", spec.Volumes)
+	}
+}
+
 func TestApplyContainer_Nil(t *testing.T) {
 	c := &corev1.Container{Env: []corev1.EnvVar{{Name: "A"}}}
 	ApplyContainer(c, nil)
@@ -156,5 +166,15 @@ func TestApplyContainer_EnvFromAppend(t *testing.T) {
 	})
 	if len(c.EnvFrom) != 1 || c.EnvFrom[0].Prefix != "KV_" {
 		t.Fatalf("extraEnvFrom must be appended, got %+v", c.EnvFrom)
+	}
+}
+
+func TestApplyContainer_VolumeMountsAppend(t *testing.T) {
+	c := &corev1.Container{VolumeMounts: []corev1.VolumeMount{{Name: "tmp"}}}
+	ApplyContainer(c, &omniav1alpha1.PodOverrides{
+		ExtraVolumeMounts: []corev1.VolumeMount{{Name: "kv", MountPath: "/mnt/kv"}},
+	})
+	if len(c.VolumeMounts) != 2 || c.VolumeMounts[1].Name != "kv" {
+		t.Fatalf("extraVolumeMounts must be appended, got %+v", c.VolumeMounts)
 	}
 }

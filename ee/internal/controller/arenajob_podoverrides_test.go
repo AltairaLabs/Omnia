@@ -58,8 +58,10 @@ func TestApplyWorkerPodOverrides_AllFields(t *testing.T) {
 		Spec: eev1alpha1.ArenaJobSpec{
 			Workers: &eev1alpha1.WorkerConfig{
 				PodOverrides: &corev1alpha1.PodOverrides{
-					NodeSelector:     map[string]string{"workload": "batch"},
-					ImagePullSecrets: []corev1.LocalObjectReference{{Name: "regcred"}},
+					NodeSelector:      map[string]string{"workload": "batch"},
+					ImagePullSecrets:  []corev1.LocalObjectReference{{Name: "regcred"}},
+					ExtraVolumes:      []corev1.Volume{{Name: "kv"}},
+					ExtraVolumeMounts: []corev1.VolumeMount{{Name: "kv", MountPath: "/mnt/kv"}},
 					ExtraEnvFrom: []corev1.EnvFromSource{{
 						SecretRef: &corev1.SecretEnvSource{LocalObjectReference: corev1.LocalObjectReference{Name: "provider-creds"}},
 					}},
@@ -73,8 +75,11 @@ func TestApplyWorkerPodOverrides_AllFields(t *testing.T) {
 	require.Equal(t, "batch", spec.NodeSelector["workload"])
 	require.NotEmpty(t, spec.ImagePullSecrets)
 	require.Equal(t, "regcred", spec.ImagePullSecrets[0].Name)
+	require.NotEmpty(t, spec.Volumes)
+	require.Equal(t, "kv", spec.Volumes[0].Name)
 
 	c := spec.Containers[0]
+	require.Equal(t, "kv", c.VolumeMounts[0].Name)
 	require.NotEmpty(t, c.EnvFrom)
 	require.Equal(t, "provider-creds", c.EnvFrom[0].SecretRef.Name)
 }
