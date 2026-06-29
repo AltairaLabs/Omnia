@@ -34,63 +34,6 @@ func revocationPolicy(action omniav1alpha1.ConsentRevocationAction) *omniav1alph
 	}
 }
 
-func TestRetentionWorker_ConsentCascade_SoftDeleteAction(t *testing.T) {
-	store := newStore(t)
-	ctx := context.Background()
-
-	userID := "user-cascade-soft"
-	seedPrivacyPrefs(t, store, userID, []string{"memory:context"})
-	revokedID := saveUserMemWithCategory(t, store, userID, "memory:health")
-	keptID := saveUserMemWithCategory(t, store, userID, "memory:context")
-
-	w := NewRetentionWorker(store,
-		&StaticPolicyLoader{Policy: revocationPolicy(omniav1alpha1.ConsentRevocationSoftDelete)},
-		zap.New(zap.UseDevMode(true)))
-	w.runOnce(ctx)
-
-	assert.True(t, mustFetchEntityForgotten(t, store, revokedID),
-		"revoked-category row must be soft-deleted")
-	assert.False(t, mustFetchEntityForgotten(t, store, keptID),
-		"still-granted row must be untouched")
-}
-
-func TestRetentionWorker_ConsentCascade_HardDeleteAction(t *testing.T) {
-	store := newStore(t)
-	ctx := context.Background()
-
-	userID := "user-cascade-hard"
-	seedPrivacyPrefs(t, store, userID, []string{})
-	id := saveUserMemWithCategory(t, store, userID, "memory:location")
-
-	w := NewRetentionWorker(store,
-		&StaticPolicyLoader{Policy: revocationPolicy(omniav1alpha1.ConsentRevocationHardDelete)},
-		zap.New(zap.UseDevMode(true)))
-	w.runOnce(ctx)
-
-	assert.False(t, mustFetchEntityExists(t, store, id),
-		"HardDelete action must remove the row immediately")
-}
-
-func TestRetentionWorker_ConsentCascade_StopAction(t *testing.T) {
-	// Stop is the escape hatch: existing rows stay as-is, only future
-	// writes are blocked (by the privacy middleware, not the worker).
-	store := newStore(t)
-	ctx := context.Background()
-
-	userID := "user-cascade-stop"
-	seedPrivacyPrefs(t, store, userID, []string{})
-	id := saveUserMemWithCategory(t, store, userID, "memory:location")
-
-	w := NewRetentionWorker(store,
-		&StaticPolicyLoader{Policy: revocationPolicy(omniav1alpha1.ConsentRevocationStop)},
-		zap.New(zap.UseDevMode(true)))
-	w.runOnce(ctx)
-
-	assert.False(t, mustFetchEntityForgotten(t, store, id),
-		"Stop action must not touch existing rows")
-	assert.True(t, mustFetchEntityExists(t, store, id))
-}
-
 func TestRetentionWorker_ConsentCascade_SoftDeleteGraceCleanup(t *testing.T) {
 	// A row already soft-deleted by the cascade, with forgotten_at
 	// backdated beyond grace, should be hard-deleted on the same
@@ -99,7 +42,6 @@ func TestRetentionWorker_ConsentCascade_SoftDeleteGraceCleanup(t *testing.T) {
 	ctx := context.Background()
 
 	userID := "user-cascade-grace"
-	seedPrivacyPrefs(t, store, userID, []string{"memory:context"})
 	expired := saveUserMemWithCategory(t, store, userID, "memory:health")
 	_, err := store.pool.Exec(ctx,
 		`UPDATE memory_entities
@@ -120,15 +62,15 @@ func TestRetentionWorker_ConsentCascade_SoftDeleteGraceCleanup(t *testing.T) {
 func TestResolveConsentAction(t *testing.T) {
 	// Nil config defaults to SoftDelete so a policy with consentRevocation
 	// unset still cascades safely rather than silently skipping.
-	assert.Equal(t, omniav1alpha1.ConsentRevocationSoftDelete, resolveConsentAction(nil))
+	assert.Equal(t, omniav1alpha1.ConsentRevocationSoftDelete, ResolveConsentAction(nil))
 
 	// Empty Action defaults to SoftDelete.
 	assert.Equal(t, omniav1alpha1.ConsentRevocationSoftDelete,
-		resolveConsentAction(&omniav1alpha1.MemoryConsentRevocationConfig{}))
+		ResolveConsentAction(&omniav1alpha1.MemoryConsentRevocationConfig{}))
 
 	// Explicit action round-trips.
 	assert.Equal(t, omniav1alpha1.ConsentRevocationHardDelete,
-		resolveConsentAction(&omniav1alpha1.MemoryConsentRevocationConfig{
+		ResolveConsentAction(&omniav1alpha1.MemoryConsentRevocationConfig{
 			Action: omniav1alpha1.ConsentRevocationHardDelete,
 		}))
 }

@@ -196,8 +196,11 @@ paths:
       summary: Workspace-scoped memory aggregate
       description: |
         Returns a `[{key, value, count}]` aggregate over `memory_entities`
-        for the specified workspace. Composes the `analytics:aggregate`
-        consent filter so users without that grant are excluded.
+        for the specified workspace. Counts all tiers unfiltered — consent
+        revocation is enforced per-user via the event-driven
+        `POST /api/v1/memories/consent-events` path (see #1642). The
+        analytics:aggregate consent category is owned by privacy-api;
+        aggregate queries here do not apply a consent JOIN.
       parameters:
         - name: workspace
           in: query
@@ -213,10 +216,8 @@ paths:
           description: |
             Dimension to group results by. The `tier` value classifies each row
             into one of `institutional` / `agent` / `user` based on which scope
-            columns are populated. The user-tier count reflects only memories
-            owned by users who granted `analytics:aggregate` consent;
-            institutional and agent rows have no `virtual_user_id` and are
-            unaffected by the consent filter.
+            columns are populated. All tiers are counted unfiltered; there is no
+            analytics:aggregate consent gate at query time (CE2, #1642).
         - name: metric
           in: query
           required: false

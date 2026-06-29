@@ -46,6 +46,10 @@ const (
 // eventTypeMemoryDeleted is the event type published when a memory is deleted.
 const eventTypeMemoryDeleted = "memory_deleted"
 
+// eventTypeConsentPrune is the audit event type emitted when memories are
+// pruned in response to a per-user consent-revocation event (CE1).
+const eventTypeConsentPrune = "memory_consent_prune"
+
 // logMemoryEventPublishFailed is the structured-log message emitted when an
 // event-bus publish fails. Extracted to a constant to keep grep-ability
 // across 5+ call sites (and satisfy Sonar's S1192).
@@ -117,17 +121,18 @@ type MemoryAuditEntry struct {
 
 // MemoryService wraps the memory store with business logic for the HTTP layer.
 type MemoryService struct {
-	store          memory.Store
-	institutional  eememory.InstitutionalStore // nil unless enterprise (set via SetInstitutionalStore)
-	embeddingSvc   *memory.EmbeddingService    // nil if embeddings not configured
-	eventPublisher MemoryEventPublisher        // nil if event publishing not configured
-	auditLogger    MemoryAuditLogger           // nil if audit logging not configured
-	policyLoader   memory.PolicyLoader         // nil if no MemoryPolicy resolution wired
-	ingestFallback ingestion.Config            // default ingestion config (from --ingest-* flags)
-	summaryQueue   ingestion.SummaryQueue      // nil disables the agent path (falls back to extractive)
-	config         MemoryServiceConfig
-	log            logr.Logger
-	enterprise     bool
+	store              memory.Store
+	institutional      eememory.InstitutionalStore // nil unless enterprise (set via SetInstitutionalStore)
+	embeddingSvc       *memory.EmbeddingService    // nil if embeddings not configured
+	eventPublisher     MemoryEventPublisher        // nil if event publishing not configured
+	auditLogger        MemoryAuditLogger           // nil if audit logging not configured
+	policyLoader       memory.PolicyLoader         // nil if no MemoryPolicy resolution wired
+	consentEventPruner memory.ConsentEventPruner   // nil if not wired; used by PruneUserConsentCategory
+	ingestFallback     ingestion.Config            // default ingestion config (from --ingest-* flags)
+	summaryQueue       ingestion.SummaryQueue      // nil disables the agent path (falls back to extractive)
+	config             MemoryServiceConfig
+	log                logr.Logger
+	enterprise         bool
 }
 
 // NewMemoryService creates a new MemoryService backed by the given store.
@@ -168,6 +173,13 @@ func (s *MemoryService) SetPolicyLoader(loader memory.PolicyLoader) {
 // It may be called at most once before the service begins handling requests.
 func (s *MemoryService) SetAuditLogger(l MemoryAuditLogger) {
 	s.auditLogger = l
+}
+
+// SetConsentEventPruner wires the per-user/category consent prune store
+// used by PruneUserConsentCategory. Called at startup under --enterprise;
+// left nil otherwise (the consent-events route is requireEnterprise-gated).
+func (s *MemoryService) SetConsentEventPruner(p memory.ConsentEventPruner) {
+	s.consentEventPruner = p
 }
 
 // safeGoMaxInFlight bounds the total number of fire-and-forget

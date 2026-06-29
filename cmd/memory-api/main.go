@@ -502,22 +502,6 @@ func run() error {
 	}
 	startRetentionWorkerWithLoader(ctx, pgStore, policyLoader, log)
 
-	// --- Analytics opt-in metric + worker ---
-	// Computes the fraction of users who have granted the
-	// analytics:aggregate consent category. Runs in any mode (EE or
-	// OSS); in OSS the grant is never set so the ratio reports 0 which
-	// is correct (no cross-user analytics consent).
-	optInMetrics := memory.NewAnalyticsOptInMetrics()
-	if err := memory.RegisterAnalyticsOptInMetrics(prometheus.DefaultRegisterer, optInMetrics); err != nil {
-		log.Error(err, "analytics opt-in metrics registration failed")
-	} else {
-		optInWorker := memory.NewAnalyticsOptInWorker(pool, optInMetrics, log)
-		go optInWorker.Run(ctx)
-		log.Info("analytics opt-in worker started",
-			"interval", memory.DefaultAnalyticsOptInInterval,
-		)
-	}
-
 	// --- Compaction worker ---
 	// Temporal summarization of old memories. Uses NoopSummarizer by default —
 	// memory growth is still bounded because the worker supersedes originals,
@@ -634,7 +618,7 @@ func run() error {
 	}()
 
 	// --- Build API mux ---
-	apiMux, cleanup := buildAPIMux(ctx, apiStore, embeddingSvc, svcCfg, eventPublisher, f.enterprise, pool, policyLoader, auditLogger, log, buildIngestOptions(f, log), f.workspace, f.serviceGroup)
+	apiMux, cleanup := buildAPIMux(ctx, apiStore, embeddingSvc, svcCfg, eventPublisher, f.enterprise, pool, policyLoader, auditLogger, log, buildIngestOptions(f, log), f.workspace, f.serviceGroup, pgStore)
 	defer cleanup()
 
 	// --- Consolidation worker ---
@@ -794,6 +778,7 @@ func buildAPIMux(
 	log logr.Logger,
 	ingestOpts memoryapi.IngestOptions,
 	workspace, serviceGroup string,
+	consentPruner memory.ConsentEventPruner,
 ) (http.Handler, func()) {
 	httpMetrics := memoryapi.NewHTTPMetrics(nil)
 
@@ -809,6 +794,10 @@ func buildAPIMux(
 		// Retrieval consults the loader to build a per-tier ranker from
 		// the workspace's bound MemoryPolicy.spec.tierPrecedence.
 		svc.SetPolicyLoader(policyLoader)
+	}
+	if consentPruner != nil {
+		// CE1: per-user/category consent-event prune endpoint.
+		svc.SetConsentEventPruner(consentPruner)
 	}
 
 	// Wire ingestion: a flag-derived fallback Config + an optional async

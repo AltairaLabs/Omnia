@@ -134,7 +134,7 @@ func (w *RetentionWorker) runOnce(ctx context.Context) {
 		}
 	}
 
-	cascadeSoft, cascadeHard, cascadeErr := w.runConsentRevocation(ctx,
+	_, cascadeHard, cascadeErr := w.runConsentRevocation(ctx,
 		policy.Spec.ConsentRevocation, batchSize)
 	if cascadeErr != nil {
 		anyErr = true
@@ -159,8 +159,7 @@ func (w *RetentionWorker) runOnce(ctx context.Context) {
 	w.log.V(1).Info("retention pass finished",
 		"duration", time.Since(start).String(),
 		"hardDeleted", hard,
-		"consentSoftDeleted", cascadeSoft,
-		"consentHardDeleted", cascadeHard,
+		"consentGraceDeleted", cascadeHard,
 		"supersededObservations", superseded,
 		"ok", !anyErr)
 }
@@ -210,68 +209,40 @@ func resolveSupersessionGraceDays(cfg *omniav1alpha1.MemorySupersessionConfig) i
 	return 14
 }
 
-// runConsentRevocation cascades user consent revocations to memory
-// rows. For action=SoftDelete it flips forgotten=true with
-// forgotten_at=now so the grace-period pass later hard-deletes. For
-// action=HardDelete it removes rows immediately. action=Stop is a
-// no-op — operators chose it explicitly to keep existing rows.
+// runConsentRevocation is the grace-finalizer pass for consent-driven
+// soft-deletions. The bulk sweep (JOIN against user_privacy_preferences)
+// was removed in CE2; per-user revocation is now driven by the inbound
+// POST /api/v1/memories/consent-events endpoint (CE1). This pass only
+// hard-deletes rows whose consent-driven soft-delete grace window has
+// expired, keyed on forgotten_at so TTL/LRU-forgotten rows are handled
+// by the separate general hard-delete pass.
 //
-// Returns (softCount, hardCount, err) so callers can log totals
-// without re-querying.
+// Returns (0, hardCount, err) so runOnce logging is unchanged.
 func (w *RetentionWorker) runConsentRevocation(
 	ctx context.Context,
 	cfg *omniav1alpha1.MemoryConsentRevocationConfig,
 	batchSize int32,
 ) (int64, int64, error) {
 	metrics := defaultRetentionMetrics.Load()
-	action := resolveConsentAction(cfg)
-	switch action {
-	case omniav1alpha1.ConsentRevocationStop:
-		return 0, 0, nil
-	case omniav1alpha1.ConsentRevocationHardDelete:
-		n, err := w.store.HardDeleteRevokedConsent(ctx, int(batchSize))
-		if err != nil {
-			metrics.observeBranchError(TierUser, BranchConsentRevoke)
-			w.log.Error(err, "consent revocation hard-delete failed")
-			return 0, 0, err
-		}
-		metrics.observeHardDelete(n)
-		if n > 0 {
-			w.emitConsentAudit(ctx, action, 0, n)
-		}
-		return 0, n, nil
-	}
-
-	// SoftDelete path (default).
-	soft, err := w.store.SoftDeleteRevokedConsent(ctx, int(batchSize))
-	if err != nil {
-		metrics.observeBranchError(TierUser, BranchConsentRevoke)
-		w.log.Error(err, "consent revocation soft-delete failed")
-		return 0, 0, err
-	}
-	metrics.observeSoftDelete(TierUser, BranchConsentRevoke, soft)
-
-	// Hard-delete rows whose consent-driven soft-delete grace has
-	// elapsed. Keyed on forgotten_at so we don't double-count rows
-	// whose forgotten=true came from TTL/LRU elsewhere.
 	hard, err := w.store.HardDeleteForgottenByConsentOlderThan(ctx,
 		resolveGraceDays(cfg), int(batchSize))
 	if err != nil {
 		metrics.observeBranchError(TierUser, BranchConsentHardClean)
 		w.log.Error(err, "consent revocation grace hard-delete failed")
-		return soft, 0, err
+		return 0, 0, err
 	}
-	metrics.observeHardDelete(hard)
-
-	if soft > 0 || hard > 0 {
-		w.emitConsentAudit(ctx, action, soft, hard)
+	if hard > 0 {
+		metrics.observeHardDelete(hard)
+		w.emitConsentAudit(ctx, omniav1alpha1.ConsentRevocationHardDelete, 0, hard)
 	}
-	return soft, hard, nil
+	return 0, hard, nil
 }
 
-// resolveConsentAction returns the policy's action, defaulting to
-// SoftDelete so absent config doesn't silently skip the cascade.
-func resolveConsentAction(cfg *omniav1alpha1.MemoryConsentRevocationConfig) omniav1alpha1.ConsentRevocationAction {
+// ResolveConsentAction returns the policy's consent-revocation action,
+// defaulting to SoftDelete so absent config doesn't silently skip the
+// cascade. Exported so the memory-api handler layer can apply the same
+// policy decision for inbound per-user consent events (CE1).
+func ResolveConsentAction(cfg *omniav1alpha1.MemoryConsentRevocationConfig) omniav1alpha1.ConsentRevocationAction {
 	if cfg != nil && cfg.Action != "" {
 		return cfg.Action
 	}

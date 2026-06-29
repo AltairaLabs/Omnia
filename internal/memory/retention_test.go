@@ -108,8 +108,6 @@ func TestRetentionWorker_PerCategoryOverride(t *testing.T) {
 	ctx := context.Background()
 	scope := testScope(testWorkspace1) // user-scoped → user tier
 	past := time.Now().Add(-1 * time.Hour)
-	const healthCat = "memory:health"
-
 	health := &Memory{
 		Type: "fact", Content: "protected health note", Confidence: 0.9,
 		Scope: scope, ExpiresAt: &past,

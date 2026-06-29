@@ -12,8 +12,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
@@ -422,6 +424,147 @@ func TestValidateCategories_InvalidInRevocations(t *testing.T) {
 	err := validateCategories(nil, []ConsentCategory{"also:bad"})
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "also:bad")
+}
+
+// ---- ConsentNotifier integration tests ----
+
+// spyNotifier records calls made to NotifyRevocation for assertion.
+type spyNotifier struct {
+	mu    sync.Mutex
+	calls []notifyCall
+}
+
+type notifyCall struct {
+	userID   string
+	category ConsentCategory
+}
+
+func (s *spyNotifier) NotifyRevocation(_ context.Context, userID string, category ConsentCategory) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.calls = append(s.calls, notifyCall{userID: userID, category: category})
+	return nil
+}
+
+func (s *spyNotifier) callCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.calls)
+}
+
+func (s *spyNotifier) callAt(i int) notifyCall {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.calls[i]
+}
+
+// TestConsentHandlerPUT_RevocationTriggersNotifier asserts that a successful
+// revocation fires NotifyRevocation with the correct (userID, category).
+func TestConsentHandlerPUT_RevocationTriggersNotifier(t *testing.T) {
+	pool := &prefsMockPool{
+		execFn: func(_ context.Context, _ string, _ ...any) (pgconn.CommandTag, error) {
+			return pgconn.NewCommandTag("UPDATE 1"), nil
+		},
+		queryRowFn: func(_ context.Context, _ string, _ ...any) pgx.Row {
+			return &prefsMockRow{scanFn: func(dest ...any) error {
+				*dest[0].(*[]string) = []string{}
+				return nil
+			}}
+		},
+	}
+	spy := &spyNotifier{}
+	h := newTestConsentHandler(pool, nil).WithConsentNotifier(spy)
+
+	body, _ := json.Marshal(ConsentRequest{
+		Revocations: []ConsentCategory{ConsentMemoryIdentity},
+	})
+	rec := serveConsentRequest(h, http.MethodPut,
+		"/api/v1/privacy/preferences/user42/consent", body)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, 1, spy.callCount(), "expected one NotifyRevocation call")
+	call := spy.callAt(0)
+	assert.Equal(t, "user42", call.userID)
+	assert.Equal(t, ConsentMemoryIdentity, call.category)
+}
+
+// TestConsentHandlerPUT_GrantDoesNotTriggerNotifier asserts that granting
+// consent never calls NotifyRevocation.
+func TestConsentHandlerPUT_GrantDoesNotTriggerNotifier(t *testing.T) {
+	pool := successExecPool([]string{string(ConsentMemoryIdentity)})
+	spy := &spyNotifier{}
+	h := newTestConsentHandler(pool, nil).WithConsentNotifier(spy)
+
+	body, _ := json.Marshal(ConsentRequest{
+		Grants: []ConsentCategory{ConsentMemoryIdentity},
+	})
+	rec := serveConsentRequest(h, http.MethodPut,
+		"/api/v1/privacy/preferences/user7/consent", body)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, 0, spy.callCount(), "grant must not trigger NotifyRevocation")
+}
+
+// TestConsentHandlerPUT_MultipleRevocationsNotifiedEach asserts that each
+// revocation in a batch is individually forwarded to the notifier.
+func TestConsentHandlerPUT_MultipleRevocationsNotifiedEach(t *testing.T) {
+	pool := &prefsMockPool{
+		execFn: func(_ context.Context, _ string, _ ...any) (pgconn.CommandTag, error) {
+			return pgconn.NewCommandTag("UPDATE 1"), nil
+		},
+		queryRowFn: func(_ context.Context, _ string, _ ...any) pgx.Row {
+			return &prefsMockRow{scanFn: func(dest ...any) error {
+				*dest[0].(*[]string) = []string{}
+				return nil
+			}}
+		},
+	}
+	spy := &spyNotifier{}
+	h := newTestConsentHandler(pool, nil).WithConsentNotifier(spy)
+
+	body, _ := json.Marshal(ConsentRequest{
+		Revocations: []ConsentCategory{ConsentMemoryIdentity, ConsentMemoryLocation},
+	})
+	rec := serveConsentRequest(h, http.MethodPut,
+		"/api/v1/privacy/preferences/userN/consent", body)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, 2, spy.callCount(), "each revocation must trigger one notify call")
+}
+
+// TestConsentHandlerPUT_NotifierErrorIsSwallowed asserts that a notifier that
+// returns an error does not fail the HTTP request (best-effort contract).
+func TestConsentHandlerPUT_NotifierErrorIsSwallowed(t *testing.T) {
+	pool := &prefsMockPool{
+		execFn: func(_ context.Context, _ string, _ ...any) (pgconn.CommandTag, error) {
+			return pgconn.NewCommandTag("UPDATE 1"), nil
+		},
+		queryRowFn: func(_ context.Context, _ string, _ ...any) pgx.Row {
+			return &prefsMockRow{scanFn: func(dest ...any) error {
+				*dest[0].(*[]string) = []string{}
+				return nil
+			}}
+		},
+	}
+	// A notifier that always errors.
+	errNotifier := errorNotifier{}
+	h := newTestConsentHandler(pool, nil).WithConsentNotifier(errNotifier)
+
+	body, _ := json.Marshal(ConsentRequest{
+		Revocations: []ConsentCategory{ConsentMemoryIdentity},
+	})
+	rec := serveConsentRequest(h, http.MethodPut,
+		"/api/v1/privacy/preferences/user99/consent", body)
+
+	// The revocation store write succeeded; notifier error must not surface as HTTP 500.
+	assert.Equal(t, http.StatusOK, rec.Code)
+}
+
+// errorNotifier always returns an error from NotifyRevocation.
+type errorNotifier struct{}
+
+func (errorNotifier) NotifyRevocation(_ context.Context, _ string, _ ConsentCategory) error {
+	return errors.New("simulated notifier failure")
 }
 
 func TestConsentHandlerPUT_MixedGrantsAndRevocations(t *testing.T) {

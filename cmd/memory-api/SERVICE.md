@@ -60,10 +60,10 @@ the reconciler on the next reshape. Empty/fresh columns reshape with no consent.
     = no filtering; malformed `deny_cel` fails closed (500). Response:
     `{memories:[...], total:N}` (200). 400 on missing `workspace_id` (#1205).
   - `GET /api/v1/memories/aggregate` — workspace-scoped GROUP BY aggregate
-    for the operator dashboard (#1004). Composes the analytics:aggregate
-    consent filter from Phase D. Supports `groupBy=category|agent|day|tier`;
-    tier returns `institutional` / `agent` / `user` counts derived from
-    `virtual_user_id` / `agent_id` columns.
+    for the operator dashboard (#1004). Counts all tiers unfiltered; the
+    analytics:aggregate consent gate was removed in CE2 (#1642). Supports
+    `groupBy=category|agent|day|tier`; tier returns `institutional` / `agent`
+    / `user` counts derived from `virtual_user_id` / `agent_id` columns.
   - `GET /api/v1/privacy/consent/stats` (EE only) — workspace-wide consent
     posture for the operator dashboard.
   - `POST /admin/embedding-dimension-change` — records one-shot consent to change

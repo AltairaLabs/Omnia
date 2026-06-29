@@ -31,23 +31,7 @@ func seedAggregateFixtures(t *testing.T, store *PostgresMemoryStore) string {
 	ctx := context.Background()
 	pool := store.Pool()
 
-	// Three users: granted (consents), denied (no consent), opted-out.
-	_, err := pool.Exec(ctx, `
-		INSERT INTO user_privacy_preferences (user_id, consent_grants)
-		VALUES ($1, $2), ($3, $4)
-		ON CONFLICT (user_id) DO UPDATE SET consent_grants = EXCLUDED.consent_grants`,
-		"agg-user-granted", []string{"analytics:aggregate"},
-		"agg-user-denied", []string{"memory:preferences"},
-	)
-	require.NoError(t, err)
-	_, err = pool.Exec(ctx, `
-		INSERT INTO user_privacy_preferences (user_id, opt_out_all)
-		VALUES ($1, TRUE)
-		ON CONFLICT (user_id) DO UPDATE SET opt_out_all = EXCLUDED.opt_out_all`,
-		"agg-user-opted-out",
-	)
-	require.NoError(t, err)
-
+	// Three users: no consent filtering after CE2 — all rows counted.
 	insertMem := func(userID, agentID, category string, when time.Time) {
 		var virtualUserID, agent any
 		if userID != "" {
@@ -73,14 +57,14 @@ func seedAggregateFixtures(t *testing.T, store *PostgresMemoryStore) string {
 	// Granted user: 3 memories spread over 3 days, 2 categories, 2 agents.
 	insertMem("agg-user-granted", agentAUUID, "memory:context", day1)
 	insertMem("agg-user-granted", agentAUUID, "memory:context", day2)
-	insertMem("agg-user-granted", agentBUUID, "memory:health", day3)
+	insertMem("agg-user-granted", agentBUUID, healthCat, day3)
 
 	// Denied user: 2 memories that MUST be excluded by the consent filter.
 	insertMem("agg-user-denied", agentAUUID, "memory:context", day2)
-	insertMem("agg-user-denied", agentBUUID, "memory:identity", day3)
+	insertMem("agg-user-denied", agentBUUID, identityCat, day3)
 
 	// Opted-out user: 1 memory that MUST also be excluded.
-	insertMem("agg-user-opted-out", agentAUUID, "memory:preferences", day3)
+	insertMem("agg-user-opted-out", agentAUUID, prefsCat, day3)
 
 	// One institutional row (no user, no agent) — counted for category/day,
 	// skipped for agent.
@@ -107,8 +91,10 @@ func TestAggregate_GroupByCategory_Count(t *testing.T) {
 	}
 
 	want := map[string]int64{
-		"memory:context": 3, // 2 granted + 1 institutional
-		"memory:health":  1, // 1 granted
+		"memory:context": 4, // 2 granted + 1 denied + 1 institutional (no consent filter)
+		healthCat:        1, // 1 granted
+		identityCat:      1, // 1 denied
+		prefsCat:         1, // 1 opted-out
 	}
 	require.Equal(t, want, got)
 }
@@ -130,8 +116,8 @@ func TestAggregate_GroupByAgent_SkipsInstitutional(t *testing.T) {
 		got[r.Key] = r.Value
 	}
 	want := map[string]int64{
-		agentAUUID: 2, // granted user's 2 rows
-		agentBUUID: 1, // granted user's 1 row
+		agentAUUID: 4, // granted×2 + denied×1 + opted-out×1 (no consent filter)
+		agentBUUID: 2, // granted×1 + denied×1
 	}
 	require.Equal(t, want, got)
 }
@@ -158,7 +144,7 @@ func TestAggregate_GroupByDay_OrderedAscending(t *testing.T) {
 	for _, r := range rows {
 		total += r.Value
 	}
-	require.Equal(t, int64(4), total)
+	require.Equal(t, int64(7), total) // all 7 fixture rows counted (no consent filter)
 }
 
 func TestAggregate_DistinctUsers_DiffersFromCount(t *testing.T) {
@@ -180,10 +166,10 @@ func TestAggregate_DistinctUsers_DiffersFromCount(t *testing.T) {
 		gotCounts[r.Key] = r.Count
 	}
 
-	require.Equal(t, int64(1), got["memory:context"], "distinct users for context")
-	require.Equal(t, int64(3), gotCounts["memory:context"], "row count for context")
-	require.Equal(t, int64(1), got["memory:health"], "distinct users for health")
-	require.Equal(t, int64(1), gotCounts["memory:health"], "row count for health")
+	require.Equal(t, int64(2), got["memory:context"], "distinct users for context (no consent filter)")
+	require.Equal(t, int64(4), gotCounts["memory:context"], "row count for context")
+	require.Equal(t, int64(1), got[healthCat], "distinct users for health")
+	require.Equal(t, int64(1), gotCounts[healthCat], "row count for health")
 }
 
 func TestAggregate_TimeBounds_FromExcludesEarlier(t *testing.T) {
@@ -205,7 +191,8 @@ func TestAggregate_TimeBounds_FromExcludesEarlier(t *testing.T) {
 	for _, r := range rows {
 		got[r.Key] = r.Value
 	}
-	require.Equal(t, map[string]int64{"memory:health": 1}, got)
+	// Day3 rows only: health×1, identity×1, preferences×1 (no consent filter)
+	require.Equal(t, map[string]int64{healthCat: 1, identityCat: 1, prefsCat: 1}, got)
 }
 
 func TestAggregate_LimitClamping(t *testing.T) {
@@ -220,8 +207,8 @@ func TestAggregate_LimitClamping(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
-	require.Equal(t, "memory:context", rows[0].Key)
-	require.Equal(t, int64(3), rows[0].Value)
+	require.Equal(t, "memory:context", rows[0].Key) // most rows (no consent filter)
+	require.Equal(t, int64(4), rows[0].Value)
 }
 
 func TestAggregate_MissingWorkspace_Errors(t *testing.T) {
@@ -309,14 +296,14 @@ func TestAggregate_EmptyWorkspace_ReturnsEmpty(t *testing.T) {
 
 // TestAggregate_GroupByTier verifies the tier pivot classifies rows by
 // (virtual_user_id, agent_id) into institutional / agent / user /
-// user_for_agent and that the existing AggregateConsentJoin still filters
-// non-consenting users.
+// user_for_agent. As of CE2 (#1642) there is no consent filter — all
+// rows are counted regardless of analytics:aggregate grant status.
 //
-// Baseline from seedAggregateFixtures:
-//   - 3 granted-user rows (user_id + agent_id) → tier=user_for_agent
-//   - 2 denied-user rows (excluded by consent filter)
-//   - 1 opted-out user row (excluded by consent filter)
-//   - 1 institutional row (no user, no agent) → tier=institutional
+// Baseline from seedAggregateFixtures (all users counted, no consent filter):
+//   - 3 granted-user rows  (user_id + agent_id) → tier=user_for_agent
+//   - 2 denied-user rows   (user_id + agent_id) → tier=user_for_agent
+//   - 1 opted-out user row (user_id + agent_id) → tier=user_for_agent
+//   - 1 institutional row  (no user, no agent)  → tier=institutional
 //
 // We add one extra agent-only row (agent_id, no user_id) and one extra
 // user-only row (user_id, no agent_id) so all four tiers appear.
@@ -359,14 +346,14 @@ func TestAggregate_GroupByTier(t *testing.T) {
 		string(TierInstitutional): 1, // the no-user, no-agent fixture
 		string(TierAgent):         1, // the agent-only row inserted above
 		string(TierUser):          1, // the user-only row inserted above
-		string(TierUserForAgent):  3, // granted user's 3 (user+agent) rows
+		string(TierUserForAgent):  6, // 3 granted + 2 denied + 1 opted-out (no consent filter)
 	}
 	require.Equal(t, want, got)
 }
 
 // TestAggregate_GroupByTier_DistinctUsers verifies the distinct_users metric
 // against tier — institutional rows have NULL virtual_user_id so count zero;
-// the user / user_for_agent tiers carry the consenting users.
+// the user / user_for_agent tiers carry all users (no consent filter, CE2).
 func TestAggregate_GroupByTier_DistinctUsers(t *testing.T) {
 	store := newStore(t)
 	workspace := seedAggregateFixtures(t, store)
@@ -383,10 +370,8 @@ func TestAggregate_GroupByTier_DistinctUsers(t *testing.T) {
 	for _, r := range rows {
 		got[r.Key] = r.Value
 	}
-	// All 3 granted-user fixtures have agent_id set, so they land in
-	// user_for_agent. The "user" tier has zero distinct users until an
-	// agent-id-NULL row is added (see TestAggregate_GroupByTier above
-	// for that case).
-	require.Equal(t, int64(1), got[string(TierUserForAgent)], "one consenting user across the fixture set")
+	// All 3 users in the fixture have agent_id set → user_for_agent.
+	// CE2 removes the consent filter: all 3 distinct users are counted.
+	require.Equal(t, int64(3), got[string(TierUserForAgent)], "three users across the fixture (no consent filter)")
 	require.Equal(t, int64(0), got[string(TierInstitutional)], "institutional rows have NULL virtual_user_id")
 }

@@ -231,21 +231,10 @@ spec:
 			g.Expect(output).To(Equal("True"))
 		}, 4*time.Minute, time.Second).Should(Succeed())
 
-		By("seeding analytics:aggregate consent for the consenting user")
-		// Memory-api ran its migrations on startup → user_privacy_preferences
-		// table exists. We pre-seed a row for the consenting user; the
-		// non-consenting user has no row, so the consent join filters their
-		// memories from the user-tier aggregate by construction.
-		seedSQL := `
-INSERT INTO user_privacy_preferences (user_id, consent_grants)
-VALUES ('e2e-user-consenting', ARRAY['analytics:aggregate'])
-ON CONFLICT (user_id) DO UPDATE SET consent_grants = EXCLUDED.consent_grants;
-`
-		cmd = exec.Command("kubectl", "exec", "-n", memoryE2ENamespace,
-			"deployment/memory-e2e-postgres", "--",
-			"psql", "-U", "omnia", "-d", "omnia_memory", "-c", seedSQL)
-		_, err = utils.Run(cmd)
-		Expect(err).NotTo(HaveOccurred(), "Failed to seed analytics:aggregate consent")
+		// No consent seed needed: as of CE2 (#1642) the aggregate endpoint
+		// counts all tiers unfiltered. The user_privacy_preferences table
+		// is no longer consulted by aggregate queries — consent revocation
+		// is event-driven via POST /api/v1/memories/consent-events.
 	})
 
 	AfterAll(func() {
@@ -271,7 +260,7 @@ ON CONFLICT (user_id) DO UPDATE SET consent_grants = EXCLUDED.consent_grants;
 		_, _ = utils.Run(cmd)
 	})
 
-	It("derives tier on list responses, aggregates by tier, and respects analytics:aggregate consent", func() {
+	It("derives tier on list responses and aggregates by tier (CE2: consent filter removed)", func() {
 		By("deploying the python memory-tier test pod")
 		testPodManifest := fmt.Sprintf(`
 apiVersion: v1
@@ -414,11 +403,10 @@ spec:
       print(f"tier counts: {counts}", flush=True)
       assert counts.get("institutional", 0) >= 1, f"missing institutional: {counts}"
       assert counts.get("agent", 0) >= 1, f"missing agent: {counts}"
-      # Only the consenting user's row should count toward the user tier.
-      # Non-consenting user is filtered by AggregateConsentJoin.
+      # CE2: consent filter removed. Both users count toward the user tier.
       user_count = counts.get("user", 0)
-      assert user_count == 1, \
-          f"expected user tier count == 1 (consenting user only), got {user_count} ({counts})"
+      assert user_count == 2, \
+          f"expected user tier count == 2 (both users counted, no consent filter), got {user_count} ({counts})"
 
       print("=== Step 4: category aggregate also responds ===", flush=True)
       cat_agg = get_json(

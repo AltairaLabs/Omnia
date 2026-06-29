@@ -75,9 +75,10 @@ type Aggregator interface {
 	Aggregate(ctx context.Context, opts AggregateOptions) ([]AggregateRow, error)
 }
 
-// Aggregate runs a workspace-scoped GROUP BY over memory_entities,
-// composing AggregateConsentJoin so users without analytics:aggregate
-// consent are excluded by construction.
+// Aggregate runs a workspace-scoped GROUP BY over memory_entities.
+// All non-forgotten rows are counted regardless of analytics consent
+// (CE2: analytics:aggregate consent filter removed by product decision,
+// 2026-06-29; re-introducing requires a local derived-table approach).
 func (s *PostgresMemoryStore) Aggregate(ctx context.Context, opts AggregateOptions) ([]AggregateRow, error) {
 	if opts.Workspace == "" {
 		return nil, errors.New("memory: workspace is required")
@@ -99,19 +100,17 @@ func (s *PostgresMemoryStore) Aggregate(ctx context.Context, opts AggregateOptio
 		return nil, err
 	}
 
-	join, consentWhere := AggregateConsentJoin("e")
 	sql := fmt.Sprintf(`
 		SELECT %s AS key, %s AS value, COUNT(*) AS count
-		FROM memory_entities e %s
+		FROM memory_entities e
 		WHERE e.workspace_id = $1
 		  AND e.forgotten = false
-		  AND %s
 		  AND ($2::timestamptz IS NULL OR e.created_at >= $2)
 		  AND ($3::timestamptz IS NULL OR e.created_at <  $3)%s
 		GROUP BY 1
 		%s
 		LIMIT $4`,
-		keyExpr, valueExpr, join, consentWhere, extraWhere, orderClause)
+		keyExpr, valueExpr, extraWhere, orderClause)
 
 	var fromArg, toArg any
 	if opts.From != nil {
@@ -162,9 +161,10 @@ func groupByFragments(g AggregateGroupBy) (keyExpr, extraWhere, orderClause stri
 		//   neither                      → institutional  (ws, null, null)
 		// Mirrors deriveTier in internal/memory/api/handler.go and the
 		// Tier constants in retrieve_multi_tier.go.
-		// AggregateConsentJoin still filters non-consenting users on the
-		// "user" + "user_for_agent" branches; institutional and agent
-		// rows have virtual_user_id IS NULL and are unaffected.
+		// CE2: consent filter removed. All tiers count regardless of
+		// analytics consent. Institutional and agent rows have
+		// virtual_user_id IS NULL; user and user_for_agent rows are
+		// counted without filtering.
 		return `CASE
 			WHEN e.virtual_user_id IS NOT NULL AND e.agent_id IS NOT NULL THEN 'user_for_agent'
 			WHEN e.virtual_user_id IS NOT NULL                            THEN 'user'

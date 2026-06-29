@@ -10,6 +10,27 @@ or `api/proto/`, add an entry below with the date, affected API, and reason.
 
 ## Unreleased
 
+### Changed (memory-api: aggregate endpoint drops analytics:aggregate consent filter, #1642)
+
+- **`GET /api/v1/memories/aggregate`** no longer composes the
+  `analytics:aggregate` consent filter. All tiers (institutional, agent, user)
+  are counted unconditionally. This is a product-signed-off privacy-posture
+  change (2026-06-29): consent revocation is now enforced per-user via the
+  event-driven `POST /api/v1/memories/consent-events` endpoint (CE1) rather
+  than a JOIN-based sweep at query time. The analytics:aggregate consent
+  category is owned by privacy-api going forward.
+- The `groupBy=tier` `user` count previously reflected only memories owned by
+  users who granted `analytics:aggregate`; it now reflects all user-tier rows.
+
+### Added (memory-api: per-user consent-event prune endpoint, #1642 CE1)
+
+- **`POST /api/v1/memories/consent-events`** — accepts a consent revocation
+  event for a specific user (`{workspace_id, user_id, revoked_categories}`)
+  and immediately prunes matching memories for that user. This is the
+  event-driven replacement for the former JOIN-based consent sweep
+  (`SoftDeleteRevokedConsent` / `HardDeleteRevokedConsent`). Returns 204 on
+  success; 400 on missing required fields.
+
 ### Changed (CRD: `AgentRuntime.spec.facade` → `spec.facades` composition, #1576) — BREAKING
 
 - `AgentRuntime` now composes a list of single-protocol facades: `spec.facade`

@@ -74,6 +74,5 @@ const (
 	WorkerNameTombstoneGC     = "tombstone_gc"
 	WorkerNameReembed         = "reembed"
 	WorkerNameRetention       = "retention"
-	WorkerNameAnalyticsOptIn  = "analytics_opt_in"
 	WorkerNameAccessTouchFlow = "access_touch_flush"
 )

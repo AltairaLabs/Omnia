@@ -7,11 +7,8 @@ SPDX-License-Identifier: Apache-2.0
 package memory
 
 import (
-	"context"
 	"testing"
-	"time"
 
-	"github.com/go-logr/logr"
 	dto "github.com/prometheus/client_model/go"
 )
 
@@ -44,46 +41,5 @@ func TestMarkWorker_FlipsGauge(t *testing.T) {
 	MarkWorkerStopped(name)
 	if got := readWorkerRunning(name); got != 0 {
 		t.Errorf("after MarkWorkerStopped: gauge=%v want=0", got)
-	}
-}
-
-// TestAnalyticsOptInWorker_FlipsLivenessGauge wires the regression
-// test to the actual worker. Run must Set the gauge to 1 before
-// any tick fires, and back to 0 when ctx cancels. Issue #1038's
-// failure mode was workers that "started" but never called the
-// liveness signal — this test fails loudly if anyone removes the
-// MarkWorkerRunning call from the Run loop.
-func TestAnalyticsOptInWorker_FlipsLivenessGauge(t *testing.T) {
-	store := newStore(t)
-	metrics := NewAnalyticsOptInMetrics()
-	worker := NewAnalyticsOptInWorker(store.Pool(), metrics, logr.Discard())
-
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan struct{})
-	go func() {
-		worker.Run(ctx)
-		close(done)
-	}()
-
-	// Wait briefly for the worker to enter its loop. Polling rather
-	// than sleeping so a fast machine doesn't race past Set(1).
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if readWorkerRunning(WorkerNameAnalyticsOptIn) == 1 {
-			break
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
-	if got := readWorkerRunning(WorkerNameAnalyticsOptIn); got != 1 {
-		t.Errorf("worker running but gauge=%v, want=1 — Run() is missing MarkWorkerRunning(%q)",
-			got, WorkerNameAnalyticsOptIn)
-	}
-
-	cancel()
-	<-done
-
-	if got := readWorkerRunning(WorkerNameAnalyticsOptIn); got != 0 {
-		t.Errorf("worker stopped but gauge=%v, want=0 — Run() is missing deferred MarkWorkerStopped(%q)",
-			got, WorkerNameAnalyticsOptIn)
 	}
 }
