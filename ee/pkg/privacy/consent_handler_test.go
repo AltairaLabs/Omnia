@@ -28,6 +28,9 @@ import (
 	"github.com/altairalabs/omnia/internal/session/api"
 )
 
+// fakeOutboxID is the outbox row id returned by the test store fakes.
+const fakeOutboxID = "fake-outbox-id"
+
 // mockConsentAuditLogger captures emitted audit events for assertions.
 type mockConsentAuditLogger struct {
 	events []*api.AuditEntry
@@ -119,7 +122,7 @@ func TestConsentHandlerPUT_ValidRevocations(t *testing.T) {
 				},
 				queryRowFn: func(_ context.Context, _ string, _ ...any) pgx.Row {
 					return &prefsMockRow{scanFn: func(dest ...any) error {
-						*dest[0].(*string) = "fake-outbox-id"
+						*dest[0].(*string) = fakeOutboxID
 						return nil
 					}}
 				},
@@ -515,7 +518,7 @@ func TestConsentHandlerPUT_RevocationTriggersNotifier(t *testing.T) {
 				},
 				queryRowFn: func(_ context.Context, _ string, _ ...any) pgx.Row {
 					return &prefsMockRow{scanFn: func(dest ...any) error {
-						*dest[0].(*string) = "fake-outbox-id"
+						*dest[0].(*string) = fakeOutboxID
 						return nil
 					}}
 				},
@@ -577,7 +580,7 @@ func TestConsentHandlerPUT_MultipleRevocationsNotifiedEach(t *testing.T) {
 				},
 				queryRowFn: func(_ context.Context, _ string, _ ...any) pgx.Row {
 					return &prefsMockRow{scanFn: func(dest ...any) error {
-						*dest[0].(*string) = "fake-outbox-id"
+						*dest[0].(*string) = fakeOutboxID
 						return nil
 					}}
 				},
@@ -619,7 +622,7 @@ func TestConsentHandlerPUT_NotifierErrorIsSwallowed(t *testing.T) {
 				},
 				queryRowFn: func(_ context.Context, _ string, _ ...any) pgx.Row {
 					return &prefsMockRow{scanFn: func(dest ...any) error {
-						*dest[0].(*string) = "fake-outbox-id"
+						*dest[0].(*string) = fakeOutboxID
 						return nil
 					}}
 				},
@@ -677,7 +680,7 @@ func TestConsentHandlerPUT_MixedGrantsAndRevocations(t *testing.T) {
 				},
 				queryRowFn: func(_ context.Context, _ string, _ ...any) pgx.Row {
 					return &prefsMockRow{scanFn: func(dest ...any) error {
-						*dest[0].(*string) = "fake-outbox-id"
+						*dest[0].(*string) = fakeOutboxID
 						return nil
 					}}
 				},
