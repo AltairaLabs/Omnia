@@ -21,9 +21,10 @@ import (
 
 // ConsentHandler provides HTTP endpoints for managing consent grants.
 type ConsentHandler struct {
-	store *PreferencesPostgresStore
-	audit api.AuditLogger
-	log   logr.Logger
+	store    *PreferencesPostgresStore
+	audit    api.AuditLogger
+	notifier ConsentNotifier
+	log      logr.Logger
 }
 
 // NewConsentHandler creates a new ConsentHandler.
@@ -33,6 +34,14 @@ func NewConsentHandler(store *PreferencesPostgresStore, audit api.AuditLogger, l
 		audit: audit,
 		log:   log.WithName("consent-handler"),
 	}
+}
+
+// WithConsentNotifier sets the notifier used to fan out revocations to
+// downstream memory-api instances. Calling this is optional; when unset
+// revocations are stored but not forwarded. Returns the receiver for chaining.
+func (h *ConsentHandler) WithConsentNotifier(n ConsentNotifier) *ConsentHandler {
+	h.notifier = n
+	return h
 }
 
 // RegisterRoutes registers consent API routes on the given mux.
@@ -142,6 +151,9 @@ func (h *ConsentHandler) applyGrants(r *http.Request, userID string, grants []Co
 }
 
 // applyRevocations calls RemoveConsentGrant for each category, ignoring ErrPreferencesNotFound.
+// After each successful store write it fans out a notification to all memory-api
+// instances via the configured ConsentNotifier (best-effort; failure is logged but
+// does not abort the revocation or return an error to the caller).
 func (h *ConsentHandler) applyRevocations(r *http.Request, userID string, revocations []ConsentCategory) error {
 	for _, cat := range revocations {
 		err := h.store.RemoveConsentGrant(r.Context(), userID, cat)
@@ -149,6 +161,15 @@ func (h *ConsentHandler) applyRevocations(r *http.Request, userID string, revoca
 			return err
 		}
 		h.emitAudit(r, "consent_revoked", userID, cat)
+		if h.notifier != nil {
+			if notifyErr := h.notifier.NotifyRevocation(r.Context(), userID, cat); notifyErr != nil {
+				// Best-effort: log but do not fail the request.
+				h.log.Error(notifyErr, "consent notify error",
+					"userHash", logging.HashID(userID),
+					"category", string(cat),
+				)
+			}
+		}
 	}
 	return nil
 }

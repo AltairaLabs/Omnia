@@ -33,7 +33,7 @@ func (alwaysDenyReviewer) ReviewToken(_ context.Context, _ string) (bool, string
 func TestRegisterRoutes_AllMounted(t *testing.T) {
 	mux := http.NewServeMux()
 	base := privacy.NewPreferencesStore(nil) // nil pool: routes only, no DB hit in this probe
-	registerRoutes(mux, base, base, logr.Discard())
+	registerRoutes(mux, base, base, logr.Discard(), privacy.NoopConsentNotifier{})
 
 	for _, p := range []string{
 		"/api/v1/privacy/preferences/abc123",
@@ -99,7 +99,7 @@ func TestApplyEnvFallbacks_AuthEnvSeam(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 	})
-	registerRoutes(mux, base, base, logr.Discard())
+	registerRoutes(mux, base, base, logr.Discard(), privacy.NoopConsentNotifier{})
 
 	subjects := splitAndTrim(f.authAllowedSubjects)
 	namespaces := splitAndTrim(f.authAllowedNamespaces)
@@ -134,7 +134,7 @@ func TestBuildHandler_AuthExemptsHealthz(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 	})
-	registerRoutes(mux, base, base, logr.Discard())
+	registerRoutes(mux, base, base, logr.Discard(), privacy.NoopConsentNotifier{})
 
 	// alwaysDenyReviewer: any presented token is rejected → unauthenticated.
 	reviewer := alwaysDenyReviewer{}

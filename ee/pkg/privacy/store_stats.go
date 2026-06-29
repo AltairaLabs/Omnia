@@ -23,6 +23,12 @@ type ConsentStats struct {
 	GrantsByCategory map[string]int64 `json:"grantsByCategory"`
 }
 
+// ConsentStatsReader can return workspace-wide consent statistics.
+// Implemented by PreferencesPostgresStore; a test double may also implement it.
+type ConsentStatsReader interface {
+	Stats(ctx context.Context) (ConsentStats, error)
+}
+
 // Stats returns workspace-wide consent posture aggregates. One round-trip.
 func (s *PreferencesPostgresStore) Stats(ctx context.Context) (ConsentStats, error) {
 	const query = `

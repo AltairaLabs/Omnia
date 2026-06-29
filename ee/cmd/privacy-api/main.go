@@ -22,6 +22,7 @@ import (
 
 	"github.com/go-logr/logr"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	goredis "github.com/redis/go-redis/v9"
 	corev1 "k8s.io/api/core/v1"
@@ -213,6 +214,23 @@ func run() error {
 		return err
 	}
 
+	// --- Consent notifier: fan-out revocations to all memory-api service-groups ---
+	// Resolve memory URLs from workspace status; MEMORY_API_URLS env overrides at
+	// notifier construction time (if set, the notifier ignores memoryURLs).
+	memoryURLs := resolveMemoryURLs(f, log)
+	log.V(1).Info("consent notifier configured", "memoryURLCount", len(memoryURLs))
+	tokenSrc := serviceauth.NewTokenSource("", 0)
+	notifier := privacy.NewMemoryAPINotifier(memoryURLs, tokenSrc, log)
+
+	// --- Analytics opt-in metric (relocated from memory-api CE2) ---
+	optInWorker := NewOptInMetricWorker(
+		base,
+		envDuration("PRIVACY_OPTIN_METRIC_INTERVAL", 5*time.Minute),
+		prometheus.DefaultRegisterer,
+		log,
+	)
+	go optInWorker.Run(ctx)
+
 	// --- Build API mux ---
 	apiMux := http.NewServeMux()
 	// /healthz on the API mux so the auth middleware can exempt it from token checks.
@@ -220,7 +238,7 @@ func run() error {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 	})
-	registerRoutes(apiMux, optOutStore, base, log)
+	registerRoutes(apiMux, optOutStore, base, log, notifier)
 
 	// Wire up auth handler.
 	apiHandler := buildHandler(reviewer, allowedSubjects, allowedNamespaces, apiMux)
@@ -257,16 +275,19 @@ func run() error {
 
 // registerRoutes mounts all privacy handlers on mux. optOutStore is the
 // (optionally cached) PreferencesStore; concrete is the raw postgres store
-// the consent and stats handlers require.
+// the consent and stats handlers require. notifier fans out consent
+// revocations to memory-api instances (use NoopConsentNotifier{} when no
+// memory URLs are configured).
 func registerRoutes(
 	mux *http.ServeMux,
 	optOutStore privacy.PreferencesStore,
 	concrete *privacy.PreferencesPostgresStore,
 	log logr.Logger,
+	notifier privacy.ConsentNotifier,
 ) {
 	privacy.NewOptOutHandler(optOutStore, log).RegisterRoutes(mux)
 	// TODO(#1642-P2): wire privacy-api audit if consent audit must live here.
-	privacy.NewConsentHandler(concrete, nil, log).RegisterRoutes(mux)
+	privacy.NewConsentHandler(concrete, nil, log).WithConsentNotifier(notifier).RegisterRoutes(mux)
 	privacy.NewConsentStatsHandler(concrete, log).RegisterRoutes(mux)
 	privacy.NewEnforcementStatsHandler(concrete, log).RegisterRoutes(mux)
 }
@@ -280,6 +301,40 @@ func buildHandler(
 ) http.Handler {
 	authMW := serviceauth.RequireServiceAccount(reviewer, allowedSubjects, allowedNamespaces, "/healthz")
 	return authMW(inner)
+}
+
+// resolveMemoryURLs returns memory-api base URLs for all service-groups in
+// the workspace. It reads the Workspace CRD status when a workspace name is
+// configured; otherwise it returns nil. Note: if MEMORY_API_URLS is set, the
+// MemoryAPINotifier constructor will override whatever is returned here.
+func resolveMemoryURLs(f *flags, log logr.Logger) []string {
+	if f.workspace == "" {
+		return nil
+	}
+	cfg, err := ctrl.GetConfig()
+	if err != nil {
+		log.V(1).Info("memory URL resolution skipped", "reason", "no K8s config", "err", err.Error())
+		return nil
+	}
+	scheme := k8sruntime.NewScheme()
+	_ = omniav1alpha1.AddToScheme(scheme)
+	c, err := client.New(cfg, client.Options{Scheme: scheme})
+	if err != nil {
+		log.V(1).Info("memory URL resolution skipped", "reason", "K8s client error", "err", err.Error())
+		return nil
+	}
+	var ws omniav1alpha1.Workspace
+	if err := c.Get(context.Background(), client.ObjectKey{Name: f.workspace}, &ws); err != nil {
+		log.V(1).Info("memory URL resolution skipped", "reason", "workspace not found", "err", err.Error())
+		return nil
+	}
+	var urls []string
+	for _, svc := range ws.Status.Services {
+		if svc.MemoryURL != "" {
+			urls = append(urls, svc.MemoryURL)
+		}
+	}
+	return urls
 }
 
 // resolveConfigFromWorkspace reads the Workspace CRD to obtain the privacy-api
