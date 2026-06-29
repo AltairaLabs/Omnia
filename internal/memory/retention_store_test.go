@@ -59,7 +59,6 @@ func TestSoftDeleteExpiredTTL_CategoryScope(t *testing.T) {
 			testWorkspace1, content, catArg, past).Scan(&id))
 		return id
 	}
-	const healthCat = "memory:health"
 	healthID := insertCat("health row", healthCat)
 	generalID := insertCat("general row", "")
 

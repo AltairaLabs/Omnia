@@ -15,6 +15,11 @@ import (
 const (
 	projTestUser   = "17b0187b2d95fca1" // a pseudonymized user id
 	projTypePolicy = "policy"
+
+	// consent category test constants — shared across consent / retention test files.
+	healthCat   = "memory:health"
+	identityCat = "memory:identity"
+	locationCat = "memory:location"
 )
 
 func abs64(f float64) float64 {

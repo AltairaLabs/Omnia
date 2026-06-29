@@ -74,9 +74,9 @@ func TestSoftDeleteRevokedConsent_DeletesNonGrantorRows(t *testing.T) {
 	healthNoRecord := saveUserMemWithCategory(t, store, noRecordUser, "memory:health")
 
 	inst := &Memory{
-		Type: "policy", Content: "institutional", Confidence: 1.0,
+		Type: projTypePolicy, Content: "institutional", Confidence: 1.0,
 		Scope:    map[string]string{ScopeWorkspaceID: testWorkspace1},
-		Metadata: map[string]any{MetaKeyConsentCategory: "memory:health"},
+		Metadata: map[string]any{MetaKeyConsentCategory: healthCat},
 	}
 	seedInstitutional(t, store, inst)
 
@@ -121,8 +121,8 @@ func TestSoftDeleteRevokedConsent_MultiCategory(t *testing.T) {
 
 	src := &fakeConsentRevocationSource{
 		nonGrantors: map[string][]string{
-			"memory:identity": {userA},
-			"memory:location": {userB},
+			identityCat: {userA},
+			locationCat: {userB},
 		},
 	}
 

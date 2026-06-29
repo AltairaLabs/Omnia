@@ -45,7 +45,7 @@ func TestRetentionWorker_ConsentCascade_SoftDeleteAction(t *testing.T) {
 	// userID grants memory:context (absent from non-grantors) but not memory:health.
 	src := &fakeConsentRevocationSource{
 		nonGrantors: map[string][]string{
-			"memory:health": {userID},
+			healthCat: {userID},
 		},
 	}
 
@@ -71,7 +71,7 @@ func TestRetentionWorker_ConsentCascade_HardDeleteAction(t *testing.T) {
 	// userID has no grants — appears in non-grantors for memory:location.
 	src := &fakeConsentRevocationSource{
 		nonGrantors: map[string][]string{
-			"memory:location": {userID},
+			locationCat: {userID},
 		},
 	}
 
