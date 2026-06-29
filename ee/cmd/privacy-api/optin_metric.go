@@ -76,8 +76,15 @@ func NewOptInMetricWorker(
 }
 
 // Run drives the metric-collection loop until ctx is cancelled. It collects
-// immediately on the first tick so the gauges are populated at startup.
+// once immediately before the first tick so the gauges are populated at
+// startup, then repeats on every interval tick.
 func (w *OptInMetricWorker) Run(ctx context.Context) {
+	// Collect once immediately so metrics are populated before the first tick.
+	if ctx.Err() != nil {
+		return
+	}
+	w.collect(ctx)
+
 	ticker := time.NewTicker(w.interval)
 	defer ticker.Stop()
 	for {

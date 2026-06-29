@@ -153,6 +153,80 @@ func TestOptInMetricWorker_StoreError(t *testing.T) {
 		"workerErrors{reason=query} must be incremented on Stats() error")
 }
 
+// TestOptInMetricWorker_RunCollectsAtStartup asserts that Run populates the
+// gauges before the first interval tick fires (immediate-collect behaviour).
+// The test uses a very long interval (1 hour) so the ticker can never fire
+// within the test window; if the gauge is populated the only explanation is
+// the pre-loop immediate collect.
+func TestOptInMetricWorker_RunCollectsAtStartup(t *testing.T) {
+	store := &stubStatsReader{
+		stats: privacy.ConsentStats{
+			TotalUsers:       6,
+			GrantsByCategory: map[string]int64{string(privacy.ConsentAnalyticsAggregate): 3},
+		},
+	}
+
+	reg := prometheus.NewRegistry()
+	// Use a very long interval — ticker must never fire during this test.
+	w := NewOptInMetricWorker(store, time.Hour, reg, zap.New(zap.UseDevMode(true)))
+
+	ctx, cancel := context.WithCancel(t.Context())
+
+	done := make(chan struct{})
+	go func() {
+		w.Run(ctx)
+		close(done)
+	}()
+
+	// Give Run a brief window to execute the immediate collect, then cancel.
+	// 200 ms is orders of magnitude less than the 1-hour interval.
+	time.Sleep(200 * time.Millisecond)
+	cancel()
+	<-done
+
+	// Gauge must be populated from the pre-loop collect, not from a tick.
+	assert.InDelta(t, 0.5, readGauge(t, w.optInRatio), 0.001,
+		"optInRatio must be populated at startup (3/6=0.5)")
+	assert.InDelta(t, 3.0, readGaugeVec(t, w.usersTotal, "true"), 0.001,
+		"usersTotal{granted=true} must be populated at startup")
+	assert.InDelta(t, 3.0, readGaugeVec(t, w.usersTotal, "false"), 0.001,
+		"usersTotal{granted=false} must be populated at startup")
+}
+
+// TestOptInMetricWorker_RunRespectsAlreadyCancelledContext asserts that Run
+// returns immediately without calling collect when the context is already
+// cancelled before Run is invoked.
+func TestOptInMetricWorker_RunRespectsAlreadyCancelledContext(t *testing.T) {
+	store := &stubStatsReader{
+		stats: privacy.ConsentStats{
+			TotalUsers:       4,
+			GrantsByCategory: map[string]int64{string(privacy.ConsentAnalyticsAggregate): 2},
+		},
+	}
+
+	w := newTestWorker(t, store)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel() // cancel before Run is called
+
+	done := make(chan struct{})
+	go func() {
+		w.Run(ctx)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// Run returned immediately — correct.
+	case <-time.After(2 * time.Second):
+		t.Fatal("Run did not return promptly for a pre-cancelled context")
+	}
+
+	// Gauges must remain at zero — no collect should have occurred.
+	assert.InDelta(t, 0.0, readGauge(t, w.optInRatio), 0.001,
+		"optInRatio must remain 0 when context was already cancelled")
+}
+
 // TestOptInMetricWorker_RunStopsOnContextCancel asserts that Run returns when
 // the context is cancelled without blocking indefinitely.
 func TestOptInMetricWorker_RunStopsOnContextCancel(t *testing.T) {
