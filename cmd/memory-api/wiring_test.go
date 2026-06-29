@@ -452,24 +452,6 @@ func TestWrapPrivacyMiddleware_DoesNotPanicWithNilEmbeddingSvc(t *testing.T) {
 	_ = wrapPrivacyMiddleware(context.Background(), next, nil, nil, "", "", logr.Discard())
 }
 
-// TestMemoryAnalyticsOptInMetrics_Registered verifies that the
-// analytics:aggregate opt-in metric surface registers cleanly on a
-// fresh Prometheus registry, and that duplicate registration is
-// rejected (proves the collectors actually hit the registry).
-// Hermetic — no running Postgres needed.
-func TestMemoryAnalyticsOptInMetrics_Registered(t *testing.T) {
-	freshPromRegistry(t)
-	m := memory.NewAnalyticsOptInMetrics()
-	if err := memory.RegisterAnalyticsOptInMetrics(prometheus.DefaultRegisterer, m); err != nil {
-		t.Fatalf("first RegisterAnalyticsOptInMetrics: %v", err)
-	}
-	// Second registration must fail — otherwise the first didn't land.
-	m2 := memory.NewAnalyticsOptInMetrics()
-	if err := memory.RegisterAnalyticsOptInMetrics(prometheus.DefaultRegisterer, m2); err == nil {
-		t.Error("second RegisterAnalyticsOptInMetrics: want AlreadyRegistered error, got nil")
-	}
-}
-
 // TestBuildAPIMux_EnterpriseAuditRoutesWired proves the audit query
 // endpoint (GET /api/v1/audit/memories) is registered when an
 // auditLogger is supplied — i.e. when --enterprise=true. This is the

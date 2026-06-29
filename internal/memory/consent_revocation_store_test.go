@@ -14,18 +14,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// seedPrivacyPrefs writes a preferences row with the given grants
-// array so the JOIN against user_privacy_preferences resolves.
-func seedPrivacyPrefs(t *testing.T, store *PostgresMemoryStore, userID string, grants []string) {
-	t.Helper()
-	_, err := store.pool.Exec(context.Background(),
-		`INSERT INTO user_privacy_preferences (user_id, consent_grants)
-		 VALUES ($1, $2)
-		 ON CONFLICT (user_id) DO UPDATE SET consent_grants = EXCLUDED.consent_grants`,
-		userID, grants)
-	require.NoError(t, err)
-}
-
 // saveUserMemWithCategory saves a user-tier memory tagged with the
 // given consent category. The helper wraps the common scope +
 // metadata dance so tests stay readable.
@@ -43,99 +31,12 @@ func saveUserMemWithCategory(t *testing.T, store *PostgresMemoryStore, userID, c
 	return mem.ID
 }
 
-func TestSoftDeleteRevokedConsent_FlipsRowsMissingFromGrants(t *testing.T) {
-	store := newStore(t)
-	userID := "user-phase4-a"
-
-	// User grants "memory:context" but not "memory:health".
-	seedPrivacyPrefs(t, store, userID, []string{"memory:context"})
-	healthID := saveUserMemWithCategory(t, store, userID, "memory:health")
-	contextID := saveUserMemWithCategory(t, store, userID, "memory:context")
-
-	n, err := store.SoftDeleteRevokedConsent(context.Background(), 100)
-	require.NoError(t, err)
-	assert.Equal(t, int64(1), n)
-	assert.True(t, mustFetchEntityForgotten(t, store, healthID))
-	assert.False(t, mustFetchEntityForgotten(t, store, contextID))
-}
-
-func TestSoftDeleteRevokedConsent_IgnoresRowsWithoutCategory(t *testing.T) {
-	// A row with NULL consent_category is not part of the cascade —
-	// it's either institutional (no category) or untagged legacy data.
-	store := newStore(t)
-	userID := "user-phase4-b"
-	seedPrivacyPrefs(t, store, userID, []string{})
-
-	untagged := &Memory{
-		Type: "fact", Content: "no category", Confidence: 0.9,
-		Scope: map[string]string{
-			ScopeWorkspaceID: testWorkspace1,
-			ScopeUserID:      userID,
-		},
-	}
-	require.NoError(t, store.Save(context.Background(), untagged))
-
-	n, err := store.SoftDeleteRevokedConsent(context.Background(), 100)
-	require.NoError(t, err)
-	assert.Equal(t, int64(0), n)
-	assert.False(t, mustFetchEntityForgotten(t, store, untagged.ID))
-}
-
-func TestSoftDeleteRevokedConsent_SkipsInstitutionalRows(t *testing.T) {
-	// Institutional rows have virtual_user_id IS NULL and therefore
-	// don't join against user_privacy_preferences — they should never
-	// be touched by the consent cascade even if their category is
-	// present on them (which it shouldn't be, but defensively).
-	store := newStore(t)
-	userID := "user-phase4-c"
-	seedPrivacyPrefs(t, store, userID, []string{}) // no grants
-
-	inst := &Memory{
-		Type: "policy", Content: "inst policy", Confidence: 1.0,
-		Scope:    map[string]string{ScopeWorkspaceID: testWorkspace1},
-		Metadata: map[string]any{MetaKeyConsentCategory: "memory:health"},
-	}
-	seedInstitutional(t, store, inst)
-
-	n, err := store.SoftDeleteRevokedConsent(context.Background(), 100)
-	require.NoError(t, err)
-	assert.Equal(t, int64(0), n)
-	assert.False(t, mustFetchEntityForgotten(t, store, inst.ID))
-}
-
-func TestSoftDeleteRevokedConsent_BatchSizeZeroIsNoOp(t *testing.T) {
-	store := newStore(t)
-	n, err := store.SoftDeleteRevokedConsent(context.Background(), 0)
-	require.NoError(t, err)
-	assert.Equal(t, int64(0), n)
-}
-
-func TestHardDeleteRevokedConsent_RemovesRowsMissingFromGrants(t *testing.T) {
-	store := newStore(t)
-	userID := "user-phase4-d"
-	seedPrivacyPrefs(t, store, userID, []string{}) // all revoked
-	id := saveUserMemWithCategory(t, store, userID, "memory:location")
-
-	n, err := store.HardDeleteRevokedConsent(context.Background(), 100)
-	require.NoError(t, err)
-	assert.Equal(t, int64(1), n)
-	assert.False(t, mustFetchEntityExists(t, store, id))
-}
-
-func TestHardDeleteRevokedConsent_BatchSizeZeroIsNoOp(t *testing.T) {
-	store := newStore(t)
-	n, err := store.HardDeleteRevokedConsent(context.Background(), 0)
-	require.NoError(t, err)
-	assert.Equal(t, int64(0), n)
-}
-
 func TestHardDeleteForgottenByConsentOlderThan_UsesForgottenAt(t *testing.T) {
 	// Set forgotten_at to 30 days ago; a 7-day grace window should
 	// hard-delete the row. updated_at is not consulted — the test
 	// leaves it at now() to guard against regressions.
 	store := newStore(t)
 	userID := "user-phase4-e"
-	seedPrivacyPrefs(t, store, userID, []string{})
 	id := saveUserMemWithCategory(t, store, userID, "memory:location")
 	_, err := store.pool.Exec(context.Background(),
 		"UPDATE memory_entities SET forgotten = true, forgotten_at = now() - interval '30 days' WHERE id = $1",

@@ -271,7 +271,7 @@ ON CONFLICT (user_id) DO UPDATE SET consent_grants = EXCLUDED.consent_grants;
 		_, _ = utils.Run(cmd)
 	})
 
-	It("derives tier on list responses, aggregates by tier, and respects analytics:aggregate consent", func() {
+	It("derives tier on list responses and aggregates by tier (CE2: consent filter removed)", func() {
 		By("deploying the python memory-tier test pod")
 		testPodManifest := fmt.Sprintf(`
 apiVersion: v1
@@ -414,11 +414,10 @@ spec:
       print(f"tier counts: {counts}", flush=True)
       assert counts.get("institutional", 0) >= 1, f"missing institutional: {counts}"
       assert counts.get("agent", 0) >= 1, f"missing agent: {counts}"
-      # Only the consenting user's row should count toward the user tier.
-      # Non-consenting user is filtered by AggregateConsentJoin.
+      # CE2: consent filter removed. Both users count toward the user tier.
       user_count = counts.get("user", 0)
-      assert user_count == 1, \
-          f"expected user tier count == 1 (consenting user only), got {user_count} ({counts})"
+      assert user_count == 2, \
+          f"expected user tier count == 2 (both users counted, no consent filter), got {user_count} ({counts})"
 
       print("=== Step 4: category aggregate also responds ===", flush=True)
       cat_agg = get_json(
