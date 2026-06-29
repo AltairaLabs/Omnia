@@ -13,6 +13,19 @@ import (
 	"testing"
 )
 
+func TestOutboxMigrationEmbedded(t *testing.T) {
+	data, err := MigrationsFS.ReadFile("000002_consent_outbox.up.sql")
+	if err != nil {
+		t.Fatalf("outbox up migration not embedded: %v", err)
+	}
+	if !strings.Contains(string(data), "consent_revocation_outbox") {
+		t.Error("up migration must create consent_revocation_outbox")
+	}
+	if _, err := MigrationsFS.ReadFile("000002_consent_outbox.down.sql"); err != nil {
+		t.Fatalf("outbox down migration not embedded: %v", err)
+	}
+}
+
 func TestMigrationsEmbedded(t *testing.T) {
 	data, err := MigrationsFS.ReadFile("000001_initial.up.sql")
 	if err != nil {
