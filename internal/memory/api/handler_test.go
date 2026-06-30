@@ -32,7 +32,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	eeprojection "github.com/altairalabs/omnia/ee/pkg/memory/projection"
 	"github.com/altairalabs/omnia/internal/memory"
+	coreproj "github.com/altairalabs/omnia/internal/memory/projection"
 )
 
 // --- Mock store ---
@@ -97,6 +99,10 @@ func (m *mockStore) SaveProjection(_ context.Context, _, _, _, _, _ string, poin
 	m.projSavedPoints = points
 	return m.projErr
 }
+
+// Projector wires the enterprise t-SNE projector so the on-demand compute path
+// (memory.Render) produces a real layout in handler tests.
+func (m *mockStore) Projector() coreproj.Projector { return eeprojection.GonumProjector{} }
 
 func (m *mockStore) Save(_ context.Context, mem *memory.Memory) error {
 	if m.saveErr != nil {

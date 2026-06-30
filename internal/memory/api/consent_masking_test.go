@@ -9,7 +9,7 @@ package api
 import (
 	"testing"
 
-	"github.com/altairalabs/omnia/ee/pkg/memory/projection"
+	coreproj "github.com/altairalabs/omnia/internal/memory/projection"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -30,7 +30,7 @@ func TestIsSensitiveCategory(t *testing.T) {
 }
 
 func TestMaskPoint_ZeroesIdentifyingFields(t *testing.T) {
-	p := projection.Point{
+	p := coreproj.Point{
 		ID: "e1", X: 0.4, Y: -0.1, Tier: projTierUser, Type: "profile",
 		User: "u1", UserRef: "u1", Category: catHealth,
 		Confidence: 0.9, Title: "secret", Preview: "diagnosis: …",
@@ -51,6 +51,6 @@ func TestMaskPoint_ZeroesIdentifyingFields(t *testing.T) {
 }
 
 func TestPointMustBeMasked(t *testing.T) {
-	assert.True(t, pointMustBeMasked(projection.Point{Category: catIdentity}))
-	assert.False(t, pointMustBeMasked(projection.Point{Category: catContext}))
+	assert.True(t, pointMustBeMasked(coreproj.Point{Category: catIdentity}))
+	assert.False(t, pointMustBeMasked(coreproj.Point{Category: catContext}))
 }

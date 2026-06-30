@@ -15,8 +15,8 @@ import (
 
 	memoryv1 "github.com/altairalabs/omnia/api/v1alpha1"
 	"github.com/altairalabs/omnia/ee/pkg/memory/consolidation"
-	"github.com/altairalabs/omnia/ee/pkg/memory/projection"
 	"github.com/altairalabs/omnia/internal/memory"
+	coreproj "github.com/altairalabs/omnia/internal/memory/projection"
 	"github.com/go-logr/logr"
 )
 
@@ -163,7 +163,7 @@ func (w *Worker) renderLocked(ctx context.Context, p memoryv1.MemoryPolicy, ws c
 	start := w.opts.Now()
 	res, _, err := memory.Render(ctx, w.opts.Store, scope)
 	if err != nil {
-		w.opts.Metrics.RendersTotal.WithLabelValues(ws.UID, p.Name, "error", projection.BasisUnknown).Inc()
+		w.opts.Metrics.RendersTotal.WithLabelValues(ws.UID, p.Name, "error", coreproj.BasisUnknown).Inc()
 		w.opts.Log.Error(err, "render", "workspace", ws.UID, "policy", p.Name)
 		return
 	}

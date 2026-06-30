@@ -31,6 +31,8 @@ import (
 
 	"github.com/go-logr/logr"
 	"github.com/redis/go-redis/v9"
+
+	coreproj "github.com/altairalabs/omnia/internal/memory/projection"
 )
 
 // Compile-time interface check.
@@ -144,6 +146,20 @@ func (c *CachedStore) SaveProjection(ctx context.Context, scopeKey, workspaceID,
 		return err
 	}
 	return ps.SaveProjection(ctx, scopeKey, workspaceID, fingerprint, model, basis, points)
+}
+
+// Projector forwards the injected projection algorithm from the inner store, so
+// Render works the same whether the cache wrapper is present or not. Returns nil
+// when the inner store carries no projector (OSS).
+func (c *CachedStore) Projector() coreproj.Projector {
+	ps, err := c.projectionInner()
+	if err != nil {
+		return nil
+	}
+	if pp, ok := ps.(ProjectorProvider); ok {
+		return pp.Projector()
+	}
+	return nil
 }
 
 // GetMemory passes through to the inner store. Not cached: the

@@ -10,10 +10,14 @@ import (
 	"context"
 	"errors"
 	"testing"
+
+	eeprojection "github.com/altairalabs/omnia/ee/pkg/memory/projection"
+	coreproj "github.com/altairalabs/omnia/internal/memory/projection"
 )
 
 func TestRender_ComputesAndPersists(t *testing.T) {
 	store := newStore(t)
+	store.SetProjector(eeprojection.GonumProjector{}) // wire the enterprise t-SNE projector
 	ctx := context.Background()
 	// seed a few institutional memories in testWorkspace1
 	for i := 0; i < 5; i++ {
@@ -63,6 +67,24 @@ func (f fakeProjectionStore) LoadProjection(context.Context, string) (*StoredPro
 
 func (f fakeProjectionStore) SaveProjection(context.Context, string, string, string, string, string, []ProjectionPoint) error {
 	return f.saveErr
+}
+
+// Projector wires the enterprise projector so Render reaches the SaveProjection
+// stage (the "save" error case) instead of short-circuiting on a nil projector.
+func (f fakeProjectionStore) Projector() coreproj.Projector { return eeprojection.GonumProjector{} }
+
+// noProjectorStore implements ProjectionStore but exposes a nil projector (the
+// OSS shape), so Render must fail with ErrProjectionUnavailable.
+type noProjectorStore struct{ fakeProjectionStore }
+
+func (noProjectorStore) Projector() coreproj.Projector { return nil }
+
+func TestRender_NoProjectorReturnsUnavailable(t *testing.T) {
+	scope := map[string]string{ScopeWorkspaceID: testWorkspace1}
+	_, _, err := Render(context.Background(), noProjectorStore{}, scope)
+	if !errors.Is(err, ErrProjectionUnavailable) {
+		t.Fatalf("err = %v, want ErrProjectionUnavailable", err)
+	}
 }
 
 func TestRender_PropagatesStoreErrors(t *testing.T) {

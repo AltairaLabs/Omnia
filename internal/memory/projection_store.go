@@ -13,11 +13,20 @@ import (
 
 	"github.com/pgvector/pgvector-go"
 
-	"github.com/altairalabs/omnia/ee/pkg/memory/projection"
+	coreproj "github.com/altairalabs/omnia/internal/memory/projection"
 )
 
 // Compile-time check: the concrete store satisfies the Galaxy capability.
 var _ ProjectionStore = (*PostgresMemoryStore)(nil)
+
+// SetProjector wires the enterprise projection algorithm (the gonum/t-SNE
+// Projector from ee/pkg/memory/projection). Render consults it; left nil in OSS
+// so internal/memory never imports ee (#1669).
+func (s *PostgresMemoryStore) SetProjector(p coreproj.Projector) { s.projector = p }
+
+// Projector returns the injected projection algorithm, or nil when none is
+// wired (OSS).
+func (s *PostgresMemoryStore) Projector() coreproj.Projector { return s.projector }
 
 // LoadProjectionInputs returns one row per entity in scope, carrying the
 // most-recent active observation's content/embedding plus the entity metadata
@@ -149,7 +158,7 @@ func (s *PostgresMemoryStore) ProjectionFingerprint(ctx context.Context, scope m
 	// flips once coverage crosses the projector's dense threshold, triggering
 	// exactly one lexical→dense re-render (not one per backfilled batch).
 	denseEligible := 0
-	if float64(embedded)/float64(count) >= projection.DefaultDenseThreshold {
+	if float64(embedded)/float64(count) >= coreproj.DefaultDenseThreshold {
 		denseEligible = 1
 	}
 	return fmt.Sprintf("%d:%d:%d", count, maxObs.UTC().UnixNano(), denseEligible), nil
