@@ -1,5 +1,13 @@
 # syntax=docker/dockerfile:1
-# Build the arena controller binary
+# Build the arena controller binary.
+#
+# The arena-controller is a Kubernetes reconciler, so it intentionally builds
+# against the PUBLISHED PromptKit module rather than promptkit-local via go.work.
+# That keeps runtime/audio -> github.com/ebitengine/purego out of its dependency
+# graph: purego uses dlopen/dlsym (//go:cgo_import_dynamic), which forces a
+# dynamically-linked binary needing libc + the ELF loader even with CGO_ENABLED=0,
+# and that cannot exec on distroless/static. Building against the published SDK
+# keeps the binary fully static so it stays on the tiny distroless/static base.
 FROM golang:1.26 AS builder
 ARG TARGETOS
 ARG TARGETARCH
@@ -7,32 +15,9 @@ ARG TARGETARCH
 WORKDIR /workspace
 COPY go.mod go.sum ./
 
-# Copy local PromptKit source if present (for development with go.work)
-COPY promptkit-local* /workspace/promptkit-local/
-
-# Set up go.work for local PromptKit if the source directory exists
-RUN if [ -d "/workspace/promptkit-local/tools/arena" ]; then \
-        echo "go 1.26.0" > go.work && \
-        echo "" >> go.work && \
-        echo "use (" >> go.work && \
-        echo "    ." >> go.work && \
-        echo "    ./promptkit-local/pkg" >> go.work && \
-        echo "    ./promptkit-local/runtime" >> go.work && \
-        echo "    ./promptkit-local/sdk" >> go.work && \
-        echo "    ./promptkit-local/server/a2a" >> go.work && \
-        echo "    ./promptkit-local/tools/arena" >> go.work && \
-        echo "    ./promptkit-local/tools/packc" >> go.work && \
-        echo ")" >> go.work && \
-        cat go.work; \
-    fi
-
-# Pre-download deps when go.work isn't in play (CI path). Skipped when
-# promptkit-local is included so the go.work above stays authoritative.
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
-    if [ ! -f go.work ]; then \
-        GOWORK=off go mod download; \
-    fi
+    GOWORK=off go mod download
 
 # Copy only source directories needed for the build
 COPY api/ api/
@@ -42,7 +27,7 @@ COPY internal/ internal/
 
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
-    CGO_ENABLED=0 GOOS="${TARGETOS:-linux}" GOARCH="${TARGETARCH}" \
+    CGO_ENABLED=0 GOWORK=off GOOS="${TARGETOS:-linux}" GOARCH="${TARGETARCH}" \
     go build -a -o arena-controller ./ee/cmd/omnia-arena-controller
 
 FROM gcr.io/distroless/static:nonroot

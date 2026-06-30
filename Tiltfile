@@ -409,8 +409,9 @@ if ENABLE_ENTERPRISE:
         './go.mod',
         './go.sum',
     ]
-    if USE_LOCAL_PROMPTKIT:
-        arena_controller_only.append('./promptkit-local')
+    # arena-controller deliberately builds against the published PromptKit module
+    # (no promptkit-local / go.work) so its binary stays statically linked and the
+    # image stays on distroless/static — see ee/Dockerfile.arena-controller.
 
     docker_build(
         'omnia-arena-controller-dev',
