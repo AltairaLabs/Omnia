@@ -93,6 +93,8 @@ This document maps every deployable service, how they communicate, and where to 
 | Facade | Session API | HTTP | Session recording |
 | Facade | Redis | Direct | Realtime session route table (`rt:route:<session_id>`→podIP, TTL=grace period) for reconnect routing in multi-replica deployments |
 | Runtime | Session API | HTTP | Event recording |
+| Memory API | Privacy API | HTTP | Audit drain-forwarder: `POST /api/v1/privacy/audit-events` ships local enforcement audit rows to the central audit hub, at-least-once (#1673) |
+| Session API | Privacy API | HTTP | Audit drain-forwarder: `POST /api/v1/privacy/audit-events` ships local audit rows to the central audit hub, at-least-once (#1673) |
 | Operator | K8s API | K8s client | CRD reconciliation |
 | Arena Controller | K8s API | K8s client | Job/worker pod management |
 | Arena Worker | Redis Streams | Redis | Work item consumption and result reporting |
@@ -157,7 +159,7 @@ Browser ──WebSocket──▶ Facade ──gRPC──▶ Runtime ──HTTP�
 3. **The dashboard never talks to the runtime directly.** All communication goes through the facade's WebSocket.
 4. **WebSocket types are generated from Go.** Run `make generate-websocket-types` after changing `internal/facade/protocol.go`. The pre-commit hook enforces this.
 5. **Generated files are never manually conflict-resolved.** After merging, re-run `make generate && make manifests && go mod tidy`.
-6. **Observability has two read paths.** Prometheus is for **operational** signals (rates, latencies, system health, control-plane PromQL); session-api structured endpoints are for **product** data (eval results, cost, per-tenant usage). New product hooks must work when Prometheus is offline. See `CLAUDE.md` → "Observability Boundaries" for the classification rule; `hack/check-no-prom-product-deps` enforces it on new files.
+6. **Observability has three read paths.** Prometheus is for **operational** signals (rates, latencies, system health, control-plane PromQL); session-api structured endpoints are for **product** data (eval results, cost, per-tenant usage); privacy-api is the owner of the **privacy/compliance audit** slice (enforcement events, consent changes, enforcement-stats — memory/session forward their audit rows to privacy-api's central hub, #1673). New product hooks must work when Prometheus is offline. See `CLAUDE.md` → "Observability Boundaries" for the classification rule; `hack/check-no-prom-product-deps` enforces it on new files.
 
 ## Adding a New Service
 

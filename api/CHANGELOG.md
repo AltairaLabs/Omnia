@@ -10,6 +10,21 @@ or `api/proto/`, add an entry below with the date, affected API, and reason.
 
 ## Unreleased
 
+### Added (privacy-api: central audit hub ingest endpoint, #1673)
+
+- **`POST /api/v1/privacy/audit-events`** — ingests audit events forwarded from
+  memory-api / session-api into privacy-api's central `audit_log` hub. Body:
+  `{"sourceService":"<name>","events":[<audit.Entry>…]}` where `audit.Entry` is
+  `github.com/altairalabs/omnia/ee/pkg/audit.Entry`. Ingest is idempotent on
+  `(source_service, source_id)` (at-least-once delivery) and returns
+  `{"ingested":N,"duplicates":M}`. This makes privacy-api the source of truth for
+  the privacy/compliance audit slice: `GET /api/v1/privacy/enforcement-stats`
+  now reads this table. memory-api and session-api each run a drain-forwarder
+  (`ee/pkg/audit/forwarder.go`) that ships their local `audit_log` rows here.
+- No new env var: each service reuses the privacy-api URL it already resolves
+  for consent enforcement (`PRIVACY_API_URL` env, else Workspace CRD
+  `status.privacyURL`) and the existing ServiceAccount token source for auth.
+
 ### Changed (memory-api: aggregate endpoint drops analytics:aggregate consent filter, #1642)
 
 - **`GET /api/v1/memories/aggregate`** no longer composes the
