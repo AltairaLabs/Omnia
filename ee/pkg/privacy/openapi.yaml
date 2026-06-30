@@ -1,0 +1,387 @@
+openapi: 3.0.3
+info:
+  title: Omnia Privacy API
+  description: Per-workspace consent management, opt-out preferences, and privacy enforcement statistics.
+  version: 1.0.0
+  contact:
+    name: Altaira Labs
+    url: https://altairalabs.ai
+  license:
+    name: Functional Source License 1.1 (Apache 2.0)
+    url: https://fsl.software/
+
+servers:
+  - url: /
+    description: Privacy API
+
+tags:
+  - name: health
+    description: Health check
+  - name: opt-out
+    description: User opt-out preference management
+  - name: consent
+    description: Granular consent grant/revocation
+  - name: stats
+    description: Privacy enforcement and consent statistics
+
+paths:
+  /healthz:
+    get:
+      tags: [health]
+      summary: Health check
+      operationId: healthCheck
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: ok
+
+  /api/v1/privacy/opt-out:
+    post:
+      tags: [opt-out]
+      summary: Set opt-out preference
+      description: Records an opt-out preference for a user at the given scope.
+      operationId: setOptOut
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OptOutRequest'
+      responses:
+        '204':
+          description: Opt-out preference recorded
+        '400':
+          description: Invalid request body or parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    delete:
+      tags: [opt-out]
+      summary: Remove opt-out preference
+      description: Removes an existing opt-out preference for a user.
+      operationId: removeOptOut
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OptOutRequest'
+      responses:
+        '204':
+          description: Opt-out preference removed
+        '400':
+          description: Invalid request body or parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: User preferences not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/privacy/preferences/{userID}:
+    get:
+      tags: [opt-out]
+      summary: Get user privacy preferences
+      description: Returns the full privacy preference state for a user.
+      operationId: getPreferences
+      parameters:
+        - name: userID
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Pseudonymized user identifier
+      responses:
+        '200':
+          description: User privacy preferences
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Preferences'
+        '400':
+          description: User ID is required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: User preferences not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/privacy/preferences/{userID}/consent:
+    put:
+      tags: [consent]
+      summary: Apply consent grants or revocations
+      description: Applies one or more consent grants and/or revocations for a user. Revocations are fanned out to memory-api instances via the consent outbox.
+      operationId: setConsent
+      parameters:
+        - name: userID
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Pseudonymized user identifier
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConsentRequest'
+      responses:
+        '200':
+          description: Current consent state after applying the operation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsentResponse'
+        '400':
+          description: Invalid request body, unknown category, or missing user ID
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    get:
+      tags: [consent]
+      summary: Get current consent state
+      description: Returns the current consent grants, defaults, and denied categories for a user.
+      operationId: getConsent
+      parameters:
+        - name: userID
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Pseudonymized user identifier
+      responses:
+        '200':
+          description: Current consent state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsentResponse'
+        '400':
+          description: User ID is required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/privacy/consent/stats:
+    get:
+      tags: [stats]
+      summary: Workspace consent statistics
+      description: Returns workspace-wide consent posture aggregates (total users, opt-outs, grants by category).
+      operationId: getConsentStats
+      parameters:
+        - name: workspace
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Workspace name
+      responses:
+        '200':
+          description: Consent statistics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsentStats'
+        '400':
+          description: workspace parameter is required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/privacy/enforcement-stats:
+    get:
+      tags: [stats]
+      summary: Workspace enforcement statistics
+      description: Returns workspace-scoped privacy enforcement counts (PII write blocks and redactions) derived from the audit log.
+      operationId: getEnforcementStats
+      parameters:
+        - name: workspace
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Workspace name
+      responses:
+        '200':
+          description: Enforcement statistics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnforcementStats'
+        '400':
+          description: workspace parameter is required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+components:
+  schemas:
+    OptOutRequest:
+      type: object
+      required: [userId, scope]
+      properties:
+        userId:
+          type: string
+          description: Pseudonymized user identifier
+        scope:
+          type: string
+          enum: [all, workspace, agent]
+          description: Opt-out scope
+        target:
+          type: string
+          description: Required when scope is "workspace" or "agent"; the workspace or agent name to opt out of.
+
+    Preferences:
+      type: object
+      properties:
+        userId:
+          type: string
+        optOutAll:
+          type: boolean
+        optOutWorkspaces:
+          type: array
+          items:
+            type: string
+        optOutAgents:
+          type: array
+          items:
+            type: string
+        consentGrants:
+          type: array
+          items:
+            type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    ConsentRequest:
+      type: object
+      properties:
+        grants:
+          type: array
+          items:
+            type: string
+          description: Consent categories to grant
+        revocations:
+          type: array
+          items:
+            type: string
+          description: Consent categories to revoke; triggers outbox fan-out to memory-api instances
+
+    ConsentResponse:
+      type: object
+      properties:
+        grants:
+          type: array
+          items:
+            type: string
+          description: Categories explicitly granted by the user
+        defaults:
+          type: array
+          items:
+            type: string
+          description: Categories active by default (no grant required)
+        denied:
+          type: array
+          items:
+            type: string
+          description: Categories that require a grant but have not been granted
+
+    ConsentStats:
+      type: object
+      properties:
+        totalUsers:
+          type: integer
+          format: int64
+          description: Number of rows in user_privacy_preferences
+        optedOutAll:
+          type: integer
+          format: int64
+          description: Number of users with opt_out_all=true
+        grantsByCategory:
+          type: object
+          additionalProperties:
+            type: integer
+            format: int64
+          description: Count of active grants keyed by consent category
+
+    EnforcementStats:
+      type: object
+      properties:
+        piiBlocked:
+          type: integer
+          format: int64
+          description: Number of memory writes blocked due to user opt-out
+        redactions:
+          type: integer
+          format: int64
+          description: Number of PII redaction events recorded in the audit log
+
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string

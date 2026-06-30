@@ -296,6 +296,14 @@ demoWorkspace:
   devSessionConn: "postgres://omnia:omnia@omnia-postgres.omnia-system.svc.cluster.local:5432/omnia_sessions?sslmode=disable"
   memorySecret: omnia-demo-memory
   devMemoryConn: "postgres://omnia:omnia@omnia-postgres.omnia-system.svc.cluster.local:5432/omnia_memory?sslmode=disable"
+  # -- Enable the per-workspace privacy-api (consent + opt-out). When true the
+  # chart adds spec.privacy to the demo Workspace and creates a dev Secret
+  # pointing at the omnia_consent database on the in-cluster dev postgres.
+  # For real clusters set privacyEnabled=false (or true + createDevSecret=false)
+  # and pre-create privacySecret with a POSTGRES_CONN key.
+  privacyEnabled: true
+  privacySecret: omnia-demo-privacy
+  devPrivacyConn: "postgres://omnia:omnia@omnia-postgres.omnia-system.svc.cluster.local:5432/omnia_consent?sslmode=disable"
 
 # -- Anthropic skills SkillSource. Syncs https://github.com/anthropics/skills
 # into the demo workspace so the Skills page is populated out of the box.

@@ -124,6 +124,10 @@ spec:
                     # nomic-embed-text embeddings don't collide with another
                     # workspace's embedding column dimension in omnia_memory.
                     psql -U omnia -d omnia_sessions -c "CREATE DATABASE omnia_memory_demo;" 2>/dev/null || true
+                    # Dedicated DB for the privacy-api (consent grants + opt-out
+                    # preferences), isolated from session/memory so consent-schema
+                    # migrations run without cross-service locking.
+                    psql -U omnia -d omnia_sessions -c "CREATE DATABASE omnia_consent;" 2>/dev/null || true
           ports:
             - containerPort: 5432
               protocol: TCP

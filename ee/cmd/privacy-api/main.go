@@ -290,7 +290,7 @@ func run() error {
 		// Consent notifier: fan-out revocations to all memory-api service-groups.
 		// Resolve memory URLs from workspace status; MEMORY_API_URLS env overrides at
 		// notifier construction time (if set, the notifier ignores memoryURLs).
-		memoryURLs := resolveMemoryURLs(f, log)
+		memoryURLs, workspaceUID := resolveMemoryFanout(f, log)
 		if len(memoryURLs) == 0 {
 			// No fan-out targets: revocations are recorded then immediately marked
 			// delivered without any prune, and the stuck gauge stays 0 — the backstop
@@ -301,7 +301,7 @@ func run() error {
 			log.V(1).Info("consent notifier configured", "memoryURLCount", len(memoryURLs))
 		}
 		tokenSrc := serviceauth.NewTokenSource("", 0)
-		notifier = privacy.NewMemoryAPINotifier(memoryURLs, f.workspace, tokenSrc, log)
+		notifier = privacy.NewMemoryAPINotifier(memoryURLs, workspaceUID, tokenSrc, log)
 
 		// Analytics opt-in metric (relocated from memory-api CE2).
 		optInWorker := NewOptInMetricWorker(
@@ -378,6 +378,7 @@ func registerRoutes(
 	log logr.Logger,
 	notifier privacy.ConsentNotifier,
 ) {
+	privacy.RegisterDocs(mux)
 	privacy.NewOptOutHandler(optOutStore, log).RegisterRoutes(mux)
 	privacy.NewConsentHandler(concrete, nil, log).WithConsentNotifier(notifier).RegisterRoutes(mux)
 	privacy.NewConsentStatsHandler(concrete, log).RegisterRoutes(mux)
@@ -420,30 +421,44 @@ func buildHandler(
 	return authMW(inner)
 }
 
-// resolveMemoryURLs returns memory-api base URLs for all service-groups in
-// the workspace. It reads the Workspace CRD status when a workspace name is
-// configured; otherwise it returns nil. Note: if MEMORY_API_URLS is set, the
-// MemoryAPINotifier constructor will override whatever is returned here.
-func resolveMemoryURLs(f *flags, log logr.Logger) []string {
+// resolveMemoryFanout returns the memory-api base URLs for all service-groups
+// in the workspace AND the Workspace CRD UID. The UID is what
+// memory_entities.workspace_id stores (the runtime writes string(ws.UID) there),
+// so it MUST be used as the ?workspace= scope on consent-revocation POSTs — the
+// workspace name would fail the uuid cast and match no rows. Returns (nil, "")
+// when no workspace is configured or the K8s lookup fails. Note: if
+// MEMORY_API_URLS is set, the MemoryAPINotifier constructor overrides the URLs
+// returned here (but not the UID, which it still needs for scoping).
+func resolveMemoryFanout(f *flags, log logr.Logger) ([]string, string) {
 	if f.workspace == "" {
-		return nil
+		return nil, ""
 	}
 	cfg, err := ctrl.GetConfig()
 	if err != nil {
-		log.V(1).Info("memory URL resolution skipped", "reason", "no K8s config", "err", err.Error())
-		return nil
+		log.V(1).Info("memory fan-out resolution skipped", "reason", "no K8s config", "err", err.Error())
+		return nil, ""
 	}
 	scheme := k8sruntime.NewScheme()
 	_ = omniav1alpha1.AddToScheme(scheme)
 	c, err := client.New(cfg, client.Options{Scheme: scheme})
 	if err != nil {
-		log.V(1).Info("memory URL resolution skipped", "reason", "K8s client error", "err", err.Error())
-		return nil
+		log.V(1).Info("memory fan-out resolution skipped", "reason", "K8s client error", "err", err.Error())
+		return nil, ""
 	}
+	urls, uid := memoryFanoutFromWorkspace(context.Background(), c, f.workspace)
+	if uid == "" {
+		log.V(1).Info("memory fan-out resolution skipped", "reason", "workspace not found", "workspace", f.workspace)
+	}
+	return urls, uid
+}
+
+// memoryFanoutFromWorkspace loads the named Workspace CRD via c and returns its
+// memory-api fan-out URLs plus the Workspace UID (the workspace_id used by
+// memory_entities). Returns (nil, "") if the workspace cannot be loaded.
+func memoryFanoutFromWorkspace(ctx context.Context, c client.Client, workspaceName string) ([]string, string) {
 	var ws omniav1alpha1.Workspace
-	if err := c.Get(context.Background(), client.ObjectKey{Name: f.workspace}, &ws); err != nil {
-		log.V(1).Info("memory URL resolution skipped", "reason", "workspace not found", "err", err.Error())
-		return nil
+	if err := c.Get(ctx, client.ObjectKey{Name: workspaceName}, &ws); err != nil {
+		return nil, ""
 	}
 	var urls []string
 	for _, svc := range ws.Status.Services {
@@ -451,7 +466,7 @@ func resolveMemoryURLs(f *flags, log logr.Logger) []string {
 			urls = append(urls, svc.MemoryURL)
 		}
 	}
-	return urls
+	return urls, string(ws.UID)
 }
 
 // resolveConfigFromWorkspace reads the Workspace CRD to obtain the privacy-api

@@ -126,7 +126,7 @@ allow_k8s_contexts(['kind-omnia-dev', 'docker-desktop', 'minikube', 'kind-kind',
 # Also suppress langchain runtime which is referenced via Helm values, not directly in manifests
 _suppress_images = ['omnia-facade-dev', 'omnia-runtime-dev', 'omnia-langchain-runtime-dev']
 if ENABLE_ENTERPRISE:
-    _suppress_images.extend(['omnia-arena-controller-dev', 'omnia-promptkit-lsp-dev', 'omnia-session-api-dev', 'omnia-memory-api-dev'])
+    _suppress_images.extend(['omnia-arena-controller-dev', 'omnia-promptkit-lsp-dev', 'omnia-session-api-dev', 'omnia-memory-api-dev', 'omnia-privacy-api-dev'])
 update_settings(suppress_unused_image_warnings=_suppress_images)
 
 
@@ -302,6 +302,28 @@ docker_build(
 )
 
 # ============================================================================
+# Privacy API Server - Per-workspace consent and opt-out service (Enterprise)
+# ============================================================================
+
+docker_build(
+    'omnia-privacy-api-dev',
+    context='.',
+    dockerfile='./ee/Dockerfile.privacy-api',
+    # Mirror the Dockerfile's COPY set. privacy-api transitively pulls
+    # ee/pkg/{audit,redaction}, ee/api, and internal/session (a deep dep
+    # tree), so enumerating leaf packages is fragile — include the whole
+    # api/ ee/ pkg/ internal/ trees, exactly what the Dockerfile copies.
+    only=[
+        './api',
+        './ee',
+        './internal',
+        './pkg',
+        './go.mod',
+        './go.sum',
+    ],
+)
+
+# ============================================================================
 # Doctor - Cluster diagnostic service for Omnia health checks
 # ============================================================================
 # Doctor is a platform component (chart-owned, default off) but every target it
@@ -387,8 +409,9 @@ if ENABLE_ENTERPRISE:
         './go.mod',
         './go.sum',
     ]
-    if USE_LOCAL_PROMPTKIT:
-        arena_controller_only.append('./promptkit-local')
+    # arena-controller deliberately builds against the published PromptKit module
+    # (no promptkit-local / go.work) so its binary stays statically linked and the
+    # image stays on distroless/static — see ee/Dockerfile.arena-controller.
 
     docker_build(
         'omnia-arena-controller-dev',
@@ -522,6 +545,10 @@ helm_set = [
     'workspaceServices.memoryApi.image.repository=omnia-memory-api-dev',
     'workspaceServices.memoryApi.image.tag=latest',
     'workspaceServices.memoryApi.image.pullPolicy=Never',
+    # Per-workspace privacy-api image (operator creates Deployments from Workspace.spec.privacy)
+    'workspaceServices.privacyApi.image.repository=omnia-privacy-api-dev',
+    'workspaceServices.privacyApi.image.tag=latest',
+    'workspaceServices.privacyApi.image.pullPolicy=Never',
     # Exercise the consolidation worker locally — 30s tick is short
     # enough that any local seed of stale observations gets processed
     # within a development feedback cycle. Production runs at 6h.
@@ -1294,6 +1321,24 @@ _rebuild_policy_proxy_cmd = 'docker build -f ./ee/Dockerfile.policy-proxy -t omn
 # bump). Same pattern as agent auto-rebuild.
 _restart_memory_api_cmd = 'kubectl delete po -n omnia-demo -l app.kubernetes.io/component=memory-api 2>/dev/null || true'
 _restart_session_api_cmd = 'kubectl delete po -n omnia-demo -l app.kubernetes.io/component=session-api 2>/dev/null || true'
+# privacy-api is the same operator-managed-Deployment trap: rebuild the image,
+# then delete the pod so the ReplicaSet recreates with the new :latest.
+_rebuild_privacy_api_cmd = 'docker build -f ./ee/Dockerfile.privacy-api -t omnia-privacy-api-dev:latest .'
+_restart_privacy_api_cmd = 'kubectl delete po -n omnia-demo -l app.kubernetes.io/component=privacy-api 2>/dev/null || true'
+
+_privacy_api_deps = [
+    './ee/cmd/privacy-api',
+    './ee/pkg/privacy',
+    './ee/pkg/audit',
+    './ee/pkg/redaction',
+    './ee/api',
+    './internal/serviceauth',
+    './internal/session',
+    './internal/tracing',
+    './pkg',
+    './api',
+    './go.mod',
+]
 
 _memory_api_deps = [
     './cmd/memory-api',
@@ -1385,6 +1430,42 @@ local_resource(
     cmd=_rebuild_session_api_cmd + ' && ' + _restart_session_api_cmd,
     deps=_session_api_deps,
     labels=['dynamic-services'],
+)
+
+local_resource(
+    'auto-rebuild-privacy-api',
+    cmd=_rebuild_privacy_api_cmd + ' && ' + _restart_privacy_api_cmd,
+    deps=_privacy_api_deps,
+    labels=['dynamic-services'],
+)
+
+# ============================================================================
+# Port-forwards — API documentation endpoints
+# Expose /docs at localhost:<port>/docs for each workspace API service.
+# session-api:  http://localhost:8085/docs
+# memory-api:   http://localhost:8086/docs
+# privacy-api:  http://localhost:8087/docs
+# ============================================================================
+
+local_resource(
+    'pf-session-api',
+    serve_cmd='kubectl port-forward -n omnia-demo svc/session-demo-default 8085:8080',
+    links=[link('http://localhost:8085/docs', 'session-api docs')],
+    labels=['port-forwards'],
+)
+
+local_resource(
+    'pf-memory-api',
+    serve_cmd='kubectl port-forward -n omnia-demo svc/memory-demo-default 8086:8080',
+    links=[link('http://localhost:8086/docs', 'memory-api docs')],
+    labels=['port-forwards'],
+)
+
+local_resource(
+    'pf-privacy-api',
+    serve_cmd='kubectl port-forward -n omnia-demo svc/privacy-demo 8087:8080',
+    links=[link('http://localhost:8087/docs', 'privacy-api docs')],
+    labels=['port-forwards'],
 )
 
 # Policy-proxy sidecar (EE/ToolPolicy). Rebuild the image and restart the agent

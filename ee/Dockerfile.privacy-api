@@ -1,0 +1,53 @@
+# syntax=docker/dockerfile:1
+# Build the privacy-api binary
+FROM golang:1.26 AS builder
+ARG TARGETOS
+ARG TARGETARCH
+
+WORKDIR /workspace
+COPY go.mod go.sum ./
+
+# Copy local PromptKit source if present (for development with go.work)
+COPY promptkit-local* /workspace/promptkit-local/
+
+# Set up go.work for local PromptKit if the source directory exists
+RUN if [ -d "/workspace/promptkit-local/tools/arena" ]; then \
+        echo "go 1.26.0" > go.work && \
+        echo "" >> go.work && \
+        echo "use (" >> go.work && \
+        echo "    ." >> go.work && \
+        echo "    ./promptkit-local/pkg" >> go.work && \
+        echo "    ./promptkit-local/runtime" >> go.work && \
+        echo "    ./promptkit-local/sdk" >> go.work && \
+        echo "    ./promptkit-local/server/a2a" >> go.work && \
+        echo "    ./promptkit-local/tools/arena" >> go.work && \
+        echo "    ./promptkit-local/tools/packc" >> go.work && \
+        echo ")" >> go.work && \
+        cat go.work; \
+    fi
+
+# Pre-download deps when go.work isn't in play (CI path). Skipped when
+# promptkit-local is included so the go.work above stays authoritative.
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    if [ ! -f go.work ]; then \
+        GOWORK=off go mod download; \
+    fi
+
+# Copy only source directories needed for the build
+COPY api/ api/
+COPY ee/ ee/
+COPY pkg/ pkg/
+COPY internal/ internal/
+
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 GOOS="${TARGETOS:-linux}" GOARCH="${TARGETARCH}" \
+    go build -a -o privacy-api ./ee/cmd/privacy-api
+
+FROM gcr.io/distroless/static:nonroot
+WORKDIR /
+COPY --from=builder /workspace/privacy-api .
+USER 65532:65532
+
+ENTRYPOINT ["/privacy-api"]
