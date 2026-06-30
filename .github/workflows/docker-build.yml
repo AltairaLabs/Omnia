@@ -82,6 +82,9 @@ jobs:
           - image: omnia-promptkit-lsp
             dockerfile: ee/Dockerfile.promptkit-lsp
             context: .
+          - image: omnia-privacy-api
+            dockerfile: ee/Dockerfile.privacy-api
+            context: .
     steps:
       - name: Checkout
         uses: actions/checkout@v7

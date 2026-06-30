@@ -150,6 +150,18 @@ spec:
           secretRef:
             name: {{ .Values.demoWorkspace.memorySecret }}
   {{- end }}
+  {{- if .Values.demoWorkspace.privacyEnabled }}
+  # Per-workspace privacy-api: consent grants, opt-out preferences, and
+  # deletion-outbox fan-out. The operator deploys one privacy-<workspace>
+  # Deployment per Workspace with spec.privacy set. The Secret must have a
+  # POSTGRES_CONN key; created by demo-workspace-privacy-secret.yaml when
+  # demoWorkspace.createDevSecret is true. The omnia_consent database is a
+  # DEDICATED logical DB so consent state is isolated from session/memory.
+  privacy:
+    database:
+      secretRef:
+        name: {{ .Values.demoWorkspace.privacySecret }}
+  {{- end }}
 {{- if .Values.sharepointHero.enabled }}
 ---
 # Ingest each SharePoint document as ONE condensed summary item, not a

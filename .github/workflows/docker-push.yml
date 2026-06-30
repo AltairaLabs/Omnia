@@ -122,6 +122,10 @@ jobs:
             omnia-promptkit-lsp:
               - 'ee/cmd/promptkit-lsp/**'
 
+            omnia-privacy-api:
+              - 'ee/cmd/privacy-api/**'
+              - 'ee/pkg/privacy/**'
+
       - name: Resolve service list
         id: resolve
         env:
@@ -129,7 +133,7 @@ jobs:
           MATCHED: ${{ steps.filter.outputs.changes }}
         run: |
           # Full image list — matches docker-build.yml + release.yml matrices.
-          ALL='["omnia-operator","omnia-facade","omnia-runtime","omnia-dashboard","omnia-session-api","omnia-memory-api","omnia-doctor","omnia-compaction","omnia-arena-controller","omnia-arena-worker","omnia-arena-dev-console","omnia-eval-worker","omnia-policy-proxy","omnia-promptkit-lsp"]'
+          ALL='["omnia-operator","omnia-facade","omnia-runtime","omnia-dashboard","omnia-session-api","omnia-memory-api","omnia-doctor","omnia-compaction","omnia-arena-controller","omnia-arena-worker","omnia-arena-dev-console","omnia-eval-worker","omnia-policy-proxy","omnia-promptkit-lsp","omnia-privacy-api"]'
 
           if [[ "$SHARED" == "true" ]]; then
             echo "Shared paths changed — rebuilding all services."
@@ -224,6 +228,11 @@ jobs:
             context: .
             title: Omnia PromptKit LSP (Enterprise)
             description: Language-server for PromptKit configs and arena YAML. Powers autocomplete and validation in the dev console.
+          - image: omnia-privacy-api
+            dockerfile: ee/Dockerfile.privacy-api
+            context: .
+            title: Omnia Privacy API (Enterprise)
+            description: Per-workspace service that owns consent grants, opt-out preferences, and deletion-outbox fan-out to memory-api.
     steps:
       - name: Checkout
         uses: actions/checkout@v7

@@ -126,7 +126,7 @@ allow_k8s_contexts(['kind-omnia-dev', 'docker-desktop', 'minikube', 'kind-kind',
 # Also suppress langchain runtime which is referenced via Helm values, not directly in manifests
 _suppress_images = ['omnia-facade-dev', 'omnia-runtime-dev', 'omnia-langchain-runtime-dev']
 if ENABLE_ENTERPRISE:
-    _suppress_images.extend(['omnia-arena-controller-dev', 'omnia-promptkit-lsp-dev', 'omnia-session-api-dev', 'omnia-memory-api-dev'])
+    _suppress_images.extend(['omnia-arena-controller-dev', 'omnia-promptkit-lsp-dev', 'omnia-session-api-dev', 'omnia-memory-api-dev', 'omnia-privacy-api-dev'])
 update_settings(suppress_unused_image_warnings=_suppress_images)
 
 
@@ -295,6 +295,28 @@ docker_build(
         './internal/pgutil',
         './internal/httputil',
         './internal/tracing',
+        './pkg',
+        './go.mod',
+        './go.sum',
+    ],
+)
+
+# ============================================================================
+# Privacy API Server - Per-workspace consent and opt-out service (Enterprise)
+# ============================================================================
+
+docker_build(
+    'omnia-privacy-api-dev',
+    context='.',
+    dockerfile='./ee/Dockerfile.privacy-api',
+    # Mirror the Dockerfile's COPY set. privacy-api transitively pulls
+    # ee/pkg/{audit,redaction}, ee/api, and internal/session (a deep dep
+    # tree), so enumerating leaf packages is fragile — include the whole
+    # api/ ee/ pkg/ internal/ trees, exactly what the Dockerfile copies.
+    only=[
+        './api',
+        './ee',
+        './internal',
         './pkg',
         './go.mod',
         './go.sum',
@@ -522,6 +544,10 @@ helm_set = [
     'workspaceServices.memoryApi.image.repository=omnia-memory-api-dev',
     'workspaceServices.memoryApi.image.tag=latest',
     'workspaceServices.memoryApi.image.pullPolicy=Never',
+    # Per-workspace privacy-api image (operator creates Deployments from Workspace.spec.privacy)
+    'workspaceServices.privacyApi.image.repository=omnia-privacy-api-dev',
+    'workspaceServices.privacyApi.image.tag=latest',
+    'workspaceServices.privacyApi.image.pullPolicy=Never',
     # Exercise the consolidation worker locally — 30s tick is short
     # enough that any local seed of stale observations gets processed
     # within a development feedback cycle. Production runs at 6h.
