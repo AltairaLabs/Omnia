@@ -36,18 +36,20 @@ func (alwaysDenyReviewer) ReviewToken(_ context.Context, _ string) (bool, string
 func TestRegisterRoutes_AllMounted(t *testing.T) {
 	mux := http.NewServeMux()
 	base := privacy.NewPreferencesStore(nil) // nil pool: routes only, no DB hit in this probe
-	registerRoutes(mux, base, base, logr.Discard(), privacy.NoopConsentNotifier{})
+	auditStore := privacy.NewAuditStore(nil) // nil pool: routes only, no DB hit in this probe
+	registerRoutes(mux, base, base, auditStore, logr.Discard(), privacy.NoopConsentNotifier{})
 
-	for _, p := range []string{
-		"/api/v1/privacy/preferences/abc123",
-		"/api/v1/privacy/preferences/abc123/consent",
-		"/api/v1/privacy/consent/stats",
-		"/api/v1/privacy/enforcement-stats",
+	for _, tc := range []struct{ method, path string }{
+		{http.MethodGet, "/api/v1/privacy/preferences/abc123"},
+		{http.MethodGet, "/api/v1/privacy/preferences/abc123/consent"},
+		{http.MethodGet, "/api/v1/privacy/consent/stats"},
+		{http.MethodGet, "/api/v1/privacy/enforcement-stats"},
+		{http.MethodPost, "/api/v1/privacy/audit-events"},
 	} {
-		req := httptest.NewRequest(http.MethodGet, p, nil)
+		req := httptest.NewRequest(tc.method, tc.path, nil)
 		_, pattern := mux.Handler(req)
 		if pattern == "" {
-			t.Errorf("route %q is not registered (no matching pattern found)", p)
+			t.Errorf("route %s %q is not registered (no matching pattern found)", tc.method, tc.path)
 		}
 	}
 }
@@ -102,7 +104,7 @@ func TestApplyEnvFallbacks_AuthEnvSeam(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 	})
-	registerRoutes(mux, base, base, logr.Discard(), privacy.NoopConsentNotifier{})
+	registerRoutes(mux, base, base, privacy.NewAuditStore(nil), logr.Discard(), privacy.NoopConsentNotifier{})
 
 	subjects := splitAndTrim(f.authAllowedSubjects)
 	namespaces := splitAndTrim(f.authAllowedNamespaces)
@@ -129,7 +131,7 @@ func TestApplyEnvFallbacks_AuthEnvSeam(t *testing.T) {
 // privacy routes are mounted when enterprise=true (the expected production path).
 func TestEnterpriseGate_RoutesRegisteredWhenTrue(t *testing.T) {
 	base := privacy.NewPreferencesStore(nil)
-	mux := buildAPIMux(true, base, base, logr.Discard(), privacy.NoopConsentNotifier{})
+	mux := buildAPIMux(true, base, base, privacy.NewAuditStore(nil), logr.Discard(), privacy.NoopConsentNotifier{})
 
 	for _, p := range []string{
 		"/api/v1/privacy/preferences/abc123",
@@ -150,7 +152,7 @@ func TestEnterpriseGate_RoutesRegisteredWhenTrue(t *testing.T) {
 // and opt-out routes return 404 when enterprise=false, while /healthz still returns 200.
 func TestEnterpriseGate_RoutesAbsentWhenFalse(t *testing.T) {
 	base := privacy.NewPreferencesStore(nil)
-	mux := buildAPIMux(false, base, base, logr.Discard(), privacy.NoopConsentNotifier{})
+	mux := buildAPIMux(false, base, base, privacy.NewAuditStore(nil), logr.Discard(), privacy.NoopConsentNotifier{})
 
 	// /healthz must still be reachable.
 	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
@@ -235,7 +237,7 @@ func TestBuildHandler_AuthExemptsHealthz(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 	})
-	registerRoutes(mux, base, base, logr.Discard(), privacy.NoopConsentNotifier{})
+	registerRoutes(mux, base, base, privacy.NewAuditStore(nil), logr.Discard(), privacy.NoopConsentNotifier{})
 
 	// alwaysDenyReviewer: any presented token is rejected → unauthenticated.
 	reviewer := alwaysDenyReviewer{}
