@@ -139,8 +139,9 @@ func replaceDBName(connStr, newDB string) string {
 func TestMigrationFS_ContainsMigrations(t *testing.T) {
 	entries, err := MigrationFS.ReadDir("migrations")
 	require.NoError(t, err)
-	// 000001: consolidated initial schema; 000002: drop user_privacy_preferences.
-	assert.Len(t, entries, 4, "should have exactly 4 migration files (2 up + 2 down)")
+	// 000001: consolidated initial schema; 000002: drop user_privacy_preferences;
+	// 000003: audit_log.forwarded_at for the privacy-api audit drain-forwarder (#1673).
+	assert.Len(t, entries, 6, "should have exactly 6 migration files (3 up + 3 down)")
 
 	// Verify expected migration files exist
 	expected := []string{
@@ -148,6 +149,8 @@ func TestMigrationFS_ContainsMigrations(t *testing.T) {
 		"000001_initial.down.sql",
 		"000002_drop_privacy_prefs.up.sql",
 		"000002_drop_privacy_prefs.down.sql",
+		"000003_audit_forwarded_at.up.sql",
+		"000003_audit_forwarded_at.down.sql",
 	}
 	names := make(map[string]bool)
 	for _, e := range entries {
