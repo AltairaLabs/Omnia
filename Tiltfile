@@ -1320,6 +1320,24 @@ _rebuild_policy_proxy_cmd = 'docker build -f ./ee/Dockerfile.policy-proxy -t omn
 # bump). Same pattern as agent auto-rebuild.
 _restart_memory_api_cmd = 'kubectl delete po -n omnia-demo -l app.kubernetes.io/component=memory-api 2>/dev/null || true'
 _restart_session_api_cmd = 'kubectl delete po -n omnia-demo -l app.kubernetes.io/component=session-api 2>/dev/null || true'
+# privacy-api is the same operator-managed-Deployment trap: rebuild the image,
+# then delete the pod so the ReplicaSet recreates with the new :latest.
+_rebuild_privacy_api_cmd = 'docker build -f ./ee/Dockerfile.privacy-api -t omnia-privacy-api-dev:latest .'
+_restart_privacy_api_cmd = 'kubectl delete po -n omnia-demo -l app.kubernetes.io/component=privacy-api 2>/dev/null || true'
+
+_privacy_api_deps = [
+    './ee/cmd/privacy-api',
+    './ee/pkg/privacy',
+    './ee/pkg/audit',
+    './ee/pkg/redaction',
+    './ee/api',
+    './internal/serviceauth',
+    './internal/session',
+    './internal/tracing',
+    './pkg',
+    './api',
+    './go.mod',
+]
 
 _memory_api_deps = [
     './cmd/memory-api',
@@ -1410,6 +1428,13 @@ local_resource(
     'auto-rebuild-session-api',
     cmd=_rebuild_session_api_cmd + ' && ' + _restart_session_api_cmd,
     deps=_session_api_deps,
+    labels=['dynamic-services'],
+)
+
+local_resource(
+    'auto-rebuild-privacy-api',
+    cmd=_rebuild_privacy_api_cmd + ' && ' + _restart_privacy_api_cmd,
+    deps=_privacy_api_deps,
     labels=['dynamic-services'],
 )
 
