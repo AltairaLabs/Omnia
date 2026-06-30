@@ -1449,18 +1449,21 @@ local_resource(
 local_resource(
     'pf-session-api',
     serve_cmd='kubectl port-forward -n omnia-demo svc/session-demo-default 8085:8080',
+    links=[link('http://localhost:8085/docs', 'session-api docs')],
     labels=['port-forwards'],
 )
 
 local_resource(
     'pf-memory-api',
     serve_cmd='kubectl port-forward -n omnia-demo svc/memory-demo-default 8086:8080',
+    links=[link('http://localhost:8086/docs', 'memory-api docs')],
     labels=['port-forwards'],
 )
 
 local_resource(
     'pf-privacy-api',
     serve_cmd='kubectl port-forward -n omnia-demo svc/privacy-demo 8087:8080',
+    links=[link('http://localhost:8087/docs', 'privacy-api docs')],
     labels=['port-forwards'],
 )
 
