@@ -12,10 +12,11 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/altairalabs/omnia/ee/pkg/memory/consolidation"
+	"github.com/altairalabs/omnia/internal/memory/consolidation"
 )
 
-// ConsolidationWriter implements consolidation.Store using pgxpool.
+// ConsolidationWriter structurally satisfies the consolidation.Store interface
+// (defined in ee/pkg/memory/consolidation) using pgxpool.
 type ConsolidationWriter struct {
 	pool *pgxpool.Pool
 }

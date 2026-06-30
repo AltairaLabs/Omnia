@@ -6,7 +6,7 @@ SPDX-License-Identifier: Apache-2.0
 
 package api
 
-import "github.com/altairalabs/omnia/ee/pkg/memory/projection"
+import coreproj "github.com/altairalabs/omnia/internal/memory/projection"
 
 // Sensitive (PII-tier) consent categories. Mirrored as string literals from the
 // canonical definitions in ee/pkg/privacy/consent.go to keep this package free of
@@ -32,14 +32,14 @@ func isSensitiveCategory(cat string) bool {
 // pointMustBeMasked is the single masking decision for a projection point.
 // Today: sensitive category. (#1642 will add a retroactive-opt-out term here once
 // the consent store keys on the same pseudonym as virtual_user_id.)
-func pointMustBeMasked(p projection.Point) bool {
+func pointMustBeMasked(p coreproj.Point) bool {
 	return isSensitiveCategory(p.Category)
 }
 
 // maskPoint strips a point's identifying and content fields in place, leaving an
 // anonymous, non-interactive dot (no id → no click-through to the full memory).
 // Done server-side before serialization, so the stripped data never reaches the wire.
-func maskPoint(p *projection.Point) {
+func maskPoint(p *coreproj.Point) {
 	p.ID = ""
 	p.Title = ""
 	p.Preview = ""

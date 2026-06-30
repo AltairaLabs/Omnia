@@ -12,6 +12,8 @@ import (
 	"context"
 	"fmt"
 	"time"
+
+	coreconsol "github.com/altairalabs/omnia/internal/memory/consolidation"
 )
 
 // Store is the minimal interface the applier needs from the memory
@@ -53,76 +55,30 @@ type ApplyContext struct {
 	Now         time.Time
 }
 
+// The *Write DTOs are defined in internal/memory/consolidation and
+// re-exported here as type aliases so the Store interface, Applier, and
+// their tests compile unchanged.
+
 // SummaryWrite captures a CreateSummary apply.
-type SummaryWrite struct {
-	WorkspaceID    string
-	Scope          Scope
-	Content        string
-	Metadata       map[string]string
-	FromIDs        []string
-	PromotedByPack string
-	PromotedAt     time.Time
-}
+type SummaryWrite = coreconsol.SummaryWrite
 
 // SupersedeWrite captures a Supersede apply.
-type SupersedeWrite struct {
-	WorkspaceID    string
-	TargetIDs      []string
-	WithID         string
-	PromotedByPack string
-	PromotedAt     time.Time
-}
+type SupersedeWrite = coreconsol.SupersedeWrite
 
 // RescopeWrite captures a Rescope apply.
-type RescopeWrite struct {
-	WorkspaceID    string
-	TargetIDs      []string
-	NewScope       Scope
-	Reason         string
-	PromotedByPack string
-	PromotedAt     time.Time
-}
+type RescopeWrite = coreconsol.RescopeWrite
 
 // InvalidateWrite captures an Invalidate apply.
-type InvalidateWrite struct {
-	WorkspaceID    string
-	TargetIDs      []string
-	ValidUntil     time.Time
-	Reason         string
-	PromotedByPack string
-	PromotedAt     time.Time
-}
+type InvalidateWrite = coreconsol.InvalidateWrite
 
 // MergeWrite captures a MergeEntities apply.
-type MergeWrite struct {
-	WorkspaceID    string
-	CanonicalID    string
-	MergeIDs       []string
-	PromotedByPack string
-	PromotedAt     time.Time
-}
+type MergeWrite = coreconsol.MergeWrite
 
 // DiscardWrite captures a Discard apply.
-type DiscardWrite struct {
-	WorkspaceID    string
-	TargetIDs      []string
-	Reason         string
-	PromotedByPack string
-	PromotedAt     time.Time
-}
+type DiscardWrite = coreconsol.DiscardWrite
 
-// RescoreWrite captures a Rescore apply. Lineage columns
-// (PromotedByPack, PromotedAt) are populated alongside the scalar
-// score fields so a forensic walker can answer "which pack rescored
-// this row, when?".
-type RescoreWrite struct {
-	WorkspaceID    string
-	TargetID       string
-	Importance     float32
-	Confidence     float32
-	PromotedByPack string
-	PromotedAt     time.Time
-}
+// RescoreWrite captures a Rescore apply.
+type RescoreWrite = coreconsol.RescoreWrite
 
 // Outcome values for AuditEntry.Outcome.
 const (

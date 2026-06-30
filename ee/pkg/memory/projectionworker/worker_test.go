@@ -18,6 +18,7 @@ import (
 	"github.com/altairalabs/omnia/ee/pkg/memory/consolidation"
 	"github.com/altairalabs/omnia/ee/pkg/memory/projection"
 	"github.com/altairalabs/omnia/internal/memory"
+	coreproj "github.com/altairalabs/omnia/internal/memory/projection"
 	"github.com/go-logr/logr/testr"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 )
@@ -83,6 +84,11 @@ func (f *fakeRenderStore) LoadProjection(context.Context, string) (*memory.Store
 	return f.stored, f.loadErr
 }
 
+// Projector wires the real enterprise t-SNE projector so Render computes a
+// genuine layout (the worker tests assert the lexical basis on the embedding-
+// free fake input).
+func (f *fakeRenderStore) Projector() coreproj.Projector { return projection.GonumProjector{} }
+
 func (f *fakeRenderStore) SaveProjection(_ context.Context, key, _, _, _, _ string, _ []memory.ProjectionPoint) error {
 	if f.saveErr != nil {
 		return f.saveErr // not recorded — render failed
@@ -140,7 +146,7 @@ func TestRunOnce_RendersEnabledWorkspaceColdScope(t *testing.T) {
 	}
 	// The fake's single input has no embedding, so the basis degrades to
 	// lexical — the render counter must carry that basis label (#1442).
-	if got := renderCount(w.opts.Metrics, "ok", projection.BasisLexical); got != 1 {
+	if got := renderCount(w.opts.Metrics, "ok", coreproj.BasisLexical); got != 1 {
 		t.Errorf("ok/lexical render counter = %v, want 1", got)
 	}
 }
@@ -214,10 +220,10 @@ func TestRunOnce_RecordsErrorMetricOnRenderFailure(t *testing.T) {
 	if len(store.rendered) != 0 {
 		t.Errorf("recorded a render despite SaveProjection error: %v", store.rendered)
 	}
-	if got := renderCount(m, "error", projection.BasisUnknown); got != 1 {
+	if got := renderCount(m, "error", coreproj.BasisUnknown); got != 1 {
 		t.Errorf("error render counter = %v, want 1", got)
 	}
-	if got := renderCount(m, "ok", projection.BasisLexical); got != 0 {
+	if got := renderCount(m, "ok", coreproj.BasisLexical); got != 0 {
 		t.Errorf("ok render counter = %v, want 0", got)
 	}
 }

@@ -61,6 +61,7 @@ import (
 	eeaudit "github.com/altairalabs/omnia/ee/pkg/audit"
 	eememory "github.com/altairalabs/omnia/ee/pkg/memory"
 	"github.com/altairalabs/omnia/ee/pkg/memory/consolidation"
+	eeprojection "github.com/altairalabs/omnia/ee/pkg/memory/projection"
 	"github.com/altairalabs/omnia/ee/pkg/memory/projectionworker"
 	eemetrics "github.com/altairalabs/omnia/ee/pkg/metrics"
 	"github.com/altairalabs/omnia/ee/pkg/privacy"
@@ -448,6 +449,13 @@ func run() error {
 	// below.
 	pgStore := memory.NewPostgresMemoryStore(pool)
 	defer pgStore.Close()
+	if f.enterprise {
+		// Wire the enterprise gonum/t-SNE projector so memory.Render computes
+		// Memory Galaxy layouts. OSS leaves it nil (Render returns a clear
+		// "projection unavailable" error), keeping internal/memory free of an
+		// ee import (#1669).
+		pgStore.SetProjector(eeprojection.GonumProjector{})
+	}
 
 	// Build the shared Redis client (if configured) before either the
 	// cache wrapper or the event publisher. One client, one TCP pool —
@@ -794,6 +802,11 @@ func buildAPIMux(
 		// Retrieval consults the loader to build a per-tier ranker from
 		// the workspace's bound MemoryPolicy.spec.tierPrecedence.
 		svc.SetPolicyLoader(policyLoader)
+		// Enterprise tier-ranking factories: the constructors live in ee
+		// (policy -> weights/half-life); core consumes them via injected
+		// factories so internal/memory/api no longer imports ee (#1669).
+		svc.SetTierRankerFactory(eememory.NewTierRanker)
+		svc.SetTierHalfLifeFactory(eememory.NewTierHalfLife)
 	}
 	if consentPruner != nil {
 		// CE1: per-user/category consent-event prune endpoint.

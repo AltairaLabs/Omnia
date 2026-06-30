@@ -24,6 +24,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/altairalabs/omnia/internal/memory/metakeys"
+	coreproj "github.com/altairalabs/omnia/internal/memory/projection"
 )
 
 // Compile-time interface check.
@@ -94,6 +95,10 @@ const (
 type PostgresMemoryStore struct {
 	pool        *pgxpool.Pool
 	accessTouch *accessTouchBatcher
+	// projector is the injected Memory Galaxy projection algorithm. nil in OSS
+	// (the t-SNE projector is an enterprise feature); the enterprise binary
+	// wires it via SetProjector so internal/memory never imports ee (#1669).
+	projector coreproj.Projector
 }
 
 // NewPostgresMemoryStore creates a new store backed by the given connection pool.

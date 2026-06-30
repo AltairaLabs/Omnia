@@ -13,13 +13,15 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	coreproj "github.com/altairalabs/omnia/internal/memory/projection"
 )
 
-func denseInputs(n int) []Input {
-	out := make([]Input, n)
+func denseInputs(n int) []coreproj.Input {
+	out := make([]coreproj.Input, n)
 	for i := 0; i < n; i++ {
 		emb := []float32{float32(i % 5), float32((i * 3) % 7), 1, 0, float32(i % 2)}
-		out[i] = Input{
+		out[i] = coreproj.Input{
 			EntityID:  fmt.Sprintf("e%04d", i),
 			Embedding: emb, Tier: "user", User: "u1", Kind: "profile",
 			Content: strings.Repeat("word ", 40), Confidence: 0.5,
@@ -29,8 +31,8 @@ func denseInputs(n int) []Input {
 	return out
 }
 
-func defaultOpts() Options {
-	return Options{Cap: 8000, DenseThreshold: 0.7, PCADims: 30, LSADims: 50, PreviewChars: 120}
+func defaultOpts() coreproj.Options {
+	return coreproj.Options{Cap: 8000, DenseThreshold: 0.7, PCADims: 30, LSADims: 50, PreviewChars: 120}
 }
 
 func TestProject_DenseBasisAndBounds(t *testing.T) {
@@ -38,7 +40,7 @@ func TestProject_DenseBasisAndBounds(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Basis != BasisDense {
+	if res.Basis != coreproj.BasisDense {
 		t.Errorf("basis = %s, want dense", res.Basis)
 	}
 	if res.Total != 40 || len(res.Points) != 40 {
@@ -69,7 +71,7 @@ func TestProject_LexicalWhenLowCoverage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Basis != BasisLexical {
+	if res.Basis != coreproj.BasisLexical {
 		t.Errorf("basis = %s, want lexical", res.Basis)
 	}
 	if res.Unembedded != 0 {
@@ -84,7 +86,7 @@ func TestProject_DenseSkipsUnembedded(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Basis != BasisDense {
+	if res.Basis != coreproj.BasisDense {
 		t.Fatalf("basis = %s, want dense", res.Basis)
 	}
 	if res.Unembedded != 1 || res.Total != 39 {
@@ -113,7 +115,7 @@ func TestProject_TinySetUsesPCAModel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Model != ModelPCA {
+	if res.Model != coreproj.ModelPCA {
 		t.Errorf("model = %s, want pca for tiny set", res.Model)
 	}
 }
@@ -130,19 +132,6 @@ func TestProject_Caps(t *testing.T) {
 	}
 }
 
-// TestOptions_DefaultRenderCapIsBounded guards the cap that keeps the EXACT
-// O(n²) t-SNE backend tractable: a regression back to a large default (e.g.
-// 8000) reintroduces multi-minute, ~GB renders.
-func TestOptions_DefaultRenderCapIsBounded(t *testing.T) {
-	got := (Options{}).withDefaults().Cap
-	if got != defaultRenderCap {
-		t.Errorf("default Cap = %d, want %d", got, defaultRenderCap)
-	}
-	if got > 3000 {
-		t.Errorf("default Cap %d is too large for exact O(n^2) t-SNE", got)
-	}
-}
-
 func TestProject_EmptyInputs(t *testing.T) {
 	res, err := Project(nil, nil, defaultOpts())
 	if err != nil {
@@ -153,22 +142,15 @@ func TestProject_EmptyInputs(t *testing.T) {
 	}
 }
 
-func TestFromStored_ReusesCoordsRefreshesMeta(t *testing.T) {
-	inputs := denseInputs(4)
-	stored := map[string][2]float64{
-		inputs[0].EntityID: {0.1, 0.2},
-		inputs[1].EntityID: {0.3, 0.4},
-		inputs[2].EntityID: {0.5, 0.6},
-		// inputs[3] has no stored coord → dropped
+// TestGonumProjector_SatisfiesCoreInterface proves the ee adapter implements the
+// core Projector seam consumed by internal/memory (#1669).
+func TestGonumProjector_SatisfiesCoreInterface(t *testing.T) {
+	var p coreproj.Projector = GonumProjector{}
+	res, err := p.Project(denseInputs(40), nil, defaultOpts())
+	if err != nil {
+		t.Fatal(err)
 	}
-	res := FromStored(inputs, stored, defaultOpts())
-	if res.Total != 3 || len(res.Points) != 3 {
-		t.Fatalf("total/points = %d/%d, want 3/3", res.Total, len(res.Points))
-	}
-	if res.Points[0].X != 0.1 || res.Points[0].Y != 0.2 {
-		t.Errorf("coords not reused: %v", res.Points[0])
-	}
-	if res.Points[0].Preview == "" {
-		t.Error("preview should be refreshed from input content")
+	if res.Total != 40 || len(res.Points) != 40 {
+		t.Errorf("GonumProjector total/points = %d/%d, want 40/40", res.Total, len(res.Points))
 	}
 }

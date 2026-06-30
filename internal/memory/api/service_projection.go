@@ -11,8 +11,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/altairalabs/omnia/ee/pkg/memory/projection"
 	"github.com/altairalabs/omnia/internal/memory"
+	coreproj "github.com/altairalabs/omnia/internal/memory/projection"
 )
 
 // onDemandProjectionThreshold is the entity-count gate above which the endpoint
@@ -20,10 +20,10 @@ import (
 // the pre-render worker renders them in the background.
 const onDemandProjectionThreshold = 500
 
-// ProjectionResult is the service-level result: the pure projection.Result plus
+// ProjectionResult is the service-level result: the pure projection Result plus
 // embedding metadata, render status, and the compute timestamp.
 type ProjectionResult struct {
-	projection.Result
+	coreproj.Result
 	// Status is "ready" (layout served) or "pending" (large cold scope not
 	// pre-rendered yet; the worker is on it — poll until ready).
 	Status string `json:"status"`
@@ -58,8 +58,8 @@ func (s *MemoryService) Project(ctx context.Context, scope map[string]string) (P
 	}
 	// Cold/stale: small → compute now; large → pending (worker will render).
 	if projectionCount(live) > onDemandProjectionThreshold {
-		return ProjectionResult{Status: "pending", Result: projection.Result{
-			Total: projectionCount(live), Points: []projection.Point{}}}, nil
+		return ProjectionResult{Status: "pending", Result: coreproj.Result{
+			Total: projectionCount(live), Points: []coreproj.Point{}}}, nil
 	}
 	res, computedAt, err := memory.Render(ctx, ps, scope)
 	if err != nil {
@@ -78,7 +78,7 @@ func (s *MemoryService) serveStored(ctx context.Context, ps memory.ProjectionSto
 	if err != nil {
 		return ProjectionResult{}, err
 	}
-	res := projection.FromStored(toProjectionInputs(inputs), stored.Layout, projection.Options{})
+	res := coreproj.FromStored(toProjectionInputs(inputs), stored.Layout, coreproj.Options{})
 	res.Model, res.Basis = stored.Model, stored.Basis
 	out := ProjectionResult{Result: res, Status: "ready", ComputedAt: stored.ComputedAt}
 	s.enrichEmbeddingMeta(&out)
@@ -112,22 +112,22 @@ func projectionCount(fingerprint string) int {
 // enrichEmbeddingMeta sets the representation hint + embedding model/dim per basis.
 func (s *MemoryService) enrichEmbeddingMeta(out *ProjectionResult) {
 	switch out.Basis {
-	case projection.BasisDense:
+	case coreproj.BasisDense:
 		out.ProjectionInput = "embedding"
 		if s.embeddingSvc != nil {
 			out.EmbeddingModel = s.embeddingSvc.ModelName()
 			out.EmbeddingDim = s.embeddingSvc.Provider().Dimensions()
 		}
-	case projection.BasisLexical:
+	case coreproj.BasisLexical:
 		out.ProjectionInput = "tfidf"
 		out.EmbeddingModel = "tfidf+lsa"
 	}
 }
 
-func toProjectionInputs(in []memory.ProjectionInput) []projection.Input {
-	out := make([]projection.Input, len(in))
+func toProjectionInputs(in []memory.ProjectionInput) []coreproj.Input {
+	out := make([]coreproj.Input, len(in))
 	for i, x := range in {
-		out[i] = projection.Input{
+		out[i] = coreproj.Input{
 			EntityID: x.EntityID, Content: x.Content, Embedding: x.Embedding,
 			Tier: x.Tier, User: x.User, Kind: x.Kind, Category: x.Category, Title: x.Title,
 			Confidence: x.Confidence, ObservedAt: x.ObservedAt, ExpiresAt: x.ExpiresAt,

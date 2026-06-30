@@ -15,6 +15,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"time"
+
+	coreconsol "github.com/altairalabs/omnia/internal/memory/consolidation"
 )
 
 // PreFilterAxis identifies one of the three pre-filter SQL builders.
@@ -30,42 +32,24 @@ const (
 // String returns the axis as a string. Mirrors the JSON tag value.
 func (a PreFilterAxis) String() string { return string(a) }
 
+// Scope, ScopeShape, Bucket, BucketEntry, and MutabilityMutable are
+// defined in internal/memory/consolidation and re-exported here as type
+// aliases so the EE worker, validator, and their tests compile unchanged.
+
 // Scope is the (workspace_id, agent_id?, user_id?) tuple a memory row
-// (or a rescope action) targets. Fields with empty values are
-// equivalent to NULL in the database.
-type Scope struct {
-	WorkspaceID string `json:"workspaceID"`
-	AgentID     string `json:"agentID,omitempty"`
-	UserID      string `json:"userID,omitempty"`
-}
+// (or a rescope action) targets.
+type Scope = coreconsol.Scope
 
-// ScopeShape labels a Scope by its nullability pattern. Maps 1:1 to
-// the four operator-facing tier names.
-type ScopeShape string
+// ScopeShape labels a Scope by its nullability pattern.
+type ScopeShape = coreconsol.ScopeShape
 
-// ScopeShape values.
+// ScopeShape values (re-exported from core).
 const (
-	ScopeShapeInstitutional ScopeShape = "institutional"
-	ScopeShapeAgentScoped   ScopeShape = "agent-scoped"
-	ScopeShapeUserScoped    ScopeShape = "user-scoped"
-	ScopeShapeUserForAgent  ScopeShape = "user-for-agent"
+	ScopeShapeInstitutional = coreconsol.ScopeShapeInstitutional
+	ScopeShapeAgentScoped   = coreconsol.ScopeShapeAgentScoped
+	ScopeShapeUserScoped    = coreconsol.ScopeShapeUserScoped
+	ScopeShapeUserForAgent  = coreconsol.ScopeShapeUserForAgent
 )
-
-// Shape returns the ScopeShape this Scope represents.
-func (s Scope) Shape() ScopeShape {
-	hasAgent := s.AgentID != ""
-	hasUser := s.UserID != ""
-	switch {
-	case hasAgent && hasUser:
-		return ScopeShapeUserForAgent
-	case hasUser:
-		return ScopeShapeUserScoped
-	case hasAgent:
-		return ScopeShapeAgentScoped
-	default:
-		return ScopeShapeInstitutional
-	}
-}
 
 // ActionKind labels each typed action. The pack emits actions as a
 // JSON array; ActionKind is read from the "action" field.
@@ -208,10 +192,8 @@ func decodeOne(kind ActionKind, raw json.RawMessage) (Action, error) {
 	}
 }
 
-// MutabilityMutable is the string value the validator + tests use to
-// check a row is fair game for modification. Mirrors the value written
-// to the Postgres `mutability` column.
-const MutabilityMutable = "mutable"
+// MutabilityMutable is re-exported from the core consolidation package.
+const MutabilityMutable = coreconsol.MutabilityMutable
 
 // SafetyGateAgentScoped names the agent-scoped k-anonymity gate key in
 // MemoryConsolidationSafetyGates.MinDistinctUserCount.
@@ -220,25 +202,11 @@ const SafetyGateAgentScoped = "agentScoped"
 // SafetyGateUserScoped names the user-scoped k-anonymity gate key.
 const SafetyGateUserScoped = "userScoped"
 
-// Bucket is one pre-filter output bucket (e.g., a group of stale
-// observations sharing kind+name).
-type Bucket struct {
-	Key     string         `json:"key"`
-	Entries []BucketEntry  `json:"entries"`
-	Stats   map[string]any `json:"stats,omitempty"`
-}
+// Bucket is re-exported from the core consolidation package.
+type Bucket = coreconsol.Bucket
 
-// BucketEntry is one memory row inside a bucket. Mutability is surfaced
-// so the pack can reason about which rows are off-limits.
-type BucketEntry struct {
-	ID         string            `json:"id"`
-	Content    string            `json:"content"`
-	Scope      Scope             `json:"scope"`
-	Mutability string            `json:"mutability"`
-	SourceType string            `json:"sourceType"`
-	ObservedAt time.Time         `json:"observedAt,omitempty"`
-	Metadata   map[string]string `json:"metadata,omitempty"`
-}
+// BucketEntry is re-exported from the core consolidation package.
+type BucketEntry = coreconsol.BucketEntry
 
 // FunctionInput is the JSON body the worker POSTs to /functions/{name}.
 type FunctionInput struct {

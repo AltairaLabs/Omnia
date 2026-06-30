@@ -125,18 +125,20 @@ type MemoryAuditEntry struct {
 
 // MemoryService wraps the memory store with business logic for the HTTP layer.
 type MemoryService struct {
-	store              memory.Store
-	institutional      memory.InstitutionalStore // nil unless enterprise (set via SetInstitutionalStore)
-	embeddingSvc       *memory.EmbeddingService  // nil if embeddings not configured
-	eventPublisher     MemoryEventPublisher      // nil if event publishing not configured
-	auditLogger        MemoryAuditLogger         // nil if audit logging not configured
-	policyLoader       memory.PolicyLoader       // nil if no MemoryPolicy resolution wired
-	consentEventPruner memory.ConsentEventPruner // nil if not wired; used by PruneUserConsentCategory
-	ingestFallback     ingestion.Config          // default ingestion config (from --ingest-* flags)
-	summaryQueue       ingestion.SummaryQueue    // nil disables the agent path (falls back to extractive)
-	config             MemoryServiceConfig
-	log                logr.Logger
-	enterprise         bool
+	store               memory.Store
+	institutional       memory.InstitutionalStore                             // nil unless enterprise (set via SetInstitutionalStore)
+	embeddingSvc        *memory.EmbeddingService                              // nil if embeddings not configured
+	eventPublisher      MemoryEventPublisher                                  // nil if event publishing not configured
+	auditLogger         MemoryAuditLogger                                     // nil if audit logging not configured
+	policyLoader        memory.PolicyLoader                                   // nil if no MemoryPolicy resolution wired
+	tierRankerFactory   func(*omniav1alpha1.MemoryPolicy) memory.TierRanker   // nil unless enterprise (set via SetTierRankerFactory)
+	tierHalfLifeFactory func(*omniav1alpha1.MemoryPolicy) memory.TierHalfLife // nil unless enterprise (set via SetTierHalfLifeFactory)
+	consentEventPruner  memory.ConsentEventPruner                             // nil if not wired; used by PruneUserConsentCategory
+	ingestFallback      ingestion.Config                                      // default ingestion config (from --ingest-* flags)
+	summaryQueue        ingestion.SummaryQueue                                // nil disables the agent path (falls back to extractive)
+	config              MemoryServiceConfig
+	log                 logr.Logger
+	enterprise          bool
 }
 
 // NewMemoryService creates a new MemoryService backed by the given store.
@@ -171,6 +173,24 @@ func (s *MemoryService) SetInstitutionalStore(store memory.InstitutionalStore) {
 // score adjustment).
 func (s *MemoryService) SetPolicyLoader(loader memory.PolicyLoader) {
 	s.policyLoader = loader
+}
+
+// SetTierRankerFactory wires the enterprise factory that constructs a per-tier
+// score ranker from a loaded MemoryPolicy. Called once at startup under
+// --enterprise; left nil otherwise (OSS path: applyPolicyDefaults skips
+// ranker construction when the factory is nil, leaving req.Ranker as whatever
+// the caller supplied or nil).
+func (s *MemoryService) SetTierRankerFactory(fn func(*omniav1alpha1.MemoryPolicy) memory.TierRanker) {
+	s.tierRankerFactory = fn
+}
+
+// SetTierHalfLifeFactory wires the enterprise factory that constructs per-tier
+// recency half-lives from a loaded MemoryPolicy. Called once at startup under
+// --enterprise; left nil otherwise (OSS path: applyPolicyDefaults skips
+// half-life construction when the factory is nil, leaving req.HalfLife as the
+// zero value so the store applies its uniform default).
+func (s *MemoryService) SetTierHalfLifeFactory(fn func(*omniav1alpha1.MemoryPolicy) memory.TierHalfLife) {
+	s.tierHalfLifeFactory = fn
 }
 
 // SetAuditLogger configures the audit logger for the service.
