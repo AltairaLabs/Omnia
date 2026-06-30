@@ -327,7 +327,8 @@ func run() error {
 
 	// --- Build API mux ---
 	// /healthz is always registered; enterprise routes are gated on f.enterprise.
-	apiMux := buildAPIMux(f.enterprise, optOutStore, base, log, notifier)
+	auditStore := privacy.NewAuditStore(pool)
+	apiMux := buildAPIMux(f.enterprise, optOutStore, base, auditStore, log, notifier)
 
 	// Wire up auth handler.
 	apiHandler := buildHandler(reviewer, allowedSubjects, allowedNamespaces, apiMux)
@@ -373,14 +374,16 @@ func registerRoutes(
 	mux *http.ServeMux,
 	optOutStore privacy.PreferencesStore,
 	concrete *privacy.PreferencesPostgresStore,
+	auditStore privacy.AuditIngester,
 	log logr.Logger,
 	notifier privacy.ConsentNotifier,
 ) {
 	privacy.NewOptOutHandler(optOutStore, log).RegisterRoutes(mux)
-	// TODO(#1642-P2): wire privacy-api audit if consent audit must live here.
 	privacy.NewConsentHandler(concrete, nil, log).WithConsentNotifier(notifier).RegisterRoutes(mux)
 	privacy.NewConsentStatsHandler(concrete, log).RegisterRoutes(mux)
 	privacy.NewEnforcementStatsHandler(concrete, log).RegisterRoutes(mux)
+	// Audit hub (#1673): ingest enforcement events forwarded by memory/session-api.
+	privacy.NewAuditIngestHandler(auditStore, log).RegisterRoutes(mux)
 }
 
 // buildAPIMux creates the HTTP mux for the privacy-api. /healthz is always
@@ -391,6 +394,7 @@ func buildAPIMux(
 	enterprise bool,
 	optOutStore privacy.PreferencesStore,
 	concrete *privacy.PreferencesPostgresStore,
+	auditStore privacy.AuditIngester,
 	log logr.Logger,
 	notifier privacy.ConsentNotifier,
 ) *http.ServeMux {
@@ -400,7 +404,7 @@ func buildAPIMux(
 		_, _ = w.Write([]byte("ok"))
 	})
 	if enterprise {
-		registerRoutes(mux, optOutStore, concrete, log, notifier)
+		registerRoutes(mux, optOutStore, concrete, auditStore, log, notifier)
 	}
 	return mux
 }
