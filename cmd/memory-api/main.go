@@ -72,6 +72,7 @@ import (
 	memoryapi "github.com/altairalabs/omnia/internal/memory/api"
 	"github.com/altairalabs/omnia/internal/memory/ingestion"
 	memorypg "github.com/altairalabs/omnia/internal/memory/postgres"
+	"github.com/altairalabs/omnia/internal/serviceauth"
 	sessionapi "github.com/altairalabs/omnia/internal/session/api"
 	"github.com/altairalabs/omnia/internal/tracing"
 	omniak8s "github.com/altairalabs/omnia/pkg/k8s"
@@ -625,6 +626,19 @@ func run() error {
 		}
 	}()
 
+	// --- Audit drain-forwarder (#1673) ---
+	// Ships locally-recorded enforcement audit rows to the privacy-api central
+	// audit hub so enforcement-stats can serve them. Runs only when audit
+	// logging is on and a privacy-api URL resolves.
+	if fwd := buildAuditForwarder(auditLogger, pool,
+		resolvePrivacyURL(ctx, f.workspace, f.serviceGroup, log),
+		prometheus.DefaultRegisterer, log); fwd != nil {
+		go fwd.Run(ctx)
+		log.Info("audit forwarder started", "sourceService", auditSourceService)
+	} else if auditLogger != nil {
+		log.Info("audit forwarder skipped", "reason", "no privacy URL")
+	}
+
 	// --- Build API mux ---
 	apiMux, cleanup := buildAPIMux(ctx, apiStore, embeddingSvc, svcCfg, eventPublisher, f.enterprise, pool, policyLoader, auditLogger, log, buildIngestOptions(f, log), f.workspace, f.serviceGroup, pgStore)
 	defer cleanup()
@@ -743,6 +757,62 @@ func buildAuditLogger(enterprise bool, pool *pgxpool.Pool, log logr.Logger) (*ee
 	logger := eeaudit.NewLogger(pool, log, auditMetrics, eeaudit.LoggerConfig{})
 	log.Info("memory audit logging enabled")
 	return logger, logger.Close
+}
+
+// auditSourceService identifies this service in forwarded audit events; the
+// privacy-api hub keys idempotency on (source_service, source_id).
+const auditSourceService = "memory-api"
+
+// resolvePrivacyURL resolves the privacy-api base URL the audit forwarder ships
+// to, reusing the same resolution the privacy middleware uses for opt-out:
+//
+//  1. PRIVACY_API_URL env var — explicit override.
+//  2. Workspace CRD status.privacyURL via servicediscovery (in-cluster).
+//
+// Returns "" when no URL can be resolved, in which case the forwarder is skipped.
+func resolvePrivacyURL(ctx context.Context, workspace, serviceGroup string, log logr.Logger) string {
+	if u := os.Getenv("PRIVACY_API_URL"); u != "" {
+		return u
+	}
+	if workspace == "" || serviceGroup == "" {
+		return ""
+	}
+	kubeConfig, err := rest.InClusterConfig()
+	if err != nil {
+		log.V(1).Info("audit forwarder URL not resolved", "reason", reasonNoInClusterKubeconfig)
+		return ""
+	}
+	k8sClient, err := client.New(kubeConfig, client.Options{Scheme: newPrivacyMiddlewareScheme()})
+	if err != nil {
+		log.Error(err, "audit forwarder URL not resolved", "reason", "k8s client creation failed")
+		return ""
+	}
+	urls, err := servicediscovery.NewResolver(k8sClient).ResolveByWorkspaceName(ctx, workspace, serviceGroup)
+	if err != nil {
+		log.V(1).Info("audit forwarder URL not resolved from workspace",
+			"workspace", workspace, "serviceGroup", serviceGroup, "error", err.Error())
+		return ""
+	}
+	return urls.PrivacyURL
+}
+
+// buildAuditForwarder constructs the audit drain-forwarder that ships this
+// service's local audit_log to the privacy-api hub (#1673). It returns nil when
+// forwarding cannot run (no audit logger, or no privacy URL), so the caller can
+// skip starting the goroutine. The ServiceAccount token source authenticates the
+// ingest POSTs the same way the consent push does.
+func buildAuditForwarder(
+	auditLogger *eeaudit.Logger,
+	pool *pgxpool.Pool,
+	privacyURL string,
+	reg prometheus.Registerer,
+	log logr.Logger,
+) *eeaudit.Forwarder {
+	if auditLogger == nil || pool == nil || privacyURL == "" {
+		return nil
+	}
+	ts := serviceauth.NewTokenSource("", 0)
+	return eeaudit.NewForwarder(pool, privacyURL, auditSourceService, ts, 0, 0, reg, log)
 }
 
 // buildAPIMux assembles the HTTP handler with all memory-api routes, wrapped
