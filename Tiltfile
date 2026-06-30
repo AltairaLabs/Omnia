@@ -1438,6 +1438,32 @@ local_resource(
     labels=['dynamic-services'],
 )
 
+# ============================================================================
+# Port-forwards — API documentation endpoints
+# Expose /docs at localhost:<port>/docs for each workspace API service.
+# session-api:  http://localhost:8085/docs
+# memory-api:   http://localhost:8086/docs
+# privacy-api:  http://localhost:8087/docs
+# ============================================================================
+
+local_resource(
+    'pf-session-api',
+    serve_cmd='kubectl port-forward -n omnia-demo svc/session-demo-default 8085:8080',
+    labels=['port-forwards'],
+)
+
+local_resource(
+    'pf-memory-api',
+    serve_cmd='kubectl port-forward -n omnia-demo svc/memory-demo-default 8086:8080',
+    labels=['port-forwards'],
+)
+
+local_resource(
+    'pf-privacy-api',
+    serve_cmd='kubectl port-forward -n omnia-demo svc/privacy-demo 8087:8080',
+    labels=['port-forwards'],
+)
+
 # Policy-proxy sidecar (EE/ToolPolicy). Rebuild the image and restart the agent
 # pods that carry it so source edits actually reach the running sidecar.
 if ENABLE_ENTERPRISE:

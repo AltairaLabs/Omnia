@@ -376,6 +376,7 @@ func registerRoutes(
 	log logr.Logger,
 	notifier privacy.ConsentNotifier,
 ) {
+	privacy.RegisterDocs(mux)
 	privacy.NewOptOutHandler(optOutStore, log).RegisterRoutes(mux)
 	// TODO(#1642-P2): wire privacy-api audit if consent audit must live here.
 	privacy.NewConsentHandler(concrete, nil, log).WithConsentNotifier(notifier).RegisterRoutes(mux)
