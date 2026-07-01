@@ -7,6 +7,8 @@
  */
 
 import { NextResponse } from "next/server";
+import { getEffectiveLicense } from "@/lib/license/resolve-server";
+import { resolveBrandFromEnv, applyEntitlement } from "@/lib/branding/resolve-server";
 
 const MIN_POLL_INTERVAL_SECONDS = 15;
 const DEFAULT_POLL_INTERVAL_SECONDS = 60;
@@ -20,6 +22,8 @@ function parseSessionPollInterval(): number {
 }
 
 export async function GET() {
+  const license = await getEffectiveLicense();
+  const brand = applyEntitlement(resolveBrandFromEnv(process.env), license);
   return NextResponse.json({
     devMode: process.env.NEXT_PUBLIC_DEV_MODE === "true",
     demoMode: process.env.NEXT_PUBLIC_DEMO_MODE === "true",
@@ -40,5 +44,7 @@ export async function GET() {
     // Session expiry detection
     authMode: process.env.OMNIA_AUTH_MODE || "anonymous",
     sessionPollIntervalSeconds: parseSessionPollInterval(),
+    // White-label branding (license-gated server-side; Omnia default otherwise)
+    brand,
   });
 }
