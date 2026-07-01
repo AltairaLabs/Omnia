@@ -105,6 +105,14 @@ type AuditLogger interface {
 	LogEvent(ctx context.Context, entry *api.AuditEntry)
 }
 
+// SubjectEraser, when set on a DeletionService via SetSubjectEraser, replaces the
+// default in-process session+media+memory deletion in ProcessRequest. privacy-api
+// injects a fan-out eraser that erases across all of a workspace's service-groups
+// over HTTP; session-api leaves it unset and keeps the in-process warm-store path.
+type SubjectEraser interface {
+	EraseSubject(ctx context.Context, req *DeletionRequest) (sessionsDeleted int, errs []string, err error)
+}
+
 // Default batch size for processing sessions in chunks.
 const DefaultBatchSize = 100
 
@@ -122,6 +130,7 @@ type DeletionService struct {
 	deleter   SessionDeleter
 	media     MediaDeleter
 	memory    MemoryDeleter
+	eraser    SubjectEraser
 	audit     AuditLogger
 	log       logr.Logger
 	batchSize int
@@ -159,6 +168,14 @@ func (s *DeletionService) SetMemoryDeleter(m MemoryDeleter) {
 func (s *DeletionService) SetBatchSize(size int) {
 	if size > 0 {
 		s.batchSize = size
+	}
+}
+
+// SetSubjectEraser installs a SubjectEraser. When set, ProcessRequest delegates
+// erasure to it instead of the in-process warm-store path (nil is ignored).
+func (s *DeletionService) SetSubjectEraser(e SubjectEraser) {
+	if e != nil {
+		s.eraser = e
 	}
 }
 
@@ -206,6 +223,18 @@ func (s *DeletionService) ProcessRequest(ctx context.Context, id string) error {
 	req.StartedAt = &now
 	if err := s.store.UpdateRequest(ctx, req); err != nil {
 		return fmt.Errorf("updating request status: %w", err)
+	}
+
+	// When a SubjectEraser is installed (privacy-api fan-out), delegate erasure to
+	// it and skip the in-process warm-store path entirely.
+	if s.eraser != nil {
+		deleted, errs, eraseErr := s.eraser.EraseSubject(ctx, req)
+		if eraseErr != nil {
+			return s.failRequest(ctx, req, fmt.Sprintf("erasing subject: %v", eraseErr))
+		}
+		req.SessionsDeleted += deleted
+		req.Errors = append(req.Errors, errs...)
+		return s.completeRequest(ctx, req)
 	}
 
 	// Find sessions for the user, applying date range when scope requires it.
