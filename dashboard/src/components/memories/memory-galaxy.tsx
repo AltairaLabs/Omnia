@@ -1,40 +1,37 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTheme } from "next-themes";
 import { Plus, Minus, Maximize, Tag, Gauge, Clock, X } from "lucide-react";
 import { usePersistedViewMode } from "@/hooks/use-persisted-view-mode";
 import { MemoryGalaxyBubble } from "./memory-galaxy-bubble";
+import { sortStack, clampIndex, removeAt } from "@/lib/memory-galaxy/stack";
 import type { GalaxyPoint } from "@/lib/memory-galaxy/types";
 import {
   fitTransform,
-  worldToScreen,
   colorForPoint,
   matchesFilters,
   pointFacet,
   type Transform,
 } from "@/lib/memory-galaxy/galaxy-math";
+import {
+  project,
+  sizeFactor,
+  pointRadius,
+  overlaps,
+  onScreen,
+  computeBubbles,
+  lifeFraction,
+  type View,
+  type ScreenPos,
+  type Box,
+} from "@/lib/memory-galaxy/galaxy-layout";
 import { TIER_LABELS } from "@/lib/memory-analytics/colors";
 import type { Tier } from "@/lib/memory-analytics/types";
 import { cn } from "@/lib/utils";
 
 type Dimension = "tier" | "category";
 
-interface View {
-  zoom: number;
-  panX: number;
-  panY: number;
-}
-interface ScreenPos {
-  x: number;
-  y: number;
-}
-interface Box {
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-}
 interface Scene {
   fit: Transform;
   view: View;
@@ -50,11 +47,6 @@ const LABEL_MIN_ZOOM = 2;
 const MAX_LABELS = 160;
 const POOL_BALL_MIN_RADIUS = 9;
 const HIT_TOLERANCE = 4;
-// Confidence → radius: non-linear so a bell-curved distribution still spreads
-// visibly (the busy mid/high band gets most of the size range).
-const MIN_RADIUS = 2;
-const CONF_SPREAD = 9;
-const CONF_GAMMA = 1.8;
 // Explicit white-on-dark control styling (theme variants render dark-on-dark
 // against the galaxy background, so don't rely on them here).
 const TOGGLE_BTN = "flex h-8 w-8 items-center justify-center rounded-md transition-colors";
@@ -70,28 +62,6 @@ interface MemoryGalaxyProps {
   onDelete: (id: string) => void;
 }
 
-function project(p: GalaxyPoint, fit: Transform, view: View): ScreenPos {
-  const b = worldToScreen(p, fit);
-  return { x: b.x * view.zoom + view.panX, y: b.y * view.zoom + view.panY };
-}
-
-// Logarithmic zoom growth, on top of a strong non-linear confidence term.
-function sizeFactor(zoom: number): number {
-  return Math.max(0.7, 1 + Math.log2(zoom) * 1.2);
-}
-
-function pointRadius(p: GalaxyPoint, sf: number): number {
-  return (MIN_RADIUS + Math.pow(p.confidence, CONF_GAMMA) * CONF_SPREAD) * sf;
-}
-
-function overlaps(a: Box, b: Box): boolean {
-  return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
-}
-
-function onScreen(s: ScreenPos, w: number, h: number): boolean {
-  return s.x > -60 && s.x < w + 60 && s.y > -20 && s.y < h + 20;
-}
-
 function categoryLabel(cat?: string): string {
   if (!cat) return "Uncategorized";
   const s = cat.replace(/^memory:/, "");
@@ -105,45 +75,6 @@ function headingFor(p: GalaxyPoint, colorBy: Dimension): string {
 
 function isVisible(p: GalaxyPoint, hidden: Set<string>, colorBy: Dimension): boolean {
   return !hidden.has(pointFacet(p, colorBy));
-}
-
-interface BubblePos {
-  p: GalaxyPoint;
-  left: number; // viewport x of the node
-  top: number; // viewport y of the node
-  placement: "above" | "below";
-  tailOffset: number;
-}
-
-// Live viewport anchors for the open bubbles, recomputed from the view each
-// render so they follow their points on pan/zoom. Only points currently on the
-// canvas get a bubble.
-function computeBubbles(
-  points: GalaxyPoint[],
-  openIds: Set<string>,
-  view: View,
-  size: { w: number; h: number },
-  rect: { left: number; top: number } | null,
-): BubblePos[] {
-  const out: BubblePos[] = [];
-  if (openIds.size === 0 || size.w === 0 || !rect) return out;
-  const fit = fitTransform(points, size.w, size.h);
-  const vw = window.innerWidth;
-  for (const p of points) {
-    if (!openIds.has(p.id)) continue;
-    const s = project(p, fit, view);
-    if (s.x < 0 || s.x > size.w || s.y < 0 || s.y > size.h) continue;
-    const nodeX = rect.left + s.x;
-    const cardLeft = Math.max(150, Math.min(vw - 150, nodeX));
-    out.push({
-      p,
-      left: cardLeft,
-      top: rect.top + s.y,
-      placement: s.y > size.h / 2 ? "above" : "below",
-      tailOffset: Math.max(-120, Math.min(120, nodeX - cardLeft)),
-    });
-  }
-  return out;
 }
 
 function drawPoolBall(ctx: CanvasRenderingContext2D, s: ScreenPos, r: number, confidence: number): void {
@@ -163,15 +94,6 @@ interface DrawOpts {
   showConfidence: boolean;
   ageFade: boolean;
   now: number;
-}
-
-// 0 = fresh, 1 = at/past expiry (created + TTL). 0 when there is no TTL.
-function lifeFraction(p: GalaxyPoint, now: number): number {
-  if (!p.observedAt || !p.expiresAt) return 0;
-  const created = Date.parse(p.observedAt);
-  const expires = Date.parse(p.expiresAt);
-  if (expires <= created) return 0;
-  return Math.max(0, Math.min(1, (now - created) / (expires - created)));
 }
 
 function drawPoints(
@@ -282,7 +204,18 @@ export function MemoryGalaxy({
 }: Readonly<MemoryGalaxyProps>) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [hovered, setHovered] = useState<GalaxyPoint | null>(null);
-  const [openIds, setOpenIds] = useState<Set<string>>(new Set());
+  // The memories stacked at the currently-open location, ordered for browsing,
+  // and which one the carousel is showing. A cluster of overlapping points opens
+  // ONE popup that pages through them instead of a window per point.
+  const [openStack, setOpenStack] = useState<GalaxyPoint[]>([]);
+  const [stackIndex, setStackIndex] = useState(0);
+  // The bubble anchors to the first (lead) memory of the stack, so its position
+  // stays put while you page. computeBubbles/drawRings still work off an id set.
+  const openLeadId = openStack[0]?.id ?? null;
+  const openIds = useMemo(
+    () => new Set(openLeadId ? [openLeadId] : []),
+    [openLeadId],
+  );
   const [size, setSize] = useState({ w: 0, h: 0, left: 0, top: 0 });
   const [view, setView] = useState<View>(DEFAULT_VIEW);
   const [labelsPref, setLabelsPref] = usePersistedViewMode<"on" | "off">(
@@ -311,13 +244,16 @@ export function MemoryGalaxy({
   useEffect(() => {
     const zoomedOut = view.zoom < prevZoom.current - 0.001;
     prevZoom.current = view.zoom;
-    if (!zoomedOut || openIds.size === 0) return;
+    if (!zoomedOut || openStack.length === 0) return;
     if (closeTimer.current) clearTimeout(closeTimer.current);
-    closeTimer.current = setTimeout(() => setOpenIds(new Set()), 450);
+    closeTimer.current = setTimeout(() => {
+      setOpenStack([]);
+      setStackIndex(0);
+    }, 450);
     return () => {
       if (closeTimer.current) clearTimeout(closeTimer.current);
     };
-  }, [view.zoom, openIds.size]);
+  }, [view.zoom, openStack.length]);
 
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
@@ -429,17 +365,62 @@ export function MemoryGalaxy({
     setHovered(pickAt(e.clientX, e.clientY));
   };
 
-  const toggleOpen = (id: string) => {
-    // Single popup at a time: clicking a new point replaces any open bubble;
-    // clicking the already-open point closes it.
-    setOpenIds((prev) => (prev.size === 1 && prev.has(id) ? new Set() : new Set([id])));
+  // pickAllAt returns every visible point under the click (a dense cluster can
+  // stack many at one spot), ordered for browsing by sortStack.
+  const pickAllAt = (clientX: number, clientY: number): GalaxyPoint[] => {
+    const canvas = canvasRef.current;
+    if (!canvas) return [];
+    const rect = canvas.getBoundingClientRect();
+    const mx = clientX - rect.left;
+    const my = clientY - rect.top;
+    const fit = fitTransform(points, canvas.width, canvas.height);
+    const sf = sizeFactor(view.zoom);
+    const distById = new Map<string, number>();
+    const hits: GalaxyPoint[] = [];
+    for (const p of visiblePoints) {
+      const s = project(p, fit, view);
+      const r = pointRadius(p, sf) + HIT_TOLERANCE;
+      const dx = s.x - mx;
+      const dy = s.y - my;
+      const d = dx * dx + dy * dy;
+      if (d <= r * r) {
+        hits.push(p);
+        distById.set(p.id, d);
+      }
+    }
+    return sortStack(hits, (p) => distById.get(p.id) ?? 0);
+  };
+
+  const closeStack = () => {
+    setOpenStack([]);
+    setStackIndex(0);
+  };
+
+  const openStackAt = (stack: GalaxyPoint[]) => {
+    // Clicking the already-open cluster (same lead memory) closes it; a new
+    // cluster replaces it and resets to the first memory.
+    if (stack.length === 0 || stack[0].id === openLeadId) {
+      closeStack();
+      return;
+    }
+    setOpenStack(stack);
+    setStackIndex(0);
+  };
+
+  const showPrev = () => setStackIndex((i) => clampIndex(i - 1, openStack.length));
+  const showNext = () => setStackIndex((i) => clampIndex(i + 1, openStack.length));
+
+  const deleteCurrent = (id: string) => {
+    onDelete(id);
+    const next = removeAt(openStack, stackIndex);
+    setOpenStack(next.stack);
+    setStackIndex(next.index);
   };
 
   const onMouseUp = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const d = drag.current;
     if (d.active && !d.moved) {
-      const p = pickAt(e.clientX, e.clientY);
-      if (p) toggleOpen(p.id);
+      openStackAt(pickAllAt(e.clientX, e.clientY));
     }
     d.active = false;
   };
@@ -486,7 +467,7 @@ export function MemoryGalaxy({
               aria-label="Close all popups"
               title="Close all popups"
               data-testid="close-all"
-              onClick={() => setOpenIds(new Set())}
+              onClick={closeStack}
               className={cn(TOGGLE_BTN, TOGGLE_PLAIN)}
             >
               <X className="h-4 w-4" />
@@ -539,21 +520,20 @@ export function MemoryGalaxy({
         </button>
       </div>
 
-      {openBubbles.map((b) => (
+      {openBubbles[0] && openStack.length > 0 && (
         <MemoryGalaxyBubble
-          key={b.p.id}
-          point={b.p}
-          left={b.left}
-          top={b.top}
-          placement={b.placement}
-          tailOffset={b.tailOffset}
-          onClose={() => toggleOpen(b.p.id)}
-          onDelete={(id) => {
-            onDelete(id);
-            toggleOpen(id);
-          }}
+          stack={openStack}
+          index={stackIndex}
+          left={openBubbles[0].left}
+          top={openBubbles[0].top}
+          placement={openBubbles[0].placement}
+          tailOffset={openBubbles[0].tailOffset}
+          onPrev={showPrev}
+          onNext={showNext}
+          onClose={closeStack}
+          onDelete={deleteCurrent}
         />
-      ))}
+      )}
 
       {hovered && (
         <div className="pointer-events-none absolute left-3 top-3 max-w-xs rounded-md bg-background/95 p-2 text-xs shadow">
