@@ -75,9 +75,10 @@ func TestPostgresDeletionStore_RoundTrip_RealPostgres(t *testing.T) {
 
 	store := NewPostgresDeletionStore(pool)
 
+	const reqID = "req-1"
 	req := &DeletionRequest{
-		ID:            "req-1",
-		VirtualUserID: "vu-1",
+		ID:            reqID,
+		VirtualUserID: testEraseVU,
 		Reason:        "gdpr_erasure",
 		Scope:         "all",
 		Status:        StatusPending,
@@ -86,9 +87,9 @@ func TestPostgresDeletionStore_RoundTrip_RealPostgres(t *testing.T) {
 	}
 	require.NoError(t, store.CreateRequest(ctx, req))
 
-	got, err := store.GetRequest(ctx, "req-1")
+	got, err := store.GetRequest(ctx, reqID)
 	require.NoError(t, err)
-	require.Equal(t, "vu-1", got.VirtualUserID)
+	require.Equal(t, testEraseVU, got.VirtualUserID)
 	require.Equal(t, StatusPending, got.Status)
 
 	// Update to completed with a count + error, then re-read.
@@ -99,13 +100,13 @@ func TestPostgresDeletionStore_RoundTrip_RealPostgres(t *testing.T) {
 	got.Errors = []string{"group-b memory: boom"}
 	require.NoError(t, store.UpdateRequest(ctx, got))
 
-	reread, err := store.GetRequest(ctx, "req-1")
+	reread, err := store.GetRequest(ctx, reqID)
 	require.NoError(t, err)
 	require.Equal(t, StatusCompleted, reread.Status)
 	require.Equal(t, 3, reread.SessionsDeleted)
 	require.Equal(t, []string{"group-b memory: boom"}, reread.Errors)
 
-	list, err := store.ListRequestsByUser(ctx, "vu-1")
+	list, err := store.ListRequestsByUser(ctx, testEraseVU)
 	require.NoError(t, err)
 	require.Len(t, list, 1)
 

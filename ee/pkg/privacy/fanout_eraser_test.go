@@ -20,6 +20,12 @@ import (
 // compile-time check that FanOutSubjectEraser satisfies SubjectEraser.
 var _ SubjectEraser = (*FanOutSubjectEraser)(nil)
 
+const (
+	testFanoutWSUID = "ws-uid"
+	sessionURLA     = "http://s-a"
+	sessionURLB     = "http://s-b"
+)
+
 type fakeGroupSessionEraser struct {
 	byURL    map[string]EraseResult
 	errByURL map[string]error
@@ -49,7 +55,7 @@ func (f *fakeMemoryDeleter) DeleteAllMemories(_ context.Context, _, workspace st
 func newTestFanOut(groups []GroupTarget, se groupSessionEraser, mem *fakeMemoryDeleter) *FanOutSubjectEraser {
 	return &FanOutSubjectEraser{
 		groups:        groups,
-		workspaceUID:  "ws-uid",
+		workspaceUID:  testFanoutWSUID,
 		sessionEraser: se,
 		newMemory:     func(string) MemoryDeleter { return mem },
 		log:           logr.Discard(),
@@ -58,16 +64,16 @@ func newTestFanOut(groups []GroupTarget, se groupSessionEraser, mem *fakeMemoryD
 
 func TestFanOut_AllGroupsSucceed_SumsCounts(t *testing.T) {
 	se := &fakeGroupSessionEraser{byURL: map[string]EraseResult{
-		"http://s-a": {SessionsDeleted: 2},
-		"http://s-b": {SessionsDeleted: 3},
+		sessionURLA: {SessionsDeleted: 2},
+		sessionURLB: {SessionsDeleted: 3},
 	}}
 	mem := &fakeMemoryDeleter{}
 	f := newTestFanOut([]GroupTarget{
-		{Name: "a", SessionURL: "http://s-a", MemoryURL: "http://m-a"},
-		{Name: "b", SessionURL: "http://s-b", MemoryURL: "http://m-b"},
+		{Name: "a", SessionURL: sessionURLA, MemoryURL: "http://m-a"},
+		{Name: "b", SessionURL: sessionURLB, MemoryURL: "http://m-b"},
 	}, se, mem)
 
-	total, errs, err := f.EraseSubject(context.Background(), &DeletionRequest{VirtualUserID: "vu-1"})
+	total, errs, err := f.EraseSubject(context.Background(), &DeletionRequest{VirtualUserID: testEraseVU})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -80,23 +86,23 @@ func TestFanOut_AllGroupsSucceed_SumsCounts(t *testing.T) {
 	if mem.calls != 2 {
 		t.Fatalf("memory calls = %d, want 2", mem.calls)
 	}
-	if mem.gotWorkspace != "ws-uid" {
+	if mem.gotWorkspace != testFanoutWSUID {
 		t.Fatalf("memory workspace = %q, want ws-uid (workspace UID scope)", mem.gotWorkspace)
 	}
 }
 
 func TestFanOut_OneSessionTargetFails_OthersStillProcessed(t *testing.T) {
 	se := &fakeGroupSessionEraser{
-		byURL:    map[string]EraseResult{"http://s-b": {SessionsDeleted: 3}},
-		errByURL: map[string]error{"http://s-a": errors.New("boom")},
+		byURL:    map[string]EraseResult{sessionURLB: {SessionsDeleted: 3}},
+		errByURL: map[string]error{sessionURLA: errors.New("boom")},
 	}
 	mem := &fakeMemoryDeleter{}
 	f := newTestFanOut([]GroupTarget{
-		{Name: "a", SessionURL: "http://s-a", MemoryURL: "http://m-a"},
-		{Name: "b", SessionURL: "http://s-b", MemoryURL: "http://m-b"},
+		{Name: "a", SessionURL: sessionURLA, MemoryURL: "http://m-a"},
+		{Name: "b", SessionURL: sessionURLB, MemoryURL: "http://m-b"},
 	}, se, mem)
 
-	total, errs, err := f.EraseSubject(context.Background(), &DeletionRequest{VirtualUserID: "vu-1"})
+	total, errs, err := f.EraseSubject(context.Background(), &DeletionRequest{VirtualUserID: testEraseVU})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -114,14 +120,14 @@ func TestFanOut_OneSessionTargetFails_OthersStillProcessed(t *testing.T) {
 
 func TestFanOut_PropagatesSessionAndMemoryErrors(t *testing.T) {
 	se := &fakeGroupSessionEraser{byURL: map[string]EraseResult{
-		"http://s-a": {SessionsDeleted: 1, Errors: []string{"session x: warm boom"}},
+		sessionURLA: {SessionsDeleted: 1, Errors: []string{"session x: warm boom"}},
 	}}
 	mem := &fakeMemoryDeleter{err: errors.New("mem down")}
 	f := newTestFanOut([]GroupTarget{
-		{Name: "a", SessionURL: "http://s-a", MemoryURL: "http://m-a"},
+		{Name: "a", SessionURL: sessionURLA, MemoryURL: "http://m-a"},
 	}, se, mem)
 
-	total, errs, err := f.EraseSubject(context.Background(), &DeletionRequest{VirtualUserID: "vu-1"})
+	total, errs, err := f.EraseSubject(context.Background(), &DeletionRequest{VirtualUserID: testEraseVU})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -138,22 +144,22 @@ func TestFanOut_PropagatesSessionAndMemoryErrors(t *testing.T) {
 
 func TestFanOut_NoGroups_ReturnsZero(t *testing.T) {
 	f := newTestFanOut(nil, &fakeGroupSessionEraser{}, &fakeMemoryDeleter{})
-	total, errs, err := f.EraseSubject(context.Background(), &DeletionRequest{VirtualUserID: "vu-1"})
+	total, errs, err := f.EraseSubject(context.Background(), &DeletionRequest{VirtualUserID: testEraseVU})
 	if err != nil || total != 0 || len(errs) != 0 {
 		t.Fatalf("got total=%d errs=%v err=%v; want 0/nil/nil", total, errs, err)
 	}
 }
 
 func TestFanOut_SkipsEmptyURLs(t *testing.T) {
-	se := &fakeGroupSessionEraser{byURL: map[string]EraseResult{"http://s-a": {SessionsDeleted: 1}}}
+	se := &fakeGroupSessionEraser{byURL: map[string]EraseResult{sessionURLA: {SessionsDeleted: 1}}}
 	mem := &fakeMemoryDeleter{}
 	// group with only a session URL, and group with only a memory URL.
 	f := newTestFanOut([]GroupTarget{
-		{Name: "a", SessionURL: "http://s-a"},
+		{Name: "a", SessionURL: sessionURLA},
 		{Name: "b", MemoryURL: "http://m-b"},
 	}, se, mem)
 
-	total, errs, err := f.EraseSubject(context.Background(), &DeletionRequest{VirtualUserID: "vu-1"})
+	total, errs, err := f.EraseSubject(context.Background(), &DeletionRequest{VirtualUserID: testEraseVU})
 	if err != nil || len(errs) != 0 {
 		t.Fatalf("errs=%v err=%v", errs, err)
 	}
