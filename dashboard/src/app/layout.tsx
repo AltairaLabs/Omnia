@@ -4,6 +4,7 @@ import "./globals.css";
 import { Providers } from "@/components/providers";
 import { AuthWrapper } from "@/components/auth-wrapper";
 import { AppShell } from "@/components/layout";
+import { buildBrandMetadata } from "@/lib/branding/metadata";
 
 const inter = Inter({
   variable: "--font-inter",
@@ -15,13 +16,9 @@ const jetbrainsMono = JetBrains_Mono({
   subsets: ["latin"],
 });
 
-export const metadata: Metadata = {
-  title: "Omnia Dashboard",
-  description: "AI Agent Operations Platform - Monitor and manage your Kubernetes-native AI agents",
-  icons: {
-    icon: "/favicon.svg",
-  },
-};
+export function generateMetadata(): Metadata {
+  return buildBrandMetadata(process.env);
+}
 
 export default function RootLayout({
   children,
