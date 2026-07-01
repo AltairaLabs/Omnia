@@ -51,12 +51,7 @@ func (h *SessionEraseHandler) handleDelete(w http.ResponseWriter, r *http.Reques
 		writeJSONError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	res, err := h.eraser.Erase(r.Context(), EraseScope{
-		VirtualUserID: body.VirtualUserID,
-		Workspace:     body.Workspace,
-		DateFrom:      body.DateFrom,
-		DateTo:        body.DateTo,
-	})
+	res, err := h.eraser.Erase(r.Context(), EraseScope(body))
 	if errors.Is(err, ErrMissingVirtualUserID) {
 		writeJSONError(w, http.StatusBadRequest, "virtual_user_id is required")
 		return

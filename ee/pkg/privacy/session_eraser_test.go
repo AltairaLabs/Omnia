@@ -17,6 +17,9 @@ import (
 	"github.com/go-logr/logr"
 )
 
+// testEraseVU is a shared pseudonymized subject id used across erase tests.
+const testEraseVU = "vu-1"
+
 // mockSessionDeleter is a test double for SessionDeleter.
 type mockSessionDeleter struct {
 	ids       []string
@@ -64,7 +67,7 @@ func TestSessionEraser_Erase_DeletesSessionsAndMedia(t *testing.T) {
 	e := NewSessionEraser(deleter, logr.Discard())
 	e.SetMediaDeleter(media)
 
-	res, err := e.Erase(context.Background(), EraseScope{VirtualUserID: "vu-1", Workspace: "ws"})
+	res, err := e.Erase(context.Background(), EraseScope{VirtualUserID: testEraseVU, Workspace: "ws"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -77,7 +80,7 @@ func TestSessionEraser_Erase_DeletesSessionsAndMedia(t *testing.T) {
 	if len(res.Errors) != 0 {
 		t.Fatalf("Errors = %v, want none", res.Errors)
 	}
-	if deleter.gotUserID != "vu-1" {
+	if deleter.gotUserID != testEraseVU {
 		t.Fatalf("gotUserID = %q, want vu-1", deleter.gotUserID)
 	}
 }
@@ -104,7 +107,7 @@ func TestSessionEraser_Erase_RecordsPerSessionErrors(t *testing.T) {
 	e := NewSessionEraser(deleter, logr.Discard())
 	e.SetMediaDeleter(media)
 
-	res, err := e.Erase(context.Background(), EraseScope{VirtualUserID: "vu-1"})
+	res, err := e.Erase(context.Background(), EraseScope{VirtualUserID: testEraseVU})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -121,7 +124,7 @@ func TestSessionEraser_Erase_RecordsPerSessionErrors(t *testing.T) {
 func TestSessionEraser_Erase_PropagatesListError(t *testing.T) {
 	deleter := &mockSessionDeleter{listErr: errors.New("db down")}
 	e := NewSessionEraser(deleter, logr.Discard())
-	if _, err := e.Erase(context.Background(), EraseScope{VirtualUserID: "vu-1"}); err == nil {
+	if _, err := e.Erase(context.Background(), EraseScope{VirtualUserID: testEraseVU}); err == nil {
 		t.Fatal("expected error, got nil")
 	}
 }
