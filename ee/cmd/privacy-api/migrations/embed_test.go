@@ -26,6 +26,22 @@ func TestOutboxMigrationEmbedded(t *testing.T) {
 	}
 }
 
+func TestDeletionRequestsMigrationEmbedded(t *testing.T) {
+	data, err := MigrationsFS.ReadFile("000004_deletion_requests.up.sql")
+	if err != nil {
+		t.Fatalf("deletion_requests up migration not embedded: %v", err)
+	}
+	up := string(data)
+	for _, want := range []string{"deletion_requests", "idx_deletion_requests_user", "idx_deletion_requests_status"} {
+		if !strings.Contains(up, want) {
+			t.Errorf("up migration must reference %q", want)
+		}
+	}
+	if _, err := MigrationsFS.ReadFile("000004_deletion_requests.down.sql"); err != nil {
+		t.Fatalf("deletion_requests down migration not embedded: %v", err)
+	}
+}
+
 func TestMigrationsEmbedded(t *testing.T) {
 	data, err := MigrationsFS.ReadFile("000001_initial.up.sql")
 	if err != nil {
