@@ -1,0 +1,115 @@
+{{- if and .Values.memoryDemo.enabled (eq .Values.memoryDemo.embedding.provider.type "tei") }}
+{{- $ns := .Values.namespace }}
+{{- $tei := .Values.memoryDemo.embedding.tei }}
+{{- $model := .Values.memoryDemo.embedding.provider.model }}
+{{- $img := printf "%s:%s" $tei.image.repository $tei.image.tag }}
+---
+# Hugging Face Text Embeddings Inference (TEI) — a lightweight, CPU-only
+# embedding server for the memory demo. Rendered only when
+# embedding.provider.type=tei. Far smaller than the ollama embed instance
+# (no LLM runtime), fast cold-start, no GPU, no API key — the cheapest local/dev
+# option. Exposes an OpenAI-compatible /v1/embeddings, consumed by the
+# memory-demo-embeddings Provider (type openai + baseURL). Dev-only.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: memory-demo-tei
+  namespace: {{ $ns }}
+  labels:
+    app.kubernetes.io/name: memory-demo-tei
+    app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: memory-demo-tei
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: memory-demo-tei
+        app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
+    spec:
+      {{- with .Values.ollama.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: tei
+          image: {{ $img }}
+          imagePullPolicy: {{ $tei.image.pullPolicy }}
+          # TEI downloads the model from the HF hub on first start into the cache
+          # dir; keep it writable + non-privileged. PORT>1024 so it runs fine as
+          # a non-root user.
+          env:
+            - name: MODEL_ID
+              value: {{ $model | quote }}
+            - name: PORT
+              value: "8080"
+            - name: HUGGINGFACE_HUB_CACHE
+              value: /data
+          ports:
+            - containerPort: 8080
+              name: http
+          resources:
+            {{- toYaml $tei.resources | nindent 12 }}
+          volumeMounts:
+            - name: cache
+              mountPath: /data
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            # Generous: first start pulls the model from the HF hub.
+            failureThreshold: 60
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 30
+            failureThreshold: 3
+      volumes:
+        - name: cache
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: memory-demo-tei
+  namespace: {{ $ns }}
+  labels:
+    app.kubernetes.io/name: memory-demo-tei
+    app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
+spec:
+  selector:
+    app.kubernetes.io/name: memory-demo-tei
+  ports:
+    - port: 80
+      targetPort: http
+      name: http
+  type: ClusterIP
+---
+# Dummy credential for the openai-typed Provider. TEI requires no auth and
+# ignores the key; the Provider CRD requires a credential.secretRef, so provision
+# a placeholder here rather than forcing the operator to pre-create one.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: memory-demo-tei-credentials
+  namespace: {{ $ns }}
+  labels:
+    app.kubernetes.io/name: omnia-demos
+    app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
+type: Opaque
+stringData:
+  OPENAI_API_KEY: "tei-local-no-auth"
+{{- end }}
