@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, act } from "@testing-library/react";
 import { SessionWatcher } from "./session-watcher";
 import type { RuntimeConfig } from "@/lib/config";
+import { OMNIA_BRAND } from "@/lib/branding/types";
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -63,6 +64,7 @@ function makeConfig(
       hideEnterprise: false,
       authMode: "oauth",
       sessionPollIntervalSeconds: 30,
+      brand: OMNIA_BRAND,
       ...overrides,
     },
     loading: false,

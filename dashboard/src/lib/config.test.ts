@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { OMNIA_BRAND } from "@/lib/branding/types";
 
 describe("config", () => {
   const mockFetch = vi.fn();
@@ -57,6 +58,7 @@ describe("config", () => {
         hideEnterprise: false,
         authMode: "anonymous",
         sessionPollIntervalSeconds: 60,
+        brand: OMNIA_BRAND,
       });
     });
 
@@ -83,6 +85,7 @@ describe("config", () => {
         hideEnterprise: false,
         authMode: "anonymous",
         sessionPollIntervalSeconds: 60,
+        brand: OMNIA_BRAND,
       });
     });
 

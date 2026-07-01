@@ -356,6 +356,25 @@ describe("MemoriesPage (galaxy)", () => {
     expect((input as HTMLInputElement).value).toBe("test");
   });
 
+  it("shows a match count in the footer when a search is active", () => {
+    mockUseMemoryProjection.mockReturnValue({
+      data: {
+        points: [makePoint("p1", "billing dispute"), makePoint("p2", "rate limit")],
+        total: 2,
+        capped: false,
+        model: "tsne",
+        embeddingModel: "text-embedding-3-small",
+        embeddingDim: 1536,
+        computedAt: new Date().toISOString(),
+      },
+      isLoading: false,
+      error: null,
+    });
+    render(<MemoriesPage />);
+    fireEvent.change(screen.getByTestId("memory-search"), { target: { value: "billing" } });
+    expect(screen.getByText(/1 match\b/)).toBeInTheDocument();
+  });
+
   it("renders the upgrade gate when enterprise is disabled", () => {
     mockUseEnterpriseConfig.mockReturnValue({ enterpriseEnabled: false, hideEnterprise: false, loading: false });
     render(<MemoriesPage />);

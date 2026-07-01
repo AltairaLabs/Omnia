@@ -25,6 +25,7 @@ import {
 import { cn } from "@/lib/utils";
 import { useShowEnterpriseNav } from "@/components/license/license-gate";
 import { useEnterpriseConfig } from "@/hooks/core";
+import { useBrand } from "@/hooks/use-brand";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { useSidebarStore } from "@/stores/sidebar-store";
 import { useIsNarrow } from "@/hooks/use-is-narrow";
@@ -65,6 +66,7 @@ function isItemActive(pathname: string, href: string): boolean {
 
 export function Sidebar() {
   const pathname = usePathname();
+  const { brand } = useBrand();
   const { showEnterpriseNav } = useShowEnterpriseNav();
   const { enterpriseEnabled } = useEnterpriseConfig();
   const collapsedPref = useSidebarStore((s) => s.collapsed);
@@ -107,9 +109,9 @@ export function Sidebar() {
               : "h-16 items-center gap-3 px-6",
           )}
         >
-          <Image src="/logo-dark.svg" alt="Omnia" width={28} height={28} />
+          <Image src={brand.logo.dark} alt={brand.productName} width={28} height={28} />
           {!collapsed && (
-            <span className="flex-1 text-lg font-semibold text-white">Omnia</span>
+            <span className="flex-1 text-lg font-semibold text-white">{brand.productName}</span>
           )}
           <button
             type="button"

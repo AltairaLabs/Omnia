@@ -14,7 +14,7 @@ vi.mock("next/font/google", () => ({
 vi.mock("./globals.css", () => ({}));
 
 // Now import the layout to test
-import RootLayout, { metadata } from "./layout";
+import RootLayout, { generateMetadata } from "./layout";
 
 // Mock only the child components, not the layout itself
 vi.mock("@/components/providers", () => ({
@@ -94,22 +94,22 @@ describe("RootLayout", () => {
   });
 });
 
-describe("metadata", () => {
-  it("should export metadata with title", () => {
-    expect(metadata.title).toBe("Omnia Dashboard");
+describe("generateMetadata", () => {
+  it("should default the title to the Omnia product name", () => {
+    expect(generateMetadata().title).toBe("Omnia Dashboard");
   });
 
   it("should have description mentioning AI Agent", () => {
-    expect(metadata.description).toContain("AI Agent");
+    expect(generateMetadata().description).toContain("AI Agent");
   });
 
   it("should have description mentioning Kubernetes", () => {
-    expect(metadata.description).toContain("Kubernetes");
+    expect(generateMetadata().description).toContain("Kubernetes");
   });
 
   it("should have favicon icon configured", () => {
-    expect(metadata.icons).toBeDefined();
-    const icons = metadata.icons as { icon: string };
+    const icons = generateMetadata().icons as { icon: string };
+    expect(icons).toBeDefined();
     expect(icons.icon).toBe("/favicon.svg");
   });
 });

@@ -31,6 +31,7 @@ describe("license types", () => {
       expect(OPEN_CORE_LICENSE.features.dataGeneration).toBe(false);
       expect(OPEN_CORE_LICENSE.features.scheduling).toBe(false);
       expect(OPEN_CORE_LICENSE.features.distributedWorkers).toBe(false);
+      expect(OPEN_CORE_LICENSE.features.whiteLabel).toBe(false);
     });
 
     it("should have correct limits", () => {

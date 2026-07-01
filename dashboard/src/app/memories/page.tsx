@@ -20,6 +20,7 @@ import { useMemoryProjection } from "@/hooks/use-memory-projection";
 import { usePersistedViewMode } from "@/hooks/use-persisted-view-mode";
 import { FacetRail, type Facet } from "@/components/memories/facet-rail";
 import { facetCounts, parseHiddenTiers } from "@/lib/memory-galaxy/galaxy-math";
+import { countMatches } from "@/lib/memory-galaxy/galaxy-search";
 import {
   TIER_COLORS,
   TIER_LABELS,
@@ -169,6 +170,7 @@ function MemoriesContent() {
   );
 
   const points = useMemo(() => data?.points ?? [], [data?.points]);
+  const matchCount = useMemo(() => countMatches(points, searchQuery), [points, searchQuery]);
   // The active filter dimension follows the color dropdown.
   const hiddenCsv = colorBy === "tier" ? hiddenTiersCsv : hiddenCatsCsv;
   const setHiddenCsv = colorBy === "tier" ? setHiddenTiersCsv : setHiddenCatsCsv;
@@ -239,6 +241,7 @@ function MemoriesContent() {
           <p className="text-center text-xs text-muted-foreground">
             {data?.total} memories · {clusterKind} clustering
             {data?.capped ? " (showing a capped subset)" : ""}
+            {searchQuery.trim() ? ` · ${matchCount} match${matchCount === 1 ? "" : "es"}` : ""}
           </p>
         )}
       </div>

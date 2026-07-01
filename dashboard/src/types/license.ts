@@ -25,6 +25,8 @@ export interface LicenseFeatures {
   scheduling: boolean;
   /** Multiple worker replicas */
   distributedWorkers: boolean;
+  /** Dashboard white-label / custom branding */
+  whiteLabel: boolean;
 }
 
 /**
@@ -72,6 +74,7 @@ export const OPEN_CORE_LICENSE: License = {
     dataGeneration: false,
     scheduling: false,
     distributedWorkers: false,
+    whiteLabel: false,
   },
   limits: {
     maxScenarios: 10,
