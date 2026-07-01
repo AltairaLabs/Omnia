@@ -269,6 +269,41 @@
         "replicaCount": { "type": "integer", "minimum": 1 },
         "image":        { "$ref": "#/$defs/image" },
         "resources":    { "$ref": "#/$defs/resources" },
+        "branding": {
+          "type": "object",
+          "description": "White-label branding (Enterprise). Emitted as NEXT_PUBLIC_BRAND_* only when enterprise.enabled and productName are set; the dashboard enforces the whiteLabel license feature at runtime.",
+          "properties": {
+            "productName": { "type": "string" },
+            "logoLightUrl": { "type": "string" },
+            "logoDarkUrl": { "type": "string" },
+            "faviconUrl": { "type": "string" },
+            "colors": {
+              "type": "object",
+              "properties": {
+                "primary": { "type": "string" },
+                "accent": { "type": "string" },
+                "sidebar": { "type": "string" }
+              }
+            },
+            "fonts": {
+              "type": "object",
+              "properties": {
+                "family": { "type": "string" },
+                "url": { "type": "string" }
+              }
+            },
+            "links": {
+              "type": "object",
+              "properties": {
+                "docsBaseUrl": { "type": "string" },
+                "support": { "type": "string" },
+                "sales": { "type": "string" },
+                "upgradeUrl": { "type": "string" }
+              }
+            },
+            "customCss": { "type": "string" }
+          }
+        },
         "serviceAccount": {
           "type": "object",
           "description": "Dedicated ServiceAccount for the dashboard with a narrower ClusterRole than the operator's manager role.",

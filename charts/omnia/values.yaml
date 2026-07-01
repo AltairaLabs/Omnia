@@ -578,6 +578,45 @@ dashboard:
   # When true: Hides enterprise features entirely from the UI
   hideEnterprise: false
 
+  # -- White-label branding (Enterprise). Emitted to the dashboard as
+  # NEXT_PUBLIC_BRAND_* env only when enterprise.enabled=true AND a license
+  # with the whiteLabel feature is active (the dashboard enforces the license
+  # gate at runtime). Leave productName empty to keep the default Omnia brand.
+  branding:
+    # -- Product name shown in the sidebar, page title and auth screens
+    productName: ""
+    # -- Logo URL for light backgrounds
+    logoLightUrl: ""
+    # -- Logo URL for dark backgrounds (sidebar)
+    logoDarkUrl: ""
+    # -- Favicon URL
+    faviconUrl: ""
+    # -- Design-token color overrides (any CSS color value)
+    colors:
+      # -- Primary/brand color (maps to --primary)
+      primary: ""
+      # -- Accent color (maps to --accent)
+      accent: ""
+      # -- Sidebar background (maps to --sidebar)
+      sidebar: ""
+    fonts:
+      # -- Font family name applied to --font-sans
+      family: ""
+      # -- Optional web-font stylesheet URL to load the family
+      url: ""
+    links:
+      # -- Base URL for in-app documentation links
+      docsBaseUrl: ""
+      # -- Support contact (email or URL)
+      support: ""
+      # -- Sales contact (email or URL)
+      sales: ""
+      # -- Upgrade/enterprise URL shown on license gates
+      upgradeUrl: ""
+    # -- Optional token-scoped custom CSS appended to :root only. Overrides
+    # design tokens; targeting internal selectors is unsupported.
+    customCss: ""
+
   image:
     # -- Dashboard image repository
     repository: ghcr.io/altairalabs/omnia-dashboard
