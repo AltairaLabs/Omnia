@@ -30,8 +30,8 @@ export function SidebarNavItem({
         "relative flex items-center rounded-md py-2 text-sm font-medium transition-colors",
         collapsed ? "justify-center px-2" : "gap-3 px-3",
         isActive
-          ? "bg-primary text-white"
-          : "text-[#E2E8F0]/70 hover:bg-[#1E293B] hover:text-white",
+          ? "bg-primary text-primary-foreground"
+          : "text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
       )}
     >
       <Icon className="h-4 w-4 shrink-0" />
