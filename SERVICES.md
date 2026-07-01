@@ -79,6 +79,7 @@ This document maps every deployable service, how they communicate, and where to 
 | **Arena Eval Worker** | `ee/cmd/arena-eval-worker/` | [ee/cmd/arena-eval-worker/SERVICE.md](ee/cmd/arena-eval-worker/SERVICE.md) | Consumes session events, runs LLM judge evals |
 | **Arena Dev Console** | `ee/cmd/arena-dev-console/` | [ee/cmd/arena-dev-console/SERVICE.md](ee/cmd/arena-dev-console/SERVICE.md) | Interactive WebSocket testing for Arena agents |
 | **Policy Proxy** | `ee/cmd/policy-proxy/` | [ee/cmd/policy-proxy/SERVICE.md](ee/cmd/policy-proxy/SERVICE.md) | HTTP proxy enforcing AgentPolicy via CEL |
+| **Privacy API** | `ee/cmd/privacy-api/` | [ee/cmd/privacy-api/SERVICE.md](ee/cmd/privacy-api/SERVICE.md) | Per-workspace owner of consent/opt-out, the central privacy/compliance audit hub (#1673), and the DSAR erasure lifecycle (#1676) |
 | **PromptKit LSP** | `ee/cmd/promptkit-lsp/` | [ee/cmd/promptkit-lsp/SERVICE.md](ee/cmd/promptkit-lsp/SERVICE.md) | Language server for Arena agent definitions |
 
 ## Communication Protocols
@@ -95,6 +96,8 @@ This document maps every deployable service, how they communicate, and where to 
 | Runtime | Session API | HTTP | Event recording |
 | Memory API | Privacy API | HTTP | Audit drain-forwarder: `POST /api/v1/privacy/audit-events` ships local enforcement audit rows to the central audit hub, at-least-once (#1673) |
 | Session API | Privacy API | HTTP | Audit drain-forwarder: `POST /api/v1/privacy/audit-events` ships local audit rows to the central audit hub, at-least-once (#1673) |
+| Privacy API | Session API | HTTP | DSAR fan-out: `POST /api/v1/privacy/sessions/delete-by-user` erases each service-group's sessions + media for a subject (SA-authed, #1676) |
+| Privacy API | Memory API | HTTP | DSAR fan-out: batch-delete erases each service-group's memories for a subject (scoped by workspace UID); consent-revocation prune `POST /api/v1/memories/consent-events` (SA-authed, #1676 / #1660) |
 | Operator | K8s API | K8s client | CRD reconciliation |
 | Arena Controller | K8s API | K8s client | Job/worker pod management |
 | Arena Worker | Redis Streams | Redis | Work item consumption and result reporting |

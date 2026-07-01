@@ -17,6 +17,7 @@ import (
 
 	"github.com/go-logr/logr"
 
+	"github.com/altairalabs/omnia/internal/serviceauth"
 	"github.com/altairalabs/omnia/pkg/logging"
 )
 
@@ -34,6 +35,7 @@ type MemoryHTTPDeleter struct {
 	baseURL   string
 	client    *http.Client
 	batchSize int
+	ts        *serviceauth.TokenSource
 	log       logr.Logger
 }
 
@@ -45,6 +47,14 @@ func NewMemoryHTTPDeleter(baseURL string, log logr.Logger) *MemoryHTTPDeleter {
 		batchSize: defaultMemoryBatchSize,
 		log:       log.WithName("memory-http-deleter"),
 	}
+}
+
+// WithTokenSource attaches a ServiceAccount token source so batch-delete requests
+// carry an Authorization: Bearer header. Returns the deleter for chaining. When
+// unset (the session-api in-process path), requests are sent unauthenticated.
+func (d *MemoryHTTPDeleter) WithTokenSource(ts *serviceauth.TokenSource) *MemoryHTTPDeleter {
+	d.ts = ts
+	return d
 }
 
 // DeleteAllMemories deletes all memories for userID in workspace by calling the
@@ -72,6 +82,11 @@ func (d *MemoryHTTPDeleter) deleteBatch(ctx context.Context, userID, workspace s
 	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, url, nil)
 	if err != nil {
 		return 0, fmt.Errorf("building memory delete request: %w", err)
+	}
+	if d.ts != nil {
+		if authErr := d.ts.Authorize(req); authErr != nil {
+			return 0, fmt.Errorf("set auth header: %w", authErr)
+		}
 	}
 
 	resp, err := d.client.Do(req)

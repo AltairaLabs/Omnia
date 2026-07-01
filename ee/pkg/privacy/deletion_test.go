@@ -325,6 +325,83 @@ func TestProcessRequest_HappyPath(t *testing.T) {
 	assert.Equal(t, "deletion_completed", audit.Events[1].EventType)
 }
 
+// mockSubjectEraser is a test double for the SubjectEraser fan-out path.
+type mockSubjectEraser struct {
+	deleted   int
+	errs      []string
+	err       error
+	called    bool
+	gotUserID string
+}
+
+func (m *mockSubjectEraser) EraseSubject(_ context.Context, req *DeletionRequest) (int, []string, error) {
+	m.called = true
+	m.gotUserID = req.VirtualUserID
+	return m.deleted, m.errs, m.err
+}
+
+func TestProcessRequest_WithSubjectEraser_Delegates(t *testing.T) {
+	store := NewMockDeletionStore()
+	deleter := NewMockSessionDeleter()
+	audit := &MockAuditLogger{}
+	svc := newTestService(store, deleter, audit)
+
+	eraser := &mockSubjectEraser{deleted: 5}
+	svc.SetSubjectEraser(eraser)
+
+	// Populate the deleter too — it must NOT be consulted when an eraser is set.
+	deleter.Sessions["user-1|"] = []string{"sess-1", "sess-2"}
+
+	req, err := svc.CreateRequest(context.Background(), &CreateDeletionRequest{
+		VirtualUserID: testUserID1,
+		Reason:        testReasonGDPR,
+		Scope:         ScopeAll,
+	})
+	require.NoError(t, err)
+
+	require.NoError(t, svc.ProcessRequest(context.Background(), req.ID))
+
+	updated, err := store.GetRequest(context.Background(), req.ID)
+	require.NoError(t, err)
+	assert.True(t, eraser.called, "eraser should be invoked")
+	assert.Equal(t, testUserID1, eraser.gotUserID)
+	assert.Equal(t, StatusCompleted, updated.Status)
+	assert.Equal(t, 5, updated.SessionsDeleted, "count must come from the eraser, not the warm-store deleter")
+	assert.Nil(t, deleter.LastDateFrom, "warm-store deleter must not be consulted")
+}
+
+func TestProcessRequest_WithSubjectEraser_RecordsErrorsAndFailsOnError(t *testing.T) {
+	// Sub-case A: eraser returns per-target errors -> request marked failed with them.
+	store := NewMockDeletionStore()
+	svc := newTestService(store, NewMockSessionDeleter(), &MockAuditLogger{})
+	svc.SetSubjectEraser(&mockSubjectEraser{deleted: 2, errs: []string{"group-b memory: boom"}})
+
+	req, err := svc.CreateRequest(context.Background(), &CreateDeletionRequest{
+		VirtualUserID: testUserID1, Reason: testReasonGDPR, Scope: ScopeAll,
+	})
+	require.NoError(t, err)
+	require.NoError(t, svc.ProcessRequest(context.Background(), req.ID))
+	updated, err := store.GetRequest(context.Background(), req.ID)
+	require.NoError(t, err)
+	assert.Equal(t, StatusFailed, updated.Status)
+	assert.Equal(t, 2, updated.SessionsDeleted)
+	assert.Contains(t, updated.Errors, "group-b memory: boom")
+
+	// Sub-case B: eraser returns a hard error -> request marked failed.
+	store2 := NewMockDeletionStore()
+	svc2 := newTestService(store2, NewMockSessionDeleter(), &MockAuditLogger{})
+	svc2.SetSubjectEraser(&mockSubjectEraser{err: errors.New("fan-out failed")})
+	req2, err := svc2.CreateRequest(context.Background(), &CreateDeletionRequest{
+		VirtualUserID: testUserID1, Reason: testReasonGDPR, Scope: ScopeAll,
+	})
+	require.NoError(t, err)
+	err = svc2.ProcessRequest(context.Background(), req2.ID)
+	require.Error(t, err)
+	updated2, err := store2.GetRequest(context.Background(), req2.ID)
+	require.NoError(t, err)
+	assert.Equal(t, StatusFailed, updated2.Status)
+}
+
 func TestProcessRequest_PartialFailure(t *testing.T) {
 	store := NewMockDeletionStore()
 	deleter := NewMockSessionDeleter()

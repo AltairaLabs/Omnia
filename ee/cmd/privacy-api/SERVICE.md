@@ -43,6 +43,9 @@ warm cache retains opt-out preferences.
 | `GET` | `/api/v1/privacy/consent/stats` | Workspace-scoped aggregate consent stats |
 | `GET` | `/api/v1/privacy/enforcement-stats` | Workspace-scoped enforcement event stats (reads the central audit hub) |
 | `POST` | `/api/v1/privacy/audit-events` | Ingest forwarded audit events from memory-api / session-api into the central audit hub (#1673). Body `{sourceService, events:[Entry…]}`; idempotent on `(source_service, source_id)`; returns `{ingested, duplicates}` |
+| `POST` | `/api/v1/privacy/deletion-request` | Create a DSAR / right-to-erasure request; returns 202 + the request. Processed asynchronously: fans erasure out across every service-group's session-api (delete-by-user) + memory-api (batch-delete). (#1676) |
+| `GET` | `/api/v1/privacy/deletion-request/{id}` | Get a deletion request's status (pending/in_progress/completed/failed + sessions_deleted + errors) |
+| `GET` | `/api/v1/privacy/deletion-requests?virtual_user_id=…` | List a subject's deletion requests |
 
 ### Health server (`:8081`)
 
@@ -71,6 +74,14 @@ warm cache retains opt-out preferences.
   enforcement events in their own local `audit_log`, then a drain-forwarder ships
   them at-least-once to this hub via `POST /api/v1/privacy/audit-events`. The
   dashboard's enforcement-stats read path reads here, not session-api.
+- **DSAR (right-to-erasure) lifecycle** (#1676) — the `deletion_requests` table
+  (migration `000004`) tracks each erasure request's status. privacy-api owns the
+  lifecycle and orchestrates erasure across every service-group: per group it
+  calls session-api's `delete-by-user` endpoint (sessions + media) and memory-api's
+  batch-delete (memories, scoped by workspace UID), both SA-authenticated. Per-tier
+  deletion is delegated to the owning service, so privacy-api holds no warm-store or
+  object-storage credentials. (DSAR lifecycle audit events are not yet forwarded to
+  the audit hub — see #1678.)
 
 ## What privacy-api does NOT own
 

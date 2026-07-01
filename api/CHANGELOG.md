@@ -10,6 +10,18 @@ or `api/proto/`, add an entry below with the date, affected API, and reason.
 
 ## Unreleased
 
+### Added (privacy-api: DSAR orchestration endpoints, #1676 Slice B)
+
+- **`POST /api/v1/privacy/deletion-request`**, **`GET /api/v1/privacy/deletion-request/{id}`**,
+  **`GET /api/v1/privacy/deletion-requests?virtual_user_id=…`** now served by
+  **privacy-api** (enterprise, behind SA auth). privacy-api owns the
+  `deletion_requests` lifecycle and fans erasure out across every service-group:
+  per group it calls session-api's `delete-by-user` (sessions + media) and
+  memory-api's batch-delete (memories, scoped by workspace UID). The same routes
+  remain on session-api during the transition; they are removed from session-api in
+  Slice C. No request/response schema change — the contract matches the session-api
+  origin handler.
+
 ### Added (session-api: session-tier DSAR erasure endpoint, #1676)
 
 - **`POST /api/v1/privacy/sessions/delete-by-user`** (enterprise) — erases a

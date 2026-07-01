@@ -13,9 +13,14 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
+	"time"
 
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
+
+	"github.com/altairalabs/omnia/internal/serviceauth"
 )
 
 func TestMemoryHTTPDeleter_DeleteAllMemories(t *testing.T) {
@@ -115,6 +120,45 @@ func TestMemoryHTTPDeleter_DeleteAllMemories(t *testing.T) {
 		}
 		if gotQuery == "" {
 			t.Error("expected query parameters, got none")
+		}
+	})
+
+	t.Run("attaches SA bearer when a token source is set", func(t *testing.T) {
+		var gotAuth string
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			gotAuth = r.Header.Get("Authorization")
+			mustWriteJSON(t, w, memoryBatchDeleteResponse{Deleted: 0})
+		}))
+		defer srv.Close()
+
+		tokenPath := filepath.Join(t.TempDir(), "token")
+		if err := os.WriteFile(tokenPath, []byte("test-sa-token"), 0o600); err != nil {
+			t.Fatalf("writing token file: %v", err)
+		}
+		d := NewMemoryHTTPDeleter(srv.URL, zap.New()).
+			WithTokenSource(serviceauth.NewTokenSource(tokenPath, time.Minute))
+		if err := d.DeleteAllMemories(context.Background(), "user-7", "ws-g"); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if gotAuth != "Bearer test-sa-token" {
+			t.Errorf("expected bearer auth header, got %q", gotAuth)
+		}
+	})
+
+	t.Run("no auth header when token source is unset", func(t *testing.T) {
+		var gotAuth string
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			gotAuth = r.Header.Get("Authorization")
+			mustWriteJSON(t, w, memoryBatchDeleteResponse{Deleted: 0})
+		}))
+		defer srv.Close()
+
+		d := NewMemoryHTTPDeleter(srv.URL, zap.New())
+		if err := d.DeleteAllMemories(context.Background(), "user-8", "ws-h"); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if gotAuth != "" {
+			t.Errorf("expected no auth header, got %q", gotAuth)
 		}
 	})
 }

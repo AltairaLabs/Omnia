@@ -265,8 +265,9 @@ func run() error {
 	// When enterprise is false, privacy-api is still deployed but serves only /healthz
 	// on the API port (belt-and-suspenders: privacy-api is enterprise-only by design).
 	var (
-		optOutStore privacy.PreferencesStore = base
-		notifier    privacy.ConsentNotifier  = privacy.NoopConsentNotifier{}
+		optOutStore     privacy.PreferencesStore = base
+		notifier        privacy.ConsentNotifier  = privacy.NoopConsentNotifier{}
+		deletionHandler *privacy.DeletionHandler
 	)
 
 	if f.enterprise {
@@ -315,6 +316,11 @@ func run() error {
 		// Consent-outbox replay: re-delivers undelivered revocation rows and prunes old ones.
 		replayWorker := NewOutboxReplayWorker(base, notifier, f.outboxReplayInterval, f.outboxRetention, prometheus.DefaultRegisterer, log)
 		go replayWorker.Run(ctx)
+
+		// DSAR orchestrator (#1676): privacy-api owns the deletion_requests lifecycle
+		// and fans erasure out across the workspace's service-groups.
+		groups, dsarUID := resolveGroupTargets(f, log)
+		deletionHandler = buildDeletionHandler(pool, groups, dsarUID, tokenSrc, log)
 	} else {
 		log.Info("privacy-api enterprise features disabled; consent and opt-out routes not registered")
 	}
@@ -328,7 +334,7 @@ func run() error {
 	// --- Build API mux ---
 	// /healthz is always registered; enterprise routes are gated on f.enterprise.
 	auditStore := privacy.NewAuditStore(pool)
-	apiMux := buildAPIMux(f.enterprise, optOutStore, base, auditStore, log, notifier)
+	apiMux := buildAPIMux(f.enterprise, optOutStore, base, auditStore, log, notifier, deletionHandler)
 
 	// Wire up auth handler.
 	apiHandler := buildHandler(reviewer, allowedSubjects, allowedNamespaces, apiMux)
@@ -377,6 +383,7 @@ func registerRoutes(
 	auditStore privacy.AuditIngester,
 	log logr.Logger,
 	notifier privacy.ConsentNotifier,
+	deletionHandler *privacy.DeletionHandler,
 ) {
 	privacy.RegisterDocs(mux)
 	privacy.NewOptOutHandler(optOutStore, log).RegisterRoutes(mux)
@@ -385,6 +392,30 @@ func registerRoutes(
 	privacy.NewEnforcementStatsHandler(concrete, log).RegisterRoutes(mux)
 	// Audit hub (#1673): ingest enforcement events forwarded by memory/session-api.
 	privacy.NewAuditIngestHandler(auditStore, log).RegisterRoutes(mux)
+	// DSAR lifecycle (#1676): privacy-api owns deletion-request[s]; nil when the
+	// orchestrator could not be built (no workspace targets resolved).
+	if deletionHandler != nil {
+		deletionHandler.RegisterRoutes(mux)
+	}
+}
+
+// buildDeletionHandler constructs the DSAR orchestrator: a PostgresDeletionStore
+// over privacy's deletion_requests table plus a fan-out SubjectEraser that erases
+// across the workspace's service-groups. Audit is nil for this slice — the
+// deletion_requests row is the authoritative erasure record (see #1676 Slice C
+// follow-up for wiring DSAR events into privacy's audit_log).
+func buildDeletionHandler(
+	pool *pgxpool.Pool,
+	groups []privacy.GroupTarget,
+	workspaceUID string,
+	ts *serviceauth.TokenSource,
+	log logr.Logger,
+) *privacy.DeletionHandler {
+	store := privacy.NewPostgresDeletionStore(pool)
+	eraser := privacy.NewFanOutSubjectEraser(groups, workspaceUID, privacy.NewSessionGroupEraser(ts, log), ts, log)
+	svc := privacy.NewDeletionService(store, privacy.NoOpSessionDeleter{}, nil, log)
+	svc.SetSubjectEraser(eraser)
+	return privacy.NewDeletionHandler(svc, log)
 }
 
 // buildAPIMux creates the HTTP mux for the privacy-api. /healthz is always
@@ -398,6 +429,7 @@ func buildAPIMux(
 	auditStore privacy.AuditIngester,
 	log logr.Logger,
 	notifier privacy.ConsentNotifier,
+	deletionHandler *privacy.DeletionHandler,
 ) *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
@@ -405,7 +437,7 @@ func buildAPIMux(
 		_, _ = w.Write([]byte("ok"))
 	})
 	if enterprise {
-		registerRoutes(mux, optOutStore, concrete, auditStore, log, notifier)
+		registerRoutes(mux, optOutStore, concrete, auditStore, log, notifier, deletionHandler)
 	}
 	return mux
 }
@@ -433,16 +465,8 @@ func resolveMemoryFanout(f *flags, log logr.Logger) ([]string, string) {
 	if f.workspace == "" {
 		return nil, ""
 	}
-	cfg, err := ctrl.GetConfig()
-	if err != nil {
-		log.V(1).Info("memory fan-out resolution skipped", "reason", "no K8s config", "err", err.Error())
-		return nil, ""
-	}
-	scheme := k8sruntime.NewScheme()
-	_ = omniav1alpha1.AddToScheme(scheme)
-	c, err := client.New(cfg, client.Options{Scheme: scheme})
-	if err != nil {
-		log.V(1).Info("memory fan-out resolution skipped", "reason", "K8s client error", "err", err.Error())
+	c, ok := newWorkspaceClient(log, "memory fan-out resolution skipped")
+	if !ok {
 		return nil, ""
 	}
 	urls, uid := memoryFanoutFromWorkspace(context.Background(), c, f.workspace)
@@ -450,6 +474,66 @@ func resolveMemoryFanout(f *flags, log logr.Logger) ([]string, string) {
 		log.V(1).Info("memory fan-out resolution skipped", "reason", "workspace not found", "workspace", f.workspace)
 	}
 	return urls, uid
+}
+
+// newWorkspaceClient builds a controller-runtime client with the omnia scheme for
+// reading Workspace CRDs at startup. reason is the log message used when config or
+// client construction fails. Returns (nil, false) on failure.
+func newWorkspaceClient(log logr.Logger, reason string) (client.Client, bool) {
+	cfg, err := ctrl.GetConfig()
+	if err != nil {
+		log.V(1).Info(reason, "reason", "no K8s config", "err", err.Error())
+		return nil, false
+	}
+	scheme := k8sruntime.NewScheme()
+	_ = omniav1alpha1.AddToScheme(scheme)
+	c, err := client.New(cfg, client.Options{Scheme: scheme})
+	if err != nil {
+		log.V(1).Info(reason, "reason", "K8s client error", "err", err.Error())
+		return nil, false
+	}
+	return c, true
+}
+
+// resolveGroupTargets returns one privacy.GroupTarget per service-group in the
+// workspace (session + memory base URLs) plus the Workspace CRD UID used to scope
+// memory erasure. Returns (nil, "") when no workspace is configured or the lookup
+// fails.
+func resolveGroupTargets(f *flags, log logr.Logger) ([]privacy.GroupTarget, string) {
+	if f.workspace == "" {
+		return nil, ""
+	}
+	c, ok := newWorkspaceClient(log, "DSAR group-target resolution skipped")
+	if !ok {
+		return nil, ""
+	}
+	targets, uid := groupTargetsFromWorkspace(context.Background(), c, f.workspace)
+	if uid == "" {
+		log.V(1).Info("DSAR group-target resolution skipped", "reason", "workspace not found", "workspace", f.workspace)
+	}
+	return targets, uid
+}
+
+// groupTargetsFromWorkspace loads the named Workspace CRD via c and returns a
+// GroupTarget for each service-group that has a session or memory URL, plus the
+// Workspace UID. Returns (nil, "") if the workspace cannot be loaded.
+func groupTargetsFromWorkspace(ctx context.Context, c client.Client, workspaceName string) ([]privacy.GroupTarget, string) {
+	var ws omniav1alpha1.Workspace
+	if err := c.Get(ctx, client.ObjectKey{Name: workspaceName}, &ws); err != nil {
+		return nil, ""
+	}
+	var targets []privacy.GroupTarget
+	for _, svc := range ws.Status.Services {
+		if svc.SessionURL == "" && svc.MemoryURL == "" {
+			continue
+		}
+		targets = append(targets, privacy.GroupTarget{
+			Name:       svc.Name,
+			SessionURL: svc.SessionURL,
+			MemoryURL:  svc.MemoryURL,
+		})
+	}
+	return targets, string(ws.UID)
 }
 
 // memoryFanoutFromWorkspace loads the named Workspace CRD via c and returns its
