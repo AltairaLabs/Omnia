@@ -74,6 +74,27 @@ data:
   NEXT_PUBLIC_ENTERPRISE_ENABLED: {{ .Values.enterprise.enabled | quote }}
   NEXT_PUBLIC_HIDE_ENTERPRISE: {{ .Values.dashboard.hideEnterprise | default false | quote }}
 
+  # White-label branding (Enterprise). Emitted only when enterprise is enabled
+  # and a product name is set; the dashboard additionally enforces the
+  # whiteLabel license feature at runtime before applying any override.
+  {{- if and .Values.enterprise.enabled .Values.dashboard.branding.productName }}
+  {{- $b := .Values.dashboard.branding }}
+  NEXT_PUBLIC_BRAND_PRODUCT_NAME: {{ $b.productName | quote }}
+  NEXT_PUBLIC_BRAND_LOGO_LIGHT: {{ $b.logoLightUrl | quote }}
+  NEXT_PUBLIC_BRAND_LOGO_DARK: {{ $b.logoDarkUrl | quote }}
+  NEXT_PUBLIC_BRAND_FAVICON: {{ $b.faviconUrl | quote }}
+  NEXT_PUBLIC_BRAND_COLOR_PRIMARY: {{ $b.colors.primary | quote }}
+  NEXT_PUBLIC_BRAND_COLOR_ACCENT: {{ $b.colors.accent | quote }}
+  NEXT_PUBLIC_BRAND_COLOR_SIDEBAR: {{ $b.colors.sidebar | quote }}
+  NEXT_PUBLIC_BRAND_FONT_FAMILY: {{ $b.fonts.family | quote }}
+  NEXT_PUBLIC_BRAND_FONT_URL: {{ $b.fonts.url | quote }}
+  NEXT_PUBLIC_BRAND_DOCS_URL: {{ $b.links.docsBaseUrl | quote }}
+  NEXT_PUBLIC_BRAND_SUPPORT: {{ $b.links.support | quote }}
+  NEXT_PUBLIC_BRAND_SALES: {{ $b.links.sales | quote }}
+  NEXT_PUBLIC_BRAND_UPGRADE_URL: {{ $b.links.upgradeUrl | quote }}
+  NEXT_PUBLIC_BRAND_CUSTOM_CSS: {{ $b.customCss | quote }}
+  {{- end }}
+
   # WebSocket proxy URL (for agent console connections)
   {{- if .Values.dashboard.wsProxy.url }}
   NEXT_PUBLIC_WS_PROXY_URL: {{ .Values.dashboard.wsProxy.url | quote }}

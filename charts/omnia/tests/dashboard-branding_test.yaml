@@ -1,0 +1,42 @@
+suite: dashboard branding
+release:
+  name: omnia
+values:
+  - ../values-chart-tests.yaml
+templates:
+  - templates/dashboard/configmap.yaml
+tests:
+  - it: emits brand env when product name is set and enterprise enabled
+    set:
+      dashboard.enabled: true
+      enterprise.enabled: true
+      dashboard.branding.productName: "Acme AI"
+      dashboard.branding.logoLightUrl: "https://cdn/acme-light.svg"
+      dashboard.branding.colors.primary: "#ff0000"
+    asserts:
+      - equal:
+          path: data.NEXT_PUBLIC_BRAND_PRODUCT_NAME
+          value: "Acme AI"
+      - equal:
+          path: data.NEXT_PUBLIC_BRAND_LOGO_LIGHT
+          value: "https://cdn/acme-light.svg"
+      - equal:
+          path: data.NEXT_PUBLIC_BRAND_COLOR_PRIMARY
+          value: "#ff0000"
+
+  - it: omits brand env when product name is unset
+    set:
+      dashboard.enabled: true
+      enterprise.enabled: true
+    asserts:
+      - notExists:
+          path: data.NEXT_PUBLIC_BRAND_PRODUCT_NAME
+
+  - it: omits brand env when enterprise is disabled even if product name is set
+    set:
+      dashboard.enabled: true
+      enterprise.enabled: false
+      dashboard.branding.productName: "Acme AI"
+    asserts:
+      - notExists:
+          path: data.NEXT_PUBLIC_BRAND_PRODUCT_NAME
