@@ -16,6 +16,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/altairalabs/omnia/ee/pkg/license"
 	"github.com/go-logr/logr"
 )
 
@@ -290,6 +291,34 @@ func TestHandleGetLicense_NilValidator(t *testing.T) {
 	}
 	if resp.Tier != "open-core" {
 		t.Errorf("tier = %q, want %q", resp.Tier, "open-core")
+	}
+}
+
+func TestToLicenseResponse_IncludesEnterpriseFeatures(t *testing.T) {
+	// The dashboard reads memory/privacy/policy entitlements from this
+	// endpoint, so the feature keys must survive serialization and carry
+	// the license's actual values.
+	body, err := json.Marshal(toLicenseResponse(license.DevLicense()))
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	var decoded struct {
+		Features map[string]any `json:"features"`
+	}
+	if err := json.Unmarshal(body, &decoded); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	for _, key := range []string{"memoryEnterprise", "privacyEnterprise", "policyProxy"} {
+		val, ok := decoded.Features[key]
+		if !ok {
+			t.Errorf("features JSON missing key %q", key)
+			continue
+		}
+		if val != true {
+			t.Errorf("features[%q] = %v, want true for dev license", key, val)
+		}
 	}
 }
 

@@ -27,6 +27,12 @@ export interface LicenseFeatures {
   distributedWorkers: boolean;
   /** Dashboard white-label / custom branding */
   whiteLabel: boolean;
+  /** Enterprise memory: Galaxy, analytics, institutional, multi-tier, consolidation */
+  memoryEnterprise: boolean;
+  /** Privacy/compliance suite: consent, DSAR, audit hub, enforcement-stats */
+  privacyEnterprise: boolean;
+  /** AgentPolicy / CEL enforcement (policy-proxy) */
+  policyProxy: boolean;
 }
 
 /**
@@ -75,6 +81,11 @@ export const OPEN_CORE_LICENSE: License = {
     scheduling: false,
     distributedWorkers: false,
     whiteLabel: false,
+    // Enterprise memory/privacy/policy features are paid; open-core degrades
+    // to open-core behavior (feature disabled).
+    memoryEnterprise: false,
+    privacyEnterprise: false,
+    policyProxy: false,
   },
   limits: {
     maxScenarios: 10,

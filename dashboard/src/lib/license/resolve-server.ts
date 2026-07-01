@@ -29,6 +29,9 @@ export const MOCK_ENTERPRISE_LICENSE: License = {
     scheduling: true,
     distributedWorkers: true,
     whiteLabel: true,
+    memoryEnterprise: true,
+    privacyEnterprise: true,
+    policyProxy: true,
   },
   limits: {
     maxScenarios: 0, // unlimited

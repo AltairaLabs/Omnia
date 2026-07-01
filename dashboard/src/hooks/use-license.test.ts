@@ -77,6 +77,9 @@ describe("useLicense", () => {
         scheduling: true,
         distributedWorkers: true,
         whiteLabel: true,
+        memoryEnterprise: true,
+        privacyEnterprise: true,
+        policyProxy: true,
       },
       limits: {
         maxScenarios: 0,
