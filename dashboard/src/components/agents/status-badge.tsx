@@ -2,24 +2,30 @@
 
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
+import { getStatusClasses, type StatusKind } from "@/lib/colors/status";
 import type { AgentRuntimePhase, PromptPackPhase, ToolRegistryPhase } from "@/types";
 
 type Phase = AgentRuntimePhase | PromptPackPhase | ToolRegistryPhase;
 
-const STYLE_GREEN = "bg-green-500/15 text-green-700 dark:text-green-400 border-green-500/20";
-
-const phaseStyles: Record<Phase, string> = {
+// Map each resource phase onto a semantic status kind so badge coloring is
+// token-driven and re-themes with a white-label brand.
+const phaseKind: Record<Phase, StatusKind> = {
   // Agent phases
-  Running: STYLE_GREEN,
-  Pending: "bg-yellow-500/15 text-yellow-700 dark:text-yellow-400 border-yellow-500/20",
-  Failed: "bg-red-500/15 text-red-700 dark:text-red-400 border-red-500/20",
+  Running: "success",
+  Pending: "warning",
+  Failed: "error",
   // PromptPack phases
-  Active: STYLE_GREEN,
-  Superseded: "bg-gray-500/15 text-gray-700 dark:text-gray-400 border-gray-500/20",
+  Active: "success",
+  Superseded: "neutral",
   // ToolRegistry phases
-  Ready: STYLE_GREEN,
-  Degraded: "bg-orange-500/15 text-orange-700 dark:text-orange-400 border-orange-500/20",
+  Ready: "success",
+  Degraded: "warning",
 };
+
+function phaseClasses(phase: Phase): string {
+  const s = getStatusClasses(phaseKind[phase]);
+  return cn(s.bg, s.text, s.border);
+}
 
 interface StatusBadgeProps {
   phase?: Phase;
@@ -38,7 +44,7 @@ export function StatusBadge({ phase, className }: Readonly<StatusBadgeProps>) {
   return (
     <Badge
       variant="outline"
-      className={cn("text-xs", phaseStyles[phase], className)}
+      className={cn("text-xs", phaseClasses(phase), className)}
       data-testid="status-badge"
     >
       {phase}
