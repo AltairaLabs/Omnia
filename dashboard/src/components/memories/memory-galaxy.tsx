@@ -9,33 +9,29 @@ import { sortStack, clampIndex, removeAt } from "@/lib/memory-galaxy/stack";
 import type { GalaxyPoint } from "@/lib/memory-galaxy/types";
 import {
   fitTransform,
-  worldToScreen,
   colorForPoint,
   matchesFilters,
   pointFacet,
   type Transform,
 } from "@/lib/memory-galaxy/galaxy-math";
+import {
+  project,
+  sizeFactor,
+  pointRadius,
+  overlaps,
+  onScreen,
+  computeBubbles,
+  lifeFraction,
+  type View,
+  type ScreenPos,
+  type Box,
+} from "@/lib/memory-galaxy/galaxy-layout";
 import { TIER_LABELS } from "@/lib/memory-analytics/colors";
 import type { Tier } from "@/lib/memory-analytics/types";
 import { cn } from "@/lib/utils";
 
 type Dimension = "tier" | "category";
 
-interface View {
-  zoom: number;
-  panX: number;
-  panY: number;
-}
-interface ScreenPos {
-  x: number;
-  y: number;
-}
-interface Box {
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-}
 interface Scene {
   fit: Transform;
   view: View;
@@ -51,11 +47,6 @@ const LABEL_MIN_ZOOM = 2;
 const MAX_LABELS = 160;
 const POOL_BALL_MIN_RADIUS = 9;
 const HIT_TOLERANCE = 4;
-// Confidence → radius: non-linear so a bell-curved distribution still spreads
-// visibly (the busy mid/high band gets most of the size range).
-const MIN_RADIUS = 2;
-const CONF_SPREAD = 9;
-const CONF_GAMMA = 1.8;
 // Explicit white-on-dark control styling (theme variants render dark-on-dark
 // against the galaxy background, so don't rely on them here).
 const TOGGLE_BTN = "flex h-8 w-8 items-center justify-center rounded-md transition-colors";
@@ -71,28 +62,6 @@ interface MemoryGalaxyProps {
   onDelete: (id: string) => void;
 }
 
-function project(p: GalaxyPoint, fit: Transform, view: View): ScreenPos {
-  const b = worldToScreen(p, fit);
-  return { x: b.x * view.zoom + view.panX, y: b.y * view.zoom + view.panY };
-}
-
-// Logarithmic zoom growth, on top of a strong non-linear confidence term.
-function sizeFactor(zoom: number): number {
-  return Math.max(0.7, 1 + Math.log2(zoom) * 1.2);
-}
-
-function pointRadius(p: GalaxyPoint, sf: number): number {
-  return (MIN_RADIUS + Math.pow(p.confidence, CONF_GAMMA) * CONF_SPREAD) * sf;
-}
-
-function overlaps(a: Box, b: Box): boolean {
-  return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
-}
-
-function onScreen(s: ScreenPos, w: number, h: number): boolean {
-  return s.x > -60 && s.x < w + 60 && s.y > -20 && s.y < h + 20;
-}
-
 function categoryLabel(cat?: string): string {
   if (!cat) return "Uncategorized";
   const s = cat.replace(/^memory:/, "");
@@ -106,45 +75,6 @@ function headingFor(p: GalaxyPoint, colorBy: Dimension): string {
 
 function isVisible(p: GalaxyPoint, hidden: Set<string>, colorBy: Dimension): boolean {
   return !hidden.has(pointFacet(p, colorBy));
-}
-
-interface BubblePos {
-  p: GalaxyPoint;
-  left: number; // viewport x of the node
-  top: number; // viewport y of the node
-  placement: "above" | "below";
-  tailOffset: number;
-}
-
-// Live viewport anchors for the open bubbles, recomputed from the view each
-// render so they follow their points on pan/zoom. Only points currently on the
-// canvas get a bubble.
-function computeBubbles(
-  points: GalaxyPoint[],
-  openIds: Set<string>,
-  view: View,
-  size: { w: number; h: number },
-  rect: { left: number; top: number } | null,
-): BubblePos[] {
-  const out: BubblePos[] = [];
-  if (openIds.size === 0 || size.w === 0 || !rect) return out;
-  const fit = fitTransform(points, size.w, size.h);
-  const vw = window.innerWidth;
-  for (const p of points) {
-    if (!openIds.has(p.id)) continue;
-    const s = project(p, fit, view);
-    if (s.x < 0 || s.x > size.w || s.y < 0 || s.y > size.h) continue;
-    const nodeX = rect.left + s.x;
-    const cardLeft = Math.max(150, Math.min(vw - 150, nodeX));
-    out.push({
-      p,
-      left: cardLeft,
-      top: rect.top + s.y,
-      placement: s.y > size.h / 2 ? "above" : "below",
-      tailOffset: Math.max(-120, Math.min(120, nodeX - cardLeft)),
-    });
-  }
-  return out;
 }
 
 function drawPoolBall(ctx: CanvasRenderingContext2D, s: ScreenPos, r: number, confidence: number): void {
@@ -164,15 +94,6 @@ interface DrawOpts {
   showConfidence: boolean;
   ageFade: boolean;
   now: number;
-}
-
-// 0 = fresh, 1 = at/past expiry (created + TTL). 0 when there is no TTL.
-function lifeFraction(p: GalaxyPoint, now: number): number {
-  if (!p.observedAt || !p.expiresAt) return 0;
-  const created = Date.parse(p.observedAt);
-  const expires = Date.parse(p.expiresAt);
-  if (expires <= created) return 0;
-  return Math.max(0, Math.min(1, (now - created) / (expires - created)));
 }
 
 function drawPoints(
