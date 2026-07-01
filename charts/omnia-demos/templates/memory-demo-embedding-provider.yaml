@@ -1,0 +1,48 @@
+{{- if .Values.memoryDemo.enabled }}
+{{- $ns := .Values.namespace }}
+{{- $emb := .Values.memoryDemo.embedding.provider }}
+{{- $isTei := eq $emb.type "tei" }}
+# Embedding Provider the demo Workspace's memory service binds via providerRef
+# (memory-demo-embeddings). Drives the Memory Galaxy's dense (semantic)
+# projection + embedding-similarity dedup.
+#
+# provider.type selects the backend:
+#   tei    → HF Text Embeddings Inference, a lightweight CPU embedder deployed
+#            in-cluster (memory-demo-tei-embed.yaml). Rendered as a Provider of
+#            type "openai" (TEI is OpenAI-compatible) pointed at the TEI Service.
+#            Cheapest local/dev option — no API key, fast on CPU.
+#   ollama → in-cluster ollama-memory-embed (memory-demo-ollama-embed.yaml).
+#   openai/gemini/voyageai → hosted embedder (needs credentialSecret with the key).
+# The CRD only accepts openai|gemini|voyageai|ollama for embedding, so "tei" is a
+# chart-level alias that renders as openai + baseURL.
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: Provider
+metadata:
+  name: memory-demo-embeddings
+  namespace: {{ $ns }}
+  labels:
+    app.kubernetes.io/name: omnia-demos
+    app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
+spec:
+  type: {{ if $isTei }}openai{{ else }}{{ $emb.type }}{{ end }}
+  # role: embedding is REQUIRED — memory-api skips a provider with the default
+  # "llm" role for embeddings ("has role llm but embedding is required").
+  role: embedding
+  model: {{ $emb.model }}
+  {{- if eq $emb.type "ollama" }}
+  baseURL: http://ollama-memory-embed.{{ $ns }}:11434
+  {{- else if $isTei }}
+  baseURL: http://memory-demo-tei.{{ $ns }}/v1
+  {{- end }}
+  # Pin the dimensions so the embedding columns match the model (all-MiniLM-L6-v2
+  # is 384; nomic-embed-text and gemini text-embedding-004 are 768; the default
+  # fallback is 1536). Changing this after first run is a destructive re-init.
+  embedding:
+    dimensions: {{ $emb.dimensions }}
+    distance: {{ $emb.distance }}
+  credential:
+    secretRef:
+      # TEI needs no key; the chart provisions a dummy Secret so the openai
+      # provider's required credential is satisfied (TEI ignores it).
+      name: {{ if $isTei }}memory-demo-tei-credentials{{ else }}{{ $emb.credentialSecret }}{{ end }}
+{{- end }}

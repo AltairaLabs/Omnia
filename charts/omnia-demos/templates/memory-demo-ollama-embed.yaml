@@ -1,12 +1,13 @@
-{{- if .Values.memoryDemo.enabled }}
+{{- if and .Values.memoryDemo.enabled (eq .Values.memoryDemo.embedding.provider.type "ollama") }}
 {{- $ns := .Values.namespace }}
 {{- $img := printf "%s:%s" .Values.ollama.image.repository .Values.ollama.image.tag }}
 {{- $model := .Values.memoryDemo.embedding.model }}
 ---
 # Dedicated ollama instance serving the embedding model (nomic-embed-text) for
 # the memory demo's semantic retrieval (the Memory Galaxy's dense projection +
-# embedding-similarity dedup). Kept separate from the chat instances so the
-# embed model is only pulled when memoryDemo is enabled. Mirrors ollama.yaml.
+# embedding-similarity dedup). Only rendered when embedding.provider.type=ollama;
+# the shared Provider lives in memory-demo-embedding-provider.yaml. Mirrors
+# ollama.yaml.
 {{- if .Values.ollama.persistence.enabled }}
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -150,36 +151,4 @@ spec:
       targetPort: http
       name: http
   type: ClusterIP
----
-# Embedding Provider the demo Workspace's memory service binds via providerRef
-# (memory-demo-embeddings). Drives the Memory Galaxy's dense projection +
-# embedding-similarity dedup. Defaults to a hosted embedder (Gemini, 768-dim)
-# to avoid the local-CPU ollama bottleneck; type=ollama uses the in-cluster
-# instance above. See values.yaml memoryDemo.embedding.provider.
-{{- $emb := .Values.memoryDemo.embedding.provider }}
-apiVersion: omnia.altairalabs.ai/v1alpha1
-kind: Provider
-metadata:
-  name: memory-demo-embeddings
-  namespace: {{ $ns }}
-  labels:
-    app.kubernetes.io/name: omnia-demos
-    app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
-spec:
-  type: {{ $emb.type }}
-  # role: embedding is REQUIRED — memory-api skips a provider with the default
-  # "llm" role for embeddings ("has role llm but embedding is required").
-  role: embedding
-  model: {{ $emb.model }}
-  {{- if eq $emb.type "ollama" }}
-  baseURL: http://ollama-memory-embed.{{ $ns }}:11434
-  {{- end }}
-  # Pin the dimensions so the embedding columns match (nomic-embed-text and
-  # gemini text-embedding-004 are both 768; the default fallback is 1536).
-  embedding:
-    dimensions: {{ $emb.dimensions }}
-    distance: {{ $emb.distance }}
-  credential:
-    secretRef:
-      name: {{ $emb.credentialSecret }}
 {{- end }}

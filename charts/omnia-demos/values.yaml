@@ -619,34 +619,63 @@ memoryDemo:
 
   # Embedding configuration for the Memory Galaxy's dense (semantic) projection.
   embedding:
-    # Model the in-cluster ollama memory-embed instance pulls/serves (Task 10),
-    # used only when provider.type=ollama.
-    model: nomic-embed-text
+    # The embedding model the in-cluster ollama memory-embed instance pulls/serves
+    # (used when provider.type=ollama). DEFAULT all-minilm (22M params, ~45MB,
+    # 384-dim) — the smallest sensible embedder; ~6x lighter than nomic-embed-text
+    # and fast enough on CPU that the dense-projection backlog reaches coverage
+    # (galaxy goes semantic rather than staying on the lexical fallback). For
+    # type=ollama this MUST match provider.model below.
+    model: all-minilm
     # The memory-demo-embeddings Provider the workspace binds for embeddings.
     #
-    # DEFAULTS to a hosted embedder: a local CPU ollama embed can take ~10s
-    # under load and large batches time out, so the backlog never reaches the
-    # 70% coverage the dense projection needs and the galaxy stays on the
-    # lexical fallback. Hosted embeds return in <1s. Set type=ollama to use the
-    # in-cluster instance instead (baseURL is auto-set for ollama).
+    # DEFAULTS to `ollama` + all-minilm: multi-arch (works on Apple-Silicon/arm64
+    # dev clusters), no API key, tiny + fast — the cheapest embedder that runs
+    # anywhere. memoryDemo is dev-only, so a local embedder is the sensible default.
+    #
+    # Alternatives:
+    #   tei    → HF Text Embeddings Inference, the lightest embedder for x86 — but
+    #            AMD64-ONLY (no arm64 image), so it will NOT pull on Apple Silicon.
+    #            Rendered as an openai-typed Provider -> the in-cluster TEI Service.
+    #   openai/gemini/voyageai -> hosted embedder (needs credentialSecret with a key).
     #
     # NOTE: dimensions must match the memory DB's embedding columns. The schema
-    # is provisioned on first run; changing it later (e.g. 1536↔768) is a
+    # is provisioned on first run; changing it later (e.g. 384<->768) is a
     # destructive re-init gated by a one-shot consent marker.
     provider:
-      # type: ollama | gemini | openai | voyageai
-      type: openai
-      model: text-embedding-3-small
-      dimensions: 1536
+      # type: ollama | tei | openai | gemini | voyageai
+      # (tei is a chart alias rendered as an openai-typed Provider -> the TEI Service)
+      type: ollama
+      # The model in the Provider spec. For ollama: the ollama model name (MUST
+      # match embedding.model above). For tei/openai: the served/hosted model id,
+      # e.g. tei -> sentence-transformers/all-MiniLM-L6-v2 (also 384-dim).
+      model: all-minilm
+      dimensions: 384
       distance: cosine
-      # API-key Secret for hosted types. NOT created by the chart — provision
-      # out-of-band so the key never lands in git. The Secret KEY name is the
-      # provider's env-var name (memory-api derives it from the type):
-      #   openai → OPENAI_API_KEY, gemini → GEMINI_API_KEY.
+      # API-key Secret for hosted types (openai/gemini/voyageai). NOT created by
+      # the chart — provision out-of-band so the key never lands in git. The Secret
+      # KEY name is the provider's env-var name (memory-api derives it from the
+      # type): openai → OPENAI_API_KEY, gemini → GEMINI_API_KEY.
       #   kubectl create secret generic openai-embeddings-credentials \
       #     -n <ns> --from-literal=OPENAI_API_KEY=$OPENAI_API_KEY
-      # For type=ollama set this to the chart-created ollama-credentials.
+      # Ignored for type=tei (the chart provisions a dummy Secret; TEI needs no key).
       credentialSecret: openai-embeddings-credentials
+
+    # Hugging Face TEI backend, used when provider.type=tei. AMD64-ONLY — the CPU
+    # image has no arm64 manifest, so this is for x86 dev/CI clusters, not Apple
+    # Silicon. The served model is provider.model above (use the HF path form,
+    # e.g. sentence-transformers/all-MiniLM-L6-v2).
+    tei:
+      image:
+        repository: ghcr.io/huggingface/text-embeddings-inference
+        tag: cpu-1.5
+        pullPolicy: IfNotPresent
+      resources:
+        requests:
+          cpu: "250m"
+          memory: "512Mi"
+        limits:
+          cpu: "1"
+          memory: "1Gi"
 
   # Post-install seed Job (Task 11). The seeder generates a fixed-scale
   # "Hawkridge Cloud" scenario (built-in DefaultScenario — counts are not
