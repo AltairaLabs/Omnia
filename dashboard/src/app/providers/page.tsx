@@ -3,6 +3,7 @@
 import { useState, useMemo, useCallback } from "react";
 import { LayoutGrid, List, Plus } from "lucide-react";
 import { usePersistedViewMode } from "@/hooks/use-persisted-view-mode";
+import { getProviderColor } from "@/lib/provider-utils";
 import Link from "next/link";
 import { Header } from "@/components/layout";
 import { NamespaceFilter } from "@/components/filters";
@@ -57,24 +58,14 @@ function effectiveRole(provider: Provider): ProviderRole {
   return provider.spec?.role ?? "llm";
 }
 
-/** Color mapping for provider types */
-const providerColorMap: Record<string, string> = {
-  anthropic: "#F97316", // orange
-  openai: "#22C55E",    // green
-  gemini: "#3B82F6",    // blue
-  ollama: "#A855F7",    // purple
-  bedrock: "#EAB308",   // yellow
-  mock: "#6B7280",      // gray
-};
-
 function ProviderCard({ provider }: Readonly<{ provider: ProviderWithSource }>) {
   const { metadata, spec, status, _isShared } = provider;
 
   // Fetch metrics for this provider
   const { data: metrics } = useProviderMetrics(metadata?.name || "", spec?.type);
 
-  // Get sparkline color based on provider type
-  const sparklineColor = spec?.type ? providerColorMap[spec.type] || "#3B82F6" : "#3B82F6";
+  // Get sparkline color based on provider type (single source: provider-utils)
+  const sparklineColor = getProviderColor(spec?.type ?? "");
 
   // Convert cost rate data for sparkline (uses { value } format)
   const sparklineData = metrics?.costRate?.map(p => ({ value: p.value })) || [];
