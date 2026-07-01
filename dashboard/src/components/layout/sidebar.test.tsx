@@ -2,7 +2,9 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Sidebar } from "./sidebar";
+import { BrandContext } from "@/components/branding/brand-provider";
 import { useSidebarStore } from "@/stores/sidebar-store";
+import type { BrandConfig } from "@/lib/branding/types";
 
 // next/navigation
 vi.mock("next/navigation", () => ({ usePathname: () => "/" }));
@@ -40,6 +42,23 @@ describe("Sidebar", () => {
     render(<Sidebar />);
     expect(screen.getByText("Omnia")).toBeInTheDocument();
     expect(screen.getByText("Overview")).toBeInTheDocument();
+  });
+
+  it("renders a custom brand name and logo when provided", () => {
+    const brand: BrandConfig = {
+      productName: "Acme AI",
+      logo: { light: "/l.svg", dark: "/acme-dark.svg" },
+      favicon: "/f.svg",
+    };
+    render(
+      <BrandContext.Provider value={{ brand, setBrandOverride: () => {} }}>
+        <Sidebar />
+      </BrandContext.Provider>,
+    );
+    expect(screen.getByText("Acme AI")).toBeInTheDocument();
+    // logo alt reflects the brand name (proves the logo/alt swap off hardcoded "Omnia")
+    expect(screen.getByAltText("Acme AI")).toBeInTheDocument();
+    expect(screen.queryByText("Omnia")).not.toBeInTheDocument();
   });
 
   it("no longer lists Console (moved to the header)", () => {
