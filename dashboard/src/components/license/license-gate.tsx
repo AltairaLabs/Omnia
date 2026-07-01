@@ -41,6 +41,7 @@ const FEATURE_DISPLAY_NAMES: Record<keyof LicenseFeatures, string> = {
   dataGeneration: "Data Generation",
   scheduling: "Job Scheduling",
   distributedWorkers: "Distributed Workers",
+  whiteLabel: "White-Label Branding",
 };
 
 export interface LicenseGateProps {

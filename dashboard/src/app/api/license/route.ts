@@ -32,6 +32,7 @@ const MOCK_ENTERPRISE_LICENSE: License = {
     dataGeneration: true,
     scheduling: true,
     distributedWorkers: true,
+    whiteLabel: true,
   },
   limits: {
     maxScenarios: 0, // unlimited
