@@ -10,6 +10,18 @@ or `api/proto/`, add an entry below with the date, affected API, and reason.
 
 ## Unreleased
 
+### Added (session-api: session-tier DSAR erasure endpoint, #1676)
+
+- **`POST /api/v1/privacy/sessions/delete-by-user`** (enterprise) — erases a
+  subject's sessions and their media within this session-api's own group. Body:
+  `{"virtual_user_id","workspace","date_from","date_to"}`; returns
+  `{"sessions_deleted":N,"errors":[…]}`. Fails closed with 400 on an empty
+  `virtual_user_id`. This is the session-tier half of DSAR (Phase 2, #1676):
+  privacy-api will orchestrate this endpoint across all of a workspace's
+  service-groups, so privacy-api needs no warm-store or object-storage access.
+  The in-process `POST/GET /api/v1/privacy/deletion-request[s]` endpoints remain
+  on session-api during the transition and move to privacy-api in a later slice.
+
 ### Added (privacy-api: central audit hub ingest endpoint, #1673)
 
 - **`POST /api/v1/privacy/audit-events`** — ingests audit events forwarded from
