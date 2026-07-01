@@ -27,6 +27,14 @@
   --color-chart-3: var(--chart-3);
   --color-chart-2: var(--chart-2);
   --color-chart-1: var(--chart-1);
+  --color-category-1: var(--category-1);
+  --color-category-2: var(--category-2);
+  --color-category-3: var(--category-3);
+  --color-category-4: var(--category-4);
+  --color-category-5: var(--category-5);
+  --color-category-6: var(--category-6);
+  --color-category-7: var(--category-7);
+  --color-category-8: var(--category-8);
   --color-ring: var(--ring);
   --color-input: var(--input);
   --color-border: var(--border);
@@ -92,12 +100,22 @@
   --border: #E2E8F0;
   --input: #E2E8F0;
   --ring: #3B82F6;
-  /* Chart colors - brand palette */
+  /* Chart colors - brand palette (time-series / data series) */
   --chart-1: #3B82F6;
   --chart-2: #8B5CF6;
   --chart-3: #06B6D4;
   --chart-4: #10B981;
   --chart-5: #F59E0B;
+  /* Categorical palette - distinct hues for entity categories
+     (memory categories, resource-type nodes). SI-tunable. */
+  --category-1: #3B82F6;
+  --category-2: #8B5CF6;
+  --category-3: #EC4899;
+  --category-4: #F59E0B;
+  --category-5: #10B981;
+  --category-6: #06B6D4;
+  --category-7: #EF4444;
+  --category-8: #6B7280;
   /* Sidebar - Deep Space blue to match website nav */
   --sidebar: #0F172A;
   --sidebar-foreground: #E2E8F0;
@@ -141,6 +159,15 @@
   --chart-3: #22D3EE;
   --chart-4: #34D399;
   --chart-5: #FBBF24;
+  /* Categorical palette - adjusted for dark */
+  --category-1: #60A5FA;
+  --category-2: #A78BFA;
+  --category-3: #F472B6;
+  --category-4: #FBBF24;
+  --category-5: #34D399;
+  --category-6: #22D3EE;
+  --category-7: #F87171;
+  --category-8: #9CA3AF;
   /* Sidebar - Deep Space blue (same in dark mode) */
   --sidebar: #0F172A;
   --sidebar-foreground: #E2E8F0;
