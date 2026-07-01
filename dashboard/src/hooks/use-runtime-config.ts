@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { getRuntimeConfig, type RuntimeConfig } from "@/lib/config";
+import { OMNIA_BRAND } from "@/lib/branding/types";
 
 // Use NEXT_PUBLIC_* as build-time defaults to avoid flash of wrong state
 // The API route will provide the runtime values if different
@@ -19,6 +20,7 @@ const defaultConfig: RuntimeConfig = {
   // Default to anonymous so SessionWatcher is inactive until config loads
   authMode: "anonymous",
   sessionPollIntervalSeconds: 60,
+  brand: OMNIA_BRAND,
 };
 
 // Track if config has been fetched to avoid duplicate requests

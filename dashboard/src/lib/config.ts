@@ -6,6 +6,8 @@
  * (e.g., when config comes from Kubernetes ConfigMaps).
  */
 
+import { type BrandConfig, OMNIA_BRAND } from "@/lib/branding/types";
+
 export interface RuntimeConfig {
   devMode: boolean;
   demoMode: boolean;
@@ -30,6 +32,8 @@ export interface RuntimeConfig {
    * Set via OMNIA_SESSION_POLL_INTERVAL_SECONDS.
    */
   sessionPollIntervalSeconds: number;
+  /** White-label branding, license-gated server-side (Omnia default otherwise). */
+  brand: BrandConfig;
 }
 
 let cachedConfig: RuntimeConfig | null = null;
@@ -48,6 +52,7 @@ const defaultConfig: RuntimeConfig = {
   hideEnterprise: false,
   authMode: "anonymous",
   sessionPollIntervalSeconds: 60,
+  brand: OMNIA_BRAND,
 };
 
 /**

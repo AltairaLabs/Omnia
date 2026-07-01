@@ -27,6 +27,7 @@ function createMockLicense(overrides: Partial<License> = {}): License {
       dataGeneration: true,
       scheduling: true,
       distributedWorkers: true,
+      whiteLabel: true,
     },
     limits: {
       maxScenarios: 0,

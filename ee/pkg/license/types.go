@@ -38,6 +38,8 @@ type Features struct {
 	Scheduling bool `json:"scheduling"`
 	// DistributedWorkers enables multiple worker replicas.
 	DistributedWorkers bool `json:"distributedWorkers"`
+	// WhiteLabel enables dashboard white-label / custom branding.
+	WhiteLabel bool `json:"whiteLabel"`
 }
 
 // Limits defines the resource limits in the license.
@@ -111,6 +113,7 @@ func DevLicense() *License {
 			DataGeneration:     true,
 			Scheduling:         true,
 			DistributedWorkers: true,
+			WhiteLabel:         true,
 		},
 		Limits: Limits{
 			MaxScenarios:      0, // unlimited
