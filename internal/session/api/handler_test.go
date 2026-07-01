@@ -46,6 +46,7 @@ const (
 // --- Mock providers ---
 
 type mockHotCache struct {
+	mu       sync.Mutex // protects all fields; the service writes from detached pushToHotCache goroutines
 	sessions map[string]*session.Session
 	setErr   error
 }
@@ -55,6 +56,8 @@ func newMockHotCache() *mockHotCache {
 }
 
 func (m *mockHotCache) GetSession(_ context.Context, id string) (*session.Session, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	s, ok := m.sessions[id]
 	if !ok {
 		return nil, session.ErrSessionNotFound
@@ -63,6 +66,8 @@ func (m *mockHotCache) GetSession(_ context.Context, id string) (*session.Sessio
 }
 
 func (m *mockHotCache) SetSession(_ context.Context, s *session.Session, _ time.Duration) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if m.setErr != nil {
 		return m.setErr
 	}
@@ -71,6 +76,8 @@ func (m *mockHotCache) SetSession(_ context.Context, s *session.Session, _ time.
 }
 
 func (m *mockHotCache) DeleteSession(_ context.Context, id string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	delete(m.sessions, id)
 	return nil
 }
@@ -80,6 +87,8 @@ func (m *mockHotCache) AppendMessage(_ context.Context, _ string, _ *session.Mes
 }
 
 func (m *mockHotCache) GetRecentMessages(_ context.Context, id string, limit int) ([]*session.Message, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	s, ok := m.sessions[id]
 	if !ok {
 		return nil, session.ErrSessionNotFound
