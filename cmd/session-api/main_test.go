@@ -273,7 +273,8 @@ func TestNewHealthServer_Healthz(t *testing.T) {
 
 // TestEnterpriseRoutesConsentOptOutNotHosted guards that session-api no longer
 // hosts the consent/opt-out handlers. privacy-api is the sole owner of those
-// routes (#1642 Slice B). The DeletionHandler (DSAR, Phase 2) must stay.
+// routes (#1642 Slice B), and now of the full DSAR deletion-request lifecycle too
+// (#1676 Slice C) — session-api keeps only the per-group delete-by-user endpoint.
 //
 // Strategy:
 //   - POST /api/v1/privacy/opt-out with an empty JSON body: when the route IS
@@ -284,14 +285,13 @@ func TestNewHealthServer_Healthz(t *testing.T) {
 //     registered the mux returns 405 (path matched, wrong method); when they
 //     are gone it returns 404. No handler body is executed, so a nil pool is safe.
 func TestEnterpriseRoutesConsentOptOutNotHosted(t *testing.T) {
-	// Pass nil pool and nil auditLogger.
-	// The DeletionHandler block is gated on (f.enterprise && auditLogger != nil),
-	// so it is skipped entirely — no registry.WarmStore() panic.
-	// The consent/opt-out block calls NewPreferencesStore(nil), which is safe
-	// because it only stores the pool; the pool is not used during registration.
+	// Pass a nil auditLogger: the enterprise block is gated on
+	// (f.enterprise && auditLogger != nil), so it is skipped entirely — no
+	// registry.WarmStore() access. The consent/opt-out routes are not registered
+	// here at all (privacy-api owns them).
 	mux := http.NewServeMux()
 	f := &flags{enterprise: true}
-	registerEnterpriseRoutes(mux, nil, nil, nil, f, logr.Discard())
+	registerEnterpriseRoutes(mux, nil, nil, f, logr.Discard())
 
 	// POST /api/v1/privacy/opt-out must return 404 (not hosted here).
 	rec := httptest.NewRecorder()

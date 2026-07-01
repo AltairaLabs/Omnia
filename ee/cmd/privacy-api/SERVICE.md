@@ -80,8 +80,9 @@ warm cache retains opt-out preferences.
   calls session-api's `delete-by-user` endpoint (sessions + media) and memory-api's
   batch-delete (memories, scoped by workspace UID), both SA-authenticated. Per-tier
   deletion is delegated to the owning service, so privacy-api holds no warm-store or
-  object-storage credentials. (DSAR lifecycle audit events are not yet forwarded to
-  the audit hub — see #1678.)
+  object-storage credentials. DSAR lifecycle events (`deletion_requested` /
+  `deletion_completed` / `deletion_failed`) are written to the central `audit_log`
+  under source_service `privacy-api-dsar` (#1678).
 
 ## What privacy-api does NOT own
 

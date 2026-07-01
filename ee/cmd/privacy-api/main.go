@@ -401,9 +401,8 @@ func registerRoutes(
 
 // buildDeletionHandler constructs the DSAR orchestrator: a PostgresDeletionStore
 // over privacy's deletion_requests table plus a fan-out SubjectEraser that erases
-// across the workspace's service-groups. Audit is nil for this slice — the
-// deletion_requests row is the authoritative erasure record (see #1676 Slice C
-// follow-up for wiring DSAR events into privacy's audit_log).
+// across the workspace's service-groups. DSAR lifecycle events are written to
+// privacy's central audit_log via DeletionAuditLogger (#1678).
 func buildDeletionHandler(
 	pool *pgxpool.Pool,
 	groups []privacy.GroupTarget,
@@ -413,7 +412,8 @@ func buildDeletionHandler(
 ) *privacy.DeletionHandler {
 	store := privacy.NewPostgresDeletionStore(pool)
 	eraser := privacy.NewFanOutSubjectEraser(groups, workspaceUID, privacy.NewSessionGroupEraser(ts, log), ts, log)
-	svc := privacy.NewDeletionService(store, privacy.NoOpSessionDeleter{}, nil, log)
+	auditLogger := privacy.NewDeletionAuditLogger(privacy.NewAuditStore(pool), workspaceUID, log)
+	svc := privacy.NewDeletionService(store, privacy.NoOpSessionDeleter{}, auditLogger, log)
 	svc.SetSubjectEraser(eraser)
 	return privacy.NewDeletionHandler(svc, log)
 }

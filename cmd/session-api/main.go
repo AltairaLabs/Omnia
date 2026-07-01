@@ -632,7 +632,7 @@ func buildAPIMux(pool *pgxpool.Pool, registry *providers.Registry, f *flags, log
 
 	mux := http.NewServeMux()
 	handler.RegisterRoutes(mux)
-	registerEnterpriseRoutes(mux, pool, registry, auditLogger, f, log)
+	registerEnterpriseRoutes(mux, registry, auditLogger, f, log)
 
 	// Privacy middleware (enterprise only): PII redaction + user opt-out.
 	var apiHandler http.Handler = mux
@@ -678,31 +678,20 @@ func buildAPIMux(pool *pgxpool.Pool, registry *providers.Registry, f *flags, log
 	return rlMiddleware(authMW(api.MetricsMiddleware(httpMetrics, traced))), sessionService, cleanup
 }
 
-// registerEnterpriseRoutes adds audit, GDPR deletion, and opt-out routes when
-// enterprise mode is enabled.
-func registerEnterpriseRoutes(mux *http.ServeMux, pool *pgxpool.Pool, registry *providers.Registry, auditLogger *audit.Logger, f *flags, log logr.Logger) {
+// registerEnterpriseRoutes adds audit and the session-tier DSAR erasure endpoint
+// when enterprise mode is enabled. The full DSAR request lifecycle
+// (deletion-request[s]) is owned by privacy-api (#1676); session-api only exposes
+// the per-group session erase that privacy-api orchestrates.
+func registerEnterpriseRoutes(mux *http.ServeMux, registry *providers.Registry, auditLogger *audit.Logger, f *flags, log logr.Logger) {
 	if f.enterprise && auditLogger != nil {
 		ah := audit.NewHandler(auditLogger, log)
 		ah.RegisterRoutes(mux)
 
+		// Session-tier DSAR erasure endpoint (#1676): lists + warm-deletes this
+		// group's sessions and their media for a subject. privacy-api calls this
+		// per service-group when orchestrating an erasure.
 		warm, _ := registry.WarmStore()
-		deletionStore := privacy.NewPostgresDeletionStore(pool)
-		deleter := privacy.NewWarmStoreSessionDeleter(warm)
-		deletionSvc := privacy.NewDeletionService(deletionStore, deleter, auditLogger, log)
-		deletionSvc.SetMediaDeleter(buildMediaDeleter(f, log))
-		if memoryAPIURL := os.Getenv("OMNIA_MEMORY_API_URL"); memoryAPIURL != "" {
-			memDeleter := privacy.NewMemoryHTTPDeleter(memoryAPIURL, log)
-			deletionSvc.SetMemoryDeleter(memDeleter)
-			log.Info("memory deleter enabled", "memoryAPIURL", memoryAPIURL)
-		}
-		deletionHandler := privacy.NewDeletionHandler(deletionSvc, log)
-		deletionHandler.RegisterRoutes(mux)
-
-		// Session-tier DSAR erasure endpoint (privacy-api Phase 2, #1676): exposes
-		// list + warm delete + media cleanup for this group so privacy-api can
-		// orchestrate erasure across service-groups. Reuses the same warm-store
-		// deleter and media deleter as the (transitional) in-process DeletionService.
-		eraser := privacy.NewSessionEraser(deleter, log)
+		eraser := privacy.NewSessionEraser(privacy.NewWarmStoreSessionDeleter(warm), log)
 		eraser.SetMediaDeleter(buildMediaDeleter(f, log))
 		privacy.NewSessionEraseHandler(eraser, log).RegisterRoutes(mux)
 	}

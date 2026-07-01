@@ -140,8 +140,9 @@ func TestMigrationFS_ContainsMigrations(t *testing.T) {
 	entries, err := MigrationFS.ReadDir("migrations")
 	require.NoError(t, err)
 	// 000001: consolidated initial schema; 000002: drop user_privacy_preferences;
-	// 000003: audit_log.forwarded_at for the privacy-api audit drain-forwarder (#1673).
-	assert.Len(t, entries, 6, "should have exactly 6 migration files (3 up + 3 down)")
+	// 000003: audit_log.forwarded_at for the privacy-api audit drain-forwarder (#1673);
+	// 000004: drop deletion_requests (DSAR moved to privacy-api, #1676).
+	assert.Len(t, entries, 8, "should have exactly 8 migration files (4 up + 4 down)")
 
 	// Verify expected migration files exist
 	expected := []string{
@@ -151,6 +152,8 @@ func TestMigrationFS_ContainsMigrations(t *testing.T) {
 		"000002_drop_privacy_prefs.down.sql",
 		"000003_audit_forwarded_at.up.sql",
 		"000003_audit_forwarded_at.down.sql",
+		"000004_drop_deletion_requests.up.sql",
+		"000004_drop_deletion_requests.down.sql",
 	}
 	names := make(map[string]bool)
 	for _, e := range entries {
@@ -167,6 +170,13 @@ func TestDropMigration_SessionFS_Content(t *testing.T) {
 	sqlText := string(data)
 	assert.Contains(t, sqlText, "DROP TABLE IF EXISTS user_privacy_preferences",
 		"session drop migration must drop user_privacy_preferences")
+}
+
+func TestDropMigration_DeletionRequestsContent(t *testing.T) {
+	data, err := MigrationFS.ReadFile("migrations/000004_drop_deletion_requests.up.sql")
+	require.NoError(t, err)
+	assert.Contains(t, string(data), "DROP TABLE IF EXISTS deletion_requests",
+		"session drop migration must drop deletion_requests (#1676)")
 }
 
 func TestDropMigration_UserPrivacyPrefsDropped(t *testing.T) {

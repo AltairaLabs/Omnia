@@ -10,6 +10,16 @@ or `api/proto/`, add an entry below with the date, affected API, and reason.
 
 ## Unreleased
 
+### Removed (session-api: DSAR request-lifecycle endpoints, #1676 Slice C)
+
+- **`POST /api/v1/privacy/deletion-request`**, **`GET /api/v1/privacy/deletion-request/{id}`**,
+  **`GET /api/v1/privacy/deletion-requests`** are **no longer served by session-api** — privacy-api
+  is the sole owner of the DSAR request lifecycle (see the Slice B entry below). session-api keeps
+  only `POST /api/v1/privacy/sessions/delete-by-user`, which privacy-api calls per service group.
+  The session DB `deletion_requests` table is dropped (session migration `000004`). DSAR lifecycle
+  events (`deletion_requested` / `_completed` / `_failed`) are now written to privacy-api's central
+  `audit_log` by the orchestrator (#1678), so the audit trail is preserved.
+
 ### Added (privacy-api: DSAR orchestration endpoints, #1676 Slice B)
 
 - **`POST /api/v1/privacy/deletion-request`**, **`GET /api/v1/privacy/deletion-request/{id}`**,

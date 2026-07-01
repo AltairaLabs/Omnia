@@ -254,6 +254,37 @@ func TestBuildAPIMux_EnterpriseEraseRouteWired(t *testing.T) {
 	}
 }
 
+// TestBuildAPIMux_DeletionRequestRouteRemoved locks in #1676 Slice C: the DSAR
+// request-lifecycle routes (deletion-request[s]) moved to privacy-api, so
+// session-api must NOT serve them even in enterprise mode. session-api keeps only
+// the per-group delete-by-user endpoint (asserted above).
+func TestBuildAPIMux_DeletionRequestRouteRemoved(t *testing.T) {
+	freshPromRegistry(t)
+	pool := newBogusPool(t)
+	registry := providers.NewRegistry()
+	f := &flags{
+		enterprise:  true,
+		apiAddr:     ":0",
+		healthAddr:  ":0",
+		metricsAddr: ":0",
+	}
+
+	handler, _, cleanup := buildAPIMux(pool, registry, f, logr.Discard(), nil, nil, nil)
+	defer cleanup()
+
+	for _, path := range []string{
+		"/api/v1/privacy/deletion-request",
+		"/api/v1/privacy/deletion-requests",
+	} {
+		req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(`{}`))
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+		if rr.Code != http.StatusNotFound {
+			t.Errorf("%s must not be hosted by session-api (privacy-api owns it, #1676); got %d", path, rr.Code)
+		}
+	}
+}
+
 // TestBuildAPIMux_NonEnterprise_EraseRouteAbsent is the negative counterpart:
 // without --enterprise, the delete-by-user route must NOT be registered.
 func TestBuildAPIMux_NonEnterprise_EraseRouteAbsent(t *testing.T) {
