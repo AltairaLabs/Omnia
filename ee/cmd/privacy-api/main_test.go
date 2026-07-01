@@ -37,7 +37,7 @@ func TestRegisterRoutes_AllMounted(t *testing.T) {
 	mux := http.NewServeMux()
 	base := privacy.NewPreferencesStore(nil) // nil pool: routes only, no DB hit in this probe
 	auditStore := privacy.NewAuditStore(nil) // nil pool: routes only, no DB hit in this probe
-	registerRoutes(mux, base, base, auditStore, logr.Discard(), privacy.NoopConsentNotifier{})
+	registerRoutes(mux, base, base, auditStore, logr.Discard(), privacy.NoopConsentNotifier{}, nil)
 
 	for _, tc := range []struct{ method, path string }{
 		{http.MethodGet, "/api/v1/privacy/preferences/abc123"},
@@ -104,7 +104,7 @@ func TestApplyEnvFallbacks_AuthEnvSeam(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 	})
-	registerRoutes(mux, base, base, privacy.NewAuditStore(nil), logr.Discard(), privacy.NoopConsentNotifier{})
+	registerRoutes(mux, base, base, privacy.NewAuditStore(nil), logr.Discard(), privacy.NoopConsentNotifier{}, nil)
 
 	subjects := splitAndTrim(f.authAllowedSubjects)
 	namespaces := splitAndTrim(f.authAllowedNamespaces)
@@ -131,7 +131,7 @@ func TestApplyEnvFallbacks_AuthEnvSeam(t *testing.T) {
 // privacy routes are mounted when enterprise=true (the expected production path).
 func TestEnterpriseGate_RoutesRegisteredWhenTrue(t *testing.T) {
 	base := privacy.NewPreferencesStore(nil)
-	mux := buildAPIMux(true, base, base, privacy.NewAuditStore(nil), logr.Discard(), privacy.NoopConsentNotifier{})
+	mux := buildAPIMux(true, base, base, privacy.NewAuditStore(nil), logr.Discard(), privacy.NoopConsentNotifier{}, nil)
 
 	for _, p := range []string{
 		"/api/v1/privacy/preferences/abc123",
@@ -152,7 +152,7 @@ func TestEnterpriseGate_RoutesRegisteredWhenTrue(t *testing.T) {
 // and opt-out routes return 404 when enterprise=false, while /healthz still returns 200.
 func TestEnterpriseGate_RoutesAbsentWhenFalse(t *testing.T) {
 	base := privacy.NewPreferencesStore(nil)
-	mux := buildAPIMux(false, base, base, privacy.NewAuditStore(nil), logr.Discard(), privacy.NoopConsentNotifier{})
+	mux := buildAPIMux(false, base, base, privacy.NewAuditStore(nil), logr.Discard(), privacy.NoopConsentNotifier{}, nil)
 
 	// /healthz must still be reachable.
 	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
@@ -175,6 +175,34 @@ func TestEnterpriseGate_RoutesAbsentWhenFalse(t *testing.T) {
 		if rec.Code != http.StatusNotFound {
 			t.Errorf("enterprise=false: route %q expected 404, got %d", p, rec.Code)
 		}
+	}
+}
+
+// TestDSAR_RouteRegisteredWhenHandlerPresent verifies the DSAR deletion-request
+// route is mounted when a deletion handler is wired (enterprise + fan-out
+// orchestrator built). buildDeletionHandler needs no live DB at construction.
+func TestDSAR_RouteRegisteredWhenHandlerPresent(t *testing.T) {
+	base := privacy.NewPreferencesStore(nil)
+	dh := buildDeletionHandler(nil, nil, "", nil, logr.Discard())
+	mux := buildAPIMux(true, base, base, privacy.NewAuditStore(nil), logr.Discard(), privacy.NoopConsentNotifier{}, dh)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/privacy/deletion-request", nil)
+	if _, pattern := mux.Handler(req); pattern == "" {
+		t.Error("POST /api/v1/privacy/deletion-request should be registered when a deletion handler is wired")
+	}
+}
+
+// TestDSAR_RouteAbsentWhenHandlerNil verifies the nil-guard: with no deletion
+// handler, the DSAR route is not mounted (404).
+func TestDSAR_RouteAbsentWhenHandlerNil(t *testing.T) {
+	base := privacy.NewPreferencesStore(nil)
+	mux := buildAPIMux(true, base, base, privacy.NewAuditStore(nil), logr.Discard(), privacy.NoopConsentNotifier{}, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/privacy/deletion-request", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("DSAR route must be absent without a deletion handler; got %d", rec.Code)
 	}
 }
 
@@ -237,7 +265,7 @@ func TestBuildHandler_AuthExemptsHealthz(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 	})
-	registerRoutes(mux, base, base, privacy.NewAuditStore(nil), logr.Discard(), privacy.NoopConsentNotifier{})
+	registerRoutes(mux, base, base, privacy.NewAuditStore(nil), logr.Discard(), privacy.NoopConsentNotifier{}, nil)
 
 	// alwaysDenyReviewer: any presented token is rejected → unauthenticated.
 	reviewer := alwaysDenyReviewer{}
