@@ -12,6 +12,7 @@ import {
 import { ThemeProvider } from "next-themes";
 import { useState } from "react";
 import { DataServiceProvider } from "@/lib/data";
+import { BrandProvider } from "@/components/branding/brand-provider";
 import { WorkspaceProvider } from "@/contexts/workspace-context";
 import { DEFAULT_STALE_TIME } from "@/lib/query-config";
 import { redirectToLogin } from "@/lib/auth/redirect-to-login";
@@ -57,11 +58,13 @@ export function Providers({ children }: Readonly<{ children: React.ReactNode }>)
         enableSystem
         disableTransitionOnChange
       >
-        <WorkspaceProvider>
-          <DataServiceProvider>
-            {children}
-          </DataServiceProvider>
-        </WorkspaceProvider>
+        <BrandProvider>
+          <WorkspaceProvider>
+            <DataServiceProvider>
+              {children}
+            </DataServiceProvider>
+          </WorkspaceProvider>
+        </BrandProvider>
       </ThemeProvider>
     </QueryClientProvider>
   );
