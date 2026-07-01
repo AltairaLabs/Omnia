@@ -697,6 +697,14 @@ func registerEnterpriseRoutes(mux *http.ServeMux, pool *pgxpool.Pool, registry *
 		}
 		deletionHandler := privacy.NewDeletionHandler(deletionSvc, log)
 		deletionHandler.RegisterRoutes(mux)
+
+		// Session-tier DSAR erasure endpoint (privacy-api Phase 2, #1676): exposes
+		// list + warm delete + media cleanup for this group so privacy-api can
+		// orchestrate erasure across service-groups. Reuses the same warm-store
+		// deleter and media deleter as the (transitional) in-process DeletionService.
+		eraser := privacy.NewSessionEraser(deleter, log)
+		eraser.SetMediaDeleter(buildMediaDeleter(f, log))
+		privacy.NewSessionEraseHandler(eraser, log).RegisterRoutes(mux)
 	}
 
 }

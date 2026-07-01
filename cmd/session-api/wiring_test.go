@@ -14,6 +14,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -215,6 +216,67 @@ func TestBuildAPIMux_NonEnterprise_AuditRoutesAbsent(t *testing.T) {
 
 	if rr.Code != http.StatusNotFound {
 		t.Errorf("audit route must not be registered without --enterprise; got %d", rr.Code)
+	}
+}
+
+// TestBuildAPIMux_EnterpriseEraseRouteWired verifies the session-tier DSAR
+// erasure endpoint (POST /api/v1/privacy/sessions/delete-by-user) is registered
+// when --enterprise is set. privacy-api calls this route to erase a group's
+// sessions; if the SessionEraseHandler.RegisterRoutes call in
+// registerEnterpriseRoutes is dropped, DSAR fan-out silently breaks.
+func TestBuildAPIMux_EnterpriseEraseRouteWired(t *testing.T) {
+	freshPromRegistry(t)
+	pool := newBogusPool(t)
+	registry := providers.NewRegistry()
+	f := &flags{
+		enterprise:  true,
+		apiAddr:     ":0",
+		healthAddr:  ":0",
+		metricsAddr: ":0",
+	}
+
+	handler, _, cleanup := buildAPIMux(pool, registry, f, logr.Discard(), nil, nil, nil)
+	defer cleanup()
+
+	// Empty body → missing virtual_user_id → the eraser fails closed with 400
+	// before touching the (unreachable) warm store. Proves the route is
+	// registered without requiring a working DB.
+	req := httptest.NewRequest(http.MethodPost,
+		"/api/v1/privacy/sessions/delete-by-user", strings.NewReader(`{}`))
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code == http.StatusNotFound {
+		t.Errorf("POST /api/v1/privacy/sessions/delete-by-user should be registered in enterprise mode; got 404")
+	}
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("delete-by-user with empty body should fail closed 400; got %d", rr.Code)
+	}
+}
+
+// TestBuildAPIMux_NonEnterprise_EraseRouteAbsent is the negative counterpart:
+// without --enterprise, the delete-by-user route must NOT be registered.
+func TestBuildAPIMux_NonEnterprise_EraseRouteAbsent(t *testing.T) {
+	freshPromRegistry(t)
+	pool := newBogusPool(t)
+	registry := providers.NewRegistry()
+	f := &flags{
+		enterprise:  false,
+		apiAddr:     ":0",
+		healthAddr:  ":0",
+		metricsAddr: ":0",
+	}
+
+	handler, _, cleanup := buildAPIMux(pool, registry, f, logr.Discard(), nil, nil, nil)
+	defer cleanup()
+
+	req := httptest.NewRequest(http.MethodPost,
+		"/api/v1/privacy/sessions/delete-by-user", strings.NewReader(`{}`))
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusNotFound {
+		t.Errorf("delete-by-user route must not be registered without --enterprise; got %d", rr.Code)
 	}
 }
 

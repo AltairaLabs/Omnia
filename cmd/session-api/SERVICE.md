@@ -50,6 +50,7 @@
   - `DELETE /api/v1/sessions/{id}` — delete a single session
   - `DELETE /api/v1/sessions?namespace={ns}` — bulk purge sessions by scope (optional `agent`/`before` filters). Note: purged sessions stay readable by ID until the hot-cache TTL expires (see service.go `DeleteSessionsByScope`).
   - `GET /api/v1/privacy-policy?namespace={ns}&agent={agent}` — returns the facade-visible subset of the effective SessionPrivacyPolicy (`{"recording":{"enabled","facadeData","runtimeData"}}`); 204 when no policy applies
+  - `POST /api/v1/privacy/sessions/delete-by-user` (enterprise) — session-tier DSAR erasure for **this group only**. Body `{"virtual_user_id","workspace","date_from","date_to"}`; lists + warm-deletes the subject's sessions and their media, returns `{"sessions_deleted":N,"errors":[…]}`. Fails closed (400) on an empty `virtual_user_id`. Does NOT touch memory or the deletion-request lifecycle — privacy-api orchestrates this endpoint across all of a workspace's service-groups (#1676).
 - **gRPC/HTTP** OTLP trace ingestion (optional)
 
 ## Authentication (internal service-to-service)
