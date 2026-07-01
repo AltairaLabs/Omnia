@@ -26,6 +26,8 @@ import {
   type ScreenPos,
   type Box,
 } from "@/lib/memory-galaxy/galaxy-layout";
+import { drawPoolBall, drawRings, drawSearchRings } from "@/lib/memory-galaxy/galaxy-draw";
+import { matchFitView } from "@/lib/memory-galaxy/galaxy-search";
 import { TIER_LABELS } from "@/lib/memory-analytics/colors";
 import type { Tier } from "@/lib/memory-analytics/types";
 import { cn } from "@/lib/utils";
@@ -77,19 +79,6 @@ function isVisible(p: GalaxyPoint, hidden: Set<string>, colorBy: Dimension): boo
   return !hidden.has(pointFacet(p, colorBy));
 }
 
-function drawPoolBall(ctx: CanvasRenderingContext2D, s: ScreenPos, r: number, confidence: number): void {
-  const inner = r * 0.62;
-  ctx.beginPath();
-  ctx.arc(s.x, s.y, inner, 0, Math.PI * 2);
-  ctx.fillStyle = "rgba(255,255,255,0.92)";
-  ctx.fill();
-  ctx.fillStyle = "#0b1020";
-  ctx.font = `${Math.round(inner * 1.1)}px sans-serif`;
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  ctx.fillText(String(Math.round(confidence * 100)), s.x, s.y + 0.5);
-}
-
 interface DrawOpts {
   showConfidence: boolean;
   ageFade: boolean;
@@ -121,29 +110,6 @@ function drawPoints(
     if (opts.showConfidence && !dim && r >= POOL_BALL_MIN_RADIUS) drawPoolBall(ctx, s, r, p.confidence);
   }
   ctx.globalAlpha = 1;
-}
-
-// Highlight ring around points that currently have an open bubble, so it's
-// obvious which node a bubble belongs to.
-function drawRings(
-  ctx: CanvasRenderingContext2D,
-  points: GalaxyPoint[],
-  openIds: Set<string>,
-  fit: Transform,
-  view: View,
-  isDark: boolean,
-): void {
-  if (openIds.size === 0) return;
-  const sf = sizeFactor(view.zoom);
-  ctx.lineWidth = 2;
-  ctx.strokeStyle = isDark ? "rgba(255,255,255,0.95)" : "rgba(15,23,42,0.95)";
-  for (const p of points) {
-    if (!openIds.has(p.id)) continue;
-    const s = project(p, fit, view);
-    ctx.beginPath();
-    ctx.arc(s.x, s.y, pointRadius(p, sf) + 4, 0, Math.PI * 2);
-    ctx.stroke();
-  }
 }
 
 function labelCandidates(
@@ -238,6 +204,7 @@ export function MemoryGalaxy({
   const drag = useRef({ active: false, moved: false, startX: 0, startY: 0, panX: 0, panY: 0 });
   const prevZoom = useRef(view.zoom);
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const searchZoomTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Auto-close open bubbles when zooming out, debounced so small adjustments
   // don't dismiss them.
@@ -266,6 +233,7 @@ export function MemoryGalaxy({
     const scene: Scene = { fit, view, w: width, h: height };
     drawPoints(ctx, points, colorBy, hidden, filters, scene, { showConfidence, ageFade, now: Date.now() });
     drawRings(ctx, points, openIds, fit, view, isDark);
+    drawSearchRings(ctx, points, filters.search, fit, view);
     if (labelsOn && view.zoom >= LABEL_MIN_ZOOM) {
       drawLabels(ctx, labelCandidates(points, colorBy, hidden, filters, scene), colorBy, width, isDark);
     }
@@ -296,6 +264,27 @@ export function MemoryGalaxy({
   useEffect(() => {
     draw();
   }, [draw]);
+
+  // Debounced zoom-to-matches: framing the matching points makes an active
+  // search obviously "do something"; clearing it returns to the full view.
+  useEffect(() => {
+    if (size.w === 0) return;
+    if (searchZoomTimer.current) clearTimeout(searchZoomTimer.current);
+    searchZoomTimer.current = setTimeout(() => {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      if (!filters.search) {
+        setView(DEFAULT_VIEW);
+        return;
+      }
+      const fit = fitTransform(points, canvas.width, canvas.height);
+      const v = matchFitView(points, filters.search, fit, canvas.width, canvas.height, MIN_ZOOM, MAX_ZOOM);
+      if (v) setView(v);
+    }, 400);
+    return () => {
+      if (searchZoomTimer.current) clearTimeout(searchZoomTimer.current);
+    };
+  }, [filters.search, points, size.w]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
