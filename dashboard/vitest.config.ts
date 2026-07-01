@@ -69,6 +69,11 @@ export default defineConfig({
         "src/components/layout/**",
         "src/components/logs/**",
         "src/components/topology/**",
+        // Canvas-rendered galaxy scatter: hit-testing/projection need a real
+        // canvas (getContext/getBoundingClientRect) that jsdom can't provide.
+        // The browse-order/index logic is extracted to lib/memory-galaxy/stack.ts
+        // (unit-tested); the bubble carousel has its own component test.
+        "src/components/memories/memory-galaxy.tsx",
 
         // Next.js framework files (tested via E2E)
         "src/app/**/layout.tsx",

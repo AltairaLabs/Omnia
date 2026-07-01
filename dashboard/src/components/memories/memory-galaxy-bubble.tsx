@@ -2,18 +2,23 @@
 
 import { createPortal } from "react-dom";
 import type { ReactNode } from "react";
-import { X, Trash2 } from "lucide-react";
+import { X, Trash2, ChevronLeft, ChevronRight } from "lucide-react";
 import type { GalaxyPoint } from "@/lib/memory-galaxy/types";
 import { TierBadge } from "./tier-badge";
 import { CategoryBadge } from "./category-badge";
 import { cn } from "@/lib/utils";
 
 interface MemoryGalaxyBubbleProps {
-  point: GalaxyPoint;
+  // The memories stacked at the clicked location, ordered for browsing. One
+  // popup pages through them (prev/next) instead of opening a window per point.
+  stack: GalaxyPoint[];
+  index: number; // which memory in the stack is currently shown
   left: number; // viewport x of the node (tail target)
   top: number; // viewport y of the node (tail target)
   placement: "above" | "below";
   tailOffset: number; // px from the card centre to the tail, so it points at the node when clamped
+  onPrev: () => void;
+  onNext: () => void;
   onClose: () => void;
   onDelete: (id: string) => void;
 }
@@ -35,19 +40,28 @@ function Row({ label, children }: { label: string; children: ReactNode }) {
 
 // A speech-bubble popup, portalled to <body> so it's never clipped by the
 // galaxy's overflow and is always clickable. A triangle tail bridges the gap to
-// the node and points at it.
+// the node and points at it. When several memories share the clicked point the
+// footer shows a prev/next carousel so all of them are reachable from one popup.
 export function MemoryGalaxyBubble({
-  point,
+  stack,
+  index,
   left,
   top,
   placement,
   tailOffset,
+  onPrev,
+  onNext,
   onClose,
   onDelete,
 }: Readonly<MemoryGalaxyBubbleProps>) {
   if (typeof document === "undefined") return null;
+  const point = stack[index];
+  if (!point) return null;
   const above = placement === "above";
   const tailLeft = `calc(50% + ${tailOffset}px)`;
+  const many = stack.length > 1;
+  const atStart = index <= 0;
+  const atEnd = index >= stack.length - 1;
 
   return createPortal(
     <div
@@ -91,6 +105,34 @@ export function MemoryGalaxyBubble({
         <Row label="Created">{fmtDate(point.observedAt)}</Row>
         <Row label="Expires">{fmtDate(point.expiresAt)}</Row>
       </div>
+
+      {many && (
+        <div className="flex items-center justify-between gap-2 border-t px-2 py-1.5 text-xs">
+          <button
+            type="button"
+            aria-label="Previous memory"
+            data-testid="bubble-prev"
+            onClick={onPrev}
+            disabled={atStart}
+            className="rounded p-1 text-muted-foreground transition-colors hover:bg-muted disabled:pointer-events-none disabled:opacity-30"
+          >
+            <ChevronLeft className="h-4 w-4" />
+          </button>
+          <span data-testid="bubble-position" className="text-muted-foreground">
+            {index + 1} of {stack.length}
+          </span>
+          <button
+            type="button"
+            aria-label="Next memory"
+            data-testid="bubble-next"
+            onClick={onNext}
+            disabled={atEnd}
+            className="rounded p-1 text-muted-foreground transition-colors hover:bg-muted disabled:pointer-events-none disabled:opacity-30"
+          >
+            <ChevronRight className="h-4 w-4" />
+          </button>
+        </div>
+      )}
 
       <div className="border-t p-2">
         <button
