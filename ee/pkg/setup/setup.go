@@ -9,6 +9,7 @@ Functional Source License. See ee/LICENSE for details.
 package setup
 
 import (
+	"context"
 	"fmt"
 
 	"k8s.io/client-go/tools/record"
@@ -99,6 +100,9 @@ func registerLicenseActivation(mgr ctrl.Manager, opts EnterpriseOptions) error {
 	if err != nil {
 		return fmt.Errorf("failed to create license validator: %w", err)
 	}
+
+	// Nag once at startup when the operator isn't backed by a valid license.
+	license.NagIfUnlicensed(validator.GetLicenseOrDefault(context.Background()), mgr.GetLogger().WithName("license"))
 
 	var clientOpts []license.ActivationClientOption
 	if opts.LicenseServerURL != "" {

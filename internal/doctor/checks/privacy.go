@@ -15,6 +15,7 @@ import (
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 	eev1alpha1 "github.com/altairalabs/omnia/ee/api/v1alpha1"
+	"github.com/altairalabs/omnia/ee/pkg/license"
 	"github.com/altairalabs/omnia/internal/doctor"
 )
 
@@ -80,34 +81,16 @@ func (p *PrivacyChecker) requireEnterprise(ctx context.Context) *doctor.TestResu
 		return &r
 	}
 
-	licenseURL := p.arenaURL + "/api/v1/license"
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, licenseURL, nil)
+	// Fetch + parse via the shared license client (one parser for the endpoint,
+	// the same license.License struct the validator produces).
+	lic, err := license.NewClient(p.arenaURL, license.WithClientHTTP(memoryClient())).Refresh(ctx)
 	if err != nil {
-		r := doctor.TestResult{Status: doctor.StatusSkip, Detail: "enterprise license check failed", Error: err.Error()}
-		return &r
-	}
-	resp, err := memoryClient().Do(req)
-	if err != nil {
-		r := doctor.TestResult{Status: doctor.StatusSkip, Detail: "enterprise not available (arena controller unreachable)"}
-		return &r
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode != http.StatusOK {
-		r := doctor.TestResult{Status: doctor.StatusSkip, Detail: fmt.Sprintf("license endpoint returned HTTP %d", resp.StatusCode)}
+		r := doctor.TestResult{Status: doctor.StatusSkip, Detail: "enterprise not available (arena controller unreachable)", Error: err.Error()}
 		return &r
 	}
 
-	var license struct {
-		Tier string `json:"tier"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&license); err != nil {
-		r := doctor.TestResult{Status: doctor.StatusSkip, Detail: "failed to decode license response", Error: err.Error()}
-		return &r
-	}
-
-	if license.Tier != "enterprise" {
-		r := doctor.TestResult{Status: doctor.StatusSkip, Detail: fmt.Sprintf("privacy checks require enterprise license (current: %s)", license.Tier)}
+	if !lic.IsEnterprise() {
+		r := doctor.TestResult{Status: doctor.StatusSkip, Detail: fmt.Sprintf("privacy checks require enterprise license (current: %s)", lic.Tier)}
 		return &r
 	}
 	return nil

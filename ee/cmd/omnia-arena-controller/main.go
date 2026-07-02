@@ -257,10 +257,6 @@ func main() {
 	var licenseValidator *license.Validator
 	validatorOpts := []license.ValidatorOption{}
 	if devMode {
-		setupLog.Info("========================================================================")
-		setupLog.Info("WARNING: Running with development license - NOT LICENSED FOR PRODUCTION USE.")
-		setupLog.Info("Please obtain a valid enterprise license at https://altairalabs.ai/licensing")
-		setupLog.Info("========================================================================")
 		validatorOpts = append(validatorOpts, license.WithDevMode())
 	}
 	licenseValidator, err = license.NewValidator(mgr.GetClient(), validatorOpts...)
@@ -268,6 +264,9 @@ func main() {
 		setupLog.Error(err, "unable to create license validator")
 		os.Exit(1)
 	}
+	// Nag once at startup when this deployment isn't backed by a valid license
+	// (open-core, absent, or expired) — gated on the license, not on dev-mode.
+	license.NagIfUnlicensed(licenseValidator.GetLicenseOrDefault(context.Background()), setupLog)
 
 	// Create storage manager for lazy PVC creation (only used when NFS is not configured)
 	var storageManager *workspace.StorageManager
