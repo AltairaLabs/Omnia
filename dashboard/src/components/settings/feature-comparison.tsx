@@ -50,6 +50,12 @@ const FEATURE_COMPARISON: FeatureCategory[] = [
     ],
   },
   {
+    category: "Branding",
+    features: [
+      { name: "White-Label Branding", openCore: false, enterprise: true },
+    ],
+  },
+  {
     category: "Limits",
     features: [
       { name: "Max Scenarios per Job", openCore: "10", enterprise: "Unlimited" },
