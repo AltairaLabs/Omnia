@@ -4,7 +4,6 @@
 [![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=AltairaLabs_Omnia&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=AltairaLabs_Omnia)
 [![Coverage](https://sonarcloud.io/api/project_badges/measure?project=AltairaLabs_Omnia&metric=coverage)](https://sonarcloud.io/summary/new_code?id=AltairaLabs_Omnia)
 [![Go Report Card](https://goreportcard.com/badge/github.com/AltairaLabs/Omnia)](https://goreportcard.com/report/github.com/AltairaLabs/Omnia)
-[![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/AltairaLabs/Omnia/badge)](https://scorecard.dev/viewer/?uri=github.com/AltairaLabs/Omnia)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
 **The Kubernetes Platform for AI Agent Deployment**
