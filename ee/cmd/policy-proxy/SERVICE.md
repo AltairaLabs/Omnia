@@ -29,3 +29,8 @@
 ## Dependencies
 - K8s client (policy watching)
 - CEL evaluator
+- Operator/arena-controller `/api/v1/license` (optional) — read once at startup
+  via `OPERATOR_API_URL` (stamped onto the sidecar by the operator) for the
+  license-awareness nag (#1682). policy-proxy is enterprise-only, so an
+  unlicensed deployment (open-core/absent/expired) logs a startup reminder. It
+  **never blocks** — enforcement keeps running; a valid license is silent.

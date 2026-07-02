@@ -196,7 +196,7 @@ func (r *AgentRuntimeReconciler) buildDeploymentSpec(
 	// before they reach the runtime. PolicyProxyImage is only set when
 	// the --enterprise flag is active.
 	if r.PolicyProxyImage != "" {
-		policyContainer := buildPolicyProxyContainer(agentRuntime, r.PolicyProxyImage)
+		policyContainer := buildPolicyProxyContainer(agentRuntime, r.PolicyProxyImage, r.PolicyProxyLicenseAPIURL)
 		containers = append(containers, policyContainer)
 		log.Info("injecting policy-proxy sidecar", "agent", agentRuntime.Name)
 	}

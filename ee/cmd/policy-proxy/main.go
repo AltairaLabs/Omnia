@@ -20,6 +20,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/go-logr/logr"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -27,6 +28,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/ee/api/v1alpha1"
+	eelicense "github.com/altairalabs/omnia/ee/pkg/license"
 	"github.com/altairalabs/omnia/ee/pkg/policy"
 )
 
@@ -41,7 +43,37 @@ const (
 	envUpstreamURL = "POLICY_PROXY_UPSTREAM_URL"
 	envNamespace   = "OMNIA_NAMESPACE"
 	envAgentName   = "OMNIA_AGENT_NAME"
+	// envOperatorAPIURL points at the operator/arena-controller license
+	// endpoint. When set and the license is not valid, the proxy logs a
+	// startup reminder. Never blocks.
+	envOperatorAPIURL = "OPERATOR_API_URL"
 )
+
+// nagLicenseAtStartup fetches the operator license once and logs a reminder when
+// the policy-proxy sidecar runs without a valid license. The proxy is
+// enterprise-only, so any non-valid license (open-core, absent, or expired)
+// nags. It never blocks — enforcement keeps running. The "startup license
+// check" line is always emitted so the check is observable when silent.
+func nagLicenseAtStartup(ctx context.Context, logger *slog.Logger) {
+	operatorURL := os.Getenv(envOperatorAPIURL)
+	if operatorURL == "" {
+		logger.Info("startup license check skipped", "reason", "no OPERATOR_API_URL configured")
+		return
+	}
+	log := logr.FromSlogHandler(logger.Handler())
+	licClient := eelicense.NewClient(operatorURL, eelicense.WithClientLogger(log.WithName("license")))
+	lic, err := licClient.Refresh(ctx)
+	if err != nil {
+		// Operator unreachable — degrade to the open-core fallback and nag.
+		lic = licClient.License()
+	}
+	logger.Info("startup license check",
+		"valid", lic.IsValidEnterprise(),
+		"tier", string(lic.Tier),
+		"licenseID", lic.ID,
+		"operatorURL", operatorURL)
+	eelicense.NagIfUnlicensed(lic, log)
+}
 
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
@@ -99,6 +131,9 @@ func run(logger *slog.Logger) error {
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
+
+	// License-awareness nag (#1682): remind if enterprise runs unlicensed.
+	nagLicenseAtStartup(ctx, logger)
 
 	go func() {
 		if watchErr := watcher.Start(ctx); watchErr != nil && !errors.Is(watchErr, context.Canceled) {
