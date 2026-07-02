@@ -70,3 +70,21 @@ export function getCategoryClasses(category?: string): { bg: string; text: strin
 export function getCategoryLabel(category?: string): string {
   return (category && CATEGORY_LABELS[category]) || "Context";
 }
+
+/** Memory tier -> category token index. Hues roughly preserved. */
+const TIER_INDEX: Record<string, number> = {
+  institutional: 1,
+  agent: 5,
+  user: 2,
+  user_for_agent: 3,
+};
+
+/** CSS variable for a memory tier — themeable. */
+export function tierColorVar(tier: string): string {
+  return `var(--category-${TIER_INDEX[tier] ?? NEUTRAL_INDEX})`;
+}
+
+/** Concrete hex for a memory tier — for canvas, which can't resolve var(). */
+export function tierColorHex(tier: string): string {
+  return CATEGORY_HEX[TIER_INDEX[tier] ?? NEUTRAL_INDEX];
+}

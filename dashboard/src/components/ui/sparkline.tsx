@@ -121,24 +121,24 @@ const colorMap = {
     text: "text-foreground",
   },
   green: {
-    stroke: "rgb(34, 197, 94)",
-    fill: "rgb(34, 197, 94)",
-    text: "text-green-600 dark:text-green-400",
+    stroke: "var(--success)",
+    fill: "var(--success)",
+    text: "text-success",
   },
   blue: {
-    stroke: "rgb(59, 130, 246)",
-    fill: "rgb(59, 130, 246)",
-    text: "text-blue-600 dark:text-blue-400",
+    stroke: "var(--info)",
+    fill: "var(--info)",
+    text: "text-info",
   },
   orange: {
-    stroke: "rgb(249, 115, 22)",
-    fill: "rgb(249, 115, 22)",
-    text: "text-orange-600 dark:text-orange-400",
+    stroke: "var(--warning)",
+    fill: "var(--warning)",
+    text: "text-warning",
   },
   red: {
-    stroke: "rgb(239, 68, 68)",
-    fill: "rgb(239, 68, 68)",
-    text: "text-red-600 dark:text-red-400",
+    stroke: "var(--destructive)",
+    fill: "var(--destructive)",
+    text: "text-destructive",
   },
 };
 

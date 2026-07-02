@@ -34,7 +34,7 @@ describe("hitTest", () => {
 });
 describe("colorForPoint", () => {
   it("uses tier color when colorBy=tier", () => {
-    expect(colorForPoint(pt({ tier: "institutional" }), "tier")).toBe("hsl(217, 91%, 60%)");
+    expect(colorForPoint(pt({ tier: "institutional" }), "tier")).toBe("#3B82F6");
   });
   it("uses category color when colorBy=category", () => {
     expect(colorForPoint(pt({ category: "memory:identity" }), "category")).toBe("#3B82F6");

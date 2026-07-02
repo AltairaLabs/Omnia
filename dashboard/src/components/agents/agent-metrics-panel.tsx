@@ -209,7 +209,7 @@ function renderTokenUsageContent(
             type="monotone"
             dataKey="output"
             name="Output"
-            stroke="hsl(142, 76%, 36%)"
+            stroke="var(--chart-4)"
             strokeWidth={2}
             dot={false}
           />
@@ -306,7 +306,7 @@ export function AgentMetricsPanel({
           metric={metrics.p95Latency}
           icon={Clock}
           loading={isLoading}
-          color="hsl(142, 76%, 36%)"
+          color="var(--chart-4)"
           available={metrics.available}
         />
         <MetricCard
@@ -315,7 +315,7 @@ export function AgentMetricsPanel({
           metric={metrics.errorRate}
           icon={AlertTriangle}
           loading={isLoading}
-          color="hsl(0, 84%, 60%)"
+          color="var(--destructive)"
           available={metrics.available}
         />
         <MetricCard
@@ -324,7 +324,7 @@ export function AgentMetricsPanel({
           metric={metrics.activeConnections}
           icon={Users}
           loading={isLoading}
-          color="hsl(262, 83%, 58%)"
+          color="var(--chart-2)"
           available={metrics.available}
         />
       </div>
