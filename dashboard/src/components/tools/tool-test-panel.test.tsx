@@ -761,4 +761,27 @@ describe("ToolTestPanel — OpenAPI handler", () => {
     fireEvent.change(search, { target: { value: "op7" } });
     expect(screen.getByText("op7")).toBeInTheDocument();
   });
+
+  it("shows the client-tool notice with warning tokens for a client handler", () => {
+    const clientRegistry: ToolRegistry = {
+      ...mockRegistry,
+      spec: {
+        handlers: [
+          {
+            name: "browser-handler",
+            type: "client",
+            tool: {
+              name: "click",
+              description: "Click an element",
+              inputSchema: { type: "object", properties: {} },
+            },
+          },
+        ],
+      },
+    };
+    render(<ToolTestPanel registry={clientRegistry} workspaceName="ws1" />);
+    const notice = screen.getByText(/Client tools are executed in the browser/);
+    expect(notice).toBeInTheDocument();
+    expect(notice.className).toContain("text-warning");
+  });
 });
