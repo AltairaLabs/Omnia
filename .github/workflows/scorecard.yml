@@ -1,0 +1,51 @@
+name: Scorecard supply-chain security
+
+on:
+  # Re-run when branch protection changes (Scorecard grades it).
+  branch_protection_rule:
+  schedule:
+    - cron: "27 6 * * 1" # weekly, Monday 06:27 UTC
+  push:
+    branches: ["main"]
+
+# Least-privilege by default; the job below elevates only what it needs.
+permissions: read-all
+
+jobs:
+  analysis:
+    name: Scorecard analysis
+    runs-on: ubuntu-latest
+    permissions:
+      # Needed to upload results to the code-scanning (Security) tab.
+      security-events: write
+      # Needed for publish_results to attest to the public Scorecard API
+      # (this is what powers the README badge).
+      id-token: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Run analysis
+        uses: ossf/scorecard-action@v2.4.1
+        with:
+          results_file: results.sarif
+          results_format: sarif
+          # Publish to the public dashboard/badge at
+          # https://securityscorecards.dev — required for the README badge.
+          publish_results: true
+
+      - name: Upload SARIF artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: scorecard-sarif
+          path: results.sarif
+          retention-days: 5
+
+      - name: Upload to Security tab
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: results.sarif
+          category: scorecard

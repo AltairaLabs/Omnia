@@ -4,6 +4,7 @@
 [![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=AltairaLabs_Omnia&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=AltairaLabs_Omnia)
 [![Coverage](https://sonarcloud.io/api/project_badges/measure?project=AltairaLabs_Omnia&metric=coverage)](https://sonarcloud.io/summary/new_code?id=AltairaLabs_Omnia)
 [![Go Report Card](https://goreportcard.com/badge/github.com/AltairaLabs/Omnia)](https://goreportcard.com/report/github.com/AltairaLabs/Omnia)
+[![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/AltairaLabs/Omnia/badge)](https://scorecard.dev/viewer/?uri=github.com/AltairaLabs/Omnia)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
 **The Kubernetes Platform for AI Agent Deployment**
@@ -176,6 +177,19 @@ Omnia is part of the AltairaLabs open-source ecosystem:
 | [PromptKit](https://github.com/AltairaLabs/PromptKit) | Go SDK for building AI agents with tool use and streaming |
 | [PromptPack](https://promptpack.org) | Specification for portable, testable AI agent definitions |
 | **Omnia** | Kubernetes platform for deploying PromptKit agents at scale |
+
+## Security
+
+To report a vulnerability, see our [Security Policy](SECURITY.md) (please use
+private disclosure — not a public issue).
+
+Vulnerabilities are scanned continuously and triaged in the
+[Security tab](https://github.com/AltairaLabs/Omnia/security/code-scanning):
+**govulncheck** (reachability-based Go stdlib + module CVEs, gating CI),
+**Trivy** (container images), **CodeQL** (SAST), **Dependabot** +
+`dependency-review` (dependencies), and **OpenSSF Scorecard** (supply-chain
+posture). All service images build statically onto `distroless/static:nonroot`,
+keeping the base-layer CVE surface minimal.
 
 ## Contributing
 
