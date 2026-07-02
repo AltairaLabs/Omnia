@@ -351,6 +351,7 @@ type Handler struct {
 	maxBodySize        int64
 	recordDimConsent   DimensionConsentRecorder
 	enterprise         bool
+	entitledFn         func() bool
 	categoryRegistered CategoryRegisteredFunc
 }
 
@@ -377,6 +378,26 @@ func (h *Handler) WithEnterprise(enterprise bool) *Handler {
 	return h
 }
 
+// WithEnterpriseFunc gates enterprise-only routes on a live predicate,
+// evaluated per request. It lets the gate track the current license rather
+// than a value snapshotted at startup, so an entitlement that lapses (an
+// expired or downgraded license) degrades the paid endpoints to 403 without a
+// restart. When set it takes precedence over WithEnterprise. Pass nil to fall
+// back to the static flag.
+func (h *Handler) WithEnterpriseFunc(fn func() bool) *Handler {
+	h.entitledFn = fn
+	return h
+}
+
+// isEnterprise reports whether enterprise routes are currently permitted,
+// preferring the live predicate when one is wired.
+func (h *Handler) isEnterprise() bool {
+	if h.entitledFn != nil {
+		return h.entitledFn()
+	}
+	return h.enterprise
+}
+
 // WithCategoryRegistration wires a predicate that validates consent
 // categories at write time. When set, saves carrying an unregistered
 // category return HTTP 400. Pass nil to disable (OSS default).
@@ -390,7 +411,7 @@ func (h *Handler) WithCategoryRegistration(fn CategoryRegisteredFunc) *Handler {
 // projection, and memory-analytics routes; agent + user routes stay open.
 func (h *Handler) requireEnterprise(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if !h.enterprise {
+		if !h.isEnterprise() {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusForbidden)
 			_, _ = w.Write([]byte(`{"error":"enterprise_required"}`))

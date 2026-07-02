@@ -91,6 +91,30 @@ the Workspace CRD.
 - `--default-ttl` / `DEFAULT_TTL` — Default memory TTL (optional)
 - `--ingest-chunk-size` / `INGEST_CHUNK_SIZE` — Word count per ingest chunk (default 200)
 - `--ingest-chunk-overlap` / `INGEST_CHUNK_OVERLAP` — Overlapping words between adjacent chunks (default 40)
+- `--operator-api-url` / `OPERATOR_API_URL` — Base URL of the operator/arena-controller
+  license endpoint (e.g. `http://omnia-arena-controller.omnia-system:8082`). See
+  License enforcement below.
+
+## License enforcement (#1682)
+
+Enterprise memory capabilities (Memory Galaxy projection, memory-analytics,
+institutional memory, multi-tier ranking, consolidation, audit) require the
+license to grant the `memoryEnterprise` entitlement — `ENTERPRISE_ENABLED` alone
+is no longer sufficient. At startup memory-api fetches the license from
+`OPERATOR_API_URL` + `/api/v1/license` (the arena-controller endpoint) and gates
+those features on `memoryEnterprise && !expired`. A background refresher re-reads
+the license every ~5 minutes; the HTTP gate re-evaluates that cached entitlement
+per request (never blocking on the operator), so a license that lapses at runtime
+degrades the paid endpoints to `403 enterprise_required` within the refresh window
+without a restart. A transient operator outage at startup is treated optimistically
+(features stay wired, the live gate enforces once the operator is reachable) so a
+boot-time blip never downgrades a licensed deployment.
+
+Fail mode is **degrade-to-open-core**: an unreachable operator, an expired
+license, or a license without `memoryEnterprise` disables the paid features while
+the service keeps serving open-core behavior — it never crash-loops and never
+fails open. **Non-breaking:** when `OPERATOR_API_URL` is unset, enforcement is
+dormant and features follow `ENTERPRISE_ENABLED` as before.
 
 ## Data Flow
 
@@ -101,6 +125,8 @@ Agent Pod (runtime) → HTTP → Memory API → PostgreSQL
 - PostgreSQL (required) — memory storage
 - Provider CRD + embedding model (optional) — semantic search
 - Redis (optional) — event publishing
+- Operator/arena-controller `/api/v1/license` (optional) — enterprise license
+  enforcement; unreachable degrades enterprise features to open-core (#1682)
 
 ## Warning: No Embedding Provider
 

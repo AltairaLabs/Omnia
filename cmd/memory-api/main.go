@@ -59,6 +59,7 @@ import (
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 	eeaudit "github.com/altairalabs/omnia/ee/pkg/audit"
+	eelicense "github.com/altairalabs/omnia/ee/pkg/license"
 	eememory "github.com/altairalabs/omnia/ee/pkg/memory"
 	"github.com/altairalabs/omnia/ee/pkg/memory/consolidation"
 	eeprojection "github.com/altairalabs/omnia/ee/pkg/memory/projection"
@@ -129,6 +130,7 @@ type flags struct {
 	redisURL              string // --redis-url, env REDIS_URL or OMNIA_MEMORY_REDIS_URL
 	cacheTTL              string // env: MEMORY_CACHE_TTL, e.g. "5m"; "" or "0" disables
 	enterprise            bool
+	operatorAPIURL        string // --operator-api-url, env OPERATOR_API_URL; base URL of the operator/arena-controller license endpoint. Empty (or unreachable) degrades enterprise features to open-core.
 	tracingEnabled        bool
 	tracingEndpoint       string
 	tracingSample         float64
@@ -176,6 +178,7 @@ func parseFlags() *flags {
 	flag.StringVar(&f.redisURL, "redis-url", "", "Redis connection URL (redis:// or rediss://). When set, the same client is reused for both the read-through cache and the event publisher. Empty disables both.")
 	flag.StringVar(&f.cacheTTL, "cache-ttl", "5m", "TTL for the Redis read-through cache (Retrieve/List). Set to 0 or empty to disable caching even when --redis-url is configured.")
 	flag.BoolVar(&f.enterprise, "enterprise", false, "Enable enterprise features (audit logging)")
+	flag.StringVar(&f.operatorAPIURL, "operator-api-url", "", "Base URL of the operator/arena-controller license endpoint (e.g. http://omnia-arena-controller.omnia-system:8082). Enterprise features additionally require the license to grant memoryEnterprise; an empty or unreachable URL degrades to open-core.")
 	flag.BoolVar(&f.tracingEnabled, "tracing-enabled", false, "Enable OpenTelemetry tracing")
 	flag.StringVar(&f.tracingEndpoint, "tracing-endpoint", "", "OTel collector endpoint")
 	flag.Float64Var(&f.tracingSample, "tracing-sample", 0, "Tracing sample rate (0.0-1.0)")
@@ -221,6 +224,7 @@ func (f *flags) applyEnvFallbacks() {
 	envFallback(&f.metricsAddr, ":9090", "METRICS_ADDR")
 
 	envBoolFallback(&f.enterprise, "ENTERPRISE_ENABLED")
+	envFallback(&f.operatorAPIURL, "", "OPERATOR_API_URL")
 	envBoolFallback(&f.tracingEnabled, "TRACING_ENABLED")
 	envBoolFallback(&f.tracingInsecure, "TRACING_INSECURE")
 	envFallback(&f.tracingEndpoint, "", "TRACING_ENDPOINT")
@@ -424,6 +428,15 @@ func run() error {
 		context.Background(), syscall.SIGINT, syscall.SIGTERM,
 	)
 	defer cancel()
+
+	// --- Enterprise license gate (#1682) ---
+	// Collapse ENTERPRISE_ENABLED AND the operator license into f.enterprise so
+	// every downstream DI site (projector, institutional store, tier ranking,
+	// audit, consolidation/projection workers) gates on the real memoryEnterprise
+	// entitlement instead of a bare infra flag. `entitled` is the live predicate
+	// the HTTP gate uses to degrade paid endpoints on a lapsed license.
+	startupLicensed, entitled := resolveEnterpriseGate(ctx, f, log)
+	f.enterprise = startupLicensed
 
 	// --- Postgres pool ---
 	pool, err := initPool(ctx, f.postgresConn)
@@ -640,7 +653,7 @@ func run() error {
 	}
 
 	// --- Build API mux ---
-	apiMux, cleanup := buildAPIMux(ctx, apiStore, embeddingSvc, svcCfg, eventPublisher, f.enterprise, pool, policyLoader, auditLogger, log, buildIngestOptions(f, log), f.workspace, f.serviceGroup, pgStore)
+	apiMux, cleanup := buildAPIMux(ctx, apiStore, embeddingSvc, svcCfg, eventPublisher, f.enterprise, pool, policyLoader, auditLogger, log, buildIngestOptions(f, log), f.workspace, f.serviceGroup, pgStore, entitled)
 	defer cleanup()
 
 	// --- Consolidation worker ---
@@ -843,6 +856,56 @@ func buildIngestOptions(f *flags, log logr.Logger) memoryapi.IngestOptions {
 	return opts
 }
 
+// resolveEnterpriseGate collapses the ENTERPRISE_ENABLED flag and the operator
+// license into a single startup decision, and returns a live entitlement
+// predicate for the HTTP gate (#1682). The flag alone only means "enterprise is
+// deployed"; the paid memory capabilities additionally require the license to
+// grant memoryEnterprise. It fails safe: with the flag off, a missing operator
+// URL, or an unreachable/expired license, it returns (false, always-false),
+// degrading to open-core rather than failing open. The returned predicate is
+// re-evaluated per request so a license that lapses at runtime degrades the
+// paid endpoints to 403 without a restart.
+func resolveEnterpriseGate(ctx context.Context, f *flags, log logr.Logger) (bool, func() bool) {
+	if !f.enterprise {
+		return false, nil
+	}
+	if f.operatorAPIURL == "" {
+		// Enterprise is deployed but license enforcement is not wired (no
+		// operator URL to read the license from). Fall back to the flag so
+		// existing enterprise deployments keep working unchanged; enforcement
+		// activates only once an operator passes OPERATOR_API_URL. A nil
+		// predicate leaves the HTTP gate on the static flag.
+		log.Info("license enforcement inactive", "reason", "no OPERATOR_API_URL configured")
+		return true, nil
+	}
+
+	licClient := eelicense.NewClient(f.operatorAPIURL, eelicense.WithClientLogger(log.WithName("license")))
+	entitled := func() bool {
+		lic := licClient.License()
+		return lic.CanUseMemoryEnterprise() && !lic.IsExpired()
+	}
+
+	// Definitive startup read distinguishes "operator unreachable" from
+	// "operator says not licensed"; Start keeps the cache warm so the per-
+	// request gate never blocks on network I/O.
+	lic, err := licClient.Refresh(ctx)
+	licClient.Start(ctx)
+	if err != nil {
+		// Could not verify the license at startup. Be optimistic — a transient
+		// boot-time outage must not downgrade a licensed deployment — and let
+		// the live gate enforce once the operator becomes reachable.
+		log.Info("license unverified at startup", "reason", "operator license endpoint unreachable")
+		return true, entitled
+	}
+	if lic.CanUseMemoryEnterprise() && !lic.IsExpired() {
+		log.Info("enterprise license verified", "feature", "memoryEnterprise")
+		return true, entitled
+	}
+	log.Info("enterprise features degraded to open-core",
+		"reason", "license does not grant memoryEnterprise (or is expired)")
+	return false, entitled
+}
+
 func buildAPIMux(
 	ctx context.Context,
 	store memory.Store,
@@ -857,6 +920,7 @@ func buildAPIMux(
 	ingestOpts memoryapi.IngestOptions,
 	workspace, serviceGroup string,
 	consentPruner memory.ConsentEventPruner,
+	entitled ...func() bool,
 ) (http.Handler, func()) {
 	httpMetrics := memoryapi.NewHTTPMetrics(nil)
 
@@ -909,6 +973,14 @@ func buildAPIMux(
 		WithDimensionConsentRecorder(func(ctx context.Context, targetDim int, createdBy string) error {
 			return memorypg.InsertDimensionChangeConsent(ctx, pool, targetDim, createdBy)
 		})
+	if len(entitled) > 0 && entitled[0] != nil {
+		// Gate the paid HTTP routes on the live license: enterprise wiring was
+		// decided at startup, but a license that lapses mid-run must degrade the
+		// endpoints to 403 without a restart. ANDing with `enterprise` ensures we
+		// never pass the gate when the enterprise algorithms were not wired.
+		live := entitled[0]
+		handler = handler.WithEnterpriseFunc(func() bool { return enterprise && live() })
+	}
 	if enterprise {
 		// Validate consent_category against the platform registry at write time.
 		// privacy.CategoryInfo is the authoritative source; only registered
