@@ -49,6 +49,16 @@ export function BrandProvider({ children }: Readonly<{ children: React.ReactNode
 
   return (
     <BrandContext.Provider value={value}>
+      {/*
+        Load the brand's webfont stylesheet so a custom `fonts.family` actually
+        renders. `fonts.family` re-points `--font-sans` (see css-vars.ts), but
+        the family only resolves if its @font-face is available — this fetches
+        it. `fonts.url` must be a CSS stylesheet URL (e.g. a Google Fonts href);
+        the brand's font host must be allowed by the dashboard CSP.
+      */}
+      {brand.fonts?.url && (
+        <link rel="stylesheet" href={brand.fonts.url} data-brand-font="" />
+      )}
       <style id="brand-vars" dangerouslySetInnerHTML={{ __html: renderCss(brand) }} />
       {children}
     </BrandContext.Provider>
