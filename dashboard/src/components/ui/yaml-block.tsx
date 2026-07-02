@@ -41,14 +41,14 @@ function formatValue(value: unknown): React.ReactNode {
   }
   if (typeof value === "boolean") {
     return (
-      <span className="text-orange-500 dark:text-orange-400">
+      <span className="text-category-4">
         {value.toString()}
       </span>
     );
   }
   if (typeof value === "number") {
     return (
-      <span className="text-cyan-600 dark:text-cyan-400">{value}</span>
+      <span className="text-category-6">{value}</span>
     );
   }
   if (typeof value === "string") {
@@ -63,13 +63,13 @@ function formatValue(value: unknown): React.ReactNode {
 
     if (needsQuotes) {
       return (
-        <span className="text-emerald-600 dark:text-emerald-400">
+        <span className="text-category-5">
           &quot;{value}&quot;
         </span>
       );
     }
     return (
-      <span className="text-green-600 dark:text-green-400">{value}</span>
+      <span className="text-category-5">{value}</span>
     );
   }
   return <span>{String(value)}</span>;
@@ -126,7 +126,7 @@ function YamlNode({
     return (
       <div className="leading-relaxed">
         {indent}
-        <span className="text-violet-600 dark:text-violet-400">{keyName}</span>
+        <span className="text-category-2">{keyName}</span>
         <span className="text-foreground">: </span>
         {formatValue(value)}
       </div>
@@ -156,7 +156,7 @@ function YamlNode({
     return (
       <div className="leading-relaxed">
         {indent}
-        <span className="text-violet-600 dark:text-violet-400">{keyName}</span>
+        <span className="text-category-2">{keyName}</span>
         <span className="text-foreground">: </span>
         <span className="text-muted-foreground">{isArray(value) ? "[]" : "{}"}</span>
       </div>
@@ -181,7 +181,7 @@ function YamlNode({
         </>
       ) : (
         <>
-          <span className="text-violet-600 dark:text-violet-400">{keyName}</span>
+          <span className="text-category-2">{keyName}</span>
           <span className="text-foreground">:</span>
           {isCollapsed && (
             <span className="text-muted-foreground text-xs ml-1">

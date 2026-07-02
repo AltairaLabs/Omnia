@@ -43,7 +43,7 @@ function EndpointRow({ endpoint, authLabel, authDetail }: Readonly<EndpointRowPr
     <div
       className={cn(
         "rounded-md border p-3 space-y-2",
-        isInvalid && "border-amber-400 bg-amber-50 dark:bg-amber-950/30",
+        isInvalid && "border-warning/30 bg-warning/10",
       )}
     >
       <div className="flex items-center justify-between gap-2 flex-wrap">
@@ -56,7 +56,7 @@ function EndpointRow({ endpoint, authLabel, authDetail }: Readonly<EndpointRowPr
           </Badge>
         </div>
         {isInvalid && (
-          <span className="flex items-center gap-1 text-xs font-medium text-amber-700 dark:text-amber-400">
+          <span className="flex items-center gap-1 text-xs font-medium text-warning">
             <AlertTriangle className="h-3 w-3" />
             Not connectable
           </span>
@@ -79,7 +79,7 @@ function EndpointRow({ endpoint, authLabel, authDetail }: Readonly<EndpointRowPr
       </div>
 
       {isInvalid && endpoint.reason && (
-        <p className="text-xs text-amber-700 dark:text-amber-400">{endpoint.reason}</p>
+        <p className="text-xs text-warning">{endpoint.reason}</p>
       )}
 
       <p className="text-xs text-muted-foreground">
@@ -167,7 +167,7 @@ function ExposeControl({ agent, workspace, onExposeChange }: Readonly<ConnectCar
       )}
 
       {enabled && !hasExternalAuth && (
-        <p className="flex items-start gap-1.5 text-xs text-amber-700 dark:text-amber-400">
+        <p className="flex items-start gap-1.5 text-xs text-warning">
           <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
           Exposing this agent does not authenticate it — anyone who can reach the URL
           can use it. Set spec.externalAuth to require a token.

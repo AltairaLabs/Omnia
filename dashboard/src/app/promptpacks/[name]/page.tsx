@@ -145,13 +145,13 @@ function ValidatorsList({ validators }: { validators: ValidatorDefinition[] }) {
               {v.enabled !== undefined && (
                 <Badge
                   variant="outline"
-                  className={`text-xs ${v.enabled ? "border-green-500/30 text-green-600" : "border-red-500/30 text-red-600"}`}
+                  className={`text-xs ${v.enabled ? "border-success/30 text-success" : "border-destructive/30 text-destructive"}`}
                 >
                   {v.enabled ? "enabled" : "disabled"}
                 </Badge>
               )}
               {v.fail_on_violation && (
-                <Badge variant="outline" className="text-xs border-orange-500/30 text-orange-600">
+                <Badge variant="outline" className="text-xs border-warning/30 text-warning">
                   fail on violation
                 </Badge>
               )}
@@ -585,7 +585,7 @@ export default function PromptPackDetailPage({ params }: Readonly<PromptPackDeta
                                       <div key={v.name} className="flex items-center gap-2 text-xs bg-muted/50 rounded px-2 py-1.5">
                                         <code className="text-primary font-medium">{`{{${v.name}}}`}</code>
                                         <Badge variant="outline" className="text-xs">{v.type}</Badge>
-                                        {v.required && <Badge className="text-xs bg-red-500/15 text-red-600 border-red-500/20">required</Badge>}
+                                        {v.required && <Badge className="text-xs bg-destructive/15 text-destructive border-destructive/20">required</Badge>}
                                         {v.values && (
                                           <span className="text-muted-foreground">
                                             [{v.values.join(", ")}]

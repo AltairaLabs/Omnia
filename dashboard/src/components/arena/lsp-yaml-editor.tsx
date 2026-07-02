@@ -456,16 +456,16 @@ export function LspYamlEditor({
     if (!diagnostics) {
       return (
         <div className="flex items-center gap-1">
-          <CheckCircle className="h-3.5 w-3.5 text-green-500" />
+          <CheckCircle className="h-3.5 w-3.5 text-success" />
           <span className="text-muted-foreground">No issues</span>
         </div>
       );
     }
 
     const severityConfig = {
-      error: { icon: AlertTriangle, color: "text-red-500" },
-      warning: { icon: AlertTriangle, color: "text-amber-500" },
-      info: { icon: Circle, color: "text-blue-500" },
+      error: { icon: AlertTriangle, color: "text-destructive" },
+      warning: { icon: AlertTriangle, color: "text-warning" },
+      info: { icon: Circle, color: "text-info" },
       hint: { icon: Circle, color: "text-muted-foreground" },
     };
 

@@ -27,19 +27,19 @@ function formatValue(value: unknown): React.ReactNode {
   }
   if (typeof value === "boolean") {
     return (
-      <span className="text-orange-500 dark:text-orange-400">
+      <span className="text-category-4">
         {value.toString()}
       </span>
     );
   }
   if (typeof value === "number") {
     return (
-      <span className="text-cyan-600 dark:text-cyan-400">{value}</span>
+      <span className="text-category-6">{value}</span>
     );
   }
   if (typeof value === "string") {
     return (
-      <span className="text-emerald-600 dark:text-emerald-400">
+      <span className="text-category-5">
         &quot;{value}&quot;
       </span>
     );
@@ -85,7 +85,7 @@ function JsonNode({
 
   const keyPrefix = keyName !== undefined ? (
     <>
-      <span className="text-violet-600 dark:text-violet-400">
+      <span className="text-category-2">
         &quot;{keyName}&quot;
       </span>
       <span className="text-foreground">: </span>

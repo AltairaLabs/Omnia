@@ -96,8 +96,8 @@ function ToolCallIndicator({ toolCall }: Readonly<{ toolCall: ToolCall }>) {
 
   return (
     <div className="flex gap-3">
-      <div className="flex items-center justify-center h-8 w-8 rounded-full shrink-0 bg-orange-500/10">
-        <Wrench className="h-4 w-4 text-orange-500" />
+      <div className="flex items-center justify-center h-8 w-8 rounded-full shrink-0 bg-warning/10">
+        <Wrench className="h-4 w-4 text-warning" />
       </div>
       <button
         className="flex items-center gap-2 border rounded-lg bg-muted/30 px-3 py-1.5 text-left hover:bg-muted/50 transition-colors"
@@ -119,8 +119,8 @@ function ToolCallIndicator({ toolCall }: Readonly<{ toolCall: ToolCall }>) {
  */
 function getAvatarClassName(isUser: boolean, isAssistant: boolean): string {
   if (isUser) return "bg-primary text-primary-foreground";
-  if (isAssistant) return "bg-blue-500 text-white";
-  return "bg-gray-500 text-white";
+  if (isAssistant) return "bg-info text-white";
+  return "bg-muted text-muted-foreground";
 }
 
 /**
@@ -998,19 +998,19 @@ function EvalResultsPanel({ results, messages }: Readonly<{ results: EvalResult[
         <Card>
           <CardContent className="pt-6">
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <CheckCircle2 className="h-4 w-4 text-green-500" />
+              <CheckCircle2 className="h-4 w-4 text-success" />
               Passed
             </div>
-            <p className="text-2xl font-bold mt-1 text-green-600 dark:text-green-400">{totalPassed}</p>
+            <p className="text-2xl font-bold mt-1 text-success">{totalPassed}</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="pt-6">
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <XCircle className="h-4 w-4 text-red-500" />
+              <XCircle className="h-4 w-4 text-destructive" />
               Failed
             </div>
-            <p className="text-2xl font-bold mt-1 text-red-600 dark:text-red-400">{totalFailed}</p>
+            <p className="text-2xl font-bold mt-1 text-destructive">{totalFailed}</p>
           </CardContent>
         </Card>
       </div>
@@ -1076,10 +1076,10 @@ function AggregatedEvalRow({ eval_ }: Readonly<{ eval_: AggregatedEval }>) {
     <TableRow>
       <TableCell>
         {allPassed
-          ? <CheckCircle2 className="h-4 w-4 text-green-500" />
+          ? <CheckCircle2 className="h-4 w-4 text-success" />
           : allFailed
-            ? <XCircle className="h-4 w-4 text-red-500" />
-            : <AlertCircle className="h-4 w-4 text-yellow-500" />
+            ? <XCircle className="h-4 w-4 text-destructive" />
+            : <AlertCircle className="h-4 w-4 text-warning" />
         }
       </TableCell>
       <TableCell className="font-mono text-sm">{eval_.evalId}</TableCell>
@@ -1089,9 +1089,9 @@ function AggregatedEvalRow({ eval_ }: Readonly<{ eval_: AggregatedEval }>) {
       <TableCell>
         <span className={cn(
           "font-medium",
-          allPassed && "text-green-600 dark:text-green-400",
-          allFailed && "text-red-600 dark:text-red-400",
-          !allPassed && !allFailed && "text-yellow-600 dark:text-yellow-400",
+          allPassed && "text-success",
+          allFailed && "text-destructive",
+          !allPassed && !allFailed && "text-warning",
         )}>
           {(eval_.passRate * 100).toFixed(0)}%
         </span>

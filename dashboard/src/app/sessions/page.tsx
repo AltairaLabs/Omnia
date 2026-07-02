@@ -66,16 +66,16 @@ function getTimeRangeFrom(value: string): string | undefined {
   return new Date(now - (ms[value] || 0)).toISOString();
 }
 
-/** Deterministic color for a tag string, Grafana-style. */
+/** Deterministic categorical token color for a tag string, Grafana-style. */
 const TAG_COLORS = [
-  "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200",
-  "bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200",
-  "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200",
-  "bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200",
-  "bg-pink-100 text-pink-800 dark:bg-pink-900 dark:text-pink-200",
-  "bg-cyan-100 text-cyan-800 dark:bg-cyan-900 dark:text-cyan-200",
-  "bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200",
-  "bg-indigo-100 text-indigo-800 dark:bg-indigo-900 dark:text-indigo-200",
+  "bg-category-1/15 text-category-1",
+  "bg-category-2/15 text-category-2",
+  "bg-category-3/15 text-category-3",
+  "bg-category-4/15 text-category-4",
+  "bg-category-5/15 text-category-5",
+  "bg-category-6/15 text-category-6",
+  "bg-category-7/15 text-category-7",
+  "bg-category-8/15 text-category-8",
 ];
 
 function tagColor(tag: string): string {
@@ -241,7 +241,7 @@ export default function SessionsPage() {
               <Card>
                 <CardContent className="pt-6">
                   <div className="flex items-center gap-2">
-                    <Clock className="h-4 w-4 text-green-500" />
+                    <Clock className="h-4 w-4 text-success" />
                     <span className="text-sm text-muted-foreground">Active Now</span>
                   </div>
                   <p className="text-2xl font-bold mt-1">{stats.active}</p>

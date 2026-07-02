@@ -174,7 +174,7 @@ describe("DeployButton", () => {
 
     // Check for the green check circle (deployed and ready)
     const button = screen.getByRole("button");
-    expect(button.querySelector(".text-green-500")).toBeInTheDocument();
+    expect(button.querySelector(".text-success")).toBeInTheDocument();
   });
 
   it("should show deploy status indicator when deployed and Error", () => {
@@ -190,7 +190,7 @@ describe("DeployButton", () => {
 
     // Check for the red x circle (failed)
     const button = screen.getByRole("button");
-    expect(button.querySelector(".text-red-500")).toBeInTheDocument();
+    expect(button.querySelector(".text-destructive")).toBeInTheDocument();
   });
 
   it("should show deploy status indicator when deployed with unknown phase", () => {
@@ -206,7 +206,7 @@ describe("DeployButton", () => {
 
     // Check for the yellow clock (pending)
     const button = screen.getByRole("button");
-    expect(button.querySelector(".text-yellow-500")).toBeInTheDocument();
+    expect(button.querySelector(".text-warning")).toBeInTheDocument();
   });
 
   it("should not show status indicator when loading", () => {
@@ -223,9 +223,9 @@ describe("DeployButton", () => {
 
     // Should not show any status icons
     const button = screen.getByRole("button");
-    expect(button.querySelector(".text-green-500")).not.toBeInTheDocument();
-    expect(button.querySelector(".text-red-500")).not.toBeInTheDocument();
-    expect(button.querySelector(".text-yellow-500")).not.toBeInTheDocument();
+    expect(button.querySelector(".text-success")).not.toBeInTheDocument();
+    expect(button.querySelector(".text-destructive")).not.toBeInTheDocument();
+    expect(button.querySelector(".text-warning")).not.toBeInTheDocument();
   });
 
   it("should not show status indicator when not deployed", () => {
@@ -235,7 +235,7 @@ describe("DeployButton", () => {
     render(<DeployButton projectId="test-project" />);
 
     const button = screen.getByRole("button");
-    expect(button.querySelector(".text-green-500")).not.toBeInTheDocument();
+    expect(button.querySelector(".text-success")).not.toBeInTheDocument();
   });
 
   it("should open advanced deploy dialog", async () => {

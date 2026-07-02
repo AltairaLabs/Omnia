@@ -33,16 +33,16 @@ export function ToolCallCard({ toolCall, className, onApprove, onAlwaysApprove, 
 
   const statusIcon = {
     pending: <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />,
-    awaiting_consent: <AlertTriangle className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400" />,
-    success: <Check className="h-3.5 w-3.5 text-green-600 dark:text-green-400" />,
-    error: <X className="h-3.5 w-3.5 text-red-600 dark:text-red-400" />,
+    awaiting_consent: <AlertTriangle className="h-3.5 w-3.5 text-warning" />,
+    success: <Check className="h-3.5 w-3.5 text-success" />,
+    error: <X className="h-3.5 w-3.5 text-destructive" />,
   }[toolCall.status];
 
   const statusColor = {
     pending: "border-muted-foreground/30 bg-muted/30",
-    awaiting_consent: "border-amber-500/30 bg-amber-500/10",
-    success: "border-green-500/30 bg-green-500/10",
-    error: "border-red-500/30 bg-red-500/10",
+    awaiting_consent: "border-warning/30 bg-warning/10",
+    success: "border-success/30 bg-success/10",
+    error: "border-destructive/30 bg-destructive/10",
   }[toolCall.status];
 
   return (
@@ -79,7 +79,7 @@ export function ToolCallCard({ toolCall, className, onApprove, onAlwaysApprove, 
           {toolCall.status === "awaiting_consent" && (
             <div>
               {toolCall.consent_message && (
-                <p className="text-amber-700 dark:text-amber-300 mb-2">
+                <p className="text-warning mb-2">
                   {toolCall.consent_message}
                 </p>
               )}
@@ -123,8 +123,8 @@ export function ToolCallCard({ toolCall, className, onApprove, onAlwaysApprove, 
 
           {toolCall.status === "error" && toolCall.error && (
             <div>
-              <p className="text-red-600 dark:text-red-400 mb-1">Error:</p>
-              <pre className="bg-red-500/10 rounded p-2 overflow-x-auto text-red-700 dark:text-red-300">
+              <p className="text-destructive mb-1">Error:</p>
+              <pre className="bg-destructive/10 rounded p-2 overflow-x-auto text-destructive">
                 {toolCall.error}
               </pre>
             </div>

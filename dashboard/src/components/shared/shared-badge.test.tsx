@@ -25,7 +25,7 @@ describe("SharedBadge", () => {
     render(<SharedBadge />);
 
     const badge = screen.getByTestId("shared-badge");
-    expect(badge).toHaveClass("bg-blue-500/15");
-    expect(badge).toHaveClass("text-blue-700");
+    expect(badge).toHaveClass("bg-info/15");
+    expect(badge).toHaveClass("text-info");
   });
 });

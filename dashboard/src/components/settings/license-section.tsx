@@ -47,7 +47,7 @@ function LicenseStatus({ isExpired, daysUntilExpiry }: LicenseStatusProps) {
 
   if (daysUntilExpiry <= 30) {
     return (
-      <Badge variant="outline" className="gap-1 border-yellow-500 text-yellow-600">
+      <Badge variant="outline" className="gap-1 border-warning/30 text-warning">
         <AlertTriangle className="h-3 w-3" />
         Expires in {daysUntilExpiry} day{daysUntilExpiry === 1 ? "" : "s"}
       </Badge>
@@ -55,7 +55,7 @@ function LicenseStatus({ isExpired, daysUntilExpiry }: LicenseStatusProps) {
   }
 
   return (
-    <Badge variant="outline" className="gap-1 border-green-500 text-green-600">
+    <Badge variant="outline" className="gap-1 border-success/30 text-success">
       <CheckCircle className="h-3 w-3" />
       Active
     </Badge>
@@ -70,7 +70,7 @@ function FeatureList({ features }: { features: LicenseFeatures }) {
       {featureEntries.map(([key, enabled]) => (
         <div key={key} className="flex items-center gap-2">
           {enabled ? (
-            <CheckCircle className="h-4 w-4 text-green-500" />
+            <CheckCircle className="h-4 w-4 text-success" />
           ) : (
             <XCircle className="h-4 w-4 text-muted-foreground" />
           )}

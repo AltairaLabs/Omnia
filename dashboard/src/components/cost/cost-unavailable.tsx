@@ -71,13 +71,13 @@ export function CostUnavailable({
  */
 export function CostUnavailableBanner({ reason }: Readonly<{ reason?: string }>) {
   return (
-    <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-4 flex items-center gap-3">
-      <AlertTriangle className="h-5 w-5 text-yellow-600 dark:text-yellow-500 flex-shrink-0" />
+    <div className="bg-warning/10 border border-warning/30 rounded-lg p-4 flex items-center gap-3">
+      <AlertTriangle className="h-5 w-5 text-warning flex-shrink-0" />
       <div>
-        <p className="text-sm font-medium text-yellow-800 dark:text-yellow-200">
+        <p className="text-sm font-medium text-warning">
           Cost tracking is currently unavailable
         </p>
-        <p className="text-sm text-yellow-700 dark:text-yellow-300">
+        <p className="text-sm text-warning">
           {reason || "Prometheus is not configured. Deploy Prometheus to enable cost tracking."}
         </p>
       </div>

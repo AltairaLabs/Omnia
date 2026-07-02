@@ -106,14 +106,14 @@ function renderEventsPanelContent(
           return (
             <TableRow
               key={`${event.involvedObject.kind}-${event.involvedObject.name}-${event.reason}-${event.lastTimestamp}-${messageHash}`}
-              className={cn(isWarning && "bg-amber-500/5")}
+              className={cn(isWarning && "bg-warning/5")}
               data-testid="event-row"
             >
               <TableCell>
                 {isWarning ? (
-                  <AlertCircle className="h-4 w-4 text-amber-500" />
+                  <AlertCircle className="h-4 w-4 text-warning" />
                 ) : (
-                  <CheckCircle2 className="h-4 w-4 text-green-500" />
+                  <CheckCircle2 className="h-4 w-4 text-success" />
                 )}
               </TableCell>
               <TableCell>

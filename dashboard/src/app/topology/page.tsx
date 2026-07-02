@@ -156,28 +156,28 @@ export default function TopologyPage() {
           <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
             {/* Resource types */}
             <div className="flex items-center gap-2">
-              <div className="w-3 h-3 rounded bg-blue-500" />
-              <Bot className="h-4 w-4 text-blue-600" />
+              <div className="w-3 h-3 rounded bg-category-1" />
+              <Bot className="h-4 w-4 text-category-1" />
               <span className="text-muted-foreground">Agents ({filteredAgents.length})</span>
             </div>
             <div className="flex items-center gap-2">
-              <div className="w-3 h-3 rounded bg-purple-500" />
-              <FileText className="h-4 w-4 text-purple-600" />
+              <div className="w-3 h-3 rounded bg-category-2" />
+              <FileText className="h-4 w-4 text-category-2" />
               <span className="text-muted-foreground">PromptPacks ({filteredPromptPacks.length})</span>
             </div>
             <div className="flex items-center gap-2">
-              <div className="w-3 h-3 rounded bg-orange-500" />
-              <Package className="h-4 w-4 text-orange-600" />
+              <div className="w-3 h-3 rounded bg-category-4" />
+              <Package className="h-4 w-4 text-category-4" />
               <span className="text-muted-foreground">ToolRegistries ({filteredToolRegistries.length})</span>
             </div>
             <div className="flex items-center gap-2">
-              <div className="w-3 h-3 rounded bg-teal-500" />
-              <Wrench className="h-4 w-4 text-teal-600" />
+              <div className="w-3 h-3 rounded bg-category-6" />
+              <Wrench className="h-4 w-4 text-category-6" />
               <span className="text-muted-foreground">Tools ({totalTools})</span>
             </div>
             <div className="flex items-center gap-2">
-              <div className="w-3 h-3 rounded bg-green-500" />
-              <Zap className="h-4 w-4 text-green-600" />
+              <div className="w-3 h-3 rounded bg-category-5" />
+              <Zap className="h-4 w-4 text-category-5" />
               <span className="text-muted-foreground">Providers ({filteredProviders.length})</span>
             </div>
 
@@ -185,15 +185,15 @@ export default function TopologyPage() {
             <div className="border-l pl-6 flex items-center gap-4">
               <span className="text-muted-foreground font-medium">Status:</span>
               <div className="flex items-center gap-1.5">
-                <div className="w-2.5 h-2.5 rounded-full bg-green-500" />
+                <div className="w-2.5 h-2.5 rounded-full bg-success" />
                 <span className="text-muted-foreground">Healthy</span>
               </div>
               <div className="flex items-center gap-1.5">
-                <div className="w-2.5 h-2.5 rounded-full bg-yellow-500" />
+                <div className="w-2.5 h-2.5 rounded-full bg-warning" />
                 <span className="text-muted-foreground">Pending</span>
               </div>
               <div className="flex items-center gap-1.5">
-                <div className="w-2.5 h-2.5 rounded-full bg-red-500" />
+                <div className="w-2.5 h-2.5 rounded-full bg-destructive" />
                 <span className="text-muted-foreground">Failed</span>
               </div>
             </div>

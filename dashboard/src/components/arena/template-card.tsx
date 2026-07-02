@@ -22,17 +22,17 @@ export interface TemplateCardProps {
 function getCategoryColor(category?: string): string {
   switch (category?.toLowerCase()) {
     case "chatbot":
-      return "bg-blue-500/10 text-blue-500 border-blue-500/20";
+      return "bg-category-1/10 text-category-1 border-category-1/20";
     case "agent":
-      return "bg-purple-500/10 text-purple-500 border-purple-500/20";
+      return "bg-category-2/10 text-category-2 border-category-2/20";
     case "assistant":
-      return "bg-green-500/10 text-green-500 border-green-500/20";
+      return "bg-category-5/10 text-category-5 border-category-5/20";
     case "evaluation":
-      return "bg-orange-500/10 text-orange-500 border-orange-500/20";
+      return "bg-category-4/10 text-category-4 border-category-4/20";
     case "workflow":
-      return "bg-pink-500/10 text-pink-500 border-pink-500/20";
+      return "bg-category-3/10 text-category-3 border-category-3/20";
     default:
-      return "bg-gray-500/10 text-gray-500 border-gray-500/20";
+      return "bg-category-8/10 text-category-8 border-category-8/20";
   }
 }
 

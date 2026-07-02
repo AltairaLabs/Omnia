@@ -48,9 +48,9 @@ export function LicenseExpiryBanner() {
   // Show warning banner when expiring soon
   if (daysUntilExpiry <= WARNING_THRESHOLD_DAYS) {
     return (
-      <Alert variant="default" className="rounded-none border-x-0 border-t-0 border-yellow-500 bg-yellow-50 dark:bg-yellow-950">
-        <AlertTriangle className="h-4 w-4 text-yellow-600" />
-        <AlertDescription className="text-yellow-800 dark:text-yellow-200">
+      <Alert variant="default" className="rounded-none border-x-0 border-t-0 border-warning/30 bg-warning/10">
+        <AlertTriangle className="h-4 w-4 text-warning" />
+        <AlertDescription className="text-warning">
           Your enterprise license expires in {daysUntilExpiry} day{daysUntilExpiry === 1 ? "" : "s"}.
           Please contact sales to renew your license.
         </AlertDescription>

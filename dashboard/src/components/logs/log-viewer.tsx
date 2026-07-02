@@ -69,17 +69,17 @@ export type LogViewerProps = AgentLogViewerProps | ArenaJobLogViewerProps;
 const TAIL_LINE_OPTIONS = [50, 100, 200, 500, 1000];
 
 const levelColors = {
-  info: "text-blue-600 dark:text-blue-400",
-  warn: "text-yellow-600 dark:text-yellow-400",
-  error: "text-red-600 dark:text-red-400",
-  debug: "text-gray-500 dark:text-gray-400",
+  info: "text-info",
+  warn: "text-warning",
+  error: "text-destructive",
+  debug: "text-muted-foreground",
 };
 
 const levelBadgeColors = {
-  info: "bg-blue-500/15 text-blue-700 dark:text-blue-400 border-blue-500/20",
-  warn: "bg-yellow-500/15 text-yellow-700 dark:text-yellow-400 border-yellow-500/20",
-  error: "bg-red-500/15 text-red-700 dark:text-red-400 border-red-500/20",
-  debug: "bg-gray-500/15 text-gray-700 dark:text-gray-400 border-gray-500/20",
+  info: "bg-info/15 text-info border-info/30",
+  warn: "bg-warning/15 text-warning border-warning/30",
+  error: "bg-destructive/15 text-destructive border-destructive/30",
+  debug: "bg-muted text-muted-foreground border-border",
 };
 
 /** Get the empty state message based on logs state */

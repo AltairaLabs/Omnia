@@ -1,0 +1,25 @@
+# Files with intentional, non-themeable hardcoded Tailwind palette classes.
+# Exempt from `hack/check-no-hardcoded-palette.sh` (#1690). Each entry is a
+# deliberate identity color that must NOT re-theme under white-label branding.
+# Tokenizing one of these later means deleting its line here.
+
+# Third-party PROVIDER brand identity swatches (OpenAI green, Anthropic orange,
+# Gemini blue, Ollama purple, AWS Bedrock yellow). These recognizable vendor
+# colors must survive white-labeling — mapping them to brand tokens would
+# recolor every provider badge to the SI's palette.
+dashboard/src/components/providers/provider-type-icon.tsx
+
+# Third-party FRAMEWORK badge identity (PromptKit, LangChain, AutoGen, Custom).
+# Same rationale: framework identity colors are a categorical set that must not
+# re-theme; the neutral "Custom" member stays palette-based to match its siblings.
+dashboard/src/components/agents/framework-badge.tsx
+
+# Skeuomorphic "paper sticky note" affordance (yellow post-it) on the topology
+# canvas. The literal yellow-note metaphor is deliberate; a warning token would
+# be semantically wrong and would recolor the note to the brand's caution hue.
+dashboard/src/components/topology/nodes.tsx
+
+# Fixed-dark canvas chrome for the memory galaxy: the floating control dock
+# (bg-slate-900/90 with always-white controls) and the always-dark starfield
+# backdrop must stay dark in BOTH themes so the white controls stay legible.
+dashboard/src/components/memories/memory-galaxy.tsx

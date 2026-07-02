@@ -117,8 +117,8 @@ function ProblemRow({ problem, onClick }: ProblemRowProps) {
 
   const severityColor = {
     error: "text-destructive",
-    warning: "text-amber-500",
-    info: "text-blue-500",
+    warning: "text-warning",
+    info: "text-info",
   }[problem.severity];
 
   return (
@@ -171,13 +171,13 @@ export function ProblemsSummary({ problems, className }: ProblemsSummaryProps) {
         </span>
       )}
       {warningCount > 0 && (
-        <span className="flex items-center gap-1 text-amber-500">
+        <span className="flex items-center gap-1 text-warning">
           <AlertTriangle className="h-4 w-4" />
           {warningCount} warning{warningCount !== 1 && "s"}
         </span>
       )}
       {infoCount > 0 && (
-        <span className="flex items-center gap-1 text-blue-500">
+        <span className="flex items-center gap-1 text-info">
           <Info className="h-4 w-4" />
           {infoCount} info
         </span>

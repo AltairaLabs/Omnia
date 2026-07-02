@@ -19,7 +19,7 @@ interface SourceExplorerProps {
 
 function arenaFileIcon(name: string): ReactNode | undefined {
   if (name === "config.arena.yaml") {
-    return <Settings className="h-4 w-4 text-purple-500 flex-shrink-0" />;
+    return <Settings className="h-4 w-4 text-category-2 flex-shrink-0" />;
   }
   return undefined;
 }

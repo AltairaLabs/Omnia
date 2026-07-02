@@ -55,7 +55,7 @@ export function ToolCallsTab({ toolCalls }: ToolCallsTabProps) {
               )}
               data-testid={`toolcall-item-${tc.callId || tc.id}`}
             >
-              <Wrench className="h-3.5 w-3.5 text-orange-500 shrink-0" />
+              <Wrench className="h-3.5 w-3.5 text-warning shrink-0" />
               <span className="font-mono truncate flex-1">{tc.name}</span>
               <span className="flex items-center gap-1 shrink-0">
                 {tc.status && <ToolCallBadge status={tc.status} />}
@@ -91,7 +91,7 @@ export function ToolCallsTab({ toolCalls }: ToolCallsTabProps) {
             <div className="grid grid-cols-2 gap-4 flex-1 min-h-0">
               <div className="min-w-0 flex flex-col">
                 <h4 className="text-sm font-medium text-muted-foreground mb-2 shrink-0">Arguments</h4>
-                <div className="flex-1 min-h-0 overflow-auto rounded border bg-white dark:bg-zinc-950">
+                <div className="flex-1 min-h-0 overflow-auto rounded border bg-background">
                   <RenderValue value={selectedTc.arguments} />
                 </div>
               </div>
@@ -103,7 +103,7 @@ export function ToolCallsTab({ toolCalls }: ToolCallsTabProps) {
                   )}>
                     {selectedTc.errorMessage ? "Error" : "Result"}
                   </h4>
-                  <div className="flex-1 min-h-0 overflow-auto rounded border bg-white dark:bg-zinc-950">
+                  <div className="flex-1 min-h-0 overflow-auto rounded border bg-background">
                     <RenderValue value={typeof selectedTc.result === "string" ? tryParseJSON(selectedTc.result) : selectedTc.result} />
                   </div>
                 </div>
@@ -111,7 +111,7 @@ export function ToolCallsTab({ toolCalls }: ToolCallsTabProps) {
               {!selectedTc.result && selectedTc.errorMessage && (
                 <div className="min-w-0 flex flex-col">
                   <h4 className="text-sm font-medium mb-2 shrink-0 text-destructive">Error</h4>
-                  <div className="flex-1 min-h-0 overflow-auto rounded border bg-white dark:bg-zinc-950">
+                  <div className="flex-1 min-h-0 overflow-auto rounded border bg-background">
                     <RenderValue value={selectedTc.errorMessage} />
                   </div>
                 </div>

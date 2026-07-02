@@ -91,11 +91,11 @@ export function getSourceTypeIcon(type?: ArenaSourceType, size: "sm" | "md" = "s
  */
 export function getSourceTypeBadge(type?: ArenaSourceType) {
   const colors: Record<ArenaSourceType, string> = {
-    git: "border-green-500 text-green-600",
-    oci: "border-blue-500 text-blue-600",
-    s3: "border-orange-500 text-orange-600",
-    configmap: "border-purple-500 text-purple-600",
-    workspace: "border-teal-500 text-teal-600",
+    git: "border-category-5 text-category-5",
+    oci: "border-category-1 text-category-1",
+    s3: "border-category-4 text-category-4",
+    configmap: "border-category-2 text-category-2",
+    workspace: "border-category-6 text-category-6",
   };
 
   return (
@@ -113,7 +113,7 @@ export function getStatusBadge(phase?: string) {
   switch (phase) {
     case "Ready":
       return (
-        <Badge variant="default" className="bg-green-500">
+        <Badge variant="default" className="bg-success">
           <CheckCircle className="h-3 w-3 mr-1" /> Ready
         </Badge>
       );
@@ -172,10 +172,10 @@ export function getSourceUrl(source: ArenaSource): string {
  */
 export function getConditionIcon(status: string) {
   if (status === "True") {
-    return <CheckCircle className="h-4 w-4 text-green-500" />;
+    return <CheckCircle className="h-4 w-4 text-success" />;
   }
   if (status === "False") {
-    return <AlertCircle className="h-4 w-4 text-red-500" />;
+    return <AlertCircle className="h-4 w-4 text-destructive" />;
   }
-  return <Clock className="h-4 w-4 text-yellow-500" />;
+  return <Clock className="h-4 w-4 text-warning" />;
 }
