@@ -189,21 +189,28 @@ func (l *License) CanUseScheduling() bool {
 	return l.Features.Scheduling
 }
 
+// Enterprise-bundle entitlements are tier-derived: any valid enterprise
+// license grants them, including capabilities added after the license was
+// issued. The per-feature Features bit is an optional override that can grant a
+// single capability to a non-enterprise (e.g. trial) license. This is what
+// keeps "ship a new enterprise feature" from requiring every customer's license
+// to be re-issued — the enterprise tier already covers it.
+
 // CanUseMemoryEnterprise returns true if the enterprise memory features
 // (Galaxy, analytics, institutional, multi-tier, consolidation) are licensed.
 func (l *License) CanUseMemoryEnterprise() bool {
-	return l.Features.MemoryEnterprise
+	return l.Features.MemoryEnterprise || l.IsEnterprise()
 }
 
 // CanUsePrivacyEnterprise returns true if the privacy/compliance suite
 // (consent, DSAR, audit hub, enforcement-stats) is licensed.
 func (l *License) CanUsePrivacyEnterprise() bool {
-	return l.Features.PrivacyEnterprise
+	return l.Features.PrivacyEnterprise || l.IsEnterprise()
 }
 
 // CanUsePolicyProxy returns true if AgentPolicy / CEL enforcement is licensed.
 func (l *License) CanUsePolicyProxy() bool {
-	return l.Features.PolicyProxy
+	return l.Features.PolicyProxy || l.IsEnterprise()
 }
 
 // CanUseWorkerReplicas returns true if the given number of replicas is allowed.

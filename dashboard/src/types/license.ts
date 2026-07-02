@@ -188,3 +188,31 @@ export function isLicenseExpired(license: License): boolean {
 export function isEnterpriseLicense(license: License): boolean {
   return license.tier === "enterprise";
 }
+
+/**
+ * Enterprise-bundle features are tier-derived: any valid enterprise license
+ * grants them, including capabilities added after the license was issued. Their
+ * per-feature bit is an optional override for granting a single capability to a
+ * non-enterprise (e.g. trial) license. Features NOT listed here (Arena source
+ * types, white-label) stay explicit — they can be sold à la carte.
+ */
+const TIER_DERIVED_FEATURES: ReadonlySet<keyof LicenseFeatures> = new Set([
+  "memoryEnterprise",
+  "privacyEnterprise",
+  "policyProxy",
+]);
+
+/**
+ * Check whether a license grants a feature. Enterprise-bundle features are
+ * granted by the enterprise tier alone (so a newly shipped feature is covered
+ * without re-issuing licenses); all other features require their explicit bit.
+ */
+export function canUseFeature(license: License, feature: keyof LicenseFeatures): boolean {
+  if (license.features[feature]) {
+    return true;
+  }
+  if (TIER_DERIVED_FEATURES.has(feature)) {
+    return isEnterpriseLicense(license);
+  }
+  return false;
+}
