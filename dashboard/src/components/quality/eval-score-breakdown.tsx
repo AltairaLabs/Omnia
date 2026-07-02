@@ -27,18 +27,18 @@ export function formatMetricName(name: string): string {
   return name.replaceAll(/^omnia_eval_/g, "").replaceAll("_", " ");
 }
 
-/** Get a color class for gauge values based on threshold. */
+/** Get a semantic status token color for gauge values based on threshold. */
 export function getGaugeColor(value: number): string {
-  if (value >= 0.9) return "text-green-600 dark:text-green-400";
-  if (value >= 0.7) return "text-yellow-600 dark:text-yellow-400";
-  return "text-red-600 dark:text-red-400";
+  if (value >= 0.9) return "text-success";
+  if (value >= 0.7) return "text-warning";
+  return "text-destructive";
 }
 
-/** Get a CSS class for Progress indicator color based on gauge value. */
+/** Get a Progress-indicator token color class based on gauge value. */
 export function getGaugeBarClass(value: number): string {
-  if (value >= 0.9) return "[&>[data-slot=progress-indicator]]:bg-green-500";
-  if (value >= 0.7) return "[&>[data-slot=progress-indicator]]:bg-yellow-500";
-  return "[&>[data-slot=progress-indicator]]:bg-red-500";
+  if (value >= 0.9) return "[&>[data-slot=progress-indicator]]:bg-success";
+  if (value >= 0.7) return "[&>[data-slot=progress-indicator]]:bg-warning";
+  return "[&>[data-slot=progress-indicator]]:bg-destructive";
 }
 
 /** Get sparkline stroke color based on gauge value. */

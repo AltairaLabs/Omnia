@@ -51,30 +51,36 @@ describe("formatMetricName", () => {
 });
 
 describe("getGaugeColor", () => {
-  it("returns green for high values", () => {
-    expect(getGaugeColor(0.95)).toContain("green");
+  it("returns the success token for high values", () => {
+    expect(getGaugeColor(0.95)).toContain("text-success");
   });
 
-  it("returns yellow for medium values", () => {
-    expect(getGaugeColor(0.75)).toContain("yellow");
+  it("returns the warning token for medium values", () => {
+    expect(getGaugeColor(0.75)).toContain("text-warning");
   });
 
-  it("returns red for low values", () => {
-    expect(getGaugeColor(0.5)).toContain("red");
+  it("returns the destructive token for low values", () => {
+    expect(getGaugeColor(0.5)).toContain("text-destructive");
+  });
+
+  it("never returns a raw palette class", () => {
+    for (const v of [0.95, 0.75, 0.5]) {
+      expect(getGaugeColor(v)).not.toMatch(/-(green|yellow|red)-\d/);
+    }
   });
 });
 
 describe("getGaugeBarClass", () => {
-  it("returns green class for high values", () => {
-    expect(getGaugeBarClass(0.95)).toContain("green");
+  it("returns the success token for high values", () => {
+    expect(getGaugeBarClass(0.95)).toContain("bg-success");
   });
 
-  it("returns yellow class for medium values", () => {
-    expect(getGaugeBarClass(0.75)).toContain("yellow");
+  it("returns the warning token for medium values", () => {
+    expect(getGaugeBarClass(0.75)).toContain("bg-warning");
   });
 
-  it("returns red class for low values", () => {
-    expect(getGaugeBarClass(0.5)).toContain("red");
+  it("returns the destructive token for low values", () => {
+    expect(getGaugeBarClass(0.5)).toContain("bg-destructive");
   });
 });
 
