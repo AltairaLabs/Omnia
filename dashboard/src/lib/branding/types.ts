@@ -11,6 +11,16 @@ export interface BrandColorTokens {
   primary?: string;
   accent?: string;
   sidebar?: string;
+  // Surfaces — the canvas the UI sits on. Curated (not arbitrary CSS) so a
+  // brand can re-tone page/card/text/border without breaking contrast. Provide
+  // dark-mode values via BrandConfig.colorsDark (a single value can't be both a
+  // light and a dark surface).
+  background?: string;
+  foreground?: string;
+  card?: string;
+  muted?: string;
+  mutedForeground?: string;
+  border?: string;
   // Series palette (charts / time-series)
   chart1?: string;
   chart2?: string;
@@ -36,6 +46,12 @@ export interface BrandConfig {
   logo: { light: string; dark: string };
   favicon: string;
   colors?: BrandColorTokens;
+  /**
+   * Dark-mode color overrides, injected under `.dark`. Use for tokens that must
+   * differ between light and dark — chiefly surfaces (a warm-charcoal dark vs a
+   * warm-white light). Anything omitted here falls back to `colors` / defaults.
+   */
+  colorsDark?: BrandColorTokens;
   fonts?: { family?: string; url?: string };
   links?: {
     docsBaseUrl?: string;

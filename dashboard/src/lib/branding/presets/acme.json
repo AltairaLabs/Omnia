@@ -25,7 +25,21 @@
     "category8": "#78716C",
     "success": "#16A34A",
     "warning": "#D97706",
-    "info": "#EA580C"
+    "info": "#EA580C",
+    "background": "#FFF7ED",
+    "card": "#FFFFFF",
+    "foreground": "#431407",
+    "muted": "#FFEDD5",
+    "mutedForeground": "#9A3412",
+    "border": "#FED7AA"
+  },
+  "colorsDark": {
+    "background": "#1A120B",
+    "card": "#251A11",
+    "foreground": "#FFF7ED",
+    "muted": "#251A11",
+    "mutedForeground": "#FDBA74",
+    "border": "rgba(253, 186, 116, 0.14)"
   },
   "links": {
     "docsBaseUrl": "https://docs.acme.example",

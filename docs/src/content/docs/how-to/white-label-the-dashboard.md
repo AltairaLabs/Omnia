@@ -26,6 +26,7 @@ default.
 | Brand color | `--primary` | Primary buttons, links, focus rings, active nav |
 | Accent | `--accent` | Secondary accents |
 | Sidebar | `--sidebar` | Sidebar surface |
+| Surfaces | `background`, `card`, `foreground`, `muted`, `mutedForeground`, `border` | The page/card canvas + text + borders. Curated (not arbitrary CSS). Provide dark-mode values via `colorsDark` — see below |
 | Status | `--success` `--warning` `--info` `--destructive` | Semantic status (success/warning/info/error) |
 | Categorical | `--category-1` … `--category-8` | Entity/node/memory-category colors (graphs, badges) |
 | Chart series | `--chart-1` … `--chart-5` | Time-series / data-series colors |
@@ -98,6 +99,33 @@ dashboard:
 `customCss` is appended to `:root` only — it overrides design tokens, never
 arbitrary selectors. Targeting internal component classes is unsupported and may
 break on upgrade.
+
+### Dark-mode surfaces
+
+A single override can't be both a light and a dark surface, so surface tokens
+that must differ by theme go in a separate `colorsDark` block. Light/shared
+values live in `colors` (`:root`); `colorsDark` is injected under `.dark` and
+wins in dark mode. This lets a brand ship, say, a warm-charcoal dark canvas
+instead of the default navy:
+
+```yaml
+dashboard:
+  branding:
+    colors:      # light + shared (accents apply in both modes)
+      primary: "#EA580C"
+      background: "#FFF7ED"
+      card: "#FFFFFF"
+      foreground: "#431407"
+    colorsDark:  # dark-mode surface tones
+      background: "#1A120B"
+      card: "#251A11"
+      foreground: "#FFF7ED"
+      mutedForeground: "#FDBA74"
+      border: "rgba(253, 186, 116, 0.14)"
+```
+
+Accents (primary/category/chart/status) generally read fine in both modes, so
+they only need to be set once in `colors`.
 
 ## Logos & favicon
 

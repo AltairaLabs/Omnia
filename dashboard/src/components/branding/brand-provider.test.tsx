@@ -76,6 +76,19 @@ describe("BrandProvider", () => {
     expect(document.getElementById("brand-vars")?.textContent).toContain("Brand Sans");
   });
 
+  it("emits a .dark block for dark-mode surface overrides", async () => {
+    state.brand = { ...BASE, colorsDark: { background: "#0a0a0a", card: "#151515" } };
+    render(
+      <BrandProvider>
+        <Probe />
+      </BrandProvider>,
+    );
+    await waitFor(() => expect(screen.getByText("Acme AI")).toBeInTheDocument());
+    const css = document.getElementById("brand-vars")?.textContent ?? "";
+    expect(css).toMatch(/\.dark\s*\{[^}]*--background:\s*#0a0a0a/);
+    expect(css).toContain("--card: #151515");
+  });
+
   it("injects no font link when the brand has no fonts.url", async () => {
     state.brand = { ...BASE, fonts: { family: "Brand Sans" } };
     render(

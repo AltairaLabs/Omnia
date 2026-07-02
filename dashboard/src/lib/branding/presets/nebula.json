@@ -25,7 +25,21 @@
     "category8": "#64748B",
     "success": "#10B981",
     "warning": "#F59E0B",
-    "info": "#6366F1"
+    "info": "#6366F1",
+    "background": "#F5F3FF",
+    "card": "#FFFFFF",
+    "foreground": "#2E1065",
+    "muted": "#EDE9FE",
+    "mutedForeground": "#6D28D9",
+    "border": "#DDD6FE"
+  },
+  "colorsDark": {
+    "background": "#120E20",
+    "card": "#1C1533",
+    "foreground": "#F5F3FF",
+    "muted": "#1C1533",
+    "mutedForeground": "#C4B5FD",
+    "border": "rgba(196, 181, 253, 0.14)"
   },
   "links": {
     "docsBaseUrl": "https://docs.nebula.example",
