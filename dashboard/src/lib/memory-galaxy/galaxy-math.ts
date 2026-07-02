@@ -1,6 +1,7 @@
 import type { GalaxyPoint } from "./types";
 import type { Tier } from "@/lib/memory-analytics/types";
-import { TIER_COLORS, CATEGORY_COLORS } from "@/lib/memory-analytics/colors";
+import { TIER_COLORS } from "@/lib/memory-analytics/colors";
+import { categoryColorHex } from "@/lib/colors/category";
 
 const TIERS: Tier[] = ["institutional", "agent", "user", "user_for_agent"];
 const PADDING = 24;
@@ -44,7 +45,7 @@ export function hitTest(points: GalaxyPoint[], pos: ScreenPos, t: Transform, rad
 
 export function colorForPoint(p: GalaxyPoint, colorBy: "tier" | "category"): string {
   if (colorBy === "tier") return TIER_COLORS[p.tier];
-  return CATEGORY_COLORS[p.category ?? "unknown"] ?? CATEGORY_COLORS.unknown;
+  return categoryColorHex(p.category);
 }
 
 export function isTierVisible(p: GalaxyPoint, hidden: Set<string>): boolean {

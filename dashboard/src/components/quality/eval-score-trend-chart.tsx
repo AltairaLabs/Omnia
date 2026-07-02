@@ -26,14 +26,11 @@ import {
 import { useEvalScoreTrends, type EvalTrendRange, type EvalTrendPoint } from "@/hooks/sessions";
 import type { EvalFilter } from "@/lib/prometheus-queries";
 
-/** Color palette for eval metric lines. */
-const CHART_COLORS = [
-  "#2563eb", "#16a34a", "#d97706", "#dc2626", "#7c3aed",
-  "#0891b2", "#be185d", "#65a30d", "#ea580c", "#6366f1",
-];
+const CATEGORY_TOKEN_COUNT = 8;
 
+/** Token color for an eval metric line — cycles the categorical palette. */
 export function getEvalColor(index: number): string {
-  return CHART_COLORS[index % CHART_COLORS.length];
+  return `var(--category-${(index % CATEGORY_TOKEN_COUNT) + 1})`;
 }
 
 interface EvalScoreTrendChartProps {

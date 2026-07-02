@@ -14,7 +14,7 @@ interface CostSparklineProps {
 
 export function CostSparkline({
   data,
-  color = "#3B82F6",
+  color = "var(--chart-1)",
   height = 32,
 }: Readonly<CostSparklineProps>) {
   if (!data || data.length === 0) {

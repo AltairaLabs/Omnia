@@ -9,7 +9,7 @@ import {
   Legend,
 } from "recharts";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { CATEGORY_COLORS } from "@/lib/memory-analytics/colors";
+import { categoryColorVar } from "@/lib/colors/category";
 import type { AggregateRow } from "@/lib/memory-analytics/types";
 
 interface CategoryDonutProps {
@@ -17,7 +17,7 @@ interface CategoryDonutProps {
 }
 
 function colorFor(category: string): string {
-  return CATEGORY_COLORS[category] ?? CATEGORY_COLORS.unknown;
+  return categoryColorVar(category);
 }
 
 export function CategoryDonut({ rows }: Readonly<CategoryDonutProps>) {

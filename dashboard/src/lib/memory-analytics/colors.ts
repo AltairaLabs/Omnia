@@ -29,13 +29,3 @@ export const TIER_DESCRIPTIONS: Record<Tier, string> = {
   user_for_agent:
     "Things this agent remembers about a specific user in this agent only — per-agent personalisation.",
 };
-
-export const CATEGORY_COLORS: Record<string, string> = {
-  "memory:context": "hsl(200, 80%, 55%)",
-  "memory:identity": "hsl(15, 85%, 55%)",
-  "memory:health": "hsl(0, 75%, 55%)",
-  "memory:location": "hsl(45, 90%, 55%)",
-  "memory:preferences": "hsl(140, 70%, 45%)",
-  "memory:history": "hsl(260, 70%, 60%)",
-  unknown: "hsl(0, 0%, 60%)",
-};

@@ -72,12 +72,12 @@ export function TokenUsageChart({
             <AreaChart data={chartData}>
               <defs>
                 <linearGradient id="inputTokens" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#3B82F6" stopOpacity={0.3} />
-                  <stop offset="95%" stopColor="#3B82F6" stopOpacity={0} />
+                  <stop offset="5%" stopColor="var(--chart-1)" stopOpacity={0.3} />
+                  <stop offset="95%" stopColor="var(--chart-1)" stopOpacity={0} />
                 </linearGradient>
                 <linearGradient id="outputTokens" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#8B5CF6" stopOpacity={0.3} />
-                  <stop offset="95%" stopColor="#8B5CF6" stopOpacity={0} />
+                  <stop offset="5%" stopColor="var(--chart-2)" stopOpacity={0.3} />
+                  <stop offset="95%" stopColor="var(--chart-2)" stopOpacity={0} />
                 </linearGradient>
               </defs>
               <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
@@ -114,7 +114,7 @@ export function TokenUsageChart({
               <Area
                 type="monotone"
                 dataKey="Input Tokens"
-                stroke="#3B82F6"
+                stroke="var(--chart-1)"
                 strokeWidth={2}
                 fillOpacity={1}
                 fill="url(#inputTokens)"
@@ -122,7 +122,7 @@ export function TokenUsageChart({
               <Area
                 type="monotone"
                 dataKey="Output Tokens"
-                stroke="#8B5CF6"
+                stroke="var(--chart-2)"
                 strokeWidth={2}
                 fillOpacity={1}
                 fill="url(#outputTokens)"
