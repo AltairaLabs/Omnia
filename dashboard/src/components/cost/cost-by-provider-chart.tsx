@@ -70,7 +70,7 @@ export function CostByProviderChart({
                 labelLine={false}
                 label={renderLabel}
                 outerRadius={100}
-                fill="#8884d8"
+                fill="var(--chart-1)"
                 dataKey="cost"
                 nameKey="name"
               >

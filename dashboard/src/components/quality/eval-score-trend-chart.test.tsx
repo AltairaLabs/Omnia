@@ -50,15 +50,19 @@ function createWrapper() {
 }
 
 describe("getEvalColor", () => {
-  it("returns colors from the palette", () => {
-    expect(getEvalColor(0)).toBe("#2563eb");
-    expect(getEvalColor(1)).toBe("#16a34a");
-    expect(getEvalColor(2)).toBe("#d97706");
+  it("returns category token colors from the palette", () => {
+    expect(getEvalColor(0)).toBe("var(--category-1)");
+    expect(getEvalColor(1)).toBe("var(--category-2)");
+    expect(getEvalColor(2)).toBe("var(--category-3)");
+  });
+
+  it("never returns a raw hex color", () => {
+    expect(getEvalColor(0)).not.toMatch(/^#/);
   });
 
   it("wraps around when index exceeds palette length", () => {
-    expect(getEvalColor(10)).toBe(getEvalColor(0));
-    expect(getEvalColor(11)).toBe(getEvalColor(1));
+    expect(getEvalColor(8)).toBe(getEvalColor(0));
+    expect(getEvalColor(9)).toBe(getEvalColor(1));
   });
 });
 

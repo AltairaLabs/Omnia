@@ -182,7 +182,7 @@ export function SystemMetrics({ className }: Readonly<{ className?: string }>) {
           metric={metrics?.requestsPerSec ?? { current: 0, display: "--", series: [], unit: "req/s" }}
           icon={Activity}
           loading={isLoading}
-          color="#3B82F6"
+          color="var(--chart-1)"
           available={available}
         />
         <MetricCard
@@ -191,7 +191,7 @@ export function SystemMetrics({ className }: Readonly<{ className?: string }>) {
           metric={metrics?.p95Latency ?? { current: 0, display: "--", series: [], unit: "ms" }}
           icon={Clock}
           loading={isLoading}
-          color="#10B981"
+          color="var(--chart-4)"
           available={available}
         />
         <MetricCard
@@ -200,7 +200,7 @@ export function SystemMetrics({ className }: Readonly<{ className?: string }>) {
           metric={metrics?.cost24h ?? { current: 0, display: "--", series: [], unit: "$" }}
           icon={DollarSign}
           loading={isLoading}
-          color="#F59E0B"
+          color="var(--chart-5)"
           available={available}
         />
         <MetricCard
@@ -209,7 +209,7 @@ export function SystemMetrics({ className }: Readonly<{ className?: string }>) {
           metric={metrics?.tokensPerMin ?? { current: 0, display: "--", series: [], unit: "tok/min" }}
           icon={Coins}
           loading={isLoading}
-          color="#8B5CF6"
+          color="var(--chart-2)"
           available={available}
         />
       </div>
