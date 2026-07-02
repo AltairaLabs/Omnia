@@ -244,8 +244,8 @@ interface ResultsSummaryProps {
 }
 
 function getPassRateColor(passRate: number): string {
-  if (passRate >= 0.9) return "text-green-500";
-  if (passRate >= 0.7) return "text-amber-500";
+  if (passRate >= 0.9) return "text-success";
+  if (passRate >= 0.7) return "text-warning";
   return "text-destructive";
 }
 
@@ -269,7 +269,7 @@ function ResultsSummary({ summary }: ResultsSummaryProps) {
       )}
       {summary.passed !== undefined && (
         <div className="flex items-center gap-1">
-          <CheckCircle2 className="h-4 w-4 text-green-500" />
+          <CheckCircle2 className="h-4 w-4 text-success" />
           <span>{summary.passed}</span>
         </div>
       )}
@@ -306,9 +306,9 @@ function ResultRow({ result }: ResultRowProps) {
   }[result.status];
 
   const statusColor = {
-    pass: "text-green-500",
+    pass: "text-success",
     fail: "text-destructive",
-    error: "text-amber-500",
+    error: "text-warning",
     skipped: "text-muted-foreground",
   }[result.status];
 
@@ -325,7 +325,7 @@ function ResultRow({ result }: ResultRowProps) {
         {result.score === undefined ? (
           <span className="text-muted-foreground">—</span>
         ) : (
-          <span className={cn(result.score >= 0.7 ? "text-green-500" : "text-amber-500")}>
+          <span className={cn(result.score >= 0.7 ? "text-success" : "text-warning")}>
             {(result.score * 100).toFixed(0)}%
           </span>
         )}
