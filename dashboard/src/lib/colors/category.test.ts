@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   categoryIndex,
+  isKnownCategory,
   categoryColorVar,
   categoryColorHex,
   getCategoryClasses,
@@ -20,6 +21,12 @@ describe("category colors", () => {
   it("falls back to the neutral index for unknown/missing categories", () => {
     expect(categoryIndex("memory:nope")).toBe(8);
     expect(categoryIndex()).toBe(8);
+  });
+
+  it("reports whether a category is known", () => {
+    expect(isKnownCategory("memory:identity")).toBe(true);
+    expect(isKnownCategory("memory:nope")).toBe(false);
+    expect(isKnownCategory()).toBe(false);
   });
 
   it("returns a category CSS variable", () => {

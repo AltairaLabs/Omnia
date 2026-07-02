@@ -39,36 +39,18 @@ describe("CategoryBadge", () => {
 });
 
 describe("getCategoryColor", () => {
-  it("returns blue hex for memory:identity", () => {
-    expect(getCategoryColor("memory:identity")).toBe("#3b82f6");
+  it("returns the category token var for known categories", () => {
+    expect(getCategoryColor("memory:identity")).toBe("var(--category-1)");
+    expect(getCategoryColor("memory:health")).toBe("var(--category-7)");
   });
 
-  it("returns gray hex for memory:context", () => {
-    expect(getCategoryColor("memory:context")).toBe("#6b7280");
+  it("returns the neutral category token var for unknown/undefined", () => {
+    expect(getCategoryColor("memory:unknown")).toBe("var(--category-8)");
+    expect(getCategoryColor()).toBe("var(--category-8)");
   });
 
-  it("returns red hex for memory:health", () => {
-    expect(getCategoryColor("memory:health")).toBe("#ef4444");
-  });
-
-  it("returns green hex for memory:location", () => {
-    expect(getCategoryColor("memory:location")).toBe("#22c55e");
-  });
-
-  it("returns purple hex for memory:preferences", () => {
-    expect(getCategoryColor("memory:preferences")).toBe("#a855f7");
-  });
-
-  it("returns amber hex for memory:history", () => {
-    expect(getCategoryColor("memory:history")).toBe("#f59e0b");
-  });
-
-  it("returns gray fallback for unknown category", () => {
-    expect(getCategoryColor("memory:unknown")).toBe("#6b7280");
-  });
-
-  it("returns gray fallback when category is undefined", () => {
-    expect(getCategoryColor()).toBe("#6b7280");
+  it("never returns a raw hex color", () => {
+    expect(getCategoryColor("memory:identity")).not.toMatch(/^#/);
   });
 });
 

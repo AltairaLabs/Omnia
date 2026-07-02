@@ -45,6 +45,11 @@ export function categoryIndex(category?: string): number {
   return (category && MEMORY_CATEGORY_INDEX[category]) || NEUTRAL_INDEX;
 }
 
+/** True if the category is a recognized memory category. */
+export function isKnownCategory(category?: string): boolean {
+  return category != null && category in MEMORY_CATEGORY_INDEX;
+}
+
 /** CSS variable for a category — themeable; use in CSS/recharts/inline style. */
 export function categoryColorVar(category?: string): string {
   return `var(--category-${categoryIndex(category)})`;
