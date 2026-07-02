@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"testing"
 
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
@@ -31,7 +32,7 @@ func TestBuildPolicyProxyContainer_DefaultImage(t *testing.T) {
 		Spec:       omniav1alpha1.AgentRuntimeSpec{},
 	}
 
-	container := buildPolicyProxyContainer(agentRuntime, "")
+	container := buildPolicyProxyContainer(agentRuntime, "", "")
 	if container.Name != PolicyProxyContainerName {
 		t.Errorf("Name = %q, want %q", container.Name, PolicyProxyContainerName)
 	}
@@ -56,9 +57,35 @@ func TestBuildPolicyProxyContainer_CustomImage(t *testing.T) {
 	}
 
 	customImage := "my-registry/policy-proxy:v1.0"
-	container := buildPolicyProxyContainer(agentRuntime, customImage)
+	container := buildPolicyProxyContainer(agentRuntime, customImage, "")
 	if container.Image != customImage {
 		t.Errorf("Image = %q, want %q", container.Image, customImage)
+	}
+}
+
+func TestBuildPolicyProxyEnvVars_StampsOperatorAPIURL(t *testing.T) {
+	agentRuntime := &omniav1alpha1.AgentRuntime{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-agent", Namespace: "default"},
+	}
+	const url = "http://omnia-arena-controller.omnia-system:8082"
+
+	hasEnv := func(env []corev1.EnvVar, name string) (string, bool) {
+		for _, e := range env {
+			if e.Name == name {
+				return e.Value, true
+			}
+		}
+		return "", false
+	}
+
+	withURL := buildPolicyProxyEnvVars(agentRuntime, url)
+	if v, ok := hasEnv(withURL, "OPERATOR_API_URL"); !ok || v != url {
+		t.Errorf("OPERATOR_API_URL = %q, present=%v; want %q", v, ok, url)
+	}
+
+	withoutURL := buildPolicyProxyEnvVars(agentRuntime, "")
+	if _, ok := hasEnv(withoutURL, "OPERATOR_API_URL"); ok {
+		t.Error("OPERATOR_API_URL must not be stamped when no license URL is set")
 	}
 }
 
@@ -68,7 +95,7 @@ func TestBuildPolicyProxyEnvVars(t *testing.T) {
 		Spec:       omniav1alpha1.AgentRuntimeSpec{},
 	}
 
-	envVars := buildPolicyProxyEnvVars(agentRuntime)
+	envVars := buildPolicyProxyEnvVars(agentRuntime, "")
 
 	expectedEnvs := map[string]string{
 		"POLICY_PROXY_LISTEN_ADDR":  fmt.Sprintf(":%d", DefaultPolicyProxyPort),
@@ -113,7 +140,7 @@ func TestBuildPolicyProxyContainer_Probes(t *testing.T) {
 		Spec:       omniav1alpha1.AgentRuntimeSpec{},
 	}
 
-	container := buildPolicyProxyContainer(agentRuntime, "")
+	container := buildPolicyProxyContainer(agentRuntime, "", "")
 
 	if container.ReadinessProbe == nil {
 		t.Fatal("ReadinessProbe is nil")

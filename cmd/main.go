@@ -409,13 +409,14 @@ func main() {
 			GatewayNamespace: defaultExposureGatewayNamespace,
 			GatewaySection:   defaultExposureGatewaySection,
 		},
-		PolicyProxyImage:     policyProxyImageForEnterprise(enterpriseEnabled, policyProxyImage),
-		RolloutMetrics:       controller.NewRolloutMetrics(prometheus.DefaultRegisterer),
-		WorkspaceContentPath: workspaceContentPath,
-		MgmtPlaneJWKSURL:     mgmtPlaneJWKSURL,
-		Recorder:             mgr.GetEventRecorderFor("agentruntime-controller"),
-		MeshEnabled:          meshEnabled,
-		ServiceAuth:          serviceAuth,
+		PolicyProxyImage:         policyProxyImageForEnterprise(enterpriseEnabled, policyProxyImage),
+		PolicyProxyLicenseAPIURL: licenseAPIURL,
+		RolloutMetrics:           controller.NewRolloutMetrics(prometheus.DefaultRegisterer),
+		WorkspaceContentPath:     workspaceContentPath,
+		MgmtPlaneJWKSURL:         mgmtPlaneJWKSURL,
+		Recorder:                 mgr.GetEventRecorderFor("agentruntime-controller"),
+		MeshEnabled:              meshEnabled,
+		ServiceAuth:              serviceAuth,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, errUnableToCreateController, logKeyController, "AgentRuntime")
 		os.Exit(1)

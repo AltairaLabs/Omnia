@@ -41,6 +41,7 @@ const (
 func buildPolicyProxyContainer(
 	agentRuntime *omniav1alpha1.AgentRuntime,
 	proxyImage string,
+	licenseAPIURL string,
 ) corev1.Container {
 	if proxyImage == "" {
 		proxyImage = DefaultPolicyProxyImage
@@ -62,7 +63,7 @@ func buildPolicyProxyContainer(
 				Protocol:      corev1.ProtocolTCP,
 			},
 		},
-		Env: buildPolicyProxyEnvVars(agentRuntime),
+		Env: buildPolicyProxyEnvVars(agentRuntime, licenseAPIURL),
 		ReadinessProbe: &corev1.Probe{
 			ProbeHandler: corev1.ProbeHandler{
 				HTTPGet: &corev1.HTTPGetAction{
@@ -86,9 +87,11 @@ func buildPolicyProxyContainer(
 	}
 }
 
-// buildPolicyProxyEnvVars creates environment variables for the policy proxy container.
-func buildPolicyProxyEnvVars(_ *omniav1alpha1.AgentRuntime) []corev1.EnvVar {
-	return []corev1.EnvVar{
+// buildPolicyProxyEnvVars creates environment variables for the policy proxy
+// container. licenseAPIURL, when set, is passed as OPERATOR_API_URL so the
+// sidecar logs a startup license nag when unlicensed (#1682).
+func buildPolicyProxyEnvVars(_ *omniav1alpha1.AgentRuntime, licenseAPIURL string) []corev1.EnvVar {
+	env := []corev1.EnvVar{
 		{
 			Name: "OMNIA_AGENT_NAME",
 			ValueFrom: &corev1.EnvVarSource{
@@ -118,4 +121,8 @@ func buildPolicyProxyEnvVars(_ *omniav1alpha1.AgentRuntime) []corev1.EnvVar {
 			Value: fmt.Sprintf("http://localhost:%d", DefaultRuntimeGRPCPort),
 		},
 	}
+	if licenseAPIURL != "" {
+		env = append(env, corev1.EnvVar{Name: "OPERATOR_API_URL", Value: licenseAPIURL})
+	}
+	return env
 }

@@ -121,6 +121,10 @@ type AgentRuntimeReconciler struct {
 	// is injected into the agent pod to evaluate CEL rules before tool execution.
 	// If empty, the default image from policy_proxy_sidecar.go is used.
 	PolicyProxyImage string
+	// PolicyProxyLicenseAPIURL is the operator/arena-controller license endpoint,
+	// stamped onto the policy-proxy sidecar as OPERATOR_API_URL so it logs a
+	// startup nag when unlicensed (#1682). Empty disables the nag. Never gates.
+	PolicyProxyLicenseAPIURL string
 	// WorkspaceContentPath is the base path for the workspace content PVC.
 	// When set, the runtime container mounts the workspace content PVC at
 	// this path (read-only) and receives OMNIA_PROMPTPACK_MANIFEST_PATH
