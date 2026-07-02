@@ -187,3 +187,25 @@
     @apply bg-background text-foreground antialiased;
   }
 }
+
+/* Brand the React Flow chrome (background dots, edges, handles, controls,
+   minimap) via its CSS variables. The doubled `.react-flow` selector raises
+   specificity above the library defaults so these win regardless of the order
+   in which globals.css and @xyflow/react/dist/style.css load. colorMode still
+   drives light/dark; these map the chrome onto the design tokens. */
+.react-flow.react-flow {
+  --xy-background-pattern-dots-color-default: var(--border);
+  --xy-edge-stroke-default: var(--muted-foreground);
+  --xy-edge-stroke-selected-default: var(--primary);
+  --xy-connectionline-stroke-default: var(--primary);
+  --xy-handle-background-color-default: var(--primary);
+  --xy-handle-border-color-default: var(--background);
+  --xy-controls-button-background-color-default: var(--card);
+  --xy-controls-button-background-color-hover-default: var(--accent);
+  --xy-controls-button-color-default: var(--card-foreground);
+  --xy-controls-button-color-hover-default: var(--accent-foreground);
+  --xy-controls-button-border-color-default: var(--border);
+  --xy-minimap-background-color-default: var(--card);
+  --xy-minimap-mask-background-color-default: color-mix(in srgb, var(--background) 60%, transparent);
+  --xy-attribution-background-color-default: transparent;
+}

@@ -16,6 +16,7 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { Info } from "lucide-react";
+import { useFlowColorMode } from "@/lib/flow/use-color-mode";
 import { modelToFlow, type WorkloadNodeData } from "./to-flow";
 import { layoutFlow } from "./layout";
 import { workloadNodeTypes } from "./workload-nodes";
@@ -152,6 +153,7 @@ export function WorkloadGraph({
     [edges, dataNodeIds, showData],
   );
 
+  const colorMode = useFlowColorMode();
   const selected: WorkloadNode | undefined = selectedId ? findNode(model, selectedId) : undefined;
   const hasData = dataNodeIds.size > 0;
   const banner = bannerLabel(model);
@@ -172,6 +174,7 @@ export function WorkloadGraph({
         style={{ width: "100%", height: `${height}px` }}
       >
         <ReactFlow
+          colorMode={colorMode}
           nodes={displayNodes}
           edges={displayEdges}
           onNodesChange={onNodesChange}

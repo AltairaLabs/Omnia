@@ -14,6 +14,7 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 
+import { useFlowColorMode } from "@/lib/flow/use-color-mode";
 import { nodeTypes } from "./nodes";
 import { buildTopologyGraph, applyLayoutToGraph } from "./graph-builder";
 import { usePersistedNodeLayout } from "@/hooks/use-persisted-node-layout";
@@ -109,9 +110,12 @@ export function TopologyGraph({
     }
   }, []);
 
+  const colorMode = useFlowColorMode();
+
   return (
     <div style={{ width: "100%", height: "600px" }} className={className}>
       <ReactFlow
+        colorMode={colorMode}
         nodes={nodes}
         edges={edges}
         onNodesChange={onNodesChange}
