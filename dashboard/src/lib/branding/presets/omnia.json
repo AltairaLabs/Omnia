@@ -1,0 +1,14 @@
+{
+  "productName": "Omnia",
+  "logo": { "light": "/logo.svg", "dark": "/logo-dark.svg" },
+  "favicon": "/favicon.svg",
+  "links": {
+    "docsBaseUrl": "https://omnia.altairalabs.ai",
+    "upgradeUrl": "https://altairalabs.ai/enterprise",
+    "sales": "sales@altairalabs.ai"
+  },
+  "copy": {
+    "loginTagline": "Sign in to Omnia",
+    "signupTagline": "Sign up to get started with Omnia"
+  }
+}

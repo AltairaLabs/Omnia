@@ -1,0 +1,35 @@
+{
+  "productName": "Nebula",
+  "logo": { "light": "/logo.svg", "dark": "/logo-dark.svg" },
+  "favicon": "/favicon.svg",
+  "colors": {
+    "primary": "#7C3AED",
+    "accent": "#DB2777",
+    "sidebar": "#2E1065",
+    "chart1": "#7C3AED",
+    "chart2": "#2563EB",
+    "chart3": "#DB2777",
+    "chart4": "#0891B2",
+    "chart5": "#4F46E5",
+    "category1": "#7C3AED",
+    "category2": "#DB2777",
+    "category3": "#2563EB",
+    "category4": "#0891B2",
+    "category5": "#4F46E5",
+    "category6": "#9333EA",
+    "category7": "#C026D3",
+    "category8": "#64748B",
+    "success": "#10B981",
+    "warning": "#F59E0B",
+    "info": "#6366F1"
+  },
+  "links": {
+    "docsBaseUrl": "https://docs.nebula.example",
+    "upgradeUrl": "https://nebula.example/enterprise",
+    "sales": "sales@nebula.example"
+  },
+  "copy": {
+    "loginTagline": "Sign in to Nebula",
+    "signupTagline": "Sign up to get started with Nebula"
+  }
+}

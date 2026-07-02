@@ -9,12 +9,16 @@ vi.mock("@/contexts/workspace-context", () => ({
   useWorkspace: () => ({ currentWorkspace: mockWorkspace }),
 }));
 
+const mockDemo = vi.fn();
+vi.mock("@/hooks/core", () => ({ useDemoMode: () => mockDemo() }));
+
 function wrapper({ children }: { children: ReactNode }) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return <QueryClientProvider client={qc}>{children}</QueryClientProvider>;
 }
 
 beforeEach(() => {
+  mockDemo.mockReturnValue({ isDemoMode: false, loading: false });
   global.fetch = vi.fn().mockResolvedValue({
     ok: true,
     json: async () => ({ points: [{ id: "a" }], total: 1, model: "tsne" }),
@@ -29,6 +33,18 @@ describe("useMemoryProjection", () => {
     expect(global.fetch).toHaveBeenCalledWith(
       expect.stringContaining("/api/workspaces/ws-1/memory/projection"),
     );
+  });
+
+  it("returns a deterministic mock projection in demo mode without fetching", async () => {
+    mockDemo.mockReturnValue({ isDemoMode: true, loading: false });
+    const fetchMock = vi.fn();
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    const { result } = renderHook(() => useMemoryProjection(), { wrapper });
+    await waitFor(() => expect(result.current.data).toBeDefined());
+    expect(result.current.data!.points.length).toBeGreaterThan(0);
+    expect(result.current.data!.embeddingModel).toBe("mock");
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("polls while the projection is pending, then stops once ready", async () => {
