@@ -79,6 +79,8 @@ export default defineConfig({
         // Next.js framework files (tested via E2E)
         "src/app/**/layout.tsx",
         "src/app/page.tsx", // Root page
+        "src/app/costs/page.tsx", // Cost dashboard page (hook-driven data composition)
+        "src/app/topology/page.tsx", // Topology page (hook-driven data composition)
         "src/app/agents/**/page.tsx", // Agent pages (require full context)
         "src/app/functions/**/page.tsx", // Function pages (compose heavy agent controls)
         "src/app/arena/configs/[name]/page.tsx", // Arena detail pages (complex UI)
