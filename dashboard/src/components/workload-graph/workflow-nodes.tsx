@@ -27,28 +27,28 @@ function CollapsedCompositionNode({
   const steps = node.detail.stepCount;
   return (
     <div className="relative" style={{ width, height }}>
-      <Handle type="target" position={Position.Top} className="!bg-indigo-500" />
+      <Handle type="target" position={Position.Top} className="!bg-category-2" />
       {/* stacked layers behind, hinting "contains a sub-flow" */}
-      <div aria-hidden="true" className="absolute inset-0 translate-x-[5px] translate-y-[5px] rounded-md border-2 border-indigo-300 bg-indigo-50/50 dark:border-indigo-700 dark:bg-indigo-950/20" />
-      <div aria-hidden="true" className="absolute inset-0 translate-x-[2px] translate-y-[2px] rounded-md border-2 border-indigo-300 bg-indigo-50/70 dark:border-indigo-700 dark:bg-indigo-950/30" />
+      <div aria-hidden="true" className="absolute inset-0 translate-x-[5px] translate-y-[5px] rounded-md border-2 border-category-2 bg-category-2/50 dark:border-category-2 dark:bg-category-2/20" />
+      <div aria-hidden="true" className="absolute inset-0 translate-x-[2px] translate-y-[2px] rounded-md border-2 border-category-2 bg-category-2/70 dark:border-category-2 dark:bg-category-2/30" />
       <button
         type="button"
         onClick={() => onToggle?.(node.id)}
         aria-label="Expand composition"
         style={{ width, height }}
-        className="nodrag nopan relative box-border flex flex-col justify-center rounded-md border-2 border-indigo-500 bg-card pl-4 pr-8 text-left shadow-sm cursor-pointer hover:shadow-md overflow-hidden"
+        className="nodrag nopan relative box-border flex flex-col justify-center rounded-md border-2 border-category-2 bg-card pl-4 pr-8 text-left shadow-sm cursor-pointer hover:shadow-md overflow-hidden"
       >
         <span className="inline-flex items-center gap-1.5 font-medium text-sm truncate">
-          <Workflow className="h-4 w-4 shrink-0 text-indigo-600" />
+          <Workflow className="h-4 w-4 shrink-0 text-category-2" />
           {node.label}
         </span>
-        <span className="text-[11px] text-indigo-700 dark:text-indigo-300">
+        <span className="text-[11px] text-category-2 dark:text-category-2">
           composition{steps ? ` · ${steps} steps` : ""}
         </span>
         {/* top-right disclosure chevron: v = expand */}
-        <ChevronDown className="absolute right-2 top-2 h-4 w-4 text-indigo-600" />
+        <ChevronDown className="absolute right-2 top-2 h-4 w-4 text-category-2" />
       </button>
-      <Handle type="source" position={Position.Bottom} className="!bg-indigo-500" />
+      <Handle type="source" position={Position.Bottom} className="!bg-category-2" />
     </div>
   );
 }
@@ -59,12 +59,12 @@ export const WorkflowStateNode = memo(({ data }: Readonly<{ data: WorkloadNodeDa
   const { width, height } = nodeSize("state");
   return (
     <div className="relative" style={{ width, height }}>
-      <Handle type="target" position={Position.Top} className="!bg-blue-500" />
+      <Handle type="target" position={Position.Top} className="!bg-category-1" />
       <button
         type="button"
         onClick={() => onClick?.(node.id)}
         style={{ width, height }}
-        className="box-border flex flex-col justify-center rounded-full border-2 border-blue-500 bg-card px-4 shadow-sm text-left overflow-hidden cursor-pointer hover:shadow-md"
+        className="box-border flex flex-col justify-center rounded-full border-2 border-category-1 bg-card px-4 shadow-sm text-left overflow-hidden cursor-pointer hover:shadow-md"
       >
         <span className="font-medium text-sm truncate">{node.label}</span>
         {node.badges.length > 0 && (
@@ -77,7 +77,7 @@ export const WorkflowStateNode = memo(({ data }: Readonly<{ data: WorkloadNodeDa
           </span>
         )}
       </button>
-      <Handle type="source" position={Position.Bottom} className="!bg-blue-500" />
+      <Handle type="source" position={Position.Bottom} className="!bg-category-1" />
     </div>
   );
 });
@@ -116,12 +116,12 @@ export const VariableNode = memo(({ data }: Readonly<{ data: WorkloadNodeData }>
         type="button"
         onClick={() => onClick?.(node.id)}
         style={{ width, height }}
-        className="box-border inline-flex items-center justify-center gap-1 rounded-full border border-dashed border-amber-500 bg-amber-50 px-2 text-xs text-amber-900 cursor-pointer overflow-hidden dark:bg-amber-950/30 dark:text-amber-200"
+        className="box-border inline-flex items-center justify-center gap-1 rounded-full border border-dashed border-category-4 bg-category-4/10 px-2 text-xs text-category-4 cursor-pointer overflow-hidden dark:bg-category-4/30 dark:text-category-4"
       >
         <Variable className="h-3 w-3 shrink-0" />
         <span className="truncate font-mono">{node.label}</span>
       </button>
-      <Handle type="source" position={Position.Bottom} className="!bg-amber-500" />
+      <Handle type="source" position={Position.Bottom} className="!bg-category-4" />
     </div>
   );
 });
@@ -133,22 +133,22 @@ export const ArtifactNode = memo(({ data }: Readonly<{ data: WorkloadNodeData }>
   const muted = node.resolution === "unresolved";
   return (
     <div className="relative" style={{ width, height }}>
-      <Handle type="target" position={Position.Top} className="!bg-teal-500" />
+      <Handle type="target" position={Position.Top} className="!bg-category-6" />
       <button
         type="button"
         onClick={() => onClick?.(node.id)}
         style={{ width, height, transform: "skewX(-12deg)" }}
         className={cn(
-          "box-border flex items-center justify-center gap-1 border-2 border-teal-500 bg-teal-50 px-2 cursor-pointer overflow-hidden dark:bg-teal-950/30",
+          "box-border flex items-center justify-center gap-1 border-2 border-category-6 bg-category-6/10 px-2 cursor-pointer overflow-hidden dark:bg-category-6/30",
           muted && "opacity-50 border-dashed",
         )}
       >
-        <span style={{ transform: "skewX(12deg)" }} className="inline-flex items-center gap-1 text-xs text-teal-900 dark:text-teal-200">
+        <span style={{ transform: "skewX(12deg)" }} className="inline-flex items-center gap-1 text-xs text-category-6 dark:text-category-6">
           <FileText className="h-3 w-3 shrink-0" />
           <span className="truncate font-mono">{node.label}</span>
         </span>
       </button>
-      <Handle type="source" position={Position.Bottom} className="!bg-teal-500" />
+      <Handle type="source" position={Position.Bottom} className="!bg-category-6" />
     </div>
   );
 });
@@ -159,15 +159,15 @@ export const ScenarioGroupNode = memo(({ data }: Readonly<{ data: WorkloadNodeDa
   const { width, height } = nodeSize("scenario");
   return (
     <div className="relative" style={{ width, height }}>
-      <Handle type="source" position={Position.Right} className="!bg-teal-500" />
+      <Handle type="source" position={Position.Right} className="!bg-category-6" />
       <button
         type="button"
         onClick={() => onClick?.(node.id)}
         style={{ width, height }}
-        className="box-border flex items-center gap-2 rounded-md border-2 border-teal-500 bg-teal-50 px-3 text-left cursor-pointer overflow-hidden hover:shadow-md dark:bg-teal-950/30"
+        className="box-border flex items-center gap-2 rounded-md border-2 border-category-6 bg-category-6/10 px-3 text-left cursor-pointer overflow-hidden hover:shadow-md dark:bg-category-6/30"
       >
-        <Layers className="h-4 w-4 shrink-0 text-teal-600" />
-        <span className="font-medium text-sm text-teal-900 truncate dark:text-teal-200">{node.label}</span>
+        <Layers className="h-4 w-4 shrink-0 text-category-6" />
+        <span className="font-medium text-sm text-category-6 truncate dark:text-category-6">{node.label}</span>
       </button>
     </div>
   );
@@ -179,15 +179,15 @@ export const JudgeNode = memo(({ data }: Readonly<{ data: WorkloadNodeData }>) =
   const { width, height } = nodeSize("judge");
   return (
     <div className="relative" style={{ width, height }}>
-      <Handle type="target" position={Position.Left} className="!bg-purple-500" />
+      <Handle type="target" position={Position.Left} className="!bg-category-3" />
       <button
         type="button"
         onClick={() => onClick?.(node.id)}
         style={{ width, height }}
-        className="box-border flex flex-col justify-center rounded-md border-2 border-purple-500 bg-card px-3 text-left cursor-pointer overflow-hidden hover:shadow-md"
+        className="box-border flex flex-col justify-center rounded-md border-2 border-category-3 bg-card px-3 text-left cursor-pointer overflow-hidden hover:shadow-md"
       >
         <span className="inline-flex items-center gap-2 font-medium text-sm truncate">
-          <Scale className="h-4 w-4 shrink-0 text-purple-600" />
+          <Scale className="h-4 w-4 shrink-0 text-category-3" />
           {node.label}
         </span>
         {node.detail.judgeProvider && (
@@ -204,17 +204,17 @@ export const PersonaNode = memo(({ data }: Readonly<{ data: WorkloadNodeData }>)
   const { width, height } = nodeSize("persona");
   return (
     <div className="relative" style={{ width, height }}>
-      <Handle type="source" position={Position.Right} className="!bg-amber-500" />
+      <Handle type="source" position={Position.Right} className="!bg-category-4" />
       <button
         type="button"
         onClick={() => onClick?.(node.id)}
         style={{ width, height }}
-        className="box-border flex items-center gap-2 rounded-md border-2 border-dashed border-amber-500 bg-card px-3 text-left cursor-pointer overflow-hidden hover:shadow-md"
+        className="box-border flex items-center gap-2 rounded-md border-2 border-dashed border-category-4 bg-card px-3 text-left cursor-pointer overflow-hidden hover:shadow-md"
       >
-        <User className="h-4 w-4 shrink-0 text-amber-600" />
+        <User className="h-4 w-4 shrink-0 text-category-4" />
         <span className="font-medium text-sm truncate">{node.label}</span>
       </button>
-      <Handle type="target" position={Position.Left} className="!bg-amber-500" />
+      <Handle type="target" position={Position.Left} className="!bg-category-4" />
     </div>
   );
 });

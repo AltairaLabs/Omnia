@@ -73,7 +73,7 @@ function SkillSourceDetail({
       <SkillList source={source} />
       <Link
         href={href}
-        className="inline-flex items-center gap-1 text-xs text-violet-600 hover:underline"
+        className="inline-flex items-center gap-1 text-xs text-category-2 hover:underline"
       >
         <ExternalLink className="h-3 w-3" />
         Open in Skills explorer

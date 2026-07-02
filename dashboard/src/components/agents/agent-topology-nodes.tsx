@@ -23,14 +23,14 @@ export interface FacadeNodeData {
 
 export const AgentFacadeNode = memo(function AgentFacadeNode({ data }: { data: FacadeNodeData }) {
   return (
-    <div className={cn(boxBase, "border-blue-500/40")}>
+    <div className={cn(boxBase, "border-category-1/40")}>
       <p className={labelCls}>
         <Radio className="h-3 w-3" />
         Facade
       </p>
       <p className="text-xs font-medium capitalize">{data.facadeType}</p>
       {data.port != null && <p className="text-xs text-muted-foreground">:{data.port}</p>}
-      <Handle type="source" position={Position.Right} className="!bg-blue-500" />
+      <Handle type="source" position={Position.Right} className="!bg-category-1" />
     </div>
   );
 });
@@ -65,7 +65,7 @@ export interface PromptPackNodeData {
 
 export const AgentPromptPackNode = memo(function AgentPromptPackNode({ data }: { data: PromptPackNodeData }) {
   return (
-    <div className={cn(boxBase, "flex flex-col justify-center border-violet-500/40")}>
+    <div className={cn(boxBase, "flex flex-col justify-center border-category-2/40")}>
       <span className={labelCls}>
         <FileText className="h-3 w-3 shrink-0" />
         PromptPack
@@ -85,7 +85,7 @@ export interface ContextNodeData {
 
 export const AgentContextNode = memo(function AgentContextNode({ data }: { data: ContextNodeData }) {
   return (
-    <div className={cn(boxBase, "border-slate-400/40")}>
+    <div className={cn(boxBase, "border-category-8/40")}>
       <p className={labelCls}>
         <Database className="h-3 w-3" />
         Context
@@ -109,12 +109,12 @@ export const AgentMemoryNode = memo(function AgentMemoryNode({ data }: { data: M
       aria-hidden
       className={cn(
         "inline-block h-2 w-2 rounded-full",
-        data.enabled ? "bg-green-500" : "bg-muted-foreground/40",
+        data.enabled ? "bg-success" : "bg-muted-foreground/40",
       )}
     />
   );
   return (
-    <div className={cn(boxBase, "flex items-center justify-between", data.enabled ? "border-green-500/40" : "border-border")}>
+    <div className={cn(boxBase, "flex items-center justify-between", data.enabled ? "border-success/40" : "border-border")}>
       <span className={labelCls}>
         <Brain className="h-3 w-3" />
         Memory
