@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useSyncExternalStore } from "react";
 import { usePathname } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { RefreshCw, Moon, Sun, Terminal } from "lucide-react";
@@ -11,6 +12,10 @@ import { WorkspaceSwitcher } from "@/components/workspace-switcher";
 import { BrandPresetSwitcher } from "@/components/branding/brand-preset-switcher";
 import { cn } from "@/lib/utils";
 
+// Hydration-safe mount flag: false on the server + initial client render, true
+// after. Avoids a setState-in-effect while keeping SSR and hydration in sync.
+const NO_SUBSCRIBE = () => () => {};
+
 interface HeaderProps {
   title: React.ReactNode;
   description?: React.ReactNode;
@@ -20,7 +25,11 @@ interface HeaderProps {
 export function Header({ title, description, children }: Readonly<HeaderProps>) {
   const { theme, setTheme } = useTheme();
   const queryClient = useQueryClient();
-  const isFetching = useIsFetching() > 0;
+  // `useIsFetching()` is 0 during SSR but >0 once client queries start, so gate
+  // the fetch-dependent UI on mount to avoid a hydration mismatch on the button.
+  const mounted = useSyncExternalStore(NO_SUBSCRIBE, () => true, () => false);
+  const fetching = useIsFetching() > 0;
+  const isFetching = mounted && fetching;
   const pathname = usePathname();
   const consoleActive = pathname === "/console" || pathname.startsWith("/console/");
 
