@@ -8,7 +8,7 @@
 
 import { NextResponse } from "next/server";
 import { getEffectiveLicense } from "@/lib/license/resolve-server";
-import { resolveBrandFromEnv, applyEntitlement } from "@/lib/branding/resolve-server";
+import { resolveBrand, applyEntitlement } from "@/lib/branding/resolve-server";
 
 const MIN_POLL_INTERVAL_SECONDS = 15;
 const DEFAULT_POLL_INTERVAL_SECONDS = 60;
@@ -23,10 +23,16 @@ function parseSessionPollInterval(): number {
 
 export async function GET() {
   const license = await getEffectiveLicense();
-  const brand = applyEntitlement(resolveBrandFromEnv(process.env), license);
+  const demoMode = process.env.NEXT_PUBLIC_DEMO_MODE === "true";
+  // Presets (NEXT_PUBLIC_BRAND_PRESET) are a dev/demo shortcut; a real
+  // deployment still resolves from the full NEXT_PUBLIC_BRAND_* env set.
+  const brand = applyEntitlement(
+    resolveBrand(process.env, { allowPreset: demoMode }),
+    license,
+  );
   return NextResponse.json({
     devMode: process.env.NEXT_PUBLIC_DEV_MODE === "true",
-    demoMode: process.env.NEXT_PUBLIC_DEMO_MODE === "true",
+    demoMode,
     readOnlyMode: process.env.NEXT_PUBLIC_READ_ONLY_MODE === "true",
     readOnlyMessage: process.env.NEXT_PUBLIC_READ_ONLY_MESSAGE || "This dashboard is in read-only mode",
     // WebSocket proxy URL for agent console connections (runtime config for K8s deployments)

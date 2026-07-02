@@ -9,7 +9,26 @@
  */
 
 import { type BrandConfig, OMNIA_BRAND } from "./types";
+import { getBrandPreset } from "./presets";
 import type { License } from "@/types/license";
+
+/**
+ * Resolve the brand, optionally honoring a named preset. Presets are a
+ * dev/demo convenience (NEXT_PUBLIC_BRAND_PRESET) and are only consulted when
+ * `allowPreset` is set — a real deployment always resolves from the full
+ * NEXT_PUBLIC_BRAND_* env set. Falls back to env-based resolution for an
+ * unknown or unset preset.
+ */
+export function resolveBrand(
+  env: Record<string, string | undefined>,
+  opts: { allowPreset: boolean },
+): BrandConfig {
+  if (opts.allowPreset) {
+    const preset = getBrandPreset(env.NEXT_PUBLIC_BRAND_PRESET);
+    if (preset) return preset;
+  }
+  return resolveBrandFromEnv(env);
+}
 
 export function resolveBrandFromEnv(env: Record<string, string | undefined>): BrandConfig {
   const name = env.NEXT_PUBLIC_BRAND_PRODUCT_NAME;

@@ -1,0 +1,35 @@
+{
+  "productName": "Acme Cloud",
+  "logo": { "light": "/logo.svg", "dark": "/logo-dark.svg" },
+  "favicon": "/favicon.svg",
+  "colors": {
+    "primary": "#EA580C",
+    "accent": "#DC2626",
+    "sidebar": "#7C2D12",
+    "chart1": "#EA580C",
+    "chart2": "#F59E0B",
+    "chart3": "#DC2626",
+    "chart4": "#B45309",
+    "chart5": "#92400E",
+    "category1": "#EA580C",
+    "category2": "#DC2626",
+    "category3": "#D97706",
+    "category4": "#F59E0B",
+    "category5": "#B45309",
+    "category6": "#EF4444",
+    "category7": "#C2410C",
+    "category8": "#78716C",
+    "success": "#16A34A",
+    "warning": "#D97706",
+    "info": "#EA580C"
+  },
+  "links": {
+    "docsBaseUrl": "https://docs.acme.example",
+    "upgradeUrl": "https://acme.example/enterprise",
+    "sales": "sales@acme.example"
+  },
+  "copy": {
+    "loginTagline": "Sign in to Acme Cloud",
+    "signupTagline": "Sign up to get started with Acme Cloud"
+  }
+}

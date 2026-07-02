@@ -96,6 +96,16 @@ export default defineConfig({
         video: 'off',
       },
     },
+    /* White-label theme preset visual harness - run with: npm run test:e2e:theme */
+    {
+      name: 'theme-presets',
+      testMatch: '**/screenshots/theme-presets.spec.ts',
+      use: {
+        ...devices['Desktop Chrome'],
+        screenshot: 'off',
+        video: 'off',
+      },
+    },
     /* Video capture for GIFs - run with: npm run videos */
     {
       name: 'video-capture',
