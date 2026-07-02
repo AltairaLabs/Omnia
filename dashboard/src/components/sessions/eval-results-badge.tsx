@@ -66,9 +66,9 @@ function EvalDetailRow({ result }: Readonly<{ result: EvalResult }>) {
       >
         <div className="flex items-center gap-2">
           {result.passed ? (
-            <CheckCircle2 className="h-3 w-3 text-green-500" />
+            <CheckCircle2 className="h-3 w-3 text-success" />
           ) : (
-            <XCircle className="h-3 w-3 text-red-500" />
+            <XCircle className="h-3 w-3 text-destructive" />
           )}
           <span className="font-medium">{result.evalId}</span>
           <Badge variant="outline" className="text-[10px] px-1 py-0">
@@ -141,7 +141,7 @@ export function EvalResultsBadge({ results }: Readonly<{ results: EvalResult[] }
               variant={allPassed ? "secondary" : "destructive"}
               className={cn(
                 "gap-1 text-xs cursor-pointer",
-                allPassed && "bg-green-100 text-green-800 hover:bg-green-200 dark:bg-green-900/30 dark:text-green-400"
+                allPassed && "bg-success/15 text-success hover:bg-success/25"
               )}
             >
               {allPassed ? (

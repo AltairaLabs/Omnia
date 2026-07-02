@@ -43,7 +43,11 @@ describe("EvalResultsBadge", () => {
 
     render(<EvalResultsBadge results={results} />);
 
-    expect(screen.getByText("2 evals passed")).toBeInTheDocument();
+    // the passing badge uses semantic status tokens, not palette classes
+    const badge = screen.getByText("2 evals passed");
+    expect(badge).toBeInTheDocument();
+    expect(badge.className).toContain("text-success");
+    expect(badge.className).not.toMatch(/-(green|red)-\d/);
   });
 
   it("renders singular text for a single passing eval", () => {
