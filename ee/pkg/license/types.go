@@ -65,10 +65,16 @@ type Limits struct {
 	MaxActivations int `json:"maxActivations,omitempty"`
 }
 
-// License represents a validated license.
+// License represents a validated license. Its JSON form is the single
+// canonical wire representation, produced both by the validator (from the
+// signed JWT in the Secret/ConfigMap) and by the operator's /api/v1/license
+// endpoint, and parsed back into this same struct by license.Client — one
+// struct, one parser, regardless of source. The signed-JWT claim keys
+// (lid/iat/exp) live on the separate licenseClaims struct in the validator, so
+// these tags are free to be the friendly names every consumer already expects.
 type License struct {
 	// ID is the unique license identifier.
-	ID string `json:"lid"`
+	ID string `json:"id"`
 	// Tier is the license tier (open-core or enterprise).
 	Tier Tier `json:"tier"`
 	// Customer is the name of the licensed customer.
@@ -78,9 +84,9 @@ type License struct {
 	// Limits defines resource limits.
 	Limits Limits `json:"limits"`
 	// IssuedAt is when the license was issued.
-	IssuedAt time.Time `json:"iat"`
+	IssuedAt time.Time `json:"issuedAt"`
 	// ExpiresAt is when the license expires.
-	ExpiresAt time.Time `json:"exp"`
+	ExpiresAt time.Time `json:"expiresAt"`
 }
 
 // OpenCoreLicense returns a default open-core license.
@@ -150,6 +156,14 @@ func (l *License) IsExpired() bool {
 // IsEnterprise returns true if this is an enterprise license.
 func (l *License) IsEnterprise() bool {
 	return l.Tier == TierEnterprise
+}
+
+// IsValidEnterprise reports whether this is a currently-valid enterprise
+// license — enterprise tier and not expired. It's the condition the startup
+// nag uses: anything else (open-core, missing, or expired) is treated as
+// "unlicensed" and triggers the reminder.
+func (l *License) IsValidEnterprise() bool {
+	return l.IsEnterprise() && !l.IsExpired()
 }
 
 // CanUseSourceType returns true if the given source type is allowed.

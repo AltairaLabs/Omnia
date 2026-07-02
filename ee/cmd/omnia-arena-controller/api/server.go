@@ -208,33 +208,10 @@ func (s *Server) handlePreviewTemplate(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// licenseResponse is the JSON shape the dashboard expects.
-// The Go License struct uses JWT-style tags (lid, iat, exp) but the dashboard
-// expects (id, issuedAt, expiresAt), so we map explicitly.
-type licenseResponse struct {
-	ID        string           `json:"id"`
-	Tier      license.Tier     `json:"tier"`
-	Customer  string           `json:"customer"`
-	Features  license.Features `json:"features"`
-	Limits    license.Limits   `json:"limits"`
-	IssuedAt  string           `json:"issuedAt"`
-	ExpiresAt string           `json:"expiresAt"`
-}
-
-func toLicenseResponse(l *license.License) licenseResponse {
-	return licenseResponse{
-		ID:        l.ID,
-		Tier:      l.Tier,
-		Customer:  l.Customer,
-		Features:  l.Features,
-		Limits:    l.Limits,
-		IssuedAt:  l.IssuedAt.Format(time.RFC3339),
-		ExpiresAt: l.ExpiresAt.Format(time.RFC3339),
-	}
-}
-
-// handleGetLicense handles GET /api/v1/license.
-// Returns the current license information for the dashboard.
+// handleGetLicense handles GET /api/v1/license. It returns the current license
+// as the canonical license.License JSON — the same shape license.Client parses
+// and the dashboard consumes. No bespoke DTO: the License struct's json tags are
+// already the friendly (id/issuedAt/expiresAt) names.
 func (s *Server) handleGetLicense(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, msgMethodNotAllowed, http.StatusMethodNotAllowed)
@@ -249,7 +226,7 @@ func (s *Server) handleGetLicense(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set(httputil.HeaderContentType, httputil.ContentTypeJSON)
-	if err := json.NewEncoder(w).Encode(toLicenseResponse(lic)); err != nil {
+	if err := json.NewEncoder(w).Encode(lic); err != nil {
 		s.log.Error(err, "failed to encode license response")
 	}
 }

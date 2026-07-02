@@ -282,7 +282,10 @@ func TestHandleGetLicense_NilValidator(t *testing.T) {
 		t.Errorf("status = %d, want %d", w.Code, http.StatusOK)
 	}
 
-	var resp licenseResponse
+	// The endpoint serves the canonical license.License JSON directly, so it
+	// round-trips straight back into a License via the same struct the client
+	// and validator use — no bespoke DTO.
+	var resp license.License
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("failed to unmarshal response: %v", err)
 	}
@@ -294,11 +297,11 @@ func TestHandleGetLicense_NilValidator(t *testing.T) {
 	}
 }
 
-func TestToLicenseResponse_IncludesEnterpriseFeatures(t *testing.T) {
+func TestHandleGetLicense_IncludesEnterpriseFeatures(t *testing.T) {
 	// The dashboard reads memory/privacy/policy entitlements from this
-	// endpoint, so the feature keys must survive serialization and carry
-	// the license's actual values.
-	body, err := json.Marshal(toLicenseResponse(license.DevLicense()))
+	// endpoint, so the feature keys must survive serialization of the canonical
+	// License and carry the license's actual values.
+	body, err := json.Marshal(license.DevLicense())
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
