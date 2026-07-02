@@ -35,7 +35,7 @@ function PostItNote({
 
         {/* Delete button */}
         <button
-          className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 rounded-full flex items-center justify-center text-white hover:bg-red-600 opacity-0 hover:opacity-100 transition-opacity"
+          className="absolute -top-1 -right-1 w-4 h-4 bg-destructive rounded-full flex items-center justify-center text-white hover:bg-destructive/90 opacity-0 hover:opacity-100 transition-opacity"
           onClick={onDelete}
           style={{ opacity: 'var(--delete-opacity, 0)' }}
         >
@@ -72,34 +72,34 @@ function AddNoteButton({ onClick }: Readonly<{ onClick: () => void }>) {
   );
 }
 
-// Type-based colors
+// Type-based colors — each resource type maps to a distinct categorical token.
 const typeColors = {
-  agent: "border-blue-500 bg-blue-50 dark:bg-blue-950/30",
-  promptPack: "border-purple-500 bg-purple-50 dark:bg-purple-950/30",
-  toolRegistry: "border-orange-500 bg-orange-50 dark:bg-orange-950/30",
-  tool: "border-teal-500 bg-teal-50 dark:bg-teal-950/30",
-  prompt: "border-violet-500 bg-violet-50 dark:bg-violet-950/30",
-  provider: "border-green-500 bg-green-50 dark:bg-green-950/30",
+  agent: "border-category-1 bg-category-1/10",
+  promptPack: "border-category-2 bg-category-2/10",
+  toolRegistry: "border-category-4 bg-category-4/10",
+  tool: "border-category-6 bg-category-6/10",
+  prompt: "border-category-3 bg-category-3/10",
+  provider: "border-category-5 bg-category-5/10",
 };
 
 // Status indicator component
 function StatusDot({ status }: Readonly<{ status?: string }>) {
-  let color = "bg-gray-400"; // unknown
+  let color = "bg-muted-foreground"; // unknown
   switch (status) {
     case "Running":
     case "Ready":
     case "Active":
     case "Available":
-      color = "bg-green-500";
+      color = "bg-success";
       break;
     case "Pending":
     case "Canary":
-      color = "bg-yellow-500";
+      color = "bg-warning";
       break;
     case "Failed":
     case "Degraded":
     case "Unavailable":
-      color = "bg-red-500";
+      color = "bg-destructive";
       break;
   }
   return (
@@ -179,14 +179,14 @@ interface CustomNodeProps<T extends Record<string, unknown>> {
 export const AgentNodeComponent = memo(({ data }: Readonly<CustomNodeProps<AgentNodeData>>) => {
   return (
     <div className="relative group">
-      <Handle type="target" position={Position.Left} className="!bg-blue-500" />
+      <Handle type="target" position={Position.Left} className="!bg-category-1" />
       <button
         type="button"
         className={cn(baseNodeStyles, typeColors.agent)}
         onClick={data.onClick}
       >
         <div className="flex items-center gap-2">
-          <Bot className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+          <Bot className="h-4 w-4 text-category-1" />
           <div className="flex flex-col flex-1">
             <span className="font-medium text-sm">{data.label}</span>
             <span className="text-xs text-muted-foreground">{data.namespace}</span>
@@ -194,7 +194,7 @@ export const AgentNodeComponent = memo(({ data }: Readonly<CustomNodeProps<Agent
           <StatusDot status={data.phase} />
         </div>
       </button>
-      <Handle type="source" position={Position.Right} className="!bg-blue-500" />
+      <Handle type="source" position={Position.Right} className="!bg-category-1" />
 
       {/* Post-it note or add button */}
       {data.note ? (
@@ -217,14 +217,14 @@ AgentNodeComponent.displayName = "AgentNodeComponent";
 export const PromptPackNodeComponent = memo(({ data }: Readonly<CustomNodeProps<PromptPackNodeData>>) => {
   return (
     <div className="relative group">
-      <Handle type="target" position={Position.Left} className="!bg-purple-500" />
+      <Handle type="target" position={Position.Left} className="!bg-category-2" />
       <button
         type="button"
         className={cn(baseNodeStyles, typeColors.promptPack)}
         onClick={data.onClick}
       >
         <div className="flex items-center gap-2">
-          <FileText className="h-4 w-4 text-purple-600 dark:text-purple-400" />
+          <FileText className="h-4 w-4 text-category-2" />
           <div className="flex flex-col flex-1">
             <span className="font-medium text-sm">{data.label}</span>
             <span className="text-xs text-muted-foreground">
@@ -242,7 +242,7 @@ export const PromptPackNodeComponent = memo(({ data }: Readonly<CustomNodeProps<
           <StatusDot status={data.phase} />
         </div>
       </button>
-      <Handle type="source" position={Position.Right} className="!bg-purple-500" />
+      <Handle type="source" position={Position.Right} className="!bg-category-2" />
 
       {/* Post-it note or add button */}
       {data.note ? (
@@ -265,14 +265,14 @@ PromptPackNodeComponent.displayName = "PromptPackNodeComponent";
 export const ToolRegistryNodeComponent = memo(({ data }: Readonly<CustomNodeProps<ToolRegistryNodeData>>) => {
   return (
     <div className="relative group">
-      <Handle type="target" position={Position.Left} className="!bg-orange-500" />
+      <Handle type="target" position={Position.Left} className="!bg-category-4" />
       <button
         type="button"
         className={cn(baseNodeStyles, typeColors.toolRegistry)}
         onClick={data.onClick}
       >
         <div className="flex items-center gap-2">
-          <Package className="h-4 w-4 text-orange-600 dark:text-orange-400" />
+          <Package className="h-4 w-4 text-category-4" />
           <div className="flex flex-col flex-1">
             <span className="font-medium text-sm">{data.label}</span>
             <span className="text-xs text-muted-foreground">
@@ -282,7 +282,7 @@ export const ToolRegistryNodeComponent = memo(({ data }: Readonly<CustomNodeProp
           <StatusDot status={data.phase} />
         </div>
       </button>
-      <Handle type="source" position={Position.Right} className="!bg-orange-500" />
+      <Handle type="source" position={Position.Right} className="!bg-category-4" />
 
       {/* Post-it note or add button */}
       {data.note ? (
@@ -305,14 +305,14 @@ ToolRegistryNodeComponent.displayName = "ToolRegistryNodeComponent";
 export const ToolNodeComponent = memo(({ data }: Readonly<CustomNodeProps<ToolNodeData>>) => {
   return (
     <div className="relative">
-      <Handle type="target" position={Position.Left} className="!bg-teal-500" />
+      <Handle type="target" position={Position.Left} className="!bg-category-6" />
       <button
         type="button"
         className={cn(baseNodeStyles, typeColors.tool)}
         onClick={data.onClick}
       >
         <div className="flex items-center gap-2">
-          <Wrench className="h-4 w-4 text-teal-600 dark:text-teal-400" />
+          <Wrench className="h-4 w-4 text-category-6" />
           <div className="flex flex-col flex-1">
             <span className="font-medium text-sm">{data.label}</span>
             {data.handlerType && (
@@ -331,18 +331,18 @@ ToolNodeComponent.displayName = "ToolNodeComponent";
 export const PromptNodeComponent = memo(({ data }: Readonly<CustomNodeProps<PromptNodeData>>) => {
   return (
     <div className="relative">
-      <Handle type="target" position={Position.Left} className="!bg-violet-500" />
+      <Handle type="target" position={Position.Left} className="!bg-category-3" />
       <button
         type="button"
         className={cn(baseNodeStyles, typeColors.prompt)}
         onClick={data.onClick}
       >
         <div className="flex items-center gap-2">
-          <MessageSquare className="h-4 w-4 text-violet-600 dark:text-violet-400" />
+          <MessageSquare className="h-4 w-4 text-category-3" />
           <span className="font-medium text-sm">{data.label}</span>
         </div>
       </button>
-      <Handle type="source" position={Position.Right} className="!bg-violet-500" />
+      <Handle type="source" position={Position.Right} className="!bg-category-3" />
     </div>
   );
 });
@@ -352,7 +352,7 @@ PromptNodeComponent.displayName = "PromptNodeComponent";
 export const ProviderNodeComponent = memo(({ data }: Readonly<CustomNodeProps<ProviderNodeData>>) => {
   return (
     <div className="relative">
-      <Handle type="target" position={Position.Left} className="!bg-green-500" />
+      <Handle type="target" position={Position.Left} className="!bg-category-5" />
       <button
         type="button"
         className={cn(baseNodeStyles, typeColors.provider)}

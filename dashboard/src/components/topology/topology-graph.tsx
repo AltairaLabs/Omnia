@@ -90,23 +90,25 @@ export function TopologyGraph({
     };
   }, [initialGraph, setNodes, setEdges, applyLayout, layoutNonce]);
 
-  // Custom mini-map node color
+  // Custom mini-map node color. The minimap draws on <canvas>, which cannot
+  // resolve CSS variables, so these mirror the --category-* token DEFAULTS
+  // (same mapping the nodes use via border-category-*/bg-category-*).
   const nodeColor = useCallback((node: Node) => {
     switch (node.type) {
       case "agent":
-        return "#3b82f6"; // blue
+        return "#3B82F6"; // category-1
       case "promptPack":
-        return "#8b5cf6"; // purple
+        return "#8B5CF6"; // category-2
       case "toolRegistry":
-        return "#f97316"; // orange
+        return "#F59E0B"; // category-4
       case "tool":
-        return "#14b8a6"; // teal
+        return "#06B6D4"; // category-6
       case "prompt":
-        return "#a855f7"; // violet
+        return "#EC4899"; // category-3
       case "provider":
-        return "#22c55e"; // green
+        return "#10B981"; // category-5
       default:
-        return "#6b7280"; // gray
+        return "#6B7280"; // category-8
     }
   }, []);
 
