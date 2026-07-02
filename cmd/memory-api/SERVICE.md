@@ -101,6 +101,19 @@ Agent Pod (runtime) → HTTP → Memory API → PostgreSQL
 - PostgreSQL (required) — memory storage
 - Provider CRD + embedding model (optional) — semantic search
 - Redis (optional) — event publishing
+- Operator/arena-controller `/api/v1/license` (optional) — read once at startup
+  via `OPERATOR_API_URL` for the license-awareness nag (#1682); unreachable just
+  means the nag treats it as unlicensed. Never gates.
+
+## License awareness (#1682)
+
+When enterprise features are enabled (`ENTERPRISE_ENABLED`) and `OPERATOR_API_URL`
+(`--operator-api-url`, stamped by the operator) points at the license endpoint,
+memory-api fetches the license once at startup and logs a reminder if the
+deployment isn't backed by a valid enterprise license (open-core, absent, or
+expired). It **never blocks** — features keep working; it only nags. A valid
+license is silent. The operator stamps `OPERATOR_API_URL` automatically via
+`--license-api-url` on enterprise installs.
 
 ## Warning: No Embedding Provider
 

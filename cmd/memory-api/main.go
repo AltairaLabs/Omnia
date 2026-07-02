@@ -59,6 +59,7 @@ import (
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 	eeaudit "github.com/altairalabs/omnia/ee/pkg/audit"
+	eelicense "github.com/altairalabs/omnia/ee/pkg/license"
 	eememory "github.com/altairalabs/omnia/ee/pkg/memory"
 	"github.com/altairalabs/omnia/ee/pkg/memory/consolidation"
 	eeprojection "github.com/altairalabs/omnia/ee/pkg/memory/projection"
@@ -129,6 +130,7 @@ type flags struct {
 	redisURL              string // --redis-url, env REDIS_URL or OMNIA_MEMORY_REDIS_URL
 	cacheTTL              string // env: MEMORY_CACHE_TTL, e.g. "5m"; "" or "0" disables
 	enterprise            bool
+	operatorAPIURL        string // --operator-api-url, env OPERATOR_API_URL; the operator/arena-controller license endpoint, used to nag when unlicensed.
 	tracingEnabled        bool
 	tracingEndpoint       string
 	tracingSample         float64
@@ -176,6 +178,7 @@ func parseFlags() *flags {
 	flag.StringVar(&f.redisURL, "redis-url", "", "Redis connection URL (redis:// or rediss://). When set, the same client is reused for both the read-through cache and the event publisher. Empty disables both.")
 	flag.StringVar(&f.cacheTTL, "cache-ttl", "5m", "TTL for the Redis read-through cache (Retrieve/List). Set to 0 or empty to disable caching even when --redis-url is configured.")
 	flag.BoolVar(&f.enterprise, "enterprise", false, "Enable enterprise features (audit logging)")
+	flag.StringVar(&f.operatorAPIURL, "operator-api-url", "", "Base URL of the operator/arena-controller license endpoint (e.g. http://omnia-arena-controller.omnia-system:8082). When enterprise features run without a valid license, memory-api logs a startup reminder. Never blocks.")
 	flag.BoolVar(&f.tracingEnabled, "tracing-enabled", false, "Enable OpenTelemetry tracing")
 	flag.StringVar(&f.tracingEndpoint, "tracing-endpoint", "", "OTel collector endpoint")
 	flag.Float64Var(&f.tracingSample, "tracing-sample", 0, "Tracing sample rate (0.0-1.0)")
@@ -221,6 +224,7 @@ func (f *flags) applyEnvFallbacks() {
 	envFallback(&f.metricsAddr, ":9090", "METRICS_ADDR")
 
 	envBoolFallback(&f.enterprise, "ENTERPRISE_ENABLED")
+	envFallback(&f.operatorAPIURL, "", "OPERATOR_API_URL")
 	envBoolFallback(&f.tracingEnabled, "TRACING_ENABLED")
 	envBoolFallback(&f.tracingInsecure, "TRACING_INSECURE")
 	envFallback(&f.tracingEndpoint, "", "TRACING_ENDPOINT")
@@ -397,6 +401,35 @@ func main() {
 	}
 }
 
+// nagLicenseAtStartup fetches the operator license once at startup and logs a
+// reminder when this enterprise deployment isn't backed by a valid license.
+// It never blocks — memory-api's features keep working regardless. The
+// "startup license check" line is always emitted so the wiring is observable
+// even when the license is valid and the nag stays silent.
+func nagLicenseAtStartup(ctx context.Context, f *flags, log logr.Logger) {
+	if !f.enterprise {
+		return
+	}
+	if f.operatorAPIURL == "" {
+		log.Info("startup license check skipped", "reason", "no OPERATOR_API_URL configured")
+		return
+	}
+
+	licClient := eelicense.NewClient(f.operatorAPIURL, eelicense.WithClientLogger(log.WithName("license")))
+	lic, err := licClient.Refresh(ctx)
+	if err != nil {
+		// Operator unreachable — degrade to the open-core fallback and nag.
+		lic = licClient.License()
+	}
+	log.Info("startup license check",
+		"valid", lic.IsValidEnterprise(),
+		"tier", lic.Tier,
+		"licenseID", lic.ID,
+		"operatorURL", f.operatorAPIURL,
+	)
+	eelicense.NagIfUnlicensed(lic, log)
+}
+
 func run() error {
 	f := parseFlags()
 
@@ -424,6 +457,11 @@ func run() error {
 		context.Background(), syscall.SIGINT, syscall.SIGTERM,
 	)
 	defer cancel()
+
+	// --- License awareness nag (#1682) ---
+	// When enterprise features are enabled without a valid license, log a
+	// one-time reminder. Never blocks; features keep working.
+	nagLicenseAtStartup(ctx, f, log)
 
 	// --- Postgres pool ---
 	pool, err := initPool(ctx, f.postgresConn)

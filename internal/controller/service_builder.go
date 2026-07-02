@@ -129,6 +129,12 @@ type ServiceBuilder struct {
 	// the operator's license mode. Enterprise is operator-wide; every
 	// workspace's services receive the same value.
 	Enterprise bool
+
+	// LicenseAPIURL is the operator/arena-controller license endpoint (e.g.
+	// http://omnia-arena-controller.omnia-system:8082). When set and Enterprise
+	// is true, it is stamped as OPERATOR_API_URL onto data-plane pods so they
+	// can fetch the license and log a startup nag when unlicensed. Never gates.
+	LicenseAPIURL string
 }
 
 // SecretKeyRef points at a single key within a Kubernetes Secret. Used
@@ -162,7 +168,7 @@ func (sb *ServiceBuilder) BuildSessionDeployment(workspaceName, namespace string
 	}
 	dep := buildServiceDeployment(name, namespace, sb.SessionImage, sb.SessionImagePullPolicy, args, labels, overrides)
 	addMemoryRedisURLEnv(dep, redisSecret)
-	addEnterpriseEnv(dep, sb.Enterprise)
+	addEnterpriseEnv(dep, sb.Enterprise, sb.LicenseAPIURL)
 	// Server side: enforce ServiceAccount auth (SEC-1/SEC-5) when enabled.
 	sb.ServiceAuth.applySessionAPIServerAuthEnv(dep, workspaceName, sg.Name, namespace)
 	if dep.Spec.Template.Annotations == nil {
@@ -344,7 +350,7 @@ func (sb *ServiceBuilder) BuildMemoryDeployment(workspaceName, namespace string,
 	dep := buildServiceDeployment(name, namespace, sb.MemoryImage, sb.MemoryImagePullPolicy, args, labels, overrides)
 	addPodNamespaceEnv(dep)
 	addMemoryRedisURLEnv(dep, redisSecret)
-	addEnterpriseEnv(dep, sb.Enterprise)
+	addEnterpriseEnv(dep, sb.Enterprise, sb.LicenseAPIURL)
 	// Caller side: memory-api emits provider_usage to the co-located
 	// session-api, so it presents an audience-bound projected SA token when
 	// auth is enabled (SEC-1/SEC-5).
@@ -408,7 +414,9 @@ func addMemoryRedisURLEnv(dep *appsv1.Deployment, ref SecretKeyRef) {
 // addEnterpriseEnv stamps ENTERPRISE_ENABLED on every container so the
 // memory-api / session-api binary's --enterprise gate reflects the operator's
 // license mode. The binaries read it via envBoolFallback("ENTERPRISE_ENABLED").
-func addEnterpriseEnv(dep *appsv1.Deployment, enterprise bool) {
+// When enterprise and a license API URL are set, it also stamps OPERATOR_API_URL
+// so the data-plane binaries can fetch the license and nag when unlicensed.
+func addEnterpriseEnv(dep *appsv1.Deployment, enterprise bool, licenseAPIURL string) {
 	val := strconv.FormatBool(enterprise)
 	containers := dep.Spec.Template.Spec.Containers
 	for i := range containers {
@@ -416,6 +424,12 @@ func addEnterpriseEnv(dep *appsv1.Deployment, enterprise bool) {
 			Name:  "ENTERPRISE_ENABLED",
 			Value: val,
 		})
+		if enterprise && licenseAPIURL != "" {
+			containers[i].Env = append(containers[i].Env, corev1.EnvVar{
+				Name:  "OPERATOR_API_URL",
+				Value: licenseAPIURL,
+			})
+		}
 	}
 }
 
@@ -553,7 +567,7 @@ func (sb *ServiceBuilder) BuildPrivacyDeployment(workspaceName, namespace string
 	// No podOverrides for privacy-api — see PrivacyServiceConfig (CRD size limit).
 	dep := buildServiceDeployment(name, namespace, sb.PrivacyImage, sb.PrivacyImagePullPolicy, args, labels, nil)
 	addMemoryRedisURLEnv(dep, redisSecret)
-	addEnterpriseEnv(dep, sb.Enterprise)
+	addEnterpriseEnv(dep, sb.Enterprise, sb.LicenseAPIURL)
 	// Server side: enforce ServiceAccount auth when enabled. Empty group is
 	// intentional — privacy-api is per-workspace, groupName is not applicable.
 	sb.ServiceAuth.applySessionAPIServerAuthEnv(dep, workspaceName, "", namespace)
