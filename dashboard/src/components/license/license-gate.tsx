@@ -6,6 +6,8 @@ import { Button } from "@/components/ui/button";
 import { Lock, Sparkles, ExternalLink, X } from "lucide-react";
 import { useLicense } from "@/hooks/auth";
 import { useEnterpriseConfig } from "@/hooks/core";
+import { useBrand } from "@/hooks/use-brand";
+import { getStatusClasses } from "@/lib/colors/status";
 import type { LicenseFeatures } from "@/types/license";
 
 const DISMISS_KEY_PREFIX = "omnia.upgradeBanner.dismissed.";
@@ -29,6 +31,7 @@ function subscribeToDismiss(onChange: () => void): () => void {
 }
 
 const UPGRADE_URL = "https://altairalabs.ai/enterprise";
+const SALES_EMAIL = "sales@altairalabs.ai";
 
 /**
  * Feature names for display purposes.
@@ -144,10 +147,12 @@ export interface UpgradeBannerProps {
 export function UpgradeBanner({
   feature,
   description,
-  upgradeUrl = UPGRADE_URL,
+  upgradeUrl,
   compact = false,
   dismissKey,
 }: UpgradeBannerProps) {
+  const { brand } = useBrand();
+  const resolvedUpgradeUrl = upgradeUrl ?? brand.links?.upgradeUrl ?? UPGRADE_URL;
   const storageKey = dismissKey ? DISMISS_KEY_PREFIX + dismissKey : null;
   const getSnapshot = useCallback(
     () => (storageKey ? window.localStorage.getItem(storageKey) === "1" : false),
@@ -183,7 +188,7 @@ export function UpgradeBanner({
         <span className="flex-1">
           {description ?? `${feature} requires an Enterprise license.`}{" "}
           <a
-            href={upgradeUrl}
+            href={resolvedUpgradeUrl}
             target="_blank"
             rel="noopener noreferrer"
             className="font-medium underline underline-offset-2 hover:no-underline"
@@ -225,10 +230,10 @@ export function UpgradeBanner({
       </AlertTitle>
       <AlertDescription className="text-amber-700 dark:text-amber-300">
         <p className="mb-3">
-          {description ?? `${feature} requires an Enterprise license. Upgrade to unlock it and the rest of Omnia's enterprise features.`}
+          {description ?? `${feature} requires an Enterprise license. Upgrade to unlock it and the rest of ${brand.productName}'s enterprise features.`}
         </p>
         <Button variant="outline" size="sm" asChild>
-          <a href={upgradeUrl} target="_blank" rel="noopener noreferrer">
+          <a href={resolvedUpgradeUrl} target="_blank" rel="noopener noreferrer">
             Upgrade to Enterprise
             <ExternalLink className="ml-2 h-3 w-3" />
           </a>
@@ -261,10 +266,11 @@ export function FeatureBadge({
   enterpriseText = "Enterprise",
 }: FeatureBadgeProps) {
   const { canUseFeature } = useLicense();
+  const availableBadge = getStatusClasses("success");
 
   if (canUseFeature(feature)) {
     return (
-      <span className="inline-flex items-center rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-800 dark:bg-green-900 dark:text-green-200">
+      <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${availableBadge.bg} ${availableBadge.text}`}>
         {availableText}
       </span>
     );
@@ -293,6 +299,8 @@ export interface LicenseInfoProps {
  */
 export function LicenseInfo({ detailed = false }: LicenseInfoProps) {
   const { license, isEnterprise, isExpired } = useLicense();
+  const { brand } = useBrand();
+  const upgradeUrl = brand.links?.upgradeUrl ?? UPGRADE_URL;
 
   if (!detailed) {
     return (
@@ -350,7 +358,7 @@ export function LicenseInfo({ detailed = false }: LicenseInfoProps) {
       {!isEnterprise && (
         <div className="pt-2">
           <Button variant="outline" size="sm" asChild className="w-full">
-            <a href={UPGRADE_URL} target="_blank" rel="noopener noreferrer">
+            <a href={upgradeUrl} target="_blank" rel="noopener noreferrer">
               Upgrade to Enterprise
               <ExternalLink className="ml-2 h-3 w-3" />
             </a>
@@ -425,6 +433,9 @@ export interface EnterpriseUpgradePageProps {
  * Full-page upgrade prompt for enterprise features.
  */
 export function EnterpriseUpgradePage({ featureName }: Readonly<EnterpriseUpgradePageProps>) {
+  const { brand } = useBrand();
+  const upgradeUrl = brand.links?.upgradeUrl ?? UPGRADE_URL;
+  const salesEmail = brand.links?.sales ?? SALES_EMAIL;
   return (
     <div className="flex flex-col items-center justify-center h-full p-8">
       <div className="max-w-md text-center space-y-6">
@@ -434,13 +445,13 @@ export function EnterpriseUpgradePage({ featureName }: Readonly<EnterpriseUpgrad
         <div className="space-y-2">
           <h1 className="text-2xl font-bold">Enterprise Feature</h1>
           <p className="text-muted-foreground">
-            {featureName} is an Omnia Enterprise feature. Upgrade to unlock it
-            along with the rest of Omnia&apos;s enterprise capabilities.
+            {featureName} is an Enterprise feature. Upgrade to unlock it along
+            with the rest of {brand.productName}&apos;s enterprise capabilities.
           </p>
         </div>
         <div className="space-y-3">
           <Button asChild size="lg" className="w-full">
-            <a href={UPGRADE_URL} target="_blank" rel="noopener noreferrer">
+            <a href={upgradeUrl} target="_blank" rel="noopener noreferrer">
               Upgrade to Enterprise
               <ExternalLink className="ml-2 h-4 w-4" />
             </a>
@@ -448,10 +459,10 @@ export function EnterpriseUpgradePage({ featureName }: Readonly<EnterpriseUpgrad
           <p className="text-sm text-muted-foreground">
             Contact{" "}
             <a
-              href="mailto:sales@altairalabs.ai"
+              href={`mailto:${salesEmail}`}
               className="text-primary hover:underline"
             >
-              sales@altairalabs.ai
+              {salesEmail}
             </a>{" "}
             for pricing and trial licenses.
           </p>

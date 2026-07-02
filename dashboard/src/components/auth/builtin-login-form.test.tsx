@@ -5,6 +5,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { BuiltinLoginForm } from "./builtin-login-form";
+import { BrandContext } from "@/components/branding/brand-provider";
+import { OMNIA_BRAND } from "@/lib/branding/types";
 
 // Test credentials (not real passwords - used for testing only)
 const TEST_USER = "testuser";
@@ -28,6 +30,21 @@ describe("BuiltinLoginForm", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     global.fetch = vi.fn();
+  });
+
+  it("should render a white-label product name in the heading", () => {
+    render(
+      <BrandContext.Provider
+        value={{
+          brand: { ...OMNIA_BRAND, productName: "Acme Cloud" },
+          setBrandOverride: () => {},
+        }}
+      >
+        <BuiltinLoginForm />
+      </BrandContext.Provider>,
+    );
+
+    expect(screen.getByText("Sign in to Acme Cloud")).toBeInTheDocument();
   });
 
   it("should render login form", () => {

@@ -19,6 +19,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { AlertCircle, Loader2, LogIn, Shield } from "lucide-react";
+import { useBrand } from "@/hooks/use-brand";
 
 interface BuiltinLoginFormProps {
   error?: string;
@@ -34,6 +35,7 @@ export function BuiltinLoginForm({
   allowSignup = true,
 }: Readonly<BuiltinLoginFormProps>) {
   const router = useRouter();
+  const { brand } = useBrand();
   const [identity, setIdentity] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState(initialMessage || initialError || "");
@@ -74,7 +76,7 @@ export function BuiltinLoginForm({
         <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-primary/10">
           <Shield className="h-6 w-6 text-primary" />
         </div>
-        <CardTitle className="text-2xl">Sign in to Omnia</CardTitle>
+        <CardTitle className="text-2xl">Sign in to {brand.productName}</CardTitle>
         <CardDescription>
           Enter your credentials to access the dashboard
         </CardDescription>
