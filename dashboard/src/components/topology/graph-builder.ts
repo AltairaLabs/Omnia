@@ -4,6 +4,10 @@ import type { AgentRuntime, PromptPack, ToolRegistry, Provider, ProviderType } f
 import type { NotesMap } from "@/lib/notes-storage";
 import { getProviderColor } from "./provider-icons";
 
+// Edge label colors (tokens; extracted to satisfy sonarjs/no-duplicate-string).
+const EDGE_LABEL_FILL = "var(--muted-foreground)";
+const EDGE_LABEL_BG_FILL = "var(--card)";
+
 interface GraphData {
   nodes: Node[];
   edges: Edge[];
@@ -218,10 +222,10 @@ export function buildTopologyGraph({
           target: nodeId,
           type: "smoothstep",
           animated: true,
-          style: { stroke: "#8b5cf6" },
+          style: { stroke: "var(--category-2)" },
           label: "uses",
-          labelStyle: { fontSize: 10, fill: "#666" },
-          labelBgStyle: { fill: "white", fillOpacity: 0.8 },
+          labelStyle: { fontSize: 10, fill: EDGE_LABEL_FILL },
+          labelBgStyle: { fill: EDGE_LABEL_BG_FILL, fillOpacity: 0.8 },
         });
       }
     });
@@ -266,10 +270,10 @@ export function buildTopologyGraph({
           target: nodeId,
           type: "smoothstep",
           animated: true,
-          style: { stroke: "#f97316" },
+          style: { stroke: "var(--category-4)" },
           label: "uses",
-          labelStyle: { fontSize: 10, fill: "#666" },
-          labelBgStyle: { fill: "white", fillOpacity: 0.8 },
+          labelStyle: { fontSize: 10, fill: EDGE_LABEL_FILL },
+          labelBgStyle: { fill: EDGE_LABEL_BG_FILL, fillOpacity: 0.8 },
         });
       }
     });
@@ -295,10 +299,10 @@ export function buildTopologyGraph({
         source: nodeId,
         target: toolNodeId,
         type: "smoothstep",
-        style: { stroke: "#14b8a6" },
+        style: { stroke: "var(--category-6)" },
         label: "provides",
-        labelStyle: { fontSize: 10, fill: "#666" },
-        labelBgStyle: { fill: "white", fillOpacity: 0.8 },
+        labelStyle: { fontSize: 10, fill: EDGE_LABEL_FILL },
+        labelBgStyle: { fill: EDGE_LABEL_BG_FILL, fillOpacity: 0.8 },
       });
     });
   });
@@ -347,8 +351,8 @@ export function buildTopologyGraph({
           animated: true,
           style: { stroke: getProviderColor(providerType) },
           label: "powered by",
-          labelStyle: { fontSize: 10, fill: "#666" },
-          labelBgStyle: { fill: "white", fillOpacity: 0.8 },
+          labelStyle: { fontSize: 10, fill: EDGE_LABEL_FILL },
+          labelBgStyle: { fill: EDGE_LABEL_BG_FILL, fillOpacity: 0.8 },
         });
       }
     });

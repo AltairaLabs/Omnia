@@ -15,6 +15,7 @@ import { useMemo } from "react";
 import { ReactFlow } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 
+import { useFlowColorMode } from "@/lib/flow/use-color-mode";
 import { agentTopologyNodeTypes } from "./agent-topology-nodes";
 import { buildAgentTopologyGraph, type AgentTopologyFacade } from "./agent-topology-model";
 
@@ -48,12 +49,15 @@ export function AgentTopology({
     [agentName, facades, framework, promptPack, context, memoryEnabled],
   );
 
+  const colorMode = useFlowColorMode();
+
   return (
     // Inline height is required: React Flow measures this container and renders
     // nothing if it computes to 0 (error#004). A Tailwind arbitrary class is not
     // reliable here — match the working topology-graph and set it inline.
     <div style={{ width: "100%", height: 200 }} className="rounded-lg border bg-card/40">
       <ReactFlow
+        colorMode={colorMode}
         nodes={nodes}
         edges={edges}
         nodeTypes={agentTopologyNodeTypes}
