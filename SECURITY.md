@@ -55,8 +55,11 @@ Omnia implements several security measures to protect users:
 
 ### Code Security
 
-- **Static Analysis**: Automated security scanning with [gosec](https://github.com/securego/gosec) on all code changes
-- **Dependency Scanning**: Automated vulnerability scanning with [Dependabot](https://github.com/dependabot) for Go modules, Docker images, and GitHub Actions
+- **Vulnerability Scanning**: [govulncheck](https://pkg.go.dev/golang.org/x/vuln/cmd/govulncheck) runs in CI with reachability analysis over the Go standard library and all modules — the build fails when vulnerable code is actually called
+- **Static Analysis (SAST)**: [CodeQL](https://codeql.github.com/) analyzes Go source on every change
+- **Container Scanning**: [Trivy](https://trivy.dev/) scans every published image; results are uploaded to the repository Security tab
+- **Dependency Scanning**: [Dependabot](https://github.com/dependabot) for Go modules, Docker images, and GitHub Actions, plus `dependency-review` on PRs (blocks new high-severity dependencies)
+- **Supply-chain Posture**: [OpenSSF Scorecard](https://securityscorecards.dev/) grades the repository weekly and publishes results
 - **Code Quality**: Comprehensive linting with golangci-lint
 - **Code Review**: All changes require review before merging
 - **Signed Releases**: All releases are signed and checksummed
@@ -172,25 +175,31 @@ Security updates are distributed through:
 
 ## Automated Security Tools
 
-Omnia uses the following automated security tools:
+Omnia uses the following automated security tools, with findings surfaced in the
+repository [Security tab](https://github.com/AltairaLabs/Omnia/security/code-scanning):
 
-- **[gosec](https://github.com/securego/gosec)**: Go security scanner that inspects source code for security problems
-  - Runs locally via `make security-scan`
-  - Integrated into CI pipeline
-  - Checks for common security issues like SQL injection, command injection, weak crypto, etc.
+- **[govulncheck](https://pkg.go.dev/golang.org/x/vuln/cmd/govulncheck)**: Reachability-based vulnerability scanner for the Go standard library and modules
+  - Runs in CI against the published SDK and the `CGO_ENABLED=0` build shape that ships
+  - Fails the build only when vulnerable code is actually reachable (low false-positive)
+  - Run locally with: `GOWORK=off CGO_ENABLED=0 govulncheck ./...`
+
+- **[Trivy](https://trivy.dev/)**: Container image scanner
+  - Scans every image built in `docker-push` / `release`; SARIF uploaded to the Security tab
+
+- **[CodeQL](https://codeql.github.com/)**: Static application security testing (SAST) for Go
+
+- **[OpenSSF Scorecard](https://securityscorecards.dev/)**: Repository supply-chain posture, graded weekly and published
 
 - **[Dependabot](https://github.com/dependabot)**: Automated dependency updates and vulnerability scanning
   - Monitors all Go modules, Docker images, and GitHub Actions
   - Creates pull requests for security updates and version bumps
-  - Runs weekly on Mondays at 09:00 UTC
 
-- **[golangci-lint](https://golangci-lint.run/)**: Comprehensive Go linter including staticcheck
-  - Includes gosec as one of its enabled linters
+- **[golangci-lint](https://golangci-lint.run/)**: Comprehensive Go linter (staticcheck, errcheck, revive, and more)
   - Runs on all PRs and pre-commit hooks
 
 ---
 
-**Last Updated**: December 28, 2025
-**Next Review**: March 28, 2026
+**Last Updated**: July 2, 2026
+**Next Review**: October 2, 2026
 
 For questions about this security policy, contact: [security@altairalabs.ai](mailto:security@altairalabs.ai)
