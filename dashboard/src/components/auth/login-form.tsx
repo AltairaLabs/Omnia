@@ -13,6 +13,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { AlertCircle, LogIn, Shield } from "lucide-react";
+import { useBrand } from "@/hooks/use-brand";
 
 interface LoginFormProps {
   providerName: string;
@@ -42,6 +43,8 @@ export function LoginForm({
   errorMessage,
   returnTo,
 }: Readonly<LoginFormProps>) {
+  const { brand } = useBrand();
+
   const handleLogin = () => {
     // Redirect to OAuth login endpoint with returnTo
     const loginUrl = new URL("/api/auth/login", globalThis.location.origin);
@@ -62,7 +65,7 @@ export function LoginForm({
         <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-primary/10">
           <Shield className="h-6 w-6 text-primary" />
         </div>
-        <CardTitle className="text-2xl">Sign in to Omnia</CardTitle>
+        <CardTitle className="text-2xl">Sign in to {brand.productName}</CardTitle>
         <CardDescription>
           Continue with {providerName} to access the dashboard
         </CardDescription>

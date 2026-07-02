@@ -7,8 +7,11 @@ import {
   UpgradeBanner,
   FeatureBadge,
   LicenseInfo,
+  EnterpriseUpgradePage,
 } from "./license-gate";
 import { OPEN_CORE_LICENSE, type License } from "@/types/license";
+import { BrandContext } from "@/components/branding/brand-provider";
+import { OMNIA_BRAND, type BrandConfig } from "@/lib/branding/types";
 
 // Mock the useLicense hook
 const mockUseLicense = vi.fn();
@@ -16,6 +19,25 @@ const mockUseLicense = vi.fn();
 vi.mock("@/hooks/use-license", () => ({
   useLicense: () => mockUseLicense(),
 }));
+
+const WHITE_LABEL_BRAND: BrandConfig = {
+  ...OMNIA_BRAND,
+  productName: "Acme Cloud",
+  links: {
+    upgradeUrl: "https://acme.example/enterprise",
+    sales: "sales@acme.example",
+  },
+};
+
+function renderBranded(ui: React.ReactElement) {
+  return render(
+    <BrandContext.Provider
+      value={{ brand: WHITE_LABEL_BRAND, setBrandOverride: () => {} }}
+    >
+      {ui}
+    </BrandContext.Provider>,
+  );
+}
 
 describe("license-gate components", () => {
   beforeEach(() => {
@@ -294,6 +316,41 @@ describe("license-gate components", () => {
       render(<FeatureBadge feature="gitSource" enterpriseText="Pro" />);
 
       expect(screen.getByText("Pro")).toBeInTheDocument();
+    });
+  });
+
+  describe("white-label branding", () => {
+    beforeEach(() => {
+      mockUseLicense.mockReturnValue({
+        license: OPEN_CORE_LICENSE,
+        canUseFeature: () => true,
+        isEnterprise: false,
+        isExpired: false,
+      });
+    });
+
+    it("UpgradeBanner sources the upgrade URL from the brand config", () => {
+      renderBranded(<UpgradeBanner feature="Git Sources" />);
+      const link = screen.getByRole("link", { name: /Upgrade to Enterprise/i });
+      expect(link).toHaveAttribute("href", "https://acme.example/enterprise");
+    });
+
+    it("EnterpriseUpgradePage uses brand product name, upgrade URL, and sales email", () => {
+      renderBranded(<EnterpriseUpgradePage featureName="Arena Fleet" />);
+      expect(screen.getByText(/enterprise capabilities/)).toHaveTextContent(
+        "Acme Cloud",
+      );
+      const upgrade = screen.getByRole("link", { name: /Upgrade to Enterprise/i });
+      expect(upgrade).toHaveAttribute("href", "https://acme.example/enterprise");
+      const sales = screen.getByRole("link", { name: "sales@acme.example" });
+      expect(sales).toHaveAttribute("href", "mailto:sales@acme.example");
+    });
+
+    it("FeatureBadge available chip uses the success token, not a raw palette shade", () => {
+      renderBranded(<FeatureBadge feature="gitSource" />);
+      const badge = screen.getByText("Available");
+      expect(badge.className).toContain("text-success");
+      expect(badge.className).not.toMatch(/green/);
     });
   });
 
