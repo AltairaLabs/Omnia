@@ -10,7 +10,7 @@ import {
 } from "recharts";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type { ConsentStats } from "@/lib/memory-analytics/types";
-import { CATEGORY_COLORS } from "@/lib/memory-analytics/colors";
+import { categoryColorVar } from "@/lib/colors/category";
 
 interface PrivacyPostureProps {
   stats: ConsentStats;
@@ -60,7 +60,7 @@ export function PrivacyPosture({
                   <Tooltip />
                   <Bar
                     dataKey="value"
-                    fill={CATEGORY_COLORS["memory:context"]}
+                    fill={categoryColorVar("memory:context")}
                   />
                 </BarChart>
               </ResponsiveContainer>

@@ -25,8 +25,8 @@ import {
   TIER_COLORS,
   TIER_LABELS,
   TIER_DESCRIPTIONS,
-  CATEGORY_COLORS,
 } from "@/lib/memory-analytics/colors";
+import { categoryColorVar } from "@/lib/colors/category";
 import type { GalaxyPoint } from "@/lib/memory-galaxy/types";
 import type { Tier } from "@/lib/memory-analytics/types";
 import { useDeleteMemory } from "@/hooks/use-memory-mutations";
@@ -66,7 +66,7 @@ function buildFacets(points: GalaxyPoint[], colorBy: "tier" | "category"): Facet
   return CATEGORY_KEYS.map((c) => ({
     key: c,
     label: categoryLabel(c),
-    color: CATEGORY_COLORS[c] ?? CATEGORY_COLORS.unknown,
+    color: categoryColorVar(c),
     count: counts[c] ?? 0,
   }));
 }

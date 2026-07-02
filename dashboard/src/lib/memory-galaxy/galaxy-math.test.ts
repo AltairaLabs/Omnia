@@ -37,10 +37,10 @@ describe("colorForPoint", () => {
     expect(colorForPoint(pt({ tier: "institutional" }), "tier")).toBe("hsl(217, 91%, 60%)");
   });
   it("uses category color when colorBy=category", () => {
-    expect(colorForPoint(pt({ category: "memory:identity" }), "category")).toBe("hsl(15, 85%, 55%)");
+    expect(colorForPoint(pt({ category: "memory:identity" }), "category")).toBe("#3B82F6");
   });
   it("falls back to unknown category color", () => {
-    expect(colorForPoint(pt({ category: undefined }), "category")).toBe("hsl(0, 0%, 60%)");
+    expect(colorForPoint(pt({ category: undefined }), "category")).toBe("#6B7280");
   });
 });
 describe("visibility + filters", () => {

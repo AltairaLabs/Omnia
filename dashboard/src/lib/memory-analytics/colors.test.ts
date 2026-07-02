@@ -3,7 +3,6 @@ import {
   TIER_COLORS,
   TIER_LABELS,
   TIER_DESCRIPTIONS,
-  CATEGORY_COLORS,
 } from "./colors";
 import { TIERS } from "./types";
 
@@ -16,20 +15,4 @@ describe("memory-analytics colors", () => {
     }
   });
 
-  it("provides a fallback color for unknown categories", () => {
-    expect(CATEGORY_COLORS.unknown).toMatch(/^hsl\(/);
-  });
-
-  it("provides colors for the standard memory categories", () => {
-    for (const category of [
-      "memory:context",
-      "memory:identity",
-      "memory:health",
-      "memory:location",
-      "memory:preferences",
-      "memory:history",
-    ]) {
-      expect(CATEGORY_COLORS[category]).toMatch(/^hsl\(/);
-    }
-  });
 });
