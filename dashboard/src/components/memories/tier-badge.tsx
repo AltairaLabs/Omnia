@@ -3,7 +3,8 @@
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import type { Tier } from "@/lib/memory-analytics/types";
-import { TIER_COLORS, TIER_LABELS } from "@/lib/memory-analytics/colors";
+import { TIER_LABELS } from "@/lib/memory-analytics/colors";
+import { tierColorVar } from "@/lib/colors/category";
 
 interface TierBadgeProps {
   tier: Tier | undefined;
@@ -22,8 +23,8 @@ export function TierBadge({ tier, className }: Readonly<TierBadgeProps>) {
       variant="outline"
       className={cn("font-normal", className)}
       style={{
-        borderColor: TIER_COLORS[tier],
-        color: TIER_COLORS[tier],
+        borderColor: tierColorVar(tier),
+        color: tierColorVar(tier),
       }}
     >
       {TIER_LABELS[tier]}

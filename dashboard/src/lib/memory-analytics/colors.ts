@@ -5,12 +5,7 @@
 
 import type { Tier } from "./types";
 
-export const TIER_COLORS: Record<Tier, string> = {
-  institutional: "hsl(217, 91%, 60%)",
-  agent: "hsl(160, 84%, 39%)",
-  user: "hsl(280, 75%, 60%)",
-  user_for_agent: "hsl(320, 70%, 55%)",
-};
+// Tier colors are token-driven via lib/colors/category (tierColorVar / tierColorHex).
 
 export const TIER_LABELS: Record<Tier, string> = {
   institutional: "Institutional",

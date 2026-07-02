@@ -4,10 +4,10 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { TIERS, isTier, type AggregateRow } from "@/lib/memory-analytics/types";
 import {
-  TIER_COLORS,
   TIER_LABELS,
   TIER_DESCRIPTIONS,
 } from "@/lib/memory-analytics/colors";
+import { tierColorVar } from "@/lib/colors/category";
 
 interface TierQuadCardProps {
   rows: AggregateRow[];
@@ -68,7 +68,7 @@ export function TierQuadCard({ rows, loading }: Readonly<TierQuadCardProps>) {
               </CardTitle>
               <span
                 className="inline-block h-3 w-3 rounded-full"
-                style={{ backgroundColor: TIER_COLORS[tier] }}
+                style={{ backgroundColor: tierColorVar(tier) }}
                 aria-hidden
               />
             </CardHeader>

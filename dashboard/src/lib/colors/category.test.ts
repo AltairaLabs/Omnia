@@ -6,6 +6,8 @@ import {
   categoryColorHex,
   getCategoryClasses,
   getCategoryLabel,
+  tierColorVar,
+  tierColorHex,
 } from "./category";
 
 describe("category colors", () => {
@@ -52,5 +54,24 @@ describe("category colors", () => {
     expect(getCategoryLabel("memory:health")).toBe("Health");
     expect(getCategoryLabel("memory:nope")).toBe("Context");
     expect(getCategoryLabel()).toBe("Context");
+  });
+});
+
+describe("tier colors", () => {
+  it("maps memory tiers to category token vars", () => {
+    expect(tierColorVar("institutional")).toBe("var(--category-1)");
+    expect(tierColorVar("agent")).toBe("var(--category-5)");
+    expect(tierColorVar("user")).toBe("var(--category-2)");
+    expect(tierColorVar("user_for_agent")).toBe("var(--category-3)");
+  });
+
+  it("returns concrete hex for tiers (canvas)", () => {
+    expect(tierColorHex("institutional")).toBe("#3B82F6");
+    expect(tierColorHex("agent")).toBe("#10B981");
+  });
+
+  it("falls back to the neutral index for unknown tiers", () => {
+    expect(tierColorVar("nope")).toBe("var(--category-8)");
+    expect(tierColorHex("nope")).toBe("#6B7280");
   });
 });

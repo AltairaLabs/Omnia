@@ -22,11 +22,10 @@ import { FacetRail, type Facet } from "@/components/memories/facet-rail";
 import { facetCounts, parseHiddenTiers } from "@/lib/memory-galaxy/galaxy-math";
 import { countMatches } from "@/lib/memory-galaxy/galaxy-search";
 import {
-  TIER_COLORS,
   TIER_LABELS,
   TIER_DESCRIPTIONS,
 } from "@/lib/memory-analytics/colors";
-import { categoryColorVar } from "@/lib/colors/category";
+import { categoryColorVar, tierColorVar } from "@/lib/colors/category";
 import type { GalaxyPoint } from "@/lib/memory-galaxy/types";
 import type { Tier } from "@/lib/memory-analytics/types";
 import { useDeleteMemory } from "@/hooks/use-memory-mutations";
@@ -58,7 +57,7 @@ function buildFacets(points: GalaxyPoint[], colorBy: "tier" | "category"): Facet
     return TIER_KEYS.map((t) => ({
       key: t,
       label: TIER_LABELS[t],
-      color: TIER_COLORS[t],
+      color: tierColorVar(t),
       count: counts[t] ?? 0,
       description: TIER_DESCRIPTIONS[t],
     }));

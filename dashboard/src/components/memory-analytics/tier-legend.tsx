@@ -3,10 +3,10 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { TIERS } from "@/lib/memory-analytics/types";
 import {
-  TIER_COLORS,
   TIER_LABELS,
   TIER_DESCRIPTIONS,
 } from "@/lib/memory-analytics/colors";
+import { tierColorVar } from "@/lib/colors/category";
 
 /**
  * Persistent header card explaining the three memory tiers. Doubles as the
@@ -25,7 +25,7 @@ export function TierLegend() {
           <div key={tier} className="flex items-start gap-2">
             <span
               className="mt-1 inline-block h-2.5 w-2.5 flex-shrink-0 rounded-full"
-              style={{ backgroundColor: TIER_COLORS[tier] }}
+              style={{ backgroundColor: tierColorVar(tier) }}
               aria-hidden
             />
             <div>
