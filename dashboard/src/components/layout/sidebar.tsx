@@ -95,7 +95,7 @@ export function Sidebar() {
     <TooltipProvider>
       <div
         className={cn(
-          "flex h-full flex-col border-r border-white/10 bg-[#0F172A] text-[#E2E8F0] transition-[width] duration-200",
+          "flex h-full flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground transition-[width] duration-200",
           collapsed ? "w-16" : "w-64",
         )}
         data-testid="sidebar"
@@ -103,7 +103,7 @@ export function Sidebar() {
         {/* Logo header + collapse toggle */}
         <div
           className={cn(
-            "flex border-b border-white/10",
+            "flex border-b border-sidebar-border",
             collapsed
               ? "flex-col items-center gap-2 px-2 py-3"
               : "h-16 items-center gap-3 px-6",
@@ -111,13 +111,13 @@ export function Sidebar() {
         >
           <Image src={brand.logo.dark} alt={brand.productName} width={28} height={28} />
           {!collapsed && (
-            <span className="flex-1 text-lg font-semibold text-white">{brand.productName}</span>
+            <span className="flex-1 text-lg font-semibold text-sidebar-accent-foreground">{brand.productName}</span>
           )}
           <button
             type="button"
             onClick={toggle}
             aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-            className="rounded-md p-1.5 text-[#E2E8F0]/70 transition-colors hover:bg-[#1E293B] hover:text-white"
+            className="rounded-md p-1.5 text-sidebar-foreground/70 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
           >
             {collapsed ? (
               <PanelLeftOpen className="h-4 w-4" />
@@ -135,7 +135,7 @@ export function Sidebar() {
         {/* Secondary Navigation */}
         <div
           className={cn(
-            "border-t border-white/10 py-4",
+            "border-t border-sidebar-border py-4",
             collapsed ? "px-2" : "px-3",
           )}
         >
