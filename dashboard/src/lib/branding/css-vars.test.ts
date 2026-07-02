@@ -6,10 +6,18 @@ describe("brandConfigToCssVars", () => {
   it("maps allowlisted color keys to CSS variables", () => {
     const vars = brandConfigToCssVars({
       ...OMNIA_BRAND,
-      colors: { primary: "#ff0000", category1: "#00ff00", success: "#0000ff" },
+      colors: {
+        primary: "#ff0000",
+        chart1: "#00ff00",
+        category1: "#0000ff",
+        category8: "#123456",
+        success: "#0000ff",
+      },
     });
     expect(vars["--primary"]).toBe("#ff0000");
     expect(vars["--chart-1"]).toBe("#00ff00");
+    expect(vars["--category-1"]).toBe("#0000ff");
+    expect(vars["--category-8"]).toBe("#123456");
     expect(vars["--success"]).toBe("#0000ff");
   });
 

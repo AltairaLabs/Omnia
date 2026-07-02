@@ -11,11 +11,21 @@ export interface BrandColorTokens {
   primary?: string;
   accent?: string;
   sidebar?: string;
+  // Series palette (charts / time-series)
+  chart1?: string;
+  chart2?: string;
+  chart3?: string;
+  chart4?: string;
+  chart5?: string;
+  // Categorical palette (entity categories: memory categories, node types)
   category1?: string;
   category2?: string;
   category3?: string;
   category4?: string;
   category5?: string;
+  category6?: string;
+  category7?: string;
+  category8?: string;
   success?: string;
   warning?: string;
   info?: string;
