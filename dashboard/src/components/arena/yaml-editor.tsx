@@ -238,13 +238,13 @@ export function YamlEditor({
         <div className="flex items-center gap-2 px-3 py-1.5 border-t bg-muted/30 text-xs">
           {validation.valid ? (
             <>
-              <CheckCircle className="h-3.5 w-3.5 text-green-500" />
+              <CheckCircle className="h-3.5 w-3.5 text-success" />
               <span className="text-muted-foreground">Valid YAML</span>
             </>
           ) : (
             <>
-              <AlertTriangle className="h-3.5 w-3.5 text-amber-500" />
-              <span className="text-amber-500 truncate">
+              <AlertTriangle className="h-3.5 w-3.5 text-warning" />
+              <span className="text-warning truncate">
                 {validation.line !== undefined && `Line ${validation.line}: `}
                 {validation.error}
               </span>

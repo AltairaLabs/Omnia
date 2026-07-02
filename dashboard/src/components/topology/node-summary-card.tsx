@@ -38,14 +38,14 @@ function StatusBadge({ phase }: Readonly<{ phase?: string }>) {
     case "Running":
     case "Ready":
     case "Active":
-      return <Badge className="bg-green-500/15 text-green-700 dark:text-green-400 border-green-500/30">{phase}</Badge>;
+      return <Badge className="bg-success/15 text-success border-success/30">{phase}</Badge>;
     case "Pending":
     case "Canary":
-      return <Badge className="bg-yellow-500/15 text-yellow-700 dark:text-yellow-400 border-yellow-500/30">{phase}</Badge>;
+      return <Badge className="bg-warning/15 text-warning border-warning/30">{phase}</Badge>;
     case "Failed":
     case "Error":
     case "Degraded":
-      return <Badge className="bg-red-500/15 text-red-700 dark:text-red-400 border-red-500/30">{phase}</Badge>;
+      return <Badge className="bg-destructive/15 text-destructive border-destructive/30">{phase}</Badge>;
     default:
       return <Badge variant="outline">{phase}</Badge>;
   }
@@ -54,22 +54,22 @@ function StatusBadge({ phase }: Readonly<{ phase?: string }>) {
 /** Type header styles matching topology graph nodes */
 const typeHeaderStyles = {
   agent: {
-    bg: "bg-blue-500",
+    bg: "bg-category-1",
     icon: Bot,
     label: "Agent",
   },
   promptpack: {
-    bg: "bg-purple-500",
+    bg: "bg-category-2",
     icon: FileText,
     label: "PromptPack",
   },
   tools: {
-    bg: "bg-orange-500",
+    bg: "bg-category-4",
     icon: Package,
     label: "ToolRegistry",
   },
   provider: {
-    bg: "bg-green-500",
+    bg: "bg-category-5",
     icon: Zap,
     label: "Provider",
   },

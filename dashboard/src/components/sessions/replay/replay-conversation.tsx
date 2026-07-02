@@ -108,7 +108,7 @@ function MessageRow({
       <Icon
         className={cn(
           "mt-0.5 h-4 w-4 flex-shrink-0",
-          isUser ? "text-primary" : "text-blue-500",
+          isUser ? "text-primary" : "text-info",
         )}
       />
       <div className="min-w-0 flex-1">
@@ -137,7 +137,7 @@ function ToolCallRow({
     <div
       className={cn(
         "flex gap-3 border-b px-4 py-3",
-        isError ? "bg-destructive/5" : "bg-amber-500/5",
+        isError ? "bg-destructive/5" : "bg-warning/5",
       )}
     >
       <div className="flex w-12 flex-shrink-0 flex-col items-start gap-1 font-mono text-[10px] text-muted-foreground tabular-nums">
@@ -146,7 +146,7 @@ function ToolCallRow({
       <Wrench
         className={cn(
           "mt-0.5 h-4 w-4 flex-shrink-0",
-          isError ? "text-destructive" : "text-orange-500",
+          isError ? "text-destructive" : "text-warning",
         )}
       />
       <div className="min-w-0 flex-1">
@@ -155,8 +155,8 @@ function ToolCallRow({
           <span
             className={cn(
               "rounded-sm px-1.5 py-0.5",
-              origin === "client" && "bg-blue-500/15 text-blue-700 dark:text-blue-300",
-              origin === "server" && "bg-purple-500/15 text-purple-700 dark:text-purple-300",
+              origin === "client" && "bg-category-1/15 text-category-1",
+              origin === "server" && "bg-category-2/15 text-category-2",
               origin === "unknown" && "bg-muted text-muted-foreground",
             )}
           >

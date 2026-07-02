@@ -45,11 +45,11 @@ function getHandlerTypeIcon(type: string) {
 function ToolStatusIcon({ status }: Readonly<{ status: DiscoveredTool["status"] }>) {
   switch (status) {
     case "Available":
-      return <CheckCircle className="h-3 w-3 text-green-500" />;
+      return <CheckCircle className="h-3 w-3 text-success" />;
     case "Unavailable":
-      return <XCircle className="h-3 w-3 text-red-500" />;
+      return <XCircle className="h-3 w-3 text-destructive" />;
     default:
-      return <AlertCircle className="h-3 w-3 text-yellow-500" />;
+      return <AlertCircle className="h-3 w-3 text-warning" />;
   }
 }
 

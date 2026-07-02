@@ -95,11 +95,11 @@ export default function CostsPage() {
           description="LLM cost tracking and allocation across agents"
         />
         <div className="flex-1 p-6">
-          <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4">
-            <p className="text-sm font-medium text-red-800 dark:text-red-200">
+          <div className="bg-destructive/10 border border-destructive/30 rounded-lg p-4">
+            <p className="text-sm font-medium text-destructive">
               Failed to load cost data
             </p>
-            <p className="text-sm text-red-700 dark:text-red-300">
+            <p className="text-sm text-destructive">
               {error instanceof Error ? error.message : "Unknown error"}
             </p>
           </div>
@@ -143,7 +143,7 @@ export default function CostsPage() {
             description={
               available ? (
                 <>
-                  <span className="text-blue-600 dark:text-blue-400">
+                  <span className="text-info">
                     {summary.inputPercent.toFixed(0)}% input
                   </span>{" "}
                   / {summary.outputPercent.toFixed(0)}% output

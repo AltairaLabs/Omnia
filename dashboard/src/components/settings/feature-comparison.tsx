@@ -64,7 +64,7 @@ function FeatureValue({ value }: { value: boolean | string }) {
   }
 
   return value ? (
-    <CheckCircle className="h-5 w-5 text-green-500" />
+    <CheckCircle className="h-5 w-5 text-success" />
   ) : (
     <XCircle className="h-5 w-5 text-muted-foreground" />
   );

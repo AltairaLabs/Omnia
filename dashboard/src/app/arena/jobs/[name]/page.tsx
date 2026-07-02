@@ -83,14 +83,14 @@ function getJobTypeBadge(type: ArenaJobType | undefined) {
       );
     case "loadtest":
       return (
-        <Badge variant="secondary" className="gap-1 bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200">
+        <Badge variant="secondary" className="gap-1 bg-category-4/15 text-category-4">
           <Gauge className="h-3 w-3" />
           Load Test
         </Badge>
       );
     case "datagen":
       return (
-        <Badge variant="secondary" className="gap-1 bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200">
+        <Badge variant="secondary" className="gap-1 bg-category-2/15 text-category-2">
           <Database className="h-3 w-3" />
           Data Gen
         </Badge>
@@ -111,14 +111,14 @@ function getJobPhaseBadge(phase: ArenaJobPhase | undefined) {
       );
     case "Running":
       return (
-        <Badge variant="default" className="gap-1 bg-blue-500">
+        <Badge variant="default" className="gap-1 bg-info">
           <Play className="h-3 w-3" />
           Running
         </Badge>
       );
     case "Succeeded":
       return (
-        <Badge variant="default" className="gap-1 bg-green-500">
+        <Badge variant="default" className="gap-1 bg-success">
           <CheckCircle className="h-3 w-3" />
           Succeeded
         </Badge>
@@ -196,9 +196,9 @@ function ProviderGroupDisplay({
           return (
             <Badge key={entryKey} variant="secondary" className="text-xs flex items-center gap-0.5">
               {isAgent ? (
-                <Network className="h-2.5 w-2.5 text-blue-500" />
+                <Network className="h-2.5 w-2.5 text-category-1" />
               ) : (
-                <Zap className="h-2.5 w-2.5 text-amber-500" />
+                <Zap className="h-2.5 w-2.5 text-category-4" />
               )}
               {name}
             </Badge>
@@ -254,11 +254,11 @@ function OverviewTab({
               </div>
               <div>
                 <p className="text-sm text-muted-foreground">Completed</p>
-                <p className="text-2xl font-bold text-green-600">{completed}</p>
+                <p className="text-2xl font-bold text-success">{completed}</p>
               </div>
               <div>
                 <p className="text-sm text-muted-foreground">Failed</p>
-                <p className="text-2xl font-bold text-red-600">{failed}</p>
+                <p className="text-2xl font-bold text-destructive">{failed}</p>
               </div>
               <div>
                 <p className="text-sm text-muted-foreground">Remaining</p>
@@ -279,11 +279,11 @@ function OverviewTab({
                     </div>
                     <div>
                       <p className="text-sm text-muted-foreground">Passed</p>
-                      <p className="text-2xl font-bold text-green-600">{passedItems}</p>
+                      <p className="text-2xl font-bold text-success">{passedItems}</p>
                     </div>
                     <div>
                       <p className="text-sm text-muted-foreground">Failed</p>
-                      <p className="text-2xl font-bold text-red-600">{failedItems}</p>
+                      <p className="text-2xl font-bold text-destructive">{failedItems}</p>
                     </div>
                     <div>
                       <p className="text-sm text-muted-foreground">Pass Rate</p>
@@ -340,19 +340,19 @@ function OverviewTab({
             </div>
             <div>
               <p className="text-sm text-muted-foreground">Active</p>
-              <p className="text-2xl font-bold text-blue-600">
+              <p className="text-2xl font-bold text-info">
                 {status?.activeWorkers ?? 0}
               </p>
             </div>
             <div>
               <p className="text-sm text-muted-foreground">Succeeded</p>
-              <p className="text-2xl font-bold text-green-600">
+              <p className="text-2xl font-bold text-success">
                 {status?.progress?.completed ?? 0}
               </p>
             </div>
             <div>
               <p className="text-sm text-muted-foreground">Failed</p>
-              <p className="text-2xl font-bold text-red-600">
+              <p className="text-2xl font-bold text-destructive">
                 {status?.progress?.failed ?? 0}
               </p>
             </div>
@@ -745,11 +745,11 @@ function ResultsTab({ job }: Readonly<{ job: ArenaJob }>) {
             </div>
             <div>
               <p className="text-sm text-muted-foreground">Passed</p>
-              <p className="text-2xl font-bold text-green-600">{passedItems}</p>
+              <p className="text-2xl font-bold text-success">{passedItems}</p>
             </div>
             <div>
               <p className="text-sm text-muted-foreground">Failed</p>
-              <p className="text-2xl font-bold text-red-600">{failedItems}</p>
+              <p className="text-2xl font-bold text-destructive">{failedItems}</p>
             </div>
             <div>
               <p className="text-sm text-muted-foreground">Pass Rate</p>
@@ -808,8 +808,8 @@ function ResultsTab({ job }: Readonly<{ job: ArenaJob }>) {
                     <tr key={s.name} className="border-b last:border-0">
                       <td className="py-2 font-medium">{s.name}</td>
                       <td className="py-2 text-right">{s.total}</td>
-                      <td className="py-2 text-right text-green-600">{s.passed}</td>
-                      <td className="py-2 text-right text-red-600">{s.failed > 0 ? s.failed : "-"}</td>
+                      <td className="py-2 text-right text-success">{s.passed}</td>
+                      <td className="py-2 text-right text-destructive">{s.failed > 0 ? s.failed : "-"}</td>
                       <td className="py-2 text-right">{s.passRate.toFixed(1)}%</td>
                       <td className="py-2 text-right">{formatDurationMs(s.avgDurationMs)}</td>
                       <td className="py-2 text-right">{s.totalTokens ? s.totalTokens.toLocaleString() : "-"}</td>
@@ -848,8 +848,8 @@ function ResultsTab({ job }: Readonly<{ job: ArenaJob }>) {
                     <tr key={p.name} className="border-b last:border-0">
                       <td className="py-2 font-medium">{p.name}</td>
                       <td className="py-2 text-right">{p.total}</td>
-                      <td className="py-2 text-right text-green-600">{p.passed}</td>
-                      <td className="py-2 text-right text-red-600">{p.failed > 0 ? p.failed : "-"}</td>
+                      <td className="py-2 text-right text-success">{p.passed}</td>
+                      <td className="py-2 text-right text-destructive">{p.failed > 0 ? p.failed : "-"}</td>
                       <td className="py-2 text-right">{p.passRate.toFixed(1)}%</td>
                       <td className="py-2 text-right">{formatDurationMs(p.avgDurationMs)}</td>
                     </tr>
@@ -875,9 +875,9 @@ function ResultsTab({ job }: Readonly<{ job: ArenaJob }>) {
               {details.assertions.map((a) => (
                 <div key={a.name} className="flex items-start gap-2 text-sm">
                   {a.failed === 0 ? (
-                    <CheckCircle className="h-4 w-4 text-green-500 mt-0.5 shrink-0" />
+                    <CheckCircle className="h-4 w-4 text-success mt-0.5 shrink-0" />
                   ) : (
-                    <XCircle className="h-4 w-4 text-red-500 mt-0.5 shrink-0" />
+                    <XCircle className="h-4 w-4 text-destructive mt-0.5 shrink-0" />
                   )}
                   <div className="flex-1">
                     <div className="flex items-center gap-2">
@@ -889,7 +889,7 @@ function ResultsTab({ job }: Readonly<{ job: ArenaJob }>) {
                     {a.failures && a.failures.length > 0 && (
                       <ul className="mt-1 space-y-0.5 text-muted-foreground">
                         {a.failures.map((msg) => (
-                          <li key={msg} className="text-red-600">
+                          <li key={msg} className="text-destructive">
                             {msg}
                           </li>
                         ))}
@@ -907,14 +907,14 @@ function ResultsTab({ job }: Readonly<{ job: ArenaJob }>) {
       {details?.errors && details.errors.length > 0 && (
         <Card>
           <CardHeader>
-            <CardTitle className="text-base text-red-600">Errors</CardTitle>
+            <CardTitle className="text-base text-destructive">Errors</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="space-y-3">
               {details.errors.map((e) => (
                 <div key={e.message} className="text-sm">
                   <div className="flex items-center gap-2">
-                    <AlertCircle className="h-4 w-4 text-red-500 shrink-0" />
+                    <AlertCircle className="h-4 w-4 text-destructive shrink-0" />
                     <span className="font-medium">{e.message}</span>
                     {e.count > 1 && (
                       <Badge variant="secondary" className="text-xs">{e.count}x</Badge>
@@ -971,21 +971,21 @@ function formatLiveCost(cost: number): string {
 }
 
 function passRateColor(rate: number): string {
-  if (rate >= 0.95) return "text-green-600";
-  if (rate >= 0.8) return "text-yellow-600";
-  return "text-red-600";
+  if (rate >= 0.95) return "text-success";
+  if (rate >= 0.8) return "text-warning";
+  return "text-destructive";
 }
 
 function errorRateColor(rate: number): string {
-  if (rate <= 0.02) return "text-green-600";
-  if (rate <= 0.1) return "text-yellow-600";
-  return "text-red-600";
+  if (rate <= 0.02) return "text-success";
+  if (rate <= 0.1) return "text-warning";
+  return "text-destructive";
 }
 
 function LiveIndicator({ connected }: Readonly<{ connected: boolean }>) {
   if (!connected) return null;
   return (
-    <Badge variant="outline" className="gap-1 text-green-600 border-green-300">
+    <Badge variant="outline" className="gap-1 text-success border-success/30">
       <Radio className="h-3 w-3 animate-pulse" />
       Live
     </Badge>
@@ -1033,8 +1033,8 @@ function ProviderRow({ name, stats: p }: Readonly<{ name: string; stats: Provide
     <tr className="border-b last:border-0">
       <td className="py-2 font-medium">{name}</td>
       <td className="py-2 text-right">{p.total}</td>
-      <td className="py-2 text-right text-green-600">{p.passed}</td>
-      <td className="py-2 text-right text-red-600">{p.failed > 0 ? p.failed : "-"}</td>
+      <td className="py-2 text-right text-success">{p.passed}</td>
+      <td className="py-2 text-right text-destructive">{p.failed > 0 ? p.failed : "-"}</td>
       <td className="py-2 text-right">{formatPercent(providerPassRate)}</td>
       <td className="py-2 text-right">{formatLatency(p.avgLatencyMs)}</td>
       <td className="py-2 text-right">{p.totalTokens.toLocaleString()}</td>
@@ -1106,8 +1106,8 @@ function ThresholdsSection({ job }: Readonly<{ job: ArenaJob }>) {
               <div key={`${t.metric}-${t.operator}-${t.value}`} className="flex items-center gap-3 text-sm">
                 {isFinished && passed !== undefined && (
                   passed
-                    ? <CheckCircle className="h-4 w-4 text-green-500 shrink-0" />
-                    : <XCircle className="h-4 w-4 text-red-500 shrink-0" />
+                    ? <CheckCircle className="h-4 w-4 text-success shrink-0" />
+                    : <XCircle className="h-4 w-4 text-destructive shrink-0" />
                 )}
                 <span className="font-mono">
                   {t.metric} {t.operator} {t.value}

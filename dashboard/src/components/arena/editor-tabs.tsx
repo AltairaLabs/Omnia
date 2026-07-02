@@ -113,7 +113,7 @@ function EditorTab({
         >
           {/* Dirty indicator */}
           {file.isDirty && (
-            <Circle className="h-2 w-2 fill-current text-amber-500 flex-shrink-0" />
+            <Circle className="h-2 w-2 fill-current text-warning flex-shrink-0" />
           )}
 
           {/* File name */}
@@ -137,7 +137,7 @@ function EditorTab({
       <TooltipContent side="bottom" className="max-w-xs">
         <p className="font-mono text-xs">{file.path}</p>
         {file.isDirty && (
-          <p className="text-amber-500 text-xs mt-1">Unsaved changes</p>
+          <p className="text-warning text-xs mt-1">Unsaved changes</p>
         )}
       </TooltipContent>
     </Tooltip>

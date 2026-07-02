@@ -26,7 +26,7 @@ export function ArenaWorkloadView({ projectId }: Readonly<{ projectId: string }>
   return (
     <div className="h-full p-3 overflow-auto">
       {parseError && (
-        <div className="mb-2 flex items-center gap-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1 dark:bg-amber-950/30 dark:text-amber-300">
+        <div className="mb-2 flex items-center gap-2 text-xs text-warning bg-warning/10 border border-warning/30 rounded px-2 py-1">
           <AlertTriangle className="h-3.5 w-3.5" />
           {parseError} — showing last valid workload.
         </div>

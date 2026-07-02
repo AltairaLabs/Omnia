@@ -162,12 +162,12 @@ function TemplatesContent() {
             <span className="text-sm text-muted-foreground">Sources:</span>
             <Badge variant="secondary">{sourceStats.total}</Badge>
             {sourceStats.ready > 0 && (
-              <Badge variant="default" className="bg-green-500">
+              <Badge variant="default" className="bg-success">
                 {sourceStats.ready} ready
               </Badge>
             )}
             {sourceStats.pending > 0 && (
-              <Badge variant="default" className="bg-blue-500">
+              <Badge variant="default" className="bg-info">
                 {sourceStats.pending} syncing
               </Badge>
             )}

@@ -13,7 +13,7 @@ export function ToolCallBadge({ status }: ToolCallBadgeProps) {
     case "success":
       return (
         <Badge variant="secondary" className="gap-1" data-testid="tool-call-badge">
-          <CheckCircle2 className="h-3 w-3 text-green-500" />
+          <CheckCircle2 className="h-3 w-3 text-success" />
           Success
         </Badge>
       );

@@ -86,7 +86,7 @@ function canDropInto(src: string | null, targetDir: string): boolean {
 function getFileIcon(type: FileType | undefined, name: string) {
   // Special case for config file
   if (name === "config.arena.yaml") {
-    return <Settings className="h-4 w-4 text-purple-500 flex-shrink-0" />;
+    return <Settings className="h-4 w-4 text-category-2 flex-shrink-0" />;
   }
 
   switch (type) {
@@ -96,14 +96,14 @@ function getFileIcon(type: FileType | undefined, name: string) {
     case "scenario":
     case "tool":
     case "persona":
-      return <FileCode className="h-4 w-4 text-blue-500 flex-shrink-0" />;
+      return <FileCode className="h-4 w-4 text-category-1 flex-shrink-0" />;
     case "yaml":
     case "json":
-      return <FileCode className="h-4 w-4 text-yellow-600 flex-shrink-0" />;
+      return <FileCode className="h-4 w-4 text-category-4 flex-shrink-0" />;
     case "markdown":
-      return <FileText className="h-4 w-4 text-gray-500 flex-shrink-0" />;
+      return <FileText className="h-4 w-4 text-muted-foreground flex-shrink-0" />;
     default:
-      return <File className="h-4 w-4 text-gray-400 flex-shrink-0" />;
+      return <File className="h-4 w-4 text-muted-foreground flex-shrink-0" />;
   }
 }
 
@@ -207,10 +207,10 @@ function TreeNode({
 
       {/* Icon */}
       {node.isDirectory && isExpanded && (
-        <FolderOpen className="h-4 w-4 text-amber-500 flex-shrink-0" />
+        <FolderOpen className="h-4 w-4 text-category-4 flex-shrink-0" />
       )}
       {node.isDirectory && !isExpanded && (
-        <Folder className="h-4 w-4 text-amber-500 flex-shrink-0" />
+        <Folder className="h-4 w-4 text-category-4 flex-shrink-0" />
       )}
       {!node.isDirectory && getFileIcon(node.type, node.name)}
 

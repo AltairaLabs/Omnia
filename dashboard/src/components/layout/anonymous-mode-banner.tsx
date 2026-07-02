@@ -30,9 +30,9 @@ export function AnonymousModeBanner() {
   return (
     <div
       role="alert"
-      className="bg-red-500/15 border-b border-red-500/40 px-4 py-2"
+      className="bg-destructive/10 border-b border-destructive/30 px-4 py-2"
     >
-      <div className="flex items-center justify-center gap-2 text-sm font-medium text-red-600 dark:text-red-400">
+      <div className="flex items-center justify-center gap-2 text-sm font-medium text-destructive">
         <ShieldAlert className="h-3.5 w-3.5" />
         <span>
           Anonymous access — authentication is disabled. Do not use this configuration outside an isolated dev environment.

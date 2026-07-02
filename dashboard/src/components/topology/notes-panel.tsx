@@ -45,9 +45,9 @@ const typeIcons = {
 };
 
 const typeColors = {
-  agent: "bg-blue-500/10 text-blue-600 border-blue-500/20",
-  promptpack: "bg-purple-500/10 text-purple-600 border-purple-500/20",
-  toolregistry: "bg-orange-500/10 text-orange-600 border-orange-500/20",
+  agent: "bg-category-1/10 text-category-1 border-category-1/20",
+  promptpack: "bg-category-2/10 text-category-2 border-category-2/20",
+  toolregistry: "bg-category-4/10 text-category-4 border-category-4/20",
 };
 
 const typeLabels = {

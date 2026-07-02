@@ -13,18 +13,21 @@ interface ReplayScrubberProps {
   readonly onSeek: (ms: number) => void;
 }
 
+// Categorical markers differentiating timeline event kinds. Mapped onto the
+// SI-tunable --category-1..8 token palette (nearest hue) so markers re-theme
+// under white-label branding. primary/destructive are already design tokens.
 const MARKER_COLOR: Record<TimelineEventKind, string> = {
   user_message: "bg-primary",
-  assistant_message: "bg-blue-500",
-  system_message: "bg-gray-400",
-  tool_call: "bg-orange-500",
-  tool_result: "bg-amber-500",
-  pipeline_event: "bg-indigo-500",
-  stage_event: "bg-cyan-500",
-  provider_call: "bg-yellow-500",
-  workflow_transition: "bg-purple-500",
-  workflow_completed: "bg-green-500",
-  eval_event: "bg-violet-500",
+  assistant_message: "bg-category-1",
+  system_message: "bg-category-8",
+  tool_call: "bg-category-4",
+  tool_result: "bg-category-4",
+  pipeline_event: "bg-category-2",
+  stage_event: "bg-category-6",
+  provider_call: "bg-category-4",
+  workflow_transition: "bg-category-2",
+  workflow_completed: "bg-category-5",
+  eval_event: "bg-category-2",
   error: "bg-destructive",
 };
 

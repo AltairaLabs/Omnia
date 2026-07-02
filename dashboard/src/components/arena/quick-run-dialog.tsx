@@ -213,9 +213,9 @@ export function QuickRunDialog({
           </div>
 
           {!deployed && !deploymentStatus?.deployed && (
-            <div className="rounded-md bg-amber-50 border border-amber-200 p-3 text-sm">
-              <p className="font-medium text-amber-800">Project Not Deployed</p>
-              <p className="text-amber-700">
+            <div className="rounded-md bg-warning/10 border border-warning/30 p-3 text-sm">
+              <p className="font-medium text-warning">Project Not Deployed</p>
+              <p className="text-warning">
                 The project will be automatically deployed before running.
               </p>
             </div>

@@ -130,14 +130,14 @@ function getJobTypeBadge(type: ArenaJobType | undefined) {
       );
     case "loadtest":
       return (
-        <Badge variant="secondary" className="gap-1 bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200">
+        <Badge variant="secondary" className="gap-1 bg-category-4/15 text-category-4">
           <Gauge className="h-3 w-3" />
           Load Test
         </Badge>
       );
     case "datagen":
       return (
-        <Badge variant="secondary" className="gap-1 bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200">
+        <Badge variant="secondary" className="gap-1 bg-category-2/15 text-category-2">
           <Database className="h-3 w-3" />
           Data Gen
         </Badge>
@@ -158,14 +158,14 @@ function getJobPhaseBadge(phase: ArenaJobPhase | undefined) {
       );
     case "Running":
       return (
-        <Badge variant="default" className="gap-1 bg-blue-500">
+        <Badge variant="default" className="gap-1 bg-info">
           <Play className="h-3 w-3" />
           Running
         </Badge>
       );
     case "Succeeded":
       return (
-        <Badge variant="default" className="gap-1 bg-green-500">
+        <Badge variant="default" className="gap-1 bg-success">
           <CheckCircle className="h-3 w-3" />
           Succeeded
         </Badge>

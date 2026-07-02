@@ -13,9 +13,9 @@ interface ProviderBindingIndicatorProps {
 }
 
 const STATUS_STYLES: Record<ProviderBindingInfo["status"], string> = {
-  bound: "bg-green-500",
-  stale: "bg-blue-500",
-  unbound: "bg-yellow-500",
+  bound: "bg-success",
+  stale: "bg-info",
+  unbound: "bg-warning",
 };
 
 /**

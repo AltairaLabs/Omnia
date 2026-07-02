@@ -167,7 +167,7 @@ function DeployStatusIndicator({ status, loading }: DeployStatusIndicatorProps) 
   if (phase === "Ready") {
     return (
       <span title="Deployed and ready">
-        <CheckCircle2 className="h-3 w-3 text-green-500" />
+        <CheckCircle2 className="h-3 w-3 text-success" />
       </span>
     );
   }
@@ -175,7 +175,7 @@ function DeployStatusIndicator({ status, loading }: DeployStatusIndicatorProps) 
   if (phase === "Error") {
     return (
       <span title="Deployment failed">
-        <XCircle className="h-3 w-3 text-red-500" />
+        <XCircle className="h-3 w-3 text-destructive" />
       </span>
     );
   }
@@ -183,7 +183,7 @@ function DeployStatusIndicator({ status, loading }: DeployStatusIndicatorProps) 
   // Pending or unknown state
   return (
     <span title="Deployment pending">
-      <Clock className="h-3 w-3 text-yellow-500" />
+      <Clock className="h-3 w-3 text-warning" />
     </span>
   );
 }

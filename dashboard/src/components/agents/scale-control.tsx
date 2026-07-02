@@ -72,7 +72,7 @@ function AutoscalingIndicator({
       <Tooltip>
         <TooltipTrigger asChild>
           <div className="mr-1">
-            <Zap className="h-3.5 w-3.5 text-yellow-500" />
+            <Zap className="h-3.5 w-3.5 text-warning" />
           </div>
         </TooltipTrigger>
         <TooltipContent>
@@ -86,7 +86,7 @@ function AutoscalingIndicator({
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <div className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-yellow-500/10 text-yellow-600 dark:text-yellow-400">
+        <div className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-warning/10 text-warning">
           <Zap className="h-3 w-3" />
           <span className="text-xs font-medium">{type?.toUpperCase()}</span>
         </div>

@@ -103,7 +103,7 @@ function JsonInput({
     <div className="space-y-2">
       <Label>Input (JSON)</Label>
       <JsonEditor value={args} onChange={onChange} ariaLabel="Input (JSON)" onSubmit={onSubmit} />
-      {jsonError && <p className="text-sm text-red-500">{jsonError}</p>}
+      {jsonError && <p className="text-sm text-destructive">{jsonError}</p>}
     </div>
   );
 }
@@ -195,9 +195,9 @@ function ResultCard({
       <CardHeader>
         <CardTitle className="text-base flex items-center gap-2">
           {result.ok ? (
-            <CheckCircle className="h-4 w-4 text-green-500" />
+            <CheckCircle className="h-4 w-4 text-success" />
           ) : (
-            <XCircle className="h-4 w-4 text-red-500" />
+            <XCircle className="h-4 w-4 text-destructive" />
           )}
           {result.ok ? "Success" : "Failed"}
         </CardTitle>
@@ -224,8 +224,8 @@ function ResultCard({
         </div>
 
         {result.error && (
-          <div className="bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-900/50 rounded-lg p-3">
-            <p className="text-sm text-red-700 dark:text-red-400 font-mono break-all">
+          <div className="bg-destructive/10 border border-destructive/30 rounded-lg p-3">
+            <p className="text-sm text-destructive font-mono break-all">
               {result.error}
             </p>
           </div>
@@ -252,7 +252,7 @@ function ResultCard({
 
         {result.ok && hasOutputSchema && (
           <p className="flex items-center gap-1 text-xs text-muted-foreground">
-            <ShieldCheck className="h-3.5 w-3.5 text-green-500" />
+            <ShieldCheck className="h-3.5 w-3.5 text-success" />
             Output matches the output schema (validated by the facade).
           </p>
         )}
@@ -421,8 +421,8 @@ export function FunctionTestPanel({
           />
 
           {!ready && (
-            <div className="rounded-lg border border-amber-200 dark:border-amber-900/50 bg-amber-50 dark:bg-amber-950/20 p-3">
-              <p className="text-sm text-amber-700 dark:text-amber-400">
+            <div className="rounded-lg border border-warning/30 bg-warning/10 p-3">
+              <p className="text-sm text-warning">
                 This function is not ready
                 {unavailableReason ? ` (${unavailableReason})` : ""} — its runtime or provider may
                 still be starting. The Run button is disabled until it&apos;s serving requests.

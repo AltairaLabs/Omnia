@@ -138,7 +138,7 @@ export function EvalConfigPanel({
     <Card>
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
-          <Sparkles className="h-4 w-4 text-purple-500" />
+          <Sparkles className="h-4 w-4 text-primary" />
           Realtime Evals
         </CardTitle>
         <CardDescription>
@@ -146,9 +146,9 @@ export function EvalConfigPanel({
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
-        <Alert variant="default" className="border-blue-200 bg-blue-50 dark:border-blue-800 dark:bg-blue-950">
-          <AlertTriangle className="h-4 w-4 text-blue-600 dark:text-blue-400" />
-          <AlertDescription className="text-blue-700 dark:text-blue-300">
+        <Alert variant="default" className="border-info/30 bg-info/10">
+          <AlertTriangle className="h-4 w-4 text-info" />
+          <AlertDescription className="text-info">
             When enabled, cheap deterministic evals (contains, regex) run inline
             in the agent runtime and expensive ones (LLM judges, external API
             checks) run in the eval-worker. The sampling rates control how

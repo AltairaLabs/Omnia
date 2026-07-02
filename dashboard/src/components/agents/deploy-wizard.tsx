@@ -800,8 +800,8 @@ function ReviewStep({
   if (success) {
     return (
       <div className="flex flex-col items-center justify-center py-8 text-center">
-        <div className="rounded-full bg-green-500/10 p-3 mb-4">
-          <Check className="h-8 w-8 text-green-500" />
+        <div className="rounded-full bg-success/10 p-3 mb-4">
+          <Check className="h-8 w-8 text-success" />
         </div>
         <h3 className="text-lg font-semibold">Agent Created!</h3>
         <p className="text-sm text-muted-foreground mt-1">

@@ -10,9 +10,9 @@ import type { AgentRuntime, AgentRuntimePhase } from "@/types";
 import { getDefaultProviderRef } from "@/types/agent-runtime";
 
 const phaseColors: Record<AgentRuntimePhase, string> = {
-  Running: "bg-green-500/15 text-green-700 dark:text-green-400 border-green-500/20",
-  Pending: "bg-yellow-500/15 text-yellow-700 dark:text-yellow-400 border-yellow-500/20",
-  Failed: "bg-red-500/15 text-red-700 dark:text-red-400 border-red-500/20",
+  Running: "bg-success/15 text-success border-success/20",
+  Pending: "bg-warning/15 text-warning border-warning/20",
+  Failed: "bg-destructive/15 text-destructive border-destructive/20",
 };
 
 function RecentAgentItem({ agent }: Readonly<{ agent: AgentRuntime }>) {

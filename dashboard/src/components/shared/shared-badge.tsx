@@ -17,7 +17,7 @@ export function SharedBadge({ className }: Readonly<SharedBadgeProps>) {
     <Badge
       variant="outline"
       className={cn(
-        "text-xs bg-blue-500/15 text-blue-700 dark:text-blue-400 border-blue-500/20",
+        "text-xs bg-info/15 text-info border-info/20",
         className
       )}
       data-testid="shared-badge"

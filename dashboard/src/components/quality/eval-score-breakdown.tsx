@@ -21,6 +21,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Sparkline } from "@/components/ui/sparkline";
 import { useEvalMetrics, type EvalMetricInfo } from "@/hooks/sessions";
 import type { EvalFilter } from "@/lib/prometheus-queries";
+import { getStatusColorVar } from "@/lib/colors/status";
 
 /** Format a metric name for display by stripping the prefix and converting underscores. */
 export function formatMetricName(name: string): string {
@@ -43,9 +44,9 @@ export function getGaugeBarClass(value: number): string {
 
 /** Get sparkline stroke color based on gauge value. */
 function getSparklineColor(value: number): string {
-  if (value >= 0.9) return "rgb(34, 197, 94)";
-  if (value >= 0.7) return "rgb(234, 179, 8)";
-  return "rgb(239, 68, 68)";
+  if (value >= 0.9) return getStatusColorVar("success");
+  if (value >= 0.7) return getStatusColorVar("warning");
+  return getStatusColorVar("error");
 }
 
 interface EvalScoreBreakdownProps {
@@ -163,7 +164,7 @@ function MetricSparkline({ metric }: Readonly<{ metric: EvalMetricInfo }>) {
 
   const color = metric.metricType === "gauge"
     ? getSparklineColor(metric.value)
-    : "rgb(148, 163, 184)";
+    : getStatusColorVar("neutral");
 
   return (
     <Sparkline

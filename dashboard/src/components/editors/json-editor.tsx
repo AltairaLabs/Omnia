@@ -139,13 +139,13 @@ export function JsonEditor({
       <div className="flex items-center gap-2 px-3 py-1 border-t bg-muted/30 text-xs">
         {validation.valid ? (
           <>
-            <CheckCircle className="h-3.5 w-3.5 text-green-500" />
+            <CheckCircle className="h-3.5 w-3.5 text-success" />
             <span className="text-muted-foreground">Valid JSON</span>
           </>
         ) : (
           <>
-            <AlertTriangle className="h-3.5 w-3.5 text-amber-500 shrink-0" />
-            <span className="text-amber-500 truncate">{validation.error}</span>
+            <AlertTriangle className="h-3.5 w-3.5 text-warning shrink-0" />
+            <span className="text-warning truncate">{validation.error}</span>
           </>
         )}
       </div>

@@ -120,6 +120,14 @@ if [ -n "$STAGED_DASHBOARD_FILES" ]; then
 			CHECKS_FAILED=1
 		fi
 	fi
+
+	print_header "Dashboard: hardcoded palette guard"
+	if bash "$REPO_ROOT/hack/check-no-hardcoded-palette.sh"; then
+		: # printed its own success line
+	else
+		print_error "Hardcoded palette classes found (design tokens required for white-label)"
+		CHECKS_FAILED=1
+	fi
 fi
 
 if [ -z "$STAGED_GO_FILES" ]; then

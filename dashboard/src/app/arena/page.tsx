@@ -61,9 +61,9 @@ function formatDate(dateString?: string): string {
 function getJobStatusBadge(phase?: string) {
   switch (phase) {
     case "Running":
-      return <Badge variant="default" className="bg-blue-500"><Loader2 className="h-3 w-3 mr-1 animate-spin" /> Running</Badge>;
+      return <Badge variant="default" className="bg-info"><Loader2 className="h-3 w-3 mr-1 animate-spin" /> Running</Badge>;
     case "Succeeded":
-      return <Badge variant="default" className="bg-green-500"><CheckCircle className="h-3 w-3 mr-1" /> Succeeded</Badge>;
+      return <Badge variant="default" className="bg-success"><CheckCircle className="h-3 w-3 mr-1" /> Succeeded</Badge>;
     case "Failed":
       return <Badge variant="destructive"><AlertCircle className="h-3 w-3 mr-1" /> Failed</Badge>;
     case "Cancelled":
@@ -78,11 +78,11 @@ function getJobStatusBadge(phase?: string) {
 function getJobTypeBadge(type?: string) {
   switch (type) {
     case "evaluation":
-      return <Badge variant="outline" className="border-purple-500 text-purple-600">Evaluation</Badge>;
+      return <Badge variant="outline" className="border-category-2 text-category-2">Evaluation</Badge>;
     case "loadtest":
-      return <Badge variant="outline" className="border-orange-500 text-orange-600">Load Test</Badge>;
+      return <Badge variant="outline" className="border-category-4 text-category-4">Load Test</Badge>;
     case "datagen":
-      return <Badge variant="outline" className="border-cyan-500 text-cyan-600">Data Gen</Badge>;
+      return <Badge variant="outline" className="border-category-6 text-category-6">Data Gen</Badge>;
     default:
       return <Badge variant="outline">{type || "Unknown"}</Badge>;
   }
