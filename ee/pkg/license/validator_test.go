@@ -108,14 +108,21 @@ func TestLicense_EnterpriseFeatureGates(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Disabled by default (open-core).
+			// Disabled by default (no tier, no feature bit).
 			off := &License{}
 			assert.False(t, tt.can(off))
 
-			// Enabled when the license grants the feature.
-			on := &License{}
-			tt.enabled(&on.Features)
-			assert.True(t, tt.can(on))
+			// Enabled by an explicit per-feature override (e.g. a trial that
+			// grants a single capability without being enterprise tier).
+			override := &License{}
+			tt.enabled(&override.Features)
+			assert.True(t, tt.can(override))
+
+			// Enabled by tier alone: any enterprise license grants the feature
+			// even without the bit set — so a feature added after the license
+			// was issued is still covered, no re-issue needed.
+			tier := &License{Tier: TierEnterprise}
+			assert.True(t, tt.can(tier), "enterprise tier should grant the feature without the explicit bit")
 		})
 	}
 }

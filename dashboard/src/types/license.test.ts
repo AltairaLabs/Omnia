@@ -3,6 +3,7 @@ import {
   OPEN_CORE_LICENSE,
   SOURCE_TYPE_FEATURE_MAP,
   JOB_TYPE_FEATURE_MAP,
+  canUseFeature,
   canUseSourceType,
   canUseJobType,
   canUseScheduling,
@@ -13,7 +14,43 @@ import {
   type License,
 } from "./license";
 
+const enterpriseLicense = (overrides: Partial<License> = {}): License => ({
+  ...OPEN_CORE_LICENSE,
+  tier: "enterprise",
+  ...overrides,
+});
+
 describe("license types", () => {
+  describe("canUseFeature", () => {
+    it("grants enterprise-bundle features by tier without the explicit bit", () => {
+      const lic = enterpriseLicense(); // memoryEnterprise etc. all false in the base
+      expect(lic.features.memoryEnterprise).toBe(false);
+      expect(canUseFeature(lic, "memoryEnterprise")).toBe(true);
+      expect(canUseFeature(lic, "privacyEnterprise")).toBe(true);
+      expect(canUseFeature(lic, "policyProxy")).toBe(true);
+    });
+
+    it("denies enterprise-bundle features to open-core without an override", () => {
+      expect(canUseFeature(OPEN_CORE_LICENSE, "memoryEnterprise")).toBe(false);
+      expect(canUseFeature(OPEN_CORE_LICENSE, "privacyEnterprise")).toBe(false);
+      expect(canUseFeature(OPEN_CORE_LICENSE, "policyProxy")).toBe(false);
+    });
+
+    it("honors an explicit per-feature override on a non-enterprise license", () => {
+      const trial: License = {
+        ...OPEN_CORE_LICENSE,
+        features: { ...OPEN_CORE_LICENSE.features, memoryEnterprise: true },
+      };
+      expect(canUseFeature(trial, "memoryEnterprise")).toBe(true);
+    });
+
+    it("keeps à-la-carte features (white-label) explicit, not tier-derived", () => {
+      const lic = enterpriseLicense();
+      expect(lic.features.whiteLabel).toBe(false);
+      expect(canUseFeature(lic, "whiteLabel")).toBe(false);
+    });
+  });
+
   describe("OPEN_CORE_LICENSE", () => {
     it("should have open-core tier", () => {
       expect(OPEN_CORE_LICENSE.tier).toBe("open-core");
