@@ -16,10 +16,8 @@ jobs:
     name: Scorecard analysis
     runs-on: ubuntu-latest
     permissions:
-      # Needed to upload results to the code-scanning (Security) tab.
-      security-events: write
       # Needed for publish_results to attest to the public Scorecard API
-      # (this is what powers the README badge).
+      # (this is what powers the dashboard/score).
       id-token: write
 
     steps:
@@ -37,15 +35,14 @@ jobs:
           # https://securityscorecards.dev — required for the README badge.
           publish_results: true
 
+      # Scorecard results are posture signals, not code vulnerabilities, so they
+      # are NOT uploaded to the code-scanning (Security) tab — that floods it
+      # with one alert per unpinned dep / token-permission and drowns real
+      # findings. The score/badge lives on the public dashboard via
+      # publish_results; keep a downloadable SARIF artifact for reference.
       - name: Upload SARIF artifact
         uses: actions/upload-artifact@v4
         with:
           name: scorecard-sarif
           path: results.sarif
           retention-days: 5
-
-      - name: Upload to Security tab
-        uses: github/codeql-action/upload-sarif@v4
-        with:
-          sarif_file: results.sarif
-          category: scorecard
