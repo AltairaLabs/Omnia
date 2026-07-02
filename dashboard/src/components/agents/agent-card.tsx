@@ -8,6 +8,7 @@ import { StatusBadge } from "./status-badge";
 import { FrameworkBadge } from "./framework-badge";
 import { ScaleControl } from "./scale-control";
 import { CostSparkline } from "@/components/cost";
+import { getProviderColor } from "@/lib/provider-utils";
 import { formatCost } from "@/lib/pricing";
 import { useDataService } from "@/lib/data";
 import { useAgentCost } from "@/hooks/agents";
@@ -51,7 +52,7 @@ export function AgentCard({ agent }: Readonly<AgentCardProps>) {
 
   // Determine sparkline color based on provider
   const providerType = provider?.spec?.type;
-  const sparklineColor = providerType === "openai" ? "#8B5CF6" : "#3B82F6";
+  const sparklineColor = getProviderColor(providerType ?? "");
 
   return (
     <Link href={`/agents/${metadata.name}?namespace=${metadata.namespace}`}>

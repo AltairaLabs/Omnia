@@ -17,6 +17,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { StatusBadge } from "@/components/agents/status-badge";
 import { FrameworkBadge } from "@/components/agents/framework-badge";
 import { CostSparkline } from "@/components/cost";
+import { getProviderColor } from "@/lib/provider-utils";
 import { formatCost } from "@/lib/pricing";
 import { useAgentCost } from "@/hooks/agents";
 import { useProvider } from "@/hooks/resources";
@@ -58,7 +59,7 @@ export function FunctionCard({ fn }: Readonly<FunctionCardProps>) {
   const totalCost = costData?.totalCost || 0;
 
   const providerType = provider?.spec?.type;
-  const sparklineColor = providerType === "openai" ? "#8B5CF6" : "#3B82F6";
+  const sparklineColor = getProviderColor(providerType ?? "");
 
   return (
     <Link href={`/functions/${metadata.name}?namespace=${namespace}`}>
