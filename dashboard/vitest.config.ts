@@ -79,7 +79,7 @@ export default defineConfig({
         // Next.js framework files (tested via E2E)
         "src/app/**/layout.tsx",
         "src/app/page.tsx", // Root page
-        "src/app/dev/theme/page.tsx", // Dev-only theme kitchen-sink (visual; verified via Playwright)
+        "src/app/dev/theme/**", // Dev-only theme kitchen-sink + React Flow sample (visual; verified via Playwright)
         "src/app/costs/page.tsx", // Cost dashboard page (hook-driven data composition)
         "src/app/topology/page.tsx", // Topology page (hook-driven data composition)
         "src/app/sessions/[id]/page.tsx", // Session detail page (dynamic, hook-driven)
