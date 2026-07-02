@@ -357,6 +357,39 @@ export const mockPromptPacks: PromptPack[] = [
       lastUpdated: hoursAgo(1),
     },
   },
+  // Workflow pack (state machine) — namespace "default" so it shows in the
+  // default demo workspace alongside single-prompt packs.
+  {
+    apiVersion: "omnia.altairalabs.ai/v1alpha1",
+    kind: "PromptPack",
+    metadata: {
+      name: "support-workflow",
+      namespace: "default",
+      creationTimestamp: daysAgo(12),
+      uid: "pack-wf-001",
+    },
+    spec: {
+      source: { type: "configmap", configMapRef: { name: "support-workflow-v1.2.0" } },
+      version: "1.2.0",
+    },
+    status: { phase: "Active", activeVersion: "1.2.0", lastUpdated: hoursAgo(4) },
+  },
+  // Composition pack (multi-step) — namespace "default".
+  {
+    apiVersion: "omnia.altairalabs.ai/v1alpha1",
+    kind: "PromptPack",
+    metadata: {
+      name: "code-composition",
+      namespace: "default",
+      creationTimestamp: daysAgo(8),
+      uid: "pack-comp-001",
+    },
+    spec: {
+      source: { type: "configmap", configMapRef: { name: "code-composition-v2.1.0" } },
+      version: "2.1.0",
+    },
+    status: { phase: "Active", activeVersion: "2.1.0", lastUpdated: hoursAgo(2) },
+  },
   // E2E test prompt pack - must have namespace "default" to match default workspace
   {
     apiVersion: "omnia.altairalabs.ai/v1alpha1",
