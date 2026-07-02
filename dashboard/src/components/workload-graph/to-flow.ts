@@ -41,7 +41,7 @@ function edgeStyle(style?: WorkloadModel["edges"][number]["style"]): FlowEdge["s
   if (style === "unresolved") return { strokeDasharray: "4 4", opacity: 0.5 };
   if (style === "loop") return { strokeDasharray: "6 3" };
   if (style === "provides") return { strokeDasharray: "2 4", opacity: 0.6 };
-  if (style === "data") return { strokeDasharray: "3 3", stroke: "#0d9488", opacity: 0.8 };
+  if (style === "data") return { strokeDasharray: "3 3", stroke: "var(--category-6)", opacity: 0.8 };
   return undefined;
 }
 

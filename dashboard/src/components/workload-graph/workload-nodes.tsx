@@ -30,15 +30,15 @@ function badgeIcon(icon?: WorkloadBadge["icon"]) {
 // Endpoints get a thick, strongly-coloured border (emerald=start, rose=end) so
 // they read as the most important nodes; everything else is a thinner blue.
 function nodeBorderClass(node: WorkloadNode): string {
-  if (node.isEntry) return "border-4 border-emerald-500 ring-2 ring-emerald-500/20";
-  if (node.isTerminal) return "border-4 border-rose-500 ring-2 ring-rose-500/20";
-  return "border-2 border-blue-500";
+  if (node.isEntry) return "border-4 border-category-5 ring-2 ring-category-5/20";
+  if (node.isTerminal) return "border-4 border-category-7 ring-2 ring-category-7/20";
+  return "border-2 border-category-1";
 }
 
 function iconColorClass(node: WorkloadNode): string {
-  if (node.isEntry) return "text-emerald-600";
-  if (node.isTerminal) return "text-rose-600";
-  return "text-blue-600";
+  if (node.isEntry) return "text-category-5";
+  if (node.isTerminal) return "text-category-7";
+  return "text-category-1";
 }
 
 function BadgeRow({ badges }: Readonly<{ badges: WorkloadBadge[] }>) {
@@ -61,7 +61,7 @@ export const WorkloadAgentNode = memo(({ data }: Readonly<{ data: WorkloadNodeDa
   const iconColor = iconColorClass(node);
   return (
     <div className="relative">
-      <Handle type="target" position={Position.Top} className="!bg-blue-500" />
+      <Handle type="target" position={Position.Top} className="!bg-category-1" />
       <button
         type="button"
         className={cn(base, nodeBorderClass(node), muted && "opacity-50")}
@@ -77,7 +77,7 @@ export const WorkloadAgentNode = memo(({ data }: Readonly<{ data: WorkloadNodeDa
         </div>
         <BadgeRow badges={node.badges} />
       </button>
-      <Handle type="source" position={Position.Bottom} className="!bg-blue-500" />
+      <Handle type="source" position={Position.Bottom} className="!bg-category-1" />
     </div>
   );
 });
@@ -87,10 +87,10 @@ export const WorkloadProviderNode = memo(({ data }: Readonly<{ data: WorkloadNod
   const { node, onClick } = data;
   return (
     <div className="relative">
-      <Handle type="target" position={Position.Top} className="!bg-green-500" />
+      <Handle type="target" position={Position.Top} className="!bg-category-6" />
       <button
         type="button"
-        className={cn(base, "border-2 border-green-500 border-dashed")}
+        className={cn(base, "border-2 border-category-6 border-dashed")}
         onClick={() => onClick?.(node.id)}
       >
         <div className="flex items-center gap-2 min-w-0">
@@ -119,14 +119,14 @@ export const WorkloadSkillNode = memo(({ data }: Readonly<{ data: WorkloadNodeDa
   const phaseLabel = node.badges[0]?.label ?? node.detail.skillPhase;
   return (
     <div className="relative">
-      <Handle type="target" position={Position.Top} className="!bg-violet-500" />
+      <Handle type="target" position={Position.Top} className="!bg-category-2" />
       <button
         type="button"
-        className={cn(base, "border-2 border-violet-500 border-dashed", muted && "opacity-60")}
+        className={cn(base, "border-2 border-category-2 border-dashed", muted && "opacity-60")}
         onClick={() => onClick?.(node.id)}
       >
         <div className="flex items-center gap-2">
-          <Sparkles className="h-4 w-4 text-violet-600" />
+          <Sparkles className="h-4 w-4 text-category-2" />
           <span className="font-medium text-sm">{node.label}</span>
         </div>
         <div className="flex items-center gap-2 mt-1 text-xs text-muted-foreground">
@@ -144,14 +144,14 @@ export const WorkloadToolNode = memo(({ data }: Readonly<{ data: WorkloadNodeDat
   const count = node.detail.tools?.length ?? 0;
   return (
     <div className="relative">
-      <Handle type="target" position={Position.Top} className="!bg-amber-500" />
+      <Handle type="target" position={Position.Top} className="!bg-category-4" />
       <button
         type="button"
-        className={cn(base, "border-2 border-amber-500 border-dashed")}
+        className={cn(base, "border-2 border-category-4 border-dashed")}
         onClick={() => onClick?.(node.id)}
       >
         <div className="flex items-center gap-2">
-          <Wrench className="h-4 w-4 text-amber-600" />
+          <Wrench className="h-4 w-4 text-category-4" />
           <span className="font-medium text-sm">{node.label}</span>
         </div>
         <div className="mt-1 text-xs text-muted-foreground">
