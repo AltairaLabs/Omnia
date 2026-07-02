@@ -104,6 +104,12 @@ warm cache retains opt-out preferences.
 - **Kubernetes API** (optional) — only needed in `--workspace` CRD resolution
   mode; requires `get` on `workspaces.omnia.altairalabs.ai` and `get` on the
   database Secret in the workspace namespace.
+- **Operator/arena-controller `/api/v1/license`** (optional) — read once at
+  startup via `OPERATOR_API_URL` (`--operator-api-url`, stamped by the operator)
+  for the license-awareness nag (#1682). privacy-api is enterprise-only, so when
+  the deployment isn't backed by a valid license (open-core, absent, or expired)
+  it logs a reminder pointing at licensing. It **never blocks** — features keep
+  working; a valid license is silent.
 
 ## Authentication
 

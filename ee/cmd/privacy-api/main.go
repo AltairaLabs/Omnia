@@ -33,6 +33,7 @@ import (
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 	"github.com/altairalabs/omnia/ee/cmd/privacy-api/migrations"
+	eelicense "github.com/altairalabs/omnia/ee/pkg/license"
 	"github.com/altairalabs/omnia/ee/pkg/privacy"
 	"github.com/altairalabs/omnia/internal/serviceauth"
 	"github.com/altairalabs/omnia/internal/tracing"
@@ -61,6 +62,9 @@ type flags struct {
 	redisURL     string
 	workspace    string
 	enterprise   bool
+	// operatorAPIURL is the operator/arena-controller license endpoint, used to
+	// nag when enterprise features run without a valid license (#1682).
+	operatorAPIURL string
 
 	// OTLP tracing (optional).
 	tracingEnabled  bool
@@ -88,6 +92,7 @@ func parseFlags() *flags {
 	flag.StringVar(&f.redisURL, "redis-url", "", "Redis URL (redis:// or rediss://); env REDIS_URL fallback")
 	flag.StringVar(&f.workspace, "workspace", "", "Workspace name for K8s CRD config resolution (env OMNIA_WORKSPACE)")
 	flag.BoolVar(&f.enterprise, "enterprise", false, "Enable enterprise features (env ENTERPRISE_ENABLED)")
+	flag.StringVar(&f.operatorAPIURL, "operator-api-url", "", "Operator/arena-controller license endpoint (env OPERATOR_API_URL). When enterprise runs without a valid license, privacy-api logs a startup reminder. Never blocks.")
 	flag.BoolVar(&f.tracingEnabled, "tracing-enabled", false, "Enable OTLP tracing export (env TRACING_ENABLED)")
 	flag.StringVar(&f.tracingEndpoint, "tracing-endpoint", "", "OTLP collector gRPC endpoint host:port (env TRACING_ENDPOINT)")
 	flag.Float64Var(&f.tracingSample, "tracing-sample-rate", 0, "Tracing sample rate 0.0–1.0; 0 → SDK default 0.1 (env TRACING_SAMPLE_RATE)")
@@ -118,6 +123,7 @@ func (f *flags) applyEnvFallbacks() {
 	envFallback(&f.healthAddr, ":8081", "HEALTH_ADDR")
 	envFallback(&f.metricsAddr, ":9090", "METRICS_ADDR")
 	envBoolFallback(&f.enterprise, "ENTERPRISE_ENABLED")
+	envFallback(&f.operatorAPIURL, "", "OPERATOR_API_URL")
 
 	envBoolFallback(&f.tracingEnabled, "TRACING_ENABLED")
 	envBoolFallback(&f.tracingInsecure, "TRACING_INSECURE")
@@ -186,6 +192,35 @@ func main() {
 	}
 }
 
+// nagLicenseAtStartup fetches the operator license once at startup and logs a
+// reminder when this enterprise deployment isn't backed by a valid license.
+// It never blocks — privacy-api's features keep working regardless. The
+// "startup license check" line is always emitted so the wiring is observable
+// even when the license is valid and the nag stays silent.
+func nagLicenseAtStartup(ctx context.Context, f *flags, log logr.Logger) {
+	if !f.enterprise {
+		return
+	}
+	if f.operatorAPIURL == "" {
+		log.Info("startup license check skipped", "reason", "no OPERATOR_API_URL configured")
+		return
+	}
+
+	licClient := eelicense.NewClient(f.operatorAPIURL, eelicense.WithClientLogger(log.WithName("license")))
+	lic, err := licClient.Refresh(ctx)
+	if err != nil {
+		// Operator unreachable — degrade to the open-core fallback and nag.
+		lic = licClient.License()
+	}
+	log.Info("startup license check",
+		"valid", lic.IsValidEnterprise(),
+		"tier", lic.Tier,
+		"licenseID", lic.ID,
+		"operatorURL", f.operatorAPIURL,
+	)
+	eelicense.NagIfUnlicensed(lic, log)
+}
+
 func run() error {
 	f := parseFlags()
 
@@ -215,6 +250,11 @@ func run() error {
 		context.Background(), syscall.SIGINT, syscall.SIGTERM,
 	)
 	defer cancel()
+
+	// --- License awareness nag (#1682) ---
+	// privacy-api is enterprise-only; when it runs without a valid license, log
+	// a one-time reminder. Never blocks.
+	nagLicenseAtStartup(ctx, f, log)
 
 	// --- Tracing ---
 	// Set propagator so incoming trace context is extracted and spans become
