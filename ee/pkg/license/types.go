@@ -40,6 +40,16 @@ type Features struct {
 	DistributedWorkers bool `json:"distributedWorkers"`
 	// WhiteLabel enables dashboard white-label / custom branding.
 	WhiteLabel bool `json:"whiteLabel"`
+	// MemoryEnterprise enables the enterprise memory features: Memory Galaxy
+	// projection, memory analytics, institutional memory, multi-tier recall,
+	// and consolidation (memory-api enterprise paths).
+	MemoryEnterprise bool `json:"memoryEnterprise"`
+	// PrivacyEnterprise enables the privacy/compliance suite served by
+	// privacy-api: consent, opt-out, DSAR erasure, the central audit hub, and
+	// enforcement-stats.
+	PrivacyEnterprise bool `json:"privacyEnterprise"`
+	// PolicyProxy enables AgentPolicy / CEL enforcement in policy-proxy.
+	PolicyProxy bool `json:"policyProxy"`
 }
 
 // Limits defines the resource limits in the license.
@@ -87,6 +97,11 @@ func OpenCoreLicense() *License {
 			DataGeneration:     false,
 			Scheduling:         false,
 			DistributedWorkers: false,
+			// Enterprise memory/privacy/policy features are paid; open-core
+			// deployments degrade to open-core behavior (feature disabled).
+			MemoryEnterprise:  false,
+			PrivacyEnterprise: false,
+			PolicyProxy:       false,
 		},
 		Limits: Limits{
 			MaxScenarios:      10,
@@ -114,6 +129,9 @@ func DevLicense() *License {
 			Scheduling:         true,
 			DistributedWorkers: true,
 			WhiteLabel:         true,
+			MemoryEnterprise:   true,
+			PrivacyEnterprise:  true,
+			PolicyProxy:        true,
 		},
 		Limits: Limits{
 			MaxScenarios:      0, // unlimited
@@ -169,6 +187,23 @@ func (l *License) CanUseJobType(jobType string) bool {
 // CanUseScheduling returns true if cron scheduling is allowed.
 func (l *License) CanUseScheduling() bool {
 	return l.Features.Scheduling
+}
+
+// CanUseMemoryEnterprise returns true if the enterprise memory features
+// (Galaxy, analytics, institutional, multi-tier, consolidation) are licensed.
+func (l *License) CanUseMemoryEnterprise() bool {
+	return l.Features.MemoryEnterprise
+}
+
+// CanUsePrivacyEnterprise returns true if the privacy/compliance suite
+// (consent, DSAR, audit hub, enforcement-stats) is licensed.
+func (l *License) CanUsePrivacyEnterprise() bool {
+	return l.Features.PrivacyEnterprise
+}
+
+// CanUsePolicyProxy returns true if AgentPolicy / CEL enforcement is licensed.
+func (l *License) CanUsePolicyProxy() bool {
+	return l.Features.PolicyProxy
 }
 
 // CanUseWorkerReplicas returns true if the given number of replicas is allowed.

@@ -27,6 +27,9 @@ function createMockLicense(overrides: Partial<License> = {}): License {
       scheduling: true,
       distributedWorkers: true,
       whiteLabel: true,
+      memoryEnterprise: true,
+      privacyEnterprise: true,
+      policyProxy: true,
     },
     limits: {
       maxScenarios: 0,
@@ -69,6 +72,9 @@ function mockOpenCoreLicense() {
         scheduling: false,
         distributedWorkers: false,
         whiteLabel: false,
+        memoryEnterprise: false,
+        privacyEnterprise: false,
+        policyProxy: false,
       },
       limits: {
         maxScenarios: 10,

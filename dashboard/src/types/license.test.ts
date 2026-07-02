@@ -32,6 +32,10 @@ describe("license types", () => {
       expect(OPEN_CORE_LICENSE.features.scheduling).toBe(false);
       expect(OPEN_CORE_LICENSE.features.distributedWorkers).toBe(false);
       expect(OPEN_CORE_LICENSE.features.whiteLabel).toBe(false);
+      // Enterprise memory/privacy/policy features are paid — off in open-core.
+      expect(OPEN_CORE_LICENSE.features.memoryEnterprise).toBe(false);
+      expect(OPEN_CORE_LICENSE.features.privacyEnterprise).toBe(false);
+      expect(OPEN_CORE_LICENSE.features.policyProxy).toBe(false);
     });
 
     it("should have correct limits", () => {

@@ -61,6 +61,14 @@ func TestOpenCoreLicense(t *testing.T) {
 	assert.False(t, license.Features.Scheduling)
 	assert.False(t, license.Features.DistributedWorkers)
 
+	// Enterprise memory/privacy/policy features are paid — off in open-core.
+	assert.False(t, license.Features.MemoryEnterprise)
+	assert.False(t, license.Features.PrivacyEnterprise)
+	assert.False(t, license.Features.PolicyProxy)
+	assert.False(t, license.CanUseMemoryEnterprise())
+	assert.False(t, license.CanUsePrivacyEnterprise())
+	assert.False(t, license.CanUsePolicyProxy())
+
 	// Check limits
 	assert.Equal(t, 10, license.Limits.MaxScenarios)
 	assert.Equal(t, 1, license.Limits.MaxWorkerReplicas)
@@ -68,6 +76,48 @@ func TestOpenCoreLicense(t *testing.T) {
 	// Should not be expired
 	assert.False(t, license.IsExpired())
 	assert.False(t, license.IsEnterprise())
+}
+
+func TestDevLicense(t *testing.T) {
+	license := DevLicense()
+
+	assert.Equal(t, TierEnterprise, license.Tier)
+	assert.True(t, license.IsEnterprise())
+	assert.False(t, license.IsExpired())
+
+	// Dev license grants every feature, including the enterprise
+	// memory/privacy/policy entitlements.
+	assert.True(t, license.Features.MemoryEnterprise)
+	assert.True(t, license.Features.PrivacyEnterprise)
+	assert.True(t, license.Features.PolicyProxy)
+	assert.True(t, license.CanUseMemoryEnterprise())
+	assert.True(t, license.CanUsePrivacyEnterprise())
+	assert.True(t, license.CanUsePolicyProxy())
+}
+
+func TestLicense_EnterpriseFeatureGates(t *testing.T) {
+	tests := []struct {
+		name    string
+		can     func(*License) bool
+		enabled func(*Features)
+	}{
+		{"memory", (*License).CanUseMemoryEnterprise, func(f *Features) { f.MemoryEnterprise = true }},
+		{"privacy", (*License).CanUsePrivacyEnterprise, func(f *Features) { f.PrivacyEnterprise = true }},
+		{"policy", (*License).CanUsePolicyProxy, func(f *Features) { f.PolicyProxy = true }},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Disabled by default (open-core).
+			off := &License{}
+			assert.False(t, tt.can(off))
+
+			// Enabled when the license grants the feature.
+			on := &License{}
+			tt.enabled(&on.Features)
+			assert.True(t, tt.can(on))
+		})
+	}
 }
 
 func TestLicense_CanUseSourceType(t *testing.T) {

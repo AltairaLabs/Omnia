@@ -10,6 +10,17 @@ or `api/proto/`, add an entry below with the date, affected API, and reason.
 
 ## Unreleased
 
+### Added (arena-controller: license entitlements for memory/privacy/policy, #1682 Slice A)
+
+- **`GET /api/v1/license`** response `features` object gains three boolean fields:
+  `memoryEnterprise` (Memory Galaxy / analytics / institutional / multi-tier / consolidation),
+  `privacyEnterprise` (consent / DSAR / audit-hub / enforcement-stats), and `policyProxy`
+  (AgentPolicy / CEL enforcement). These are **off** in the open-core and any pre-existing
+  Arena-only license (JSON absence → `false`), **on** in the dev license. This is the license-model
+  half of #1682; no backend service enforces these entitlements yet, so the change is non-breaking —
+  runtime gates in memory-api / privacy-api / policy-proxy land in follow-up slices. Mirrored in the
+  dashboard `LicenseFeatures` type (`dashboard/src/types/license.ts`).
+
 ### Removed (session-api: DSAR request-lifecycle endpoints, #1676 Slice C)
 
 - **`POST /api/v1/privacy/deletion-request`**, **`GET /api/v1/privacy/deletion-request/{id}`**,

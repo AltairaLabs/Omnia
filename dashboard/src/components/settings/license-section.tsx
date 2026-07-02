@@ -25,6 +25,9 @@ const FEATURE_LABELS: Record<keyof LicenseFeatures, string> = {
   scheduling: "Job Scheduling",
   distributedWorkers: "Distributed Workers",
   whiteLabel: "White-Label Branding",
+  memoryEnterprise: "Memory Enterprise",
+  privacyEnterprise: "Privacy & Compliance",
+  policyProxy: "Policy Enforcement",
 };
 
 interface LicenseStatusProps {
