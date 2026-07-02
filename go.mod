@@ -5,10 +5,10 @@ go 1.26.0
 require (
 	cloud.google.com/go/kms v1.26.0
 	cloud.google.com/go/storage v1.62.3
-	github.com/AltairaLabs/PromptKit/pkg v1.5.1
-	github.com/AltairaLabs/PromptKit/runtime v1.5.1
-	github.com/AltairaLabs/PromptKit/sdk v1.5.1
-	github.com/AltairaLabs/PromptKit/server/a2a v1.5.1
+	github.com/AltairaLabs/PromptKit/pkg v1.5.3
+	github.com/AltairaLabs/PromptKit/runtime v1.5.3
+	github.com/AltairaLabs/PromptKit/sdk v1.5.3
+	github.com/AltairaLabs/PromptKit/server/a2a v1.5.3
 	github.com/AltairaLabs/PromptKit/tools/arena v1.5.1
 	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.22.0
 	github.com/Azure/azure-sdk-for-go/sdk/azidentity v1.14.0
@@ -16,7 +16,7 @@ require (
 	github.com/Azure/azure-sdk-for-go/sdk/storage/azblob v1.8.0
 	github.com/alicebob/miniredis/v2 v2.38.0
 	github.com/aws/aws-sdk-go-v2 v1.42.0
-	github.com/aws/aws-sdk-go-v2/config v1.32.23
+	github.com/aws/aws-sdk-go-v2/config v1.32.25
 	github.com/aws/aws-sdk-go-v2/credentials v1.19.24
 	github.com/aws/aws-sdk-go-v2/service/kms v1.53.4
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.104.0
@@ -41,9 +41,9 @@ require (
 	github.com/pgvector/pgvector-go v0.4.0
 	github.com/prometheus/client_golang v1.23.2
 	github.com/prometheus/client_model v0.6.2
-	github.com/prometheus/common v0.68.1
+	github.com/prometheus/common v0.69.0
 	github.com/redis/go-redis/extra/redisotel/v9 v9.20.0
-	github.com/redis/go-redis/v9 v9.20.1
+	github.com/redis/go-redis/v9 v9.21.0
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2
 	github.com/sony/gobreaker/v2 v2.4.0
@@ -238,7 +238,7 @@ require (
 	go.yaml.in/yaml/v4 v4.0.0-rc.3 // indirect
 	golang.org/x/crypto v0.53.0 // indirect
 	golang.org/x/exp v0.0.0-20260410095643-746e56fc9e2f // indirect
-	golang.org/x/image v0.42.0 // indirect
+	golang.org/x/image v0.43.0 // indirect
 	golang.org/x/mod v0.36.0 // indirect
 	golang.org/x/net v0.56.0 // indirect
 	golang.org/x/oauth2 v0.36.0 // indirect
