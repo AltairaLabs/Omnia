@@ -1,9 +1,6 @@
 # syntax=docker/dockerfile:1
 # Build stage
-FROM golang:1.26-alpine AS builder
-
-# Install build dependencies
-RUN apk add --no-cache git ca-certificates tzdata
+FROM golang:1.26 AS builder
 
 # Set working directory
 WORKDIR /workspace
@@ -33,19 +30,14 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     -o agent \
     ./cmd/agent
 
-# Runtime stage
-FROM scratch
-
-# Import CA certificates and timezone data from builder
-COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
-COPY --from=builder /usr/share/zoneinfo /usr/share/zoneinfo
+# Runtime stage — distroless/static provides ca-certificates, tzdata, /tmp,
+# and the nonroot user, so nothing beyond the binary needs copying in.
+FROM gcr.io/distroless/static:nonroot
+WORKDIR /
 
 # Copy the binary
-COPY --from=builder /workspace/agent /agent
+COPY --from=builder /workspace/agent .
 
-# Create non-root user
-# Note: scratch image doesn't support adduser, so we set USER by UID
-# The container orchestrator should ensure proper user mapping
 USER 65532:65532
 
 # Expose default ports
