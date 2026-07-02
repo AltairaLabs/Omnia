@@ -120,10 +120,10 @@ function getInitials(name: string): string {
 function getRoleColor(role: string): string {
   switch (role) {
     case "admin":
-      return "text-red-600 border-red-600";
+      return "text-destructive border-destructive";
     case "editor":
-      return "text-blue-600 border-blue-600";
+      return "text-info border-info";
     default:
-      return "text-gray-600 border-gray-600";
+      return "text-muted-foreground border-border";
   }
 }

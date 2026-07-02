@@ -22,7 +22,7 @@ const bgColorMap: Record<string, string> = {
   gemini: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400",
   ollama: "bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400",
   bedrock: "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400",
-  mock: "bg-gray-100 text-gray-700 dark:bg-gray-900/30 dark:text-gray-400",
+  mock: "bg-muted text-muted-foreground",
 };
 
 const sizeClasses = {
@@ -35,8 +35,8 @@ const sizeClasses = {
 export function ProviderTypeIcon({ type, size = "sm" }: Readonly<ProviderTypeIconProps>) {
   const icon = type ? iconMap[type] || type[0]?.toUpperCase() : "?";
   const bgColor = type
-    ? bgColorMap[type] || "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-400"
-    : "bg-gray-100";
+    ? bgColorMap[type] || "bg-muted text-muted-foreground"
+    : "bg-muted";
 
   return (
     <div

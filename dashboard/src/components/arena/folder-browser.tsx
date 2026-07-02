@@ -147,9 +147,9 @@ function TreeNode({
           )}
         </button>
         {isExpanded ? (
-          <FolderOpen className="h-4 w-4 text-amber-500 flex-shrink-0" />
+          <FolderOpen className="h-4 w-4 text-warning flex-shrink-0" />
         ) : (
-          <Folder className="h-4 w-4 text-amber-500 flex-shrink-0" />
+          <Folder className="h-4 w-4 text-warning flex-shrink-0" />
         )}
         <span className="truncate text-sm">{node.name}</span>
       </div>
@@ -254,7 +254,7 @@ export function FolderBrowser({
             }}
           >
             <span className="w-4" />
-            <Folder className="h-4 w-4 text-amber-500 flex-shrink-0" />
+            <Folder className="h-4 w-4 text-warning flex-shrink-0" />
             <span className="text-sm">/ (root)</span>
           </div>
 

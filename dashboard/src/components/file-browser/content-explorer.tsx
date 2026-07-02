@@ -191,10 +191,10 @@ function FrontmatterCard({ data }: FrontmatterCardProps) {
 /** Default file-type icons; consumers can override specific filenames. */
 function defaultFileIcon(name: string): ReactNode {
   if (name.endsWith(".yaml") || name.endsWith(".yml") || name.endsWith(".json")) {
-    return <FileCode className="h-4 w-4 text-yellow-600 flex-shrink-0" />;
+    return <FileCode className="h-4 w-4 text-category-4 flex-shrink-0" />;
   }
   if (isMarkdown(name)) {
-    return <FileText className="h-4 w-4 text-gray-500 flex-shrink-0" />;
+    return <FileText className="h-4 w-4 text-muted-foreground flex-shrink-0" />;
   }
   if (
     name.endsWith(".go") ||
@@ -202,9 +202,9 @@ function defaultFileIcon(name: string): ReactNode {
     name.endsWith(".js") ||
     name.endsWith(".py")
   ) {
-    return <FileCode className="h-4 w-4 text-blue-500 flex-shrink-0" />;
+    return <FileCode className="h-4 w-4 text-category-1 flex-shrink-0" />;
   }
-  return <File className="h-4 w-4 text-gray-400 flex-shrink-0" />;
+  return <File className="h-4 w-4 text-muted-foreground flex-shrink-0" />;
 }
 
 interface TreeNodeProps {
@@ -280,10 +280,10 @@ function TreeNode({
         )}
 
         {node.isDirectory && isExpanded && (
-          <FolderOpen className="h-4 w-4 text-amber-500 flex-shrink-0" />
+          <FolderOpen className="h-4 w-4 text-category-4 flex-shrink-0" />
         )}
         {node.isDirectory && !isExpanded && (
-          <Folder className="h-4 w-4 text-amber-500 flex-shrink-0" />
+          <Folder className="h-4 w-4 text-category-4 flex-shrink-0" />
         )}
         {!node.isDirectory && resolveIcon(node.name)}
 

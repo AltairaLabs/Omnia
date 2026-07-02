@@ -145,7 +145,7 @@ export function VersionSelector({
                   <div className="flex items-center gap-2">
                     <span className="font-mono text-sm">{truncateHash(headVersion)}</span>
                     {currentVersion?.isLatest && (
-                      <Badge variant="default" className="text-[10px] px-1.5 py-0 bg-green-500">
+                      <Badge variant="default" className="text-[10px] px-1.5 py-0 bg-success">
                         latest
                       </Badge>
                     )}
@@ -163,7 +163,7 @@ export function VersionSelector({
                     <div className="flex items-center gap-2 w-full">
                       <span className="font-mono text-sm">{formatVersionLabel(version)}</span>
                       {version.isLatest && (
-                        <Badge variant="default" className="text-[10px] px-1.5 py-0 bg-green-500 ml-auto">
+                        <Badge variant="default" className="text-[10px] px-1.5 py-0 bg-success ml-auto">
                           latest
                         </Badge>
                       )}

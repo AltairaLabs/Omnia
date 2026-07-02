@@ -16,7 +16,7 @@ interface SkillSourceExplorerProps {
 
 function skillFileIcon(name: string): ReactNode | undefined {
   if (name === "SKILL.md" || name.toLowerCase() === "skill.md") {
-    return <BookOpen className="h-4 w-4 text-purple-500 flex-shrink-0" />;
+    return <BookOpen className="h-4 w-4 text-primary flex-shrink-0" />;
   }
   return undefined;
 }

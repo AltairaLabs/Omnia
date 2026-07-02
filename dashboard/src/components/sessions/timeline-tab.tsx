@@ -41,43 +41,43 @@ const KIND_CONFIG: Record<TimelineEventKind, {
   },
   assistant_message: {
     icon: <Bot className="h-3.5 w-3.5" />,
-    color: "text-blue-500",
+    color: "text-category-1",
   },
   system_message: {
     icon: <MessageSquare className="h-3.5 w-3.5" />,
-    color: "text-gray-500",
+    color: "text-muted-foreground",
   },
   tool_call: {
     icon: <Wrench className="h-3.5 w-3.5" />,
-    color: "text-orange-500",
+    color: "text-category-4",
   },
   tool_result: {
     icon: <ArrowLeftRight className="h-3.5 w-3.5" />,
-    color: "text-amber-500",
+    color: "text-category-4",
   },
   pipeline_event: {
     icon: <Layers className="h-3.5 w-3.5" />,
-    color: "text-indigo-500",
+    color: "text-category-2",
   },
   stage_event: {
     icon: <Cpu className="h-3.5 w-3.5" />,
-    color: "text-cyan-500",
+    color: "text-category-6",
   },
   provider_call: {
     icon: <Zap className="h-3.5 w-3.5" />,
-    color: "text-yellow-500",
+    color: "text-category-4",
   },
   workflow_transition: {
     icon: <GitBranch className="h-3.5 w-3.5" />,
-    color: "text-purple-500",
+    color: "text-category-2",
   },
   eval_event: {
     icon: <Shield className="h-3.5 w-3.5" />,
-    color: "text-violet-500",
+    color: "text-category-3",
   },
   workflow_completed: {
     icon: <CheckCircle2 className="h-3.5 w-3.5" />,
-    color: "text-green-500",
+    color: "text-success",
   },
   error: {
     icon: <AlertCircle className="h-3.5 w-3.5" />,
@@ -276,7 +276,7 @@ function PipelineSection({ group, openToolCall }: {
         <span className="text-xs text-muted-foreground font-mono shrink-0 w-20">
           {formatTimestamp(group.startEvent.timestamp)}
         </span>
-        <span className="shrink-0 text-indigo-500">
+        <span className="shrink-0 text-category-2">
           {expanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
         </span>
         <span className="font-medium truncate shrink-0 max-w-48">
@@ -301,7 +301,7 @@ function PipelineSection({ group, openToolCall }: {
         </span>
       </button>
       {expanded && (
-        <div className="border-l-2 border-indigo-500/20 ml-[6.5rem]">
+        <div className="border-l-2 border-category-2/20 ml-[6.5rem]">
           {group.children.map((child) => (
             <EventRow key={child.id} event={child} openToolCall={openToolCall} indent />
           ))}
@@ -338,7 +338,7 @@ function EvalGroupSection({ group, openToolCall }: {
         <span className="text-xs text-muted-foreground font-mono shrink-0 w-20">
           {formatTimestamp(group.timestamp)}
         </span>
-        <span className="shrink-0 text-violet-500">
+        <span className="shrink-0 text-category-3">
           {expanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
         </span>
         <span className="font-medium truncate shrink-0 max-w-48">
@@ -355,7 +355,7 @@ function EvalGroupSection({ group, openToolCall }: {
         </span>
       </button>
       {expanded && (
-        <div className="border-l-2 border-violet-500/20 ml-[6.5rem]">
+        <div className="border-l-2 border-category-3/20 ml-[6.5rem]">
           {group.children.map((child) => (
             <EventRow key={child.id} event={child} openToolCall={openToolCall} indent />
           ))}

@@ -181,10 +181,10 @@ export function UpgradeBanner({
   if (compact) {
     return (
       <div
-        className="flex items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200"
+        className="flex items-center gap-2 rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-sm text-warning"
         data-testid="upgrade-banner-compact"
       >
-        <Sparkles className="h-4 w-4 flex-shrink-0 text-amber-600 dark:text-amber-400" />
+        <Sparkles className="h-4 w-4 flex-shrink-0 text-warning" />
         <span className="flex-1">
           {description ?? `${feature} requires an Enterprise license.`}{" "}
           <a
@@ -202,7 +202,7 @@ export function UpgradeBanner({
             onClick={handleDismiss}
             aria-label="Dismiss"
             data-testid="upgrade-banner-dismiss"
-            className="rounded p-0.5 hover:bg-amber-100 dark:hover:bg-amber-900"
+            className="rounded p-0.5 hover:bg-warning/20"
           >
             <X className="h-4 w-4" />
           </button>
@@ -212,9 +212,9 @@ export function UpgradeBanner({
   }
 
   return (
-    <Alert className="border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950">
-      <Sparkles className="h-4 w-4 text-amber-600 dark:text-amber-400" />
-      <AlertTitle className="flex items-center justify-between text-amber-800 dark:text-amber-200">
+    <Alert className="border-warning/30 bg-warning/10">
+      <Sparkles className="h-4 w-4 text-warning" />
+      <AlertTitle className="flex items-center justify-between text-warning">
         <span>Enterprise Feature</span>
         {storageKey && (
           <button
@@ -222,13 +222,13 @@ export function UpgradeBanner({
             onClick={handleDismiss}
             aria-label="Dismiss"
             data-testid="upgrade-banner-dismiss"
-            className="rounded p-0.5 text-amber-700 hover:bg-amber-100 dark:text-amber-300 dark:hover:bg-amber-900"
+            className="rounded p-0.5 text-warning hover:bg-warning/20"
           >
             <X className="h-4 w-4" />
           </button>
         )}
       </AlertTitle>
-      <AlertDescription className="text-amber-700 dark:text-amber-300">
+      <AlertDescription className="text-warning">
         <p className="mb-3">
           {description ?? `${feature} requires an Enterprise license. Upgrade to unlock it and the rest of ${brand.productName}'s enterprise features.`}
         </p>
@@ -267,6 +267,7 @@ export function FeatureBadge({
 }: FeatureBadgeProps) {
   const { canUseFeature } = useLicense();
   const availableBadge = getStatusClasses("success");
+  const enterpriseBadge = getStatusClasses("warning");
 
   if (canUseFeature(feature)) {
     return (
@@ -277,7 +278,7 @@ export function FeatureBadge({
   }
 
   return (
-    <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800 dark:bg-amber-900 dark:text-amber-200">
+    <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${enterpriseBadge.bg} ${enterpriseBadge.text}`}>
       <Lock className="h-3 w-3" />
       {enterpriseText}
     </span>
@@ -307,17 +308,17 @@ export function LicenseInfo({ detailed = false }: LicenseInfoProps) {
       <div className="flex items-center gap-2">
         <span className="text-sm text-muted-foreground">License:</span>
         {isEnterprise ? (
-          <span className="inline-flex items-center gap-1 rounded-full bg-purple-100 px-2 py-0.5 text-xs font-medium text-purple-800 dark:bg-purple-900 dark:text-purple-200">
+          <span className="inline-flex items-center gap-1 rounded-full bg-accent/15 px-2 py-0.5 text-xs font-medium text-accent">
             <Sparkles className="h-3 w-3" />
             Enterprise
           </span>
         ) : (
-          <span className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-800 dark:bg-gray-800 dark:text-gray-200">
+          <span className="inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
             Open Core
           </span>
         )}
         {isExpired && (
-          <span className="inline-flex items-center rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-800 dark:bg-red-900 dark:text-red-200">
+          <span className="inline-flex items-center rounded-full bg-destructive/10 px-2 py-0.5 text-xs font-medium text-destructive">
             Expired
           </span>
         )}
@@ -330,12 +331,12 @@ export function LicenseInfo({ detailed = false }: LicenseInfoProps) {
       <div className="flex items-center justify-between">
         <span className="font-medium">License</span>
         {isEnterprise ? (
-          <span className="inline-flex items-center gap-1 rounded-full bg-purple-100 px-2 py-0.5 text-xs font-medium text-purple-800 dark:bg-purple-900 dark:text-purple-200">
+          <span className="inline-flex items-center gap-1 rounded-full bg-accent/15 px-2 py-0.5 text-xs font-medium text-accent">
             <Sparkles className="h-3 w-3" />
             Enterprise
           </span>
         ) : (
-          <span className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-800 dark:bg-gray-800 dark:text-gray-200">
+          <span className="inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
             Open Core
           </span>
         )}
@@ -348,7 +349,7 @@ export function LicenseInfo({ detailed = false }: LicenseInfoProps) {
           </div>
           <div className="flex items-center justify-between text-sm">
             <span className="text-muted-foreground">Expires</span>
-            <span className={isExpired ? "text-red-600" : ""}>
+            <span className={isExpired ? "text-destructive" : ""}>
               {new Date(license.expiresAt).toLocaleDateString()}
               {isExpired && " (Expired)"}
             </span>
@@ -439,8 +440,8 @@ export function EnterpriseUpgradePage({ featureName }: Readonly<EnterpriseUpgrad
   return (
     <div className="flex flex-col items-center justify-center h-full p-8">
       <div className="max-w-md text-center space-y-6">
-        <div className="mx-auto w-16 h-16 rounded-full bg-amber-100 dark:bg-amber-900 flex items-center justify-center">
-          <Sparkles className="h-8 w-8 text-amber-600 dark:text-amber-400" />
+        <div className="mx-auto w-16 h-16 rounded-full bg-warning/10 flex items-center justify-center">
+          <Sparkles className="h-8 w-8 text-warning" />
         </div>
         <div className="space-y-2">
           <h1 className="text-2xl font-bold">Enterprise Feature</h1>

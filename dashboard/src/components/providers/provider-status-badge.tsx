@@ -12,13 +12,13 @@ export function ProviderStatusBadge({ phase }: Readonly<ProviderStatusBadgeProps
   switch (phase) {
     case "Ready":
       return (
-        <Badge className="bg-green-500/15 text-green-700 dark:text-green-400 border-green-500/30">
+        <Badge className="bg-success/15 text-success border-success/30">
           Ready
         </Badge>
       );
     case "Error":
       return (
-        <Badge className="bg-red-500/15 text-red-700 dark:text-red-400 border-red-500/30">
+        <Badge className="bg-destructive/15 text-destructive border-destructive/30">
           Error
         </Badge>
       );

@@ -26,6 +26,7 @@ import {
 import { useWorkspacePermissions } from "@/hooks/use-workspace-permissions";
 import type { WorkspaceRole } from "@/types/workspace";
 import { cn } from "@/lib/utils";
+import { getStatusClasses, type StatusKind } from "@/lib/colors/status";
 
 /**
  * Get badge variant based on workspace role.
@@ -45,14 +46,13 @@ function getRoleBadgeVariant(role: WorkspaceRole): "default" | "secondary" | "ou
  * Get environment badge color.
  */
 function getEnvironmentColor(environment: string): string {
-  switch (environment) {
-    case "production":
-      return "text-red-600 bg-red-50 border-red-200 dark:text-red-400 dark:bg-red-950 dark:border-red-800";
-    case "staging":
-      return "text-yellow-600 bg-yellow-50 border-yellow-200 dark:text-yellow-400 dark:bg-yellow-950 dark:border-yellow-800";
-    default:
-      return "text-blue-600 bg-blue-50 border-blue-200 dark:text-blue-400 dark:bg-blue-950 dark:border-blue-800";
-  }
+  const kindByEnvironment: Record<string, StatusKind> = {
+    production: "error",
+    staging: "warning",
+  };
+  const kind: StatusKind = kindByEnvironment[environment] ?? "info";
+  const { text, bg, border } = getStatusClasses(kind);
+  return `${text} ${bg} ${border}`;
 }
 
 /**

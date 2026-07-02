@@ -49,7 +49,7 @@ export function CostSummary({
             <div
               className={cn(
                 "flex items-center text-xs mt-1",
-                costChange > 0 ? "text-destructive" : "text-green-600"
+                costChange > 0 ? "text-destructive" : "text-success"
               )}
             >
               {costChange > 0 ? (

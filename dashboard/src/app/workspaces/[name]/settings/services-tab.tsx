@@ -22,9 +22,9 @@ function StatusIndicator({ ready }: StatusDotProps) {
   return (
     <span
       data-testid={ready ? "status-ready" : "status-not-ready"}
-      className={`inline-flex items-center gap-1.5 text-xs font-medium ${ready ? "text-green-600" : "text-red-600"}`}
+      className={`inline-flex items-center gap-1.5 text-xs font-medium ${ready ? "text-success" : "text-destructive"}`}
     >
-      <span className={`inline-block h-2 w-2 rounded-full ${ready ? "bg-green-500" : "bg-red-500"}`} />
+      <span className={`inline-block h-2 w-2 rounded-full ${ready ? "bg-success" : "bg-destructive"}`} />
       {ready ? "Ready" : "Not Ready"}
     </span>
   );

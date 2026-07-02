@@ -44,16 +44,16 @@ const KIND_ICON: Record<TimelineEventKind, React.ReactNode> = {
 
 const KIND_COLOR: Record<TimelineEventKind, string> = {
   user_message: "text-primary",
-  assistant_message: "text-blue-500",
-  system_message: "text-gray-500",
-  tool_call: "text-orange-500",
-  tool_result: "text-amber-500",
-  pipeline_event: "text-indigo-500",
-  stage_event: "text-cyan-500",
-  provider_call: "text-yellow-600",
-  workflow_transition: "text-purple-500",
-  workflow_completed: "text-green-500",
-  eval_event: "text-violet-500",
+  assistant_message: "text-category-1",
+  system_message: "text-muted-foreground",
+  tool_call: "text-category-4",
+  tool_result: "text-category-4",
+  pipeline_event: "text-category-2",
+  stage_event: "text-category-6",
+  provider_call: "text-category-4",
+  workflow_transition: "text-category-2",
+  workflow_completed: "text-category-5",
+  eval_event: "text-category-2",
   error: "text-destructive",
 };
 

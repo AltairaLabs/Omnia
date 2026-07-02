@@ -49,7 +49,7 @@ export function AgentErrorBanner({ error, workspace }: AgentErrorBannerProps) {
   // user still sees the raw text exactly like before.
   if (info.kind === "unknown") {
     return (
-      <div className="px-4 py-2 bg-red-500/10 border-b border-red-500/20 text-red-600 dark:text-red-400 text-sm">
+      <div className="px-4 py-2 bg-destructive/10 border-b border-destructive/30 text-destructive text-sm">
         {error}
       </div>
     );
@@ -59,7 +59,7 @@ export function AgentErrorBanner({ error, workspace }: AgentErrorBannerProps) {
   const action = renderAction(info.kind, info.provider, workspace);
 
   return (
-    <div className="px-4 py-2 bg-red-500/10 border-b border-red-500/20 text-red-600 dark:text-red-400 text-sm">
+    <div className="px-4 py-2 bg-destructive/10 border-b border-destructive/30 text-destructive text-sm">
       <div className="flex items-start gap-2">
         <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
         <div className="flex-1 min-w-0">
@@ -79,7 +79,7 @@ export function AgentErrorBanner({ error, workspace }: AgentErrorBannerProps) {
             {showDetails ? "Hide details" : "Show details"}
           </button>
           {showDetails && (
-            <pre className="mt-2 p-2 rounded bg-red-500/5 text-xs overflow-x-auto whitespace-pre-wrap break-words">
+            <pre className="mt-2 p-2 rounded bg-destructive/5 text-xs overflow-x-auto whitespace-pre-wrap break-words">
               {info.raw}
             </pre>
           )}

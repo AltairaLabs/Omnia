@@ -37,10 +37,10 @@ export function SidebarNavItem({
       <Icon className="h-4 w-4 shrink-0" />
       {!collapsed && <span className="flex-1">{name}</span>}
       {!collapsed && showEnterpriseBadge && (
-        <Sparkles className="h-3 w-3 text-amber-500" />
+        <Sparkles className="h-3 w-3 text-warning" />
       )}
       {collapsed && showEnterpriseBadge && (
-        <span className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-amber-500" />
+        <span className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-warning" />
       )}
     </Link>
   );

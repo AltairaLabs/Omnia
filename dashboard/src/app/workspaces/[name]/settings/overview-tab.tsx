@@ -13,22 +13,24 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { getStatusClasses, type StatusKind } from "@/lib/colors/status";
 import type { Workspace } from "@/types/workspace";
 
 interface OverviewTabProps {
   workspace: Workspace;
 }
 
-const CONDITION_STYLE: Record<string, { label: string; className: string }> = {
-  True: { label: "OK", className: "bg-green-100 text-green-800 border-green-200" },
-  False: { label: "Error", className: "bg-red-100 text-red-800 border-red-200" },
-  Unknown: { label: "Warning", className: "bg-yellow-100 text-yellow-800 border-yellow-200" },
+const CONDITION_STYLE: Record<string, { label: string; kind: StatusKind }> = {
+  True: { label: "OK", kind: "success" },
+  False: { label: "Error", kind: "error" },
+  Unknown: { label: "Warning", kind: "warning" },
 };
 
 function ConditionBadge({ status }: { status: string }) {
   const style = CONDITION_STYLE[status] ?? CONDITION_STYLE.Unknown;
+  const { text, bg, border } = getStatusClasses(style.kind);
   return (
-    <Badge variant="outline" className={style.className}>
+    <Badge variant="outline" className={`${bg} ${text} ${border}`}>
       {style.label}
     </Badge>
   );

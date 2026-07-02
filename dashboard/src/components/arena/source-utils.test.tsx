@@ -244,21 +244,21 @@ describe("getSourceUrl", () => {
 });
 
 describe("getConditionIcon", () => {
-  it("returns green check for True status", () => {
+  it("returns success check for True status", () => {
     const { container } = render(<>{getConditionIcon("True")}</>);
     const svg = container.querySelector("svg");
-    expect(svg).toHaveClass("text-green-500");
+    expect(svg).toHaveClass("text-success");
   });
 
-  it("returns red alert for False status", () => {
+  it("returns destructive alert for False status", () => {
     const { container } = render(<>{getConditionIcon("False")}</>);
     const svg = container.querySelector("svg");
-    expect(svg).toHaveClass("text-red-500");
+    expect(svg).toHaveClass("text-destructive");
   });
 
-  it("returns yellow clock for Unknown status", () => {
+  it("returns warning clock for Unknown status", () => {
     const { container } = render(<>{getConditionIcon("Unknown")}</>);
     const svg = container.querySelector("svg");
-    expect(svg).toHaveClass("text-yellow-500");
+    expect(svg).toHaveClass("text-warning");
   });
 });

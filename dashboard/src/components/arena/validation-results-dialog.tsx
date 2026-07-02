@@ -61,9 +61,9 @@ function getSeverityIcon(severity: number) {
     case 1:
       return <XCircle className="h-4 w-4 text-destructive" />;
     case 2:
-      return <AlertTriangle className="h-4 w-4 text-amber-500" />;
+      return <AlertTriangle className="h-4 w-4 text-warning" />;
     case 3:
-      return <Info className="h-4 w-4 text-blue-500" />;
+      return <Info className="h-4 w-4 text-info" />;
     default:
       return <Info className="h-4 w-4 text-muted-foreground" />;
   }
@@ -104,7 +104,7 @@ export function ValidationResultsDialog({
           <DialogTitle className="flex items-center gap-2">
             {results.valid ? (
               <>
-                <CheckCircle2 className="h-5 w-5 text-green-500" />
+                <CheckCircle2 className="h-5 w-5 text-success" />
                 Validation Passed
               </>
             ) : (
@@ -118,7 +118,7 @@ export function ValidationResultsDialog({
             {results.summary ? (
               <span className="flex items-center gap-4 mt-2">
                 <span>{results.summary.totalFiles} files checked</span>
-                <Badge variant="outline" className="text-green-600">
+                <Badge variant="outline" className="text-success">
                   {results.summary.validFiles} valid
                 </Badge>
                 {results.summary.invalidFiles > 0 && (
@@ -132,7 +132,7 @@ export function ValidationResultsDialog({
                   </span>
                 )}
                 {results.summary.warningCount > 0 && (
-                  <span className="text-amber-500">
+                  <span className="text-warning">
                     {results.summary.warningCount} warnings
                   </span>
                 )}
@@ -146,7 +146,7 @@ export function ValidationResultsDialog({
         <ScrollArea className="flex-1 mt-4 -mx-6 px-6">
           {filesWithIssues.length === 0 ? (
             <div className="text-center py-8 text-muted-foreground">
-              <CheckCircle2 className="h-12 w-12 mx-auto mb-4 text-green-500" />
+              <CheckCircle2 className="h-12 w-12 mx-auto mb-4 text-success" />
               <p>All files are valid!</p>
               <p className="text-sm mt-1">
                 {validFiles.length} file{validFiles.length === 1 ? "" : "s"} checked
@@ -173,7 +173,7 @@ export function ValidationResultsDialog({
                           {warningCount > 0 && (
                             <Badge
                               variant="outline"
-                              className="text-xs text-amber-500 border-amber-500"
+                              className="text-xs text-warning border-warning"
                             >
                               {warningCount}
                             </Badge>
@@ -210,7 +210,7 @@ export function ValidationResultsDialog({
                               className={cn(
                                 "text-xs flex-shrink-0",
                                 diag.severity === 1 && "text-destructive border-destructive",
-                                diag.severity === 2 && "text-amber-500 border-amber-500"
+                                diag.severity === 2 && "text-warning border-warning"
                               )}
                             >
                               {getSeverityLabel(diag.severity)}
@@ -229,7 +229,7 @@ export function ValidationResultsDialog({
           {validFiles.length > 0 && filesWithIssues.length > 0 && (
             <div className="mt-4 pt-4 border-t">
               <p className="text-sm text-muted-foreground mb-2 flex items-center gap-2">
-                <CheckCircle2 className="h-4 w-4 text-green-500" />
+                <CheckCircle2 className="h-4 w-4 text-success" />
                 {validFiles.length} file{validFiles.length === 1 ? "" : "s"} passed
                 validation
               </p>

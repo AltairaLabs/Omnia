@@ -194,10 +194,10 @@ export function ApiKeysSection() {
         </CardHeader>
         <CardContent>
           {isFileMode && (
-            <div className="mb-4 p-3 bg-blue-500/10 border border-blue-500/20 rounded-lg flex items-start gap-3">
-              <Info className="h-4 w-4 text-blue-500 mt-0.5 shrink-0" />
+            <div className="mb-4 p-3 bg-info/10 border border-info/20 rounded-lg flex items-start gap-3">
+              <Info className="h-4 w-4 text-info mt-0.5 shrink-0" />
               <div className="text-sm">
-                <p className="font-medium text-blue-600 dark:text-blue-400">
+                <p className="font-medium text-info">
                   Keys managed via Kubernetes Secret
                 </p>
                 <p className="text-muted-foreground mt-1">
@@ -329,7 +329,7 @@ export function ApiKeysSection() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <Check className="h-5 w-5 text-green-500" />
+              <Check className="h-5 w-5 text-success" />
               API Key Created
             </DialogTitle>
             <DialogDescription>
@@ -349,15 +349,15 @@ export function ApiKeysSection() {
                 className="shrink-0"
               >
                 {keyCopied ? (
-                  <Check className="h-4 w-4 text-green-500" />
+                  <Check className="h-4 w-4 text-success" />
                 ) : (
                   <Copy className="h-4 w-4" />
                 )}
               </Button>
             </div>
 
-            <div className="mt-4 p-3 bg-yellow-500/10 border border-yellow-500/20 rounded text-sm">
-              <p className="font-medium text-yellow-600 dark:text-yellow-400">
+            <div className="mt-4 p-3 bg-warning/10 border border-warning/20 rounded text-sm">
+              <p className="font-medium text-warning">
                 Important
               </p>
               <p className="text-muted-foreground mt-1">

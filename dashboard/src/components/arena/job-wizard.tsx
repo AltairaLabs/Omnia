@@ -237,9 +237,9 @@ function ProviderGroupEditor({
               className="flex items-center gap-1"
             >
               {entry.type === "agent" ? (
-                <Network className="h-3 w-3 text-blue-500" />
+                <Network className="h-3 w-3 text-category-1" />
               ) : (
-                <Zap className="h-3 w-3 text-amber-500" />
+                <Zap className="h-3 w-3 text-category-4" />
               )}
               {entry.name}
               <button
@@ -268,9 +268,9 @@ function ProviderGroupEditor({
               >
                 <span className="flex items-center gap-2">
                   {opt.type === "agent" ? (
-                    <Network className="h-3.5 w-3.5 text-blue-500" />
+                    <Network className="h-3.5 w-3.5 text-category-1" />
                   ) : (
-                    <Zap className="h-3.5 w-3.5 text-amber-500" />
+                    <Zap className="h-3.5 w-3.5 text-category-4" />
                   )}
                   {opt.name}
                 </span>
@@ -338,7 +338,7 @@ function ProviderMappingEditor({
               {availableProviders.map((p) => (
                 <SelectItem key={`provider:${p.name}`} value={`provider:${p.name}`}>
                   <span className="flex items-center gap-2">
-                    <Zap className="h-3.5 w-3.5 text-amber-500" />
+                    <Zap className="h-3.5 w-3.5 text-category-4" />
                     {p.name}
                   </span>
                 </SelectItem>
@@ -346,7 +346,7 @@ function ProviderMappingEditor({
               {availableAgents.map((a) => (
                 <SelectItem key={`agent:${a.name}`} value={`agent:${a.name}`}>
                   <span className="flex items-center gap-2">
-                    <Network className="h-3.5 w-3.5 text-blue-500" />
+                    <Network className="h-3.5 w-3.5 text-category-1" />
                     {a.name}
                   </span>
                 </SelectItem>
@@ -1043,8 +1043,8 @@ export function JobWizard({
     <div className="space-y-4">
       {success ? (
         <div className="flex flex-col items-center justify-center py-8 text-center">
-          <div className="rounded-full bg-green-500/10 p-3 mb-4">
-            <Check className="h-8 w-8 text-green-500" />
+          <div className="rounded-full bg-success/10 p-3 mb-4">
+            <Check className="h-8 w-8 text-success" />
           </div>
           <h3 className="text-lg font-semibold">Job Created!</h3>
           <p className="text-sm text-muted-foreground mt-1">

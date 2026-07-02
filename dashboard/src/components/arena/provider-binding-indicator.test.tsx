@@ -12,7 +12,7 @@ describe("ProviderBindingIndicator", () => {
       message: "Bound to my-provider",
     };
     const { container } = render(<ProviderBindingIndicator bindingInfo={info} />);
-    const dot = container.querySelector("span.bg-green-500");
+    const dot = container.querySelector("span.bg-success");
     expect(dot).toBeInTheDocument();
   });
 
@@ -24,7 +24,7 @@ describe("ProviderBindingIndicator", () => {
       message: 'Provider "deleted-provider" not found in cluster',
     };
     const { container } = render(<ProviderBindingIndicator bindingInfo={info} />);
-    const dot = container.querySelector("span.bg-blue-500");
+    const dot = container.querySelector("span.bg-info");
     expect(dot).toBeInTheDocument();
   });
 
@@ -34,7 +34,7 @@ describe("ProviderBindingIndicator", () => {
       message: "Not bound to a cluster provider",
     };
     const { container } = render(<ProviderBindingIndicator bindingInfo={info} />);
-    const dot = container.querySelector("span.bg-yellow-500");
+    const dot = container.querySelector("span.bg-warning");
     expect(dot).toBeInTheDocument();
   });
 

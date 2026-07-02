@@ -109,7 +109,7 @@ export function CostBreakdownTable({
                 <TableCell className="text-right font-mono text-sm">
                   {item.cachedCost > 0 ? formatCost(item.cachedCost) : "-"}
                 </TableCell>
-                <TableCell className="text-right font-mono text-sm text-green-600 dark:text-green-400">
+                <TableCell className="text-right font-mono text-sm text-success">
                   {item.cacheSavings > 0 ? `-${formatCost(item.cacheSavings)}` : "-"}
                 </TableCell>
                 <TableCell className="text-right font-mono text-sm font-medium">
@@ -127,7 +127,7 @@ export function CostBreakdownTable({
               <TableCell className="text-right font-mono">
                 {totals.cachedCost > 0 ? formatCost(totals.cachedCost) : "-"}
               </TableCell>
-              <TableCell className="text-right font-mono text-green-600 dark:text-green-400">
+              <TableCell className="text-right font-mono text-success">
                 {totals.cacheSavings > 0 ? `-${formatCost(totals.cacheSavings)}` : "-"}
               </TableCell>
               <TableCell className="text-right font-mono">{formatCost(totals.totalCost)}</TableCell>

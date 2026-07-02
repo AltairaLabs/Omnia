@@ -60,7 +60,7 @@ describe("ToolCallCard", () => {
       };
       render(<ToolCallCard toolCall={successToolCall} />);
       const card = screen.getByText("search_database").closest("div");
-      expect(card).toHaveClass("bg-green-500/10");
+      expect(card).toHaveClass("bg-success/10");
     });
 
     it("should render error status with X icon", () => {
@@ -71,7 +71,7 @@ describe("ToolCallCard", () => {
       };
       render(<ToolCallCard toolCall={errorToolCall} />);
       const card = screen.getByText("search_database").closest("div");
-      expect(card).toHaveClass("bg-red-500/10");
+      expect(card).toHaveClass("bg-destructive/10");
     });
   });
 

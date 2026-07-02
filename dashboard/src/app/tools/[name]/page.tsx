@@ -75,11 +75,11 @@ function getHandlerTypeIcon(type: string) {
 function ToolStatusIcon({ status }: Readonly<{ status: DiscoveredTool["status"] }>) {
   switch (status) {
     case "Available":
-      return <CheckCircle className="h-4 w-4 text-green-500" />;
+      return <CheckCircle className="h-4 w-4 text-success" />;
     case "Unavailable":
-      return <XCircle className="h-4 w-4 text-red-500" />;
+      return <XCircle className="h-4 w-4 text-destructive" />;
     default:
-      return <AlertCircle className="h-4 w-4 text-yellow-500" />;
+      return <AlertCircle className="h-4 w-4 text-warning" />;
   }
 }
 
@@ -197,13 +197,13 @@ export default function ToolDetailPage({ params }: Readonly<PageProps>) {
                   </div>
                   <div className="flex items-center justify-between">
                     <span className="text-sm text-muted-foreground">Available</span>
-                    <Badge variant="secondary" className="text-green-600 dark:text-green-400">
+                    <Badge variant="secondary" className="text-success">
                       {availableCount}
                     </Badge>
                   </div>
                   <div className="flex items-center justify-between">
                     <span className="text-sm text-muted-foreground">Unavailable</span>
-                    <Badge variant="secondary" className="text-red-600 dark:text-red-400">
+                    <Badge variant="secondary" className="text-destructive">
                       {totalCount - availableCount}
                     </Badge>
                   </div>
@@ -257,9 +257,9 @@ export default function ToolDetailPage({ params }: Readonly<PageProps>) {
                     {status.conditions.map((condition) => (
                       <div key={condition.type} className="flex items-start gap-3 p-3 rounded-lg bg-muted/50">
                         {condition.status === "True" ? (
-                          <CheckCircle className="h-4 w-4 text-green-500 mt-0.5" />
+                          <CheckCircle className="h-4 w-4 text-success mt-0.5" />
                         ) : (
-                          <XCircle className="h-4 w-4 text-red-500 mt-0.5" />
+                          <XCircle className="h-4 w-4 text-destructive mt-0.5" />
                         )}
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2">
@@ -320,7 +320,7 @@ export default function ToolDetailPage({ params }: Readonly<PageProps>) {
                                 </code>
                               </div>
                               {tool.error && (
-                                <p className="text-sm text-red-500 mt-2">
+                                <p className="text-sm text-destructive mt-2">
                                   Error: {tool.error}
                                 </p>
                               )}

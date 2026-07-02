@@ -140,17 +140,17 @@ function ValidationBadge({ label, check }: Readonly<{ label: string; check: Sche
   return (
     <div className="flex items-start gap-2">
       {check.valid ? (
-        <ShieldCheck className="h-4 w-4 text-green-500 mt-0.5 shrink-0" />
+        <ShieldCheck className="h-4 w-4 text-success mt-0.5 shrink-0" />
       ) : (
-        <ShieldAlert className="h-4 w-4 text-amber-500 mt-0.5 shrink-0" />
+        <ShieldAlert className="h-4 w-4 text-warning mt-0.5 shrink-0" />
       )}
       <div className="min-w-0">
         <span className="text-sm font-medium">
           {label}:{" "}
           {check.valid ? (
-            <span className="text-green-600 dark:text-green-400">Valid</span>
+            <span className="text-success">Valid</span>
           ) : (
-            <span className="text-amber-600 dark:text-amber-400">Invalid</span>
+            <span className="text-warning">Invalid</span>
           )}
         </span>
         {check.errors && check.errors.length > 0 && (
@@ -174,9 +174,9 @@ function ResultCard({ result }: Readonly<{ result: ToolTestResult }>) {
       <CardHeader>
         <CardTitle className="text-base flex items-center gap-2">
           {result.success ? (
-            <CheckCircle className="h-4 w-4 text-green-500" />
+            <CheckCircle className="h-4 w-4 text-success" />
           ) : (
-            <XCircle className="h-4 w-4 text-red-500" />
+            <XCircle className="h-4 w-4 text-destructive" />
           )}
           {result.success ? "Success" : "Failed"}
         </CardTitle>
@@ -195,8 +195,8 @@ function ResultCard({ result }: Readonly<{ result: ToolTestResult }>) {
 
         {/* Error */}
         {result.error && (
-          <div className="bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-900/50 rounded-lg p-3">
-            <p className="text-sm text-red-700 dark:text-red-400 font-mono break-all">
+          <div className="bg-destructive/10 border border-destructive/30 rounded-lg p-3">
+            <p className="text-sm text-destructive font-mono break-all">
               {result.error}
             </p>
           </div>
@@ -310,7 +310,7 @@ function ArgsInput({
     <div className="space-y-2">
       <Label>Arguments (JSON)</Label>
       <JsonEditor value={args} onChange={onChange} ariaLabel="Arguments (JSON)" />
-      {jsonError && <p className="text-sm text-red-500">{jsonError}</p>}
+      {jsonError && <p className="text-sm text-destructive">{jsonError}</p>}
     </div>
   );
 }
@@ -435,8 +435,8 @@ function ToolInspector({ tool }: Readonly<{ tool: OpenAPIToolPreviewItem | undef
       )}
       {lints.map((lint) => (
         <div key={lint.id} className="flex items-start gap-2">
-          <AlertTriangle className="h-4 w-4 text-amber-500 mt-0.5 shrink-0" />
-          <p className="text-xs text-amber-700 dark:text-amber-400">{lint.message}</p>
+          <AlertTriangle className="h-4 w-4 text-warning mt-0.5 shrink-0" />
+          <p className="text-xs text-warning">{lint.message}</p>
         </div>
       ))}
     </div>
@@ -604,11 +604,11 @@ function OpenAPISection({
 
   if (preview.error) {
     return (
-      <div className="rounded-lg border border-red-200 dark:border-red-900/50 bg-red-50 dark:bg-red-950/20 p-3 space-y-1">
-        <p className="text-sm font-medium text-red-700 dark:text-red-400">
+      <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 space-y-1">
+        <p className="text-sm font-medium text-destructive">
           Couldn&apos;t load tools from spec
         </p>
-        <p className="text-sm text-red-700 dark:text-red-400 font-mono break-all">
+        <p className="text-sm text-destructive font-mono break-all">
           {preview.error}
         </p>
         {preview.specURL && (
@@ -806,8 +806,8 @@ export function ToolTestPanel({ registry, workspaceName }: Readonly<ToolTestPane
 
               {/* Client tool notice */}
               {currentHandler?.type === "client" && (
-                <div className="rounded-lg border border-amber-200 dark:border-amber-900/50 bg-amber-50 dark:bg-amber-950/20 p-3">
-                  <p className="text-sm text-amber-700 dark:text-amber-400">
+                <div className="rounded-lg border border-warning/30 bg-warning/10 p-3">
+                  <p className="text-sm text-warning">
                     Client tools are executed in the browser during an active agent session. They
                     cannot be tested from this page — use the Console to test them through a live
                     agent conversation.

@@ -254,7 +254,7 @@ export function ProviderStep({
           </SelectContent>
         </Select>
         {(!providers || providers.length === 0) && (
-          <p className="text-xs text-amber-600 dark:text-amber-400">
+          <p className="text-xs text-warning">
             No Providers configured. Create a Provider resource first.
           </p>
         )}

@@ -112,7 +112,7 @@ function TrafficSplitBar({ weight }: { weight: number }) {
         aria-label={`Stable ${stable} percent, candidate ${canary} percent`}
       >
         <div className="bg-primary/70 h-full" style={{ width: `${stable}%` }} />
-        <div className="bg-amber-500 h-full" style={{ width: `${canary}%` }} />
+        <div className="bg-warning h-full" style={{ width: `${canary}%` }} />
       </div>
     </div>
   );

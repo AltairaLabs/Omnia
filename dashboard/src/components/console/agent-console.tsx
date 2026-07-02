@@ -422,19 +422,19 @@ export function AgentConsole({ agentName, namespace, sessionId, className }: Rea
       </Badge>
     ),
     connecting: (
-      <Badge variant="outline" className="gap-1.5 text-yellow-600 border-yellow-600/30 bg-yellow-500/10">
+      <Badge variant="outline" className="gap-1.5 text-warning border-warning/30 bg-warning/10">
         <RefreshCw className="h-3 w-3 animate-spin" />
         Connecting
       </Badge>
     ),
     connected: (
-      <Badge variant="outline" className="gap-1.5 text-green-600 border-green-600/30 bg-green-500/10">
+      <Badge variant="outline" className="gap-1.5 text-success border-success/30 bg-success/10">
         <Wifi className="h-3 w-3" />
         Connected
       </Badge>
     ),
     error: (
-      <Badge variant="outline" className="gap-1.5 text-red-600 border-red-600/30 bg-red-500/10">
+      <Badge variant="outline" className="gap-1.5 text-destructive border-destructive/30 bg-destructive/10">
         <WifiOff className="h-3 w-3" />
         Error
       </Badge>
@@ -581,10 +581,10 @@ export function AgentConsole({ agentName, namespace, sessionId, className }: Rea
 
       {/* File rejection feedback */}
       {rejections.length > 0 && (
-        <div className="px-4 py-2 bg-amber-500/10 border-b border-amber-500/20" data-testid="rejection-feedback">
+        <div className="px-4 py-2 bg-warning/10 border-b border-warning/20" data-testid="rejection-feedback">
           <div className="flex items-start gap-2">
-            <AlertCircle className="h-4 w-4 text-amber-600 dark:text-amber-400 mt-0.5 shrink-0" />
-            <div className="flex-1 text-sm text-amber-600 dark:text-amber-400">
+            <AlertCircle className="h-4 w-4 text-warning mt-0.5 shrink-0" />
+            <div className="flex-1 text-sm text-warning">
               <p className="font-medium">Some files could not be added:</p>
               <ul className="mt-1 list-disc list-inside">
                 {rejections.map((reason) => (

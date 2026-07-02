@@ -501,7 +501,7 @@ export function DevConsolePanel({
     connecting: (
       <Badge
         variant="outline"
-        className="gap-1.5 text-yellow-600 border-yellow-600/30 bg-yellow-500/10"
+        className="gap-1.5 text-warning border-warning/30 bg-warning/10"
       >
         <RefreshCw className="h-3 w-3 animate-spin" />
         Connecting
@@ -510,7 +510,7 @@ export function DevConsolePanel({
     connected: (
       <Badge
         variant="outline"
-        className="gap-1.5 text-green-600 border-green-600/30 bg-green-500/10"
+        className="gap-1.5 text-success border-success/30 bg-success/10"
       >
         <Wifi className="h-3 w-3" />
         Connected
@@ -519,7 +519,7 @@ export function DevConsolePanel({
     error: (
       <Badge
         variant="outline"
-        className="gap-1.5 text-red-600 border-red-600/30 bg-red-500/10"
+        className="gap-1.5 text-destructive border-destructive/30 bg-destructive/10"
       >
         <WifiOff className="h-3 w-3" />
         Error
@@ -631,7 +631,7 @@ export function DevConsolePanel({
 
       {/* Error display */}
       {error && (
-        <div className="px-3 py-1.5 bg-red-500/10 border-b border-red-500/20 text-red-600 dark:text-red-400 text-xs">
+        <div className="px-3 py-1.5 bg-destructive/10 border-b border-destructive/20 text-destructive text-xs">
           {error}
         </div>
       )}
@@ -639,12 +639,12 @@ export function DevConsolePanel({
       {/* File rejection feedback */}
       {rejections.length > 0 && (
         <div
-          className="px-3 py-1.5 bg-amber-500/10 border-b border-amber-500/20"
+          className="px-3 py-1.5 bg-warning/10 border-b border-warning/20"
           data-testid="rejection-feedback"
         >
           <div className="flex items-start gap-2">
-            <AlertCircle className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400 mt-0.5 shrink-0" />
-            <div className="flex-1 text-xs text-amber-600 dark:text-amber-400">
+            <AlertCircle className="h-3.5 w-3.5 text-warning mt-0.5 shrink-0" />
+            <div className="flex-1 text-xs text-warning">
               <p className="font-medium">Some files could not be added:</p>
               <ul className="mt-0.5 list-disc list-inside">
                 {rejections.map((reason) => (

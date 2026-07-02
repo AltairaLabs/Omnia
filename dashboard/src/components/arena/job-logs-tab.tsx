@@ -143,7 +143,7 @@ export function JobLogsTab({ className }: JobLogsTabProps) {
         <span>
           {streaming ? (
             <span className="flex items-center gap-1">
-              <span className="h-2 w-2 rounded-full bg-green-500 animate-pulse" />{" "}
+              <span className="h-2 w-2 rounded-full bg-success animate-pulse" />{" "}
               Live
             </span>
           ) : (
@@ -168,7 +168,7 @@ function LogLine({ log }: LogLineProps) {
 
   const levelColors: Record<string, string> = {
     error: "text-destructive",
-    warn: "text-amber-500",
+    warn: "text-warning",
     info: "text-foreground",
     debug: "text-muted-foreground",
   };
@@ -180,7 +180,7 @@ function LogLine({ log }: LogLineProps) {
         {formatLogTimestamp(log.timestamp)}
       </span>
       {log.container && (
-        <span className="text-blue-500 shrink-0">[{log.container}]</span>
+        <span className="text-info shrink-0">[{log.container}]</span>
       )}
       <span className={cn("break-all", levelColor)}>{log.message}</span>
     </div>

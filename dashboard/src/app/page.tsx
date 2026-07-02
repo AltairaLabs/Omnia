@@ -30,7 +30,7 @@ export default function Home() {
             value={stats?.agents.total ?? 0}
             description={
               <>
-                <span className="text-green-600 dark:text-green-400">
+                <span className="text-success">
                   {stats?.agents.running ?? 0} running
                 </span>{" "}
                 / {stats?.agents.pending ?? 0} pending
@@ -45,7 +45,7 @@ export default function Home() {
             value={stats?.promptPacks.total ?? 0}
             description={
               <>
-                <span className="text-violet-600 dark:text-violet-400">
+                <span className="text-category-2">
                   {stats?.promptPacks.active ?? 0} active
                 </span>{" "}
                 deployments
@@ -60,7 +60,7 @@ export default function Home() {
             value={stats?.tools.total ?? 0}
             description={
               <>
-                <span className="text-cyan-600 dark:text-cyan-400">
+                <span className="text-category-6">
                   {stats?.tools.available ?? 0} available
                 </span>{" "}
                 / {stats?.tools.degraded ?? 0} degraded
@@ -76,7 +76,7 @@ export default function Home() {
             description={
               stats?.sessions.trend !== null && stats?.sessions.trend !== undefined ? (
                 <>
-                  <span className={stats.sessions.trend >= 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}>
+                  <span className={stats.sessions.trend >= 0 ? "text-success" : "text-destructive"}>
                     {stats.sessions.trend >= 0 ? "+" : ""}{stats.sessions.trend.toFixed(0)}%
                   </span>{" "}
                   from last hour
@@ -95,7 +95,7 @@ export default function Home() {
             description={
               costsAvailable ? (
                 <>
-                  <span className="text-amber-600 dark:text-amber-400">
+                  <span className="text-category-4">
                     {(summary?.totalRequests ?? 0).toLocaleString()}
                   </span>{" "}
                   requests
@@ -114,7 +114,7 @@ export default function Home() {
             description={
               costsAvailable ? (
                 <>
-                  <span className="text-blue-600 dark:text-blue-400">
+                  <span className="text-category-1">
                     {formatTokens(summary?.inputTokens ?? 0)}
                   </span>{" "}
                   in / {formatTokens(summary?.outputTokens ?? 0)} out

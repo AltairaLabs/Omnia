@@ -137,7 +137,7 @@ export function ProjectToolbar({
       <div className="flex items-center gap-2">
         {/* Unsaved indicator */}
         {hasUnsavedChanges && (
-          <span className="text-xs text-amber-500 mr-2">Unsaved changes</span>
+          <span className="text-xs text-warning mr-2">Unsaved changes</span>
         )}
 
         {/* Validate All button */}

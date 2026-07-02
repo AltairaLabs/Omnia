@@ -36,7 +36,7 @@ export function VoiceCallBar(props: VoiceCallBarProps) {
   return (
     <div className="p-4 border-t bg-muted/30 flex items-center justify-center gap-3" data-testid="voice-live">
       <span className="inline-flex items-center gap-2 text-sm">
-        <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" /> {label}
+        <span className="w-2 h-2 rounded-full bg-success animate-pulse" /> {label}
       </span>
       <Button variant="destructive" onClick={hangup} aria-label="End call" data-testid="voice-end-button">
         <PhoneOff className="h-4 w-4 mr-2" /> End

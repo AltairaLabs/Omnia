@@ -40,8 +40,8 @@ export function AgentConditions({ conditions }: Readonly<AgentConditionsProps>) 
                   className={cn(
                     "px-2 py-0.5 rounded text-xs font-medium",
                     condition.status === "True"
-                      ? "bg-green-500/15 text-green-700 dark:text-green-400"
-                      : "bg-red-500/15 text-red-700 dark:text-red-400",
+                      ? "bg-success/15 text-success"
+                      : "bg-destructive/15 text-destructive",
                   )}
                 >
                   {condition.type}
