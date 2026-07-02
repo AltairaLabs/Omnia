@@ -113,6 +113,7 @@ func main() {
 	var memoryEnterpriseReaderClusterRole string
 	var enterpriseEnabled bool
 	var licenseServerURL string
+	var licenseAPIURL string
 	var clusterName string
 	var mgmtPlaneJWKSURL string
 	var meshEnabled bool
@@ -274,6 +275,10 @@ func main() {
 		"Enable enterprise edition controllers and webhooks")
 	flag.StringVar(&licenseServerURL, "license-server-url", "",
 		"URL of the license activation server for enterprise features")
+	flag.StringVar(&licenseAPIURL, "license-api-url", "",
+		"Arena-controller license endpoint, stamped onto data-plane pods as "+
+			"OPERATOR_API_URL so they nag when unlicensed (e.g. "+
+			"http://omnia-arena-controller.omnia-system:8082)")
 	flag.StringVar(&clusterName, "cluster-name", "",
 		"Human-readable name for this cluster in license records")
 	flag.StringVar(&mgmtPlaneJWKSURL, "mgmt-plane-jwks-url", "",
@@ -466,8 +471,9 @@ func main() {
 				Name: sessionRedisURLSecretName,
 				Key:  sessionRedisURLSecretKey,
 			},
-			ServiceAuth: serviceAuth,
-			Enterprise:  enterpriseEnabled,
+			ServiceAuth:   serviceAuth,
+			Enterprise:    enterpriseEnabled,
+			LicenseAPIURL: licenseAPIURL,
 		},
 		AgentWorkspaceReaderClusterRole:   agentWorkspaceReaderClusterRole,
 		OperatorNamespace:                 os.Getenv("POD_NAMESPACE"),

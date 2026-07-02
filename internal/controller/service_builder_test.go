@@ -974,6 +974,28 @@ func TestBuildMemoryDeployment_StampsEnterpriseEnv(t *testing.T) {
 	}
 }
 
+func TestBuildMemoryDeployment_StampsOperatorAPIURL(t *testing.T) {
+	const url = "http://omnia-arena-controller.omnia-system:8082"
+
+	t.Run("enterprise with URL stamps OPERATOR_API_URL", func(t *testing.T) {
+		sb := &ServiceBuilder{MemoryImage: "memory:test", Enterprise: true, LicenseAPIURL: url}
+		dep := sb.BuildMemoryDeployment("ws", "ns", omniav1alpha1.WorkspaceServiceGroup{Name: defaultSvcGroupName})
+		assert.Equal(t, url, deploymentEnvValue(t, dep, "OPERATOR_API_URL"))
+	})
+
+	t.Run("enterprise without URL stamps nothing", func(t *testing.T) {
+		sb := &ServiceBuilder{MemoryImage: "memory:test", Enterprise: true}
+		dep := sb.BuildMemoryDeployment("ws", "ns", omniav1alpha1.WorkspaceServiceGroup{Name: defaultSvcGroupName})
+		assert.False(t, deploymentHasEnv(dep, "OPERATOR_API_URL"))
+	})
+
+	t.Run("non-enterprise never stamps the URL", func(t *testing.T) {
+		sb := &ServiceBuilder{MemoryImage: "memory:test", Enterprise: false, LicenseAPIURL: url}
+		dep := sb.BuildMemoryDeployment("ws", "ns", omniav1alpha1.WorkspaceServiceGroup{Name: defaultSvcGroupName})
+		assert.False(t, deploymentHasEnv(dep, "OPERATOR_API_URL"))
+	})
+}
+
 func TestBuildSessionDeployment_StampsEnterpriseEnv(t *testing.T) {
 	for _, tc := range []struct {
 		name       string
@@ -1000,6 +1022,15 @@ func deploymentEnvValue(t *testing.T, dep *appsv1.Deployment, name string) strin
 	}
 	t.Fatalf("env %q not found", name)
 	return ""
+}
+
+func deploymentHasEnv(dep *appsv1.Deployment, name string) bool {
+	for _, e := range dep.Spec.Template.Spec.Containers[0].Env {
+		if e.Name == name {
+			return true
+		}
+	}
+	return false
 }
 
 // TestBuildPrivacyDeployment verifies the core shape of a per-workspace

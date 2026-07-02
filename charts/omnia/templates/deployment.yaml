@@ -254,6 +254,10 @@ spec:
             # Tell the operator the reader ClusterRole name so it binds each memory-api
             # ServiceAccount to it (#1444).
             - --memory-enterprise-reader-clusterrole={{ include "omnia.fullname" . }}-memory-enterprise-reader
+            # License endpoint (arena-controller), stamped onto data-plane pods as
+            # OPERATOR_API_URL so they log a startup nag when unlicensed (#1682).
+            # FQDN with namespace because data-plane pods run in workspace namespaces.
+            - --license-api-url=http://{{ include "omnia.fullname" . }}-arena-controller.{{ .Release.Namespace }}:{{ ((.Values.enterprise.arena.controller).api).port | default 8082 }}
             {{- end }}
             {{- if .Values.rollout.meshEnabled }}
             # Istio ambient + waypoint present — let the operator manage
