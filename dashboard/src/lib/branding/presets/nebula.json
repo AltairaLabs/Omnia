@@ -1,7 +1,11 @@
 {
   "productName": "Nebula",
-  "logo": { "light": "/logo.svg", "dark": "/logo-dark.svg" },
-  "favicon": "/favicon.svg",
+  "logo": { "light": "/presets/nebula-logo.svg", "dark": "/presets/nebula-logo.svg" },
+  "favicon": "/presets/nebula-logo.svg",
+  "fonts": {
+    "family": "Space Grotesk",
+    "url": "https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap"
+  },
   "colors": {
     "primary": "#7C3AED",
     "accent": "#DB2777",

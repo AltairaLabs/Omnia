@@ -37,7 +37,7 @@ describe("brandConfigToCssVars", () => {
 
   it("emits a font-family var when provided", () => {
     const vars = brandConfigToCssVars({ ...OMNIA_BRAND, fonts: { family: "Acme Sans" } });
-    expect(vars["--font-sans"]).toContain("Acme Sans");
+    expect(vars["--brand-font-sans"]).toContain("Acme Sans");
   });
 
   it("returns no vars for a config with no colors or fonts", () => {

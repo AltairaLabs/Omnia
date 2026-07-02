@@ -1,7 +1,11 @@
 {
   "productName": "Acme Cloud",
-  "logo": { "light": "/logo.svg", "dark": "/logo-dark.svg" },
-  "favicon": "/favicon.svg",
+  "logo": { "light": "/presets/acme-logo.svg", "dark": "/presets/acme-logo.svg" },
+  "favicon": "/presets/acme-logo.svg",
+  "fonts": {
+    "family": "Poppins",
+    "url": "https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap"
+  },
   "colors": {
     "primary": "#EA580C",
     "accent": "#DC2626",

@@ -42,7 +42,12 @@ export function brandConfigToCssVars(cfg: BrandConfig): Record<string, string> {
     }
   }
   if (cfg.fonts?.family) {
-    vars["--font-sans"] = `${cfg.fonts.family}, ui-sans-serif, system-ui, sans-serif`;
+    // Consumed by globals.css `--font-sans`, which falls back to the bundled
+    // Inter (`@theme inline` bakes the token into the utility, so a plain
+    // `--font-sans` override would be a no-op — this indirection is what makes
+    // the brand font actually apply at runtime). Emit only the family so the
+    // global fallback stack survives if the webfont fails to load.
+    vars["--brand-font-sans"] = cfg.fonts.family;
   }
   return vars;
 }

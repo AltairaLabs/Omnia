@@ -18,6 +18,14 @@ describe("applySecurityHeaders", () => {
     expect(csp).not.toContain("jsdelivr");
   });
 
+  it("allows brand webfonts from Google Fonts (white-label branding)", () => {
+    const res = applySecurityHeaders(NextResponse.next());
+    const csp = res.headers.get("Content-Security-Policy") ?? "";
+    // Brand fonts.url stylesheets + their font files must be loadable.
+    expect(csp).toContain("https://fonts.googleapis.com");
+    expect(csp).toContain("https://fonts.gstatic.com");
+  });
+
   it("honours the OMNIA_CSP_POLICY override", () => {
     process.env.OMNIA_CSP_POLICY = "default-src 'none'";
     const res = applySecurityHeaders(NextResponse.next());

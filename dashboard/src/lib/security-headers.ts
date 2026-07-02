@@ -32,9 +32,11 @@ import type { NextResponse } from "next/server";
 const DEFAULT_CSP = [
   "default-src 'self'",
   "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
-  "style-src 'self' 'unsafe-inline'",
+  // fonts.googleapis.com serves brand webfont stylesheets (white-label
+  // `fonts.url`); gstatic serves the font files themselves.
+  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
   "img-src 'self' data: blob: https:",
-  "font-src 'self' data:",
+  "font-src 'self' data: https://fonts.gstatic.com",
   "connect-src 'self' ws: wss:",
   // Monaco (self-hosted) creates its editor/language web workers from blob URLs.
   "worker-src 'self' blob:",
