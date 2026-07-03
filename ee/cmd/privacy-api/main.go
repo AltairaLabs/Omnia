@@ -187,7 +187,12 @@ func splitAndTrim(s string) []string {
 
 func main() {
 	if err := run(); err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		if log, syncLog, lerr := logging.NewLogger(); lerr == nil {
+			log.Error(err, "startup failed")
+			syncLog()
+		} else {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		}
 		os.Exit(1)
 	}
 }
@@ -714,7 +719,7 @@ func envDuration(key string, def time.Duration) time.Duration {
 // startHTTPServer starts an HTTP server in a background goroutine.
 func startHTTPServer(log logr.Logger, name, addr string, srv *http.Server) {
 	go func() {
-		log.Info("starting server", "server", name, "addr", addr)
+		log.Info(fmt.Sprintf("starting %s server on %s", name, addr), "addr", addr)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Error(err, "server error", "server", name)
 		}
