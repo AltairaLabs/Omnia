@@ -18,6 +18,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Brain, Search, AlertCircle, Loader2 } from "lucide-react";
 import { useMemoryProjection } from "@/hooks/use-memory-projection";
 import { usePersistedViewMode } from "@/hooks/use-persisted-view-mode";
+import { useServiceBannerCulprit } from "@/hooks/use-service-banner-culprit";
 import { FacetRail, type Facet } from "@/components/memories/facet-rail";
 import { facetCounts, parseHiddenTiers } from "@/lib/memory-galaxy/galaxy-math";
 import { countMatches } from "@/lib/memory-galaxy/galaxy-search";
@@ -30,6 +31,7 @@ import type { GalaxyPoint } from "@/lib/memory-galaxy/types";
 import type { Tier } from "@/lib/memory-analytics/types";
 import { useDeleteMemory } from "@/hooks/use-memory-mutations";
 import { EnterpriseGate } from "@/components/license/license-gate";
+import { ServiceUnreadyBanner } from "@/components/sessions/service-unready-banner";
 
 const MemoryGalaxy = dynamic(
   () => import("@/components/memories/memory-galaxy").then((m) => m.MemoryGalaxy),
@@ -74,6 +76,10 @@ interface GalaxyBodyState {
   hasWorkspace: boolean;
   error: unknown;
   isLoading: boolean;
+  /** A culprit service was already identified by the banner above — the
+   * error alert and the loading skeleton both defer to it instead of
+   * duplicating (or, for loading, hanging on) the same message. */
+  hasCulprit: boolean;
   status?: "ready" | "pending";
   total: number;
   points: GalaxyPoint[];
@@ -94,6 +100,7 @@ function renderGalaxyBody(s: GalaxyBodyState): ReactNode {
     );
   }
   if (s.error) {
+    if (s.hasCulprit) return null;
     return (
       <Alert variant="destructive" data-testid="memory-error">
         <AlertCircle className="h-4 w-4" />
@@ -105,6 +112,10 @@ function renderGalaxyBody(s: GalaxyBodyState): ReactNode {
     );
   }
   if (s.isLoading) {
+    // A known culprit means the banner above already explains the hang —
+    // an indefinite skeleton here would be the endless-spinner bug this
+    // proactive check exists to fix.
+    if (s.hasCulprit) return null;
     return <Skeleton className="h-[70vh] min-h-[360px] w-full rounded-lg" data-testid="galaxy-loading" />;
   }
   // Large workspace the pre-render worker hasn't finished yet — the hook polls
@@ -153,6 +164,15 @@ function MemoriesContent() {
   const { currentWorkspace } = useWorkspace();
   const hasWorkspace = !!currentWorkspace;
   const { data, isLoading, error } = useMemoryProjection();
+  // A hung memory-api never surfaces an error on its own — check the
+  // culprit banner proactively (while loading, not just on error) so a
+  // dead backend doesn't leave the galaxy spinning forever.
+  const { bannerCulprit, setBannerCulprit, showBanner } = useServiceBannerCulprit(
+    currentWorkspace?.name,
+    error,
+    isLoading
+  );
+  const hasCulprit = bannerCulprit === true;
 
   const [searchQuery, setSearchQuery] = useState("");
   const [colorBy, setColorBy] = usePersistedViewMode<"tier" | "category">(
@@ -223,10 +243,19 @@ function MemoriesContent() {
 
         {hasWorkspace && <FacetRail facets={facets} hidden={hidden} onToggle={toggleFacet} />}
 
+        {showBanner && currentWorkspace && (
+          <ServiceUnreadyBanner
+            workspaceName={currentWorkspace.name}
+            resourceLabel="memories"
+            onResult={setBannerCulprit}
+          />
+        )}
+
         {renderGalaxyBody({
           hasWorkspace,
           error,
           isLoading,
+          hasCulprit,
           status: data?.status,
           total: data?.total ?? 0,
           points,

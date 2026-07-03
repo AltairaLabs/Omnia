@@ -6,6 +6,8 @@ import { useMemoryAggregate } from "@/hooks/use-memory-aggregate";
 import { useConsentStats } from "@/hooks/use-consent-stats";
 import { useEnforcementStats } from "@/hooks/use-enforcement-stats";
 import { useAgents } from "@/hooks/use-agents";
+import { useWorkspace } from "@/contexts/workspace-context";
+import { useServiceBannerCulprit } from "@/hooks/use-service-banner-culprit";
 import { TierLegend } from "@/components/memory-analytics/tier-legend";
 import { TierQuadCard } from "@/components/memory-analytics/tier-quad-card";
 import { ConsolidationSection } from "@/components/memory-analytics/consolidation-section";
@@ -24,6 +26,7 @@ import {
   resolveAgentRows,
 } from "@/lib/memory-analytics/agent-names";
 import { EnterpriseGate } from "@/components/license/license-gate";
+import { ServiceUnreadyBanner } from "@/components/sessions/service-unready-banner";
 
 const DEFAULT_RANGE_DAYS: RangeDays = 30;
 
@@ -61,6 +64,23 @@ function rangeWindow(days: RangeDays): { from: string; to: string } {
   return { from: from.toISOString(), to: now.toISOString() };
 }
 
+interface QueryLike {
+  isLoading: boolean;
+  error: unknown;
+}
+
+/** True while any of the memory-api aggregate queries backing this page is
+ * still in flight — a hung memory-api never surfaces an error on its own,
+ * so the culprit banner must be checked proactively while loading. */
+function anyLoading(queries: QueryLike[]): boolean {
+  return queries.some((q) => q.isLoading);
+}
+
+/** The first error among the memory-api aggregate queries, if any. */
+function firstError(queries: QueryLike[]): unknown {
+  return queries.find((q) => q.error)?.error ?? null;
+}
+
 function MemoryAnalyticsContent() {
   const [rangeDays, setRangeDays] = useState<RangeDays>(DEFAULT_RANGE_DAYS);
 
@@ -88,6 +108,18 @@ function MemoryAnalyticsContent() {
   const agentsQuery = useAgents();
   const consolidationQuery = useConsolidationStats({ rangeDays });
 
+  // Memory-api aggregate queries drive every panel on this page — while any
+  // of them is loading, a hung memory-api would otherwise spin forever with
+  // no error to trigger a fallback. Check the culprit banner proactively.
+  const memoryQueries = [tierQuery, categoryQuery, agentQuery, todayQuery, dayQuery, activeUsersQuery];
+  const { currentWorkspace } = useWorkspace();
+  const { bannerCulprit, setBannerCulprit, showBanner } = useServiceBannerCulprit(
+    currentWorkspace?.name,
+    firstError(memoryQueries),
+    anyLoading(memoryQueries),
+  );
+  const hasCulprit = bannerCulprit === true;
+
   const agentNameByUid = useMemo(
     () => agentNameByUidMap(agentsQuery.data ?? []),
     [agentsQuery.data],
@@ -114,10 +146,11 @@ function MemoryAnalyticsContent() {
   const enforcement = enforcementQuery.data ?? EMPTY_ENFORCEMENT;
 
   const summaryLoading =
-    categoryQuery.isLoading ||
-    activeUsersQuery.isLoading ||
-    todayQuery.isLoading ||
-    enforcementQuery.isLoading;
+    !hasCulprit &&
+    (categoryQuery.isLoading ||
+      activeUsersQuery.isLoading ||
+      todayQuery.isLoading ||
+      enforcementQuery.isLoading);
 
   return (
     <div className="flex flex-col h-full">
@@ -127,6 +160,14 @@ function MemoryAnalyticsContent() {
       />
 
       <main className="flex-1 overflow-auto p-6 space-y-6">
+        {showBanner && currentWorkspace && (
+          <ServiceUnreadyBanner
+            workspaceName={currentWorkspace.name}
+            resourceLabel="memory analytics"
+            onResult={setBannerCulprit}
+          />
+        )}
+
         <TierLegend />
 
         <SummaryCards
@@ -139,12 +180,12 @@ function MemoryAnalyticsContent() {
 
         <TierQuadCard
           rows={tierQuery.data ?? []}
-          loading={tierQuery.isLoading}
+          loading={!hasCulprit && tierQuery.isLoading}
         />
 
         <ConsolidationSection
           stats={consolidationQuery.data}
-          loading={consolidationQuery.isLoading}
+          loading={!hasCulprit && consolidationQuery.isLoading}
         />
 
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
