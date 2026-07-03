@@ -55,8 +55,12 @@
 
 ## Authentication (internal service-to-service)
 
-Opt-in, off by default; gated by the chart value `internalServiceAuth.enabled`
-(closes SEC-1 unauthenticated JSON API, SEC-5 unauthenticated OTLP listeners).
+Gated by the chart value `internalServiceAuth.enabled`, which is **on by default**
+(secure by default, #1720; closes SEC-1 unauthenticated JSON API, SEC-5
+unauthenticated OTLP listeners). The binary flag `--auth-enabled` still defaults
+to `false` — the chart/operator opt each per-workspace session-api in. Operators
+can disable the chart value for a custom, non-enumerated caller that cannot
+present an SA token.
 When enabled, **every** caller must present a Kubernetes ServiceAccount bearer
 token, validated server-side via the **TokenReview API**. A caller is authorized
 iff its TokenReview subject is an **exact match** in the allowed-subjects list

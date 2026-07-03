@@ -157,6 +157,49 @@ For chart-owned deployments (operator, dashboard, arena-controller) use the inli
 
 ---
 
+## Internal service authentication (session-api)
+
+The operator-managed per-workspace **session-api** (the session CRUD JSON API and
+its optional OTLP listeners) is protected by ServiceAccount-token authentication.
+This is controlled by `internalServiceAuth` and is **on by default** (secure by
+default, [#1720](https://github.com/AltairaLabs/Omnia/issues/1720)).
+
+**Trust boundary.** With `internalServiceAuth.enabled: true`, session-api rejects
+any request that does not carry a valid Kubernetes ServiceAccount bearer token:
+
+- Every caller presents an **audience-bound projected SA token** (`audience:
+  omnia-session-api`) and sends it as `Authorization: Bearer <token>`.
+- session-api validates the token server-side via the Kubernetes **TokenReview**
+  API and authorizes the caller when its ServiceAccount subject is in the
+  allowlist **or** its ServiceAccount namespace is the workspace namespace.
+- The chart/operator wire this automatically for every caller they manage:
+  the facade/agent, memory-api and eval-worker (authorized by namespace) and the
+  cross-namespace dashboard SA (authorized as an exact-match subject).
+- Two defence-in-depth layers ride on the same switch: a default-deny-ingress
+  **NetworkPolicy** on the session-api/memory-api pods (a no-op on clusters whose
+  CNI does not enforce NetworkPolicy — the TokenReview gate still applies), and
+  an optional STRICT Istio **PeerAuthentication** via
+  `internalServiceAuth.istio.enabled`.
+
+**When to disable.** Set `internalServiceAuth.enabled: false` only if you run a
+**custom, non-enumerated caller** of session-api that cannot present an SA token.
+It will otherwise receive `401`s. Prefer adding its ServiceAccount to the
+allowlist over turning the gate off wholesale.
+
+**OTLP senders.** session-api's OTLP listeners (`--otlp-enabled`) are gated by the
+same auth. The default chart trace path is `agents → alloy → Tempo` only (no
+alloy→session-api exporter), so nothing needs a bearer token out of the box. If
+you add an OTLP exporter that targets session-api while auth is on, that sender
+**must** present its own projected SA token. See `cmd/session-api/SERVICE.md`.
+
+**Upgrade note.** Turning this on (now the default) makes session-api reject
+tokenless callers. All in-tree callers already send tokens, so upgrades of a
+stock install are transparent — but if you had a bespoke integration talking to
+session-api directly, allowlist its SA or set `internalServiceAuth.enabled:
+false` before upgrading.
+
+---
+
 ## Upgrading
 
 Before each upgrade:
@@ -204,6 +247,7 @@ A selection of things that will bite you if you don't know about them:
 - **Large CRDs overflow client-side `kubectl apply`.** Always use `kubectl apply --server-side --force-conflicts -f charts/omnia/crds/` when installing CRDs manually. `make install` does this correctly.
 - **Agent metrics are discovered by a `metrics`-named container port, not by `prometheus.io/port`.** An agent pod serves Prometheus metrics on two ports across two containers — the facade on 8081 and the runtime on 9001 — with no in-pod consolidation, so a single `prometheus.io/port` annotation can't express both (it used to point at 8080, which has no `/metrics`, so facade metrics were never scraped — see #1488). Both containers instead declare a container port **named `metrics`**; the bundled Prometheus `omnia-agents` job and the optional `podMonitor` (for an external Prometheus Operator) both key on that port name, so one job covers both endpoints regardless of port number or which facade/runtime image is deployed. Under Istio sidecars the operator excludes both metrics ports from inbound mTLS interception so the direct scrape still works (no reliance on `merge-metrics`).
 - **Grafana dashboard ConfigMaps render only when `grafana.enabled`.** They're labeled for discovery by Grafana's sidecar — harmless if missing, but not orphaned.
+- **session-api requires ServiceAccount auth by default (`internalServiceAuth.enabled: true`).** Tokenless callers get `401`. All in-tree callers (facade, dashboard, memory-api, eval-worker) send tokens automatically; a bespoke direct caller must be allowlisted or you must set `internalServiceAuth.enabled: false`. See [Internal service authentication](#internal-service-authentication-session-api).
 
 ---
 
