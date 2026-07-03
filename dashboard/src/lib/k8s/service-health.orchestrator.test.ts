@@ -144,4 +144,43 @@ describe("getServiceHealth", () => {
       process.env.MEMORY_API_URL = originalMemory;
     }
   });
+
+  it("returns unknown with no groups when there is neither CRD status nor env fallback", async () => {
+    vi.mocked(getWorkspace).mockResolvedValue({
+      spec: { namespace: { name: "omnia-acme" } },
+      status: {},
+    } as any);
+
+    const originalSession = process.env.SESSION_API_URL;
+    const originalMemory = process.env.MEMORY_API_URL;
+    delete process.env.SESSION_API_URL;
+    delete process.env.MEMORY_API_URL;
+
+    try {
+      const result = await getServiceHealth(clientOptions, "acme");
+      expect(result).toEqual({ workspaceServices: [], groups: [], source: "unknown" });
+      expect(getWorkspaceCoreApi).not.toHaveBeenCalled();
+    } finally {
+      process.env.SESSION_API_URL = originalSession;
+      process.env.MEMORY_API_URL = originalMemory;
+    }
+  });
+
+  it("falls back to a default group name when getWorkspace itself throws", async () => {
+    vi.mocked(getWorkspace).mockRejectedValue(new Error("k8s API unavailable"));
+
+    const result = await getServiceHealth(clientOptions, "acme");
+
+    expect(result.source).toBe("unknown");
+    expect(result.groups).toEqual([
+      {
+        name: "default",
+        ready: false,
+        members: [
+          expect.objectContaining({ service: "session-api", state: "unknown" }),
+          expect.objectContaining({ service: "memory-api", state: "unknown" }),
+        ],
+      },
+    ]);
+  });
 });
