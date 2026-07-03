@@ -351,6 +351,10 @@ func (sb *ServiceBuilder) BuildMemoryDeployment(workspaceName, namespace string,
 	addPodNamespaceEnv(dep)
 	addMemoryRedisURLEnv(dep, redisSecret)
 	addEnterpriseEnv(dep, sb.Enterprise, sb.LicenseAPIURL)
+	// Server side: enforce ServiceAccount auth on memory-api's JSON API when
+	// enabled — reads the same shared SESSION_API_AUTH_* config the operator
+	// stamps onto session-api and privacy-api (SEC-1/SEC-5).
+	sb.ServiceAuth.applySessionAPIServerAuthEnv(dep, workspaceName, sg.Name, namespace)
 	// Caller side: memory-api emits provider_usage to the co-located
 	// session-api, so it presents an audience-bound projected SA token when
 	// auth is enabled (SEC-1/SEC-5).
