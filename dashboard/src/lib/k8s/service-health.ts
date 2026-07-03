@@ -67,11 +67,11 @@ function reasonForPending(cs: V1ContainerStatus): string | undefined {
   return reason && reason.length > REASON_MAX_LEN ? `${reason.slice(0, REASON_MAX_LEN)}...` : reason;
 }
 
-function stateFor(phase: string | undefined, ready: boolean, crashlooping: boolean): ServiceState {
+function stateFor(phase: string | undefined, ready: boolean, crashlooping: boolean, hasContainerStatuses: boolean): ServiceState {
   if (crashlooping) return "crashlooping";
   if (ready) return "ready";
-  if (phase === "Pending" || !ready) return "pending";
-  return "unknown";
+  if (phase === "Unknown" || !hasContainerStatuses) return "unknown";
+  return "pending";
 }
 
 /**
@@ -91,7 +91,7 @@ export function podHealthFromStatus(pods: V1Pod[], service: string, url?: string
   const crashedContainer = containerStatuses.find((cs) => isCrashlooping(cs, cs.restartCount ?? 0));
   const crashlooping = crashedContainer !== undefined;
 
-  const state = stateFor(status?.phase, ready, crashlooping);
+  const state = stateFor(status?.phase, ready, crashlooping, containerStatuses.length > 0);
 
   let reason: string | undefined;
   if (crashlooping && crashedContainer) {

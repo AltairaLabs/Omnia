@@ -6,6 +6,12 @@ const ready = { status: { phase: "Running", containerStatuses: [{ ready: true, r
 const crash = { status: { phase: "Running", containerStatuses: [{ ready: false, restartCount: 12,
   state: { waiting: { reason: "CrashLoopBackOff", message: "back-off restarting" } },
   lastState: { terminated: { reason: "Error", message: "ensure embedding schema: consent required" } } }] } } as any;
+const pending = { status: { phase: "Pending", containerStatuses: [{ ready: false, restartCount: 0,
+  state: { waiting: { reason: "ContainerCreating" } } }] } } as any;
+const unknownPhase = { status: { phase: "Unknown" } } as any;
+const emptyContainerStatuses = { status: { phase: "Running", containerStatuses: [] } } as any;
+const pendingNoWaiting = { status: { phase: "Pending", containerStatuses: [{ ready: false, restartCount: 0, state: {} }] } } as any;
+const crashNoDetail = { status: { phase: "Running", containerStatuses: [{ ready: false, restartCount: 1, state: {} }] } } as any;
 
 describe("podHealthFromStatus", () => {
   it("healthy pod → ready", () => {
@@ -19,5 +25,30 @@ describe("podHealthFromStatus", () => {
   });
   it("no pods → notDeployed", () => {
     expect(podHealthFromStatus([], "privacy-api")).toMatchObject({ state: "notDeployed", ready: false, restarts: 0 });
+  });
+  it("pending pod (ContainerCreating) → pending", () => {
+    const h = podHealthFromStatus([pending], "runtime");
+    expect(h.state).toBe("pending");
+    expect(h.ready).toBe(false);
+  });
+  it("Unknown phase pod with no container statuses → unknown", () => {
+    const h = podHealthFromStatus([unknownPhase], "facade");
+    expect(h.state).toBe("unknown");
+    expect(h.ready).toBe(false);
+  });
+  it("Running phase pod with empty container statuses → unknown", () => {
+    const h = podHealthFromStatus([emptyContainerStatuses], "policy-proxy");
+    expect(h.state).toBe("unknown");
+    expect(h.ready).toBe(false);
+  });
+  it("pending container with no waiting state → no reason surfaced", () => {
+    const h = podHealthFromStatus([pendingNoWaiting], "runtime");
+    expect(h.state).toBe("pending");
+    expect(h.reason).toBeUndefined();
+  });
+  it("crashlooping container with no waiting/terminated detail → no reason surfaced", () => {
+    const h = podHealthFromStatus([crashNoDetail], "memory-api");
+    expect(h.state).toBe("crashlooping");
+    expect(h.reason).toBeUndefined();
   });
 });
