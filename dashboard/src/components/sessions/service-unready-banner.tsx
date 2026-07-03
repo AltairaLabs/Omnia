@@ -13,7 +13,7 @@
  * This banner independently checks GET /api/workspaces/:name/services (the
  * per-service health endpoint) whenever the sessions view has an error, and
  * — if it can identify a genuinely unready member of the `default` service
- * group — names it and links to the Services page for that group. If the
+ * group — names it and links to the workspace settings Services tab. If the
  * services check comes back healthy (a different, unrelated error), it
  * renders nothing so the sessions page's existing generic error message is
  * the only thing shown.
@@ -105,7 +105,7 @@ export function ServiceUnreadyBanner({
           {culprit.service} unhealthy
         </span>
         <Button asChild variant="outline" size="sm">
-          <Link href={`/services?group=${encodeURIComponent(culprit.groupName)}`}>
+          <Link href={`/workspaces/${encodeURIComponent(workspaceName)}/settings?tab=services`}>
             Open Services
           </Link>
         </Button>

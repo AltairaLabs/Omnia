@@ -102,7 +102,7 @@ describe("ServiceUnreadyBanner", () => {
     expect(screen.getByText(/memory-api unhealthy/i)).toBeInTheDocument();
 
     const link = screen.getByRole("link", { name: /open services/i });
-    expect(link).toHaveAttribute("href", "/services?group=default");
+    expect(link).toHaveAttribute("href", "/workspaces/demo/settings?tab=services");
 
     expect(global.fetch).toHaveBeenCalledWith("/api/workspaces/demo/services");
     expect(onResult).toHaveBeenCalledWith(true);
@@ -122,7 +122,7 @@ describe("ServiceUnreadyBanner", () => {
 
     expect(screen.getByText(/service group 'grp-1' not ready/i)).toBeInTheDocument();
     const link = screen.getByRole("link", { name: /open services/i });
-    expect(link).toHaveAttribute("href", "/services?group=grp-1");
+    expect(link).toHaveAttribute("href", "/workspaces/demo/settings?tab=services");
   });
 
   it("renders nothing when all group members are ready", async () => {

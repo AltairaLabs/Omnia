@@ -16,8 +16,11 @@ vi.mock("@/hooks/use-workspace-permissions", () => ({
   useWorkspacePermissions: () => mockUseWorkspacePermissions(),
 }));
 
+const mockUseSearchParams = vi.fn();
+
 vi.mock("next/navigation", () => ({
   useParams: () => ({ name: "test-ws" }),
+  useSearchParams: () => mockUseSearchParams(),
 }));
 
 vi.mock("@/components/layout", () => ({
@@ -45,6 +48,7 @@ describe("WorkspaceSettingsPage", () => {
   beforeEach(() => {
     mockUseWorkspacePatch.mockReturnValue({ mutate: vi.fn() });
     mockUseWorkspacePermissions.mockReturnValue({ isOwner: false });
+    mockUseSearchParams.mockReturnValue(new URLSearchParams());
   });
 
   it("renders header with 'Workspace Settings'", () => {
@@ -111,6 +115,17 @@ describe("WorkspaceSettingsPage", () => {
     const user = userEvent.setup();
     render(<WorkspaceSettingsPage />);
     await user.click(screen.getByRole("tab", { name: "Services" }));
+    expect(screen.getByText("No service groups configured")).toBeInTheDocument();
+  });
+
+  it("deep-links straight to the Services tab via ?tab=services", () => {
+    mockUseWorkspaceDetail.mockReturnValue({
+      data: workspace,
+      isLoading: false,
+      error: null,
+    });
+    mockUseSearchParams.mockReturnValue(new URLSearchParams("?tab=services"));
+    render(<WorkspaceSettingsPage />);
     expect(screen.getByText("No service groups configured")).toBeInTheDocument();
   });
 });

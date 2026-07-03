@@ -20,7 +20,6 @@ import {
   Zap,
   PanelLeftClose,
   PanelLeftOpen,
-  HeartPulse,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -49,7 +48,6 @@ const navigation: NavItem[] = [
   { name: "Tools", href: "/tools", icon: Wrench },
   { name: "Providers", href: "/providers", icon: Cpu },
   { name: "Sessions", href: "/sessions", icon: MessageSquare },
-  { name: "Services", href: "/services", icon: HeartPulse },
   { name: "Memories", href: "/memories", icon: Brain, enterprise: true },
   { name: "Memory analytics", href: "/memory-analytics", icon: BarChart3, enterprise: true },
   { name: "Quality", href: "/quality", icon: ShieldCheck },

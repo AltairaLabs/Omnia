@@ -1,6 +1,6 @@
 "use client";
 
-import { useParams } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
 import { AlertCircle } from "lucide-react";
 import { Header } from "@/components/layout";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -15,8 +15,15 @@ import { AccessTab } from "./access-tab";
 import { AdminTab } from "./admin-tab";
 import { DeployTab } from "./deploy-tab";
 
+/** Query-string key used to deep-link into a specific settings tab. */
+const TAB_QUERY_PARAM = "tab";
+const VALID_TABS = ["overview", "services", "deploy", "access", "advanced"];
+
 export default function WorkspaceSettingsPage() {
   const { name } = useParams<{ name: string }>();
+  const searchParams = useSearchParams();
+  const requestedTab = searchParams.get(TAB_QUERY_PARAM);
+  const initialTab = requestedTab && VALID_TABS.includes(requestedTab) ? requestedTab : "overview";
   const { data: workspace, isLoading, error } = useWorkspaceDetail(name);
   const { isOwner } = useWorkspacePermissions();
   const { toast } = useToast();
@@ -64,7 +71,7 @@ export default function WorkspaceSettingsPage() {
     <div className="flex flex-col h-full">
       <Header title="Workspace Settings" description={workspace.spec.displayName} />
       <div className="flex-1 p-6">
-        <Tabs defaultValue="overview">
+        <Tabs defaultValue={initialTab}>
           <TabsList>
             <TabsTrigger value="overview">Overview</TabsTrigger>
             <TabsTrigger value="services">Services</TabsTrigger>
