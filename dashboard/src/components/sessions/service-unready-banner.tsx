@@ -30,6 +30,13 @@ const DEFAULT_GROUP = "default";
 
 interface ServiceUnreadyBannerProps {
   workspaceName: string;
+  /**
+   * Invoked once the `/services` fetch resolves — `true` when a culprit
+   * service was identified, `false` otherwise. Lets the caller decide
+   * whether to fall back to a generic error message instead of stacking
+   * one on top of this banner.
+   */
+  onResult?: (hasCulprit: boolean) => void;
 }
 
 interface Culprit {
@@ -68,18 +75,23 @@ async function fetchCulprit(workspaceName: string): Promise<Culprit | null> {
  * Renders a banner naming the unready service behind a failed sessions
  * load, or nothing when the service group is actually healthy.
  */
-export function ServiceUnreadyBanner({ workspaceName }: Readonly<ServiceUnreadyBannerProps>) {
+export function ServiceUnreadyBanner({
+  workspaceName,
+  onResult,
+}: Readonly<ServiceUnreadyBannerProps>) {
   const [culprit, setCulprit] = useState<Culprit | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     fetchCulprit(workspaceName).then((found) => {
-      if (!cancelled) setCulprit(found);
+      if (cancelled) return;
+      setCulprit(found);
+      onResult?.(found !== null);
     });
     return () => {
       cancelled = true;
     };
-  }, [workspaceName]);
+  }, [workspaceName, onResult]);
 
   if (!culprit) return null;
 

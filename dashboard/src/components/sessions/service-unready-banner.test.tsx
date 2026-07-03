@@ -90,8 +90,9 @@ describe("ServiceUnreadyBanner", () => {
 
   it("names the crashlooping service and links to the affected group", async () => {
     mockFetchWith(crashloopingResponse);
+    const onResult = vi.fn();
 
-    render(<ServiceUnreadyBanner workspaceName="demo" />);
+    render(<ServiceUnreadyBanner workspaceName="demo" onResult={onResult} />);
 
     await waitFor(() => {
       expect(screen.getByText(/memory-api/)).toBeInTheDocument();
@@ -104,6 +105,7 @@ describe("ServiceUnreadyBanner", () => {
     expect(link).toHaveAttribute("href", "/services?group=default");
 
     expect(global.fetch).toHaveBeenCalledWith("/api/workspaces/demo/services");
+    expect(onResult).toHaveBeenCalledWith(true);
   });
 
   it("falls back to the first group when 'default' is absent", async () => {
@@ -125,8 +127,9 @@ describe("ServiceUnreadyBanner", () => {
 
   it("renders nothing when all group members are ready", async () => {
     mockFetchWith(healthyResponse);
+    const onResult = vi.fn();
 
-    render(<ServiceUnreadyBanner workspaceName="demo" />);
+    render(<ServiceUnreadyBanner workspaceName="demo" onResult={onResult} />);
 
     await waitFor(() => {
       expect(global.fetch).toHaveBeenCalled();
@@ -134,6 +137,9 @@ describe("ServiceUnreadyBanner", () => {
 
     expect(screen.queryByText(/not ready/i)).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: /open services/i })).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(onResult).toHaveBeenCalledWith(false);
+    });
   });
 
   it("renders nothing when the services fetch fails", async () => {

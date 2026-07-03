@@ -146,6 +146,10 @@ export default function SessionsPage() {
   const [timeRange, setTimeRange] = useState<string>("all");
   const [tagFilters, setTagFilters] = useState<Set<string>>(new Set());
   const [page, setPage] = useState(0);
+  // Tri-state: undefined = banner's /services check still pending, true =
+  // a culprit service was found (banner shown, generic alert suppressed),
+  // false = services are healthy (generic alert is the accurate message).
+  const [bannerCulprit, setBannerCulprit] = useState<boolean | undefined>(undefined);
 
   const debouncedSearch = useDebounce(search, 300);
 
@@ -174,6 +178,22 @@ export default function SessionsPage() {
 
   const activeQuery = isSearching ? searchQuery : listQuery;
   const { data, isLoading, error } = activeQuery;
+
+  // Reset the banner tri-state whenever a new error (or workspace) shows
+  // up. This runs during render — not in a useEffect — so it settles
+  // *before* ServiceUnreadyBanner's own effect reports its result; doing
+  // this reset as an effect would run after the child's on mount (effects
+  // fire child-first) and clobber whatever the banner just reported.
+  // See https://react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes
+  const currentWorkspaceName = currentWorkspace?.name;
+  const [resolvedFor, setResolvedFor] = useState<{ error: unknown; workspaceName?: string }>({
+    error: undefined,
+    workspaceName: undefined,
+  });
+  if (error !== resolvedFor.error || currentWorkspaceName !== resolvedFor.workspaceName) {
+    setResolvedFor({ error, workspaceName: currentWorkspaceName });
+    setBannerCulprit(currentWorkspaceName ? undefined : false);
+  }
 
   // Reset to page 0 when filters change
   const resetPage = () => setPage(0);
@@ -272,17 +292,26 @@ export default function SessionsPage() {
           )}
         </div>
 
-        {/* Error state */}
+        {/* Error state — the culprit banner replaces the generic alert when
+            it can name an unready service; the generic alert only shows
+            once we know there's no culprit (bannerCulprit === false). */}
         {error && (
           <>
-            {currentWorkspace && <ServiceUnreadyBanner workspaceName={currentWorkspace.name} />}
-            <Alert variant="destructive">
-              <AlertCircle className="h-4 w-4" />
-              <AlertTitle>Error loading sessions</AlertTitle>
-              <AlertDescription>
-                {error instanceof Error ? error.message : "An unexpected error occurred"}
-              </AlertDescription>
-            </Alert>
+            {currentWorkspace && (
+              <ServiceUnreadyBanner
+                workspaceName={currentWorkspace.name}
+                onResult={setBannerCulprit}
+              />
+            )}
+            {bannerCulprit === false && (
+              <Alert variant="destructive">
+                <AlertCircle className="h-4 w-4" />
+                <AlertTitle>Error loading sessions</AlertTitle>
+                <AlertDescription>
+                  {error instanceof Error ? error.message : "An unexpected error occurred"}
+                </AlertDescription>
+              </Alert>
+            )}
           </>
         )}
 

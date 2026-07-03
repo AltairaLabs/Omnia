@@ -2,9 +2,11 @@
  * Tests for Sessions list page.
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { useEffect } from "react";
+import { render, screen, waitFor } from "@testing-library/react";
 import SessionsPage from "./page";
+import type { WorkspaceServicesHealth } from "@/lib/k8s/service-health";
 
 // Mock hooks
 vi.mock("@/hooks/agents", () => ({
@@ -27,8 +29,18 @@ vi.mock("@/hooks/use-workspace-permissions", () => ({
 vi.mock("@/components/sessions/purge-sessions-dialog", () => ({
   PurgeSessionsDialog: () => <button data-testid="purge-sessions-open">Purge</button>,
 }));
+// Default stub: simulates the banner resolving to "no culprit found" so the
+// pre-existing generic-error tests below (which don't care about the
+// banner/alert composition) keep seeing the generic alert. The dedicated
+// composition describe block further down unmocks this and exercises the
+// real ServiceUnreadyBanner against a mocked `/services` fetch.
 vi.mock("@/components/sessions/service-unready-banner", () => ({
-  ServiceUnreadyBanner: () => <div data-testid="service-unready-banner" />,
+  ServiceUnreadyBanner: ({ onResult }: { onResult?: (hasCulprit: boolean) => void }) => {
+    useEffect(() => {
+      onResult?.(false);
+    }, [onResult]);
+    return <div data-testid="service-unready-banner" />;
+  },
 }));
 vi.mock("@/contexts/workspace-context", () => ({
   useWorkspace: () => ({ currentWorkspace: { name: "demo-workspace" } }),
@@ -156,7 +168,12 @@ describe("SessionsPage", () => {
 
     render(<SessionsPage />);
 
-    expect(screen.getByText("Error loading sessions")).toBeInTheDocument();
+    // The stubbed banner resolves onResult(false) asynchronously (mirrors
+    // the real banner's async /services fetch), so the generic alert
+    // appears once that resolves.
+    await waitFor(() => {
+      expect(screen.getByText("Error loading sessions")).toBeInTheDocument();
+    });
     expect(screen.getByText("Failed to fetch sessions")).toBeInTheDocument();
   });
 
@@ -316,7 +333,9 @@ describe("SessionsPage", () => {
 
     render(<SessionsPage />);
 
-    expect(screen.getByText("An unexpected error occurred")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText("An unexpected error occurred")).toBeInTheDocument();
+    });
   });
 
   async function setupListData() {
@@ -342,5 +361,107 @@ describe("SessionsPage", () => {
     await setupListData();
     render(<SessionsPage />);
     expect(screen.getByTestId("purge-sessions-open")).toBeInTheDocument();
+  });
+
+  // These tests render the REAL ServiceUnreadyBanner (not the stub above) to
+  // verify the page-level composition: the culprit banner must REPLACE the
+  // generic error alert rather than stack on top of it (see #1690 review
+  // finding). vi.resetModules + vi.doUnmock forces a fresh module graph so
+  // the real banner component is used for just this block.
+  describe("error banner composition (real ServiceUnreadyBanner)", () => {
+    const crashloopingHealth: WorkspaceServicesHealth = {
+      workspaceServices: [],
+      groups: [
+        {
+          name: "default",
+          ready: false,
+          members: [
+            { service: "memory-api", state: "crashlooping", ready: false, restarts: 5 },
+            { service: "session-api", state: "ready", ready: true, restarts: 0 },
+          ],
+        },
+      ],
+      source: "crd",
+    };
+
+    const healthyHealth: WorkspaceServicesHealth = {
+      workspaceServices: [],
+      groups: [
+        {
+          name: "default",
+          ready: true,
+          members: [
+            { service: "memory-api", state: "ready", ready: true, restarts: 0 },
+            { service: "session-api", state: "ready", ready: true, restarts: 0 },
+          ],
+        },
+      ],
+      source: "crd",
+    };
+
+    beforeEach(() => {
+      vi.resetModules();
+      vi.doUnmock("@/components/sessions/service-unready-banner");
+    });
+
+    afterEach(() => {
+      // Restore the default stub for every other test in this file.
+      vi.doMock("@/components/sessions/service-unready-banner", () => ({
+        ServiceUnreadyBanner: ({ onResult }: { onResult?: (hasCulprit: boolean) => void }) => {
+          useEffect(() => {
+            onResult?.(false);
+          }, [onResult]);
+          return <div data-testid="service-unready-banner" />;
+        },
+      }));
+    });
+
+    async function renderWithError(health: WorkspaceServicesHealth) {
+      global.fetch = vi.fn(() =>
+        Promise.resolve({ ok: true, json: () => Promise.resolve(health) })
+      ) as unknown as typeof fetch;
+
+      const { useSessions, useSessionSearch, useAgents } = await import("@/hooks");
+      vi.mocked(useSessions).mockReturnValue({
+        data: undefined,
+        isLoading: false,
+        error: new Error("Failed to fetch sessions"),
+      } as any);
+      vi.mocked(useSessionSearch).mockReturnValue({
+        data: undefined,
+        isLoading: false,
+        error: null,
+      } as any);
+      vi.mocked(useAgents).mockReturnValue({ data: undefined } as any);
+
+      const { default: SessionsPageReal } = await import("./page");
+      render(<SessionsPageReal />);
+    }
+
+    it("shows only the culprit banner — the generic alert is suppressed", async () => {
+      await renderWithError(crashloopingHealth);
+
+      // No flash of the generic (misleading) alert while /services is
+      // still pending, right after the initial synchronous render.
+      expect(screen.queryByText("Error loading sessions")).not.toBeInTheDocument();
+
+      await waitFor(() => {
+        expect(screen.getByText(/memory-api unhealthy/i)).toBeInTheDocument();
+      });
+
+      expect(screen.queryByText("Error loading sessions")).not.toBeInTheDocument();
+      expect(screen.getAllByRole("alert")).toHaveLength(1);
+    });
+
+    it("shows only the generic alert when all services are healthy", async () => {
+      await renderWithError(healthyHealth);
+
+      await waitFor(() => {
+        expect(screen.getByText("Error loading sessions")).toBeInTheDocument();
+      });
+
+      expect(screen.queryByText(/unhealthy/i)).not.toBeInTheDocument();
+      expect(screen.getAllByRole("alert")).toHaveLength(1);
+    });
   });
 });
