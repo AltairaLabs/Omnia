@@ -1,7 +1,8 @@
-import React from "react";
-import { render, screen, fireEvent } from "@testing-library/react";
+import React, { useEffect } from "react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import type { WorkspaceServicesHealth } from "@/lib/k8s/service-health";
 
 const { mockUseWorkspace, mockUseMemoryProjection, mockDeleteMutate, mockGetItem, mockSetItem, mockUseEnterpriseConfig } =
   vi.hoisted(() => ({
@@ -116,6 +117,21 @@ vi.mock("@/components/memories/facet-rail", () => ({
       </button>
     </div>
   ),
+}));
+
+// Default stub: simulates the banner resolving to "no culprit found" so
+// tests that don't care about the banner/culprit composition (the bulk of
+// this file) keep seeing the pre-existing error/loading states. The
+// dedicated "proactive service banner" describe block further down
+// unmocks this and exercises the real ServiceUnreadyBanner against a
+// mocked `/services` fetch.
+vi.mock("@/components/sessions/service-unready-banner", () => ({
+  ServiceUnreadyBanner: ({ onResult }: { onResult?: (hasCulprit: boolean) => void }) => {
+    useEffect(() => {
+      onResult?.(false);
+    }, [onResult]);
+    return <div data-testid="service-unready-banner" />;
+  },
 }));
 
 import MemoriesPage from "./page";
@@ -386,5 +402,71 @@ describe("MemoriesPage (galaxy)", () => {
     mockUseEnterpriseConfig.mockReturnValue({ enterpriseEnabled: true, hideEnterprise: false, loading: false });
     render(<MemoriesPage />);
     expect(screen.getByText("Memory Galaxy")).toBeInTheDocument();
+  });
+
+  // These tests render the REAL ServiceUnreadyBanner (not the stub above)
+  // to verify the proactive-render composition: while the projection is
+  // still loading, a hung memory-api never surfaces an error on its own,
+  // so the banner must be checked eagerly — and once it names a culprit,
+  // the loading skeleton (which would otherwise spin forever) must be
+  // suppressed in favor of the banner. vi.resetModules + vi.doUnmock
+  // forces a fresh module graph so the real banner component is used for
+  // just this block.
+  describe("proactive service-unready banner", () => {
+    const crashloopingHealth: WorkspaceServicesHealth = {
+      workspaceServices: [],
+      groups: [
+        {
+          name: "default",
+          ready: false,
+          members: [
+            { service: "memory-api", state: "crashlooping", ready: false, restarts: 5 },
+            { service: "session-api", state: "ready", ready: true, restarts: 0 },
+          ],
+        },
+      ],
+      source: "crd",
+    };
+
+    beforeEach(() => {
+      vi.resetModules();
+      vi.doUnmock("@/components/sessions/service-unready-banner");
+    });
+
+    afterEach(() => {
+      vi.doMock("@/components/sessions/service-unready-banner", () => ({
+        ServiceUnreadyBanner: ({ onResult }: { onResult?: (hasCulprit: boolean) => void }) => {
+          useEffect(() => {
+            onResult?.(false);
+          }, [onResult]);
+          return <div data-testid="service-unready-banner" />;
+        },
+      }));
+    });
+
+    it("shows the culprit banner and suppresses the endless loading skeleton", async () => {
+      global.fetch = vi.fn(() =>
+        Promise.resolve({ ok: true, json: () => Promise.resolve(crashloopingHealth) })
+      ) as unknown as typeof fetch;
+
+      mockUseMemoryProjection.mockReturnValue({
+        data: undefined,
+        isLoading: true,
+        error: null,
+      });
+
+      const { default: MemoriesPageReal } = await import("./page");
+      render(<MemoriesPageReal />);
+
+      // No endless spinner while /services is still pending, right after
+      // the initial synchronous render.
+      expect(screen.getByTestId("galaxy-loading")).toBeTruthy();
+
+      await waitFor(() => {
+        expect(screen.getByText(/memory-api unhealthy/i)).toBeInTheDocument();
+      });
+
+      expect(screen.queryByTestId("galaxy-loading")).toBeNull();
+    });
   });
 });

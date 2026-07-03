@@ -108,6 +108,28 @@ describe("ServiceUnreadyBanner", () => {
     expect(onResult).toHaveBeenCalledWith(true);
   });
 
+  it("uses the custom resourceLabel in the message when provided", async () => {
+    mockFetchWith(crashloopingResponse);
+
+    render(<ServiceUnreadyBanner workspaceName="demo" resourceLabel="memories" />);
+
+    await waitFor(() => {
+      expect(screen.getByText(/memory-api unhealthy/i)).toBeInTheDocument();
+    });
+    // Both the title and the description interpolate resourceLabel.
+    expect(screen.getAllByText(/Can't load memories/)).toHaveLength(2);
+  });
+
+  it("defaults resourceLabel to 'sessions' when not provided", async () => {
+    mockFetchWith(crashloopingResponse);
+
+    render(<ServiceUnreadyBanner workspaceName="demo" />);
+
+    await waitFor(() => {
+      expect(screen.getAllByText(/Can't load sessions/)).toHaveLength(2);
+    });
+  });
+
   it("falls back to the first group when 'default' is absent", async () => {
     mockFetchWith({
       ...crashloopingResponse,

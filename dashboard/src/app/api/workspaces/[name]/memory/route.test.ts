@@ -317,6 +317,36 @@ describe("proxyToMemoryApi", () => {
     expect(body.error).toContain("non-JSON");
   });
 
+  it("returns 504 (not a hang) when the backend never responds", async () => {
+    const { resolveServiceURLs } = await import("@/lib/k8s/service-url-resolver");
+    vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://session-api:8080", memoryURL: "https://memory-api:8080", namespace: "omnia-test", privacyURL: "" });
+
+    const { getWorkspace } = await import("@/lib/k8s/workspace-route-helpers");
+    vi.mocked(getWorkspace).mockResolvedValue(mockWorkspace as never);
+
+    vi.useFakeTimers();
+    mockFetch.mockImplementationOnce((_url: string, init?: RequestInit) => {
+      return new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => {
+          const err = new Error("aborted");
+          err.name = "AbortError";
+          reject(err);
+        });
+      });
+    });
+
+    const { proxyToMemoryApi } = await import("./proxy-helpers");
+    const req = createRequest("GET", "/api/workspaces/test-ws/memory");
+    const responsePromise = proxyToMemoryApi(req, "test-ws", "/api/v1/memories", mockUser);
+    await vi.advanceTimersByTimeAsync(6000);
+    const response = await responsePromise;
+    vi.useRealTimers();
+
+    expect(response.status).toBe(504);
+    const body = await response.json();
+    expect(body.error).toContain("timed out");
+  });
+
   it("strips trailing slash from memory URL", async () => {
     const { resolveServiceURLs } = await import("@/lib/k8s/service-url-resolver");
     vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://session-api:8080", memoryURL: "https://memory-api:8080/", namespace: "omnia-test", privacyURL: "" });
@@ -688,6 +718,36 @@ describe("DELETE /api/workspaces/[name]/memory/[memoryId]", () => {
     const response = await DELETE(req, createMemoryIdContext());
 
     expect(response.status).toBe(502);
+  });
+
+  it("returns 504 (not a hang) when the backend never responds", async () => {
+    const { resolveServiceURLs } = await import("@/lib/k8s/service-url-resolver");
+    vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://session-api:8080", memoryURL: "https://memory-api:8080", namespace: "omnia-test", privacyURL: "" });
+
+    const { getWorkspace } = await import("@/lib/k8s/workspace-route-helpers");
+    vi.mocked(getWorkspace).mockResolvedValue(mockWorkspace as never);
+
+    vi.useFakeTimers();
+    mockFetch.mockImplementationOnce((_url: string, init?: RequestInit) => {
+      return new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => {
+          const err = new Error("aborted");
+          err.name = "AbortError";
+          reject(err);
+        });
+      });
+    });
+
+    const { DELETE } = await import("./[memoryId]/route");
+    const req = createRequest("DELETE", "/api/workspaces/test-ws/memory/mem-456");
+    const responsePromise = DELETE(req, createMemoryIdContext());
+    await vi.advanceTimersByTimeAsync(6000);
+    const response = await responsePromise;
+    vi.useRealTimers();
+
+    expect(response.status).toBe(504);
+    const body = await response.json();
+    expect(body.error).toContain("timed out");
   });
 
   it("handles non-JSON error body from backend gracefully", async () => {
