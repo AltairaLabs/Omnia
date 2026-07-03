@@ -1190,7 +1190,7 @@ func traceLogMiddleware(next http.Handler) http.Handler {
 // startHTTPServer starts an HTTP server in a background goroutine.
 func startHTTPServer(log logr.Logger, name, addr string, srv *http.Server) {
 	go func() {
-		log.Info("starting server", "server", name, "addr", addr)
+		log.Info(fmt.Sprintf("starting %s server on %s", name, addr), "addr", addr)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Error(err, "server error", "server", name)
 		}
