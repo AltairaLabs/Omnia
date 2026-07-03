@@ -39,7 +39,9 @@ import { useAgents } from "@/hooks/agents";
 import { useSessions, useSessionSearch } from "@/hooks/sessions";
 import { useWorkspacePermissions } from "@/hooks/use-workspace-permissions";
 import { PurgeSessionsDialog } from "@/components/sessions/purge-sessions-dialog";
+import { ServiceUnreadyBanner } from "@/components/sessions/service-unready-banner";
 import { useDebounce } from "@/hooks/core";
+import { useWorkspace } from "@/contexts/workspace-context";
 import type { SessionSummary, SessionListOptions, Session } from "@/types/session";
 import { formatDistanceToNow } from "date-fns";
 
@@ -137,6 +139,7 @@ function TableRowSkeleton() {
 export default function SessionsPage() {
   const router = useRouter();
   const { isOwner } = useWorkspacePermissions();
+  const { currentWorkspace } = useWorkspace();
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [agentFilter, setAgentFilter] = useState<string>("all");
@@ -271,13 +274,16 @@ export default function SessionsPage() {
 
         {/* Error state */}
         {error && (
-          <Alert variant="destructive">
-            <AlertCircle className="h-4 w-4" />
-            <AlertTitle>Error loading sessions</AlertTitle>
-            <AlertDescription>
-              {error instanceof Error ? error.message : "An unexpected error occurred"}
-            </AlertDescription>
-          </Alert>
+          <>
+            {currentWorkspace && <ServiceUnreadyBanner workspaceName={currentWorkspace.name} />}
+            <Alert variant="destructive">
+              <AlertCircle className="h-4 w-4" />
+              <AlertTitle>Error loading sessions</AlertTitle>
+              <AlertDescription>
+                {error instanceof Error ? error.message : "An unexpected error occurred"}
+              </AlertDescription>
+            </Alert>
+          </>
         )}
 
         {/* Filters */}

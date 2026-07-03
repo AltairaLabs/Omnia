@@ -27,6 +27,12 @@ vi.mock("@/hooks/use-workspace-permissions", () => ({
 vi.mock("@/components/sessions/purge-sessions-dialog", () => ({
   PurgeSessionsDialog: () => <button data-testid="purge-sessions-open">Purge</button>,
 }));
+vi.mock("@/components/sessions/service-unready-banner", () => ({
+  ServiceUnreadyBanner: () => <div data-testid="service-unready-banner" />,
+}));
+vi.mock("@/contexts/workspace-context", () => ({
+  useWorkspace: () => ({ currentWorkspace: { name: "demo-workspace" } }),
+}));
 
 // Mock layout components that require providers
 vi.mock("@/components/layout", () => ({
