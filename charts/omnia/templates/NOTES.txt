@@ -70,6 +70,22 @@ config is needed; the worker image is set via
 `workspaceServices.evalWorker.image`.
 {{- end }}
 
+{{- if .Values.internalServiceAuth.enabled }}
+
+NOTE: Internal service auth is ON (internalServiceAuth.enabled=true). session-api
+requires a ServiceAccount bearer token; the operator wires this for every caller
+it manages (facade, memory-api, eval-worker) plus the dashboard SA. If you run a
+custom caller of session-api that cannot present an SA token, allowlist its
+ServiceAccount or set `internalServiceAuth.enabled: false`. See the "Internal
+service authentication" section of the chart README.
+{{- else }}
+
+WARNING: Internal service auth is OFF (internalServiceAuth.enabled=false).
+session-api serves session CRUD without authentication to any pod that can reach
+its ClusterIP. Set `internalServiceAuth.enabled: true` (the default) to close
+SEC-1/SEC-5.
+{{- end }}
+
 To verify the operator is running:
 
   kubectl get pods -n {{ .Release.Namespace }} -l app.kubernetes.io/name={{ include "omnia.name" . }}

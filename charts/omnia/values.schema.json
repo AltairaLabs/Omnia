@@ -579,11 +579,11 @@
 
     "internalServiceAuth": {
       "type": "object",
-      "description": "Internal service-to-service ServiceAccount auth for session-api (TokenReview + allowlist). Opt-in; closes SEC-1/SEC-5.",
+      "description": "Internal service-to-service ServiceAccount auth for session-api (TokenReview + allowlist). Secure by default; closes SEC-1/SEC-5 (#1720).",
       "properties": {
         "enabled": {
           "type": "boolean",
-          "description": "Require ServiceAccount auth on session-api. Default false (opt-in). Set true in production."
+          "description": "Require ServiceAccount auth on session-api. Default true (secure by default). Set false only for custom non-enumerated callers that cannot present an SA token."
         },
         "audience": {
           "type": "string",
