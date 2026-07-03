@@ -37,7 +37,18 @@ describe("brandConfigToCssVars", () => {
 
   it("emits a font-family var when provided", () => {
     const vars = brandConfigToCssVars({ ...OMNIA_BRAND, fonts: { family: "Acme Sans" } });
-    expect(vars["--font-sans"]).toContain("Acme Sans");
+    expect(vars["--brand-font-sans"]).toContain("Acme Sans");
+  });
+
+  it("maps curated surface color keys onto their tokens", () => {
+    const vars = brandConfigToCssVars({
+      ...OMNIA_BRAND,
+      colors: { background: "#111", card: "#222", foreground: "#eee", border: "#333" },
+    });
+    expect(vars["--background"]).toBe("#111");
+    expect(vars["--card"]).toBe("#222");
+    expect(vars["--foreground"]).toBe("#eee");
+    expect(vars["--border"]).toBe("#333");
   });
 
   it("returns no vars for a config with no colors or fonts", () => {

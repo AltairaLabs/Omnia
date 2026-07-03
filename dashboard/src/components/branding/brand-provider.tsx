@@ -16,15 +16,28 @@ export const BrandContext = createContext<BrandContextValue>({
   setBrandOverride: () => {},
 });
 
-/** Render the `:root` variable overrides (and optional customCss) for a brand. */
-function renderCss(brand: BrandConfig): string {
-  const vars = brandConfigToCssVars(brand);
+function cssBlock(selector: string, vars: Record<string, string>): string {
   const decls = Object.entries(vars)
     .map(([key, value]) => `  ${key}: ${value};`)
     .join("\n");
-  const base = `:root {\n${decls}\n}`;
+  return `${selector} {\n${decls}\n}`;
+}
+
+/**
+ * Render the scoped variable overrides for a brand: `:root` for the light /
+ * shared tokens, and `.dark` for any dark-mode-specific overrides (surfaces).
+ * The `.dark` block is emitted after `:root` so it wins in dark mode.
+ */
+function renderCss(brand: BrandConfig): string {
+  const parts = [cssBlock(":root", brandConfigToCssVars(brand))];
+  if (brand.colorsDark && Object.keys(brand.colorsDark).length > 0) {
+    // Only the dark colors — fonts/customCss are theme-independent.
+    const darkVars = brandConfigToCssVars({ ...brand, colors: brand.colorsDark, fonts: undefined });
+    parts.push(cssBlock(".dark", darkVars));
+  }
   // customCss is always confined to :root — token overrides, not selectors.
-  return brand.customCss ? `${base}\n:root {\n  ${brand.customCss}\n}` : base;
+  if (brand.customCss) parts.push(`:root {\n  ${brand.customCss}\n}`);
+  return parts.join("\n");
 }
 
 export function BrandProvider({ children }: Readonly<{ children: React.ReactNode }>) {
@@ -49,6 +62,16 @@ export function BrandProvider({ children }: Readonly<{ children: React.ReactNode
 
   return (
     <BrandContext.Provider value={value}>
+      {/*
+        Load the brand's webfont stylesheet so a custom `fonts.family` actually
+        renders. `fonts.family` re-points `--font-sans` (see css-vars.ts), but
+        the family only resolves if its @font-face is available — this fetches
+        it. `fonts.url` must be a CSS stylesheet URL (e.g. a Google Fonts href);
+        the brand's font host must be allowed by the dashboard CSP.
+      */}
+      {brand.fonts?.url && (
+        <link rel="stylesheet" href={brand.fonts.url} data-brand-font="" />
+      )}
       <style id="brand-vars" dangerouslySetInnerHTML={{ __html: renderCss(brand) }} />
       {children}
     </BrandContext.Provider>

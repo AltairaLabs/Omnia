@@ -57,6 +57,7 @@ import {
   getMockSession,
 } from "../mock-data";
 import { LiveAgentConnection } from "./live-service";
+import { mockPromptPackContent } from "./mock-promptpack-content";
 
 // Mock Arena data
 const mockArenaSources: ArenaSource[] = [
@@ -539,6 +540,7 @@ export function getMockCostData(): CostData {
  * For mock data, workspace name is used as the namespace
  * (workspace name = namespace in demo mode).
  */
+
 export class MockDataService implements DataService {
   readonly name = "MockDataService";
   readonly isDemo = true;
@@ -749,28 +751,11 @@ export class MockDataService implements DataService {
     ) as PromptPack | undefined;
   }
 
-  async getPromptPackContent(_workspace: string, _name: string): Promise<PromptPackContent | undefined> {
+  async getPromptPackContent(_workspace: string, name: string): Promise<PromptPackContent | undefined> {
     await delay();
-    // Return mock content
-    return {
-      id: "mock-prompts",
-      name: "Mock Prompts",
-      version: "1.0.0",
-      description: "Mock prompt pack for demo mode",
-      template_engine: {
-        version: "v1",
-        syntax: "{{variable}}",
-      },
-      prompts: {
-        default: {
-          id: "default",
-          name: "Default Prompt",
-          version: "1.0.0",
-          system_template: "You are a helpful AI assistant.",
-          parameters: { temperature: 0.7 },
-        },
-      },
-    };
+    // Vary content by pack name so the workload graph shows workflows and
+    // compositions, not just single-prompt packs.
+    return mockPromptPackContent(name);
   }
 
   // Workspace-scoped ToolRegistries (filter by namespace)

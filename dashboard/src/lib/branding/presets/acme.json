@@ -1,7 +1,11 @@
 {
   "productName": "Acme Cloud",
-  "logo": { "light": "/logo.svg", "dark": "/logo-dark.svg" },
-  "favicon": "/favicon.svg",
+  "logo": { "light": "/presets/acme-logo.svg", "dark": "/presets/acme-logo.svg" },
+  "favicon": "/presets/acme-logo.svg",
+  "fonts": {
+    "family": "Poppins",
+    "url": "https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap"
+  },
   "colors": {
     "primary": "#EA580C",
     "accent": "#DC2626",
@@ -21,7 +25,21 @@
     "category8": "#78716C",
     "success": "#16A34A",
     "warning": "#D97706",
-    "info": "#EA580C"
+    "info": "#EA580C",
+    "background": "#FFF7ED",
+    "card": "#FFFFFF",
+    "foreground": "#431407",
+    "muted": "#FFEDD5",
+    "mutedForeground": "#9A3412",
+    "border": "#FED7AA"
+  },
+  "colorsDark": {
+    "background": "#1A120B",
+    "card": "#251A11",
+    "foreground": "#FFF7ED",
+    "muted": "#251A11",
+    "mutedForeground": "#FDBA74",
+    "border": "rgba(253, 186, 116, 0.14)"
   },
   "links": {
     "docsBaseUrl": "https://docs.acme.example",

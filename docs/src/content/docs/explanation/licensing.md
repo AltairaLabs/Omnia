@@ -76,6 +76,18 @@ that Open Core behavior.
 | Multi-cluster aggregation | ❌ | ✅ |
 | Priority support | ❌ | ✅ |
 
+### Branding
+
+| Feature | Open Core | Enterprise |
+|---------|:---------:|:----------:|
+| Omnia default theme (light / dark) | ✅ | ✅ |
+| White-label branding (colors, logos, fonts, copy) | ❌ | ✅ |
+
+White-label branding is gated by the `whiteLabel` license entitlement and
+enforced server-side — without it, the dashboard falls back to the Omnia
+default regardless of any branding configuration. See
+[White-label the Dashboard](/how-to/white-label-the-dashboard/).
+
 ## Enabling Enterprise Features
 
 To enable Enterprise features in your Helm deployment:

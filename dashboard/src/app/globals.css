@@ -12,7 +12,7 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-sans: var(--brand-font-sans, var(--font-inter)), ui-sans-serif, system-ui, sans-serif;
   --font-mono: var(--font-jetbrains-mono), ui-monospace, monospace;
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
@@ -71,6 +71,23 @@
   --color-stellar-gold: #F59E0B;
   --color-deep-space: #0F172A;
   --color-onyx: #1E293B;
+
+  /* Atlas semantic-alias fill utilities (bg-/text-/border-<alias>). The alias
+     values live in :root; these just expose the fill-type roles as Tailwind
+     colors. Text-role aliases are consumed via var(--text-*) directly. */
+  --color-surface-1: var(--surface-1);
+  --color-surface-2: var(--surface-2);
+  --color-surface-code: var(--surface-code);
+  --color-accent-primary: var(--accent-primary);
+  --color-accent-inter: var(--accent-inter);
+  --color-accent-node: var(--accent-node);
+  --color-status-healthy: var(--status-healthy);
+  --color-status-pending: var(--status-pending);
+  --color-status-error: var(--status-error);
+  --color-node-prompt: var(--node-prompt);
+  --color-node-tool: var(--node-tool);
+  --color-node-agent: var(--node-agent);
+  --color-node-output: var(--node-output);
 }
 
 :root {
@@ -125,6 +142,44 @@
   --sidebar-accent-foreground: #F8FAFC;
   --sidebar-border: rgba(255, 255, 255, 0.1);
   --sidebar-ring: #3B82F6;
+
+  /* ── Atlas semantic-alias layer ──────────────────────────────────────────
+     A role-named layer over the white-label tokens above. Components (and the
+     upcoming Atlas redesign) read these aliases, never a raw token or hex.
+     Aliases point at the white-label tokens, so any brand override re-themes
+     every alias that references it — this stays fully white-label-safe. The
+     register axis is fixed to omnia-cool (accent-inter == primary). */
+  /* New base tokens — Atlas roles with no white-label equivalent yet; still
+     overridable per brand. */
+  --accent-primary: #E3B341;            /* the gold "star" / primary action */
+  --accent-primary-foreground: #06122A; /* text on gold */
+  --surface-code: #E9EEF6;              /* code / terminal surface (light) */
+  /* Surfaces */
+  --bg-app: var(--background);
+  --surface-1: var(--card);
+  --surface-2: var(--muted);
+  --border-default: var(--border);
+  --border-strong: var(--border);       /* redesign: distinct stronger edge */
+  /* Text */
+  --text-heading: var(--foreground);
+  --text-body: var(--foreground);
+  --text-muted: var(--muted-foreground);
+  --text-faint: var(--muted-foreground);/* redesign: distinct fainter caption */
+  --text-link: var(--primary);
+  --text-on-gold: var(--accent-primary-foreground);
+  /* Accents (omnia-cool: interaction lead == primary) */
+  --accent-inter: var(--primary);
+  --accent-node: var(--category-1);
+  /* Status — dot values; the -text variants deepen on light in the redesign */
+  --status-healthy: var(--success);
+  --status-healthy-text: var(--success);
+  --status-pending: var(--warning);
+  --status-error: var(--destructive);
+  /* Node kinds (constellation graph) */
+  --node-prompt: var(--category-2);
+  --node-tool: var(--category-6);
+  --node-agent: var(--category-1);
+  --node-output: var(--accent-primary);
 }
 
 .dark {
@@ -177,6 +232,10 @@
   --sidebar-accent-foreground: #F8FAFC;
   --sidebar-border: rgba(255, 255, 255, 0.1);
   --sidebar-ring: #3B82F6;
+
+  /* Atlas alias layer — dark-sky override for the code surface. Every other
+     alias references a theme-aware token and re-resolves automatically. */
+  --surface-code: #070C16;
 }
 
 @layer base {
