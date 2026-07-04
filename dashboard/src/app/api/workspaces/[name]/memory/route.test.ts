@@ -134,15 +134,15 @@ describe("buildBackendParams", () => {
     role: "viewer" as const,
   };
 
-  it("scopes user_id to the authenticated session user and sets workspace", async () => {
+  it("scopes virtual_user_id to the authenticated session user and sets workspace", async () => {
     const { buildBackendParams } = await import("./proxy-helpers");
 
     const searchParams = new URLSearchParams("userId=user-abc");
     const params = buildBackendParams(searchParams, "ws-uid-999", mockUser);
 
     expect(params.get("workspace")).toBe("ws-uid-999");
-    // user_id comes from the SESSION user, not the client query param.
-    expect(params.get("user_id")).toBe(pseudonymizeId(mockUser.id));
+    // virtual_user_id comes from the SESSION user, not the client query param.
+    expect(params.get("virtual_user_id")).toBe(pseudonymizeId(mockUser.id));
     expect(params.has("userId")).toBe(false);
   });
 
@@ -153,8 +153,8 @@ describe("buildBackendParams", () => {
     const searchParams = new URLSearchParams("userId=victim-id");
     const params = buildBackendParams(searchParams, "ws-uid-999", mockUser);
 
-    expect(params.get("user_id")).toBe(pseudonymizeId(mockUser.id));
-    expect(params.get("user_id")).not.toBe(pseudonymizeId("victim-id"));
+    expect(params.get("virtual_user_id")).toBe(pseudonymizeId(mockUser.id));
+    expect(params.get("virtual_user_id")).not.toBe(pseudonymizeId("victim-id"));
   });
 
   it("scopes anonymous users to their client-supplied device id", async () => {
@@ -164,7 +164,7 @@ describe("buildBackendParams", () => {
     const searchParams = new URLSearchParams("userId=device-xyz");
     const params = buildBackendParams(searchParams, "ws-uid-999", anonUser);
 
-    expect(params.get("user_id")).toBe(pseudonymizeId("device-xyz"));
+    expect(params.get("virtual_user_id")).toBe(pseudonymizeId("device-xyz"));
   });
 
   it("forwards type, limit, and offset", async () => {
@@ -469,7 +469,7 @@ describe("DELETE /api/workspaces/[name]/memory", () => {
     expect(fetchOpts.method).toBe("DELETE");
     // Security (#1263): delete-all is scoped to the SESSION user, never the
     // client-supplied userId — a viewer cannot delete another user's memories.
-    expect(fetchUrl).toContain("user_id=" + pseudonymizeId(mockUser.id));
+    expect(fetchUrl).toContain("virtual_user_id=" + pseudonymizeId(mockUser.id));
     expect(fetchUrl).not.toContain(pseudonymizeId("user-abc"));
   });
 
@@ -800,7 +800,7 @@ describe("GET /api/workspaces/[name]/memory/export", () => {
     vi.mocked(getWorkspace).mockResolvedValue(mockWorkspace as never);
 
     const exportData = {
-      user_id: "user-abc",
+      virtual_user_id: "user-abc",
       workspace: "workspace-uid-123",
       memories: [{ id: "m1", content: "exported" }],
       exported_at: "2026-04-02T00:00:00Z",

@@ -115,7 +115,7 @@ func (s *Store) RetrieveMultiTier(ctx context.Context, req MultiTierRequest) (*M
 func (s *Store) retrieveMultiTierToMemories(ctx context.Context, scope map[string]string, query string, opts pkmemory.RetrieveOptions) ([]*pkmemory.Memory, error) {
 	res, err := s.RetrieveMultiTier(ctx, MultiTierRequest{
 		WorkspaceID:   scope["workspace_id"],
-		UserID:        scope["user_id"],
+		UserID:        scope["virtual_user_id"],
 		AgentID:       scope["agent_id"],
 		Query:         query,
 		Types:         opts.Types,

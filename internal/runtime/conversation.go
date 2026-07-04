@@ -197,7 +197,7 @@ func (s *Server) buildConversationOptions(ctx context.Context, sessionID string)
 			"workspace_id": s.workspaceUID,
 		}
 		if uid := policy.UserID(ctx); uid != "" {
-			scope["user_id"] = uid // Already pseudonymized by the facade
+			scope["virtual_user_id"] = uid // Already pseudonymized by the facade
 		}
 		if s.agentUID != "" {
 			scope["agent_id"] = s.agentUID
@@ -232,7 +232,7 @@ func (s *Server) buildConversationOptions(ctx context.Context, sessionID string)
 		log.V(1).Info("memory store wired",
 			"session_id", sessionID,
 			"trace_id", sessionID,
-			"hasUserID", scope["user_id"] != "",
+			"hasUserID", scope["virtual_user_id"] != "",
 			"hasAgentID", scope["agent_id"] != "",
 			"scopeKeys", len(scope),
 			"retrievalEnabled", s.memoryRetrievalEnabled,

@@ -40,7 +40,7 @@ export function buildBackendParams(
   params.set("workspace", workspaceUID);
 
   const scopedUserId = resolveScopedUserId(searchParams, user);
-  if (scopedUserId) params.set("user_id", pseudonymizeId(scopedUserId));
+  if (scopedUserId) params.set("virtual_user_id", pseudonymizeId(scopedUserId));
 
   // "Visible to me" mode — institutional + agent + the user's own.
   if (searchParams.get("includeShared") === "true") {

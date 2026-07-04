@@ -116,7 +116,7 @@ func TestSoftDeleteExpiredTTL_TierIsolation(t *testing.T) {
 	}
 	userMem := &Memory{
 		Type: "fact", Content: "user", Confidence: 0.9,
-		Scope:     map[string]string{ScopeWorkspaceID: testWorkspace1, ScopeUserID: "user-a"},
+		Scope:     map[string]string{ScopeWorkspaceID: testWorkspace1, ScopeVirtualUserID: "user-a"},
 		ExpiresAt: &past,
 	}
 	seedInstitutional(t, store, inst)

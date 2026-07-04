@@ -267,7 +267,7 @@ func (m *cacheTestStore) BatchDelete(_ context.Context, _ map[string]string, lim
 
 // cacheTestScope returns a minimal scope map for CachedStore tests.
 func cacheTestScope() map[string]string {
-	return map[string]string{ScopeWorkspaceID: "ws-1", ScopeUserID: "user-1"}
+	return map[string]string{ScopeWorkspaceID: "ws-1", ScopeVirtualUserID: "user-1"}
 }
 
 // newTestCache creates a CachedStore backed by miniredis and the given mock.
@@ -607,7 +607,7 @@ func TestCachedStore_List_VisibleToMe_BypassesCache(t *testing.T) {
 	ctx := context.Background()
 	scope := map[string]string{
 		ScopeWorkspaceID:   "ws-1",
-		ScopeUserID:        "u-vis",
+		ScopeVirtualUserID: "u-vis",
 		ScopeIncludeShared: scopeFlagTrue,
 	}
 	opts := ListOptions{Limit: 10}
@@ -795,7 +795,7 @@ func TestCachedStore_WorkspaceDelete_InvalidatesOtherScopeReads(t *testing.T) {
 	inner := &cacheTestStore{memories: []*Memory{{ID: "m1", Content: "secret"}}}
 	cs, _ := newTestCache(t, inner)
 	ctx := context.Background()
-	readScope := map[string]string{ScopeWorkspaceID: "ws-1", ScopeUserID: "u1", ScopeAgentID: "a1"}
+	readScope := map[string]string{ScopeWorkspaceID: "ws-1", ScopeVirtualUserID: "u1", ScopeAgentID: "a1"}
 
 	if _, err := cs.Retrieve(ctx, readScope, "q", RetrieveOptions{Limit: 5}); err != nil {
 		t.Fatalf("first retrieve: %v", err)
@@ -811,7 +811,7 @@ func TestCachedStore_WorkspaceDelete_InvalidatesOtherScopeReads(t *testing.T) {
 	inner.mu.Lock()
 	inner.memories = nil
 	inner.mu.Unlock()
-	if err := cs.DeleteAll(ctx, map[string]string{ScopeWorkspaceID: "ws-1", ScopeUserID: "u1"}); err != nil {
+	if err := cs.DeleteAll(ctx, map[string]string{ScopeWorkspaceID: "ws-1", ScopeVirtualUserID: "u1"}); err != nil {
 		t.Fatalf("DeleteAll: %v", err)
 	}
 

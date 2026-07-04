@@ -45,7 +45,7 @@ func (s *PostgresMemoryStore) Delete(ctx context.Context, scope map[string]strin
 		  AND ($4::uuid IS NULL OR agent_id = $4)`,
 		memoryID,
 		scope[ScopeWorkspaceID],
-		scopeOrNil(scope, ScopeUserID),
+		scopeOrNil(scope, ScopeVirtualUserID),
 		scopeOrNil(scope, ScopeAgentID))
 	if err != nil {
 		return fmt.Errorf("memory: delete: %w", err)
@@ -76,7 +76,7 @@ func buildDeleteAllQuery(scope map[string]string) (string, *pgutil.QueryBuilder)
 	var qb pgutil.QueryBuilder
 	qb.Add(colWorkspaceID, scope[ScopeWorkspaceID])
 
-	if uid := scope[ScopeUserID]; uid != "" {
+	if uid := scope[ScopeVirtualUserID]; uid != "" {
 		qb.Add(colVirtualUserID, uid)
 	}
 
@@ -106,7 +106,7 @@ func buildBatchDeleteQuery(scope map[string]string, limit int) (string, *pgutil.
 	var qb pgutil.QueryBuilder
 	qb.Add(colWorkspaceID, scope[ScopeWorkspaceID])
 
-	if uid := scope[ScopeUserID]; uid != "" {
+	if uid := scope[ScopeVirtualUserID]; uid != "" {
 		qb.Add(colVirtualUserID, uid)
 	}
 

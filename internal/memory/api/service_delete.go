@@ -36,7 +36,7 @@ func (s *MemoryService) DeleteMemory(ctx context.Context, scope map[string]strin
 			EventType:   eventTypeMemoryDeleted,
 			MemoryID:    memoryID,
 			WorkspaceID: scope[memory.ScopeWorkspaceID],
-			UserID:      scope[memory.ScopeUserID],
+			UserID:      scope[memory.ScopeVirtualUserID],
 			Timestamp:   time.Now().UTC().Format(time.RFC3339),
 		}
 		s.safeGo("event_publish", func() {
@@ -49,7 +49,7 @@ func (s *MemoryService) DeleteMemory(ctx context.Context, scope map[string]strin
 		EventType:   eventTypeMemoryDeleted,
 		MemoryID:    memoryID,
 		WorkspaceID: scope[memory.ScopeWorkspaceID],
-		UserID:      scope[memory.ScopeUserID],
+		UserID:      scope[memory.ScopeVirtualUserID],
 	})
 	return nil
 }
@@ -62,7 +62,7 @@ func (s *MemoryService) DeleteAllMemories(ctx context.Context, scope map[string]
 	s.emitAuditEvent(ctx, &MemoryAuditEntry{
 		EventType:   eventTypeMemoryDeleted,
 		WorkspaceID: scope[memory.ScopeWorkspaceID],
-		UserID:      scope[memory.ScopeUserID],
+		UserID:      scope[memory.ScopeVirtualUserID],
 		Metadata:    map[string]string{metaKeyOperation: "delete_all"},
 	})
 	return nil
@@ -79,7 +79,7 @@ func (s *MemoryService) BatchDeleteMemories(ctx context.Context, scope map[strin
 		event := MemoryEvent{
 			EventType:   eventTypeMemoryDeleted,
 			WorkspaceID: scope[memory.ScopeWorkspaceID],
-			UserID:      scope[memory.ScopeUserID],
+			UserID:      scope[memory.ScopeVirtualUserID],
 			Timestamp:   time.Now().UTC().Format(time.RFC3339),
 		}
 		s.safeGo("event_publish_batch_delete", func() {
@@ -92,7 +92,7 @@ func (s *MemoryService) BatchDeleteMemories(ctx context.Context, scope map[strin
 		s.emitAuditEvent(ctx, &MemoryAuditEntry{
 			EventType:   eventTypeMemoryDeleted,
 			WorkspaceID: scope[memory.ScopeWorkspaceID],
-			UserID:      scope[memory.ScopeUserID],
+			UserID:      scope[memory.ScopeVirtualUserID],
 			Metadata:    map[string]string{metaKeyOperation: "batch_delete"},
 		})
 	}
@@ -109,7 +109,7 @@ func (s *MemoryService) ExportMemories(ctx context.Context, scope map[string]str
 	s.emitAuditEvent(ctx, &MemoryAuditEntry{
 		EventType:   auditEventMemoryExported,
 		WorkspaceID: scope[memory.ScopeWorkspaceID],
-		UserID:      scope[memory.ScopeUserID],
+		UserID:      scope[memory.ScopeVirtualUserID],
 	})
 	return memories, nil
 }

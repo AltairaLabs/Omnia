@@ -51,7 +51,7 @@ func TestSaveInstitutional_WritesRow(t *testing.T) {
 		t.Errorf("provenance=%q, want %q", got, pkmemory.ProvenanceOperatorCurated)
 	}
 	// Scope must be sanitized — no user/agent keys should remain.
-	if _, ok := mem.Scope[ossmemory.ScopeUserID]; ok {
+	if _, ok := mem.Scope[ossmemory.ScopeVirtualUserID]; ok {
 		t.Errorf("scope still contains user_id after sanitization: %+v", mem.Scope)
 	}
 	if _, ok := mem.Scope[ossmemory.ScopeAgentID]; ok {
@@ -124,7 +124,7 @@ func TestListInstitutional_ExcludesUserAndAgentRows(t *testing.T) {
 		t.Fatalf("expected exactly 1 institutional row, got %d: %+v", len(got), got)
 	}
 	for _, m := range got {
-		if m.Scope[ossmemory.ScopeUserID] != "" || m.Scope[ossmemory.ScopeAgentID] != "" {
+		if m.Scope[ossmemory.ScopeVirtualUserID] != "" || m.Scope[ossmemory.ScopeAgentID] != "" {
 			t.Errorf("leaked non-institutional row: %+v", m)
 		}
 	}

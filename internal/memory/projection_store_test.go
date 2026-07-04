@@ -37,7 +37,7 @@ func seedProjectionScope(t *testing.T, store *PostgresMemoryStore) (instID, agen
 	must(t, store.SaveAgentScoped(ctx, ag))
 
 	usr := &Memory{Type: "profile", Content: "prefers email contact", Confidence: 0.8,
-		Scope: map[string]string{ScopeWorkspaceID: testWorkspace1, ScopeUserID: projTestUser}}
+		Scope: map[string]string{ScopeWorkspaceID: testWorkspace1, ScopeVirtualUserID: projTestUser}}
 	must(t, store.Save(ctx, usr))
 
 	return inst.ID, ag.ID, usr.ID
@@ -136,7 +136,7 @@ func TestProjectionFingerprint_EmptyAndChanges(t *testing.T) {
 		t.Fatal("fp1 must be non-empty after seeding")
 	}
 	must(t, store.Save(ctx, &Memory{Type: "profile", Content: "another", Confidence: 0.5,
-		Scope: map[string]string{ScopeWorkspaceID: testWorkspace1, ScopeUserID: "other-user"}}))
+		Scope: map[string]string{ScopeWorkspaceID: testWorkspace1, ScopeVirtualUserID: "other-user"}}))
 	fp2, err := store.ProjectionFingerprint(ctx, map[string]string{ScopeWorkspaceID: testWorkspace1})
 	if err != nil {
 		t.Fatalf("fingerprint fp2: %v", err)
@@ -159,7 +159,7 @@ func TestProjectionFingerprint_DenseEligibilityFlips(t *testing.T) {
 	// 4 distinct entities, no embeddings yet → 0% coverage → lexical-eligible.
 	for i := range 4 {
 		m := &Memory{Type: "profile", Content: "fact " + string(rune('a'+i)), Confidence: 0.9,
-			Scope: map[string]string{ScopeWorkspaceID: testWorkspace1, ScopeUserID: "u-" + string(rune('a'+i))}}
+			Scope: map[string]string{ScopeWorkspaceID: testWorkspace1, ScopeVirtualUserID: "u-" + string(rune('a'+i))}}
 		must(t, store.Save(ctx, m))
 	}
 

@@ -50,9 +50,12 @@ linters:
           - dupl
           - lll
         path: internal/*
-      # Test files often have many test cases with similar structure
+      # Test files often have many test cases with similar structure, which
+      # legitimately repeats string literals (fixture IDs, scope keys) across
+      # table entries — goconst noise, same rationale as gocognit above.
       - linters:
           - gocognit
+          - goconst
         path: _test\.go$
       # TODO: Refactor these high-complexity functions (tracked for SonarCloud compliance)
       # Exclude existing complex functions until they can be refactored

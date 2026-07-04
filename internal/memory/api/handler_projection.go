@@ -19,7 +19,7 @@ func (h *Handler) handleProjection(w http.ResponseWriter, r *http.Request) {
 	// resets the socket (which the dashboard proxy reports as a 502).
 	defer h.recoverProjection(w)
 
-	scope, err := parseWorkspaceScope(r)
+	scope, err := h.parseWorkspaceScope(r)
 	if err != nil {
 		writeError(w, err)
 		return

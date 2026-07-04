@@ -3,7 +3,7 @@
  *
  * Covers:
  *  - happy path: proxies to the backend projection endpoint
- *  - workspace-wide scoping: only ?workspace=<uid> is sent (no user_id), so the
+ *  - workspace-wide scoping: only ?workspace=<uid> is sent (no virtual_user_id), so the
  *    galaxy is the institution-wide view, not the caller's own memories
  *  - status:"pending" passes through unchanged (the FE polls on it)
  *  - 403 when workspace access is denied
@@ -117,7 +117,7 @@ describe("GET /api/workspaces/[name]/memory/projection", () => {
     expect(fetchUrl).toContain("/api/v1/memories/projection");
     expect(fetchUrl).toContain("workspace=workspace-uid-123");
     // Workspace-wide: the caller's identity must NOT narrow the galaxy.
-    expect(fetchUrl).not.toContain("user_id");
+    expect(fetchUrl).not.toContain("virtual_user_id");
   });
 
   it("passes a pending status through unchanged", async () => {

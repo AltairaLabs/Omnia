@@ -259,7 +259,7 @@ func (m *MemoryPrivacyMiddleware) Wrap(next http.Handler) http.Handler {
 		}
 
 		workspace := r.URL.Query().Get("workspace")
-		userID := r.URL.Query().Get("user_id")
+		userID, usedLegacyUserID := resolveVirtualUserID(r.URL.Query().Get)
 
 		data, req, decoded, err := readAndDecode(w, r)
 		if err != nil {
@@ -277,12 +277,18 @@ func (m *MemoryPrivacyMiddleware) Wrap(next http.Handler) http.Handler {
 		// redaction on the main write path. Prefer body scope; fall back to
 		// query params for callers that still use them.
 		if decoded {
+			if normalizeScopeUserID(req.Scope) {
+				usedLegacyUserID = true
+			}
 			if ws := req.Scope[memory.ScopeWorkspaceID]; ws != "" {
 				workspace = ws
 			}
-			if uid := req.Scope[memory.ScopeUserID]; uid != "" {
+			if uid := req.Scope[memory.ScopeVirtualUserID]; uid != "" {
 				userID = uid
 			}
+		}
+		if usedLegacyUserID {
+			m.log.V(1).Info(deprecatedUserIDParam, "path", r.URL.Path)
 		}
 
 		// Run the validator to fill / upgrade req.Category. The validator

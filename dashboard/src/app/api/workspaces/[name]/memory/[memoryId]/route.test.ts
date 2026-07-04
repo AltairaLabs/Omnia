@@ -88,7 +88,7 @@ describe("DELETE /memory/[memoryId]", () => {
     const url = mockFetch.mock.calls[0][0] as string;
     expect(url).toContain("https://memory-api:8080/api/v1/memories/mem-123");
     expect(url).toContain("workspace=workspace-uid-123");
-    expect(url).toContain(`user_id=${pseudonymizeId(mockUser.id)}`);
+    expect(url).toContain(`virtual_user_id=${pseudonymizeId(mockUser.id)}`);
     expect(url).not.toContain(pseudonymizeId("victim-id"));
   });
 
@@ -101,7 +101,7 @@ describe("DELETE /memory/[memoryId]", () => {
 
     expect(response.status).toBe(200);
     const url = mockFetch.mock.calls[0][0] as string;
-    expect(url).toContain(`user_id=${pseudonymizeId("device-xyz")}`);
+    expect(url).toContain(`virtual_user_id=${pseudonymizeId("device-xyz")}`);
   });
 
   it("denies access when the workspace guard rejects", async () => {

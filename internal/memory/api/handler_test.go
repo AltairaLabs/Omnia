@@ -340,7 +340,7 @@ func TestHandleListMemories_IncludesTier(t *testing.T) {
 	store := &mockStore{
 		memories: []*memory.Memory{
 			{ID: "u-1", Scope: map[string]string{
-				memory.ScopeWorkspaceID: "ws", memory.ScopeUserID: "alice",
+				memory.ScopeWorkspaceID: "ws", memory.ScopeVirtualUserID: "alice",
 			}},
 			{ID: "a-1", Scope: map[string]string{
 				memory.ScopeWorkspaceID: "ws", memory.ScopeAgentID: "support",
@@ -349,9 +349,9 @@ func TestHandleListMemories_IncludesTier(t *testing.T) {
 				memory.ScopeWorkspaceID: "ws",
 			}},
 			{ID: "uf-1", Scope: map[string]string{
-				memory.ScopeWorkspaceID: "ws",
-				memory.ScopeUserID:      "alice",
-				memory.ScopeAgentID:     "support",
+				memory.ScopeWorkspaceID:   "ws",
+				memory.ScopeVirtualUserID: "alice",
+				memory.ScopeAgentID:       "support",
 			}},
 		},
 	}
@@ -390,8 +390,8 @@ func TestDeriveTier(t *testing.T) {
 	}{
 		{map[string]string{}, memory.TierInstitutional},
 		{map[string]string{memory.ScopeAgentID: "a"}, memory.TierAgent},
-		{map[string]string{memory.ScopeUserID: "u"}, memory.TierUser},
-		{map[string]string{memory.ScopeAgentID: "a", memory.ScopeUserID: "u"}, memory.TierUserForAgent},
+		{map[string]string{memory.ScopeVirtualUserID: "u"}, memory.TierUser},
+		{map[string]string{memory.ScopeAgentID: "a", memory.ScopeVirtualUserID: "u"}, memory.TierUserForAgent},
 	}
 	for _, tc := range cases {
 		t.Run(string(tc.want), func(t *testing.T) {
@@ -774,7 +774,7 @@ func TestHandleOpenMemory_ReturnsFullContent(t *testing.T) {
 	store := &mockStore{
 		memories: []*memory.Memory{
 			{ID: "doc-1", Type: "document", Content: "long body content",
-				Scope: map[string]string{memory.ScopeWorkspaceID: "ws1", memory.ScopeUserID: "u1"}},
+				Scope: map[string]string{memory.ScopeWorkspaceID: "ws1", memory.ScopeVirtualUserID: "u1"}},
 		},
 	}
 	h := newTestHandler(store)
@@ -1033,7 +1033,7 @@ func TestHandleSaveMemory_PropagatesCategoryToMetadata(t *testing.T) {
 	body := SaveMemoryRequest{
 		Type:     "fact",
 		Content:  "user lives in Edinburgh",
-		Scope:    map[string]string{memory.ScopeWorkspaceID: "ws1", memory.ScopeUserID: "user-1"},
+		Scope:    map[string]string{memory.ScopeWorkspaceID: "ws1", memory.ScopeVirtualUserID: "user-1"},
 		Category: "memory:location",
 	}
 	b, err := json.Marshal(body)
@@ -1058,7 +1058,7 @@ func TestHandleSaveMemory_EmptyCategoryLeavesMetadataUntouched(t *testing.T) {
 	body := SaveMemoryRequest{
 		Type:    "fact",
 		Content: "no category here",
-		Scope:   map[string]string{memory.ScopeWorkspaceID: "ws1", memory.ScopeUserID: "user-1"},
+		Scope:   map[string]string{memory.ScopeWorkspaceID: "ws1", memory.ScopeVirtualUserID: "user-1"},
 	}
 	b, err := json.Marshal(body)
 	require.NoError(t, err)
@@ -1082,7 +1082,7 @@ func TestHandleSaveMemory_ExplicitMetadataCategoryWins(t *testing.T) {
 	body := SaveMemoryRequest{
 		Type:    "fact",
 		Content: "x",
-		Scope:   map[string]string{memory.ScopeWorkspaceID: "ws1", memory.ScopeUserID: "user-1"},
+		Scope:   map[string]string{memory.ScopeWorkspaceID: "ws1", memory.ScopeVirtualUserID: "user-1"},
 		Metadata: map[string]any{
 			memory.MetaKeyConsentCategory: "memory:health",
 		},
@@ -1141,7 +1141,7 @@ func TestHandleSaveMemory_UnknownCategory_WithPredicate(t *testing.T) {
 		body := SaveMemoryRequest{
 			Type:     "fact",
 			Content:  "user has diabetes",
-			Scope:    map[string]string{memory.ScopeWorkspaceID: "ws1", memory.ScopeUserID: "u1"},
+			Scope:    map[string]string{memory.ScopeWorkspaceID: "ws1", memory.ScopeVirtualUserID: "u1"},
 			Category: "memory:helth", // deliberate typo
 		}
 		b, err := json.Marshal(body)
@@ -1169,7 +1169,7 @@ func TestHandleSaveMemory_UnknownCategory_WithPredicate(t *testing.T) {
 		body := SaveMemoryRequest{
 			Type:    "fact",
 			Content: "x",
-			Scope:   map[string]string{memory.ScopeWorkspaceID: "ws1", memory.ScopeUserID: "u1"},
+			Scope:   map[string]string{memory.ScopeWorkspaceID: "ws1", memory.ScopeVirtualUserID: "u1"},
 			Metadata: map[string]any{
 				memory.MetaKeyConsentCategory: "bogus",
 			},
@@ -1195,7 +1195,7 @@ func TestHandleSaveMemory_UnknownCategory_WithPredicate(t *testing.T) {
 		body := SaveMemoryRequest{
 			Type:     "fact",
 			Content:  "user has diabetes",
-			Scope:    map[string]string{memory.ScopeWorkspaceID: "ws1", memory.ScopeUserID: "u1"},
+			Scope:    map[string]string{memory.ScopeWorkspaceID: "ws1", memory.ScopeVirtualUserID: "u1"},
 			Category: "memory:health",
 		}
 		b, err := json.Marshal(body)
@@ -1222,7 +1222,7 @@ func TestHandleSaveMemory_NilPredicate(t *testing.T) {
 	body := SaveMemoryRequest{
 		Type:     "fact",
 		Content:  "x",
-		Scope:    map[string]string{memory.ScopeWorkspaceID: "ws1", memory.ScopeUserID: "u1"},
+		Scope:    map[string]string{memory.ScopeWorkspaceID: "ws1", memory.ScopeVirtualUserID: "u1"},
 		Category: "totally:unknown:category",
 	}
 	b, err := json.Marshal(body)
@@ -1363,22 +1363,50 @@ func TestTruncateParam(t *testing.T) {
 
 func TestBuildScope(t *testing.T) {
 	q := fakeQuery(map[string]string{
+		"workspace":       "ws1",
+		"virtual_user_id": "u1",
+		"agent":           "a1",
+	})
+	scope, usedLegacy := buildScope(q)
+	assert.Equal(t, "ws1", scope[memory.ScopeWorkspaceID])
+	assert.Equal(t, "u1", scope[memory.ScopeVirtualUserID])
+	assert.Equal(t, "a1", scope[memory.ScopeAgentID])
+	assert.False(t, usedLegacy)
+}
+
+// TestBuildScope_LegacyUserIDParam verifies the #1280 transition window: the
+// pre-rename user_id param still populates the canonical scope key and is
+// flagged as legacy so the caller can log a deprecation warning.
+func TestBuildScope_LegacyUserIDParam(t *testing.T) {
+	q := fakeQuery(map[string]string{
 		"workspace": "ws1",
 		"user_id":   "u1",
-		"agent":     "a1",
 	})
-	scope := buildScope(q)
-	assert.Equal(t, "ws1", scope[memory.ScopeWorkspaceID])
-	assert.Equal(t, "u1", scope[memory.ScopeUserID])
-	assert.Equal(t, "a1", scope[memory.ScopeAgentID])
+	scope, usedLegacy := buildScope(q)
+	assert.Equal(t, "u1", scope[memory.ScopeVirtualUserID])
+	assert.True(t, usedLegacy)
+}
+
+// TestBuildScope_CanonicalWinsOverLegacy verifies virtual_user_id takes
+// precedence when a caller sends both params during the transition window.
+func TestBuildScope_CanonicalWinsOverLegacy(t *testing.T) {
+	q := fakeQuery(map[string]string{
+		"workspace":       "ws1",
+		"virtual_user_id": "canonical",
+		"user_id":         "legacy",
+	})
+	scope, usedLegacy := buildScope(q)
+	assert.Equal(t, "canonical", scope[memory.ScopeVirtualUserID])
+	assert.False(t, usedLegacy)
 }
 
 func TestBuildScope_MinimalParams(t *testing.T) {
 	q := fakeQuery(map[string]string{"workspace": "ws1"})
-	scope := buildScope(q)
+	scope, usedLegacy := buildScope(q)
 	assert.Equal(t, "ws1", scope[memory.ScopeWorkspaceID])
-	_, hasUser := scope[memory.ScopeUserID]
+	_, hasUser := scope[memory.ScopeVirtualUserID]
 	assert.False(t, hasUser)
+	assert.False(t, usedLegacy)
 }
 
 func TestParseIntParam_Defaults(t *testing.T) {

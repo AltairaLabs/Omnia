@@ -86,7 +86,7 @@ func TestAddScopeFilters(t *testing.T) {
 	assert.Empty(t, qb.Args())
 
 	// With user_id — filter added.
-	addScopeFilters(&qb, map[string]string{ScopeUserID: "u1"})
+	addScopeFilters(&qb, map[string]string{ScopeVirtualUserID: "u1"})
 	assert.Len(t, qb.Args(), 1)
 	assert.Equal(t, "u1", qb.Args()[0])
 }
@@ -259,7 +259,7 @@ func TestBuildRetrieveQuery_Basic(t *testing.T) {
 }
 
 func TestBuildRetrieveQuery_WithAllFilters(t *testing.T) {
-	scope := map[string]string{ScopeWorkspaceID: "ws-uuid", ScopeUserID: "user-1"}
+	scope := map[string]string{ScopeWorkspaceID: "ws-uuid", ScopeVirtualUserID: "user-1"}
 	sql, qb := buildRetrieveQuery(scope, "search term", RetrieveOptions{
 		Types:         []string{"fact"},
 		Limit:         10,
@@ -296,7 +296,7 @@ func TestBuildListQuery_Basic(t *testing.T) {
 }
 
 func TestBuildListQuery_WithPagination(t *testing.T) {
-	scope := map[string]string{ScopeWorkspaceID: "ws-uuid", ScopeUserID: "u1"}
+	scope := map[string]string{ScopeWorkspaceID: "ws-uuid", ScopeVirtualUserID: "u1"}
 	sql, qb := buildListQuery(scope, ListOptions{Limit: 25, Offset: 10})
 
 	assert.Contains(t, sql, "LIMIT")
@@ -314,7 +314,7 @@ func TestBuildListQuery_WithTypeFilter(t *testing.T) {
 }
 
 func TestBuildListQuery_StrictByDefault(t *testing.T) {
-	scope := map[string]string{ScopeWorkspaceID: "ws-uuid", ScopeUserID: "u1"}
+	scope := map[string]string{ScopeWorkspaceID: "ws-uuid", ScopeVirtualUserID: "u1"}
 	sql, _ := buildListQuery(scope, ListOptions{})
 
 	// Default list stays strictly user-scoped: equality, NOT the widened
@@ -326,7 +326,7 @@ func TestBuildListQuery_StrictByDefault(t *testing.T) {
 func TestBuildListQuery_IncludeShared_WidensToVisibleToMe(t *testing.T) {
 	scope := map[string]string{
 		ScopeWorkspaceID:   "ws-uuid",
-		ScopeUserID:        "u1",
+		ScopeVirtualUserID: "u1",
 		ScopeIncludeShared: scopeFlagTrue,
 	}
 	sql, qb := buildListQuery(scope, ListOptions{})
@@ -360,7 +360,7 @@ func TestBuildDeleteAllQuery_Basic(t *testing.T) {
 }
 
 func TestBuildDeleteAllQuery_WithUserID(t *testing.T) {
-	scope := map[string]string{ScopeWorkspaceID: "ws-uuid", ScopeUserID: "u1"}
+	scope := map[string]string{ScopeWorkspaceID: "ws-uuid", ScopeVirtualUserID: "u1"}
 	sql, qb := buildDeleteAllQuery(scope)
 
 	assert.Contains(t, sql, "virtual_user_id=$2")
@@ -381,7 +381,7 @@ func TestBuildBatchDeleteQuery_Basic(t *testing.T) {
 }
 
 func TestBuildBatchDeleteQuery_WithUserID(t *testing.T) {
-	scope := map[string]string{ScopeWorkspaceID: "ws-uuid", ScopeUserID: "u1"}
+	scope := map[string]string{ScopeWorkspaceID: "ws-uuid", ScopeVirtualUserID: "u1"}
 	sql, qb := buildBatchDeleteQuery(scope, 100)
 
 	assert.Contains(t, sql, "virtual_user_id=$2")

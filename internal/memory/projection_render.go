@@ -40,7 +40,7 @@ func projectorFor(ps ProjectionStore) coreproj.Projector {
 // ProjectionScopeKey is the stable key for a projection scope (workspace[:user][:agent]).
 func ProjectionScopeKey(scope map[string]string) string {
 	return fmt.Sprintf("%s|%s|%s",
-		scope[ScopeWorkspaceID], scope[ScopeUserID], scope[ScopeAgentID])
+		scope[ScopeWorkspaceID], scope[ScopeVirtualUserID], scope[ScopeAgentID])
 }
 
 // Render computes the 2D layout for scope (Procrustes-aligned to the stored

@@ -156,13 +156,13 @@ func NewCompositeRetriever(store pkmemory.Store, cfg RetrievalConfig, log logr.L
 }
 
 // RetrieveContext implements pkmemory.Retriever. Returns nil when the
-// scope has no user_id (anonymous deviceId not yet plumbed, or
+// scope has no virtual_user_id (anonymous deviceId not yet plumbed, or
 // scope-less invocation): the PromptKit retrieval stage treats nil as
 // "no memories" and skips injection.
 func (r *CompositeRetriever) RetrieveContext(
 	ctx context.Context, scope map[string]string, messages []types.Message,
 ) ([]*pkmemory.Memory, error) {
-	if scope["user_id"] == "" {
+	if scope["virtual_user_id"] == "" {
 		return nil, nil
 	}
 
@@ -318,7 +318,7 @@ func (r *CompositeRetriever) applyDeny(mems []*pkmemory.Memory) []*pkmemory.Memo
 func (r *CompositeRetriever) fetchProfile(
 	ctx context.Context, scope map[string]string,
 ) []*pkmemory.Memory {
-	cacheKey := scope["workspace_id"] + "|" + scope["user_id"]
+	cacheKey := scope["workspace_id"] + "|" + scope["virtual_user_id"]
 
 	r.mu.Lock()
 	if entry, ok := r.cache[cacheKey]; ok && time.Now().Before(entry.expires) {

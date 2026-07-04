@@ -22,8 +22,8 @@ func saveUserMemWithCategory(t *testing.T, store *PostgresMemoryStore, userID, c
 	mem := &Memory{
 		Type: "fact", Content: "user memory", Confidence: 0.9,
 		Scope: map[string]string{
-			ScopeWorkspaceID: testWorkspace1,
-			ScopeUserID:      userID,
+			ScopeWorkspaceID:   testWorkspace1,
+			ScopeVirtualUserID: userID,
 		},
 		Metadata: map[string]any{MetaKeyConsentCategory: category},
 	}
@@ -104,8 +104,8 @@ func TestConsentCategoryNilWhenMetadataMissing(t *testing.T) {
 	mem := &Memory{
 		Type: "fact", Content: "no category", Confidence: 0.9,
 		Scope: map[string]string{
-			ScopeWorkspaceID: testWorkspace1,
-			ScopeUserID:      "user-no-cat",
+			ScopeWorkspaceID:   testWorkspace1,
+			ScopeVirtualUserID: "user-no-cat",
 		},
 	}
 	require.NoError(t, store.Save(context.Background(), mem))

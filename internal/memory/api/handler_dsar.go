@@ -28,7 +28,7 @@ import (
 
 // handleExportMemories exports all memories for a scope (DSAR data subject access request).
 func (h *Handler) handleExportMemories(w http.ResponseWriter, r *http.Request) {
-	scope, err := parseWorkspaceScope(r)
+	scope, err := h.parseWorkspaceScope(r)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -52,7 +52,7 @@ func (h *Handler) handleExportMemories(w http.ResponseWriter, r *http.Request) {
 
 // handleDeleteAllMemories deletes all memories for a scope (DSAR).
 func (h *Handler) handleDeleteAllMemories(w http.ResponseWriter, r *http.Request) {
-	scope, err := parseWorkspaceScope(r)
+	scope, err := h.parseWorkspaceScope(r)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -71,7 +71,7 @@ func (h *Handler) handleDeleteAllMemories(w http.ResponseWriter, r *http.Request
 // handleBatchDeleteMemories deletes up to limit memories for a scope (paginated DSAR).
 // Route: DELETE /api/v1/memories/batch?workspace=X&user_id=Y&limit=N
 func (h *Handler) handleBatchDeleteMemories(w http.ResponseWriter, r *http.Request) {
-	scope, err := parseWorkspaceScope(r)
+	scope, err := h.parseWorkspaceScope(r)
 	if err != nil {
 		writeError(w, err)
 		return

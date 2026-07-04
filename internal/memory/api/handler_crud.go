@@ -29,7 +29,7 @@ import (
 
 // handleListMemories returns a paginated list of memories.
 func (h *Handler) handleListMemories(w http.ResponseWriter, r *http.Request) {
-	scope, err := parseWorkspaceScope(r)
+	scope, err := h.parseWorkspaceScope(r)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -63,7 +63,7 @@ func (h *Handler) handleListMemories(w http.ResponseWriter, r *http.Request) {
 
 // handleSearchMemories searches memories by query.
 func (h *Handler) handleSearchMemories(w http.ResponseWriter, r *http.Request) {
-	scope, err := parseWorkspaceScope(r)
+	scope, err := h.parseWorkspaceScope(r)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -121,7 +121,10 @@ func (h *Handler) handleSaveMemory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.Scope[memory.ScopeUserID] == "" {
+	if normalizeScopeUserID(req.Scope) {
+		h.log.V(1).Info(deprecatedUserIDParam, "path", r.URL.Path)
+	}
+	if req.Scope[memory.ScopeVirtualUserID] == "" {
 		writeError(w, ErrMissingUserID)
 		return
 	}
@@ -224,7 +227,7 @@ func (h *Handler) handleOpenMemory(w http.ResponseWriter, r *http.Request) {
 		writeError(w, ErrMissingMemoryID)
 		return
 	}
-	scope, err := parseWorkspaceScope(r)
+	scope, err := h.parseWorkspaceScope(r)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -271,7 +274,10 @@ func (h *Handler) handleUpdateMemory(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"content is required"}`, http.StatusBadRequest)
 		return
 	}
-	if req.Scope[memory.ScopeUserID] == "" {
+	if normalizeScopeUserID(req.Scope) {
+		h.log.V(1).Info(deprecatedUserIDParam, "path", r.URL.Path)
+	}
+	if req.Scope[memory.ScopeVirtualUserID] == "" {
 		writeError(w, ErrMissingUserID)
 		return
 	}
@@ -312,7 +318,7 @@ func (h *Handler) handleDeleteMemory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	scope, err := parseWorkspaceScope(r)
+	scope, err := h.parseWorkspaceScope(r)
 	if err != nil {
 		writeError(w, err)
 		return

@@ -87,7 +87,7 @@ func (s *PostgresMemoryStore) LookupStructured(ctx context.Context, q Structured
 
 	scopeForScan := map[string]string{ScopeWorkspaceID: q.WorkspaceID}
 	if q.UserID != "" {
-		scopeForScan[ScopeUserID] = q.UserID
+		scopeForScan[ScopeVirtualUserID] = q.UserID
 	}
 	if q.AgentID != "" {
 		scopeForScan[ScopeAgentID] = q.AgentID

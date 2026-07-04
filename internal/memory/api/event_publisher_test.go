@@ -340,8 +340,8 @@ func TestMemoryService_PublishesOnSave(t *testing.T) {
 		Content:    "dark mode",
 		Confidence: 0.9,
 		Scope: map[string]string{
-			memory.ScopeWorkspaceID: "ws-test",
-			memory.ScopeUserID:      "user-99",
+			memory.ScopeWorkspaceID:   "ws-test",
+			memory.ScopeVirtualUserID: "user-99",
 		},
 	}
 
@@ -364,8 +364,8 @@ func TestMemoryService_PublishesOnDelete(t *testing.T) {
 	svc.SetEventPublisher(pub)
 
 	scope := map[string]string{
-		memory.ScopeWorkspaceID: "ws-delete",
-		memory.ScopeUserID:      "user-42",
+		memory.ScopeWorkspaceID:   "ws-delete",
+		memory.ScopeVirtualUserID: "user-42",
 	}
 
 	err := svc.DeleteMemory(context.Background(), scope, "mem-to-delete")

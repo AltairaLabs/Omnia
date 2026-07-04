@@ -46,7 +46,7 @@ func (s *PostgresMemoryStore) LoadProjectionInputs(ctx context.Context, scope ma
 		    AND ($3::uuid IS NULL OR e.agent_id = $3)
 		    AND e.forgotten = false
 		ORDER BY e.id, o.observed_at DESC`,
-		scope[ScopeWorkspaceID], scopeOrNil(scope, ScopeUserID), scopeOrNil(scope, ScopeAgentID),
+		scope[ScopeWorkspaceID], scopeOrNil(scope, ScopeVirtualUserID), scopeOrNil(scope, ScopeAgentID),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("memory: load projection inputs: %w", err)
@@ -144,7 +144,7 @@ func (s *PostgresMemoryStore) ProjectionFingerprint(ctx context.Context, scope m
 	err := s.pool.QueryRow(ctx, latestActiveObservationCTE+`
 		SELECT count(*), max(observed_at), count(*) FILTER (WHERE has_emb)
 		FROM latest`,
-		scope[ScopeWorkspaceID], scopeOrNil(scope, ScopeUserID), scopeOrNil(scope, ScopeAgentID),
+		scope[ScopeWorkspaceID], scopeOrNil(scope, ScopeVirtualUserID), scopeOrNil(scope, ScopeAgentID),
 	).Scan(&count, &maxObs, &embedded)
 	if err != nil {
 		return "", fmt.Errorf("memory: projection fingerprint: %w", err)

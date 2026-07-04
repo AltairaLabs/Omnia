@@ -97,7 +97,7 @@ func (s *MemoryService) SaveMemoryWithResult(ctx context.Context, mem *memory.Me
 		EventType:   eventTypeMemoryCreated,
 		MemoryID:    mem.ID,
 		WorkspaceID: mem.Scope[memory.ScopeWorkspaceID],
-		UserID:      mem.Scope[memory.ScopeUserID],
+		UserID:      mem.Scope[memory.ScopeVirtualUserID],
 		Kind:        mem.Type,
 	})
 	return res, nil
@@ -151,7 +151,7 @@ func (s *MemoryService) publishMemoryCreatedEvent(memoryID string, mem *memory.M
 		EventType:   eventTypeMemoryCreated,
 		MemoryID:    memoryID,
 		WorkspaceID: mem.Scope[memory.ScopeWorkspaceID],
-		UserID:      mem.Scope[memory.ScopeUserID],
+		UserID:      mem.Scope[memory.ScopeVirtualUserID],
 		Kind:        mem.Type,
 		Timestamp:   time.Now().UTC().Format(time.RFC3339),
 	}
@@ -306,7 +306,7 @@ func (s *MemoryService) applyAutoSupersedeViaSimilarity(
 		EventType:   eventTypeMemoryCreated,
 		MemoryID:    mem.ID,
 		WorkspaceID: mem.Scope[memory.ScopeWorkspaceID],
-		UserID:      mem.Scope[memory.ScopeUserID],
+		UserID:      mem.Scope[memory.ScopeVirtualUserID],
 		Kind:        mem.Type,
 		Metadata: map[string]string{
 			"dedup_reason": string(memory.ReasonHighSimilarity),
@@ -340,7 +340,7 @@ func (s *MemoryService) UpdateMemory(ctx context.Context, entityID string, mem *
 		EventType:   eventTypeMemoryCreated,
 		MemoryID:    mem.ID,
 		WorkspaceID: mem.Scope[memory.ScopeWorkspaceID],
-		UserID:      mem.Scope[memory.ScopeUserID],
+		UserID:      mem.Scope[memory.ScopeVirtualUserID],
 		Kind:        mem.Type,
 		Metadata:    map[string]string{"dedup_reason": "explicit"},
 	})
@@ -377,7 +377,7 @@ func (s *MemoryService) SupersedeManyMemories(ctx context.Context, sourceMemoryI
 		EventType:   eventTypeMemoryCreated,
 		MemoryID:    anchorID,
 		WorkspaceID: mem.Scope[memory.ScopeWorkspaceID],
-		UserID:      mem.Scope[memory.ScopeUserID],
+		UserID:      mem.Scope[memory.ScopeVirtualUserID],
 		Kind:        mem.Type,
 		Metadata: map[string]string{
 			"dedup_reason": "supersede_many",

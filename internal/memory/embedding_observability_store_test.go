@@ -23,7 +23,7 @@ func seedUnembeddedEntities(t *testing.T, store *PostgresMemoryStore, ws string,
 	for i, c := range contents {
 		must(t, store.Save(ctx, &Memory{
 			Type: seedEntityType, Content: c, Confidence: 0.9,
-			Scope: map[string]string{ScopeWorkspaceID: ws, ScopeUserID: "u-" + string(rune('a'+i))},
+			Scope: map[string]string{ScopeWorkspaceID: ws, ScopeVirtualUserID: "u-" + string(rune('a'+i))},
 		}))
 	}
 }

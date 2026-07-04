@@ -160,7 +160,7 @@ func TestBuildAPIMux_POSTMemoryWithoutUserIDReturns400(t *testing.T) {
 		Content: "test content",
 		Scope: map[string]string{
 			memory.ScopeWorkspaceID: "ws-1",
-			// deliberately no ScopeUserID — should trigger ErrMissingUserID
+			// deliberately no ScopeVirtualUserID — should trigger ErrMissingUserID
 		},
 	})
 	if err != nil {
