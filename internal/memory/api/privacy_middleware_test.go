@@ -136,7 +136,7 @@ func TestMemoryPrivacyMiddleware_BodyScopeDrivesOptOut(t *testing.T) {
 
 	body, err := json.Marshal(SaveMemoryRequest{
 		Type: "fact", Content: "x",
-		Scope: map[string]string{memory.ScopeWorkspaceID: "ws-1", memory.ScopeUserID: "user-abc"},
+		Scope: map[string]string{memory.ScopeWorkspaceID: "ws-1", memory.ScopeVirtualUserID: "user-abc"},
 	})
 	require.NoError(t, err)
 	r := httptest.NewRequest(http.MethodPost, "/api/v1/memories", bytes.NewReader(body))

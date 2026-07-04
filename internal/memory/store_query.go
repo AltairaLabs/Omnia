@@ -103,7 +103,7 @@ func buildListQuery(scope map[string]string, opts ListOptions) (string, *pgutil.
 func buildVisibleToMeQuery(scope map[string]string, types []string) *pgutil.QueryBuilder {
 	var qb pgutil.QueryBuilder
 	qb.Add(colWorkspaceID, scope[ScopeWorkspaceID])
-	addUserTierClause(&qb, scope[ScopeUserID])
+	addUserTierClause(&qb, scope[ScopeVirtualUserID])
 	addTypeFilters(&qb, types)
 	return &qb
 }
@@ -168,7 +168,7 @@ func addScopeFilters(qb *pgutil.QueryBuilder, scope map[string]string) {
 	// workspace-scoped read (e.g. the runtime's semantic strategy, which
 	// passes no user) returns every user's private memories in the workspace.
 	// A populated user_id stays strict (that user's rows only).
-	if uid := scope[ScopeUserID]; uid != "" {
+	if uid := scope[ScopeVirtualUserID]; uid != "" {
 		qb.Add(colVirtualUserID, uid)
 	} else {
 		qb.AddRaw("virtual_user_id IS NULL")

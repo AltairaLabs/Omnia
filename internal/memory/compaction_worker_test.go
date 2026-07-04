@@ -333,7 +333,7 @@ func TestListWorkspaceIDs_ReturnsOnlyWorkspacesWithMemories(t *testing.T) {
 	for _, ws := range []string{ws1, ws2} {
 		mem := &Memory{
 			Type: "fact", Content: "ws", Confidence: 0.9,
-			Scope: map[string]string{ScopeWorkspaceID: ws, ScopeUserID: user},
+			Scope: map[string]string{ScopeWorkspaceID: ws, ScopeVirtualUserID: user},
 		}
 		if err := store.Save(ctx, mem); err != nil {
 			t.Fatalf("save %s: %v", ws, err)

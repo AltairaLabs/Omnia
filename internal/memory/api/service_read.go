@@ -39,7 +39,7 @@ func (s *MemoryService) OpenMemory(ctx context.Context, scope map[string]string,
 		EventType:   auditEventMemoryAccessed,
 		MemoryID:    entityID,
 		WorkspaceID: scope[memory.ScopeWorkspaceID],
-		UserID:      scope[memory.ScopeUserID],
+		UserID:      scope[memory.ScopeVirtualUserID],
 		Metadata:    map[string]string{metaKeyOperation: "open"},
 	})
 	return mem, nil
@@ -78,7 +78,7 @@ func (s *MemoryService) LinkMemories(ctx context.Context, scope map[string]strin
 		EventType:   eventTypeMemoryCreated,
 		MemoryID:    id,
 		WorkspaceID: scope[memory.ScopeWorkspaceID],
-		UserID:      scope[memory.ScopeUserID],
+		UserID:      scope[memory.ScopeVirtualUserID],
 		Metadata: map[string]string{
 			metaKeyOperation: "link",
 			"source_id":      sourceEntityID,
@@ -104,7 +104,7 @@ func (s *MemoryService) SearchMemories(ctx context.Context, scope map[string]str
 	s.emitAuditEvent(ctx, &MemoryAuditEntry{
 		EventType:   auditEventMemoryAccessed,
 		WorkspaceID: scope[memory.ScopeWorkspaceID],
-		UserID:      scope[memory.ScopeUserID],
+		UserID:      scope[memory.ScopeVirtualUserID],
 		Metadata:    map[string]string{metaKeyOperation: "search"},
 	})
 	return results, nil
@@ -171,7 +171,7 @@ func (s *MemoryService) ListMemories(ctx context.Context, scope map[string]strin
 	s.emitAuditEvent(ctx, &MemoryAuditEntry{
 		EventType:   auditEventMemoryAccessed,
 		WorkspaceID: scope[memory.ScopeWorkspaceID],
-		UserID:      scope[memory.ScopeUserID],
+		UserID:      scope[memory.ScopeVirtualUserID],
 		Metadata:    map[string]string{metaKeyOperation: "list"},
 	})
 	return results, nil

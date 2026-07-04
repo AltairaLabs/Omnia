@@ -32,7 +32,7 @@ import (
 // supersede / dedup machinery. Operators triage these in the
 // dashboard.
 func (h *Handler) handleListConflicts(w http.ResponseWriter, r *http.Request) {
-	scope, err := parseWorkspaceScope(r)
+	scope, err := h.parseWorkspaceScope(r)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -73,7 +73,10 @@ func (h *Handler) handleSupersedeMemories(w http.ResponseWriter, r *http.Request
 		http.Error(w, `{"error":"content is required"}`, http.StatusBadRequest)
 		return
 	}
-	if req.Scope[memory.ScopeUserID] == "" {
+	if normalizeScopeUserID(req.Scope) {
+		h.log.V(1).Info(deprecatedUserIDParam, "path", r.URL.Path)
+	}
+	if req.Scope[memory.ScopeVirtualUserID] == "" {
 		writeError(w, ErrMissingUserID)
 		return
 	}

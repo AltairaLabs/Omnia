@@ -45,10 +45,10 @@ func TestResolveTierTTL(t *testing.T) {
 	}{
 		{"institutional tier", map[string]string{ScopeWorkspaceID: "w"}, 365 * day, 0},
 		{"agent tier", map[string]string{ScopeWorkspaceID: "w", ScopeAgentID: "a"}, 90 * day, 180 * day},
-		{"user tier", map[string]string{ScopeWorkspaceID: "w", ScopeUserID: "u"}, 48 * time.Hour, 30 * day},
+		{"user tier", map[string]string{ScopeWorkspaceID: "w", ScopeVirtualUserID: "u"}, 48 * time.Hour, 30 * day},
 		{
 			"user-for-agent collapses into user",
-			map[string]string{ScopeWorkspaceID: "w", ScopeUserID: "u", ScopeAgentID: "a"},
+			map[string]string{ScopeWorkspaceID: "w", ScopeVirtualUserID: "u", ScopeAgentID: "a"},
 			48 * time.Hour, 30 * day,
 		},
 	}
@@ -62,7 +62,7 @@ func TestResolveTierTTL(t *testing.T) {
 }
 
 func TestResolveTierTTL_UnsetAndInvalid(t *testing.T) {
-	userScope := map[string]string{ScopeWorkspaceID: "w", ScopeUserID: "u"}
+	userScope := map[string]string{ScopeWorkspaceID: "w", ScopeVirtualUserID: "u"}
 
 	// Nil policy → fully unset.
 	assert.Equal(t, TierTTL{}, ResolveTierTTL(nil, userScope))

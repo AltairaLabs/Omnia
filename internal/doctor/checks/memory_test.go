@@ -373,14 +373,14 @@ func TestCheckUserOwnership_Pass(t *testing.T) {
 	srv := (&mockMemoryServer{
 		searchHandler: func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(`{"memories":[{"id":"` + testMemoryID + `","type":"doctor-test","content":"ownership test","scope":{"workspace_id":"ws1","user_id":"doctor-test-user"}}],"total":1}`))
+			_, _ = w.Write([]byte(`{"memories":[{"id":"` + testMemoryID + `","type":"doctor-test","content":"ownership test","scope":{"workspace_id":"ws1","virtual_user_id":"doctor-test-user"}}],"total":1}`))
 		},
 	}).serve(t)
 	defer srv.Close()
 
 	result := newCheckerForMemoryServer(srv).checkUserOwnership(t.Context())
 	assert.Equal(t, doctor.StatusPass, result.Status)
-	assert.Contains(t, result.Detail, "user_id scope")
+	assert.Contains(t, result.Detail, "virtual_user_id scope")
 }
 
 func TestCheckUserOwnership_Fail_NoUserID(t *testing.T) {
@@ -394,7 +394,7 @@ func TestCheckUserOwnership_Fail_NoUserID(t *testing.T) {
 
 	result := newCheckerForMemoryServer(srv).checkUserOwnership(t.Context())
 	assert.Equal(t, doctor.StatusFail, result.Status)
-	assert.Contains(t, result.Detail, "without user_id")
+	assert.Contains(t, result.Detail, "without virtual_user_id")
 }
 
 func TestCheckUserOwnership_Skip_NoWorkspace(t *testing.T) {
@@ -408,7 +408,7 @@ func TestCheckUserOwnership_Skip_NoWorkspace(t *testing.T) {
 func TestCheckUserIsolation_Pass(t *testing.T) {
 	srv := (&mockMemoryServer{
 		searchHandler: func(w http.ResponseWriter, r *http.Request) {
-			uid := r.URL.Query().Get("user_id")
+			uid := r.URL.Query().Get("virtual_user_id")
 			if uid == memoryOtherUserID {
 				w.WriteHeader(http.StatusOK)
 				_, _ = w.Write([]byte(`{"memories":[],"total":0}`))
@@ -694,7 +694,7 @@ func TestCheckMemoryPersistsAcrossSessions_Pass(t *testing.T) {
 	memSrv := (&mockMemoryServer{
 		searchHandler: func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(`{"memories":[{"id":"p1","content":"persist-ok","scope":{"workspace_id":"ws1","user_id":"test"}}],"total":1}`))
+			_, _ = w.Write([]byte(`{"memories":[{"id":"p1","content":"persist-ok","scope":{"workspace_id":"ws1","virtual_user_id":"test"}}],"total":1}`))
 		},
 	}).serve(t)
 	defer memSrv.Close()

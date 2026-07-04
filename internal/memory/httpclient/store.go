@@ -85,7 +85,7 @@ func NewStore(baseURL string, log logr.Logger) *Store {
 func (s *Store) Save(ctx context.Context, mem *pkmemory.Memory) error {
 	s.log.V(1).Info("memory save request",
 		"hasScope", len(mem.Scope) > 0,
-		"scopeUserIDHash", logging.HashID(mem.Scope["user_id"]),
+		"scopeUserIDHash", logging.HashID(mem.Scope["virtual_user_id"]),
 		"scopeWorkspaceID", mem.Scope["workspace_id"],
 		"contentLen", len(mem.Content),
 	)
@@ -311,8 +311,8 @@ func scopeParams(scope map[string]string) url.Values {
 	if ws := scope["workspace_id"]; ws != "" {
 		params.Set("workspace", ws)
 	}
-	if uid := scope["user_id"]; uid != "" {
-		params.Set("user_id", uid)
+	if uid := scope["virtual_user_id"]; uid != "" {
+		params.Set("virtual_user_id", uid)
 	}
 	if agent := scope["agent_id"]; agent != "" {
 		params.Set("agent", agent)

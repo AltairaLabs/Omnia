@@ -215,7 +215,7 @@ func TestStore_DeleteAll(t *testing.T) {
 
 	store := NewStore(srv.URL, logr.Discard())
 
-	scope := map[string]string{"workspace_id": "ws-1", "user_id": "user-1"}
+	scope := map[string]string{"workspace_id": "ws-1", "virtual_user_id": "user-1"}
 	err := store.DeleteAll(context.Background(), scope)
 	require.NoError(t, err)
 }
@@ -232,15 +232,17 @@ func TestStore_ConnectionError(t *testing.T) {
 
 func TestScopeParams(t *testing.T) {
 	scope := map[string]string{
-		"workspace_id": "ws-1",
-		"user_id":      "user-1",
-		"agent_id":     "agent-1",
+		"workspace_id":    "ws-1",
+		"virtual_user_id": "user-1",
+		"agent_id":        "agent-1",
 	}
 
 	params := scopeParams(scope)
 	assert.Equal(t, "ws-1", params.Get("workspace"))
-	assert.Equal(t, "user-1", params.Get("user_id"))
+	assert.Equal(t, "user-1", params.Get("virtual_user_id"))
 	assert.Equal(t, "agent-1", params.Get("agent"))
+	// #1280: the legacy user_id param must no longer be emitted.
+	assert.Empty(t, params.Get("user_id"))
 }
 
 func TestScopeParams_MinimalScope(t *testing.T) {
@@ -250,7 +252,7 @@ func TestScopeParams_MinimalScope(t *testing.T) {
 
 	params := scopeParams(scope)
 	assert.Equal(t, "ws-1", params.Get("workspace"))
-	assert.Empty(t, params.Get("user_id"))
+	assert.Empty(t, params.Get("virtual_user_id"))
 	assert.Empty(t, params.Get("agent"))
 }
 

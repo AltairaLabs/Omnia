@@ -152,8 +152,8 @@ const (
 
 func testScope(workspaceID string) map[string]string {
 	return map[string]string{
-		ScopeWorkspaceID: workspaceID,
-		ScopeUserID:      "user-1",
+		ScopeWorkspaceID:   workspaceID,
+		ScopeVirtualUserID: "user-1",
 	}
 }
 
@@ -566,11 +566,11 @@ func TestPostgresMemoryStore_AppendObservationToEntity_RejectsCrossScope(t *test
 	store := newStore(t)
 	ctx := context.Background()
 
-	scopeAlice := map[string]string{ScopeWorkspaceID: testWorkspace1, ScopeUserID: "alice"}
+	scopeAlice := map[string]string{ScopeWorkspaceID: testWorkspace1, ScopeVirtualUserID: "alice"}
 	memAlice := &Memory{Type: "fact", Content: "alice fact", Confidence: 0.9, Scope: scopeAlice}
 	require.NoError(t, store.Save(ctx, memAlice))
 
-	scopeBob := map[string]string{ScopeWorkspaceID: testWorkspace1, ScopeUserID: "bob"}
+	scopeBob := map[string]string{ScopeWorkspaceID: testWorkspace1, ScopeVirtualUserID: "bob"}
 	updateAsBob := &Memory{Type: "fact", Content: "bob trying to overwrite", Confidence: 0.9, Scope: scopeBob}
 	_, err := store.AppendObservationToEntity(ctx, memAlice.ID, updateAsBob)
 	require.Error(t, err)
@@ -585,11 +585,11 @@ func TestPostgresMemoryStore_Save_RejectsCrossScopeUpdate(t *testing.T) {
 	store := newStore(t)
 	ctx := context.Background()
 
-	scopeAlice := map[string]string{ScopeWorkspaceID: testWorkspace1, ScopeUserID: "alice"}
+	scopeAlice := map[string]string{ScopeWorkspaceID: testWorkspace1, ScopeVirtualUserID: "alice"}
 	memAlice := &Memory{Type: "fact", Content: "alice fact", Confidence: 0.9, Scope: scopeAlice}
 	require.NoError(t, store.Save(ctx, memAlice))
 
-	scopeBob := map[string]string{ScopeWorkspaceID: testWorkspace1, ScopeUserID: "bob"}
+	scopeBob := map[string]string{ScopeWorkspaceID: testWorkspace1, ScopeVirtualUserID: "bob"}
 	hijack := &Memory{
 		ID: memAlice.ID, Type: "fact", Content: "bob hijacks alice's entity",
 		Confidence: 0.9, Scope: scopeBob,
@@ -1065,8 +1065,8 @@ func TestPostgresMemoryStore_Delete_OtherUserDenied(t *testing.T) {
 	store := newStore(t)
 	ctx := context.Background()
 
-	scopeAlice := map[string]string{ScopeWorkspaceID: testWorkspace1, ScopeUserID: "alice"}
-	scopeBob := map[string]string{ScopeWorkspaceID: testWorkspace1, ScopeUserID: "bob"}
+	scopeAlice := map[string]string{ScopeWorkspaceID: testWorkspace1, ScopeVirtualUserID: "alice"}
+	scopeBob := map[string]string{ScopeWorkspaceID: testWorkspace1, ScopeVirtualUserID: "bob"}
 
 	mem := &Memory{Type: "preference", Content: "alice's secret", Confidence: 0.9, Scope: scopeAlice}
 	require.NoError(t, store.Save(ctx, mem))
@@ -1210,7 +1210,7 @@ func TestPostgresMemoryStore_List_VisibleToMe(t *testing.T) {
 		mem := &Memory{Type: "fact", Content: content, Confidence: 0.9, Scope: scope}
 		var err error
 		switch {
-		case scope[ScopeUserID] != "":
+		case scope[ScopeVirtualUserID] != "":
 			err = store.Save(ctx, mem)
 		case scope[ScopeAgentID] != "":
 			err = store.SaveAgentScoped(ctx, mem)
@@ -1222,12 +1222,12 @@ func TestPostgresMemoryStore_List_VisibleToMe(t *testing.T) {
 	}
 	save(map[string]string{ScopeWorkspaceID: ws}, cInst)
 	save(map[string]string{ScopeWorkspaceID: ws, ScopeAgentID: agentID}, cAgent)
-	save(map[string]string{ScopeWorkspaceID: ws, ScopeUserID: alice}, cAlice)
-	save(map[string]string{ScopeWorkspaceID: ws, ScopeUserID: "bob"}, cBob)
+	save(map[string]string{ScopeWorkspaceID: ws, ScopeVirtualUserID: alice}, cAlice)
+	save(map[string]string{ScopeWorkspaceID: ws, ScopeVirtualUserID: "bob"}, cBob)
 
 	// Strict (default) list: alice sees only her own.
 	strict, err := store.List(ctx, map[string]string{
-		ScopeWorkspaceID: ws, ScopeUserID: alice,
+		ScopeWorkspaceID: ws, ScopeVirtualUserID: alice,
 	}, ListOptions{})
 	require.NoError(t, err)
 	require.Len(t, strict, 1)
@@ -1236,7 +1236,7 @@ func TestPostgresMemoryStore_List_VisibleToMe(t *testing.T) {
 	// Visible-to-me: institutional + agent + alice's own, but NOT bob's.
 	visible, err := store.List(ctx, map[string]string{
 		ScopeWorkspaceID:   ws,
-		ScopeUserID:        alice,
+		ScopeVirtualUserID: alice,
 		ScopeIncludeShared: scopeFlagTrue,
 	}, ListOptions{})
 	require.NoError(t, err)
@@ -1249,11 +1249,11 @@ func TestPostgresMemoryStore_List_VisibleToMe(t *testing.T) {
 	assert.NotContains(t, scopeByContent, cBob, "must exclude other users' private memories")
 
 	// Per-row scope must reflect each row's real tier, not the request scope.
-	assert.Empty(t, scopeByContent[cInst][ScopeUserID])
+	assert.Empty(t, scopeByContent[cInst][ScopeVirtualUserID])
 	assert.Empty(t, scopeByContent[cInst][ScopeAgentID])
 	assert.Equal(t, agentID, scopeByContent[cAgent][ScopeAgentID])
-	assert.Empty(t, scopeByContent[cAgent][ScopeUserID])
-	assert.Equal(t, alice, scopeByContent[cAlice][ScopeUserID])
+	assert.Empty(t, scopeByContent[cAgent][ScopeVirtualUserID])
+	assert.Equal(t, alice, scopeByContent[cAlice][ScopeVirtualUserID])
 }
 
 func TestPostgresMemoryStore_Save_WithSessionAndTurnRange(t *testing.T) {

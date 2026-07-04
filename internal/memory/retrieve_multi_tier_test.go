@@ -282,7 +282,7 @@ func TestRetrieveMultiTier_SpansAllTiers(t *testing.T) {
 	// Scope map must include the tier fields that were present on the row.
 	uForA := tiers[TierUserForAgent]
 	assert.Equal(t, testWorkspace1, uForA.Scope[ScopeWorkspaceID])
-	assert.Equal(t, "user-1", uForA.Scope[ScopeUserID])
+	assert.Equal(t, "user-1", uForA.Scope[ScopeVirtualUserID])
 	assert.Equal(t, multiTierAgentID, uForA.Scope[ScopeAgentID])
 }
 
@@ -296,8 +296,8 @@ func TestRetrieveMultiTier_HidesStructuredKeySupersedes(t *testing.T) {
 	store := newStore(t)
 	ctx := context.Background()
 	scope := map[string]string{
-		ScopeWorkspaceID: testWorkspace1,
-		ScopeUserID:      "user-1",
+		ScopeWorkspaceID:   testWorkspace1,
+		ScopeVirtualUserID: "user-1",
 	}
 
 	about := map[string]any{
@@ -348,7 +348,7 @@ func TestRetrieveMultiTier_InstitutionalOnlyDoesNotBleed(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, result.Memories, 1)
 	assert.Equal(t, TierInstitutional, result.Memories[0].Tier)
-	assert.Empty(t, result.Memories[0].Scope[ScopeUserID])
+	assert.Empty(t, result.Memories[0].Scope[ScopeVirtualUserID])
 }
 
 func TestRetrieveMultiTier_TruncatesToLimit(t *testing.T) {

@@ -243,7 +243,7 @@ func appendDeduped(dst []*MultiTierMemory, rows []*Memory, seen map[string]bool)
 // scope keys are populated. Matches scanMultiTierRow's logic but reads from
 // the scope map rather than *string columns.
 func classifyTierFromScope(scope map[string]string) Tier {
-	hasUser := scope[ScopeUserID] != ""
+	hasUser := scope[ScopeVirtualUserID] != ""
 	hasAgent := scope[ScopeAgentID] != ""
 	switch {
 	case hasUser && hasAgent:
@@ -424,7 +424,7 @@ func scanMultiTierRow(row pgx.Rows, workspaceID string) (*MultiTierMemory, error
 func buildScope(workspaceID string, userID, agentID *string) map[string]string {
 	scope := map[string]string{ScopeWorkspaceID: workspaceID}
 	if userID != nil && *userID != "" {
-		scope[ScopeUserID] = *userID
+		scope[ScopeVirtualUserID] = *userID
 	}
 	if agentID != nil && *agentID != "" {
 		scope[ScopeAgentID] = *agentID

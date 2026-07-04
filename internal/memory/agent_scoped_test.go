@@ -78,7 +78,7 @@ func TestSaveAgentScoped_WritesRow(t *testing.T) {
 		t.Errorf("provenance=%q, want %q", got, pkmemory.ProvenanceOperatorCurated)
 	}
 	// Scope must be sanitized — no user_id key, agent_id preserved.
-	if _, ok := mem.Scope[ScopeUserID]; ok {
+	if _, ok := mem.Scope[ScopeVirtualUserID]; ok {
 		t.Errorf("scope still contains user_id after sanitization: %+v", mem.Scope)
 	}
 	if mem.Scope[ScopeAgentID] != testAgent1 {
@@ -105,9 +105,9 @@ func TestSaveAgentScoped_StripsUserIDFromScope(t *testing.T) {
 	mem := &Memory{
 		Type: "policy", Content: "strip me", Confidence: 1.0,
 		Scope: map[string]string{
-			ScopeWorkspaceID: testWorkspace1,
-			ScopeAgentID:     testAgent1,
-			ScopeUserID:      user, // <- should be dropped
+			ScopeWorkspaceID:   testWorkspace1,
+			ScopeAgentID:       testAgent1,
+			ScopeVirtualUserID: user, // <- should be dropped
 		},
 	}
 	if err := store.SaveAgentScoped(ctx, mem); err != nil {
@@ -116,7 +116,7 @@ func TestSaveAgentScoped_StripsUserIDFromScope(t *testing.T) {
 
 	// Listing as the user should NOT surface the agent-scoped row.
 	userRes, err := store.Retrieve(ctx,
-		map[string]string{ScopeWorkspaceID: testWorkspace1, ScopeUserID: user},
+		map[string]string{ScopeWorkspaceID: testWorkspace1, ScopeVirtualUserID: user},
 		"strip me", RetrieveOptions{Limit: 10})
 	if err != nil {
 		t.Fatalf("Retrieve: %v", err)
@@ -199,7 +199,7 @@ func TestDeleteAgentScoped_SoftDeletesOnlyAgentScoped(t *testing.T) {
 
 	userMem := &Memory{
 		Type: "pref", Content: "user-pref", Confidence: 0.8,
-		Scope: map[string]string{ScopeWorkspaceID: testWorkspace1, ScopeUserID: user},
+		Scope: map[string]string{ScopeWorkspaceID: testWorkspace1, ScopeVirtualUserID: user},
 	}
 	must(t, store.Save(ctx, userMem))
 

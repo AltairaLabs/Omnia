@@ -52,7 +52,7 @@ export const DELETE = withWorkspaceAccess<{ name: string; memoryId: string }>(
     // delete-all paths: session identity for authenticated users, the device
     // pseudonym for anonymous.
     const scopedUserId = resolveScopedUserId(request.nextUrl.searchParams, user);
-    if (scopedUserId) params.set("user_id", pseudonymizeId(scopedUserId));
+    if (scopedUserId) params.set("virtual_user_id", pseudonymizeId(scopedUserId));
 
     const baseUrl = urls.memoryURL.endsWith("/") ? urls.memoryURL.slice(0, -1) : urls.memoryURL;
     const targetUrl = `${baseUrl}/api/v1/memories/${encodeURIComponent(memoryId)}?${params.toString()}`;

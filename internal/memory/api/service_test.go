@@ -200,7 +200,7 @@ func TestServiceSaveMemory(t *testing.T) {
 		Type:       "preference",
 		Content:    "prefers dark mode",
 		Confidence: 0.9,
-		Scope:      map[string]string{memory.ScopeWorkspaceID: testWorkspaceID, memory.ScopeUserID: "test-user"},
+		Scope:      map[string]string{memory.ScopeWorkspaceID: testWorkspaceID, memory.ScopeVirtualUserID: "test-user"},
 	}
 
 	err := svc.SaveMemory(ctx, mem)
@@ -227,7 +227,7 @@ func TestServiceSaveMemory_MissingWorkspace(t *testing.T) {
 func TestServiceListMemories(t *testing.T) {
 	svc := newTestService(t)
 	ctx := context.Background()
-	scope := map[string]string{memory.ScopeWorkspaceID: testWorkspaceID, memory.ScopeUserID: "test-user"}
+	scope := map[string]string{memory.ScopeWorkspaceID: testWorkspaceID, memory.ScopeVirtualUserID: "test-user"}
 
 	// Save two memories.
 	for _, content := range []string{"likes Go", "uses Linux"} {
@@ -248,7 +248,7 @@ func TestServiceListMemories(t *testing.T) {
 func TestServiceSearchMemories(t *testing.T) {
 	svc := newTestService(t)
 	ctx := context.Background()
-	scope := map[string]string{memory.ScopeWorkspaceID: testWorkspaceID, memory.ScopeUserID: "test-user"}
+	scope := map[string]string{memory.ScopeWorkspaceID: testWorkspaceID, memory.ScopeVirtualUserID: "test-user"}
 
 	err := svc.SaveMemory(ctx, &memory.Memory{
 		Type:       "preference",
@@ -284,8 +284,8 @@ func TestServiceSaveMemory_RequireAboutCaseInsensitive(t *testing.T) {
 
 	ctx := context.Background()
 	scope := map[string]string{
-		memory.ScopeWorkspaceID: testWorkspaceID,
-		memory.ScopeUserID:      "test-user",
+		memory.ScopeWorkspaceID:   testWorkspaceID,
+		memory.ScopeVirtualUserID: "test-user",
 	}
 
 	for _, variant := range []string{"Fact", "FACT", " fact "} {
@@ -406,8 +406,8 @@ func TestServiceSaveMemory_PolicyAndConfigUnion(t *testing.T) {
 
 	ctx := context.Background()
 	scope := map[string]string{
-		memory.ScopeWorkspaceID: testWorkspaceID,
-		memory.ScopeUserID:      "test-user",
+		memory.ScopeWorkspaceID:   testWorkspaceID,
+		memory.ScopeVirtualUserID: "test-user",
 	}
 
 	// fact (in static config) without about → reject.
@@ -443,8 +443,8 @@ func TestServiceSaveMemory_PolicyLoaderError(t *testing.T) {
 
 	ctx := context.Background()
 	scope := map[string]string{
-		memory.ScopeWorkspaceID: testWorkspaceID,
-		memory.ScopeUserID:      "test-user",
+		memory.ScopeWorkspaceID:   testWorkspaceID,
+		memory.ScopeVirtualUserID: "test-user",
 	}
 	// Static config still in force when the loader errs.
 	err := svc.SaveMemory(ctx, &memory.Memory{
@@ -485,8 +485,8 @@ func TestServiceSaveMemory_PolicyRequireAboutForKinds(t *testing.T) {
 
 	ctx := context.Background()
 	scope := map[string]string{
-		memory.ScopeWorkspaceID: testWorkspaceID,
-		memory.ScopeUserID:      "test-user",
+		memory.ScopeWorkspaceID:   testWorkspaceID,
+		memory.ScopeVirtualUserID: "test-user",
 	}
 
 	// preference without about → policy rejects.
@@ -513,8 +513,8 @@ func TestServiceSupersedeMany_CollapsesAcrossEntities(t *testing.T) {
 	svc := newTestService(t)
 	ctx := context.Background()
 	scope := map[string]string{
-		memory.ScopeWorkspaceID: testWorkspaceID,
-		memory.ScopeUserID:      "test-user",
+		memory.ScopeWorkspaceID:   testWorkspaceID,
+		memory.ScopeVirtualUserID: "test-user",
 	}
 
 	older := &memory.Memory{Type: "fact", Content: "name: Slim Shard", Confidence: 0.9, Scope: scope}
@@ -553,16 +553,16 @@ func TestServiceSupersedeMany_RejectsCrossWorkspace(t *testing.T) {
 	ctx := context.Background()
 
 	scopeA := map[string]string{
-		memory.ScopeWorkspaceID: testWorkspaceID,
-		memory.ScopeUserID:      "user-a",
+		memory.ScopeWorkspaceID:   testWorkspaceID,
+		memory.ScopeVirtualUserID: "user-a",
 	}
 	memA := &memory.Memory{Type: "fact", Content: "in workspace A", Confidence: 0.9, Scope: scopeA}
 	require.NoError(t, svc.SaveMemory(ctx, memA))
 
 	// Try to supersede memA from a different workspace.
 	scopeOther := map[string]string{
-		memory.ScopeWorkspaceID: "00000000-0000-0000-0000-000000000099",
-		memory.ScopeUserID:      "user-other",
+		memory.ScopeWorkspaceID:   "00000000-0000-0000-0000-000000000099",
+		memory.ScopeVirtualUserID: "user-other",
 	}
 	canonical := &memory.Memory{Type: "fact", Content: "stolen", Confidence: 0.9, Scope: scopeOther}
 	_, err := svc.SupersedeManyMemories(ctx, []string{memA.ID}, canonical)
@@ -583,8 +583,8 @@ func TestServiceSaveMemory_RequiresAboutForConfiguredKinds(t *testing.T) {
 	}, logr.Discard())
 	ctx := context.Background()
 	scope := map[string]string{
-		memory.ScopeWorkspaceID: testWorkspaceID,
-		memory.ScopeUserID:      "test-user",
+		memory.ScopeWorkspaceID:   testWorkspaceID,
+		memory.ScopeVirtualUserID: "test-user",
 	}
 
 	// fact without about → reject.
@@ -631,8 +631,8 @@ func TestServiceLargeMemory_SaveRecallOpen(t *testing.T) {
 	svc := NewMemoryService(store, nil, MemoryServiceConfig{}, logr.Discard())
 	ctx := context.Background()
 	scope := map[string]string{
-		memory.ScopeWorkspaceID: testWorkspaceID,
-		memory.ScopeUserID:      "test-user",
+		memory.ScopeWorkspaceID:   testWorkspaceID,
+		memory.ScopeVirtualUserID: "test-user",
 	}
 
 	largeBody := strings.Repeat("payload ", 500) // ~4000 bytes
@@ -678,8 +678,8 @@ func TestServiceSearchMemories_HybridSurfacesSemanticMatch(t *testing.T) {
 
 	ctx := context.Background()
 	scope := map[string]string{
-		memory.ScopeWorkspaceID: testWorkspaceID,
-		memory.ScopeUserID:      "test-user",
+		memory.ScopeWorkspaceID:   testWorkspaceID,
+		memory.ScopeVirtualUserID: "test-user",
 	}
 
 	a := &memory.Memory{Type: "preference", Content: "User prefers dark mode", Confidence: 0.9, Scope: scope}
@@ -712,7 +712,7 @@ func TestServiceSearchMemories_HybridSurfacesSemanticMatch(t *testing.T) {
 func TestServiceSearchMemories_FallsBackWhenNoEmbedder(t *testing.T) {
 	svc := newTestService(t) // no embedder configured
 	ctx := context.Background()
-	scope := map[string]string{memory.ScopeWorkspaceID: testWorkspaceID, memory.ScopeUserID: "test-user"}
+	scope := map[string]string{memory.ScopeWorkspaceID: testWorkspaceID, memory.ScopeVirtualUserID: "test-user"}
 
 	require.NoError(t, svc.SaveMemory(ctx, &memory.Memory{
 		Type: "preference", Content: "loves dark mode", Confidence: 0.9, Scope: scope,
@@ -738,7 +738,7 @@ func TestServiceSearchMemories_HybridFallsBackOnEmbedError(t *testing.T) {
 	svc := NewMemoryService(store, embSvc, MemoryServiceConfig{}, logr.Discard())
 
 	ctx := context.Background()
-	scope := map[string]string{memory.ScopeWorkspaceID: testWorkspaceID, memory.ScopeUserID: "test-user"}
+	scope := map[string]string{memory.ScopeWorkspaceID: testWorkspaceID, memory.ScopeVirtualUserID: "test-user"}
 	require.NoError(t, store.Save(ctx, &memory.Memory{
 		Type: "preference", Content: "User prefers dark mode", Confidence: 0.9, Scope: scope,
 	}))
@@ -757,7 +757,7 @@ func TestServiceSearchMemories_HybridFallsBackOnEmbedError(t *testing.T) {
 func TestServiceRelatedForMemories(t *testing.T) {
 	svc := newTestService(t)
 	ctx := context.Background()
-	scope := map[string]string{memory.ScopeWorkspaceID: testWorkspaceID, memory.ScopeUserID: "test-user"}
+	scope := map[string]string{memory.ScopeWorkspaceID: testWorkspaceID, memory.ScopeVirtualUserID: "test-user"}
 
 	user := &memory.Memory{Type: "fact", Content: "name: Phil", Confidence: 0.9, Scope: scope}
 	require.NoError(t, svc.SaveMemory(ctx, user))
@@ -789,7 +789,7 @@ func TestServiceRelatedForMemories(t *testing.T) {
 func TestServiceDeleteMemory(t *testing.T) {
 	svc := newTestService(t)
 	ctx := context.Background()
-	scope := map[string]string{memory.ScopeWorkspaceID: testWorkspaceID, memory.ScopeUserID: "test-user"}
+	scope := map[string]string{memory.ScopeWorkspaceID: testWorkspaceID, memory.ScopeVirtualUserID: "test-user"}
 
 	mem := &memory.Memory{
 		Type:       "fact",
@@ -811,7 +811,7 @@ func TestServiceDeleteMemory(t *testing.T) {
 func TestServiceDeleteMemory_NotFound(t *testing.T) {
 	svc := newTestService(t)
 	ctx := context.Background()
-	scope := map[string]string{memory.ScopeWorkspaceID: testWorkspaceID, memory.ScopeUserID: "test-user"}
+	scope := map[string]string{memory.ScopeWorkspaceID: testWorkspaceID, memory.ScopeVirtualUserID: "test-user"}
 
 	err := svc.DeleteMemory(ctx, scope, testNonexistent)
 	require.Error(t, err)
@@ -821,7 +821,7 @@ func TestServiceDeleteMemory_NotFound(t *testing.T) {
 func TestServiceDeleteAllMemories(t *testing.T) {
 	svc := newTestService(t)
 	ctx := context.Background()
-	scope := map[string]string{memory.ScopeWorkspaceID: testWorkspaceID, memory.ScopeUserID: "test-user"}
+	scope := map[string]string{memory.ScopeWorkspaceID: testWorkspaceID, memory.ScopeVirtualUserID: "test-user"}
 
 	for i := 0; i < 3; i++ {
 		require.NoError(t, svc.SaveMemory(ctx, &memory.Memory{
@@ -862,7 +862,7 @@ func TestMemoryService_SaveWithEmbedding(t *testing.T) {
 		Type:       "preference",
 		Content:    "likes Go",
 		Confidence: 0.9,
-		Scope:      map[string]string{memory.ScopeWorkspaceID: testWorkspaceID, memory.ScopeUserID: "test-user"},
+		Scope:      map[string]string{memory.ScopeWorkspaceID: testWorkspaceID, memory.ScopeVirtualUserID: "test-user"},
 	}
 
 	err := svc.SaveMemory(ctx, mem)
@@ -906,8 +906,8 @@ func TestMemoryService_AutoSupersedesByEmbeddingSimilarity(t *testing.T) {
 
 	ctx := context.Background()
 	scope := map[string]string{
-		memory.ScopeWorkspaceID: testWorkspaceID,
-		memory.ScopeUserID:      "test-user",
+		memory.ScopeWorkspaceID:   testWorkspaceID,
+		memory.ScopeVirtualUserID: "test-user",
 	}
 
 	// Seed an existing memory and stamp it with the same embedding
@@ -974,7 +974,7 @@ func TestMemoryService_SaveWithEmbedding_EmbedError(t *testing.T) {
 		Type:       "fact",
 		Content:    "something",
 		Confidence: 0.8,
-		Scope:      map[string]string{memory.ScopeWorkspaceID: testWorkspaceID, memory.ScopeUserID: "test-user"},
+		Scope:      map[string]string{memory.ScopeWorkspaceID: testWorkspaceID, memory.ScopeVirtualUserID: "test-user"},
 	}
 
 	// Save should succeed even when embedding fails.
@@ -1000,7 +1000,7 @@ func TestMemoryService_SaveWithoutEmbedding(t *testing.T) {
 		Type:       "preference",
 		Content:    "no embedding configured",
 		Confidence: 0.7,
-		Scope:      map[string]string{memory.ScopeWorkspaceID: testWorkspaceID, memory.ScopeUserID: "test-user"},
+		Scope:      map[string]string{memory.ScopeWorkspaceID: testWorkspaceID, memory.ScopeVirtualUserID: "test-user"},
 	}
 
 	err := svc.SaveMemory(ctx, mem)
@@ -1020,7 +1020,7 @@ func TestMemoryService_SaveWithTTL(t *testing.T) {
 		Type:       "fact",
 		Content:    "TTL test",
 		Confidence: 0.9,
-		Scope:      map[string]string{memory.ScopeWorkspaceID: testWorkspaceID, memory.ScopeUserID: "test-user"},
+		Scope:      map[string]string{memory.ScopeWorkspaceID: testWorkspaceID, memory.ScopeVirtualUserID: "test-user"},
 	}
 
 	err := svc.SaveMemory(ctx, mem)
@@ -1045,7 +1045,7 @@ func TestMemoryService_SaveWithExplicitExpiry(t *testing.T) {
 		Content:    "explicit expiry test",
 		Confidence: 0.9,
 		ExpiresAt:  &explicit,
-		Scope:      map[string]string{memory.ScopeWorkspaceID: testWorkspaceID, memory.ScopeUserID: "test-user"},
+		Scope:      map[string]string{memory.ScopeWorkspaceID: testWorkspaceID, memory.ScopeVirtualUserID: "test-user"},
 	}
 
 	err := svc.SaveMemory(ctx, mem)
@@ -1069,7 +1069,7 @@ func TestMemoryService_PerTierTTLDefault(t *testing.T) {
 	before := time.Now()
 	mem := &memory.Memory{
 		Type: "fact", Content: "per-tier ttl", Confidence: 0.9,
-		Scope: map[string]string{memory.ScopeWorkspaceID: testWorkspaceID, memory.ScopeUserID: "u"},
+		Scope: map[string]string{memory.ScopeWorkspaceID: testWorkspaceID, memory.ScopeVirtualUserID: "u"},
 	}
 	require.NoError(t, svc.SaveMemory(context.Background(), mem))
 	require.NotNil(t, mem.ExpiresAt)
@@ -1091,7 +1091,7 @@ func TestMemoryService_TTLMaxAgeCapsClientExpiry(t *testing.T) {
 	farFuture := before.Add(365 * 24 * time.Hour)
 	mem := &memory.Memory{
 		Type: "fact", Content: "pinned forever", Confidence: 0.9, ExpiresAt: &farFuture,
-		Scope: map[string]string{memory.ScopeWorkspaceID: testWorkspaceID, memory.ScopeUserID: "u"},
+		Scope: map[string]string{memory.ScopeWorkspaceID: testWorkspaceID, memory.ScopeVirtualUserID: "u"},
 	}
 	require.NoError(t, svc.SaveMemory(context.Background(), mem))
 	require.NotNil(t, mem.ExpiresAt)
@@ -1108,7 +1108,7 @@ func TestMemoryService_SaveStampsDefaultPurpose(t *testing.T) {
 	ctx := context.Background()
 	mem := &memory.Memory{
 		Type: "fact", Content: "purpose default", Confidence: 1.0,
-		Scope: map[string]string{memory.ScopeWorkspaceID: testWorkspaceID, memory.ScopeUserID: "u"},
+		Scope: map[string]string{memory.ScopeWorkspaceID: testWorkspaceID, memory.ScopeVirtualUserID: "u"},
 	}
 
 	require.NoError(t, svc.SaveMemory(ctx, mem))
@@ -1129,7 +1129,7 @@ func TestMemoryService_SaveRespectsExplicitPurpose(t *testing.T) {
 	ctx := context.Background()
 	mem := &memory.Memory{
 		Type: "fact", Content: "explicit purpose", Confidence: 1.0,
-		Scope:    map[string]string{memory.ScopeWorkspaceID: testWorkspaceID, memory.ScopeUserID: "u"},
+		Scope:    map[string]string{memory.ScopeWorkspaceID: testWorkspaceID, memory.ScopeVirtualUserID: "u"},
 		Metadata: map[string]any{memory.MetaKeyPurpose: "compliance"},
 	}
 
@@ -1145,7 +1145,7 @@ func TestMemoryService_SaveRespectsExplicitPurpose(t *testing.T) {
 func TestServiceBatchDeleteMemories(t *testing.T) {
 	svc := newTestService(t)
 	ctx := context.Background()
-	scope := map[string]string{memory.ScopeWorkspaceID: testWorkspaceID, memory.ScopeUserID: "test-user"}
+	scope := map[string]string{memory.ScopeWorkspaceID: testWorkspaceID, memory.ScopeVirtualUserID: "test-user"}
 
 	// Save 5 memories.
 	for i := 0; i < 5; i++ {
@@ -1171,7 +1171,7 @@ func TestServiceBatchDeleteMemories(t *testing.T) {
 func TestServiceBatchDeleteMemories_Empty(t *testing.T) {
 	svc := newTestService(t)
 	ctx := context.Background()
-	scope := map[string]string{memory.ScopeWorkspaceID: testWorkspaceID, memory.ScopeUserID: "test-user"}
+	scope := map[string]string{memory.ScopeWorkspaceID: testWorkspaceID, memory.ScopeVirtualUserID: "test-user"}
 
 	// BatchDelete on empty store returns 0.
 	n, err := svc.BatchDeleteMemories(ctx, scope, 500)
@@ -1225,7 +1225,7 @@ func TestAuditLogger_SaveMemory_EmitsCreated(t *testing.T) {
 		Type:       "fact",
 		Content:    "audit test",
 		Confidence: 0.9,
-		Scope:      map[string]string{memory.ScopeWorkspaceID: testWorkspaceID, memory.ScopeUserID: "test-user"},
+		Scope:      map[string]string{memory.ScopeWorkspaceID: testWorkspaceID, memory.ScopeVirtualUserID: "test-user"},
 	}
 	require.NoError(t, svc.SaveMemory(ctx, mem))
 
@@ -1240,7 +1240,7 @@ func TestAuditLogger_SearchMemories_EmitsAccessed(t *testing.T) {
 	al := newMockAuditLogger()
 	svc.SetAuditLogger(al)
 
-	scope := map[string]string{memory.ScopeWorkspaceID: testWorkspaceID, memory.ScopeUserID: "test-user"}
+	scope := map[string]string{memory.ScopeWorkspaceID: testWorkspaceID, memory.ScopeVirtualUserID: "test-user"}
 	ctx := context.Background()
 	require.NoError(t, svc.SaveMemory(ctx, &memory.Memory{
 		Type: "fact", Content: "searchable", Confidence: 0.8, Scope: scope,
@@ -1261,7 +1261,7 @@ func TestAuditLogger_ListMemories_EmitsAccessed(t *testing.T) {
 	al := newMockAuditLogger()
 	svc.SetAuditLogger(al)
 
-	scope := map[string]string{memory.ScopeWorkspaceID: testWorkspaceID, memory.ScopeUserID: "test-user"}
+	scope := map[string]string{memory.ScopeWorkspaceID: testWorkspaceID, memory.ScopeVirtualUserID: "test-user"}
 	ctx := context.Background()
 
 	_, err := svc.ListMemories(ctx, scope, memory.ListOptions{Limit: 5})
@@ -1277,7 +1277,7 @@ func TestAuditLogger_DeleteMemory_EmitsDeleted(t *testing.T) {
 	al := newMockAuditLogger()
 	svc.SetAuditLogger(al)
 
-	scope := map[string]string{memory.ScopeWorkspaceID: testWorkspaceID, memory.ScopeUserID: "test-user"}
+	scope := map[string]string{memory.ScopeWorkspaceID: testWorkspaceID, memory.ScopeVirtualUserID: "test-user"}
 	ctx := context.Background()
 
 	mem := &memory.Memory{
@@ -1298,7 +1298,7 @@ func TestAuditLogger_DeleteAllMemories_EmitsDeleted(t *testing.T) {
 	al := newMockAuditLogger()
 	svc.SetAuditLogger(al)
 
-	scope := map[string]string{memory.ScopeWorkspaceID: testWorkspaceID, memory.ScopeUserID: "test-user"}
+	scope := map[string]string{memory.ScopeWorkspaceID: testWorkspaceID, memory.ScopeVirtualUserID: "test-user"}
 	ctx := context.Background()
 
 	require.NoError(t, svc.DeleteAllMemories(ctx, scope))
@@ -1313,7 +1313,7 @@ func TestAuditLogger_BatchDeleteMemories_EmitsDeleted(t *testing.T) {
 	al := newMockAuditLogger()
 	svc.SetAuditLogger(al)
 
-	scope := map[string]string{memory.ScopeWorkspaceID: testWorkspaceID, memory.ScopeUserID: "test-user"}
+	scope := map[string]string{memory.ScopeWorkspaceID: testWorkspaceID, memory.ScopeVirtualUserID: "test-user"}
 	ctx := context.Background()
 
 	// Save one memory so there is something to delete.
@@ -1336,7 +1336,7 @@ func TestAuditLogger_BatchDeleteMemories_NoEmitWhenEmpty(t *testing.T) {
 	al := newMockAuditLogger()
 	svc.SetAuditLogger(al)
 
-	scope := map[string]string{memory.ScopeWorkspaceID: testWorkspaceID, memory.ScopeUserID: "test-user"}
+	scope := map[string]string{memory.ScopeWorkspaceID: testWorkspaceID, memory.ScopeVirtualUserID: "test-user"}
 	ctx := context.Background()
 
 	n, err := svc.BatchDeleteMemories(ctx, scope, 10)
@@ -1357,7 +1357,7 @@ func TestAuditLogger_ExportMemories_EmitsExported(t *testing.T) {
 	al := newMockAuditLogger()
 	svc.SetAuditLogger(al)
 
-	scope := map[string]string{memory.ScopeWorkspaceID: testWorkspaceID, memory.ScopeUserID: "test-user"}
+	scope := map[string]string{memory.ScopeWorkspaceID: testWorkspaceID, memory.ScopeVirtualUserID: "test-user"}
 	ctx := context.Background()
 
 	_, err := svc.ExportMemories(ctx, scope)
@@ -1375,7 +1375,7 @@ func TestNewMemoryService_CarriesEnterpriseFlag(t *testing.T) {
 func TestAuditLogger_NilLogger_NoEvents(t *testing.T) {
 	// No audit logger set — operations must succeed without panicking.
 	svc := newTestService(t)
-	scope := map[string]string{memory.ScopeWorkspaceID: testWorkspaceID, memory.ScopeUserID: "test-user"}
+	scope := map[string]string{memory.ScopeWorkspaceID: testWorkspaceID, memory.ScopeVirtualUserID: "test-user"}
 	ctx := context.Background()
 
 	mem := &memory.Memory{Type: "fact", Content: "nil logger", Confidence: 0.7, Scope: scope}
@@ -1393,7 +1393,7 @@ func TestAuditLogger_RequestMetaInContext_PropagatesIPAndUA(t *testing.T) {
 	al := newMockAuditLogger()
 	svc.SetAuditLogger(al)
 
-	scope := map[string]string{memory.ScopeWorkspaceID: testWorkspaceID, memory.ScopeUserID: "test-user"}
+	scope := map[string]string{memory.ScopeWorkspaceID: testWorkspaceID, memory.ScopeVirtualUserID: "test-user"}
 	ctx := withRequestMeta(context.Background(), RequestMeta{
 		IPAddress: "10.1.2.3",
 		UserAgent: "omnia-test/1.0",
