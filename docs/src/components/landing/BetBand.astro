@@ -1,0 +1,172 @@
+---
+import { icon } from './icons';
+---
+
+<section class="bet">
+  <div class="atlas-inner grid">
+    <div class="col-left">
+      <p class="eyebrow">THE BET</p>
+      <h2>Own the agents. Rent the model.</h2>
+      <p class="lead">
+        Serious enterprises never put core banking, ERP, or the trade engine on someone else's
+        SaaS — they build the core in-house and wire in cloud products at the edges. The agent
+        layer is becoming exactly that kind of core system: it orchestrates your proprietary
+        business logic and sits between you and your users.
+      </p>
+      <p class="lead muted">
+        The model is a commodity — rent it, self-host an open one, or grow your own. The
+        <span class="hl">loop</span> — user ↔ agent ↔ your logic — you keep. That's the IP no
+        serious enterprise cedes to a vendor's cloud.
+      </p>
+    </div>
+    <div class="cards">
+      <article class="card rent">
+        <div class="c-head">
+          <span class="c-icon red" set:html={icon('close', 15)} />
+          <span class="c-title">Rent the agents</span>
+        </div>
+        <div class="c-body">
+          <span>Your logic and your users routed through a vendor's cloud control plane.</span>
+          <span>Telemetry funnels back into <em>their</em> platform.</span>
+          <span>Lock-in decided before anyone signs.</span>
+        </div>
+      </article>
+      <article class="card own">
+        <div class="c-head">
+          <span class="c-icon blue" set:html={icon('check', 15)} />
+          <span class="c-title">Own them, in your cluster</span>
+        </div>
+        <div class="c-body">
+          <span>Runs on the stack you already operate — K8s, OCI, OTel, Postgres.</span>
+          <span>Open source — pull it, read it, run it, before you sign.</span>
+          <span>Your agents and telemetry stay <em class="acc">yours</em>.</span>
+        </div>
+      </article>
+    </div>
+  </div>
+</section>
+
+<style>
+  .bet {
+    padding: 76px 30px 84px;
+    border-top: 1px solid var(--hairline);
+    background: var(--surface-1);
+  }
+  .grid {
+    display: grid;
+    grid-template-columns: 0.92fr 1.08fr;
+    gap: 56px;
+    align-items: center;
+  }
+  .eyebrow {
+    margin: 0 0 14px;
+    font-family: var(--font-mono);
+    font-weight: 600;
+    font-size: 12px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--starlight);
+  }
+  h2 {
+    margin: 0 0 16px;
+    font-weight: 600;
+    font-size: 36px;
+    line-height: 1.12;
+    letter-spacing: -0.02em;
+    color: var(--star-100);
+  }
+  .lead {
+    margin: 0 0 20px;
+    max-width: 460px;
+    font-size: 16px;
+    line-height: 1.65;
+    color: var(--star-600);
+  }
+  .lead.muted {
+    margin-bottom: 0;
+    color: var(--star-500);
+  }
+  .hl {
+    color: var(--star-300);
+    font-weight: 500;
+  }
+
+  .cards {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+  }
+  .card {
+    border: 1px solid var(--hairline);
+    border-radius: var(--radius-card);
+    background: var(--surface-card);
+    padding: 24px 22px;
+  }
+  .card.own {
+    border-color: var(--starlight-border);
+    background: var(--grad-blue-wash);
+  }
+  .c-head {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    margin-bottom: 16px;
+  }
+  .c-icon {
+    width: 26px;
+    height: 26px;
+    flex: none;
+    display: grid;
+    place-items: center;
+    border-radius: 7px;
+  }
+  .c-icon.red {
+    background: rgba(239, 68, 68, 0.1);
+    color: var(--signal-red);
+  }
+  .c-icon.blue {
+    background: var(--starlight-tint);
+    color: var(--starlight);
+  }
+  .c-icon :global(svg) {
+    display: block;
+  }
+  .c-title {
+    font-weight: 600;
+    font-size: 15px;
+    color: var(--star-200);
+  }
+  .card.own .c-title {
+    color: var(--star-100);
+  }
+  .c-body {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    font-size: 13px;
+    line-height: 1.45;
+    color: var(--star-600);
+  }
+  .card.own .c-body {
+    color: var(--star-500);
+  }
+  .c-body em {
+    font-style: normal;
+    color: var(--star-400);
+  }
+  .c-body em.acc {
+    color: var(--starlight);
+    font-weight: 500;
+  }
+  @media (max-width: 880px) {
+    .grid {
+      grid-template-columns: 1fr;
+      gap: 36px;
+    }
+  }
+  @media (max-width: 520px) {
+    .cards {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>

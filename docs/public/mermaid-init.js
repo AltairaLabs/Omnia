@@ -1,19 +1,21 @@
 import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
 
 function getThemeConfig() {
-  const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
-  const textColor = isDark ? '#e2e8f0' : '#1e293b';
+  // Atlas is dark-first: treat anything that isn't explicitly light as dark.
+  const isDark = document.documentElement.getAttribute('data-theme') !== 'light';
+  const textColor = isDark ? '#E6EDF8' : '#1E2C44';
 
   return {
     startOnLoad: false,
-    look: 'handDrawn',
+    // Atlas is instrument-grade: precise geometry, never a hand-drawn sketch.
+    look: 'classic',
     theme: 'base',
     themeVariables: {
       // No fills - transparent backgrounds
       primaryColor: 'transparent',
       secondaryColor: 'transparent',
       tertiaryColor: 'transparent',
-      // Blue borders matching Galaxy theme
+      // Starlight-blue borders (Atlas constellation lines)
       primaryBorderColor: '#3b82f6',
       secondaryBorderColor: '#3b82f6',
       tertiaryBorderColor: '#3b82f6',
@@ -37,8 +39,8 @@ function getThemeConfig() {
       gitBranchLabel0: '#3b82f6',
       gitBranchLabel1: '#3b82f6',
       commitLabelBackground: 'transparent',
-      // Fonts
-      fontFamily: 'system-ui, -apple-system, sans-serif',
+      // Fonts — Atlas display face
+      fontFamily: "'Space Grotesk', ui-sans-serif, system-ui, sans-serif",
     },
   };
 }

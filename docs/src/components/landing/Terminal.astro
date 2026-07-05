@@ -1,0 +1,108 @@
+---
+// On-brand static terminal. Color rides the glyph — no background fills.
+// Title bar: two dim dots + one gold dot.
+---
+
+<div class="term">
+  <div class="bar">
+    <span class="dot dim"></span>
+    <span class="dot dim"></span>
+    <span class="dot gold"></span>
+    <span class="title">omnia · your cluster</span>
+  </div>
+  <pre class="body"><code><span class="prompt">~ ❯</span> <span class="cmd">helm install omnia</span> <span class="path">oci://ghcr.io/altairalabs/charts/omnia</span>
+<span class="comment"># install the operator into your cluster</span>
+<span class="prompt">~ ❯</span> <span class="cmd">kubectl apply</span> <span class="flag">-f</span> <span class="path">agent.yaml</span>
+<span class="out">agentruntime/checkout-agent created</span>
+<span class="ok">✓</span> <span class="out">reconciled · replicas 2/2 · drift none</span>
+<span class="out">facade ws :8080 · sessions pg+redis · p50 42ms</span>
+<span class="comment"># your cluster. your data. no control plane.</span><span class="cursor"> </span></code></pre>
+</div>
+
+<style>
+  .term {
+    background: var(--surface-code);
+    border: 1px solid var(--hairline);
+    border-radius: var(--radius-code);
+    overflow: hidden;
+    box-shadow: var(--shadow-card);
+  }
+  .bar {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 11px 14px;
+    border-bottom: 1px solid var(--hairline-faint);
+  }
+  .dot {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+  }
+  .dot.dim {
+    background: var(--star-dim);
+  }
+  .dot.gold {
+    background: var(--gold-500);
+  }
+  .title {
+    margin-left: 6px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--star-800);
+  }
+  .body {
+    margin: 0;
+    padding: 16px 18px;
+    font-family: var(--font-mono);
+    font-size: 12.5px;
+    line-height: 1.75;
+    white-space: pre;
+    overflow-x: auto;
+  }
+  .prompt {
+    color: var(--gold-500);
+  }
+  .cmd {
+    color: var(--star-100);
+  }
+  .path {
+    color: var(--ion-cyan);
+  }
+  .flag {
+    color: var(--starlight-200);
+  }
+  .out {
+    color: var(--star-400);
+  }
+  .ok {
+    color: var(--pulsar-300);
+  }
+  .comment {
+    color: var(--star-950);
+  }
+  .cursor {
+    display: inline-block;
+    width: 8px;
+    height: 1.05em;
+    margin-left: 2px;
+    vertical-align: text-bottom;
+    background: var(--gold-500);
+    animation: atlas-blink 1s steps(1) infinite;
+  }
+  @keyframes atlas-blink {
+    0%,
+    49% {
+      opacity: 1;
+    }
+    50%,
+    100% {
+      opacity: 0;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .cursor {
+      animation: none;
+    }
+  }
+</style>

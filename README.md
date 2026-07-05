@@ -6,21 +6,21 @@
 [![Go Report Card](https://goreportcard.com/badge/github.com/AltairaLabs/Omnia)](https://goreportcard.com/report/github.com/AltairaLabs/Omnia)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
-**The Kubernetes Platform for AI Agent Deployment**
+**The Kubernetes platform for deploying AI agents**
 
-Omnia is a Kubernetes operator that makes deploying, scaling, and managing AI agents simple. Deploy intelligent assistants that can safely access private, proprietary information — all within your existing infrastructure.
+Omnia is a Kubernetes operator that deploys, scales, and manages AI agents as Kubernetes resources. Deploy intelligent assistants that can safely access private, proprietary information — all within your existing infrastructure.
 
-**Open core:** the core platform is free and open source under Apache 2.0. Advanced production and scale features ship in the Enterprise edition under the [Functional Source License](ee/LICENSE) in `ee/`. See [Licensing & Features](https://omnia.altairalabs.ai/explanation/licensing/) for what's included in each edition.
+**Open core:** the core platform is free and open source under Apache 2.0. Advanced production and scale features ship in the Enterprise edition under the [Functional Source License](https://github.com/AltairaLabs/Omnia/blob/main/ee/LICENSE) in `ee/`. See [Licensing & Features](https://omnia.altairalabs.ai/explanation/licensing/) for what's included in each edition.
 
 ## Features
 
 - **Kubernetes-Native**: Deploy AI agents as custom resources with full GitOps support
-- **Multiple LLM Providers**: Support for Claude, OpenAI, and Gemini with easy provider switching
+- **Multiple LLM Providers**: Support for Claude, OpenAI, and Gemini with per-agent provider selection
 - **Autoscaling**: Scale-to-zero with KEDA or standard HPA based on active connections
 - **Tool Integration**: HTTP, gRPC, and MCP tool adapters for extending agent capabilities
 - **Session Management**: Redis or in-memory session stores for conversation persistence
 - **Observability**: Integrated Prometheus metrics, Grafana dashboards, Loki logs, and Tempo traces
-- **Production-Ready**: Health checks, graceful shutdown, and comprehensive RBAC
+- **Production-Ready**: Health checks, graceful shutdown, and RBAC
 
 ## Quick Start
 
@@ -179,7 +179,7 @@ Omnia is part of the AltairaLabs open-source ecosystem:
 
 ## Security
 
-To report a vulnerability, see our [Security Policy](SECURITY.md) (please use
+To report a vulnerability, see our [Security Policy](https://github.com/AltairaLabs/Omnia/blob/main/SECURITY.md) (please use
 private disclosure — not a public issue).
 
 Vulnerabilities are scanned continuously and triaged in the
@@ -192,14 +192,14 @@ keeping the base-layer CVE surface minimal.
 
 ## Contributing
 
-Contributions are welcome! Please read our [Contributing Guide](CONTRIBUTING.md) for details.
+Contributions are welcome. Please read our [Contributing Guide](https://github.com/AltairaLabs/Omnia/blob/main/CONTRIBUTING.md) for details.
 
 ## License
 
 Omnia is **open core**:
 
-- The core platform is licensed under **Apache 2.0** — see [LICENSE](LICENSE).
-- Enterprise features under `ee/` are licensed under the **Functional Source License 1.1 (FSL-1.1)** — see [ee/LICENSE](ee/LICENSE).
+- The core platform is licensed under **Apache 2.0** — see [LICENSE](https://github.com/AltairaLabs/Omnia/blob/main/LICENSE).
+- Enterprise features under `ee/` are licensed under the **Functional Source License 1.1 (FSL-1.1)** — see [ee/LICENSE](https://github.com/AltairaLabs/Omnia/blob/main/ee/LICENSE).
 
 See [Licensing & Features](https://omnia.altairalabs.ai/explanation/licensing/) for the Open Core vs Enterprise comparison.
 
