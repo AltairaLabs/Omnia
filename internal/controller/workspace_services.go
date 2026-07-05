@@ -237,6 +237,9 @@ func (r *WorkspaceReconciler) reconcileManagedServiceGroup(
 	if err := r.reconcileSessionAPITokenReviewBinding(ctx, namespace, sessionDepName); err != nil {
 		return omniav1alpha1.ServiceGroupStatus{}, fmt.Errorf("session tokenreview binding: %w", err)
 	}
+	if err := r.reconcileSessionAPITokenReviewBinding(ctx, namespace, memoryDepName); err != nil {
+		return omniav1alpha1.ServiceGroupStatus{}, fmt.Errorf("memory tokenreview binding: %w", err)
+	}
 
 	// On enterprise builds, BOTH memory-api and session-api run a privacy-policy
 	// watcher that lists SessionPrivacyPolicy + AgentRuntime CRDs cluster-wide.
