@@ -365,3 +365,19 @@ func TestStore_Save_NoTokenPath_NoAuthorizationHeader(t *testing.T) {
 	require.NoError(t, store.Save(context.Background(), mem))
 	assert.False(t, hasHeader)
 }
+
+func TestStore_Save_TokenReadError_AuthorizeFails(t *testing.T) {
+	// Pointing SESSION_API_TOKEN_PATH at a directory makes os.ReadFile fail with
+	// something other than fs.ErrNotExist, so serviceauth.TokenSource.Authorize
+	// surfaces an error instead of treating it as the "no token" no-op case.
+	// doRequest must wrap and propagate that error before the request is ever
+	// sent, so no test server is needed here.
+	t.Setenv("SESSION_API_TOKEN_PATH", t.TempDir())
+
+	store := NewStore("http://unused.invalid", logr.Discard())
+	mem := &pkmemory.Memory{Content: "test", Scope: map[string]string{"workspace_id": "ws1"}}
+
+	err := store.Save(context.Background(), mem)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "authorize request")
+}
