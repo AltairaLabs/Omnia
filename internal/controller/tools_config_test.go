@@ -1241,3 +1241,50 @@ func TestReconcileToolSecrets_WritesTokenAndFailsOnMissing(t *testing.T) {
 		t.Fatal("expected error when source secret is missing, got nil")
 	}
 }
+
+func TestBuildOpenAPIConfig_SetsAuthPathWhenSecretRef(t *testing.T) {
+	// AuthType intentionally nil -> exercises authTypeOrDefault default ("bearer")
+	h := &omniav1alpha1.HandlerDefinition{
+		Name: "h1", Type: omniav1alpha1.HandlerTypeOpenAPI,
+		OpenAPIConfig: &omniav1alpha1.OpenAPIConfig{
+			SpecURL:       "https://example.com/spec",
+			AuthSecretRef: &omniav1alpha1.SecretKeySelector{Name: "s", Key: "token"},
+		},
+	}
+	cfg, err := buildOpenAPIConfig(h)
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	if cfg.AuthType != "bearer" {
+		t.Errorf("AuthType = %q, want bearer (default)", cfg.AuthType)
+	}
+	if cfg.AuthTokenPath != ToolSecretsMountPath+"/h1" {
+		t.Errorf("AuthTokenPath = %q, want %s/h1", cfg.AuthTokenPath, ToolSecretsMountPath)
+	}
+	if cfg.Headers["Authorization"] != "" {
+		t.Error("generated OpenAPI config must not contain a resolved Authorization header")
+	}
+}
+
+func TestReconcileToolSecrets_MissingKeyErrors(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = corev1.AddToScheme(scheme)
+	_ = omniav1alpha1.AddToScheme(scheme)
+	ar := &omniav1alpha1.AgentRuntime{ObjectMeta: metav1.ObjectMeta{Name: "agent", Namespace: "default"}}
+	tr := &omniav1alpha1.ToolRegistry{Spec: omniav1alpha1.ToolRegistrySpec{Handlers: []omniav1alpha1.HandlerDefinition{{
+		Name: "h1", Type: omniav1alpha1.HandlerTypeHTTP,
+		HTTPConfig: &omniav1alpha1.HTTPConfig{
+			Endpoint:      "https://x",
+			AuthSecretRef: &omniav1alpha1.SecretKeySelector{Name: "src", Key: "token"},
+		},
+	}}}}
+	src := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "src", Namespace: "default"},
+		Data:       map[string][]byte{"wrongkey": []byte("x")},
+	}
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(ar, src).Build()
+	r := &AgentRuntimeReconciler{Client: c, Scheme: scheme}
+	if err := r.reconcileToolSecrets(context.Background(), ar, tr); err == nil {
+		t.Fatal("expected error when key is missing from source secret, got nil")
+	}
+}
