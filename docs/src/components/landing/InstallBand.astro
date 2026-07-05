@@ -1,0 +1,185 @@
+---
+import CopyButton from './CopyButton.astro';
+import { icon } from './icons';
+
+const helmCmd = 'helm install omnia oci://ghcr.io/altairalabs/charts/omnia';
+---
+
+<section class="install">
+  <div class="atlas-inner grid">
+    <div class="col-left">
+      <p class="eyebrow">INSTALL</p>
+      <h2>One Helm chart into your cluster.</h2>
+      <p class="copy">
+        Install the operator over OCI, apply an <code>AgentRuntime</code>, and your agent
+        reconciles into a running pod — facade, session wiring, and autoscaling. Nothing in here
+        you don't already operate.
+      </p>
+      <div class="cta">
+        <a class="btn-primary" href="/tutorials/getting-started/">
+          Read the quickstart <span set:html={icon('arrow-right', 16)} />
+        </a>
+        <a class="btn-text" href="/reference/core/agentruntime/">
+          CRD reference <span set:html={icon('external', 14)} />
+        </a>
+      </div>
+    </div>
+    <div class="col-right">
+      <div class="cmd-row">
+        <code><span class="prompt">$</span> {helmCmd}</code>
+        <CopyButton command={helmCmd} />
+      </div>
+      <pre class="yaml"><code><span class="k">apiVersion:</span> omnia.altairalabs.ai/v1alpha1
+<span class="k">kind:</span> <span class="acc">AgentRuntime</span>
+<span class="k">metadata:</span>
+  <span class="k">name:</span> checkout-agent
+<span class="k">spec:</span>
+  <span class="k">promptPackRef:</span> &#123;name: <span class="v">my-pack</span>&#125;
+  <span class="k">providers:</span>
+    - <span class="k">name:</span> default
+      <span class="k">providerRef:</span> &#123;name: <span class="v">claude-provider</span>&#125;
+  <span class="k">facades:</span> [&#123;type: <span class="v">websocket</span>, port: 8080&#125;]</code></pre>
+      <p class="req">requires kubernetes 1.28+ · helm 3.x · apache-2.0</p>
+    </div>
+  </div>
+</section>
+
+<style>
+  .install {
+    padding: 70px 30px;
+    border-top: 1px solid var(--hairline);
+    background: var(--atmo-hero, var(--atmo-starlight)), var(--bg-app);
+  }
+  .grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 48px;
+    align-items: center;
+  }
+  .eyebrow {
+    margin: 0 0 14px;
+    font-family: var(--font-mono);
+    font-weight: 600;
+    font-size: 12px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--starlight);
+  }
+  h2 {
+    margin: 0;
+    font-weight: 600;
+    font-size: 32px;
+    line-height: 1.14;
+    letter-spacing: -0.02em;
+    color: var(--star-100);
+  }
+  .copy {
+    margin: 16px 0 0;
+    max-width: 460px;
+    font-size: 16px;
+    line-height: 1.6;
+    color: var(--star-600);
+  }
+  .copy code {
+    font-family: var(--font-mono);
+    font-size: 0.9em;
+    color: var(--starlight);
+  }
+  .cta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 16px;
+    margin-top: 26px;
+  }
+  .btn-primary,
+  .btn-text {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-weight: 600;
+    border-radius: var(--radius-btn);
+    transition: all var(--dur-base) var(--ease-standard);
+  }
+  .btn-primary {
+    padding: 12px 20px;
+    font-size: 14px;
+    background: var(--gold-500);
+    color: var(--gold-ink);
+    box-shadow: 0 8px 22px -8px rgba(227, 179, 65, 0.5);
+  }
+  .btn-primary:hover {
+    background: var(--gold-300);
+  }
+  .btn-text {
+    font-size: 14px;
+    color: var(--star-700);
+  }
+  .btn-text:hover {
+    color: var(--star-200);
+  }
+  .btn-primary :global(svg),
+  .btn-text :global(svg) {
+    display: block;
+  }
+
+  .col-right {
+    display: grid;
+    gap: 12px;
+  }
+  .cmd-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    border: 1px solid var(--hairline);
+    border-radius: var(--radius-code);
+    background: var(--surface-code);
+    padding: 15px 16px;
+  }
+  .cmd-row code {
+    flex: 1;
+    font-family: var(--font-mono);
+    font-size: 13.5px;
+    color: var(--star-300);
+    overflow-x: auto;
+    white-space: nowrap;
+  }
+  .cmd-row .prompt {
+    color: var(--star-700);
+    margin-right: 8px;
+  }
+  .yaml {
+    margin: 0;
+    border: 1px solid var(--hairline);
+    border-radius: var(--radius-code);
+    background: var(--surface-code);
+    padding: 16px 18px;
+    font-family: var(--font-mono);
+    font-size: 12.5px;
+    line-height: 1.8;
+    color: var(--star-400);
+    overflow-x: auto;
+  }
+  .yaml .k {
+    color: var(--star-800);
+  }
+  .yaml .acc {
+    color: var(--starlight);
+  }
+  .yaml .v {
+    color: var(--pulsar-300);
+  }
+  .req {
+    margin: 2px 0 0;
+    padding-left: 2px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--star-900);
+  }
+  @media (max-width: 880px) {
+    .grid {
+      grid-template-columns: 1fr;
+      gap: 32px;
+    }
+  }
+</style>

@@ -1,0 +1,472 @@
+---
+title: "Set up observability"
+description: "Deploy the integrated observability stack for monitoring agents"
+sidebar:
+  order: 4
+---
+
+
+Omnia includes an optional observability stack with Prometheus, Grafana, Loki, and Tempo for monitoring your agent deployments.
+
+## Prerequisites
+
+- Kubernetes cluster with Helm 3.x
+- Omnia Helm chart installed
+
+## Enable the observability stack
+
+The observability components are disabled by default. Enable them in your Helm values:
+
+```yaml
+prometheus:
+  enabled: true
+
+grafana:
+  enabled: true
+
+loki:
+  enabled: true
+
+tempo:
+  enabled: true
+
+alloy:
+  enabled: true
+```
+
+Install or upgrade with these values:
+
+```bash
+helm upgrade --install omnia oci://ghcr.io/altairalabs/charts/omnia \
+  --namespace omnia-system \
+  --create-namespace \
+  -f values.yaml
+```
+
+## Access Grafana
+
+### Port forward
+
+For development, port-forward to access Grafana:
+
+```bash
+kubectl port-forward svc/omnia-grafana 3000:80 -n omnia-system
+```
+
+Open http://localhost:3000 and log in with:
+- Username: `admin`
+- Password: `admin` (change this in production)
+
+### Via internal gateway
+
+If you've enabled the internal gateway (with Istio), Grafana is available at `/grafana`:
+
+```bash
+kubectl get gateway omnia-internal -n omnia-system -o jsonpath='{.status.addresses[0].value}'
+```
+
+Then access `http://<gateway-ip>:8080/grafana/`
+
+## View agent metrics
+
+Omnia agents expose Prometheus metrics automatically on the `/metrics` endpoint. Metrics are organized into several categories.
+
+### Facade metrics
+
+Connection and session metrics from the WebSocket facade:
+
+| Metric | Type | Labels | Description |
+|--------|------|--------|-------------|
+| `omnia_agent_connections_active` | Gauge | - | Current WebSocket connections |
+| `omnia_agent_connections_total` | Counter | - | Total connections since startup |
+| `omnia_agent_requests_inflight` | Gauge | - | Pending LLM requests |
+| `omnia_agent_request_duration_seconds` | Histogram | - | Request latency |
+| `omnia_agent_messages_received_total` | Counter | - | Messages received |
+| `omnia_agent_messages_sent_total` | Counter | - | Messages sent |
+
+### LLM metrics
+
+Token usage and cost metrics from LLM provider calls (via PromptKit SDK collector):
+
+| Metric | Type | Labels | Description |
+|--------|------|--------|-------------|
+| `omnia_provider_input_tokens_total` | Counter | provider, model | Input tokens sent to LLMs |
+| `omnia_provider_output_tokens_total` | Counter | provider, model | Output tokens received |
+| `omnia_provider_requests_total` | Counter | provider, model, status | Total LLM requests |
+| `omnia_provider_cost_total` | Counter | provider, model | Estimated cost in USD |
+| `omnia_provider_request_duration_seconds` | Histogram | provider, model | LLM request duration |
+
+### Runtime metrics
+
+Detailed metrics for pipelines, stages, tools, and validations:
+
+**Pipeline Metrics:**
+
+| Metric | Type | Labels | Description |
+|--------|------|--------|-------------|
+| `omnia_runtime_pipelines_active` | Gauge | - | Currently active pipelines |
+| `omnia_runtime_pipeline_duration_seconds` | Histogram | status | Pipeline execution duration |
+
+**Stage Metrics:**
+
+| Metric | Type | Labels | Description |
+|--------|------|--------|-------------|
+| `omnia_runtime_stage_elements_total` | Counter | stage, status | Total stage executions |
+| `omnia_runtime_stage_duration_seconds` | Histogram | stage, stage_type | Stage execution duration |
+
+**Tool Metrics:**
+
+| Metric | Type | Labels | Description |
+|--------|------|--------|-------------|
+| `omnia_runtime_tool_calls_total` | Counter | tool, status | Total tool invocations |
+| `omnia_runtime_tool_call_duration_seconds` | Histogram | tool | Tool execution duration |
+
+**Validation Metrics:**
+
+| Metric | Type | Labels | Description |
+|--------|------|--------|-------------|
+| `omnia_runtime_validations_total` | Counter | validator, validator_type, status | Total validations |
+| `omnia_runtime_validation_duration_seconds` | Histogram | validator, validator_type | Validation duration |
+
+### Eval worker metrics
+
+The eval worker exposes metrics for event processing, eval execution, sampling, and result persistence. These are available when `enterprise.evalWorker.enabled` is true. The eval worker pod includes Prometheus scrape annotations automatically.
+
+**Event Processing:**
+
+| Metric | Type | Labels | Description |
+|--------|------|--------|-------------|
+| `omnia_eval_worker_events_received_total` | Counter | event_type | Session events consumed from Redis Streams |
+| `omnia_eval_worker_event_processing_duration_seconds` | Histogram | event_type | End-to-end time to process a stream event |
+| `omnia_eval_worker_stream_lag` | Gauge | stream | Pending messages per Redis stream (consumer lag) |
+
+**Eval Execution:**
+
+| Metric | Type | Labels | Description |
+|--------|------|--------|-------------|
+| `omnia_eval_worker_evals_executed_total` | Counter | eval_type, trigger, status | Total eval executions (success/error) |
+| `omnia_eval_worker_eval_duration_seconds` | Histogram | eval_type, trigger | Eval execution duration |
+| `omnia_eval_worker_evals_sampled_total` | Counter | eval_type, decision | Sampling decisions (sampled vs skipped) |
+| `omnia_eval_worker_results_written_total` | Counter | status | Eval results written to session-api |
+
+### Session API metrics
+
+The session-api exposes HTTP request metrics and event publishing metrics. Prometheus scrape annotations are included on the deployment by default.
+
+**HTTP Requests:**
+
+| Metric | Type | Labels | Description |
+|--------|------|--------|-------------|
+| `omnia_session_api_requests_total` | Counter | method, route, status_code | Total HTTP requests |
+| `omnia_session_api_request_duration_seconds` | Histogram | method, route, status_code | HTTP request duration |
+
+**Event Publishing (requires Redis):**
+
+| Metric | Type | Labels | Description |
+|--------|------|--------|-------------|
+| `omnia_session_api_events_published_total` | Counter | status | Redis stream publish attempts (success/error) |
+| `omnia_session_api_event_publish_duration_seconds` | Histogram | — | Time to publish an event to Redis Streams |
+
+### Query metrics in Grafana
+
+1. Open Grafana and go to **Explore**
+2. Select the **Prometheus** datasource
+3. Try these queries:
+
+```promql
+# Active connections
+omnia_agent_connections_active
+
+# Request rate
+rate(omnia_agent_requests_total[5m])
+
+# P95 request latency
+histogram_quantile(0.95, rate(omnia_agent_request_duration_seconds_bucket[5m]))
+
+# LLM cost per model (last hour)
+sum by (model) (increase(omnia_provider_cost_total[1h]))
+
+# Token usage rate by provider
+sum by (provider) (rate(omnia_provider_input_tokens_total[5m]) + rate(omnia_provider_output_tokens_total[5m]))
+
+# Tool call error rate
+sum(rate(omnia_runtime_tool_calls_total{status="error"}[5m])) / sum(rate(omnia_runtime_tool_calls_total[5m]))
+
+# Average pipeline duration
+histogram_quantile(0.5, rate(omnia_runtime_pipeline_duration_seconds_bucket[5m]))
+
+# Eval worker: evals per second by type
+sum by (eval_type) (rate(omnia_eval_worker_evals_executed_total[5m]))
+
+# Eval worker: eval pass/fail rate
+sum(rate(omnia_eval_worker_evals_executed_total{status="error"}[5m])) / sum(rate(omnia_eval_worker_evals_executed_total[5m]))
+
+# Eval worker: consumer lag across all streams
+omnia_eval_worker_stream_lag
+
+# Eval worker: P95 eval duration by type
+histogram_quantile(0.95, rate(omnia_eval_worker_eval_duration_seconds_bucket[5m]))
+
+# Session API: request rate by route
+sum by (route) (rate(omnia_session_api_requests_total[5m]))
+
+# Session API: P99 request latency
+histogram_quantile(0.99, rate(omnia_session_api_request_duration_seconds_bucket[5m]))
+
+# Session API: event publish error rate
+rate(omnia_session_api_events_published_total{status="error"}[5m])
+```
+
+## View agent logs
+
+Logs are collected by Alloy and stored in Loki.
+
+### Query logs in Grafana
+
+1. Open Grafana and go to **Explore**
+2. Select the **Loki** datasource
+3. Use LogQL queries:
+
+```text
+{namespace="omnia-system", container="agent"}
+
+{namespace="omnia-system"} |= "error"
+
+{namespace="omnia-system", app_name="my-agent"}
+```
+
+## Agent tracing with OpenTelemetry
+
+The runtime container supports OpenTelemetry tracing for detailed visibility into conversations, LLM calls, and tool executions.
+
+### Enable tracing
+
+Tracing is configured via environment variables on the AgentRuntime. The operator will pass these to the runtime container:
+
+```yaml
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: AgentRuntime
+metadata:
+  name: my-agent
+spec:
+  # ... other config ...
+  runtime:
+    env:
+      - name: OMNIA_TRACING_ENABLED
+        value: "true"
+      - name: OMNIA_TRACING_ENDPOINT
+        value: "tempo.omnia-system.svc.cluster.local:4317"
+      - name: OMNIA_TRACING_SAMPLE_RATE
+        value: "1.0"
+      - name: OMNIA_TRACING_INSECURE
+        value: "true"
+```
+
+### Tracing configuration options
+
+| Environment Variable | Description | Default |
+|---------------------|-------------|---------|
+| `OMNIA_TRACING_ENABLED` | Enable OpenTelemetry tracing | `false` |
+| `OMNIA_TRACING_ENDPOINT` | OTLP collector endpoint (gRPC) | - |
+| `OMNIA_TRACING_SAMPLE_RATE` | Sampling rate (0.0 to 1.0) | `1.0` |
+| `OMNIA_TRACING_INSECURE` | Disable TLS for OTLP connection | `false` |
+
+### Span types
+
+The runtime creates three types of spans:
+
+**Conversation Spans** (`conversation.turn`)
+- Created for each message exchange
+- Includes session ID, message length, response length
+- Parent span for LLM and tool spans
+
+**LLM Spans** (`llm.call`)
+- Created for each LLM API call
+- Includes model name, token counts (input/output), cost
+
+**Tool Spans** (`tool.<name>`)
+- Created for each tool execution
+- Includes tool name, success/error status, result size
+
+### Trace attributes
+
+Traces include rich metadata for debugging:
+
+| Attribute | Description |
+|-----------|-------------|
+| `omnia.session_id` | Conversation session identifier |
+| `llm.model` | LLM model used |
+| `llm.input_tokens` | Input token count |
+| `llm.output_tokens` | Output token count |
+| `llm.cost_usd` | Estimated cost in USD |
+| `tool.name` | Tool that was called |
+| `tool.is_error` | Whether tool returned an error |
+| `tool.result_size` | Size of tool result |
+
+### View traces in Tempo
+
+Tempo collects distributed traces from agents.
+
+### Query traces in Grafana
+
+1. Open Grafana and go to **Explore**
+2. Select the **Tempo** datasource
+3. Search by:
+   - Service name (e.g., `omnia-runtime-my-agent`)
+   - Trace ID
+   - Duration
+   - Tags (e.g., `omnia.session_id`)
+
+### Example trace query
+
+Find slow conversations:
+
+```text
+{ duration > 5s && resource.service.name =~ "omnia-runtime.*" }
+```
+
+Find tool errors:
+
+```text
+{ span.tool.is_error = true }
+```
+
+## Production considerations
+
+### Persistent storage
+
+Enable persistent storage for production:
+
+```yaml
+prometheus:
+  server:
+    persistentVolume:
+      enabled: true
+      size: 50Gi
+
+loki:
+  singleBinary:
+    persistence:
+      enabled: true
+      size: 50Gi
+
+tempo:
+  persistence:
+    enabled: true
+    size: 10Gi
+```
+
+### Change Grafana password
+
+```yaml
+grafana:
+  adminPassword: your-secure-password
+```
+
+Or use a secret:
+
+```yaml
+grafana:
+  admin:
+    existingSecret: grafana-admin-secret
+    userKey: admin-user
+    passwordKey: admin-password
+```
+
+### Enable Loki ruler (log-based alerting)
+
+The Loki ruler is disabled by default to avoid startup issues on local development environments. For production deployments that need log-based alerting, enable it:
+
+```yaml
+loki:
+  ruler:
+    enabled: true
+    storage:
+      type: local
+      local:
+        directory: /var/loki/rules
+    alertmanager_url: http://alertmanager:9093
+  singleBinary:
+    extraVolumes:
+      - name: rules
+        emptyDir: {}
+    extraVolumeMounts:
+      - name: rules
+        mountPath: /var/loki/rules
+```
+
+The ruler allows you to:
+- **Alerting rules**: Fire alerts based on LogQL queries (e.g., error rate thresholds)
+- **Recording rules**: Pre-compute expensive queries for faster dashboards
+
+For cloud storage backends (S3, GCS), configure ruler storage accordingly:
+
+```yaml
+loki:
+  ruler:
+    enabled: true
+    storage:
+      type: s3
+      s3:
+        bucketnames: loki-rules
+        region: us-west-2
+```
+
+### Resource limits
+
+Adjust resources based on your cluster size:
+
+```yaml
+prometheus:
+  server:
+    resources:
+      requests:
+        cpu: 500m
+        memory: 512Mi
+      limits:
+        cpu: 1000m
+        memory: 1Gi
+
+grafana:
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+```
+
+## Disable individual components
+
+You can enable only the components you need:
+
+```yaml
+prometheus:
+  enabled: true
+grafana:
+  enabled: true
+loki:
+  enabled: false
+tempo:
+  enabled: false
+alloy:
+  enabled: false
+```
+
+## Use external observability
+
+If you have existing observability infrastructure, disable the subcharts and configure agents to export to your systems:
+
+```yaml
+prometheus:
+  enabled: false
+grafana:
+  enabled: false
+loki:
+  enabled: false
+tempo:
+  enabled: false
+```
+
+Agent pods include Prometheus scrape annotations by default, so your existing Prometheus can scrape them automatically.

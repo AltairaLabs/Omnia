@@ -1,0 +1,15 @@
+---
+/**
+ * SocialIcons override
+ *
+ * Renders the version switcher as a natural flex sibling immediately left of
+ * Starlight's default social icons + theme select, so it never overlaps the
+ * right-hand cluster (the old fixed-position approach did).
+ */
+import type { Props } from '@astrojs/starlight/props';
+import Default from '@astrojs/starlight/components/SocialIcons.astro';
+import VersionSwitcher from './VersionSwitcher.astro';
+---
+
+<VersionSwitcher />
+<Default {...Astro.props}><slot /></Default>

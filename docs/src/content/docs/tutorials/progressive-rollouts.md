@@ -1,5 +1,5 @@
 ---
-title: "Progressive Rollouts"
+title: "Progressive rollouts"
 description: "Safely roll out prompt, model, and tool changes with canary deployments"
 sidebar:
   order: 6
@@ -19,7 +19,7 @@ You have a customer support agent (`support-agent`) running PromptPack version `
 - The new PromptPack version (`2.0.0`) deployed as a ConfigMap and PromptPack resource
 - `kubectl` and `istioctl` available
 
-## Step 1: Create Istio Traffic Resources
+## Step 1: create Istio traffic resources
 
 The rollout controller manages traffic by patching Istio VirtualService and DestinationRule resources. Create these for your agent:
 
@@ -66,7 +66,7 @@ Apply:
 kubectl apply -f istio-traffic.yaml
 ```
 
-## Step 2: Configure the Rollout
+## Step 2: configure the rollout
 
 Update your AgentRuntime to add a rollout configuration with the candidate version:
 
@@ -123,7 +123,7 @@ kubectl apply -f support-agent.yaml
 
 The controller detects that `candidate.promptPackVersion` ("2.0.0") differs from `spec.promptPackRef.version` ("1.0.0") and begins the rollout.
 
-## Step 3: Watch the Rollout Progress
+## Step 3: watch the rollout progress
 
 Monitor the rollout status:
 
@@ -143,7 +143,7 @@ kubectl get agentruntime support-agent -n production -o jsonpath='{.status.rollo
 
 The controller creates a second Deployment for the candidate and sets the initial traffic weight to 10%.
 
-## Step 4: Verify Traffic Splitting
+## Step 4: verify traffic splitting
 
 Confirm Istio is routing traffic correctly:
 
@@ -157,7 +157,7 @@ You should see the stable subset at weight 90 and the candidate subset at weight
 Use the `x-omnia-variant` response header to confirm which version served a request. Stable traffic returns `stable`, candidate traffic returns `candidate`.
 :::
 
-## Step 5: Observe Analysis and Progression
+## Step 5: observe analysis and progression
 
 After the 5-minute pause, the controller runs the `quality-check` analysis. If the analysis passes, it advances to the next step (setWeight: 50), pauses for 10 minutes, then completes at 100%.
 
@@ -171,7 +171,7 @@ kubectl get agentruntime support-agent -n production -w
 The `analysis` step type requires the `RolloutAnalysis` CRD, which is an enterprise feature. Without it, use `pause` steps with manual verification.
 :::
 
-## Step 6: Promotion
+## Step 6: promotion
 
 When the rollout reaches `setWeight: 100`, the controller promotes the candidate. It copies the candidate overrides into the main spec, removes the candidate Deployment, and returns to a single-Deployment state.
 
@@ -190,7 +190,7 @@ kubectl get agentruntime support-agent -n production -o jsonpath='{.status.rollo
 
 The `spec.promptPackRef.version` is now `"2.0.0"` and the rollout is idle.
 
-## Rolling Back
+## Rolling back
 
 If a problem is detected during the rollout, rollback depends on the configured mode:
 
@@ -204,9 +204,9 @@ kubectl patch agentruntime support-agent -n production --type merge \
   -p '{"spec":{"rollout":{"candidate":null}}}'
 ```
 
-## Alternative Patterns
+## Alternative patterns
 
-### Blue/Green (Instant Flip)
+### Blue/green (instant flip)
 
 Skip the gradual weight increase and flip all traffic at once, with a pre-flip analysis:
 
@@ -222,7 +222,7 @@ rollout:
     mode: automatic
 ```
 
-### A/B Experiment with Sticky Sessions
+### A/B experiment with sticky sessions
 
 Split traffic 50/50 with consistent user routing for experiments:
 
@@ -239,7 +239,7 @@ rollout:
 
 With `stickySession`, the same user always hits the same variant, enabling clean A/B comparisons.
 
-## What You've Built
+## What you've built
 
 ```mermaid
 graph TB
@@ -261,13 +261,13 @@ The rollout controller manages the full lifecycle:
 3. Pauses for observation or runs analysis templates
 4. Promotes by merging candidate into spec, or rolls back on failure
 
-## Next Steps
+## Next steps
 
-- Review the [AgentRuntime rollout reference](/reference/agentruntime/#rollout) for all available fields
-- Read [Rollout Strategies](/explanation/rollout-strategies/) to understand the design decisions
-- Set up [observability](/how-to/setup-observability/) to monitor rollout metrics
+- Review the [AgentRuntime rollout reference](/reference/core/agentruntime/#rollout) for all available fields
+- Read [Rollout Strategies](/explanation/agents/rollout-strategies/) to understand the design decisions
+- Set up [observability](/how-to/observability/setup-observability/) to monitor rollout metrics
 
-## Related Resources
+## Related resources
 
-- [Rollout Strategies](/explanation/rollout-strategies/) — design and architecture
-- [AgentRuntime CRD Reference](/reference/agentruntime/) — field-by-field specification
+- [Rollout Strategies](/explanation/agents/rollout-strategies/) — design and architecture
+- [AgentRuntime CRD Reference](/reference/core/agentruntime/) — field-by-field specification

@@ -1,11 +1,9 @@
 ---
-title: "Arena Fleet: Run Your First Evaluation"
+title: "Arena Fleet: run your first evaluation"
 description: "Get started with Arena Fleet by running your first prompt evaluation"
+enterprise: true
 sidebar:
   order: 4
-  badge:
-    text: Arena
-    variant: note
 ---
 
 This tutorial walks you through running your first prompt evaluation using Arena Fleet. By the end, you'll have a complete evaluation pipeline running in your cluster.
@@ -34,15 +32,12 @@ This deploys a complete Arena demo with sample evaluations using Ollama. Skip to
 
 Arena Fleet evaluates prompts through three CRDs:
 
-```
-ArenaSource → ArenaConfig → ArenaJob → Results
-    │              │            │
-    │              │            └── Executes the evaluation
-    │              └── Defines what to test and how
-    └── Fetches your PromptKit bundle
+```mermaid
+flowchart LR
+    S["ArenaSource<br/>fetches your PromptKit bundle"] --> C["ArenaConfig<br/>defines what to test and how"] --> J["ArenaJob<br/>executes the evaluation"] --> R[Results]
 ```
 
-## Step 1: Create an ArenaSource
+## Step 1: create an ArenaSource
 
 An ArenaSource defines where to fetch your PromptKit bundle from. For this tutorial, we'll use a ConfigMap source.
 
@@ -133,7 +128,7 @@ NAME              TYPE        PHASE   REVISION   AGE
 greeting-source   configmap   Ready   12345      10s
 ```
 
-## Step 2: Configure a Provider
+## Step 2: configure a provider
 
 If you don't already have a Provider configured, create one:
 
@@ -169,7 +164,7 @@ Verify the provider is ready:
 kubectl get provider claude-provider
 ```
 
-## Step 3: Create an ArenaConfig
+## Step 3: create an ArenaConfig
 
 The ArenaConfig combines your source with providers and evaluation settings:
 
@@ -203,7 +198,7 @@ Verify the config is ready:
 kubectl get arenaconfig greeting-eval
 ```
 
-## Step 4: Run an ArenaJob
+## Step 4: run an ArenaJob
 
 Create an ArenaJob to execute the evaluation:
 
@@ -229,7 +224,7 @@ spec:
 kubectl apply -f arenajob.yaml
 ```
 
-## Step 5: Monitor the Job
+## Step 5: monitor the job
 
 Watch the job progress:
 
@@ -269,7 +264,7 @@ status:
       duration: "5.2s"
 ```
 
-## Step 6: View Results
+## Step 6: view results
 
 For jobs with S3 or PVC output configured, results are stored at the configured location. For this simple example, view results in the job status:
 
@@ -283,7 +278,7 @@ To see worker logs:
 kubectl logs -l arena.omnia.altairalabs.ai/job=greeting-eval-001
 ```
 
-## Understanding the Results
+## Understanding the results
 
 Arena Fleet evaluations produce results showing:
 
@@ -320,15 +315,15 @@ Example result summary:
 }
 ```
 
-## Next Steps
+## Next steps
 
 Now that you've run your first evaluation:
 
-- **[Configure S3 Storage](/how-to/configure-arena-s3-storage/)**: Store results in S3 for persistence
-- **[Set Up Scheduled Jobs](/how-to/setup-arena-scheduled-jobs/)**: Run evaluations on a schedule
-- **[Monitor Job Progress](/how-to/monitor-arena-jobs/)**: Track evaluations in real-time
-- **[Use Git Sources](/reference/arenasource/#git)**: Fetch bundles from Git repositories
-- **[Compare Providers](/reference/arenaconfig/#providers)**: Test against multiple LLMs
+- **[Configure S3 Storage](/how-to/evaluation/configure-arena-s3-storage/)**: Store results in S3 for persistence
+- **[Set Up Scheduled Jobs](/how-to/evaluation/setup-arena-scheduled-jobs/)**: Run evaluations on a schedule
+- **[Monitor Job Progress](/how-to/evaluation/monitor-arena-jobs/)**: Track evaluations in real-time
+- **[Use Git Sources](/reference/evaluation/arenasource/#git)**: Fetch bundles from Git repositories
+- **[Compare Providers](/reference/evaluation/arenaconfig/#providers)**: Test against multiple LLMs
 
 ## Cleanup
 

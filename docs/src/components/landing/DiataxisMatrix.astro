@@ -1,0 +1,292 @@
+---
+import { icon } from './icons';
+
+// Treatment 1a — a 2x2 compass. Learning<->Working (rows) x
+// Practical<->Theoretical (columns). Quadrant placement:
+//   TL Tutorials  | TR Explanation
+//   BL How-to     | BR Reference
+const quadrants = [
+  {
+    key: 'tutorials',
+    icon: 'graduation-cap',
+    kicker: 'Learning-oriented',
+    title: 'Tutorials',
+    body: 'From helm install to your first agent answering over a WebSocket — no prior setup assumed.',
+    lead: true,
+    links: [
+      { text: 'Getting started', href: '/tutorials/getting-started/' },
+      { text: 'Deploy your first agent', href: '/tutorials/deploy-to-omnia/' },
+      { text: 'Add a tool', href: '/tutorials/adding-tools/' },
+    ],
+  },
+  {
+    key: 'explanation',
+    icon: 'compass',
+    kicker: 'Understanding-oriented',
+    title: 'Explanation',
+    body: 'The thinking behind the platform — the why, not the how.',
+    links: [
+      { text: 'Own the agents, rent the model', href: '/explanation/platform/architecture/' },
+      { text: 'Open core vs Enterprise', href: '/explanation/platform/licensing/' },
+      { text: 'Why a Kubernetes operator', href: '/explanation/platform/reconciliation/' },
+    ],
+  },
+  {
+    key: 'how-to',
+    icon: 'list-checks',
+    kicker: 'Task-oriented',
+    title: 'How-to guides',
+    body: 'Focused recipes for the operational jobs you already know you need to do.',
+    links: [
+      { text: 'Local development', href: '/how-to/operations/local-development/' },
+      { text: 'Scale agents (KEDA / HPA)', href: '/how-to/agents/scale-agents/' },
+      { text: 'Set up observability', href: '/how-to/observability/setup-observability/' },
+    ],
+  },
+  {
+    key: 'reference',
+    icon: 'book-open',
+    kicker: 'Information-oriented',
+    title: 'Reference',
+    body: 'Every custom resource, field, and option — exact and complete, for looking up.',
+    links: [
+      { text: 'AgentRuntime CRD', href: '/reference/core/agentruntime/' },
+      { text: 'PromptPack & Provider', href: '/reference/core/promptpack/' },
+      { text: 'ToolRegistry', href: '/reference/core/toolregistry/' },
+    ],
+  },
+];
+---
+
+<section class="diataxis">
+  <div class="atlas-inner">
+    <header class="head">
+      <p class="eyebrow">FIND YOUR PATH</p>
+      <h2>Documentation, four ways.</h2>
+      <p class="intro">
+        The Omnia docs follow <a href="https://diataxis.fr/">Diátaxis</a> — tutorials to learn,
+        how-to guides to get things done, reference to look things up, explanation to understand
+        the why.
+      </p>
+    </header>
+
+    <div class="matrix">
+      <span class="axis-corner"></span>
+      <span class="axis-col">PRACTICAL STEPS</span>
+      <span class="axis-col">THEORETICAL KNOWLEDGE</span>
+
+      <span class="axis-row">WHEN LEARNING</span>
+      {
+        quadrants.slice(0, 2).map((q) => (
+          <article class:list={['quad', { lead: q.lead }]}>
+            <div class="q-head">
+              <span class="q-icon" set:html={icon(q.icon, 20)} />
+              <div>
+                <span class="kicker">{q.kicker}</span>
+                <h3>{q.title}</h3>
+              </div>
+            </div>
+            <p class="q-body">{q.body}</p>
+            <ul>
+              {q.links.map((l) => (
+                <li>
+                  <a href={l.href}>→ {l.text}</a>
+                </li>
+              ))}
+            </ul>
+          </article>
+        ))
+      }
+
+      <span class="axis-row">WHEN WORKING</span>
+      {
+        quadrants.slice(2, 4).map((q) => (
+          <article class="quad">
+            <div class="q-head">
+              <span class="q-icon" set:html={icon(q.icon, 20)} />
+              <div>
+                <span class="kicker">{q.kicker}</span>
+                <h3>{q.title}</h3>
+              </div>
+            </div>
+            <p class="q-body">{q.body}</p>
+            <ul>
+              {q.links.map((l) => (
+                <li>
+                  <a href={l.href}>→ {l.text}</a>
+                </li>
+              ))}
+            </ul>
+          </article>
+        ))
+      }
+    </div>
+  </div>
+</section>
+
+<style>
+  .diataxis {
+    padding: 76px 30px 84px;
+    border-top: 1px solid var(--hairline);
+    background: var(--surface-1);
+  }
+  .head {
+    text-align: center;
+    margin-bottom: 44px;
+  }
+  .eyebrow {
+    margin: 0 0 14px;
+    font-family: var(--font-mono);
+    font-weight: 600;
+    font-size: 12px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--starlight);
+  }
+  h2 {
+    margin: 0;
+    font-weight: 600;
+    font-size: 36px;
+    line-height: 1.12;
+    letter-spacing: -0.02em;
+    color: var(--star-100);
+  }
+  .intro {
+    margin: 16px auto 0;
+    max-width: 560px;
+    font-size: 16px;
+    line-height: 1.6;
+    color: var(--star-600);
+  }
+  .intro a {
+    color: var(--starlight);
+  }
+
+  .matrix {
+    display: grid;
+    grid-template-columns: 118px 1fr 1fr;
+    align-items: stretch;
+  }
+  .axis-corner {
+    /* empty top-left cell; natural auto-flow order places it first */
+  }
+  .axis-col,
+  .axis-row {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--star-900);
+    display: flex;
+    align-items: center;
+  }
+  .axis-col {
+    justify-content: center;
+    padding-bottom: 12px;
+  }
+  .axis-row {
+    justify-content: flex-start;
+  }
+
+  .quad {
+    border: 1px solid var(--hairline);
+    padding: 26px 28px;
+    background: var(--surface-card);
+    transition: border-color var(--dur-base) var(--ease-standard);
+  }
+  .quad.lead {
+    background: var(--grad-blue-wash);
+  }
+  /* Share edges — round only the outer corners so the four read as one chart.
+     Grid order: rows [labels+cards]. TL=col2row2, TR=col3row2, BL=col2row3, BR=col3row3. */
+  .quad:nth-of-type(1) {
+    border-top-left-radius: var(--radius-card);
+  }
+  .quad:nth-of-type(2) {
+    border-top-right-radius: var(--radius-card);
+    border-left: none;
+  }
+  .quad:nth-of-type(3) {
+    border-bottom-left-radius: var(--radius-card);
+    border-top: none;
+  }
+  .quad:nth-of-type(4) {
+    border-bottom-right-radius: var(--radius-card);
+    border-top: none;
+    border-left: none;
+  }
+  .quad:hover {
+    border-color: var(--starlight-border);
+    position: relative;
+    z-index: 1;
+  }
+
+  .q-head {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 14px;
+  }
+  .q-icon {
+    flex: none;
+    width: 38px;
+    height: 38px;
+    display: grid;
+    place-items: center;
+    border-radius: 9px;
+    background: var(--starlight-tint);
+    color: var(--starlight);
+  }
+  .kicker {
+    display: block;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--star-900);
+  }
+  h3 {
+    margin: 2px 0 0;
+    font-weight: 600;
+    font-size: 20px;
+    color: var(--star-100);
+  }
+  .q-body {
+    margin: 0 0 16px;
+    font-size: 14px;
+    line-height: 1.55;
+    color: var(--star-600);
+  }
+  ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: 8px;
+  }
+  ul a {
+    font-weight: 500;
+    font-size: 13px;
+    color: var(--star-500);
+    transition: color var(--dur-base) var(--ease-standard);
+  }
+  ul a:hover {
+    color: var(--starlight);
+  }
+
+  @media (max-width: 880px) {
+    .matrix {
+      grid-template-columns: 1fr;
+    }
+    .axis-col,
+    .axis-row {
+      display: none;
+    }
+    .quad,
+    .quad:nth-of-type(n) {
+      border: 1px solid var(--hairline);
+      border-radius: var(--radius-card);
+      margin-bottom: 12px;
+    }
+  }
+</style>

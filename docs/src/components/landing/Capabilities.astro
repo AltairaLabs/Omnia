@@ -1,0 +1,171 @@
+---
+import { icon } from './icons';
+
+const caps = [
+  {
+    icon: 'layers',
+    title: 'Kubernetes-native',
+    body: 'Deploy agents as custom resources — AgentRuntime, PromptPack, Provider — with full GitOps support.',
+  },
+  {
+    icon: 'providers',
+    title: 'Any LLM provider',
+    body: 'Claude, OpenAI, and Gemini behind one Provider resource — switch models without touching the agent.',
+  },
+  {
+    icon: 'activity',
+    title: 'Autoscaling',
+    body: 'Scale-to-zero with KEDA, or standard HPA down to a warm floor — driven by active connections. You pay for load, not idle.',
+  },
+  {
+    icon: 'link',
+    title: 'Tools & MCP',
+    body: 'HTTP, gRPC, and MCP tool adapters register through a ToolRegistry — tools are just K8s microservices.',
+  },
+  {
+    icon: 'database',
+    title: 'Sessions & memory',
+    body: 'Postgres-backed sessions with a Redis warm cache stay persistent across replicas and restarts.',
+  },
+  {
+    icon: 'line-chart',
+    title: 'Observability',
+    body: 'Prometheus metrics, Grafana dashboards, Loki logs, Tempo traces — integrated, not bolted on.',
+  },
+];
+
+const stack = ['Kubernetes', 'OCI', 'MCP', 'OpenTelemetry', 'Postgres', 'Redis', 'KEDA'];
+---
+
+<section class="caps">
+  <div class="atlas-inner">
+    <header class="head">
+      <p class="eyebrow">CAPABILITIES</p>
+      <h2>A Kubernetes operator for the whole agent lifecycle.</h2>
+      <p class="intro">
+        Deploy agents as custom resources, scale them to zero, wire in tools, and watch them
+        like any other workload — all with the observability stack you already run.
+      </p>
+    </header>
+
+    <div class="grid">
+      {
+        caps.map((c) => (
+          <article class="card">
+            <span class="c-icon" set:html={icon(c.icon, 20)} />
+            <h3>{c.title}</h3>
+            <p>{c.body}</p>
+          </article>
+        ))
+      }
+    </div>
+
+    <div class="stack">
+      <span class="stack-label">Built on what you already run</span>
+      {stack.map((s) => <span class="pill">{s}</span>)}
+    </div>
+  </div>
+</section>
+
+<style>
+  .caps {
+    padding: 76px 30px 84px;
+    border-top: 1px solid var(--hairline);
+    background: var(--bg-app);
+  }
+  .head {
+    text-align: center;
+    margin-bottom: 44px;
+  }
+  .eyebrow {
+    margin: 0 0 14px;
+    font-family: var(--font-mono);
+    font-weight: 600;
+    font-size: 12px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--starlight);
+  }
+  h2 {
+    margin: 0 0 14px;
+    font-weight: 600;
+    font-size: 36px;
+    line-height: 1.12;
+    letter-spacing: -0.02em;
+    color: var(--star-100);
+  }
+  .intro {
+    margin: 0 auto;
+    max-width: 580px;
+    font-size: 16px;
+    line-height: 1.6;
+    color: var(--star-600);
+  }
+
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 14px;
+  }
+  .card {
+    border: 1px solid var(--hairline);
+    border-radius: 12px;
+    background: var(--surface-card);
+    padding: 24px 22px;
+    transition: border-color var(--dur-base) var(--ease-standard);
+  }
+  .card:hover {
+    border-color: var(--starlight-border);
+  }
+  .c-icon {
+    width: 38px;
+    height: 38px;
+    display: grid;
+    place-items: center;
+    border-radius: 9px;
+    background: var(--starlight-tint);
+    color: var(--starlight);
+    margin-bottom: 16px;
+  }
+  .c-icon :global(svg) {
+    display: block;
+  }
+  h3 {
+    margin: 0 0 8px;
+    font-weight: 600;
+    font-size: 16px;
+    line-height: 1.1;
+    color: var(--star-100);
+  }
+  .card p {
+    margin: 0;
+    font-size: 13.5px;
+    line-height: 1.55;
+    color: var(--star-600);
+  }
+
+  .stack {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    margin-top: 24px;
+    flex-wrap: wrap;
+    font-family: var(--font-mono);
+    font-size: 12.5px;
+  }
+  .stack-label {
+    color: var(--star-900);
+  }
+  .pill {
+    border: 1px solid var(--hairline);
+    border-radius: var(--radius-pill);
+    padding: 6px 12px;
+    color: var(--star-600);
+  }
+  @media (max-width: 880px) {
+    .grid {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>

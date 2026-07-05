@@ -6,21 +6,21 @@
 [![Go Report Card](https://goreportcard.com/badge/github.com/AltairaLabs/Omnia)](https://goreportcard.com/report/github.com/AltairaLabs/Omnia)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
-**The Kubernetes Platform for AI Agent Deployment**
+**The Kubernetes platform for deploying AI agents**
 
-Omnia is a Kubernetes operator that makes deploying, scaling, and managing AI agents simple. Deploy intelligent assistants that can safely access private, proprietary information — all within your existing infrastructure.
+Omnia is a Kubernetes operator that deploys, scales, and manages AI agents as Kubernetes resources. Deploy intelligent assistants that can safely access private, proprietary information — all within your existing infrastructure.
 
 **Open core:** the core platform is free and open source under Apache 2.0. Advanced production and scale features ship in the Enterprise edition under the [Functional Source License](ee/LICENSE) in `ee/`. See [Licensing & Features](https://omnia.altairalabs.ai/explanation/licensing/) for what's included in each edition.
 
 ## Features
 
 - **Kubernetes-Native**: Deploy AI agents as custom resources with full GitOps support
-- **Multiple LLM Providers**: Support for Claude, OpenAI, and Gemini with easy provider switching
+- **Multiple LLM Providers**: Support for Claude, OpenAI, and Gemini with per-agent provider selection
 - **Autoscaling**: Scale-to-zero with KEDA or standard HPA based on active connections
 - **Tool Integration**: HTTP, gRPC, and MCP tool adapters for extending agent capabilities
 - **Session Management**: Redis or in-memory session stores for conversation persistence
 - **Observability**: Integrated Prometheus metrics, Grafana dashboards, Loki logs, and Tempo traces
-- **Production-Ready**: Health checks, graceful shutdown, and comprehensive RBAC
+- **Production-Ready**: Health checks, graceful shutdown, and RBAC
 
 ## Quick Start
 
@@ -192,7 +192,7 @@ keeping the base-layer CVE surface minimal.
 
 ## Contributing
 
-Contributions are welcome! Please read our [Contributing Guide](CONTRIBUTING.md) for details.
+Contributions are welcome. Please read our [Contributing Guide](CONTRIBUTING.md) for details.
 
 ## License
 
