@@ -108,7 +108,7 @@ in-process store regardless of `spec.context.type`.
 ## Does NOT Own
 - WebSocket protocol (Facade's job)
 - Client consent UI (Dashboard's job)
-- Tool backend connections at cluster level (ToolRegistry/Operator configures these)
+- Tool backend connections at cluster level (ToolRegistry/Operator configures these). HTTP/OpenAPI tool auth is the exception: the operator resolves each handler's `authSecretRef` into the `<agentruntime>-tool-secrets` Secret and mounts it read-only; the runtime reads the token from the mounted file and applies the `Authorization` header at call time — it never receives the credential inline from the ConfigMap.
 - CRD reconciliation (Operator's job)
 - Session persistence (Session API's job)
 

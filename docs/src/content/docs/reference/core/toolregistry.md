@@ -136,6 +136,27 @@ Configure HTTP-specific options for explicit tool endpoints:
 | `method` | string | `POST` | HTTP method |
 | `headers` | map | - | Additional HTTP headers |
 | `contentType` | string | `application/json` | Content-Type header |
+| `authType` | string | `bearer` | Auth type (`bearer` or `basic`) |
+| `authSecretRef` | object | - | Reference to a Secret holding the credential (see below) |
+
+### Authenticating HTTP / OpenAPI tools
+
+Set `authType` (`bearer` or `basic`) and `authSecretRef` to authenticate the tool call:
+
+```yaml
+httpConfig:
+  endpoint: https://api.example.com
+  authType: bearer          # or "basic"
+  authSecretRef:
+    name: my-tool-credentials   # a Kubernetes Secret in the same namespace
+    key: token                  # for basic, the value is "username:password"
+```
+
+The operator resolves the referenced Secret into an operator-managed
+`<agentruntime>-tool-secrets` Secret, mounts it read-only into the runtime, and
+the runtime attaches the `Authorization` header at call time. The token value is
+never written into the tools ConfigMap. A missing Secret or key fails the
+AgentRuntime reconcile (it does not silently send an unauthenticated request).
 
 ## GRPC handler
 
@@ -234,7 +255,7 @@ OpenAPI handlers automatically discover tools from an OpenAPI/Swagger specificat
 | `operationFilter` | []string | No | Limit to specific operation IDs |
 | `headers` | map | No | Additional headers for requests |
 | `authType` | string | No | Auth type (`bearer` or `basic`) |
-| `authToken` | string | No | Auth token/credentials |
+| `authSecretRef` | object | No | Reference to a Secret holding the credential — see "Authenticating HTTP / OpenAPI tools" under the HTTP Handler section above |
 
 ## Service discovery
 

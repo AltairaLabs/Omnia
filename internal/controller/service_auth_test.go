@@ -223,3 +223,14 @@ func hasMount(mounts []corev1.VolumeMount, name string) bool {
 	}
 	return false
 }
+
+func findMount(t *testing.T, mounts []corev1.VolumeMount, name string) corev1.VolumeMount {
+	t.Helper()
+	for _, m := range mounts {
+		if m.Name == name {
+			return m
+		}
+	}
+	t.Fatalf("mount %q not found", name)
+	return corev1.VolumeMount{}
+}

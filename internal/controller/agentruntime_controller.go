@@ -415,8 +415,12 @@ func (r *AgentRuntimeReconciler) reconcileResources(
 		log.Error(err, "Failed to reconcile facade HTTPRoute")
 	}
 
-	// Reconcile tools ConfigMap
+	// Reconcile tools ConfigMap and companion tool-secrets Secret
 	if toolRegistry != nil {
+		if err := r.reconcileToolSecrets(ctx, agentRuntime, toolRegistry); err != nil {
+			log.Error(err, "Failed to reconcile tool-secrets Secret")
+			return nil, err // fail loud — do not proceed with a broken auth config
+		}
 		if err := r.reconcileToolsConfigMap(ctx, agentRuntime, toolRegistry); err != nil {
 			log.Error(err, "Failed to reconcile tools ConfigMap")
 		}
