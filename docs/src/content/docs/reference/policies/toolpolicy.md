@@ -111,13 +111,13 @@ Claims that must be present as `X-Omnia-Claim-*` headers. If a required claim he
 spec:
   requiredClaims:
     - claim: Team
-      message: "Team claim is required — configure claimMapping in your AgentPolicy"
+      message: "Team claim is required — configure claim mapping on the AgentRuntime's external-auth block"
     - claim: Customer-Id
       message: "Customer ID claim is required for this tool"
 ```
 
 :::tip
-Required claims depend on an AgentPolicy with `claimMapping` configured for the same agent. The AgentPolicy extracts claims from the JWT; the ToolPolicy verifies they are present.
+Required claims depend on the AgentRuntime's external-auth claim mapping (`spec.externalAuth.oidc.claimMapping` or the edge-trust equivalent) being configured for the same agent — see [Configure Agent Authentication](/how-to/security/configure-authentication/). The facade extracts claims from the JWT and forwards them as `X-Omnia-Claim-*` headers; the ToolPolicy verifies they are present. AgentPolicy is unrelated to claim mapping — it governs only tool allow/deny.
 :::
 
 ### `headerInjection`

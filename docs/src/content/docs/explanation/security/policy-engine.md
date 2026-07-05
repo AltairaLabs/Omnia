@@ -46,8 +46,9 @@ graph TB
 AgentPolicy operates at the **Istio/Envoy level**. The operator controller translates each AgentPolicy into an Istio `AuthorizationPolicy`, which Envoy enforces before the request reaches the application. This provides:
 
 - **Tool allowlist/denylist** — restrict which tool registries and tools an agent can invoke
-- **JWT claim mapping** — extract claims from the user's JWT and propagate them as `X-Omnia-Claim-*` headers
 - **Enforcement modes** — `enforce` blocks violations; `permissive` logs without blocking
+
+JWT claim mapping is configured separately, on the AgentRuntime — see [JWT claim extraction](#jwt-claim-extraction) below.
 
 Because enforcement happens at the network level, there is no application code to bypass.
 
@@ -102,23 +103,14 @@ The following headers are propagated across service boundaries:
 | `x-omnia-model` | Runtime | LLM model name |
 | `x-omnia-tool-name` | Runtime | Tool being invoked |
 | `x-omnia-tool-registry` | Runtime | ToolRegistry containing the tool |
-| `x-omnia-claim-*` | AgentPolicy | Mapped JWT claims (e.g., `x-omnia-claim-team`) |
+| `x-omnia-claim-*` | Facade | Mapped JWT claims (e.g., `x-omnia-claim-team`) |
 | `x-omnia-param-*` | Runtime | Promoted scalar tool parameters |
 
 ### JWT claim extraction
 
-AgentPolicy's `claimMapping` section controls which JWT claims are extracted and forwarded:
+Claim forwarding is not an AgentPolicy concern — it's configured on the **AgentRuntime**'s external-auth block (`spec.externalAuth.oidc.claimMapping` for customer-IdP OIDC, or the edge-trust equivalent). The facade's auth validator extracts the configured claims from the verified JWT and forwards them as `X-Omnia-Claim-*` headers on every request. See [Configure Agent Authentication](/how-to/security/configure-authentication/) for the field reference.
 
-```yaml
-claimMapping:
-  forwardClaims:
-    - claim: team
-      header: X-Omnia-Claim-Team
-    - claim: org.region
-      header: X-Omnia-Claim-Region
-```
-
-Claims support dot-notation for nested values (e.g., `org.region` extracts `{"org": {"region": "us-east"}}`). Headers must use the `X-Omnia-Claim-` prefix, enforced by CRD validation.
+AgentPolicy itself governs only tool allow/deny at the network level (see below) — it has no claim-mapping configuration. Once claims arrive as `X-Omnia-Claim-*` headers, ToolPolicy's `requiredClaims` and CEL rules can consume them.
 
 ## Enforcement modes
 
