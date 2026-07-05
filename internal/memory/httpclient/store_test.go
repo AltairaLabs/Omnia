@@ -23,6 +23,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -319,4 +321,63 @@ func TestStore_Save_NoConsentGrants_NoHeader(t *testing.T) {
 	err := store.Save(context.Background(), mem)
 	require.NoError(t, err)
 	assert.False(t, hasHeader)
+}
+
+// #1720: memory-api's server now requires SA-token auth (shared with
+// session-api). The client must attach the bearer token from
+// SESSION_API_TOKEN_PATH when present, and stay a no-op when it isn't
+// (out-of-cluster / auth-disabled deployments).
+
+func TestStore_Save_WithTokenPath_SendsBearerHeader(t *testing.T) {
+	tokenFile := filepath.Join(t.TempDir(), "token")
+	require.NoError(t, os.WriteFile(tokenFile, []byte("test-sa-token\n"), 0o600))
+	t.Setenv("SESSION_API_TOKEN_PATH", tokenFile)
+
+	var capturedAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedAuth = r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"memory":{"id":"m1"}}`))
+	}))
+	defer srv.Close()
+
+	store := NewStore(srv.URL, logr.Discard())
+	mem := &pkmemory.Memory{Content: "test", Scope: map[string]string{"workspace_id": "ws1"}}
+	require.NoError(t, store.Save(context.Background(), mem))
+	assert.Equal(t, "Bearer test-sa-token", capturedAuth)
+}
+
+func TestStore_Save_NoTokenPath_NoAuthorizationHeader(t *testing.T) {
+	// A nonexistent path is the no-op path used by out-of-cluster / auth-disabled
+	// deployments (see serviceauth.TokenSource.Token).
+	t.Setenv("SESSION_API_TOKEN_PATH", filepath.Join(t.TempDir(), "does-not-exist"))
+
+	var hasHeader bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hasHeader = r.Header.Get("Authorization") != ""
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"memory":{"id":"m1"}}`))
+	}))
+	defer srv.Close()
+
+	store := NewStore(srv.URL, logr.Discard())
+	mem := &pkmemory.Memory{Content: "test", Scope: map[string]string{"workspace_id": "ws1"}}
+	require.NoError(t, store.Save(context.Background(), mem))
+	assert.False(t, hasHeader)
+}
+
+func TestStore_Save_TokenReadError_AuthorizeFails(t *testing.T) {
+	// Pointing SESSION_API_TOKEN_PATH at a directory makes os.ReadFile fail with
+	// something other than fs.ErrNotExist, so serviceauth.TokenSource.Authorize
+	// surfaces an error instead of treating it as the "no token" no-op case.
+	// doRequest must wrap and propagate that error before the request is ever
+	// sent, so no test server is needed here.
+	t.Setenv("SESSION_API_TOKEN_PATH", t.TempDir())
+
+	store := NewStore("http://unused.invalid", logr.Discard())
+	mem := &pkmemory.Memory{Content: "test", Scope: map[string]string{"workspace_id": "ws1"}}
+
+	err := store.Save(context.Background(), mem)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "authorize request")
 }
