@@ -1950,7 +1950,11 @@ export const crdConstraints: Record<string, Record<string, FieldConstraint>> =
       "required": true
     },
     "spec.handlers[].httpConfig.authType": {
-      "type": "string"
+      "type": "string",
+      "enum": [
+        "bearer",
+        "basic"
+      ]
     },
     "spec.handlers[].httpConfig.bodyMapping": {
       "type": "string"
@@ -2060,7 +2064,11 @@ export const crdConstraints: Record<string, Record<string, FieldConstraint>> =
       "required": true
     },
     "spec.handlers[].openAPIConfig.authType": {
-      "type": "string"
+      "type": "string",
+      "enum": [
+        "bearer",
+        "basic"
+      ]
     },
     "spec.handlers[].openAPIConfig.baseURL": {
       "type": "string"
