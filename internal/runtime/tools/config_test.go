@@ -453,3 +453,22 @@ func TestResolveAuthTokenPaths_EmptyPathIsNoOp(t *testing.T) {
 		t.Errorf("AuthToken should stay empty, got %q", cfg.Handlers[0].HTTPConfig.AuthToken)
 	}
 }
+
+func TestResolveAuthTokenPaths_OpenAPIReadsFile(t *testing.T) {
+	dir := t.TempDir()
+	tokenFile := filepath.Join(dir, "h1")
+	if err := os.WriteFile(tokenFile, []byte("tok123\n"), 0o600); err != nil {
+		t.Fatalf("write token file: %v", err)
+	}
+	cfg := &ToolConfig{Handlers: []HandlerEntry{{
+		Name: "h1", Type: "openapi",
+		OpenAPIConfig: &OpenAPICfg{SpecURL: "https://x/spec", AuthType: "bearer", AuthTokenPath: tokenFile},
+	}}}
+
+	if err := ResolveAuthTokenPaths(cfg); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := cfg.Handlers[0].OpenAPIConfig.AuthToken; got != "tok123" {
+		t.Errorf("AuthToken = %q, want %q", got, "tok123")
+	}
+}
