@@ -25,6 +25,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/yaml"
@@ -37,6 +38,11 @@ import (
 // so downstream callers can attribute failures to the owning handler. Extracted
 // to silence go:S1192 (was duplicated across every handler-type branch).
 const errFmtHandler = "handler %q: %w"
+
+// authTypeBearer is the default auth type applied when a handler references
+// an auth secret but doesn't specify a type. Extracted to a constant to
+// silence go:S1192 / goconst (duplicated across builders and tests).
+const authTypeBearer = "bearer"
 
 // ToolConfig represents the tools configuration file format for the runtime.
 // This is passed to the runtime container as a YAML file.
@@ -186,6 +192,75 @@ func (r *AgentRuntimeReconciler) reconcileToolsConfigMap(
 	}
 
 	log.Info("Tools ConfigMap reconciled", "result", result, "handlers", len(toolsConfig.Handlers))
+	return nil
+}
+
+// toolAuthRef pairs a handler name with the secret key it authenticates from.
+type toolAuthRef struct {
+	handler string
+	ref     *omniav1alpha1.SecretKeySelector
+}
+
+// collectToolAuthSecrets returns, in handler order, every HTTP/OpenAPI handler
+// that references an auth secret.
+func collectToolAuthSecrets(tr *omniav1alpha1.ToolRegistry) []toolAuthRef {
+	var out []toolAuthRef
+	for i := range tr.Spec.Handlers {
+		h := &tr.Spec.Handlers[i]
+		switch {
+		case h.HTTPConfig != nil && h.HTTPConfig.AuthSecretRef != nil:
+			out = append(out, toolAuthRef{handler: h.Name, ref: h.HTTPConfig.AuthSecretRef})
+		case h.OpenAPIConfig != nil && h.OpenAPIConfig.AuthSecretRef != nil:
+			out = append(out, toolAuthRef{handler: h.Name, ref: h.OpenAPIConfig.AuthSecretRef})
+		}
+	}
+	return out
+}
+
+// reconcileToolSecrets resolves each referenced auth secret into a single
+// operator-managed Secret (<name>-tool-secrets) with one key per authed handler.
+// The token value never enters the tools ConfigMap. Returns an error (surfaced
+// via the caller's reconcile) if any referenced secret/key is missing.
+func (r *AgentRuntimeReconciler) reconcileToolSecrets(
+	ctx context.Context,
+	agentRuntime *omniav1alpha1.AgentRuntime,
+	toolRegistry *omniav1alpha1.ToolRegistry,
+) error {
+	refs := collectToolAuthSecrets(toolRegistry)
+	if len(refs) == 0 {
+		return nil
+	}
+
+	data := make(map[string][]byte, len(refs))
+	for _, ar := range refs {
+		src := &corev1.Secret{}
+		if err := r.Get(ctx, types.NamespacedName{Name: ar.ref.Name, Namespace: agentRuntime.Namespace}, src); err != nil {
+			return fmt.Errorf("handler %q: read auth secret %q: %w", ar.handler, ar.ref.Name, err)
+		}
+		val, ok := src.Data[ar.ref.Key]
+		if !ok {
+			return fmt.Errorf("handler %q: key %q not found in secret %q", ar.handler, ar.ref.Key, ar.ref.Name)
+		}
+		data[ar.handler] = val
+	}
+
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      agentRuntime.Name + ToolSecretsSecretSuffix,
+			Namespace: agentRuntime.Namespace,
+		},
+	}
+	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, secret, func() error {
+		if err := controllerutil.SetControllerReference(agentRuntime, secret, r.Scheme); err != nil {
+			return err
+		}
+		secret.Type = corev1.SecretTypeOpaque
+		secret.Data = data
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("reconcile tool-secrets Secret: %w", err)
+	}
 	return nil
 }
 
@@ -443,7 +518,20 @@ func buildHTTPConfig(h *omniav1alpha1.HandlerDefinition, endpoint string) (*Tool
 		return nil, err
 	}
 	cfg.RetryPolicy = rp
+	if h.HTTPConfig.AuthSecretRef != nil {
+		cfg.AuthType = authTypeOrDefault(h.HTTPConfig.AuthType)
+		cfg.AuthTokenPath = ToolSecretsMountPath + "/" + h.Name
+	}
 	return cfg, nil
+}
+
+// authTypeOrDefault returns the configured auth type, defaulting to "bearer"
+// when a secretRef is present but no type was specified (mirrors omnia tool-test).
+func authTypeOrDefault(t *string) string {
+	if t != nil && *t != "" {
+		return *t
+	}
+	return authTypeBearer
 }
 
 // buildGRPCConfig builds gRPC configuration for a handler entry.
@@ -528,6 +616,10 @@ func buildOpenAPIConfig(h *omniav1alpha1.HandlerDefinition) (*ToolOpenAPI, error
 		return nil, err
 	}
 	cfg.RetryPolicy = rp
+	if h.OpenAPIConfig.AuthSecretRef != nil {
+		cfg.AuthType = authTypeOrDefault(h.OpenAPIConfig.AuthType)
+		cfg.AuthTokenPath = ToolSecretsMountPath + "/" + h.Name
+	}
 	return cfg, nil
 }
 
