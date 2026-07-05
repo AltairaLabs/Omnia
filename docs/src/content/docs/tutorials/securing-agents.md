@@ -1,5 +1,5 @@
 ---
-title: "Securing Agents with Policies"
+title: "Securing agents with policies"
 description: "End-to-end tutorial for adding guardrails to AI agents using AgentPolicy and ToolPolicy"
 sidebar:
   order: 5
@@ -22,10 +22,10 @@ The agent should be able to look up orders and process refunds, but **not** dele
 ## Prerequisites
 
 - A running Omnia cluster with Istio enabled
-- JWT authentication configured (see [Configure Agent Authentication](/how-to/configure-authentication/))
+- JWT authentication configured (see [Configure Agent Authentication](/how-to/security/configure-authentication/))
 - The `support-agent` AgentRuntime and `customer-tools` ToolRegistry deployed
 
-## Step 1: Restrict Tool Access with AgentPolicy
+## Step 1: restrict tool access with AgentPolicy
 
 Start by limiting which tools the agent can call. Create an AgentPolicy with a tool allowlist:
 
@@ -70,7 +70,7 @@ support-agent-policy    enforce   Active   1         10s
 
 The agent can now only call `lookup_order`, `check_status`, and `process_refund`. Any attempt to call `delete_account` is blocked at the Istio network level.
 
-## Step 2: Map JWT Claims for User Identity
+## Step 2: map JWT claims for user identity
 
 Add claim mapping so the user's team and customer ID flow through to tool services:
 
@@ -110,10 +110,10 @@ kubectl apply -f support-agent-policy.yaml
 
 Now every tool call includes `X-Omnia-Claim-Team` and `X-Omnia-Claim-Customer-Id` headers, extracted from the user's JWT.
 
-## Step 3: Add Business Rules with ToolPolicy
+## Step 3: add business rules with ToolPolicy
 
 :::note[Enterprise]
-ToolPolicy is an Enterprise feature. See [Licensing](/explanation/licensing/) for details.
+ToolPolicy is an Enterprise feature. See [Licensing](/explanation/platform/licensing/) for details.
 :::
 
 Create a ToolPolicy with CEL rules to enforce refund limits and require a reason:
@@ -177,7 +177,7 @@ NAME                 REGISTRY         MODE    PHASE    RULES   AGE
 refund-guardrails    customer-tools   audit   Active   2       10s
 ```
 
-## Step 4: Validate in Audit Mode
+## Step 4: validate in audit mode
 
 With `mode: audit`, the policy logs violations but does not block requests. This lets you verify the rules are matching correctly before enforcement.
 
@@ -209,7 +209,7 @@ The `wouldDeny: true` field confirms the rule would deny in enforce mode, but th
 Keep audit mode active for at least a few hours in production to capture a representative sample of traffic before switching to enforce.
 :::
 
-## Step 5: Switch to Enforce Mode
+## Step 5: switch to enforce mode
 
 Once audit logs confirm the policy is working correctly, switch to enforce mode:
 
@@ -243,7 +243,7 @@ Now any refund over $500 or without a reason returns a 403 response:
 }
 ```
 
-## What You've Built
+## What you've built
 
 Here's the complete security architecture for your agent:
 
@@ -278,17 +278,17 @@ graph TB
 - Header injection — team identity forwarded to the tool service
 - Audit logging — full decision trail
 
-## Next Steps
+## Next steps
 
 - Add more CEL rules for other tools in the registry
 - Configure `audit.redactFields` to mask sensitive data in logs
 - Create policies for other agents in the namespace
-- Review the [AgentPolicy Reference](/reference/agentpolicy/) and [ToolPolicy Reference](/reference/toolpolicy/) for all available fields
+- Review the [AgentPolicy Reference](/reference/policies/agentpolicy/) and [ToolPolicy Reference](/reference/policies/toolpolicy/) for all available fields
 
-## Related Resources
+## Related resources
 
-- [Policy Engine Architecture](/explanation/policy-engine/) — how the policy engine works
-- [AgentPolicy CRD Reference](/reference/agentpolicy/) — field-by-field specification
-- [ToolPolicy CRD Reference](/reference/toolpolicy/) — field-by-field specification
-- [Configure Agent Policies](/how-to/configure-agent-policies/) — operational guide
-- [Configure Tool Policies](/how-to/configure-tool-policies/) — operational guide
+- [Policy Engine Architecture](/explanation/security/policy-engine/) — how the policy engine works
+- [AgentPolicy CRD Reference](/reference/policies/agentpolicy/) — field-by-field specification
+- [ToolPolicy CRD Reference](/reference/policies/toolpolicy/) — field-by-field specification
+- [Configure Agent Policies](/how-to/security/configure-agent-policies/) — operational guide
+- [Configure Tool Policies](/how-to/security/configure-tool-policies/) — operational guide
