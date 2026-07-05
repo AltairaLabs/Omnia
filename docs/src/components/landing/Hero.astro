@@ -1,0 +1,179 @@
+---
+import Terminal from './Terminal.astro';
+import { icon } from './icons';
+---
+
+<section class="hero">
+  <div class="atlas-inner grid">
+    <div class="col-left">
+      <p class="eyebrow">OMNIA · THE SELF-HOSTABLE AGENTOS</p>
+      <h1>
+        Build your agent platform in-house.
+        <span class="payoff">Own the agents, rent the model.</span>
+      </h1>
+      <p class="lead">
+        The operating system for production agents — self-hosted on the open components your
+        platform team already runs: Kubernetes, OCI, MCP, OpenTelemetry, Postgres. Author,
+        prove, run, measure, and ship agents as installable bundles. Your cluster, your data,
+        no proprietary control plane.
+      </p>
+      <div class="cta">
+        <a class="btn-primary" href="/tutorials/getting-started/">
+          Get started <span set:html={icon('arrow-right', 16)} />
+        </a>
+        <a class="btn-secondary" href="/tutorials/getting-started/">Install the operator</a>
+        <a class="btn-text" href="https://github.com/AltairaLabs/Omnia">
+          View on GitHub <span set:html={icon('external', 14)} />
+        </a>
+      </div>
+    </div>
+    <div class="col-right">
+      <Terminal />
+      <div class="status">
+        <span><span class="s-dot pulsar"></span>2/2 reconciled</span>
+        <span><span class="s-dot starlight"></span>drift none</span>
+        <span class="drift">p50 42ms · scale-to-zero</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<style>
+  .hero {
+    position: relative;
+    padding: 74px 30px 68px;
+    background: var(--atmo-starlight), var(--bg-app);
+  }
+  .hero::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: url('/atlas/starfield.svg') center / cover no-repeat;
+    opacity: 0.5;
+    pointer-events: none;
+  }
+  /* The starfield texture carries an opaque dark backdrop — great over the
+     night sky, muddy over the light chart. Show it in dark only; the light
+     hero rides the --atmo-starlight bloom alone. */
+  :global(html[data-theme='light']) .hero::before {
+    opacity: 0;
+  }
+  .grid {
+    position: relative;
+    display: grid;
+    grid-template-columns: 1.05fr 0.95fr;
+    gap: 52px;
+    align-items: center;
+  }
+  .eyebrow {
+    margin: 0 0 20px;
+    font-family: var(--font-mono);
+    font-weight: 600;
+    font-size: 12px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--starlight);
+  }
+  h1 {
+    margin: 0;
+    font-weight: 600;
+    font-size: 50px;
+    line-height: 1.05;
+    letter-spacing: -0.03em;
+    color: var(--star-100);
+  }
+  .payoff {
+    color: var(--starlight);
+  }
+  .lead {
+    margin: 22px 0 0;
+    max-width: 520px;
+    font-size: 19px;
+    line-height: 1.6;
+    color: var(--star-600);
+  }
+  .cta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 14px;
+    margin-top: 30px;
+  }
+  .btn-primary,
+  .btn-secondary,
+  .btn-text {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-weight: 600;
+    border-radius: var(--radius-btn);
+    transition: all var(--dur-base) var(--ease-standard);
+  }
+  .btn-primary {
+    padding: 12px 20px;
+    font-size: 14px;
+    background: var(--gold-500);
+    color: var(--gold-ink);
+    box-shadow: 0 8px 22px -8px rgba(227, 179, 65, 0.5);
+  }
+  .btn-primary:hover {
+    background: var(--gold-300);
+  }
+  .btn-secondary {
+    padding: 12px 18px;
+    font-size: 14px;
+    color: var(--star-400);
+    border: 1px solid var(--hairline-strong);
+  }
+  .btn-secondary:hover {
+    border-color: var(--starlight-200);
+  }
+  .btn-text {
+    font-size: 14px;
+    color: var(--star-700);
+  }
+  .btn-text:hover {
+    color: var(--star-200);
+  }
+  .btn-primary :global(svg),
+  .btn-text :global(svg) {
+    display: block;
+  }
+  .status {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 18px;
+    margin-top: 16px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--star-900);
+  }
+  .status span {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .drift {
+    color: var(--gold-300);
+  }
+  .s-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+  }
+  .s-dot.pulsar {
+    background: var(--pulsar-500);
+  }
+  .s-dot.starlight {
+    background: var(--starlight);
+  }
+  @media (max-width: 880px) {
+    .grid {
+      grid-template-columns: 1fr;
+      gap: 36px;
+    }
+    h1 {
+      font-size: 40px;
+    }
+  }
+</style>

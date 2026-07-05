@@ -1,17 +1,106 @@
-/* Mermaid diagram styling */
+/* Fonts (self-hosted via Fontsource) */
+@import '@fontsource/space-grotesk/400.css';
+@import '@fontsource/space-grotesk/500.css';
+@import '@fontsource/space-grotesk/600.css';
+@import '@fontsource/space-grotesk/700.css';
+@import '@fontsource/spline-sans-mono/400.css';
+@import '@fontsource/spline-sans-mono/500.css';
+
+/* Atlas token layer */
+@import './atlas/tokens.css';
+@import './atlas/semantic.css';
+@import './atlas/starlight-map.css';
+
+/* ---- Family bar in the Starlight header ---- */
+/* Reserve a 38px masterbrand strip at the top of the fixed header: grow the
+   nav height by --fam-h so content/sidebar offsets stay correct, and push the
+   default header's nav content into the row below the strip. */
+:root {
+  --fam-h: 38px;
+  --sl-nav-height: calc(3.5rem + var(--fam-h));
+}
+@media (min-width: 50rem) {
+  :root {
+    --sl-nav-height: calc(4rem + var(--fam-h));
+  }
+}
+/* Scope to the <header> SHELL only — Starlight also gives the inner nav row
+   class="header sl-flex", and padding it breaks the nav's vertical centering. */
+header.header {
+  /* Reserve the strip PLUS the shell's natural top padding, so the nav row
+     stays vertically centered in the band below the family strip. */
+  padding-top: calc(var(--fam-h) + var(--sl-nav-pad-y));
+  /* Let the switcher dropdown escape the header bounds. */
+  overflow: visible;
+}
+/* Starlight sizes the logo from --sl-nav-height; pin it so the taller header
+   (which now includes the family strip) doesn't inflate the mark. */
+header.header .site-title img {
+  height: 2rem;
+  width: auto;
+}
+
+/* ---- Inner doc-chrome (Atlas) ---- */
+
+/* Sidebar active item: starlight tint + 2px starlight-blue left rail. */
+.sidebar-content a[aria-current='page'] {
+  background: var(--starlight-tint);
+  border-left: 2px solid var(--starlight);
+  border-radius: 0 6px 6px 0;
+  color: var(--sl-color-white);
+}
+
+/* Sidebar group labels: mono, uppercase, wide-tracked. */
+.sidebar-content .group-label > span {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--star-900);
+}
+
+/* Right TOC active anchor: starlight-blue with a 2px blue left rail. */
+starlight-toc a[aria-current='true'],
+starlight-toc a[aria-current='page'] {
+  color: var(--starlight);
+  border-inline-start: 2px solid var(--starlight);
+}
+
+/* Inline code (not code blocks): starlight-blue on a starlight tint. */
+.sl-markdown-content :not(pre) > code {
+  color: var(--starlight);
+  background: var(--starlight-tint);
+  border-radius: 4px;
+  padding: 0.15em 0.4em;
+}
+
+/* Code-block frames: align the outer radius/hairline to Atlas; leave the
+   Expressive Code syntax theme as-is. */
+.sl-markdown-content .expressive-code .frame pre {
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-code);
+}
+
+/* Asides / callouts: starlight border + tint for note & tip. */
+.sl-markdown-content .starlight-aside--note,
+.sl-markdown-content .starlight-aside--tip {
+  border: 1px solid var(--starlight-border);
+  background: var(--starlight-tint);
+  border-radius: var(--radius-input);
+}
+
+/* ---- Mermaid diagrams (carried over from the previous theme) ---- */
 .mermaid {
   display: flex;
   justify-content: center;
   margin: 2rem 0;
   background: transparent;
 }
-
 .mermaid svg {
   max-width: 100%;
   height: auto;
 }
-
-/* Force transparent backgrounds on edge labels */
+/* Force transparent backgrounds on edge labels. */
 .mermaid .edgeLabel rect,
 .mermaid .edgeLabel polygon,
 .mermaid .labelBkg,
@@ -19,13 +108,61 @@
   fill: transparent !important;
   background: transparent !important;
 }
-
-/* Edge label text in blue */
+/* Edge label text in starlight blue (Omnia accent). */
 .mermaid .edgeLabel span,
 .mermaid .edgeLabel tspan,
 .mermaid .edgeLabel p {
-  color: #8b5cf6 !important;
-  fill: #8b5cf6 !important;
+  color: var(--starlight) !important;
+  fill: var(--starlight) !important;
   background: transparent !important;
 }
 
+/* ---- Prev / next pagination — compact Atlas cards ---- */
+/* Starlight's default uses a 2xl title + drop shadow, which reads oversized
+   against the instrument-grade Atlas surfaces. Slim it to a hairline card with
+   a small mono kicker and a 14px sans title (matching the doc-page spec). */
+.pagination-links {
+  gap: 0.75rem;
+}
+.pagination-links a {
+  padding: 0.8rem 1rem;
+  gap: 0.6rem;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-input);
+  background: var(--surface-card);
+  box-shadow: none;
+  color: var(--star-900);
+  transition: border-color var(--dur-base) var(--ease-standard);
+}
+.pagination-links a:hover {
+  border-color: var(--starlight-border);
+}
+/* Direction kicker ("Previous" / "Next") */
+.pagination-links a > span {
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--star-900);
+  line-height: 1.2;
+}
+/* Page title */
+.pagination-links .link-title {
+  display: block;
+  margin-top: 0.35rem;
+  font-family: var(--font-sans);
+  font-size: 0.875rem;
+  font-weight: 600;
+  letter-spacing: normal;
+  text-transform: none;
+  line-height: 1.3;
+  color: var(--star-200);
+}
+.pagination-links a:hover .link-title {
+  color: var(--starlight);
+}
+.pagination-links svg {
+  width: 1rem;
+  height: 1rem;
+  color: var(--star-700);
+}
