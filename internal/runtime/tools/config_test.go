@@ -411,3 +411,45 @@ func TestDuration_UnmarshalYAML_EmptyString(t *testing.T) {
 		t.Errorf("Timeout = %v, want 0", cfg.Handlers[0].Timeout.Get())
 	}
 }
+
+func TestResolveAuthTokenPaths_HTTPReadsFile(t *testing.T) {
+	dir := t.TempDir()
+	tokenFile := filepath.Join(dir, "h1")
+	if err := os.WriteFile(tokenFile, []byte("tok123\n"), 0o600); err != nil {
+		t.Fatalf("write token file: %v", err)
+	}
+	cfg := &ToolConfig{Handlers: []HandlerEntry{{
+		Name: "h1", Type: "http",
+		HTTPConfig: &HTTPCfg{Endpoint: "https://x", AuthType: "bearer", AuthTokenPath: tokenFile},
+	}}}
+
+	if err := ResolveAuthTokenPaths(cfg); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := cfg.Handlers[0].HTTPConfig.AuthToken; got != "tok123" {
+		t.Errorf("AuthToken = %q, want %q", got, "tok123")
+	}
+}
+
+func TestResolveAuthTokenPaths_MissingFileErrors(t *testing.T) {
+	cfg := &ToolConfig{Handlers: []HandlerEntry{{
+		Name: "h1", Type: "http",
+		HTTPConfig: &HTTPCfg{Endpoint: "https://x", AuthType: "bearer", AuthTokenPath: "/no/such/file"},
+	}}}
+	if err := ResolveAuthTokenPaths(cfg); err == nil {
+		t.Fatal("expected error for missing token file, got nil")
+	}
+}
+
+func TestResolveAuthTokenPaths_EmptyPathIsNoOp(t *testing.T) {
+	cfg := &ToolConfig{Handlers: []HandlerEntry{{
+		Name: "h1", Type: "http",
+		HTTPConfig: &HTTPCfg{Endpoint: "https://x"},
+	}}}
+	if err := ResolveAuthTokenPaths(cfg); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Handlers[0].HTTPConfig.AuthToken != "" {
+		t.Errorf("AuthToken should stay empty, got %q", cfg.Handlers[0].HTTPConfig.AuthToken)
+	}
+}

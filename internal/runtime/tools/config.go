@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"os"
 	"slices"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -176,6 +177,7 @@ type HTTPCfg struct {
 	ContentType     string                  `json:"contentType,omitempty" yaml:"contentType,omitempty"`
 	AuthType        string                  `json:"authType,omitempty" yaml:"authType,omitempty"`
 	AuthToken       string                  `json:"authToken,omitempty" yaml:"authToken,omitempty"`
+	AuthTokenPath   string                  `json:"authTokenPath,omitempty" yaml:"authTokenPath,omitempty"`
 	QueryParams     []string                `json:"queryParams,omitempty" yaml:"queryParams,omitempty"`
 	HeaderParams    map[string]string       `json:"headerParams,omitempty" yaml:"headerParams,omitempty"`
 	StaticQuery     map[string]string       `json:"staticQuery,omitempty" yaml:"staticQuery,omitempty"`
@@ -233,6 +235,7 @@ type OpenAPICfg struct {
 	Headers         map[string]string       `json:"headers,omitempty" yaml:"headers,omitempty"`
 	AuthType        string                  `json:"authType,omitempty" yaml:"authType,omitempty"`
 	AuthToken       string                  `json:"authToken,omitempty" yaml:"authToken,omitempty"`
+	AuthTokenPath   string                  `json:"authTokenPath,omitempty" yaml:"authTokenPath,omitempty"`
 	RetryPolicy     *RuntimeHTTPRetryPolicy `json:"retryPolicy,omitempty" yaml:"retryPolicy,omitempty"`
 }
 
@@ -249,6 +252,39 @@ func LoadConfig(path string) (*ToolConfig, error) {
 	}
 
 	return &config, nil
+}
+
+// ResolveAuthTokenPaths reads any per-handler AuthTokenPath file and populates
+// the in-memory AuthToken so the HTTP and OpenAPI executors can apply it. The
+// token value is never stored in the tools ConfigMap — only the path is — so
+// resolution happens here, in the runtime, from a mounted Secret file.
+func ResolveAuthTokenPaths(cfg *ToolConfig) error {
+	for i := range cfg.Handlers {
+		h := &cfg.Handlers[i]
+		if h.HTTPConfig != nil && h.HTTPConfig.AuthTokenPath != "" {
+			tok, err := readTokenFile(h.HTTPConfig.AuthTokenPath)
+			if err != nil {
+				return fmt.Errorf("handler %q: %w", h.Name, err)
+			}
+			h.HTTPConfig.AuthToken = tok
+		}
+		if h.OpenAPIConfig != nil && h.OpenAPIConfig.AuthTokenPath != "" {
+			tok, err := readTokenFile(h.OpenAPIConfig.AuthTokenPath)
+			if err != nil {
+				return fmt.Errorf("handler %q: %w", h.Name, err)
+			}
+			h.OpenAPIConfig.AuthToken = tok
+		}
+	}
+	return nil
+}
+
+func readTokenFile(path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("read auth token file %q: %w", path, err)
+	}
+	return strings.TrimRight(string(data), "\n"), nil
 }
 
 // ToolTypeHTTP is the HTTP tool type.
