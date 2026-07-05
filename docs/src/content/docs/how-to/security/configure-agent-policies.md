@@ -1,6 +1,6 @@
 ---
 title: "Configure agent policies"
-description: "Restrict tool access, map JWT claims, and control agent behavior with AgentPolicy"
+description: "Restrict tool access and control agent behavior with AgentPolicy"
 sidebar:
   order: 21
 ---
@@ -12,7 +12,10 @@ This guide covers common operational tasks for configuring AgentPolicy resources
 
 - Istio installed in your cluster
 - At least one AgentRuntime deployed
-- For claim mapping: JWT authentication configured (see [Configure Agent Authentication](/how-to/security/configure-authentication/))
+
+:::note
+AgentPolicy does not forward JWT claims. Claim forwarding to downstream tools is configured on the AgentRuntime's external-auth block — see [Configure Agent Authentication](/how-to/security/configure-authentication/).
+:::
 
 ## Restrict tool access with an allowlist
 
@@ -65,33 +68,6 @@ spec:
           - drop_table
           - reset_credentials
 ```
-
-## Map JWT claims to headers
-
-Forward user identity from the JWT token to downstream services:
-
-```yaml
-apiVersion: omnia.altairalabs.ai/v1alpha1
-kind: AgentPolicy
-metadata:
-  name: identity-propagation
-  namespace: production
-spec:
-  claimMapping:
-    forwardClaims:
-      - claim: sub
-        header: X-Omnia-Claim-Sub
-      - claim: team
-        header: X-Omnia-Claim-Team
-      - claim: org.tenant_id
-        header: X-Omnia-Claim-Tenant-Id
-```
-
-:::tip
-Use dot-notation for nested JWT claims. For example, `org.tenant_id` extracts the value from `{"org": {"tenant_id": "acme"}}`.
-:::
-
-This policy applies to **all agents** in the namespace (no `selector.agents` specified). Every tool call will include the mapped claim headers, making them available to ToolPolicy CEL rules and downstream services.
 
 ## Apply a policy to all agents
 
@@ -154,9 +130,9 @@ kubectl get agentpolicies -n production
 Expected output:
 
 ```
-NAME                    MODE      PHASE    MATCHED   AGE
-support-agent-tools     enforce   Active   1         5m
-identity-propagation    enforce   Active   3         2m
+NAME                      MODE      PHASE    MATCHED   AGE
+support-agent-tools       enforce   Active   1         5m
+restrict-dangerous-tools  enforce   Active   1         2m
 ```
 
 For detailed status including conditions:
@@ -170,7 +146,7 @@ kubectl describe agentpolicy support-agent-tools -n production
 Multiple AgentPolicies can apply to the same agent. Each policy is translated into its own Istio AuthorizationPolicy. Istio evaluates them independently — a request must pass all matching policies.
 
 ```yaml
-# Policy 1: Tool restrictions
+# Policy 1: Tool restrictions for a specific agent
 apiVersion: omnia.altairalabs.ai/v1alpha1
 kind: AgentPolicy
 metadata:
@@ -185,17 +161,18 @@ spec:
       - registry: customer-tools
         tools: [lookup_order, process_refund]
 ---
-# Policy 2: Identity propagation (applies to all agents)
+# Policy 2: Namespace-wide denylist (applies to all agents)
 apiVersion: omnia.altairalabs.ai/v1alpha1
 kind: AgentPolicy
 metadata:
-  name: identity-forwarding
+  name: namespace-wide-denylist
   namespace: production
 spec:
-  claimMapping:
-    forwardClaims:
-      - claim: team
-        header: X-Omnia-Claim-Team
+  toolAccess:
+    mode: denylist
+    rules:
+      - registry: admin-tools
+        tools: [delete_user]
 ```
 
 ## Related resources

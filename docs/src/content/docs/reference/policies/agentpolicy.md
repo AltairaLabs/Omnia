@@ -6,7 +6,9 @@ sidebar:
 ---
 
 
-The AgentPolicy custom resource defines network-level access control rules for AI agents. It configures JWT claim extraction, tool access restrictions, and enforcement modes via Istio AuthorizationPolicy.
+The AgentPolicy custom resource defines network-level access control rules for AI agents. It configures tool access restrictions and enforcement modes via Istio AuthorizationPolicy.
+
+AgentPolicy does not forward JWT claims. Claim forwarding to downstream tools is configured on the AgentRuntime's external-auth block (`spec.externalAuth.oidc.claimMapping` or the edge-trust equivalent) — see [Configure Agent Authentication](/how-to/security/configure-authentication/).
 
 ## API version
 
@@ -32,37 +34,6 @@ spec:
       - customer-service
       - internal-assistant
 ```
-
-### `claimMapping`
-
-Configures JWT claim extraction and header forwarding. Claims are extracted from the user's JWT token and propagated as HTTP headers through the facade, runtime, and tool adapter pipeline.
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `forwardClaims` | []ClaimMappingEntry | No | List of claims to extract and forward. |
-
-Each `ClaimMappingEntry` has:
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `claim` | string | Yes | JWT claim name. Supports dot-notation for nested claims (e.g., `org.team`). |
-| `header` | string | Yes | Header name to propagate the value as. Must match pattern `X-Omnia-Claim-[A-Za-z0-9-]+`. |
-
-```yaml
-spec:
-  claimMapping:
-    forwardClaims:
-      - claim: team
-        header: X-Omnia-Claim-Team
-      - claim: org.region
-        header: X-Omnia-Claim-Region
-      - claim: customer_id
-        header: X-Omnia-Claim-Customer-Id
-```
-
-:::tip
-The `X-Omnia-Claim-` prefix is enforced by CRD validation. This prevents claim headers from colliding with system headers.
-:::
 
 ### `toolAccess`
 
@@ -175,15 +146,6 @@ spec:
   selector:
     agents:
       - customer-service-agent
-
-  claimMapping:
-    forwardClaims:
-      - claim: team
-        header: X-Omnia-Claim-Team
-      - claim: customer_id
-        header: X-Omnia-Claim-Customer-Id
-      - claim: org.tier
-        header: X-Omnia-Claim-Tier
 
   toolAccess:
     mode: allowlist

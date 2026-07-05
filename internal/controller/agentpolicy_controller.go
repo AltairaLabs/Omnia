@@ -50,11 +50,6 @@ const (
 	EventReasonPolicyApplied = "PolicyApplied"
 )
 
-// Claim header validation constants.
-const (
-	claimHeaderRequiredPrefix = "X-Omnia-Claim-"
-)
-
 // Istio AuthorizationPolicy constants.
 const (
 	istioSecurityAPIVersion = "security.istio.io/v1"
@@ -157,11 +152,6 @@ func (r *AgentPolicyReconciler) setActiveStatus(policy *omniav1alpha1.AgentPolic
 
 // validatePolicy validates the AgentPolicy spec.
 func (r *AgentPolicyReconciler) validatePolicy(policy *omniav1alpha1.AgentPolicy) error {
-	if policy.Spec.ClaimMapping != nil {
-		if err := validateClaimMappings(policy.Spec.ClaimMapping.ForwardClaims); err != nil {
-			return err
-		}
-	}
 	if policy.Spec.ToolAccess != nil {
 		return validateToolAccess(policy.Spec.ToolAccess)
 	}
@@ -194,36 +184,6 @@ func validateToolAccessRule(rule omniav1alpha1.ToolAccessRule) error {
 			return fmt.Errorf("tool name must not be empty in registry %q", rule.Registry)
 		}
 	}
-	return nil
-}
-
-// validateClaimMappings validates each claim mapping entry.
-func validateClaimMappings(entries []omniav1alpha1.ClaimMappingEntry) error {
-	seen := make(map[string]bool)
-	for _, entry := range entries {
-		if err := validateClaimEntry(entry, seen); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// validateClaimEntry validates a single claim mapping entry for correctness.
-func validateClaimEntry(entry omniav1alpha1.ClaimMappingEntry, seenHeaders map[string]bool) error {
-	if entry.Claim == "" {
-		return fmt.Errorf("claim name must not be empty")
-	}
-	if entry.Header == "" {
-		return fmt.Errorf("header name must not be empty")
-	}
-	if !strings.HasPrefix(entry.Header, claimHeaderRequiredPrefix) {
-		return fmt.Errorf("header %q must start with %q", entry.Header, claimHeaderRequiredPrefix)
-	}
-	headerLower := strings.ToLower(entry.Header)
-	if seenHeaders[headerLower] {
-		return fmt.Errorf("duplicate header %q in claim mappings", entry.Header)
-	}
-	seenHeaders[headerLower] = true
 	return nil
 }
 

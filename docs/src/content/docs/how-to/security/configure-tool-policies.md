@@ -15,7 +15,7 @@ This guide covers common operational tasks for configuring ToolPolicy resources.
 
 - Omnia Enterprise license activated
 - At least one ToolRegistry deployed
-- For claim-based rules: an AgentPolicy with `claimMapping` configured (see [Configure Agent Policies](/how-to/security/configure-agent-policies/))
+- For claim-based rules: the AgentRuntime's external-auth claim mapping configured so `X-Omnia-Claim-*` headers are populated (see [Configure Agent Authentication](/how-to/security/configure-authentication/))
 
 ## Write a CEL deny rule
 
@@ -97,12 +97,12 @@ Ensure that specific claims are present before any CEL rules run. This is useful
 spec:
   requiredClaims:
     - claim: Team
-      message: "Team claim is required — ensure your AgentPolicy has claimMapping configured"
+      message: "Team claim is required — ensure the AgentRuntime's external-auth claim mapping is configured"
     - claim: Customer-Id
       message: "Customer ID is required for this tool"
 ```
 
-Required claims check for the presence of `X-Omnia-Claim-<Claim>` headers. These headers are populated by an AgentPolicy's `claimMapping` section.
+Required claims check for the presence of `X-Omnia-Claim-<Claim>` headers. These headers are populated by the AgentRuntime's external-auth claim mapping (see [Configure Agent Authentication](/how-to/security/configure-authentication/)), not by AgentPolicy — AgentPolicy governs only tool allow/deny.
 
 ## Inject headers into upstream requests
 

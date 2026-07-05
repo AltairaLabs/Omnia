@@ -70,45 +70,11 @@ support-agent-policy    enforce   Active   1         10s
 
 The agent can now only call `lookup_order`, `check_status`, and `process_refund`. Any attempt to call `delete_account` is blocked at the Istio network level.
 
-## Step 2: map JWT claims for user identity
+## Step 2: forward user identity claims
 
-Add claim mapping so the user's team and customer ID flow through to tool services:
+AgentPolicy has no claim-mapping configuration — it only governs tool allow/deny. Claim forwarding to downstream tools is configured on the `support-agent` AgentRuntime's external-auth block (`spec.externalAuth.oidc.claimMapping`, already set up as part of the JWT authentication prerequisite — see [Configure Agent Authentication](/how-to/security/configure-authentication/)).
 
-```yaml
-apiVersion: omnia.altairalabs.ai/v1alpha1
-kind: AgentPolicy
-metadata:
-  name: support-agent-policy
-  namespace: production
-spec:
-  selector:
-    agents:
-      - support-agent
-
-  toolAccess:
-    mode: allowlist
-    rules:
-      - registry: customer-tools
-        tools:
-          - lookup_order
-          - check_status
-          - process_refund
-
-  claimMapping:
-    forwardClaims:
-      - claim: team
-        header: X-Omnia-Claim-Team
-      - claim: customer_id
-        header: X-Omnia-Claim-Customer-Id
-```
-
-Apply the update:
-
-```bash
-kubectl apply -f support-agent-policy.yaml
-```
-
-Now every tool call includes `X-Omnia-Claim-Team` and `X-Omnia-Claim-Customer-Id` headers, extracted from the user's JWT.
+Once that's in place, the facade extracts the configured claims from the verified JWT and forwards them as `X-Omnia-Claim-*` headers on every tool call — for example `X-Omnia-Claim-Team` and `X-Omnia-Claim-Customer-Id` — with no further AgentPolicy changes needed.
 
 ## Step 3: add business rules with ToolPolicy
 
@@ -253,10 +219,9 @@ graph TB
 
     subgraph "AgentPolicy Enforcement"
         ISTIO -->|Tool allowlist check| FACADE[Facade]
-        ISTIO -->|Extract team, customer_id| FACADE
     end
 
-    FACADE --> RUNTIME[Runtime]
+    FACADE -->|"external-auth: extract team, customer_id"| RUNTIME[Runtime]
 
     subgraph "ToolPolicy Enforcement"
         RUNTIME -->|HTTP + X-Omnia-* headers| PROXY[Policy Proxy]
@@ -270,7 +235,9 @@ graph TB
 
 **AgentPolicy** provides:
 - Tool allowlist — `delete_account` blocked at the network level
-- Claim mapping — `team` and `customer_id` propagated as headers
+
+**AgentRuntime external-auth** provides:
+- Claim mapping — `team` and `customer_id` propagated as `X-Omnia-Claim-*` headers
 
 **ToolPolicy** provides:
 - Required claims — team and customer ID must be present
