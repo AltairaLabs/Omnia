@@ -73,6 +73,20 @@ func (r *AgentRuntimeReconciler) buildVolumes(
 		})
 	}
 
+	// Mount the companion tool-secrets Secret only when at least one handler
+	// declares an authSecretRef. Otherwise no such Secret is reconciled and
+	// mounting it unconditionally would break pod scheduling.
+	if toolRegistry != nil && len(collectToolAuthSecrets(toolRegistry)) > 0 {
+		volumes = append(volumes, corev1.Volume{
+			Name: toolSecretsVolumeName,
+			VolumeSource: corev1.VolumeSource{
+				Secret: &corev1.SecretVolumeSource{
+					SecretName: agentRuntime.Name + ToolSecretsSecretSuffix,
+				},
+			},
+		})
+	}
+
 	// Mount the workspace content PVC only when the operator is configured
 	// AND the pack actually declares skills. Mounting unconditionally would
 	// peg every agent pod to a per-namespace PVC that likely doesn't exist
@@ -140,6 +154,16 @@ func (r *AgentRuntimeReconciler) buildRuntimeVolumeMounts(
 		volumeMounts = append(volumeMounts, corev1.VolumeMount{
 			Name:      toolsConfigVolumeName,
 			MountPath: ToolsMountPath,
+			ReadOnly:  true,
+		})
+	}
+
+	// Mount the tool-secrets Secret into the runtime container, mirroring the
+	// gate in buildVolumes — otherwise the volume isn't provided.
+	if toolRegistry != nil && len(collectToolAuthSecrets(toolRegistry)) > 0 {
+		volumeMounts = append(volumeMounts, corev1.VolumeMount{
+			Name:      toolSecretsVolumeName,
+			MountPath: ToolSecretsMountPath,
 			ReadOnly:  true,
 		})
 	}

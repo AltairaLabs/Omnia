@@ -127,6 +127,69 @@ func TestSkillsEnabled(t *testing.T) {
 	})
 }
 
+// authedToolRegistry returns a ToolRegistry with one HTTP handler that
+// references an auth secret, so collectToolAuthSecrets returns >=1 entry.
+func authedToolRegistry() *omniav1alpha1.ToolRegistry {
+	return &omniav1alpha1.ToolRegistry{
+		Spec: omniav1alpha1.ToolRegistrySpec{
+			Handlers: []omniav1alpha1.HandlerDefinition{{
+				Name: "h1",
+				Type: omniav1alpha1.HandlerTypeHTTP,
+				HTTPConfig: &omniav1alpha1.HTTPConfig{
+					Endpoint:      "https://x",
+					AuthSecretRef: &omniav1alpha1.SecretKeySelector{Name: "s", Key: "k"},
+				},
+			}},
+		},
+	}
+}
+
+// unauthedToolRegistry returns a ToolRegistry with one HTTP handler that has
+// no auth secret reference.
+func unauthedToolRegistry() *omniav1alpha1.ToolRegistry {
+	return &omniav1alpha1.ToolRegistry{
+		Spec: omniav1alpha1.ToolRegistrySpec{
+			Handlers: []omniav1alpha1.HandlerDefinition{{
+				Name: "h1",
+				Type: omniav1alpha1.HandlerTypeHTTP,
+				HTTPConfig: &omniav1alpha1.HTTPConfig{
+					Endpoint: "https://x",
+				},
+			}},
+		},
+	}
+}
+
+func TestBuildVolumes_AddsToolSecretsVolumeWhenAuthed(t *testing.T) {
+	r := &AgentRuntimeReconciler{}
+	ar := minimalAgentRuntime()
+	tr := authedToolRegistry()
+
+	vols := r.buildVolumes(ar, minimalPromptPack(), tr)
+	require.True(t, hasVolume(vols, toolSecretsVolumeName), "expected tool-secrets volume")
+
+	mounts := r.buildRuntimeVolumeMounts(ar, minimalPromptPack(), tr)
+	require.True(t, hasMount(mounts, toolSecretsVolumeName),
+		"expected tool-secrets mount")
+	mount := findMount(t, mounts, toolSecretsVolumeName)
+	assert.Equal(t, ToolSecretsMountPath, mount.MountPath)
+	assert.True(t, mount.ReadOnly)
+}
+
+func TestBuildVolumes_NoToolSecretsVolumeWhenUnauthed(t *testing.T) {
+	r := &AgentRuntimeReconciler{}
+	ar := minimalAgentRuntime()
+	tr := unauthedToolRegistry()
+
+	vols := r.buildVolumes(ar, minimalPromptPack(), tr)
+	assert.False(t, hasVolume(vols, toolSecretsVolumeName),
+		"did not expect tool-secrets volume without an authSecretRef")
+
+	mounts := r.buildRuntimeVolumeMounts(ar, minimalPromptPack(), tr)
+	assert.False(t, hasMount(mounts, toolSecretsVolumeName),
+		"did not expect tool-secrets mount without an authSecretRef")
+}
+
 func TestSkillManifestPath(t *testing.T) {
 	t.Run("empty when WorkspaceContentPath is unset", func(t *testing.T) {
 		r := &AgentRuntimeReconciler{}
