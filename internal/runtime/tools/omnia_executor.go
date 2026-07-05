@@ -117,6 +117,9 @@ func (e *OmniaExecutor) LoadConfig(path string) error {
 	if err != nil {
 		return fmt.Errorf("failed to load tools config: %w", err)
 	}
+	if err := ResolveAuthTokenPaths(config); err != nil {
+		return fmt.Errorf("resolve tool auth tokens: %w", err)
+	}
 	e.config = config
 	for i := range config.Handlers {
 		h := &config.Handlers[i]

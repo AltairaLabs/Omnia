@@ -184,6 +184,64 @@ func TestOmniaExecutor_LoadConfig_InvalidYAML(t *testing.T) {
 	}
 }
 
+func TestOmniaExecutor_LoadConfig_ResolvesTokenPath(t *testing.T) {
+	dir := t.TempDir()
+	tokenFile := filepath.Join(dir, "h1")
+	if err := os.WriteFile(tokenFile, []byte("tok123"), 0o600); err != nil {
+		t.Fatalf("write token: %v", err)
+	}
+	cfgYAML := "handlers:\n" +
+		"  - name: h1\n" +
+		"    type: http\n" +
+		"    endpoint: https://example.com\n" +
+		"    httpConfig:\n" +
+		"      endpoint: https://example.com\n" +
+		"      authType: bearer\n" +
+		"      authTokenPath: " + tokenFile + "\n"
+	cfgPath := filepath.Join(dir, "tools.yaml")
+	if err := os.WriteFile(cfgPath, []byte(cfgYAML), 0o600); err != nil {
+		t.Fatalf("write cfg: %v", err)
+	}
+
+	e := NewOmniaExecutor(logr.Discard(), nil)
+	if err := e.LoadConfig(cfgPath); err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+
+	h, ok := e.handlers["h1"]
+	if !ok || h.HTTPConfig == nil {
+		t.Fatalf("expected handler h1 with HTTPConfig, got %+v", h)
+	}
+	if h.HTTPConfig.AuthToken != "tok123" {
+		t.Errorf("AuthToken = %q, want %q", h.HTTPConfig.AuthToken, "tok123")
+	}
+}
+
+func TestOmniaExecutor_LoadConfig_TokenPathReadError(t *testing.T) {
+	dir := t.TempDir()
+	cfgYAML := "handlers:\n" +
+		"  - name: h1\n" +
+		"    type: http\n" +
+		"    endpoint: https://example.com\n" +
+		"    httpConfig:\n" +
+		"      endpoint: https://example.com\n" +
+		"      authType: bearer\n" +
+		"      authTokenPath: " + filepath.Join(dir, "missing-token") + "\n"
+	cfgPath := filepath.Join(dir, "tools.yaml")
+	if err := os.WriteFile(cfgPath, []byte(cfgYAML), 0o600); err != nil {
+		t.Fatalf("write cfg: %v", err)
+	}
+
+	e := NewOmniaExecutor(logr.Discard(), nil)
+	err := e.LoadConfig(cfgPath)
+	if err == nil {
+		t.Fatal("expected error for missing auth token file")
+	}
+	if !strings.Contains(err.Error(), "resolve tool auth tokens") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
 // --- Initialize ---
 
 func TestOmniaExecutor_Initialize_NilConfig(t *testing.T) {
