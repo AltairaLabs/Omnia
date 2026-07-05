@@ -24,6 +24,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -228,6 +229,15 @@ func (r *AgentRuntimeReconciler) reconcileToolSecrets(
 ) error {
 	refs := collectToolAuthSecrets(toolRegistry)
 	if len(refs) == 0 {
+		// No authed handlers remain — remove any previously-created companion
+		// Secret so a stale token doesn't linger in the namespace.
+		stale := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{
+			Name:      agentRuntime.Name + ToolSecretsSecretSuffix,
+			Namespace: agentRuntime.Namespace,
+		}}
+		if err := r.Delete(ctx, stale); err != nil && !apierrors.IsNotFound(err) {
+			return fmt.Errorf("delete stale tool-secrets Secret: %w", err)
+		}
 		return nil
 	}
 

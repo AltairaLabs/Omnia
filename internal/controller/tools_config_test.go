@@ -1250,6 +1250,51 @@ func TestReconcileToolSecrets_WritesTokenAndFailsOnMissing(t *testing.T) {
 	}
 }
 
+func TestReconcileToolSecrets_DeletesStaleCompanionSecretWhenNoAuthedHandlers(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = corev1.AddToScheme(scheme)
+	_ = omniav1alpha1.AddToScheme(scheme)
+
+	ar := &omniav1alpha1.AgentRuntime{ObjectMeta: metav1.ObjectMeta{Name: "agent", Namespace: "default"}}
+	// No authSecretRef on any handler.
+	tr := &omniav1alpha1.ToolRegistry{
+		Spec: omniav1alpha1.ToolRegistrySpec{Handlers: []omniav1alpha1.HandlerDefinition{{
+			Name:       "h1",
+			Type:       omniav1alpha1.HandlerTypeHTTP,
+			HTTPConfig: &omniav1alpha1.HTTPConfig{Endpoint: "https://example.com"},
+		}}},
+	}
+
+	t.Run("removes a previously-created companion Secret", func(t *testing.T) {
+		stale := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Name: "agent" + ToolSecretsSecretSuffix, Namespace: "default"},
+			Data:       map[string][]byte{"h1": []byte("stale-token")},
+		}
+		c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(ar, stale).Build()
+		r := &AgentRuntimeReconciler{Client: c, Scheme: scheme}
+
+		if err := r.reconcileToolSecrets(context.Background(), ar, tr); err != nil {
+			t.Fatalf("reconcileToolSecrets: %v", err)
+		}
+
+		got := &corev1.Secret{}
+		err := c.Get(context.Background(),
+			types.NamespacedName{Name: "agent" + ToolSecretsSecretSuffix, Namespace: "default"}, got)
+		if !apierrors.IsNotFound(err) {
+			t.Fatalf("expected companion Secret to be deleted (NotFound), got err=%v", err)
+		}
+	})
+
+	t.Run("no-op when no companion Secret exists", func(t *testing.T) {
+		c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(ar).Build()
+		r := &AgentRuntimeReconciler{Client: c, Scheme: scheme}
+
+		if err := r.reconcileToolSecrets(context.Background(), ar, tr); err != nil {
+			t.Fatalf("expected nil error when no companion Secret exists, got: %v", err)
+		}
+	})
+}
+
 func TestBuildOpenAPIConfig_SetsAuthPathWhenSecretRef(t *testing.T) {
 	// AuthType intentionally nil -> exercises authTypeOrDefault default ("bearer")
 	h := &omniav1alpha1.HandlerDefinition{
