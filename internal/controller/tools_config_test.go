@@ -33,6 +33,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/yaml"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 	runtimetools "github.com/altairalabs/omnia/internal/runtime/tools"
@@ -1346,5 +1347,64 @@ func TestReconcileToolSecrets_MissingKeyErrors(t *testing.T) {
 	r := &AgentRuntimeReconciler{Client: c, Scheme: scheme}
 	if err := r.reconcileToolSecrets(context.Background(), ar, tr); err == nil {
 		t.Fatal("expected error when key is missing from source secret, got nil")
+	}
+}
+
+// TestToolAuth_EndToEnd_PathInConfigValueInSecret is the wiring test whose
+// absence let the original bug ship: it proves reconcileToolSecrets and
+// buildToolsConfig compose correctly end-to-end — the operator emits a PATH
+// (never the token value) in the generated tools config, while the token
+// value itself lands only in the companion tool-secrets Secret.
+func TestToolAuth_EndToEnd_PathInConfigValueInSecret(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = corev1.AddToScheme(scheme)
+	_ = omniav1alpha1.AddToScheme(scheme)
+
+	ar := &omniav1alpha1.AgentRuntime{ObjectMeta: metav1.ObjectMeta{Name: "agent", Namespace: "default"}}
+	tr := &omniav1alpha1.ToolRegistry{
+		Status: omniav1alpha1.ToolRegistryStatus{DiscoveredTools: []omniav1alpha1.DiscoveredTool{
+			{HandlerName: "h1", Status: omniav1alpha1.ToolStatusAvailable, Endpoint: "https://example.com"},
+		}},
+		Spec: omniav1alpha1.ToolRegistrySpec{Handlers: []omniav1alpha1.HandlerDefinition{{
+			Name: "h1", Type: omniav1alpha1.HandlerTypeHTTP,
+			HTTPConfig: &omniav1alpha1.HTTPConfig{
+				Endpoint:      "https://example.com",
+				AuthSecretRef: &omniav1alpha1.SecretKeySelector{Name: "src", Key: "token"},
+			},
+		}}},
+	}
+	src := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "src", Namespace: "default"},
+		Data:       map[string][]byte{"token": []byte("tok123")},
+	}
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(ar, src).Build()
+	r := &AgentRuntimeReconciler{Client: c, Scheme: scheme}
+
+	if err := r.reconcileToolSecrets(context.Background(), ar, tr); err != nil {
+		t.Fatalf("reconcileToolSecrets: %v", err)
+	}
+	toolsCfg, err := r.buildToolsConfig(tr)
+	if err != nil {
+		t.Fatalf("buildToolsConfig: %v", err)
+	}
+
+	// 1. Config carries the PATH, never the token value.
+	entry := toolsCfg.Handlers[0]
+	if entry.HTTPConfig.AuthTokenPath != ToolSecretsMountPath+"/h1" {
+		t.Errorf("AuthTokenPath = %q", entry.HTTPConfig.AuthTokenPath)
+	}
+	blob, _ := yaml.Marshal(toolsCfg)
+	if strings.Contains(string(blob), "tok123") {
+		t.Fatal("token value leaked into the tools config")
+	}
+
+	// 2. Companion Secret carries the token value.
+	got := &corev1.Secret{}
+	if err := c.Get(context.Background(),
+		types.NamespacedName{Name: "agent" + ToolSecretsSecretSuffix, Namespace: "default"}, got); err != nil {
+		t.Fatalf("get companion secret: %v", err)
+	}
+	if string(got.Data["h1"]) != "tok123" {
+		t.Errorf("companion secret h1 = %q, want tok123", string(got.Data["h1"]))
 	}
 }
