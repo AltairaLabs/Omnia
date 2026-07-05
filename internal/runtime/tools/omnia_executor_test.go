@@ -1065,13 +1065,16 @@ func TestOmniaExecutor_BuildHTTPHeaders(t *testing.T) {
 		},
 	}
 
-	headers := e.buildHTTPHeaders(
+	headers, err := e.buildHTTPHeaders(
 		context.Background(),
 		cfg,
 		"tool-name",
 		"handler-name",
 		json.RawMessage(`{"key":"val"}`),
 	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	if headers["X-Custom"] != "value1" {
 		t.Errorf("X-Custom = %q, want %q", headers["X-Custom"], "value1")
@@ -1082,13 +1085,16 @@ func TestOmniaExecutor_BuildHTTPHeaders_NilStaticHeaders(t *testing.T) {
 	e := NewOmniaExecutor(logr.Discard(), nil)
 	cfg := &HTTPCfg{}
 
-	headers := e.buildHTTPHeaders(
+	headers, err := e.buildHTTPHeaders(
 		context.Background(),
 		cfg,
 		"tool",
 		"handler",
 		nil,
 	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	if headers == nil {
 		t.Fatal("headers map is nil")
@@ -1102,16 +1108,40 @@ func TestOmniaExecutor_BuildHTTPHeaders_WithAuth(t *testing.T) {
 		AuthToken: "my-secret-token",
 	}
 
-	headers := e.buildHTTPHeaders(
+	headers, err := e.buildHTTPHeaders(
 		context.Background(),
 		cfg,
 		"tool",
 		"handler",
 		nil,
 	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	if headers["Authorization"] != "Bearer my-secret-token" {
 		t.Errorf("Authorization = %q, want %q", headers["Authorization"], "Bearer my-secret-token")
+	}
+}
+
+func TestBuildHTTPHeaders_InvalidAuthReturnsError(t *testing.T) {
+	e := NewOmniaExecutor(logr.Discard(), nil)
+	cfg := &HTTPCfg{Endpoint: "https://x", AuthType: "bearer", AuthToken: ""} // bearer with empty token
+	_, err := e.buildHTTPHeaders(context.Background(), cfg, "tool", "handler", nil)
+	if err == nil {
+		t.Fatal("expected error for bearer auth with empty token, got nil")
+	}
+}
+
+func TestBuildHTTPHeaders_ValidAuthSetsHeader(t *testing.T) {
+	e := NewOmniaExecutor(logr.Discard(), nil)
+	cfg := &HTTPCfg{Endpoint: "https://x", AuthType: "bearer", AuthToken: "tok123"}
+	headers, err := e.buildHTTPHeaders(context.Background(), cfg, "tool", "handler", nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if headers["Authorization"] != "Bearer tok123" {
+		t.Errorf("Authorization = %q, want %q", headers["Authorization"], "Bearer tok123")
 	}
 }
 
