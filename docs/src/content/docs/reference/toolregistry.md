@@ -136,7 +136,7 @@ Configure HTTP-specific options for explicit tool endpoints:
 | `method` | string | `POST` | HTTP method |
 | `headers` | map | - | Additional HTTP headers |
 | `contentType` | string | `application/json` | Content-Type header |
-| `authType` | string | - | Auth type (`bearer` or `basic`) |
+| `authType` | string | `bearer` | Auth type (`bearer` or `basic`) |
 | `authSecretRef` | object | - | Reference to a Secret holding the credential (see below) |
 
 ### Authenticating HTTP / OpenAPI tools

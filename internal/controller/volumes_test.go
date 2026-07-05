@@ -174,6 +174,10 @@ func TestBuildVolumes_AddsToolSecretsVolumeWhenAuthed(t *testing.T) {
 	mount := findMount(t, mounts, toolSecretsVolumeName)
 	assert.Equal(t, ToolSecretsMountPath, mount.MountPath)
 	assert.True(t, mount.ReadOnly)
+
+	vol := findVolume(t, vols, toolSecretsVolumeName)
+	require.NotNil(t, vol.VolumeSource.Secret)
+	assert.Equal(t, ar.Name+ToolSecretsSecretSuffix, vol.VolumeSource.Secret.SecretName)
 }
 
 func TestBuildVolumes_NoToolSecretsVolumeWhenUnauthed(t *testing.T) {

@@ -1238,6 +1238,9 @@ func TestReconcileToolSecrets_WritesTokenAndFailsOnMissing(t *testing.T) {
 	if string(got.Data["h1"]) != "tok123" {
 		t.Errorf("companion secret key h1 = %q, want tok123", string(got.Data["h1"]))
 	}
+	if len(got.OwnerReferences) == 0 || got.OwnerReferences[0].Name != ar.Name {
+		t.Errorf("companion secret must be owner-referenced to the AgentRuntime, got %+v", got.OwnerReferences)
+	}
 
 	// missing source secret -> error
 	c2 := fake.NewClientBuilder().WithScheme(scheme).WithObjects(ar).Build()
