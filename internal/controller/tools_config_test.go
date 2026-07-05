@@ -23,11 +23,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-logr/logr"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
@@ -1263,6 +1267,62 @@ func TestBuildOpenAPIConfig_SetsAuthPathWhenSecretRef(t *testing.T) {
 	}
 	if cfg.Headers["Authorization"] != "" {
 		t.Error("generated OpenAPI config must not contain a resolved Authorization header")
+	}
+}
+
+// TestReconcileResources_ToolSecretsFailure_BlocksReconcile proves the
+// fail-loud contract at the reconcileResources level: a ToolRegistry handler
+// with an authSecretRef pointing at a Secret that does not exist must block
+// the whole reconcile (no Deployment attempted), mirroring the pattern
+// TestReconcileResources_UnresolvableFramework_Blocks uses for the framework-
+// image gate. Unlike the tools ConfigMap path (logged-and-continues), a
+// tool-secrets failure must never let a broken auth config through.
+func TestReconcileResources_ToolSecretsFailure_BlocksReconcile(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = corev1.AddToScheme(scheme)
+	_ = appsv1.AddToScheme(scheme)
+	_ = omniav1alpha1.AddToScheme(scheme)
+
+	ar := &omniav1alpha1.AgentRuntime{
+		ObjectMeta: metav1.ObjectMeta{Name: "toolsecret-agent", Namespace: "toolsecret-ns"},
+	}
+	tr := &omniav1alpha1.ToolRegistry{
+		ObjectMeta: metav1.ObjectMeta{Name: "tr1", Namespace: "toolsecret-ns"},
+		Spec: omniav1alpha1.ToolRegistrySpec{Handlers: []omniav1alpha1.HandlerDefinition{{
+			Name: "h1", Type: omniav1alpha1.HandlerTypeHTTP,
+			HTTPConfig: &omniav1alpha1.HTTPConfig{
+				Endpoint:      "https://example.com",
+				AuthSecretRef: &omniav1alpha1.SecretKeySelector{Name: "missing-secret", Key: testAuthSecretKey},
+			},
+		}}},
+	}
+	// Deliberately no Secret named "missing-secret" is added to the fake
+	// client, so reconcileToolSecrets must fail resolving it.
+
+	c := fake.NewClientBuilder().WithScheme(scheme).
+		WithObjects(ar).
+		WithStatusSubresource(&omniav1alpha1.AgentRuntime{}).
+		Build()
+	rec := record.NewFakeRecorder(10)
+	r := &AgentRuntimeReconciler{Client: c, Scheme: scheme, Recorder: rec, FrameworkImages: promptkitImage(testFacadeImage)}
+
+	dep, err := r.reconcileResources(context.Background(), logr.Discard(), ar, nil, tr, nil)
+	if err == nil {
+		t.Fatal("expected error when the tool-auth Secret is missing")
+	}
+	if dep != nil {
+		t.Fatal("no Deployment should be built when tool-secrets reconcile fails")
+	}
+
+	// Belt-and-braces: confirm reconcileDeployment never ran by checking the
+	// fake client directly for the Deployment the happy path would create.
+	got := &appsv1.Deployment{}
+	getErr := c.Get(context.Background(), types.NamespacedName{Name: ar.Name, Namespace: ar.Namespace}, got)
+	if getErr == nil {
+		t.Fatal("no Deployment should exist after a tool-secrets reconcile failure")
+	}
+	if !apierrors.IsNotFound(getErr) {
+		t.Fatalf("expected NotFound, got: %v", getErr)
 	}
 }
 
