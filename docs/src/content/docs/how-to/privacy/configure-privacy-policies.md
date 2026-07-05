@@ -9,6 +9,21 @@ This guide walks through creating a `SessionPrivacyPolicy`, attaching it to a wo
 
 `SessionPrivacyPolicy` is an Enterprise feature. You need an active Enterprise license to use it.
 
+:::note[Policy declares the rule; privacy-api enforces per-user preferences]
+A `SessionPrivacyPolicy` is a **declarative document**: `userOptOut.enabled`
+states that users in that scope *may* opt out, and `recording` / `pii` state what
+to record and redact. It does **not** store any individual user's choice.
+
+The actual **per-user opt-out and consent preferences** are stored and enforced by
+the per-workspace **privacy-api** service, which is provisioned when
+[`spec.privacy`](/reference/core/workspace/#privacy) is set on the Workspace. This is a
+change from earlier releases, where per-user opt-out state lived in session-api.
+To record a specific user's opt-out or consent decisions, call privacy-api — see
+[Manage User Consent and Opt-Out](/how-to/privacy/manage-user-consent/). To erase a
+user's data entirely, see
+[Handle Data Subject Erasure](/how-to/privacy/handle-data-subject-erasure/).
+:::
+
 ## Prerequisites
 
 - Omnia operator v0.x or later with Enterprise enabled
@@ -215,4 +230,6 @@ The `reEncryptionProgress.status` field transitions through `Pending` → `InPro
 
 ## Reference
 
-See [SessionPrivacyPolicy CRD](/reference/policies/sessionprivacypolicy/) for the full field reference, encryption coverage per object type, and example YAML.
+- [SessionPrivacyPolicy CRD](/reference/policies/sessionprivacypolicy/) — the full field reference, encryption coverage per object type, and example YAML.
+- [Manage User Consent and Opt-Out](/how-to/privacy/manage-user-consent/) — record and read individual users' opt-out and consent preferences via privacy-api.
+- [Handle Data Subject Erasure (DSAR)](/how-to/privacy/handle-data-subject-erasure/) — erase all of a user's data via privacy-api.

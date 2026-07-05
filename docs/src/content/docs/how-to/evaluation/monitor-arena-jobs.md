@@ -314,7 +314,7 @@ kubectl logs -l arena.omnia.altairalabs.ai/job=my-eval | grep -i error
 
 | Reason | Resolution |
 |--------|------------|
-| `ConfigNotReady` | Check ArenaConfig status |
+| `ConfigNotReady` | Verify the source bundle contains a valid `config.arena.yaml` |
 | `SourceFetchFailed` | Verify ArenaSource can fetch bundle |
 | `ProviderError` | Check provider credentials and limits |
 | `Timeout` | Increase evaluation timeout |

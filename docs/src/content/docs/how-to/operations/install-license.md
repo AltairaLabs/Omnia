@@ -1,5 +1,5 @@
 ---
-title: "Install with a license"
+title: "Install with a License"
 description: "Configure Omnia with an Enterprise license key"
 sidebar:
   order: 1
@@ -17,7 +17,7 @@ For feature comparison between Open Core and Enterprise, see [Licensing & Featur
 - Helm 3.x installed
 - An Omnia license key (contact [sales@altairalabs.ai](mailto:sales@altairalabs.ai) or request a [free trial](https://omnia.altairalabs.ai/trial))
 
-## Install with license key
+## Install with License Key
 
 The simplest way to install with a license is to pass it directly to Helm:
 
@@ -30,7 +30,7 @@ helm install omnia oci://ghcr.io/altairalabs/charts/omnia \
 
 This creates the `arena-license` Secret automatically.
 
-## Install with existing secret
+## Install with Existing Secret
 
 If you prefer to manage the license Secret separately (recommended for GitOps):
 
@@ -59,7 +59,7 @@ helm install omnia oci://ghcr.io/altairalabs/charts/omnia \
   -f values.yaml
 ```
 
-## Verify license status
+## Verify License Status
 
 Check that your license is active:
 
@@ -72,7 +72,7 @@ kubectl port-forward svc/omnia-dashboard 3000:3000 -n omnia-system
 kubectl logs -l app.kubernetes.io/name=omnia -n omnia-system | grep -i license
 ```
 
-## Update an existing license
+## Update an Existing License
 
 To update your license key:
 
@@ -95,7 +95,7 @@ kubectl create secret generic arena-license \
 
 The operator will detect the new license within 5 minutes (or restart it for immediate effect).
 
-## Upload via dashboard
+## Upload via Dashboard
 
 You can also upload a license through the dashboard:
 
@@ -104,17 +104,35 @@ You can also upload a license through the dashboard:
 3. Click **Upload License**
 4. Paste your license key and click **Save**
 
-## License activation
+## How the License Is Validated
 
-Enterprise licenses support activation tracking to prevent unauthorized sharing:
+Omnia validates the license **offline**. The key is a cryptographically signed
+RS256 JWT; the operator verifies it against an embedded public key and re-reads
+the Secret every 5 minutes. No internet connection is needed to install, validate,
+or run Enterprise features.
+
+Enforcement is honour-system. Each Enterprise component logs a one-time startup
+reminder when it runs without a valid license, but the features keep working. The
+license genuinely gates only dashboard white-labelling and Arena Fleet
+source/job/limit checks — see
+[License enforcement](/explanation/platform/licensing/#license-enforcement).
+
+## License Activation (Optional)
+
+For enterprise-tier licenses, the operator can register the cluster with the
+Altaira Labs license server to **count activations** for the sales relationship:
 
 - Each license has a maximum number of cluster activations
-- When installed, Omnia automatically activates with the license server
+- On install the operator activates once and heartbeats every 24 hours
 - You can view and manage activations in **Settings** → **License** → **Activations**
 
-### Deactivate a cluster
+Activation is telemetry, not a gate: if the phone-home fails or the activation
+limit is exceeded, Omnia records a Kubernetes warning event but does **not**
+disable any feature.
 
-If you need to move your license to a new cluster:
+### Deactivate a Cluster
+
+If you want to free an activation slot when moving a license to a new cluster:
 
 1. Open **Settings** → **License** → **Activations**
 2. Find the cluster you want to deactivate
@@ -122,15 +140,20 @@ If you need to move your license to a new cluster:
 
 The activation slot is now available for a new cluster.
 
-### Offline/air-gapped installations
+### Offline/Air-Gapped Installations
 
-For environments without internet access, contact support to receive a pre-activated license with your cluster fingerprint embedded.
+No special license is required for air-gapped clusters — validation is fully
+offline. The optional activation phone-home simply logs a warning event when it
+cannot reach the license server, and Enterprise features continue to run.
 
 ## Troubleshooting
 
-### License not recognized
+### License Not Recognized
 
-If features remain locked after installing a license:
+Enterprise features run on the `enterprise.enabled` flag, so they are not "locked"
+by a missing license — but white-labelling and Arena Fleet limits *are* license-gated.
+If the dashboard still shows the default theme or Arena rejects Git/OCI sources
+after installing a license:
 
 1. **Check the Secret exists**:
    ```bash
@@ -148,25 +171,31 @@ If features remain locked after installing a license:
    kubectl logs -l app.kubernetes.io/name=omnia -n omnia-system | grep -i "license\|validation"
    ```
 
-### License expired
+### License Expired
 
 If your license has expired:
 
-1. Features will degrade to Open Core functionality
-2. A warning banner appears in the dashboard
-3. Contact support to renew your license
+1. Your agents and the enterprise memory/privacy/policy services keep running; a
+   startup license reminder is logged
+2. Dashboard white-labelling reverts to the Omnia default theme, and Arena
+   admission webhooks reject new enterprise-tier ArenaSource / ArenaJob resources
+3. A warning banner appears in the dashboard
+4. Contact support to renew your license
 
-### Activation failed
+### Activation Failed
 
-If license activation fails:
+Activation is optional telemetry (see [License Activation](#license-activation-optional)),
+so a failed activation does **not** disable any feature — Omnia just records a
+Kubernetes warning event. If you want activation tracking to succeed:
 
 1. **Check network connectivity** to `https://license.altairalabs.ai`
 2. **Verify activation slots** are available (check dashboard)
 3. **Deactivate unused clusters** if at the activation limit
 
-For air-gapped environments, contact support for offline activation.
+Air-gapped clusters need no offline activation — validation is fully offline and
+features run regardless of the phone-home.
 
-## Next steps
+## Next Steps
 
 - [Licensing & Features](/explanation/platform/licensing/) - Compare Open Core vs Enterprise features
 - [Configure Arena S3 Storage](/how-to/evaluation/configure-arena-s3-storage/) - Set up artifact storage (Enterprise)

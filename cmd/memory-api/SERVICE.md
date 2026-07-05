@@ -187,9 +187,12 @@ path) and **scope-independent** (it applies even with a `user_id` filter, so an
 operator cannot enumerate users to defeat it).
 
 **Not yet covered:** retroactive opt-out masking (hiding memories whose user has
-since opted out) is deferred to #1642 — the consent table keys on a raw user id
-while projection points key on a pseudonym, so the correlation can't be made
-reliable until the id contract is unified.
+since opted out) remains unimplemented. Consent enforcement (#1642) and live-id
+unification to `virtual_user_id` (#1280) have since shipped, but #1280 only
+unified *live* write/recall identity — it does not backfill or correlate the
+historical Galaxy projection points, which were rendered against the older
+pseudonym contract. Until those projection points can be reliably correlated back
+to a user, a retroactive opt-out cannot be applied to already-rendered dots.
 
 ### Metrics
 

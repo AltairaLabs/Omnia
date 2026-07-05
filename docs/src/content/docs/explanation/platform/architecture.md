@@ -1,5 +1,5 @@
 ---
-title: "Architecture overview"
+title: "Architecture Overview"
 description: "Understanding Omnia's architecture and design decisions"
 sidebar:
   order: 1
@@ -8,41 +8,61 @@ sidebar:
 
 This document explains the architecture of Omnia and the design decisions behind it.
 
-## High-level architecture
+## High-Level Architecture
 
-Omnia consists of three main components:
+Omnia is a Kubernetes operator plus a set of standalone services. The operator
+reconciles custom resources into running agent pods and hosts the dashboard and
+REST API. The live request path is served by the agent pod (a facade + runtime
+sidecar pair), and session, memory, and privacy data are owned by separate
+per-workspace services — the facade never writes to a database directly.
 
 ```mermaid
 graph TB
+    clients((Clients /<br/>Dashboard))
+
     subgraph cluster["Kubernetes Cluster"]
-        subgraph operator["Omnia Operator"]
-            op[Controller Manager]
+        subgraph operator["Omnia Operator (cmd/main.go)"]
+            op[Controller Manager<br/>+ REST API + Dashboard]
         end
 
         subgraph pod["Agent Pod"]
             facade[Facade Container]
             runtime[Runtime Container]
+            proxy[Policy Proxy<br/>sidecar EE]
             facade <-->|gRPC| runtime
         end
 
-        op -->|creates| pod
-        op -->|watches| pp[PromptPack ConfigMap]
-
-        subgraph storage["Storage Layer"]
-            session[(Session Store<br/>Redis)]
-            tools[Tool Services]
+        subgraph data["Data plane (per workspace)"]
+            session[Session API]
+            memory[Memory API]
+            privacy[Privacy API EE]
+            pg[(PostgreSQL<br/>+ Redis warm cache)]
         end
 
-        facade --> session
-        runtime --> tools
+        op -->|creates pod /<br/>injects sidecar| pod
+        op -->|watches| pp[PromptPack ConfigMap]
+
+        facade -->|HTTP record| session
+        runtime -->|HTTP events| session
+        runtime -->|HTTP memory| memory
+        session --> pg
+        memory --> pg
+        session -->|audit drain| privacy
+        memory -->|audit drain| privacy
+        privacy -->|DSAR fan-out| session
+        privacy -->|DSAR fan-out| memory
     end
 
-    clients((Clients)) -->|WebSocket| facade
+    clients -->|WebSocket| facade
+    clients -->|HTTP| op
 ```
+
+The full node/edge topology, protocol table, and tracing inventory live in
+`SERVICES.md` at the repository root.
 
 ## Components
 
-### Omnia operator
+### Omnia Operator
 
 The operator is a Kubernetes controller that:
 
@@ -58,21 +78,53 @@ The operator follows the standard Kubernetes controller pattern:
 2. **Reconcile** - Bring actual state to desired state
 3. **Status** - Report current state back to the resource
 
-### Agent pod (sidecar architecture)
+### Agent Pod (Sidecar Architecture)
 
 Each agent pod runs two containers in a sidecar pattern:
 
-#### Facade container
+#### Facade Container
 
 The facade container handles external client communication:
 
-- **WebSocket Server** - Manages client connections and message routing
-- **Session Management** - Creates and tracks conversation sessions
-- **Protocol Translation** - Converts WebSocket messages to gRPC calls
-- **Connection Lifecycle** - Handles connect, disconnect, and heartbeat
+- **Client-facing surfaces** - Serves the agent's facade surfaces (WebSocket, A2A, MCP, REST) and routes messages
+- **Session recording** - Captures conversation off the gRPC bus and records it through the Session API over HTTP (it does not write to a database directly)
+- **Protocol Translation** - Converts client messages to gRPC calls to the runtime
+- **Connection Lifecycle** - Handles connect, disconnect, heartbeat, and realtime park-and-resume
 - **Media Storage** (optional) - Handles file uploads for multi-modal messages
 
-##### Optional media storage
+##### Facade Composition
+
+An `AgentRuntime` composes one or more **single-protocol facade surfaces** via
+`spec.facades[]`. Each entry declares a `type`:
+
+- `websocket` - persistent WebSocket for browser/client chat (agent mode)
+- `a2a` - the A2A JSON-RPC protocol for agent-to-agent communication
+- `rest` - a one-shot HTTP endpoint (`POST /functions/{name}`, function mode)
+- `mcp` - a Model Context Protocol (Streamable HTTP) surface (function mode)
+
+A single agent pod can therefore expose several surfaces at once (e.g. a
+WebSocket surface plus an A2A surface), each on its own port, all backed by the
+same runtime.
+
+##### Plane Isolation
+
+Each management-capable facade surface is served on **two listeners**:
+
+- an **external** port running the data-plane auth chain (`spec.externalAuth`
+  validators — shared token / API keys / OIDC / edge trust), and
+- an internal **management-plane twin** port (`facade-mgmt` 18080 /
+  `a2a-mgmt` 19999 / `mcp-mgmt` 19998) that accepts only dashboard-minted
+  management-plane JWTs.
+
+Twin ports are ClusterIP-only (never placed on an external Gateway/HTTPRoute)
+and fail closed without a valid management JWT. The twin is gated per-facade by
+`spec.facades[].managementPlane` (default enabled); the enabled internal
+endpoints are advertised on `AgentRuntime.status.managementEndpoints`. The
+dashboard's WebSocket proxy (and the Doctor diagnostic tool) read that status to
+dial the management plane — so a dashboard "Try this agent" session reaches the
+agent even when no external auth validators are configured.
+
+##### Optional Media Storage
 
 The facade can optionally provide media storage for runtimes that don't have built-in media externalization. When enabled, clients can upload files via HTTP before referencing them in WebSocket messages.
 
@@ -110,18 +162,43 @@ sequenceDiagram
 
 See [Configure Media Storage](/how-to/operations/configure-media-storage/) for detailed setup instructions.
 
-#### Runtime container
+#### Runtime Container
 
 The runtime container handles LLM interactions and tool execution:
 
 - **PromptKit Integration** - Uses PromptKit SDK for LLM communication
 - **Tool Manager** - Loads and manages tool adapters (HTTP, gRPC, MCP, OpenAPI)
-- **State Persistence** - Saves conversation state to the session store
+- **Event Recording** - Records turn/tool events to the Session API over HTTP
+- **Memory** - Calls the Memory API over HTTP for retrieval/extraction when memory is enabled
 - **Tracing** - OpenTelemetry instrumentation for observability
 
 The containers communicate via gRPC on localhost, providing clean separation between client-facing logic and LLM processing.
 
-### Custom resource definitions
+### Data Plane Services
+
+Session, memory, and privacy data are owned by standalone per-workspace
+services rather than by the agent pod. This keeps the request path stateless and
+lets storage scale independently.
+
+- **Session API** (`cmd/session-api/`) - HTTP service for session CRUD and
+  tiered storage. The facade and runtime record through it over HTTP;
+  **Redis is a warm cache inside the Session API, not a separate store**, and
+  PostgreSQL is the authoritative tier.
+- **Memory API** (`cmd/memory-api/`) - HTTP service for cross-session agentic
+  memory, backed by PostgreSQL with pgvector for semantic search.
+- **Privacy API** (`ee/cmd/privacy-api/`, enterprise) - per-workspace owner of
+  consent and opt-out preferences, the central privacy/compliance **audit hub**
+  (Session API and Memory API drain their enforcement records to it), and the
+  **DSAR / right-to-erasure lifecycle** (it fans deletion out across every
+  service-group's Session API and Memory API).
+- **Policy Proxy** (`ee/cmd/policy-proxy/`, enterprise) - an
+  operator-**injected sidecar** in the agent pod (not a standalone deployment)
+  that reverse-proxies requests after evaluating AgentPolicy CEL rules.
+
+See [Multi-Tenancy Architecture](/explanation/platform/multi-tenancy/) for how these
+services are scoped per workspace.
+
+### Custom Resource Definitions
 
 #### AgentRuntime
 
@@ -162,7 +239,7 @@ Configures LLM provider settings:
 - API credentials
 - Custom base URLs
 
-## Tool execution flow
+## Tool Execution Flow
 
 ```mermaid
 sequenceDiagram
@@ -211,7 +288,7 @@ graph LR
 
 ## Observability
 
-Omnia exposes observability through OpenTelemetry:
+Omnia provides comprehensive observability through OpenTelemetry:
 
 ### Tracing
 
@@ -251,7 +328,7 @@ env:
     value: "1.0"
 ```
 
-## Realtime evals
+## Realtime Evals
 
 Omnia includes a realtime evaluation system that continuously assesses the quality of live agent conversations. Eval definitions are authored in the PromptPack (alongside validators/guardrails) and executed automatically as sessions progress.
 
@@ -279,9 +356,9 @@ Both paths run concurrently for PromptKit agents, split by eval group. The defau
 
 For the complete explanation, see [Realtime Evals](/explanation/evaluation/realtime-evals/).
 
-## Design decisions
+## Design Decisions
 
-### Why Kubernetes operator?
+### Why Kubernetes Operator?
 
 We chose the operator pattern because:
 
@@ -290,7 +367,7 @@ We chose the operator pattern because:
 3. **Self-healing** - Automatic recovery from failures
 4. **Scalability** - Leverage Kubernetes scaling mechanisms
 
-### Why sidecar architecture?
+### Why Sidecar Architecture?
 
 Separating facade and runtime enables:
 
@@ -309,7 +386,7 @@ WebSocket was chosen for the client facade because:
 3. **Persistent** - Maintains connection for multi-turn conversations
 4. **Efficient** - Lower overhead than HTTP polling
 
-### Why separate PromptPack?
+### Why Separate PromptPack?
 
 Separating prompts from agents allows:
 
@@ -318,7 +395,7 @@ Separating prompts from agents allows:
 3. **Safe rollouts** - Canary deployments for prompts
 4. **Separation of concerns** - Prompt engineers vs DevOps
 
-### Why handler-based tools?
+### Why Handler-Based Tools?
 
 The handler abstraction enables:
 
@@ -327,7 +404,7 @@ The handler abstraction enables:
 3. **Unified management** - All tool types in one registry
 4. **Dynamic updates** - Add/remove tools without redeploying agents
 
-## Resource relationships
+## Resource Relationships
 
 ```mermaid
 graph LR
@@ -346,7 +423,7 @@ graph LR
     D -->|contains| RC[Runtime Container]
 ```
 
-## Reconciliation flow
+## Reconciliation Flow
 
 When an AgentRuntime is created or updated:
 
@@ -367,15 +444,15 @@ When a ToolRegistry changes:
 4. Find all AgentRuntimes referencing this ToolRegistry
 5. Regenerate tools ConfigMaps for affected agents
 
-## Security considerations
+## Security Considerations
 
-### Secrets management
+### Secrets Management
 
 - API keys are stored in Kubernetes Secrets
 - Secrets are mounted as environment variables, not files
 - Secrets can be from the same or different namespace
 
-### Network policies
+### Network Policies
 
 Consider implementing NetworkPolicies to:
 
@@ -391,7 +468,7 @@ The operator requires specific permissions:
 - Read access to ConfigMaps and Secrets
 - Create/Update access to Deployments and Services
 
-### Multi-tenancy
+### Multi-Tenancy
 
 For team isolation, Omnia provides Workspaces:
 

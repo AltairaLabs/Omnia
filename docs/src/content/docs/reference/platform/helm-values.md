@@ -1,5 +1,5 @@
 ---
-title: "Helm values reference"
+title: "Helm Values Reference"
 description: "Complete reference for Omnia Helm chart configuration"
 sidebar:
   order: 5
@@ -17,9 +17,9 @@ helm install omnia oci://ghcr.io/altairalabs/charts/omnia \
   -f values.yaml
 ```
 
-## Operator configuration
+## Operator Configuration
 
-### Basic settings
+### Basic Settings
 
 ```yaml
 replicaCount: 1
@@ -34,7 +34,7 @@ nameOverride: ""
 fullnameOverride: ""
 ```
 
-### Service account
+### Service Account
 
 ```yaml
 serviceAccount:
@@ -43,7 +43,7 @@ serviceAccount:
   name: ""  # Generated if not set
 ```
 
-### Pod configuration
+### Pod Configuration
 
 ```yaml
 podAnnotations: {}
@@ -81,14 +81,14 @@ tolerations: []
 affinity: {}
 ```
 
-### Leader election
+### Leader Election
 
 ```yaml
 leaderElection:
   enabled: true  # Enable for HA deployments
 ```
 
-### Health probes
+### Health Probes
 
 ```yaml
 probes:
@@ -132,7 +132,7 @@ crds:
   install: true
 ```
 
-## Facade configuration
+## Facade Configuration
 
 ```yaml
 facade:
@@ -141,11 +141,11 @@ facade:
     tag: ""  # Defaults to Chart appVersion
 ```
 
-### Media storage
+### Media Storage
 
 The facade can optionally provide media storage for file uploads. Configure via environment variables in your AgentRuntime.
 
-#### Local storage (development)
+#### Local Storage (Development)
 
 ```yaml
 # AgentRuntime spec.facades[].env
@@ -159,7 +159,7 @@ The facade can optionally provide media storage for file uploads. Configure via 
   value: "24h"
 ```
 
-#### S3 storage (AWS / MinIO)
+#### S3 Storage (AWS / MinIO)
 
 ```yaml
 - name: OMNIA_MEDIA_STORAGE_TYPE
@@ -175,7 +175,7 @@ The facade can optionally provide media storage for file uploads. Configure via 
   value: http://minio:9000
 ```
 
-#### GCS storage (Google cloud)
+#### GCS Storage (Google Cloud)
 
 ```yaml
 - name: OMNIA_MEDIA_STORAGE_TYPE
@@ -186,7 +186,7 @@ The facade can optionally provide media storage for file uploads. Configure via 
   value: omnia/media/
 ```
 
-#### Azure blob storage
+#### Azure Blob Storage
 
 ```yaml
 - name: OMNIA_MEDIA_STORAGE_TYPE
@@ -207,7 +207,7 @@ The facade can optionally provide media storage for file uploads. Configure via 
 
 See [Configure Media Storage](/how-to/operations/configure-media-storage/) for detailed setup instructions.
 
-## Framework configuration
+## Framework Configuration
 
 The framework image is used for the agent runtime container. This naming aligns with the CRD's `spec.framework` field.
 
@@ -218,7 +218,7 @@ framework:
     tag: ""  # Defaults to Chart appVersion
 ```
 
-## Enterprise features
+## Enterprise Features
 
 Enterprise features require a valid license key. Enable them with:
 
@@ -229,10 +229,10 @@ enterprise:
 
 When `enterprise.enabled` is `true`:
 - Arena CRDs are installed:
-  - [ArenaSource](/reference/evaluation/arenasource) - PromptKit bundle sources
-  - [ArenaJob](/reference/evaluation/arenajob) - Test execution
-  - [ArenaTemplateSource](/reference/evaluation/arena-template-source) - Project templates
-  - [ArenaDevSession](/reference/evaluation/arena-dev-session) - Interactive testing sessions
+  - [ArenaSource](/reference/evaluation/arenasource/) - PromptKit bundle sources
+  - [ArenaJob](/reference/evaluation/arenajob/) - Test execution
+  - [ArenaTemplateSource](/reference/evaluation/arena-template-source/) - Project templates
+  - [ArenaDevSession](/reference/evaluation/arena-dev-session/) - Interactive testing sessions
 - Arena controllers are deployed
 - Workspace shared filesystem features are available
 - Project Editor with LSP validation (when `promptkitLsp.enabled`)
@@ -241,11 +241,11 @@ When `enterprise.enabled` is `true`:
 Enterprise features require a valid license. See [Installing a License](/how-to/operations/install-license/) for details.
 :::
 
-## Eval worker configuration
+## Eval Worker Configuration
 
 The eval worker runs realtime evals for non-PromptKit agents (Pattern A). This is an **enterprise feature**.
 
-### Basic settings
+### Basic Settings
 
 ```yaml
 enterprise:
@@ -265,7 +265,7 @@ enterprise:
         memory: 128Mi
 ```
 
-### Multi-namespace mode
+### Multi-Namespace Mode
 
 By default, the eval worker watches only its deployment namespace (single-namespace mode with `Role`/`RoleBinding` RBAC). To watch multiple namespaces from a single worker, set the `namespaces` list:
 
@@ -285,7 +285,7 @@ When `namespaces` is empty (the default), the worker watches only its deployment
 
 The eval worker always uses `ClusterRole` RBAC since it is deployed as a cluster singleton.
 
-### Extra environment variables
+### Extra Environment Variables
 
 Pass additional environment variables (e.g., provider API keys for LLM judges):
 
@@ -300,11 +300,11 @@ enterprise:
             key: openai-api-key
 ```
 
-## Arena Fleet configuration
+## Arena Fleet Configuration
 
 Arena Fleet provides distributed testing for PromptKit bundles. This is an **enterprise feature**.
 
-### Basic settings
+### Basic Settings
 
 ```yaml
 enterprise:
@@ -323,7 +323,7 @@ enterprise:
           memory: 128Mi
 ```
 
-### Source configuration
+### Source Configuration
 
 ```yaml
 enterprise:
@@ -333,7 +333,7 @@ enterprise:
       fetchTimeout: 2m     # Timeout for fetching sources
 ```
 
-### Result storage
+### Result Storage
 
 ```yaml
 enterprise:
@@ -356,17 +356,16 @@ enterprise:
 ```
 
 When Arena Fleet is enabled, the operator will watch for:
-- **ArenaSource**: Git, OCI, or ConfigMap sources for PromptKit bundles
-- **ArenaConfig**: Test configuration referencing sources and providers
-- **ArenaJob**: Job execution with worker pods
+- **ArenaSource**: Git, OCI, ConfigMap, or Workspace sources for PromptKit bundles
+- **ArenaJob**: Job execution with worker pods (reads the in-bundle `config.arena.yaml` selected by `spec.arenaFile`)
 
 See the [Arena Fleet documentation](/explanation/evaluation/arena-fleet/) for architecture details.
 
-### Arena queue (Redis)
+### Arena Queue (Redis)
 
 Arena Fleet uses a work queue for distributing tasks to workers. By default, an in-memory queue is used for development. For production, use Redis.
 
-#### Queue type
+#### Queue Type
 
 ```yaml
 enterprise:
@@ -375,7 +374,7 @@ enterprise:
       type: memory  # memory (dev) or redis (production)
 ```
 
-#### Managed Redis (bitnami subchart)
+#### Managed Redis (Bitnami Subchart)
 
 Deploy a Redis instance using the Bitnami Redis subchart:
 
@@ -406,7 +405,7 @@ enterprise:
         port: 6379
 ```
 
-#### Bring your own Redis (BYOD)
+#### Bring Your Own Redis (BYOD)
 
 Connect to an external Redis instance (ElastiCache, Memorystore, Azure Cache, etc.):
 
@@ -431,7 +430,7 @@ enterprise:
           key: redis-password
 ```
 
-### Arena controller
+### Arena Controller
 
 The Arena controller manages ArenaSource, ArenaJob, ArenaTemplateSource, and ArenaDevSession resources.
 
@@ -447,7 +446,7 @@ enterprise:
       resources: {}
 ```
 
-### Dev console
+### Dev Console
 
 The dev console provides interactive agent testing. Pods are created on-demand by the ArenaDevSession controller.
 
@@ -461,9 +460,9 @@ enterprise:
         pullPolicy: IfNotPresent
 ```
 
-See [ArenaDevSession CRD](/reference/evaluation/arena-dev-session) for details on interactive testing.
+See [ArenaDevSession CRD](/reference/evaluation/arena-dev-session/) for details on interactive testing.
 
-### Community templates
+### Community Templates
 
 Omnia can automatically deploy a community templates source with pre-built Arena project templates.
 
@@ -479,7 +478,7 @@ enterprise:
     syncInterval: 1h
 ```
 
-See [ArenaTemplateSource CRD](/reference/evaluation/arena-template-source) for details on template sources.
+See [ArenaTemplateSource CRD](/reference/evaluation/arena-template-source/) for details on template sources.
 
 ### PromptKit LSP
 
@@ -507,11 +506,11 @@ When enabled, the LSP provides:
 
 See the [PromptKit documentation](https://promptkit.altairalabs.ai) for details on the configuration format.
 
-#### Redis subchart configuration
+#### Redis Subchart Configuration
 
 See the [Bitnami Redis chart documentation](https://github.com/bitnami/charts/tree/main/bitnami/redis) for all available options.
 
-#### Redis + Grafana integration
+#### Redis + Grafana Integration
 
 When both `redis.enabled` and `grafana.enabled` are true, the chart automatically:
 
@@ -526,11 +525,11 @@ When both `redis.enabled` and `grafana.enabled` are true, the chart automaticall
 
 No additional configuration is required - the integration is automatic.
 
-## Dashboard configuration
+## Dashboard Configuration
 
 The Omnia Dashboard provides a web UI for monitoring and managing agents.
 
-### Basic settings
+### Basic Settings
 
 ```yaml
 dashboard:
@@ -592,7 +591,7 @@ dashboard:
       editorGroups: []
 ```
 
-#### Proxy authentication
+#### Proxy Authentication
 
 For use with external authentication proxies (e.g., oauth2-proxy):
 
@@ -606,7 +605,7 @@ dashboard:
     headerGroups: X-Forwarded-Groups
 ```
 
-#### OAuth authentication
+#### OAuth Authentication
 
 For direct OAuth/OIDC integration:
 
@@ -625,7 +624,63 @@ dashboard:
     groupsClaim: groups
 ```
 
-## Observability stack
+### API Keys
+
+API keys authenticate programmatic clients (CI, the deploy adapter, scripts). The store backend is selected with `dashboard.apiKeys.store`. See [Durable API keys](/how-to/security/api-keys/) for a full walkthrough of the three stores.
+
+```yaml
+dashboard:
+  apiKeys:
+    enabled: true                # Enable API key authentication
+    # Store backend:
+    #   memory   — ephemeral, dev only (keys lost on restart)
+    #   file     — read-only Kubernetes Secret, GitOps-friendly
+    #   postgres — durable, keys (bcrypt-hashed) live in Postgres
+    store: memory
+
+    # File store (store: file)
+    filePath: /etc/omnia/api-keys/keys.json  # Where the keys Secret is mounted
+    keysSecret: ""                           # Name of an existing Secret holding keys.json
+
+    # Postgres store (store: postgres)
+    postgresUrl: ""             # Connection URL; falls back to builtin.postgresUrl when empty
+    existingPostgresSecret: ""  # Existing Secret with an OMNIA_AUTH_API_KEYS_POSTGRES_URL key
+
+    maxPerUser: 10        # Maximum keys per user
+    defaultExpiration: 90 # Default expiration in days (0 = never)
+```
+
+When `store` is left at `memory` but a `postgresUrl` or `existingPostgresSecret` is set, it is auto-promoted to `postgres` so a wired durable backend is not silently ignored.
+
+### Branding (White-label)
+
+White-label branding is an **enterprise feature**. It overrides the default Omnia identity in the dashboard. Values are emitted to the dashboard as `NEXT_PUBLIC_BRAND_*` environment variables **only when `enterprise.enabled` is `true` and a license with the `whiteLabel` feature is active** — the dashboard enforces the license gate at runtime. Leave `productName` empty to keep the default Omnia brand.
+
+```yaml
+dashboard:
+  branding:
+    productName: ""    # Product name in the sidebar, page title and auth screens
+    logoLightUrl: ""   # Logo URL for light backgrounds
+    logoDarkUrl: ""    # Logo URL for dark backgrounds (sidebar)
+    faviconUrl: ""     # Favicon URL
+    colors:
+      primary: ""      # Primary/brand color (maps to --primary)
+      accent: ""       # Accent color (maps to --accent)
+      sidebar: ""      # Sidebar background (maps to --sidebar)
+    fonts:
+      family: ""       # Font family name applied to --font-sans
+      url: ""          # Optional web-font stylesheet URL to load the family
+    links:
+      docsBaseUrl: ""  # Base URL for in-app documentation links
+      support: ""      # Support contact (email or URL)
+      sales: ""        # Sales contact (email or URL)
+      upgradeUrl: ""   # Upgrade/enterprise URL shown on license gates
+    customCss: ""      # Token-scoped custom CSS appended to :root only
+```
+
+All color values accept any CSS color. `customCss` overrides design tokens; targeting internal selectors is unsupported.
+
+## Observability Stack
 
 All observability components are optional and disabled by default.
 
@@ -719,7 +774,7 @@ loki:
     enabled: false  # Prevents mkdir errors on Docker Desktop
 ```
 
-#### Enabling the ruler (log-based alerting)
+#### Enabling the Ruler (Log-based Alerting)
 
 The ruler is disabled by default because it fails on Docker Desktop. If you need log-based alerting rules, enable the ruler with a writable emptyDir volume:
 
@@ -770,7 +825,7 @@ tempo:
 
 ## Gateway API
 
-### External gateway
+### External Gateway
 
 For exposing agents externally:
 
@@ -790,7 +845,7 @@ gateway:
       tlsSecretName: ""
 ```
 
-### Internal gateway
+### Internal Gateway
 
 For observability tools:
 
@@ -808,7 +863,7 @@ internalGateway:
     path: /prometheus
 ```
 
-## Istio integration
+## Istio Integration
 
 ```yaml
 istio:
@@ -848,7 +903,7 @@ Advanced autoscaling with scale-to-zero support.
 :::caution[Existing KEDA Installation]
 If KEDA is **already installed** in your cluster (e.g., via `helm install keda kedacore/keda`), you **must** keep `keda.enabled=false` to avoid CRD ownership conflicts. The chart automatically detects existing KEDA installations and will fail with a helpful error message if you try to enable the subchart.
 
-Your existing KEDA installation works with Omnia's ScaledObject resources.
+Your existing KEDA installation will work seamlessly with Omnia's ScaledObject resources.
 :::
 
 ```yaml
@@ -860,11 +915,11 @@ keda:
     serverAddress: "http://omnia-prometheus-server.omnia-system.svc.cluster.local"
 ```
 
-## Demo mode (separate chart)
+## Demo Mode (Separate Chart)
 
 Demo agents are now deployed via a separate `omnia-demos` chart. This provides a cleaner separation between the core operator and demo/example resources.
 
-### Installing demo agents
+### Installing Demo Agents
 
 ```bash
 # First, install the main Omnia operator
@@ -878,7 +933,7 @@ helm install omnia-demos oci://ghcr.io/altairalabs/charts/omnia-demos \
   --create-namespace
 ```
 
-### Demo chart configuration
+### Demo Chart Configuration
 
 The `omnia-demos` chart has its own values. Key options include:
 
@@ -931,9 +986,9 @@ Once deployed, demo agents are accessible at:
 - `vision-demo.omnia-demo.svc:8080`
 - `tools-demo.omnia-demo.svc:8080` (if enabled)
 
-## Example configurations
+## Example Configurations
 
-### Minimal (development)
+### Minimal (Development)
 
 ```yaml
 prometheus:
@@ -1007,7 +1062,7 @@ keda:
   enabled: true
 ```
 
-### Observability only
+### Observability Only
 
 Use existing agent deployments with just observability:
 
@@ -1033,7 +1088,7 @@ keda:
   enabled: false
 ```
 
-### Demo mode (try without API keys)
+### Demo Mode (Try Without API Keys)
 
 Quick-start demo with local Ollama LLM. Deploy using two separate charts:
 

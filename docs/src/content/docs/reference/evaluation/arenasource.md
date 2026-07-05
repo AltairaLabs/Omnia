@@ -1,18 +1,20 @@
 ---
 title: "ArenaSource CRD"
 description: "Complete reference for the ArenaSource custom resource"
-enterprise: true
 sidebar:
   order: 10
+  badge:
+    text: Enterprise
+    variant: tip
 ---
 
 :::note[Enterprise Feature]
 ArenaSource is an enterprise feature. The CRD is only installed when `enterprise.enabled=true` in your Helm values. See [Installing a License](/how-to/operations/install-license/) for details.
 :::
 
-The ArenaSource custom resource defines a source for fetching PromptKit bundles from external repositories. It supports Git repositories, OCI registries, and Kubernetes ConfigMaps as sources, enabling GitOps-friendly bundle management for Arena Fleet.
+The ArenaSource custom resource defines a source for fetching PromptKit bundles. It supports Git repositories, OCI registries, Kubernetes ConfigMaps, and in-cluster workspace directories as sources, enabling GitOps-friendly bundle management for Arena Fleet.
 
-## API version
+## API Version
 
 ```yaml
 apiVersion: omnia.altairalabs.ai/v1alpha1
@@ -23,12 +25,13 @@ kind: ArenaSource
 
 ArenaSource provides:
 
-- **Multiple source types**: Git, OCI registry, or ConfigMap
+- **Multiple source types**: Git, OCI registry, ConfigMap, or in-cluster workspace directory
 - **Automatic polling**: Configurable interval for detecting changes
 - **Revision tracking**: Tracks source revisions for reproducibility
-- **Artifact serving**: Provides URLs for workers to download bundles
+- **Content versioning**: Optional content-addressable versions on each sync
+- **Artifact serving**: Provides content for workers to consume
 
-## Spec fields
+## Spec Fields
 
 ### `type`
 
@@ -39,6 +42,7 @@ The source type for fetching PromptKit bundles.
 | `git` | Git repository | Version-controlled bundles |
 | `oci` | OCI registry | Container registry storage |
 | `configmap` | Kubernetes ConfigMap | Simple in-cluster storage |
+| `workspace` | Workspace content directory | Snapshot an in-volume project (used by the dashboard deploy path) |
 
 ```yaml
 spec:
@@ -83,7 +87,7 @@ spec:
     path: ./customer-support
 ```
 
-#### Git authentication
+#### Git Authentication
 
 For private repositories, reference a Secret containing credentials:
 
@@ -142,14 +146,14 @@ spec:
     url: oci://ghcr.io/acme/prompts:v1.0.0
 ```
 
-#### OCI URL formats
+#### OCI URL Formats
 
 | Format | Example |
 |--------|---------|
 | Tag | `oci://registry/repo:tag` |
 | Digest | `oci://registry/repo@sha256:abc123...` |
 
-#### OCI authentication
+#### OCI Authentication
 
 ```yaml
 apiVersion: v1
@@ -192,6 +196,40 @@ spec:
     key: pack.json
 ```
 
+### `workspace`
+
+Configuration for workspace-content sources. Required when `type: workspace`. Instead of fetching from an external system, the controller snapshots an existing directory on the workspace content volume — this is the path the dashboard deploy flow uses to promote an in-cluster project into an arena run.
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `path` | string | Yes | Directory to snapshot, relative to the namespace's workspace content root (e.g. `arena/projects/my-project`). Absolute paths and `..` traversal are rejected. |
+
+```yaml
+spec:
+  type: workspace
+  interval: 5m
+  workspace:
+    path: arena/projects/customer-support
+```
+
+### `targetPath`
+
+Where to sync content within the workspace content volume, relative to the workspace content root (`/workspace-content/{workspace}/default/`). If not specified, defaults to `arena/{source-name}`.
+
+```yaml
+spec:
+  targetPath: arena/customer-support
+```
+
+### `createVersionOnSync`
+
+Controls whether a new content-addressable version (SHA256) is created after each successful sync. Defaults to `true`. Set to `false` to sync content in place without accumulating version history.
+
+```yaml
+spec:
+  createVersionOnSync: true
+```
+
 ### `suspend`
 
 When `true`, prevents the source from being reconciled. Useful for maintenance.
@@ -210,14 +248,15 @@ spec:
   timeout: 120s
 ```
 
-## Status fields
+## Status Fields
 
 ### `phase`
 
 | Value | Description |
 |-------|-------------|
 | `Pending` | Source has not been fetched yet |
-| `Fetching` | Currently fetching from source |
+| `Initializing` | First fetch is in progress; content is not yet available |
+| `Fetching` | A re-sync is in progress; previous content remains available via HEAD |
 | `Ready` | Successfully fetched and artifact available |
 | `Error` | Fetch failed |
 
@@ -249,9 +288,9 @@ Timestamp of the last fetch attempt.
 
 Scheduled time for the next fetch.
 
-## Complete examples
+## Complete Examples
 
-### Git repository source
+### Git Repository Source
 
 ```yaml
 apiVersion: omnia.altairalabs.ai/v1alpha1
@@ -279,7 +318,7 @@ status:
     lastUpdateTime: "2025-01-16T10:00:00Z"
 ```
 
-### OCI registry source
+### OCI Registry Source
 
 ```yaml
 apiVersion: omnia.altairalabs.ai/v1alpha1
@@ -303,7 +342,7 @@ status:
     url: http://source-controller/artifacts/v2.0.0.tar.gz
 ```
 
-### ConfigMap source
+### ConfigMap Source
 
 ```yaml
 apiVersion: v1
@@ -347,7 +386,7 @@ status:
     url: http://source-controller/artifacts/test-prompts.tar.gz
 ```
 
-## Revision format
+## Revision Format
 
 The revision field format varies by source type:
 
@@ -359,7 +398,7 @@ The revision field format varies by source type:
 | OCI (digest) | `@sha256:digest` | `@sha256:abc123` |
 | ConfigMap | `resourceVersion` | `12345` |
 
-## Related resources
+## Related Resources
 
-- **[ArenaConfig](/reference/evaluation/arenaconfig)**: Defines test configuration using sources
-- **[ArenaJob](/reference/evaluation/arenajob)**: Executes tests using configurations
+- **[Arena Config File](/reference/evaluation/arenaconfig/)**: Schema of the `config.arena.yaml` file that lives inside the bundle this source provides
+- **[ArenaJob](/reference/evaluation/arenajob/)**: Executes a run using this source (via `spec.sourceRef` and `spec.arenaFile`)
