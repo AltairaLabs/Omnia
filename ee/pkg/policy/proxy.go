@@ -63,7 +63,7 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	decision := h.evaluator.EvaluateWithContext(r.Context(), headers, body)
 
-	h.logDecision(r, decision)
+	logDecision(h.logger, r, decision)
 
 	if !decision.Allowed {
 		writeDenialResponse(w, decision)
@@ -138,27 +138,29 @@ func writeDenialResponse(w http.ResponseWriter, decision Decision) {
 	_ = json.NewEncoder(w).Encode(resp)
 }
 
-// logDecision logs the policy decision for audit purposes.
-func (h *ProxyHandler) logDecision(r *http.Request, decision Decision) {
+// logDecision logs the policy decision for audit purposes. Shared between
+// ProxyHandler and BrokerHandler so both surfaces produce identical audit
+// trails for the same Decision.
+func logDecision(logger *slog.Logger, r *http.Request, decision Decision) {
 	if decision.Allowed && decision.DeniedBy == "" {
 		return
 	}
 
 	if decision.WouldDeny {
-		h.logAuditDecision(r, decision)
+		logAuditDecision(logger, r, decision)
 		return
 	}
 
-	h.logEnforceDecision(r, decision)
+	logEnforceDecision(logger, r, decision)
 }
 
 // logAuditDecision logs a structured audit-mode decision where the request would have been denied.
-func (h *ProxyHandler) logAuditDecision(r *http.Request, decision Decision) {
+func logAuditDecision(logger *slog.Logger, r *http.Request, decision Decision) {
 	decisionStr := logDecisionAllow
 	if decision.DeniedBy != "" {
 		decisionStr = logDecisionDeny
 	}
-	h.logger.Info(logMsgPolicyDecision,
+	logger.Info(logMsgPolicyDecision,
 		"decision", decisionStr,
 		"wouldDeny", true,
 		"mode", string(decision.Mode),
@@ -171,7 +173,7 @@ func (h *ProxyHandler) logAuditDecision(r *http.Request, decision Decision) {
 }
 
 // logEnforceDecision logs a standard enforce-mode policy decision.
-func (h *ProxyHandler) logEnforceDecision(r *http.Request, decision Decision) {
+func logEnforceDecision(logger *slog.Logger, r *http.Request, decision Decision) {
 	fields := []any{
 		"path", r.URL.Path,
 		"method", r.Method,
@@ -190,7 +192,7 @@ func (h *ProxyHandler) logEnforceDecision(r *http.Request, decision Decision) {
 		fields = append(fields, "error", decision.Error.Error())
 	}
 
-	h.logger.Info(logMsgPolicyDecision, fields...)
+	logger.Info(logMsgPolicyDecision, fields...)
 }
 
 // HealthHandler returns a simple health check handler for the proxy.
