@@ -49,10 +49,6 @@ metadata:
   name: controller-probe
   namespace: test-agents
 spec:
-  claimMapping:
-    forwardClaims:
-      - claim: probe
-        header: X-Omnia-Claim-Probe
   mode: enforce
 `
 	cmd := exec.Command("kubectl", "apply", "-f", "-")
@@ -471,7 +467,7 @@ spec:
 		})
 
 		It("should reach Active phase without Istio", func() {
-			By("applying an AgentPolicy with claim mapping only")
+			By("applying an AgentPolicy with no toolAccess")
 			applyPolicy(fmt.Sprintf(`
 apiVersion: omnia.altairalabs.ai/v1alpha1
 kind: AgentPolicy
@@ -479,10 +475,6 @@ metadata:
   name: %s
   namespace: %s
 spec:
-  claimMapping:
-    forwardClaims:
-      - claim: team
-        header: X-Omnia-Claim-Team
   mode: enforce
 `, agentPolicyName, policyNamespace))
 
@@ -491,7 +483,7 @@ spec:
 		})
 
 		It("should report validation errors in status", func() {
-			By("applying an AgentPolicy with invalid claim header (missing X-Omnia-Claim- prefix)")
+			By("applying an AgentPolicy with invalid toolAccess (empty tools list)")
 			yaml := fmt.Sprintf(`
 apiVersion: omnia.altairalabs.ai/v1alpha1
 kind: AgentPolicy
@@ -499,14 +491,15 @@ metadata:
   name: %s
   namespace: %s
 spec:
-  claimMapping:
-    forwardClaims:
-      - claim: team
-        header: X-Bad-Header
+  toolAccess:
+    mode: allowlist
+    rules:
+      - registry: e2e-registry
+        tools: []
   mode: enforce
 `, agentPolicyName, policyNamespace)
 
-			// The CRD has a pattern validation on the header field, so this may be
+			// The CRD has a MinItems validation on the tools field, so this may be
 			// rejected at admission time. Try applying and check either admission
 			// error or status error.
 			cmd := exec.Command("kubectl", "apply", "-f", "-")
@@ -514,16 +507,16 @@ spec:
 			_, applyErr := utils.Run(cmd)
 
 			if applyErr != nil {
-				By("verifying admission rejected the invalid header pattern")
-				Expect(applyErr.Error()).To(ContainSubstring("X-Omnia-Claim-"),
-					"Expected validation error about X-Omnia-Claim- prefix")
+				By("verifying admission rejected the empty tools list")
+				Expect(applyErr.Error()).To(ContainSubstring("tools"),
+					"Expected validation error about tools")
 			} else {
-				By("waiting for Error phase due to invalid header")
+				By("waiting for Error phase due to invalid config")
 				waitForPhase("agentpolicy", agentPolicyName, policyNamespace, "Error")
 
 				msg := conditionMessage("agentpolicy", agentPolicyName, policyNamespace, "Valid")
-				Expect(msg).To(ContainSubstring("X-Omnia-Claim-"),
-					"Expected error message about X-Omnia-Claim- prefix")
+				Expect(msg).To(ContainSubstring("tools"),
+					"Expected error message about tools")
 			}
 		})
 	})

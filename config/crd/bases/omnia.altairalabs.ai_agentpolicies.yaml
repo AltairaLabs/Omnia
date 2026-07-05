@@ -55,39 +55,6 @@ spec:
           spec:
             description: spec defines the desired state of AgentPolicy
             properties:
-              claimMapping:
-                description: claimMapping configures JWT claim extraction and header
-                  forwarding.
-                properties:
-                  forwardClaims:
-                    description: forwardClaims is the list of JWT claims to extract
-                      and forward as headers.
-                    items:
-                      description: ClaimMappingEntry maps a single JWT claim to an
-                        outbound header.
-                      properties:
-                        claim:
-                          description: |-
-                            claim is the JWT claim name to extract (e.g., "team", "region", "customer_id").
-                            Supports dot-notation for nested claims (e.g., "org.team").
-                          minLength: 1
-                          type: string
-                        header:
-                          description: |-
-                            header is the HTTP header name to propagate the claim value as.
-                            Must start with "X-Omnia-Claim-" prefix for security.
-                          minLength: 1
-                          pattern: ^X-Omnia-Claim-[A-Za-z0-9-]+$
-                          type: string
-                      required:
-                      - claim
-                      - header
-                      type: object
-                    type: array
-                    x-kubernetes-list-map-keys:
-                    - claim
-                    x-kubernetes-list-type: map
-                type: object
               mode:
                 default: enforce
                 description: |-

@@ -13,15 +13,6 @@ export interface AgentPolicySelector {
   agents?: string[];
 }
 
-export interface ClaimMappingEntry {
-  claim: string;
-  header: string;
-}
-
-export interface ClaimMapping {
-  forwardClaims?: ClaimMappingEntry[];
-}
-
 export interface ToolAccessRule {
   registry: string;
   tools: string[];
@@ -34,7 +25,6 @@ export interface ToolAccessConfig {
 
 export interface AgentPolicySpec {
   selector?: AgentPolicySelector;
-  claimMapping?: ClaimMapping;
   toolAccess?: ToolAccessConfig;
   mode?: AgentPolicyMode;
   onFailure?: OnFailureAction;
