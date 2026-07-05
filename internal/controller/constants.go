@@ -104,6 +104,12 @@ const (
 	ToolsConfigFileName = "tools.yaml"
 	// ToolsMountPath is the mount path for tools configuration.
 	ToolsMountPath = "/etc/omnia/tools"
+	// ToolSecretsSecretSuffix is appended to the AgentRuntime name for the
+	// operator-managed Secret holding resolved tool auth tokens.
+	ToolSecretsSecretSuffix = "-tool-secrets"
+	// ToolSecretsMountPath is where the tool-secrets Secret is mounted read-only
+	// on the runtime container.
+	ToolSecretsMountPath = "/etc/omnia/tool-secrets"
 	// CanaryConfigMapSuffix is the suffix for the per-agent canary override
 	// ConfigMap name (<agent>-canary-config). Mounted only into candidate pods.
 	CanaryConfigMapSuffix = "-canary-config"
@@ -127,6 +133,8 @@ const (
 	promptpackConfigVolumeName = "promptpack-config"
 	// toolsConfigVolumeName is the name of the tools config volume.
 	toolsConfigVolumeName = "tools-config"
+	// toolSecretsVolumeName is the name of the tool-secrets volume.
+	toolSecretsVolumeName = "tool-secrets"
 	// canaryOverrideVolumeName is the name of the canary override volume.
 	canaryOverrideVolumeName = "canary-override"
 	// EnvMgmtPlaneJWKSURL is the env var the operator sets on the facade

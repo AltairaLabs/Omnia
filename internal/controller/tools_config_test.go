@@ -1150,3 +1150,16 @@ func TestBuildHandlerEntry_OpenAPIWithRetryPolicy(t *testing.T) {
 		t.Errorf("MaxAttempts = %d, want 4", entry.OpenAPIConfig.RetryPolicy.MaxAttempts)
 	}
 }
+
+func TestToolHTTP_HasAuthFields(t *testing.T) {
+	h := ToolHTTP{AuthType: "bearer", AuthTokenPath: "/etc/omnia/tool-secrets/h1"}
+	if h.AuthType != "bearer" || h.AuthTokenPath == "" {
+		t.Fatal("ToolHTTP must carry AuthType and AuthTokenPath")
+	}
+}
+
+func TestToolSecretsConstants(t *testing.T) {
+	if ToolSecretsSecretSuffix == "" || ToolSecretsMountPath == "" || toolSecretsVolumeName == "" {
+		t.Fatal("tool-secrets constants must be defined")
+	}
+}

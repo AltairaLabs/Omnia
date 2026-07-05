@@ -78,6 +78,8 @@ type ToolHTTP struct {
 	Method          string                               `json:"method,omitempty"`
 	Headers         map[string]string                    `json:"headers,omitempty"`
 	ContentType     string                               `json:"contentType,omitempty"`
+	AuthType        string                               `json:"authType,omitempty"`
+	AuthTokenPath   string                               `json:"authTokenPath,omitempty"`
 	QueryParams     []string                             `json:"queryParams,omitempty"`
 	HeaderParams    map[string]string                    `json:"headerParams,omitempty"`
 	StaticQuery     map[string]string                    `json:"staticQuery,omitempty"`
@@ -126,6 +128,8 @@ type ToolOpenAPI struct {
 	BaseURL         string                               `json:"baseURL,omitempty"`
 	OperationFilter []string                             `json:"operationFilter,omitempty"`
 	Headers         map[string]string                    `json:"headers,omitempty"`
+	AuthType        string                               `json:"authType,omitempty"`
+	AuthTokenPath   string                               `json:"authTokenPath,omitempty"`
 	RetryPolicy     *runtimetools.RuntimeHTTPRetryPolicy `json:"retryPolicy,omitempty"`
 }
 
