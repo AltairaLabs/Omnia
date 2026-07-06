@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os/exec"
 
 	pktools "github.com/AltairaLabs/PromptKit/runtime/tools"
@@ -85,10 +86,20 @@ func (e *OmniaExecutor) initMCPHandler(ctx context.Context, name string, h *Hand
 func (e *OmniaExecutor) buildMCPTransport(cfg *MCPCfg) (mcp.Transport, error) {
 	switch MCPTransportType(cfg.Transport) {
 	case MCPTransportSSE:
-		return &mcp.SSEClientTransport{Endpoint: cfg.Endpoint}, nil
+		return &mcp.SSEClientTransport{
+			Endpoint:   cfg.Endpoint,
+			HTTPClient: &http.Client{Transport: &injectedHeaderTransport{}},
+		}, nil
 	case MCPTransportStreamableHTTP:
-		return &mcp.StreamableClientTransport{Endpoint: cfg.Endpoint}, nil
+		return &mcp.StreamableClientTransport{
+			Endpoint:   cfg.Endpoint,
+			HTTPClient: &http.Client{Transport: &injectedHeaderTransport{}},
+		}, nil
 	case MCPTransportStdio:
+		// Stdio MCP has no header/metadata channel: the subprocess speaks
+		// JSON-RPC over stdin/stdout, so there is no outbound HTTP request to
+		// merge InjectedHeadersFromContext into. ToolPolicy broker-injected
+		// headers cannot reach a stdio MCP handler.
 		cmd := exec.Command(cfg.Command, cfg.Args...)
 		if cfg.WorkDir != "" {
 			cmd.Dir = cfg.WorkDir
@@ -100,6 +111,44 @@ func (e *OmniaExecutor) buildMCPTransport(cfg *MCPCfg) (mcp.Transport, error) {
 	default:
 		return nil, fmt.Errorf("unsupported MCP transport: %s", cfg.Transport)
 	}
+}
+
+// injectedHeaderTransport wraps an http.RoundTripper and merges ToolPolicy
+// broker-injected headers (stashed on the request's context via
+// WithInjectedHeaders) into every outbound MCP HTTP request. It gives the SSE
+// and Streamable-HTTP MCP transports parity with the HTTP/gRPC executors.
+//
+// Unlike buildHTTPHeaders and executeGRPC's metadata merge, the MCP
+// client/session is built once at handler init (initMCPHandler) and reused
+// for every subsequent tool call, so there is no per-call header-building
+// hook on the SDK's transport types. The go-sdk/mcp package does thread each
+// JSON-RPC call's ctx through to http.NewRequestWithContext for every request
+// it sends (streamableClientConn.Write, sseClientConn's message POST), so a
+// ctx-aware RoundTripper is the per-call injection point available for this
+// transport.
+type injectedHeaderTransport struct {
+	base http.RoundTripper
+}
+
+// RoundTrip merges broker-injected headers in last, so they win over
+// whatever the MCP transport already set (session/protocol/auth headers) on
+// key collision — mirrors the ordering in buildHTTPHeaders and executeGRPC.
+func (t *injectedHeaderTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	base := t.base
+	if base == nil {
+		base = http.DefaultTransport
+	}
+
+	headers := InjectedHeadersFromContext(req.Context())
+	if len(headers) == 0 {
+		return base.RoundTrip(req)
+	}
+
+	req = req.Clone(req.Context())
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+	return base.RoundTrip(req)
 }
 
 func (e *OmniaExecutor) executeMCP(

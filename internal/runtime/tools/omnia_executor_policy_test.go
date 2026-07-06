@@ -17,14 +17,18 @@ limitations under the License.
 package tools
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/go-logr/logr"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -250,6 +254,139 @@ func TestDispatch_PolicyBrokerAllowWithInjectedHeaders_ReachesOutboundGRPCMetada
 		"broker-injected header must reach outgoing gRPC metadata")
 	assert.Equal(t, []string{"injected-user"}, mock.capturedMD.Get(policy.HeaderUserID),
 		"broker-injected header must win over the colliding policy-propagated header")
+}
+
+const mcpInjectedHeaderToolName = "test-mcp-tool"
+
+// newMCPToolServer builds a real Streamable-HTTP MCP server (single echo
+// tool) wrapped in a middleware that records the headers of the tools/call
+// JSON-RPC request specifically. Filtering on the JSON-RPC method (rather
+// than capturing every request) keeps the assertion deterministic: the
+// client also issues initialize / tools/list POSTs and, unless
+// DisableStandaloneSSE is set, a background GET for the standalone SSE
+// stream, any of which would otherwise race with and overwrite the captured
+// headers.
+func newMCPToolServer(t *testing.T, captured *http.Header) *httptest.Server {
+	t.Helper()
+
+	server := mcp.NewServer(&mcp.Implementation{Name: "test-mcp-server", Version: "v0.0.1"}, nil)
+	mcp.AddTool(server, &mcp.Tool{Name: mcpInjectedHeaderToolName},
+		func(_ context.Context, _ *mcp.CallToolRequest, _ any) (*mcp.CallToolResult, any, error) {
+			return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: "ok"}}}, nil, nil
+		})
+	handler := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server }, nil)
+
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			body, _ := io.ReadAll(r.Body)
+			r.Body = io.NopCloser(bytes.NewReader(body))
+			if strings.Contains(string(body), `"method":"tools/call"`) {
+				*captured = r.Header.Clone()
+			}
+		}
+		handler.ServeHTTP(w, r)
+	}))
+}
+
+// newMCPToolExecutor builds an OmniaExecutor with a single MCP tool backed by
+// mcpSrv, connecting for real (LoadConfigFromEntries + Initialize) so
+// dispatch is exercised end-to-end through ExecuteTool — the MCP mirror of
+// newHTTPToolExecutor / newGRPCToolExecutor.
+func newMCPToolExecutor(t *testing.T, mcpSrv *httptest.Server) *OmniaExecutor {
+	t.Helper()
+	e := NewOmniaExecutor(logr.Discard(), nil)
+	require.NoError(t, e.LoadConfigFromEntries([]HandlerEntry{{
+		Name: "test-mcp",
+		Type: ToolTypeMCP,
+		MCPConfig: &MCPCfg{
+			Transport: string(MCPTransportStreamableHTTP),
+			Endpoint:  mcpSrv.URL,
+		},
+	}}))
+	require.NoError(t, e.Initialize(context.Background()))
+	return e
+}
+
+// TestDispatch_PolicyBrokerAllowWithInjectedHeaders_ReachesOutboundMCPRequest
+// is the MCP mirror of TestDispatch_PolicyBrokerAllowWithInjectedHeaders_ReachesOutboundRequest
+// / _ReachesOutboundGRPCMetadata (finding: the MCP path had no
+// InjectedHeadersFromContext merge at all — the SSE/Streamable-HTTP MCP
+// transports never saw ToolPolicy broker-injected headers, a pre-existing
+// parity gap against HTTP/gRPC/OpenAPI). Asserts a broker-injected header
+// reaches the outbound MCP tools/call HTTP request.
+func TestDispatch_PolicyBrokerAllowWithInjectedHeaders_ReachesOutboundMCPRequest(t *testing.T) {
+	var captured http.Header
+	mcpSrv := newMCPToolServer(t, &captured)
+	defer mcpSrv.Close()
+
+	brokerSrv := httptest.NewServer(jsonHandler(t, `{"allow":true,"injectedHeaders":{"X-Injected-Auth":"secret-token"}}`))
+	defer brokerSrv.Close()
+	t.Setenv(envPolicyBrokerURL, brokerSrv.URL)
+
+	e := newMCPToolExecutor(t, mcpSrv)
+	defer func() { _ = e.Close() }()
+
+	result, err := e.ExecuteTool(context.Background(), mcpInjectedHeaderToolName, json.RawMessage(`{}`))
+	require.NoError(t, err)
+	assert.Contains(t, string(result), "ok")
+	assert.Equal(t, "secret-token", captured.Get("X-Injected-Auth"))
+}
+
+// recordingRoundTripper is a minimal http.RoundTripper test double that
+// records the last request it saw and returns a canned 200 response.
+type recordingRoundTripper struct {
+	lastReq *http.Request
+}
+
+func (rt *recordingRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	rt.lastReq = req
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Body:       io.NopCloser(bytes.NewReader(nil)),
+		Header:     make(http.Header),
+	}, nil
+}
+
+// TestInjectedHeaderTransport_RoundTrip unit-tests the MCP-specific
+// injection point directly: unlike buildHTTPHeaders/executeGRPC, the MCP
+// client/session is built once at handler init and reused for every call, so
+// injectedHeaderTransport (a ctx-aware http.RoundTripper) is where broker
+// headers get merged in instead. Proves both reach and collision precedence
+// without depending on real MCP protocol headers (Mcp-Session-Id,
+// Mcp-Protocol-Version), which would break the handshake if overridden.
+func TestInjectedHeaderTransport_RoundTrip(t *testing.T) {
+	t.Run("no injected headers passes the request through unchanged", func(t *testing.T) {
+		base := &recordingRoundTripper{}
+		rt := &injectedHeaderTransport{base: base}
+
+		req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, "http://mcp.example.invalid", nil)
+		require.NoError(t, err)
+		req.Header.Set("X-Existing", "orig")
+
+		_, err = rt.RoundTrip(req)
+		require.NoError(t, err)
+		assert.Equal(t, "orig", base.lastReq.Header.Get("X-Existing"))
+	})
+
+	t.Run("injected headers merge in and win on collision", func(t *testing.T) {
+		base := &recordingRoundTripper{}
+		rt := &injectedHeaderTransport{base: base}
+
+		req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, "http://mcp.example.invalid", nil)
+		require.NoError(t, err)
+		req.Header.Set("X-Existing", "orig")
+		ctx := WithInjectedHeaders(req.Context(), map[string]string{
+			"X-Existing":      "broker-wins",
+			"X-Injected-Auth": "secret-token",
+		})
+		req = req.WithContext(ctx)
+
+		_, err = rt.RoundTrip(req)
+		require.NoError(t, err)
+		assert.Equal(t, "broker-wins", base.lastReq.Header.Get("X-Existing"),
+			"broker-injected header must win over the colliding pre-existing header")
+		assert.Equal(t, "secret-token", base.lastReq.Header.Get("X-Injected-Auth"))
+	})
 }
 
 func TestDispatch_PolicyBrokerAuditWouldDeny_ProceedsWithCall(t *testing.T) {
