@@ -121,9 +121,6 @@ spec:
 
   mode: audit  # Start in audit mode
   onFailure: deny
-
-  audit:
-    logDecisions: true
 ```
 
 Apply it:
@@ -243,7 +240,6 @@ graph TB
 ## Next steps
 
 - Add more CEL rules for other tools in the registry
-- Configure `audit.redactFields` to mask sensitive data in logs
 - Create policies for other agents in the namespace
 - Review the [AgentPolicy Reference](/reference/policies/agentpolicy/) and [ToolPolicy Reference](/reference/policies/toolpolicy/) for all available fields
 

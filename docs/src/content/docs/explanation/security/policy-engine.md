@@ -63,7 +63,7 @@ ToolPolicy operates at the **application level** as a *called decision broker*, 
 - **Required claims** — verify that specific JWT claims are present before allowing the request
 - **Header injection** — obligations returned alongside the allow/deny decision; the runtime attaches them to the outbound tool call only when the request is allowed
 - **Fail-closed by default** — if the broker is unreachable, the runtime denies the call (a deployment can opt into fail-open instead)
-- **Audit logging** — structured logs for deny and audit-mode would-deny decisions (see [Audit logging](#audit-logging) below for the current gaps in `audit.logDecisions`/`audit.redactFields`)
+- **Audit logging** — structured logs for deny and audit-mode would-deny decisions (see [Audit logging](#audit-logging) below)
 
 This shape exists because Omnia runs Istio in **ambient** mode, which has no waypoint proxy on tool egress — a reverse proxy sitting passively in the network path would never see traffic routed to it. Calling the broker directly sidesteps transparent interception entirely.
 
@@ -148,9 +148,7 @@ The policy-broker emits structured JSON logs for every deny decision and, when a
 
 In `audit` mode a matched deny rule sets `deniedBy`/`message` but `allowed` stays `true` (the call proceeds); in `enforce` mode the same match produces `allowed: false`.
 
-:::caution[`audit.logDecisions` / `audit.redactFields` are not yet wired]
-The ToolPolicy CRD accepts an `audit` block (`logDecisions`, `redactFields`), and the operator/broker compile it onto the policy, but the policy-broker does not currently read either field. It already logs a `policy_decision`/`broker_tool_decision` pair for every deny and would-deny outcome regardless of `logDecisions` (skipping only wholly-uninteresting allows), and it never redacts `body`/`headers` values in those logs regardless of `redactFields`. Don't rely on `redactFields` to keep sensitive data out of broker logs today.
-:::
+Logging is unconditional: the broker emits the `policy_decision`/`broker_tool_decision` pair for every deny and would-deny outcome (skipping only wholly-uninteresting allows). It does **not** redact `body`/`headers` values in those logs — keep sensitive data out of the fields your CEL rules read if broker-log exposure is a concern.
 
 ## Architecture: policy broker (PDP/PEP)
 
