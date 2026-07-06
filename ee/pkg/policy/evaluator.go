@@ -72,7 +72,6 @@ type CompiledPolicy struct {
 	RequiredClaims  []omniav1alpha1.RequiredClaim
 	Mode            omniav1alpha1.PolicyMode
 	OnFailure       omniav1alpha1.OnFailureAction
-	Audit           *omniav1alpha1.ToolPolicyAuditConfig
 }
 
 // Evaluator compiles and evaluates CEL-based ToolPolicy rules.
@@ -134,7 +133,6 @@ func (e *Evaluator) compileRules(policy *omniav1alpha1.ToolPolicy) (*CompiledPol
 		RequiredClaims: policy.Spec.RequiredClaims,
 		Mode:           policy.Spec.Mode,
 		OnFailure:      policy.Spec.OnFailure,
-		Audit:          policy.Spec.Audit,
 		Rules:          make([]CompiledRule, 0, len(policy.Spec.Rules)),
 	}
 
