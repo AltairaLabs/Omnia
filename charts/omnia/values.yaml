@@ -233,16 +233,6 @@ enterprise:
     # -- Fetch timeout
     timeout: 2m
 
-  # Policy proxy sidecar for ToolPolicy enforcement
-  policyProxy:
-    image:
-      # -- Policy proxy image repository
-      repository: ghcr.io/altairalabs/omnia-policy-proxy
-      # -- Policy proxy image tag (defaults to Chart appVersion)
-      tag: ""
-      # -- Policy proxy image pull policy
-      pullPolicy: IfNotPresent
-
   # Policy broker sidecar for ToolPolicy enforcement
   policyBroker:
     image:

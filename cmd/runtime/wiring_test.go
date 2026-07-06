@@ -129,7 +129,8 @@ func TestBuildGRPCServer_PolicyInterceptorWiresUserIDMetadata(t *testing.T) {
 //
 // The #728 backlog listed "Runtime doesn't check ToolPolicy before executing
 // tools" as a wiring gap, on the basis that ToolPolicy enforcement lived only
-// in the separate policy-proxy sidecar (ee/cmd/policy-proxy/). That gap is
+// in the separate policy-proxy sidecar (retired in P2.4 — it never worked
+// and is replaced by the policy-broker, ee/cmd/policy-broker/). That gap is
 // closed as of the ToolPolicy-broker work (P2.1-P2.3,
 // docs/local-backlog/2026-07-05-toolpolicy-enforcement-phase2-design.md):
 // internal/runtime/tools.OmniaExecutor.dispatch (omnia_executor.go) now calls

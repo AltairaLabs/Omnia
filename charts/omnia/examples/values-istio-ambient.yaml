@@ -49,7 +49,7 @@ rollout:
 #
 # NOTE (on-cluster validation required): the waypoint manifest is rendered
 # here for convenience, but the interaction between the waypoint and the
-# enterprise OPA policy-proxy on the WebSocket path has only been validated
+# enterprise policy-broker on the WebSocket path has only been validated
 # on a real ambient cluster for the hero demo namespace. Confirm the
 # waypoint adopts agent pods (`istioctl ztunnel-config workloads`) and that
 # WS upgrades survive the waypoint before relying on mode=mesh in prod.

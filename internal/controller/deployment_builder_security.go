@@ -39,7 +39,7 @@ func hardenedPodSecurityContext() *corev1.PodSecurityContext {
 // hardenedContainerSecurityContext returns a restricted-profile-compliant
 // container SecurityContext: no privilege escalation, read-only root, all
 // capabilities dropped, seccomp RuntimeDefault. Applied to facade + runtime
-// containers; the policy-proxy sidecar (injected separately) configures its
+// containers; the policy-broker sidecar (injected separately) configures its
 // own SecurityContext.
 func hardenedContainerSecurityContext() *corev1.SecurityContext {
 	return &corev1.SecurityContext{

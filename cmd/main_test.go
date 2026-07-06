@@ -25,7 +25,7 @@ import (
 	"github.com/altairalabs/omnia/internal/controller"
 )
 
-func TestPolicyProxyImageForEnterprise(t *testing.T) {
+func TestPolicyBrokerImageForEnterprise(t *testing.T) {
 	tests := []struct {
 		name       string
 		enterprise bool
@@ -54,15 +54,15 @@ func TestPolicyProxyImageForEnterprise(t *testing.T) {
 			name:       "enterprise enabled with empty image uses default",
 			enterprise: true,
 			image:      "",
-			want:       controller.DefaultPolicyProxyImage,
+			want:       controller.DefaultPolicyBrokerImage,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := policyProxyImageForEnterprise(tt.enterprise, tt.image)
+			got := policyBrokerImageForEnterprise(tt.enterprise, tt.image)
 			if got != tt.want {
-				t.Errorf("policyProxyImageForEnterprise(%v, %q) = %q, want %q",
+				t.Errorf("policyBrokerImageForEnterprise(%v, %q) = %q, want %q",
 					tt.enterprise, tt.image, got, tt.want)
 			}
 		})

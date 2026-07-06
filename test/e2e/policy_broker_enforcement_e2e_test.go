@@ -103,6 +103,15 @@ var _ = Describe("Policy Broker Enforcement", Ordered, Label("policy-broker", "e
 		By("ensuring CRDs are installed and the controller-manager is deployed")
 		Expect(ensureManagerDeployed()).To(Succeed())
 
+		By("granting the operator EE resource RBAC before enabling --enterprise")
+		// --enterprise turns on EE controllers (SessionPrivacyPolicy, arena, ...)
+		// that watch EE resources the CORE `make deploy` RBAC does not grant. A
+		// forbidden informer never syncs, which blocks the manager's shared
+		// cache-sync so NO controller reconciles — PromptPacks included. Grant it
+		// first so the enterprise pod comes up able to sync.
+		Expect(applyManifest(eeOperatorRBACManifest)).To(Succeed(),
+			"failed to grant EE operator RBAC")
+
 		By("patching the operator into enterprise mode with the policy-broker sidecar image")
 		Expect(patchOperatorArgs(enterprisePolicyBrokerArgsJSON())).To(Succeed(),
 			"failed to enable --enterprise --policy-broker-image on the operator")
@@ -347,8 +356,14 @@ spec:
 			Eventually(func(g Gomega) {
 				readiness, err := podContainerReadiness(agent)
 				g.Expect(err).NotTo(HaveOccurred())
-				g.Expect(readiness).To(Equal([]string{"true", "true", "true"}),
-					"expected facade+runtime+policy-broker all ready for %s, got %v", agent, readiness)
+				// Enterprise pods carry facade+runtime+policy-broker (3 containers,
+				// now that the legacy policy-proxy sidecar has been retired — P2.4).
+				// Assert every container is Ready rather than a fixed count so the
+				// check survives future sidecar churn; the policy-broker container's
+				// presence + POLICY_BROKER_URL are asserted separately below.
+				g.Expect(readiness).ToNot(BeEmpty(), "no containers reported for %s", agent)
+				g.Expect(readiness).ToNot(ContainElement("false"),
+					"not all containers Ready for %s: %v", agent, readiness)
 			}, 3*time.Minute, 2*time.Second).Should(Succeed())
 		}
 	})
@@ -374,6 +389,12 @@ spec:
 		By("restoring the operator to its baseline args (no --enterprise/--policy-broker-image)")
 		Expect(patchOperatorArgs(baselineOperatorArgsJSON())).To(Succeed(),
 			"failed to restore operator baseline args")
+
+		By("removing the E2E EE operator RBAC grant")
+		_, _ = utils.Run(exec.Command("kubectl", "delete", "clusterrole",
+			"e2e-policybroker-operator-ee-access", "--ignore-not-found"))
+		_, _ = utils.Run(exec.Command("kubectl", "delete", "clusterrolebinding",
+			"e2e-policybroker-operator-ee-access", "--ignore-not-found"))
 	})
 
 	It("wires the policy-broker sidecar into the deployed agent pod", func() {
@@ -462,7 +483,73 @@ func applyManifest(manifest string) error {
 // rollout to complete. Used to flip the operator into/out of enterprise
 // mode with the policy-broker image for this suite's duration without
 // leaking that state into other specs (see baselineOperatorArgsJSON).
+// managerLeaseName is the controller-runtime leader-election lease
+// (LeaderElectionID in cmd/main.go). Its holderIdentity ("<pod>_<uuid>")
+// changes whenever a restarted manager acquires leadership.
+const managerLeaseName = "4416a20d.altairalabs.ai"
+
+// eeOperatorRBACManifest grants the controller-manager ServiceAccount access to
+// all EE (omnia.altairalabs.ai) resources. The core `make deploy` RBAC covers
+// only core kinds; running the operator with --enterprise adds controllers that
+// watch EE resources (e.g. sessionprivacypolicies), and a forbidden informer
+// blocks the manager's shared cache-sync — stalling ALL reconciliation. The
+// production enterprise deploy grants this via the Helm chart; this test-only
+// grant is the equivalent for the make-deploy path.
+const eeOperatorRBACManifest = `
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: e2e-policybroker-operator-ee-access
+rules:
+  - apiGroups: ["omnia.altairalabs.ai"]
+    resources: ["*"]
+    verbs: ["*"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: e2e-policybroker-operator-ee-access
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: e2e-policybroker-operator-ee-access
+subjects:
+  - kind: ServiceAccount
+    name: omnia-controller-manager
+    namespace: omnia-system
+`
+
+// leaseHolder returns the current holderIdentity of the controller-manager's
+// leader-election lease, or "" when the lease is absent/unreadable.
+func leaseHolder() string {
+	h, err := getJSONPath("lease", managerLeaseName, namespace, "{.spec.holderIdentity}")
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(h)
+}
+
+// waitForNewLeader blocks until the leader lease is held by an identity other
+// than prevHolder — i.e. the restarted manager has acquired leadership and its
+// controllers have begun reconciling. rollout-status does NOT cover this: with
+// --leader-elect the pod passes its readiness probe (so rollout-status returns)
+// BEFORE it acquires the lease, so fixtures created immediately after a patch
+// would otherwise race leader election and their reconcile would time out.
+func waitForNewLeader(prevHolder string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for {
+		if h := leaseHolder(); h != "" && h != prevHolder {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("controller-manager did not acquire leadership within %s (prevHolder=%q)", timeout, prevHolder)
+		}
+		time.Sleep(3 * time.Second)
+	}
+}
+
 func patchOperatorArgs(argsJSON string) error {
+	prevHolder := leaseHolder()
 	patchCmd := exec.Command("kubectl", "patch", "deployment", "omnia-controller-manager",
 		"-n", namespace, "--type=strategic",
 		"-p", fmt.Sprintf(`{"spec":{"template":{"spec":{"containers":[{"name":"manager","args":%s}]}}}}`, argsJSON))
@@ -473,6 +560,13 @@ func patchOperatorArgs(argsJSON string) error {
 		"deployment/omnia-controller-manager", "-n", namespace, "--timeout=180s")
 	if _, err := utils.Run(rolloutCmd); err != nil {
 		return fmt.Errorf("operator rollout: %w", err)
+	}
+	// rollout-status only proves the pod is Ready (healthz); with --leader-elect
+	// the controllers don't reconcile until the lease is acquired, which happens
+	// after readiness. Wait for the new leader so the fixtures created next don't
+	// race leader election (the cause of the PromptPack-never-Active timeout).
+	if err := waitForNewLeader(prevHolder, 180*time.Second); err != nil {
+		return fmt.Errorf("operator leadership after rollout: %w", err)
 	}
 	return nil
 }
@@ -505,7 +599,7 @@ func baselineOperatorArgsJSON() string {
 
 // enterprisePolicyBrokerArgsJSON is the baseline args plus --enterprise and
 // --policy-broker-image, mirroring how the Helm chart passes
-// --policy-proxy-image/--policy-broker-image when enterprise.enabled=true
+// --policy-broker-image when enterprise.enabled=true
 // (charts/omnia/templates/deployment.yaml) — but applied directly to the
 // kustomize-deployed operator this suite uses, since core E2E does not
 // install via Helm.

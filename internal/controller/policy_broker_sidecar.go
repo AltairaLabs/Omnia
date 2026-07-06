@@ -38,9 +38,10 @@ const (
 )
 
 // buildPolicyBrokerContainer creates the policy broker sidecar container spec.
-// Unlike the policy-proxy sidecar (which sits inline in the tool-call path and
-// proxies to the runtime), the broker has no upstream URL — the runtime calls
-// it directly for a decision (see internal/runtime/tools/policy_broker_client.go)
+// Unlike the (retired in P2.4) policy-proxy sidecar, which would have sat
+// inline in the tool-call path and proxied to the runtime, the broker has no
+// upstream URL — the runtime calls it directly for a decision (see
+// internal/runtime/tools/policy_broker_client.go)
 // and the broker only watches ToolPolicy CRDs in the agent's namespace.
 func buildPolicyBrokerContainer(
 	agentRuntime *omniav1alpha1.AgentRuntime,

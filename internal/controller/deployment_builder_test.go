@@ -1376,35 +1376,6 @@ func TestBuildDeploymentSpec_PodOverrides(t *testing.T) {
 	}
 }
 
-func TestBuildDeploymentSpec_PodOverrides_SkipsPolicyProxy(t *testing.T) {
-	r := &AgentRuntimeReconciler{PolicyProxyImage: "policy-proxy:latest"}
-	ar := &omniav1alpha1.AgentRuntime{}
-	ar.Name = "a"
-	ar.Namespace = "ns"
-	ar.Spec.Facades = []omniav1alpha1.FacadeConfig{{Type: omniav1alpha1.FacadeTypeWebSocket}}
-	ar.Spec.PromptPackRef.Name = "p"
-	ar.Spec.PodOverrides = &omniav1alpha1.PodOverrides{
-		ExtraEnv: []corev1.EnvVar{{Name: "USER_VAR", Value: "x"}},
-	}
-
-	dep := &appsv1.Deployment{}
-	r.buildDeploymentSpec(context.Background(), dep, ar, newTestPromptPack(), nil, "", nil)
-
-	for _, c := range dep.Spec.Template.Spec.Containers {
-		hasUserVar := false
-		for _, e := range c.Env {
-			if e.Name == "USER_VAR" {
-				hasUserVar = true
-			}
-		}
-		if c.Name == PolicyProxyContainerName {
-			require.False(t, hasUserVar, "policy-proxy must NOT receive user extraEnv")
-		} else {
-			require.True(t, hasUserVar, "container %s must receive user extraEnv", c.Name)
-		}
-	}
-}
-
 func TestHardenedPodSecurityContext(t *testing.T) {
 	sc := hardenedPodSecurityContext()
 	require.NotNil(t, sc)
@@ -1471,48 +1442,6 @@ func TestBuildDeploymentSpec_HardenedSecurityContext(t *testing.T) {
 		assert.Falsef(t, *c.SecurityContext.AllowPrivilegeEscalation, "container %s must have AllowPrivilegeEscalation=false", c.Name)
 		require.NotNilf(t, c.SecurityContext.Capabilities, "container %s missing Capabilities", c.Name)
 		assert.Equalf(t, []corev1.Capability{"ALL"}, c.SecurityContext.Capabilities.Drop, "container %s must drop ALL capabilities", c.Name)
-	}
-}
-
-func TestBuildDeploymentSpec_PolicyProxyKeepsOwnSecurityContext(t *testing.T) {
-	scheme := runtime.NewScheme()
-	require.NoError(t, omniav1alpha1.AddToScheme(scheme))
-	require.NoError(t, corev1.AddToScheme(scheme))
-
-	ar := &omniav1alpha1.AgentRuntime{
-		ObjectMeta: metav1.ObjectMeta{Name: "agent", Namespace: "ns"},
-		Spec: omniav1alpha1.AgentRuntimeSpec{
-			Facades: []omniav1alpha1.FacadeConfig{{Type: omniav1alpha1.FacadeTypeWebSocket}},
-		},
-	}
-	pp := newTestPromptPack()
-	r := &AgentRuntimeReconciler{
-		Scheme:           scheme,
-		Client:           fake.NewClientBuilder().WithScheme(scheme).Build(),
-		PolicyProxyImage: "ghcr.io/altairalabs/omnia-policy-proxy:test",
-	}
-
-	dep := &appsv1.Deployment{}
-	r.buildDeploymentSpec(context.Background(), dep, ar, pp, nil, "", nil)
-
-	// Locate the policy-proxy sidecar and check its SecurityContext is its own,
-	// not hardenedContainerSecurityContext — the sidecar configures its own SC.
-	var policyProxy *corev1.Container
-	for i := range dep.Spec.Template.Spec.Containers {
-		c := &dep.Spec.Template.Spec.Containers[i]
-		if c.Name == PolicyProxyContainerName {
-			policyProxy = c
-			break
-		}
-	}
-	require.NotNil(t, policyProxy, "policy-proxy sidecar must be injected when PolicyProxyImage is set")
-	// Either the policy-proxy has no hardened SC (it sets its own or runs with
-	// a different profile) or it has one — but the buildDeploymentSpec loop
-	// must not overwrite with hardenedContainerSecurityContext.
-	// The test's intent is "not our hardened context"; a different SC or nil is acceptable.
-	hardened := hardenedContainerSecurityContext()
-	if policyProxy.SecurityContext != nil {
-		assert.NotEqual(t, hardened, policyProxy.SecurityContext, "policy-proxy must not be overwritten with the facade/runtime hardened SC")
 	}
 }
 

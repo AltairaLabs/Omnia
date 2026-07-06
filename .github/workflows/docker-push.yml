@@ -116,9 +116,6 @@ jobs:
             omnia-eval-worker:
               - 'ee/cmd/arena-eval-worker/**'
 
-            omnia-policy-proxy:
-              - 'ee/cmd/policy-proxy/**'
-
             omnia-promptkit-lsp:
               - 'ee/cmd/promptkit-lsp/**'
 
@@ -133,7 +130,7 @@ jobs:
           MATCHED: ${{ steps.filter.outputs.changes }}
         run: |
           # Full image list — matches docker-build.yml + release.yml matrices.
-          ALL='["omnia-operator","omnia-facade","omnia-runtime","omnia-dashboard","omnia-session-api","omnia-memory-api","omnia-doctor","omnia-compaction","omnia-arena-controller","omnia-arena-worker","omnia-arena-dev-console","omnia-eval-worker","omnia-policy-proxy","omnia-promptkit-lsp","omnia-privacy-api"]'
+          ALL='["omnia-operator","omnia-facade","omnia-runtime","omnia-dashboard","omnia-session-api","omnia-memory-api","omnia-doctor","omnia-compaction","omnia-arena-controller","omnia-arena-worker","omnia-arena-dev-console","omnia-eval-worker","omnia-promptkit-lsp","omnia-privacy-api"]'
 
           if [[ "$SHARED" == "true" ]]; then
             echo "Shared paths changed — rebuilding all services."
@@ -218,11 +215,6 @@ jobs:
             context: .
             title: Omnia Eval Worker (Enterprise)
             description: Per-namespace worker that executes realtime evals against active agent sessions.
-          - image: omnia-policy-proxy
-            dockerfile: ee/Dockerfile.policy-proxy
-            context: .
-            title: Omnia Policy Proxy (Enterprise)
-            description: Sidecar proxy that intercepts tool calls and evaluates ToolPolicy CEL rules before they reach the runtime.
           - image: omnia-promptkit-lsp
             dockerfile: ee/Dockerfile.promptkit-lsp
             context: .

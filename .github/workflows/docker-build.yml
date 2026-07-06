@@ -76,9 +76,6 @@ jobs:
           - image: omnia-eval-worker
             dockerfile: ee/Dockerfile.eval-worker
             context: .
-          - image: omnia-policy-proxy
-            dockerfile: ee/Dockerfile.policy-proxy
-            context: .
           - image: omnia-promptkit-lsp
             dockerfile: ee/Dockerfile.promptkit-lsp
             context: .
