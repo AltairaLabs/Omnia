@@ -40,7 +40,6 @@ const (
 	envListenAddr = "POLICY_BROKER_LISTEN_ADDR"
 	envHealthAddr = "POLICY_BROKER_HEALTH_ADDR"
 	envNamespace  = "OMNIA_NAMESPACE"
-	envAgentName  = "OMNIA_AGENT_NAME"
 	// envOperatorAPIURL points at the operator/arena-controller license
 	// endpoint. When set and the license is not valid, the broker logs a
 	// startup reminder. Never blocks.
@@ -87,13 +86,11 @@ func run(logger *slog.Logger) error {
 	listenAddr := getEnvOrDefault(envListenAddr, defaultListenAddr)
 	healthAddr := getEnvOrDefault(envHealthAddr, defaultHealthAddr)
 	namespace := os.Getenv(envNamespace)
-	agentName := os.Getenv(envAgentName)
 
 	logger.Info("starting policy broker",
 		"listenAddr", listenAddr,
 		"healthAddr", healthAddr,
-		"namespace", namespace,
-		"agentName", agentName)
+		"namespace", namespace)
 
 	evaluator, err := policy.NewEvaluator()
 	if err != nil {

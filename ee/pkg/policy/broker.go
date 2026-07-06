@@ -20,6 +20,9 @@ import (
 // Broker response constants.
 const (
 	brokerErrMalformedRequest = "malformed_request"
+	brokerErrMethodNotAllowed = "method_not_allowed"
+	logMsgBrokerToolDecision  = "broker_tool_decision"
+	maxDecisionRequestBytes   = 1 << 20 // 1 MiB
 )
 
 // DecisionRequest is the JSON request body for POST /v1/decision. The
@@ -76,7 +79,12 @@ func NewBrokerHandler(evaluator *Evaluator, logger *slog.Logger) *BrokerHandler 
 // ServeHTTP decodes a DecisionRequest, evaluates ToolPolicy rules (and
 // header injection) against it, and writes back a DecisionResponse.
 func (h *BrokerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	req, err := decodeDecisionRequest(r)
+	if r.Method != http.MethodPost {
+		writeMethodNotAllowedResponse(w)
+		return
+	}
+
+	req, err := decodeDecisionRequest(w, r)
 	if err != nil {
 		h.logger.Debug("malformed decision request", "error", err.Error())
 		writeMalformedRequestResponse(w)
@@ -87,17 +95,46 @@ func (h *BrokerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	decision := h.evaluator.EvaluateWithContext(ctx, req.Headers, req.Body)
 	logDecision(h.logger, r, decision)
+	logBrokerToolDecision(h.logger, decision, req.Headers)
 
-	injected := h.evaluateHeaderInjection(ctx, req)
+	// A denied call must not compute or return injected headers — header
+	// injection only applies to calls that are actually allowed to proceed.
+	var injected map[string]string
+	if decision.Allowed {
+		injected = h.evaluateHeaderInjection(ctx, req)
+	}
 
 	writeDecisionResponse(w, decision, injected)
 }
 
 // decodeDecisionRequest decodes the JSON request body into a DecisionRequest.
-func decodeDecisionRequest(r *http.Request) (DecisionRequest, error) {
+// The body is wrapped in http.MaxBytesReader so an oversized request is
+// rejected as a decode error rather than consuming unbounded memory.
+func decodeDecisionRequest(w http.ResponseWriter, r *http.Request) (DecisionRequest, error) {
 	var req DecisionRequest
+	r.Body = http.MaxBytesReader(w, r.Body, maxDecisionRequestBytes)
 	err := json.NewDecoder(r.Body).Decode(&req)
 	return req, err
+}
+
+// logBrokerToolDecision emits a broker-specific structured log line carrying
+// the tool identity for this decision. The shared logDecision (proxy.go)
+// logs r.URL.Path/r.Method, which for every broker call are always
+// "/v1/decision"/"POST" — that loses which tool was evaluated. The tool
+// identity travels in the request headers instead, so it's added here as
+// explicit fields. Skip wholly-uninteresting allows (no rule matched) to
+// match logDecision's own audit-noise gating.
+func logBrokerToolDecision(logger *slog.Logger, decision Decision, headers map[string]string) {
+	if decision.Allowed && decision.DeniedBy == "" {
+		return
+	}
+	logger.Info(logMsgBrokerToolDecision,
+		"toolName", headers[HeaderToolName],
+		"toolRegistry", headers[HeaderToolRegistry],
+		"allowed", decision.Allowed,
+		"deniedBy", decision.DeniedBy,
+		"mode", string(decision.Mode),
+	)
 }
 
 // evaluateHeaderInjection evaluates header injection rules for the request.
@@ -153,4 +190,13 @@ func writeMalformedRequestResponse(w http.ResponseWriter) {
 	w.Header().Set(headerContentType, contentTypeJSON)
 	w.WriteHeader(http.StatusBadRequest)
 	_, _ = w.Write([]byte(`{"error":"` + brokerErrMalformedRequest + `"}`))
+}
+
+// writeMethodNotAllowedResponse writes a 405 response for any method other
+// than POST — /v1/decision is a POST-only decision endpoint.
+func writeMethodNotAllowedResponse(w http.ResponseWriter) {
+	w.Header().Set(headerContentType, contentTypeJSON)
+	w.Header().Set("Allow", http.MethodPost)
+	w.WriteHeader(http.StatusMethodNotAllowed)
+	_, _ = w.Write([]byte(`{"error":"` + brokerErrMethodNotAllowed + `"}`))
 }
