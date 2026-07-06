@@ -442,6 +442,21 @@ func buildActivation(
 	return activation
 }
 
+// Identity CEL activation field names. Extracted as constants because they
+// are used in both branches of identityActivation below (and mirror the
+// wire field names in ee/pkg/policy.IdentityPayload's JSON tags, used by
+// the policy-broker decision endpoint to rebuild an identity from the
+// runtime's request).
+const (
+	identityFieldOrigin    = "origin"
+	identityFieldSubject   = "subject"
+	identityFieldEndUser   = "endUser"
+	identityFieldWorkspace = "workspace"
+	identityFieldAgent     = "agent"
+	identityFieldRole      = "role"
+	identityFieldClaims    = "claims"
+)
+
 // identityActivation builds the `identity` CEL activation from the given
 // request context. When no AuthenticatedIdentity is attached, returns a map
 // populated with zero-valued strings and an empty claims map — this matches
@@ -450,13 +465,13 @@ func identityActivation(ctx context.Context) map[string]interface{} {
 	id := omniapolicy.IdentityFromContext(ctx)
 	if id == nil {
 		return map[string]interface{}{
-			"origin":    "",
-			"subject":   "",
-			"endUser":   "",
-			"workspace": "",
-			"agent":     "",
-			"role":      "",
-			"claims":    map[string]string{},
+			identityFieldOrigin:    "",
+			identityFieldSubject:   "",
+			identityFieldEndUser:   "",
+			identityFieldWorkspace: "",
+			identityFieldAgent:     "",
+			identityFieldRole:      "",
+			identityFieldClaims:    map[string]string{},
 		}
 	}
 	claims := id.Claims
@@ -464,13 +479,13 @@ func identityActivation(ctx context.Context) map[string]interface{} {
 		claims = map[string]string{}
 	}
 	return map[string]interface{}{
-		"origin":    id.Origin,
-		"subject":   id.Subject,
-		"endUser":   id.EndUser,
-		"workspace": id.Workspace,
-		"agent":     id.Agent,
-		"role":      id.Role,
-		"claims":    claims,
+		identityFieldOrigin:    id.Origin,
+		identityFieldSubject:   id.Subject,
+		identityFieldEndUser:   id.EndUser,
+		identityFieldWorkspace: id.Workspace,
+		identityFieldAgent:     id.Agent,
+		identityFieldRole:      id.Role,
+		identityFieldClaims:    claims,
 	}
 }
 
