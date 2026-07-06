@@ -382,16 +382,14 @@ func (e *OmniaExecutor) dispatch(
 // A real denial (enforce mode, not matched-but-audit) aborts dispatch with
 // errPolicyDenied. An allow — including audit-mode "would deny" — proceeds,
 // stashing any broker-injected headers on ctx for the executor's
-// header/metadata builder to merge in.
+// header/metadata builder to merge in. Decide never fails transport-side
+// (fail-mode always resolves to a decision), so there is no error path here.
 func (e *OmniaExecutor) enforcePolicy(
 	ctx context.Context,
 	toolName, handlerName string,
 	args json.RawMessage,
 ) (context.Context, error) {
-	decision, err := e.policyBroker.Decide(ctx, toolName, handlerName, args)
-	if err != nil {
-		return ctx, fmt.Errorf("policy broker decision: %w", err)
-	}
+	decision := e.policyBroker.Decide(ctx, toolName, handlerName, args)
 
 	if !decision.Allow && !decision.WouldDeny {
 		return ctx, fmt.Errorf("%w: %s (rule %q)", errPolicyDenied, decision.Message, decision.DeniedBy)

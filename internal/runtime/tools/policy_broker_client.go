@@ -98,23 +98,29 @@ func (c *PolicyBrokerClient) Enabled() bool {
 // transport failure (timeout, connection refused, non-200 response, bad
 // JSON), it logs the failure and returns a synthetic decision per the
 // configured fail mode — deny (fail-closed, default) or allow (fail-open).
-// The returned error is non-nil only for caller-side mistakes (e.g. failing
-// to marshal args); transport failures are already resolved into a
-// decision and never surface as an error here.
+// Decide never fails the call outright: transport failures are always
+// resolved into a decision (that's the whole point of the configurable fail
+// mode), so there is no error to return to the caller.
 func (c *PolicyBrokerClient) Decide(
 	ctx context.Context,
 	toolName, registryName string,
 	args json.RawMessage,
-) (*policy.DecisionResponse, error) {
+) *policy.DecisionResponse {
 	if !c.Enabled() {
-		return &policy.DecisionResponse{Allow: true}, nil
+		return &policy.DecisionResponse{Allow: true}
 	}
 
 	argsMap := decodeArgsMap(args)
+	fields := policy.ExtractPropagationFields(ctx)
 	reqBody := policy.DecisionRequest{
-		Headers:  buildDecisionHeaders(ctx, toolName, registryName, argsMap),
-		Body:     argsMap,
-		Identity: policy.IdentityPayloadFromIdentity(policy.IdentityFromContext(ctx)),
+		Headers: buildDecisionHeaders(ctx, toolName, registryName, argsMap),
+		Body:    argsMap,
+		// The runtime only ever has the flat propagated fields, never the
+		// facade's in-process AuthenticatedIdentity (it doesn't cross the
+		// gRPC hop) — see IdentityPayloadFromPropagation's doc for the exact
+		// field mapping and which AuthenticatedIdentity fields cannot be
+		// reconstructed (Origin, Workspace).
+		Identity: policy.IdentityPayloadFromPropagation(&fields),
 	}
 
 	decision, err := c.post(ctx, reqBody)
@@ -123,9 +129,9 @@ func (c *PolicyBrokerClient) Decide(
 			"toolName", toolName,
 			"registryName", registryName,
 			"failOpen", c.failOpen)
-		return c.failureDecision(), nil
+		return c.failureDecision()
 	}
-	return decision, nil
+	return decision
 }
 
 // decodeArgsMap best-effort unmarshals tool arguments into a map for the

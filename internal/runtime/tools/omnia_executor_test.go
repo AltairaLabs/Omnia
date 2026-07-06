@@ -42,6 +42,7 @@ import (
 	"google.golang.org/grpc"
 	grpcCodes "google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	grpcmetadata "google.golang.org/grpc/metadata"
 	grpcStatus "google.golang.org/grpc/status"
 
 	pktools "github.com/AltairaLabs/PromptKit/runtime/tools"
@@ -56,13 +57,22 @@ type mockToolServiceClient struct {
 	executeErr  error
 	listResp    *toolsv1.ListToolsResponse
 	listErr     error
+
+	// capturedMD records the outgoing gRPC metadata from the last Execute
+	// call, so tests can assert on what the tool actually received (e.g.
+	// broker-injected headers winning a collision) instead of only the
+	// return value.
+	capturedMD grpcmetadata.MD
 }
 
 func (m *mockToolServiceClient) Execute(
-	_ context.Context,
+	ctx context.Context,
 	_ *toolsv1.ToolRequest,
 	_ ...grpc.CallOption,
 ) (*toolsv1.ToolResponse, error) {
+	if md, ok := grpcmetadata.FromOutgoingContext(ctx); ok {
+		m.capturedMD = md
+	}
 	return m.executeResp, m.executeErr
 }
 

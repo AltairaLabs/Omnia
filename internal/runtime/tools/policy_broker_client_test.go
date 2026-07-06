@@ -47,8 +47,7 @@ func TestPolicyBrokerClient_Disabled(t *testing.T) {
 	c := NewPolicyBrokerClient(logr.Discard())
 	assert.False(t, c.Enabled())
 
-	decision, err := c.Decide(context.Background(), "tool", "registry", json.RawMessage(`{"x":1}`))
-	require.NoError(t, err)
+	decision := c.Decide(context.Background(), "tool", "registry", json.RawMessage(`{"x":1}`))
 	assert.True(t, decision.Allow)
 	assert.Empty(t, decision.InjectedHeaders)
 }
@@ -61,8 +60,7 @@ func TestPolicyBrokerClient_Allow(t *testing.T) {
 	c := NewPolicyBrokerClient(logr.Discard())
 	require.True(t, c.Enabled())
 
-	decision, err := c.Decide(context.Background(), "tool", "registry", json.RawMessage(`{"x":1}`))
-	require.NoError(t, err)
+	decision := c.Decide(context.Background(), "tool", "registry", json.RawMessage(`{"x":1}`))
 	assert.True(t, decision.Allow)
 }
 
@@ -73,8 +71,7 @@ func TestPolicyBrokerClient_Deny(t *testing.T) {
 
 	c := NewPolicyBrokerClient(logr.Discard())
 
-	decision, err := c.Decide(context.Background(), "tool", "registry", nil)
-	require.NoError(t, err)
+	decision := c.Decide(context.Background(), "tool", "registry", nil)
 	assert.False(t, decision.Allow)
 	assert.Equal(t, "rule1", decision.DeniedBy)
 	assert.Equal(t, "nope", decision.Message)
@@ -87,8 +84,7 @@ func TestPolicyBrokerClient_AllowWithInjectedHeaders(t *testing.T) {
 
 	c := NewPolicyBrokerClient(logr.Discard())
 
-	decision, err := c.Decide(context.Background(), "tool", "registry", nil)
-	require.NoError(t, err)
+	decision := c.Decide(context.Background(), "tool", "registry", nil)
 	assert.True(t, decision.Allow)
 	assert.Equal(t, "abc123", decision.InjectedHeaders["X-Extra-Auth"])
 }
@@ -100,8 +96,7 @@ func TestPolicyBrokerClient_AuditWouldDeny(t *testing.T) {
 
 	c := NewPolicyBrokerClient(logr.Discard())
 
-	decision, err := c.Decide(context.Background(), "tool", "registry", nil)
-	require.NoError(t, err)
+	decision := c.Decide(context.Background(), "tool", "registry", nil)
 	assert.False(t, decision.Allow)
 	assert.True(t, decision.WouldDeny)
 }
@@ -122,8 +117,7 @@ func TestPolicyBrokerClient_FailClosedByDefault(t *testing.T) {
 
 	c := NewPolicyBrokerClient(logr.Discard())
 
-	decision, err := c.Decide(context.Background(), "tool", "registry", nil)
-	require.NoError(t, err)
+	decision := c.Decide(context.Background(), "tool", "registry", nil)
 	assert.False(t, decision.Allow)
 	assert.Equal(t, policyDeniedByTransport, decision.DeniedBy)
 }
@@ -134,8 +128,7 @@ func TestPolicyBrokerClient_FailOpen(t *testing.T) {
 
 	c := NewPolicyBrokerClient(logr.Discard())
 
-	decision, err := c.Decide(context.Background(), "tool", "registry", nil)
-	require.NoError(t, err)
+	decision := c.Decide(context.Background(), "tool", "registry", nil)
 	assert.True(t, decision.Allow)
 }
 
@@ -161,8 +154,7 @@ func TestPolicyBrokerClient_MalformedResponseFailsClosed(t *testing.T) {
 
 	c := NewPolicyBrokerClient(logr.Discard())
 
-	decision, err := c.Decide(context.Background(), "tool", "registry", nil)
-	require.NoError(t, err)
+	decision := c.Decide(context.Background(), "tool", "registry", nil)
 	assert.False(t, decision.Allow)
 	assert.Equal(t, policyDeniedByTransport, decision.DeniedBy)
 }
@@ -176,8 +168,7 @@ func TestPolicyBrokerClient_NonOKStatusFailsClosed(t *testing.T) {
 
 	c := NewPolicyBrokerClient(logr.Discard())
 
-	decision, err := c.Decide(context.Background(), "tool", "registry", nil)
-	require.NoError(t, err)
+	decision := c.Decide(context.Background(), "tool", "registry", nil)
 	assert.False(t, decision.Allow)
 }
 
@@ -185,6 +176,15 @@ func TestPolicyBrokerClient_NonOKStatusFailsClosed(t *testing.T) {
 // the broker carries the tool/registry identification headers (so the
 // broker can select the right ToolPolicy) plus the parsed body and identity
 // — the shape ee/pkg/policy.BrokerHandler expects.
+//
+// The identity is seeded via policy.WithPropagationFields, NOT
+// policy.WithIdentity — that's the real runtime path.
+// internal/runtime/interceptor.go's extractPolicyFromMetadata rehydrates
+// PropagationFields from gRPC metadata on every inbound call; it never
+// reconstructs an AuthenticatedIdentity (WithIdentity is facade-only, see
+// pkg/policy/context.go). A test that seeds identity via WithIdentity
+// directly would pass even though the field it's asserting on is never
+// reachable in production — see the CRITICAL finding this test replaces.
 func TestPolicyBrokerClient_RequestShape(t *testing.T) {
 	var captured policy.DecisionRequest
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -198,23 +198,48 @@ func TestPolicyBrokerClient_RequestShape(t *testing.T) {
 
 	c := NewPolicyBrokerClient(logr.Discard())
 
-	ctx := policy.WithIdentity(context.Background(), &policy.AuthenticatedIdentity{
-		Origin:    policy.OriginOIDC,
-		Subject:   "user-1",
-		EndUser:   "user-1",
-		Workspace: "ws-1",
-		Agent:     "agent-1",
-		Role:      policy.RoleEditor,
+	ctx := policy.WithPropagationFields(context.Background(), &policy.PropagationFields{
+		AgentName: "agent-1",
+		UserID:    "user-1",
+		UserRoles: policy.RoleEditor,
 		Claims:    map[string]string{"team": "eng"},
 	})
 
-	_, err := c.Decide(ctx, "my-tool", "my-registry", json.RawMessage(`{"customer_id":"cust-1"}`))
-	require.NoError(t, err)
+	decision := c.Decide(ctx, "my-tool", "my-registry", json.RawMessage(`{"customer_id":"cust-1"}`))
+	require.True(t, decision.Allow)
 
 	assert.Equal(t, "my-tool", captured.Headers["X-Omnia-Tool-Name"])
 	assert.Equal(t, "my-registry", captured.Headers["X-Omnia-Tool-Registry"])
 	assert.Equal(t, "cust-1", captured.Body["customer_id"])
 	require.NotNil(t, captured.Identity)
-	assert.Equal(t, "ws-1", captured.Identity.Workspace)
+	assert.Equal(t, "user-1", captured.Identity.Subject)
+	assert.Equal(t, "user-1", captured.Identity.EndUser)
+	assert.Equal(t, policy.RoleEditor, captured.Identity.Role)
+	assert.Equal(t, "agent-1", captured.Identity.Agent)
 	assert.Equal(t, "eng", captured.Identity.Claims["team"])
+	// Workspace/Origin have no faithful propagated source (see
+	// IdentityPayloadFromPropagation) and must not be fabricated.
+	assert.Empty(t, captured.Identity.Workspace)
+	assert.Empty(t, captured.Identity.Origin)
+}
+
+// TestPolicyBrokerClient_RequestShape_NoIdentityWhenPropagationEmpty asserts
+// that unauthenticated/dev-mode traffic (no propagation fields at all) sends
+// a nil Identity rather than an empty-but-present one.
+func TestPolicyBrokerClient_RequestShape_NoIdentityWhenPropagationEmpty(t *testing.T) {
+	var captured policy.DecisionRequest
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&captured)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"allow":true}`))
+	}))
+	defer srv.Close()
+	t.Setenv(envPolicyBrokerURL, srv.URL)
+
+	c := NewPolicyBrokerClient(logr.Discard())
+
+	decision := c.Decide(context.Background(), "my-tool", "my-registry", nil)
+	require.True(t, decision.Allow)
+	assert.Nil(t, captured.Identity)
 }

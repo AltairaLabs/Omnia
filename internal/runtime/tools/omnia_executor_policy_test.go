@@ -27,6 +27,9 @@ import (
 	"github.com/go-logr/logr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/altairalabs/omnia/pkg/policy"
+	toolsv1 "github.com/altairalabs/omnia/pkg/tools/v1"
 )
 
 // newHTTPToolServer builds a tool backend that records the last request's
@@ -79,6 +82,90 @@ func TestDispatch_PolicyBrokerDeny_AbortsCall(t *testing.T) {
 	assert.False(t, toolCalled, "tool backend must not be called when the broker denies")
 }
 
+// roleGatedBrokerHandler simulates a ToolPolicy rule keyed on
+// `identity.role` (e.g. `identity.role != "admin"` denies): it decodes the
+// DecisionRequest identity payload and denies unless the propagated role
+// matches requiredRole.
+func roleGatedBrokerHandler(requiredRole string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var req policy.DecisionRequest
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		if req.Identity != nil && req.Identity.Role == requiredRole {
+			_, _ = w.Write([]byte(`{"allow":true}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"allow":false,"deniedBy":"role-gate","message":"role mismatch"}`))
+	}
+}
+
+// TestDispatch_PolicyBrokerDeny_IdentityRoleFromPropagation_AbortsCall proves
+// the CRITICAL fix: an identity.role-gated ToolPolicy rule actually denies
+// when the caller's role arrives via the runtime's propagated
+// PropagationFields (the real production path — extractPolicyFromMetadata
+// rehydrating gRPC metadata), not via policy.WithIdentity (which is
+// facade-only and never reaches the runtime). Before the fix, the broker
+// client always sent Identity: nil in this scenario, so a role-gated rule
+// could never fire.
+func TestDispatch_PolicyBrokerDeny_IdentityRoleFromPropagation_AbortsCall(t *testing.T) {
+	toolCalled := false
+	toolSrv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
+		toolCalled = true
+	}))
+	defer toolSrv.Close()
+
+	brokerSrv := httptest.NewServer(roleGatedBrokerHandler(policy.RoleAdmin))
+	defer brokerSrv.Close()
+	t.Setenv(envPolicyBrokerURL, brokerSrv.URL)
+
+	e := newHTTPToolExecutor(toolSrv)
+
+	// Mirrors what internal/runtime/interceptor.go's extractPolicyFromMetadata
+	// does on every inbound gRPC call: rehydrate PropagationFields from
+	// metadata, not an in-process AuthenticatedIdentity.
+	ctx := policy.WithPropagationFields(context.Background(), &policy.PropagationFields{
+		UserID:    "user-1",
+		UserRoles: policy.RoleViewer,
+	})
+
+	_, err := e.ExecuteTool(ctx, "test-http-tool", json.RawMessage(`{}`))
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, errPolicyDenied), "expected errPolicyDenied, got %v", err)
+	assert.Contains(t, err.Error(), "role-gate")
+	assert.False(t, toolCalled, "tool backend must not be called when identity.role gates the call")
+}
+
+// TestDispatch_PolicyBrokerAllow_IdentityRoleFromPropagation_ProceedsWithCall
+// is the allow-side complement: the same role-gated rule proceeds when the
+// propagated role matches, proving the mapping is faithful (not just
+// fail-closed by accident).
+func TestDispatch_PolicyBrokerAllow_IdentityRoleFromPropagation_ProceedsWithCall(t *testing.T) {
+	toolCalled := false
+	toolSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		toolCalled = true
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"result":"ok"}`))
+	}))
+	defer toolSrv.Close()
+
+	brokerSrv := httptest.NewServer(roleGatedBrokerHandler(policy.RoleAdmin))
+	defer brokerSrv.Close()
+	t.Setenv(envPolicyBrokerURL, brokerSrv.URL)
+
+	e := newHTTPToolExecutor(toolSrv)
+
+	ctx := policy.WithPropagationFields(context.Background(), &policy.PropagationFields{
+		UserID:    "user-1",
+		UserRoles: policy.RoleAdmin,
+	})
+
+	_, err := e.ExecuteTool(ctx, "test-http-tool", json.RawMessage(`{}`))
+	require.NoError(t, err)
+	assert.True(t, toolCalled, "tool backend must be called when identity.role matches")
+}
+
 func TestDispatch_PolicyBrokerAllowWithInjectedHeaders_ReachesOutboundRequest(t *testing.T) {
 	var captured http.Header
 	toolSrv := newHTTPToolServer(t, &captured)
@@ -94,6 +181,49 @@ func TestDispatch_PolicyBrokerAllowWithInjectedHeaders_ReachesOutboundRequest(t 
 	require.NoError(t, err)
 	assert.Contains(t, string(result), "ok")
 	assert.Equal(t, "secret-token", captured.Get("X-Injected-Auth"))
+}
+
+// newGRPCToolExecutor builds an OmniaExecutor with a single gRPC tool
+// backed by mock, so dispatch is exercised end-to-end through ExecuteTool —
+// the gRPC mirror of newHTTPToolExecutor.
+func newGRPCToolExecutor(mock *mockToolServiceClient) *OmniaExecutor {
+	e := NewOmniaExecutor(logr.Discard(), nil)
+	e.grpcClients["test-grpc"] = mock
+	e.handlers["test-grpc"] = &HandlerEntry{Name: "test-grpc", Type: ToolTypeGRPC}
+	e.toolHandlers["test-grpc-tool"] = "test-grpc"
+	return e
+}
+
+// TestDispatch_PolicyBrokerAllowWithInjectedHeaders_ReachesOutboundGRPCMetadata
+// is the gRPC mirror of TestDispatch_PolicyBrokerAllowWithInjectedHeaders_ReachesOutboundRequest
+// (finding: the HTTP path had metadata-merge coverage via a header-capturing
+// httptest server, but omnia_executor_grpc.go's InjectedHeadersFromContext
+// merge into outgoing gRPC metadata had none — the old mockToolServiceClient
+// discarded ctx entirely). Asserts a broker-injected header both reaches the
+// gRPC call and wins over a colliding policy-propagated header.
+func TestDispatch_PolicyBrokerAllowWithInjectedHeaders_ReachesOutboundGRPCMetadata(t *testing.T) {
+	brokerSrv := httptest.NewServer(jsonHandler(t, `{"allow":true,"injectedHeaders":{"x-omnia-user-id":"injected-user","X-Injected-Auth":"secret-token"}}`))
+	defer brokerSrv.Close()
+	t.Setenv(envPolicyBrokerURL, brokerSrv.URL)
+
+	mock := &mockToolServiceClient{executeResp: &toolsv1.ToolResponse{ResultJson: `{"result":"ok"}`}}
+	e := newGRPCToolExecutor(mock)
+
+	// Seed a policy-propagated user-id header so the injected header has
+	// something to collide with.
+	ctx := policy.WithPropagationFields(context.Background(), &policy.PropagationFields{
+		UserID: "original-user",
+	})
+
+	result, err := e.ExecuteTool(ctx, "test-grpc-tool", json.RawMessage(`{}`))
+	require.NoError(t, err)
+	assert.Contains(t, string(result), "ok")
+
+	require.NotNil(t, mock.capturedMD)
+	assert.Equal(t, []string{"secret-token"}, mock.capturedMD.Get("X-Injected-Auth"),
+		"broker-injected header must reach outgoing gRPC metadata")
+	assert.Equal(t, []string{"injected-user"}, mock.capturedMD.Get(policy.HeaderUserID),
+		"broker-injected header must win over the colliding policy-propagated header")
 }
 
 func TestDispatch_PolicyBrokerAuditWouldDeny_ProceedsWithCall(t *testing.T) {
