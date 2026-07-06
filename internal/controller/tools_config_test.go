@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -32,7 +33,9 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	"sigs.k8s.io/yaml"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
@@ -1247,6 +1250,85 @@ func TestReconcileToolSecrets_WritesTokenAndFailsOnMissing(t *testing.T) {
 	r2 := &AgentRuntimeReconciler{Client: c2, Scheme: scheme}
 	if err := r2.reconcileToolSecrets(context.Background(), ar, tr); err == nil {
 		t.Fatal("expected error when source secret is missing, got nil")
+	}
+}
+
+func TestReconcileToolSecrets_DeletesStaleCompanionSecretWhenNoAuthedHandlers(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = corev1.AddToScheme(scheme)
+	_ = omniav1alpha1.AddToScheme(scheme)
+
+	ar := &omniav1alpha1.AgentRuntime{ObjectMeta: metav1.ObjectMeta{Name: "agent", Namespace: "default"}}
+	// No authSecretRef on any handler.
+	tr := &omniav1alpha1.ToolRegistry{
+		Spec: omniav1alpha1.ToolRegistrySpec{Handlers: []omniav1alpha1.HandlerDefinition{{
+			Name:       "h1",
+			Type:       omniav1alpha1.HandlerTypeHTTP,
+			HTTPConfig: &omniav1alpha1.HTTPConfig{Endpoint: "https://example.com"},
+		}}},
+	}
+
+	t.Run("removes a previously-created companion Secret", func(t *testing.T) {
+		stale := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Name: "agent" + ToolSecretsSecretSuffix, Namespace: "default"},
+			Data:       map[string][]byte{"h1": []byte("stale-token")},
+		}
+		c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(ar, stale).Build()
+		r := &AgentRuntimeReconciler{Client: c, Scheme: scheme}
+
+		if err := r.reconcileToolSecrets(context.Background(), ar, tr); err != nil {
+			t.Fatalf("reconcileToolSecrets: %v", err)
+		}
+
+		got := &corev1.Secret{}
+		err := c.Get(context.Background(),
+			types.NamespacedName{Name: "agent" + ToolSecretsSecretSuffix, Namespace: "default"}, got)
+		if !apierrors.IsNotFound(err) {
+			t.Fatalf("expected companion Secret to be deleted (NotFound), got err=%v", err)
+		}
+	})
+
+	t.Run("no-op when no companion Secret exists", func(t *testing.T) {
+		c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(ar).Build()
+		r := &AgentRuntimeReconciler{Client: c, Scheme: scheme}
+
+		if err := r.reconcileToolSecrets(context.Background(), ar, tr); err != nil {
+			t.Fatalf("expected nil error when no companion Secret exists, got: %v", err)
+		}
+	})
+}
+
+func TestReconcileToolSecrets_DeleteErrorIsWrapped(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = corev1.AddToScheme(scheme)
+	_ = omniav1alpha1.AddToScheme(scheme)
+
+	ar := &omniav1alpha1.AgentRuntime{ObjectMeta: metav1.ObjectMeta{Name: "agent", Namespace: "default"}}
+	// No authSecretRef on any handler, so reconcileToolSecrets takes the
+	// stale-companion-secret delete path (len(refs) == 0).
+	tr := &omniav1alpha1.ToolRegistry{
+		Spec: omniav1alpha1.ToolRegistrySpec{Handlers: []omniav1alpha1.HandlerDefinition{{
+			Name:       "h1",
+			Type:       omniav1alpha1.HandlerTypeHTTP,
+			HTTPConfig: &omniav1alpha1.HTTPConfig{Endpoint: "https://example.com"},
+		}}},
+	}
+	stale := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "agent" + ToolSecretsSecretSuffix, Namespace: "default"},
+		Data:       map[string][]byte{"h1": []byte("stale-token")},
+	}
+
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(ar, stale).
+		WithInterceptorFuncs(interceptor.Funcs{
+			Delete: func(_ context.Context, _ client.WithWatch, _ client.Object, _ ...client.DeleteOption) error {
+				return apierrors.NewInternalError(fmt.Errorf("boom"))
+			},
+		}).Build()
+	r := &AgentRuntimeReconciler{Client: c, Scheme: scheme}
+
+	err := r.reconcileToolSecrets(context.Background(), ar, tr)
+	if err == nil || !strings.Contains(err.Error(), "delete stale tool-secrets Secret") {
+		t.Fatalf("want wrapped delete-stale error, got %v", err)
 	}
 }
 

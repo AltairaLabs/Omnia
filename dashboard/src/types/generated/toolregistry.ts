@@ -62,8 +62,8 @@ export interface ToolRegistrySpec {
         /** name is the name of the secret. */
         name: string;
       };
-      /** authType specifies the authentication type (none, bearer, basic). */
-      authType?: string;
+      /** authType specifies the authentication type (bearer, basic). */
+      authType?: "bearer" | "basic";
       /** bodyMapping is a JMESPath expression to reshape the request body
        * before sending. */
       bodyMapping?: string;
@@ -174,8 +174,8 @@ export interface ToolRegistrySpec {
         /** name is the name of the secret. */
         name: string;
       };
-      /** authType specifies the authentication type (none, bearer, basic). */
-      authType?: string;
+      /** authType specifies the authentication type (bearer, basic). */
+      authType?: "bearer" | "basic";
       /** baseURL overrides the base URL from the OpenAPI spec.
        * If not specified, uses the first server URL from the spec. */
       baseURL?: string;
