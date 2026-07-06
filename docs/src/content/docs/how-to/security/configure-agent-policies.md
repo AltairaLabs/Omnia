@@ -12,9 +12,14 @@ This guide covers common operational tasks for configuring AgentPolicy resources
 
 - Istio installed in your cluster
 - At least one AgentRuntime deployed
+- If running Istio in **ambient** mode: a waypoint proxy enrolled for each agent Service you intend to enforce `toolAccess` on
 
 :::note
 AgentPolicy does not forward JWT claims. Claim forwarding to downstream tools is configured on the AgentRuntime's external-auth block — see [Configure Agent Authentication](/how-to/security/configure-authentication/).
+:::
+
+:::caution[toolAccess requires a waypoint under ambient mode]
+`toolAccess` rules generate an Istio `AuthorizationPolicy` that matches on the `X-Omnia-Tool-Name` request header — an L7 attribute. Ambient mode's ztunnel only enforces L4, so this rule has no effect unless the target agent's Service is enrolled behind a **waypoint proxy**. Nothing in AgentPolicy provisions a waypoint automatically. Verify waypoint enrollment before relying on an allowlist/denylist for enforcement — otherwise every tool call is allowed through unchecked.
 :::
 
 ## Restrict tool access with an allowlist

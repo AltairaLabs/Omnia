@@ -21,7 +21,7 @@ The agent should be able to look up orders and process refunds, but **not** dele
 
 ## Prerequisites
 
-- A running Omnia cluster with Istio enabled
+- A running Omnia cluster with Istio enabled — **and, under ambient mode, a waypoint proxy enrolled for the `support-agent` Service**, since AgentPolicy's `toolAccess` rules match on the `X-Omnia-Tool-Name` HTTP header (an L7 attribute) and ztunnel alone only enforces L4. Without a waypoint, the generated AuthorizationPolicy is created but never enforced.
 - JWT authentication configured (see [Configure Agent Authentication](/how-to/security/configure-authentication/))
 - The `support-agent` AgentRuntime and `customer-tools` ToolRegistry deployed
 
@@ -68,7 +68,7 @@ NAME                    MODE      PHASE    MATCHED   AGE
 support-agent-policy    enforce   Active   1         10s
 ```
 
-The agent can now only call `lookup_order`, `check_status`, and `process_refund`. Any attempt to call `delete_account` is blocked at the Istio network level.
+The agent can now only call `lookup_order`, `check_status`, and `process_refund`. Any attempt to call `delete_account` is blocked at the Istio network level — **provided the agent's Service is enrolled behind a waypoint** (see prerequisites); plain ambient mode with no waypoint leaves the generated `AuthorizationPolicy` unenforced.
 
 ## Step 2: forward user identity claims
 

@@ -153,8 +153,8 @@ Controls how the policy is applied.
 
 | Value | Description |
 |-------|-------------|
-| `enforce` | (Default) Deny rules block the request with a 403 response. |
-| `audit` | Deny rules are evaluated but the request is allowed through. Violations are logged with `wouldDeny: true`. |
+| `enforce` | (Default) The broker returns `allow: false` for a matched deny rule; the runtime aborts the tool dispatch instead of calling the tool. See [Denial response format](#denial-response-format) below — there is no HTTP 403, since the decision endpoint always answers 200. |
+| `audit` | Deny rules are evaluated but the request is allowed through. The decision returned to the runtime carries `wouldDeny: true`; the broker's own `policy_decision` log line for the match has `allowed: true` and a non-empty `deniedBy` naming the rule that would have denied it. |
 
 ### `onFailure`
 
@@ -183,6 +183,10 @@ spec:
       - ssn
       - password
 ```
+
+:::caution[Not yet wired]
+The CRD accepts `audit.logDecisions` and `audit.redactFields`, and the operator compiles them onto the policy, but the policy-broker does not currently read either field: it always emits a `policy_decision`/`broker_tool_decision` log pair for any deny or audit-mode would-deny outcome (regardless of `logDecisions`), and it never redacts `body`/`headers` values in those logs (regardless of `redactFields`). Treat both fields as reserved for now — do not rely on `redactFields` to keep sensitive request data out of broker logs.
+:::
 
 ## Status fields
 

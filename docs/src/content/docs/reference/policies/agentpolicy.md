@@ -39,6 +39,10 @@ spec:
 
 Defines tool allowlist or denylist rules. These are enforced at the Istio network level via generated AuthorizationPolicy resources.
 
+:::caution[Requires a waypoint under ambient mode]
+The generated `AuthorizationPolicy` matches on the `X-Omnia-Tool-Name` request header — an L7 attribute. Under Istio ambient mode, L7 header matching is only enforced by a **waypoint proxy**; ztunnel alone enforces L4 only. The operator always creates the `AuthorizationPolicy` regardless, but it has no effect unless the target agent's Service is enrolled behind a waypoint. There is no automatic waypoint provisioning tied to AgentPolicy — verify enrollment separately before relying on `toolAccess` for enforcement.
+:::
+
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `mode` | string | Yes | Access control mode: `allowlist` or `denylist`. |

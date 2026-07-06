@@ -27,7 +27,7 @@ Omnia separates policy enforcement into two layers, each with a distinct enforce
 graph TB
     subgraph "Network Layer"
         AP[AgentPolicy] -->|Generates| IAP[Istio AuthorizationPolicy]
-        IAP -->|Enforces at| SIDECAR[Envoy Sidecar]
+        IAP -->|"Enforces at (L7 header match — waypoint only)"| WAYPOINT[Waypoint Proxy<br/>if enrolled]
     end
 
     subgraph "Application Layer"
@@ -36,22 +36,24 @@ graph TB
         BROKER -->|Decision| RUNTIME
     end
 
-    CLIENT[Client Request] --> SIDECAR
-    SIDECAR -->|Allowed| FACADE[Facade]
+    CLIENT[Client Request] --> WAYPOINT
+    WAYPOINT -->|Allowed| FACADE[Facade]
     FACADE -->|Tool Call| RUNTIME
     RUNTIME -->|Allowed| UPSTREAM[Tool Service]
 ```
 
 ### AgentPolicy (network-level)
 
-AgentPolicy operates at the **Istio/Envoy level**. The operator controller translates each AgentPolicy into an Istio `AuthorizationPolicy`, which Envoy enforces before the request reaches the application. This provides:
+AgentPolicy operates at the **Istio AuthorizationPolicy level**. The operator controller translates each AgentPolicy's `toolAccess` into a live Istio `AuthorizationPolicy` CR (allowlist mode: an `ALLOW` for the listed tools plus a catch-all `DENY`; denylist mode: a `DENY` for the listed tools; `permissive` mode maps to `AUDIT` instead), matching on the `X-Omnia-Tool-Name` request header. This provides:
 
 - **Tool allowlist/denylist** — restrict which tool registries and tools an agent can invoke
-- **Enforcement modes** — `enforce` blocks violations; `permissive` logs without blocking
+- **Enforcement modes** — `enforce` blocks violations; `permissive` audits without blocking
 
 JWT claim mapping is configured separately, on the AgentRuntime — see [JWT claim extraction](#jwt-claim-extraction) below.
 
-Because enforcement happens at the network level, there is no application code to bypass.
+:::caution[Ambient mode requires a waypoint]
+Omnia runs Istio in **ambient** mode (see the ToolPolicy section below): ztunnel enforces L4 (mTLS, principal) only. `AuthorizationPolicy` rules that match on `request.headers[...]` — which is how `toolAccess` is implemented — are **L7** and only take effect when the target agent's Service is enrolled behind a **waypoint proxy**. The operator always creates the `AuthorizationPolicy` object; nothing currently provisions a waypoint on AgentPolicy's behalf. If the agent isn't otherwise enrolled behind a waypoint (e.g. via canary-rollout mesh traffic routing), the rule is inert and every tool call is allowed through regardless of `toolAccess`. Confirm waypoint enrollment for any agent whose tool-access control matters.
+:::
 
 ### ToolPolicy (application-level, Enterprise)
 
@@ -61,7 +63,7 @@ ToolPolicy operates at the **application level** as a *called decision broker*, 
 - **Required claims** — verify that specific JWT claims are present before allowing the request
 - **Header injection** — obligations returned alongside the allow/deny decision; the runtime attaches them to the outbound tool call only when the request is allowed
 - **Fail-closed by default** — if the broker is unreachable, the runtime denies the call (a deployment can opt into fail-open instead)
-- **Audit logging** — structured logs for every policy decision with optional field redaction
+- **Audit logging** — structured logs for deny and audit-mode would-deny decisions (see [Audit logging](#audit-logging) below for the current gaps in `audit.logDecisions`/`audit.redactFields`)
 
 This shape exists because Omnia runs Istio in **ambient** mode, which has no waypoint proxy on tool egress — a reverse proxy sitting passively in the network path would never see traffic routed to it. Calling the broker directly sidesteps transparent interception entirely.
 
@@ -74,7 +76,7 @@ For policies to make decisions based on *who* is calling and *what* they're call
 ```mermaid
 sequenceDiagram
     participant Client
-    participant Istio as Istio Sidecar
+    participant Istio as Istio (Gateway/Waypoint)
     participant Facade
     participant Runtime
     participant Broker as Policy Broker
@@ -125,7 +127,7 @@ Both policy types support a mode that controls whether violations are blocked or
 
 | Policy Type | Enforce Mode | Permissive/Audit Mode |
 |-------------|-------------|----------------------|
-| AgentPolicy | `enforce` — Istio blocks the request | `permissive` — Istio allows but logs |
+| AgentPolicy | `enforce` — Istio blocks the request (requires a waypoint under ambient mode — see the caution above) | `permissive` — Istio maps to `AUDIT`: allows but logs |
 | ToolPolicy | `enforce` — broker returns `allow: false`; runtime aborts the tool dispatch | `audit` — broker returns `allow: true` with `wouldDeny: true`; runtime proceeds and logs |
 
 ### Failure behavior
@@ -140,26 +142,15 @@ Both policy types also support `onFailure` to control what happens when policy e
 The policy-broker emits structured JSON logs for every deny decision and, when audit mode is active, for would-deny decisions. Two lines land per non-trivial decision: a shared `policy_decision` line (decision outcome, mode, matched policy/rule, message) and a broker-specific `broker_tool_decision` line carrying `toolName`/`toolRegistry` — since every decision request's path/method is the constant `/v1/decision` POST, tool identity travels in dedicated fields instead:
 
 ```json
-{
-  "msg": "policy_decision",
-  "decision": "deny",
-  "wouldDeny": true,
-  "mode": "audit",
-  "policy": "refund-limits",
-  "rule": "max-refund-amount",
-  "message": "Refund amount exceeds $500 limit"
-}
-{
-  "msg": "broker_tool_decision",
-  "toolName": "process_refund",
-  "toolRegistry": "customer-tools",
-  "allowed": true,
-  "deniedBy": "max-refund-amount",
-  "mode": "audit"
-}
+{"msg":"policy_decision","allowed":true,"deniedBy":"max-refund-amount","message":"Refund amount exceeds $500 limit","mode":"audit","policy":"refund-limits"}
+{"msg":"broker_tool_decision","toolName":"process_refund","toolRegistry":"customer-tools","allowed":true,"deniedBy":"max-refund-amount","mode":"audit"}
 ```
 
-ToolPolicy's `audit.redactFields` option allows sensitive field names to be masked in log output.
+In `audit` mode a matched deny rule sets `deniedBy`/`message` but `allowed` stays `true` (the call proceeds); in `enforce` mode the same match produces `allowed: false`.
+
+:::caution[`audit.logDecisions` / `audit.redactFields` are not yet wired]
+The ToolPolicy CRD accepts an `audit` block (`logDecisions`, `redactFields`), and the operator/broker compile it onto the policy, but the policy-broker does not currently read either field. It already logs a `policy_decision`/`broker_tool_decision` pair for every deny and would-deny outcome regardless of `logDecisions` (skipping only wholly-uninteresting allows), and it never redacts `body`/`headers` values in those logs regardless of `redactFields`. Don't rely on `redactFields` to keep sensitive data out of broker logs today.
+:::
 
 ## Architecture: policy broker (PDP/PEP)
 

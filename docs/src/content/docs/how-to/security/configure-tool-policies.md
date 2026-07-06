@@ -149,17 +149,10 @@ spec:
   mode: audit  # Log violations without blocking
 ```
 
-The policy-broker logs audit decisions with `wouldDeny: true`:
+The policy-broker logs the match (`mode: "audit"`, `allowed: true`, `deniedBy` naming the rule that would have denied it — `wouldDeny: true` is returned to the runtime in the decision response, not in this log line):
 
 ```json
-{
-  "msg": "policy_decision",
-  "decision": "deny",
-  "wouldDeny": true,
-  "mode": "audit",
-  "policy": "new-limits",
-  "rule": "strict-amount-check"
-}
+{"msg":"policy_decision","allowed":true,"deniedBy":"strict-amount-check","message":"Amount exceeds strict limit","mode":"audit","policy":"new-limits"}
 ```
 
 Once satisfied, switch to `enforce`:
@@ -171,7 +164,7 @@ spec:
 
 ## Configure audit logging and redaction
 
-Enable full decision logging and redact sensitive fields:
+The `audit` block is accepted by the CRD and compiled onto the policy:
 
 ```yaml
 spec:
@@ -184,7 +177,9 @@ spec:
       - password
 ```
 
-With `logDecisions: true`, every request (allowed and denied) generates a structured log entry. Fields listed in `redactFields` have their values masked in log output.
+:::caution[Not yet wired]
+`logDecisions` and `redactFields` are not currently read by the policy-broker. In practice the broker already logs a `policy_decision`/`broker_tool_decision` pair for every deny and every audit-mode would-deny outcome regardless of `logDecisions` (fully-allowed, no-rule-matched calls are skipped to keep noise down) — and it does **not** redact any `body`/`headers` values in those logs, so `redactFields` currently has no effect. Don't put sensitive field names in a ToolPolicy body expecting them to be masked; if a rule's CEL touches sensitive data, keep that data out of `deny.message` instead.
+:::
 
 ## Apply a policy to all tools in a registry
 
