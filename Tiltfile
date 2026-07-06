@@ -660,6 +660,10 @@ if ENABLE_ENTERPRISE:
         'enterprise.policyProxy.image.repository=omnia-policy-proxy-dev',
         'enterprise.policyProxy.image.tag=latest',
         'enterprise.policyProxy.image.pullPolicy=Never',
+        # Policy broker sidecar for ToolPolicy enforcement
+        'enterprise.policyBroker.image.repository=omnia-policy-broker-dev',
+        'enterprise.policyBroker.image.tag=latest',
+        'enterprise.policyBroker.image.pullPolicy=Never',
     ])
 else:
     # Disable enterprise features
@@ -1314,6 +1318,8 @@ _rebuild_session_api_cmd = 'docker build -f Dockerfile.session-api -t omnia-sess
 # enforcement). A source edit rebuilds the image, but only restarting the agent
 # pods picks up the new sidecar — same wiring trap as the api binaries above.
 _rebuild_policy_proxy_cmd = 'docker build -f ./ee/Dockerfile.policy-proxy -t omnia-policy-proxy-dev:latest .'
+# Policy-broker is the same operator-injected-sidecar wiring trap as policy-proxy.
+_rebuild_policy_broker_cmd = 'docker build -f ./ee/Dockerfile.policy-broker -t omnia-policy-broker-dev:latest .'
 # Delete the pod (not the deployment): the operator owns the Deployment spec
 # and reconciles `kubectl rollout restart` annotations away. Pod deletion lets
 # the existing ReplicaSet recreate with the same `:latest` image we just
@@ -1365,6 +1371,17 @@ _session_api_deps = [
 
 _policy_proxy_deps = [
     './ee/cmd/policy-proxy',
+    './ee/api',
+    './ee/pkg',
+    './api',
+    './internal',
+    './pkg',
+    './go.mod',
+    './go.sum',
+]
+
+_policy_broker_deps = [
+    './ee/cmd/policy-broker',
     './ee/api',
     './ee/pkg',
     './api',
@@ -1475,6 +1492,16 @@ if ENABLE_ENTERPRISE:
         'auto-rebuild-policy-proxy',
         cmd=_rebuild_policy_proxy_cmd + ' && ' + _restart_cmd,
         deps=_policy_proxy_deps,
+        labels=['dynamic-services'],
+    )
+
+# Policy-broker sidecar (EE/ToolPolicy). Rebuild the image and restart the
+# agent pods that carry it so source edits actually reach the running sidecar.
+if ENABLE_ENTERPRISE:
+    local_resource(
+        'auto-rebuild-policy-broker',
+        cmd=_rebuild_policy_broker_cmd + ' && ' + _restart_cmd,
+        deps=_policy_broker_deps,
         labels=['dynamic-services'],
     )
 

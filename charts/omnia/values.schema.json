@@ -231,6 +231,12 @@
             "image":     { "$ref": "#/$defs/image" },
             "resources": { "$ref": "#/$defs/resources" }
           }
+        },
+        "policyBroker": {
+          "type": "object",
+          "properties": {
+            "image": { "$ref": "#/$defs/image" }
+          }
         }
       }
     },

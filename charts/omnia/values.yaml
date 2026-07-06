@@ -243,6 +243,16 @@ enterprise:
       # -- Policy proxy image pull policy
       pullPolicy: IfNotPresent
 
+  # Policy broker sidecar for ToolPolicy enforcement
+  policyBroker:
+    image:
+      # -- Policy broker image repository
+      repository: ghcr.io/altairalabs/omnia-policy-broker
+      # -- Policy broker image tag (defaults to Chart appVersion)
+      tag: ""
+      # -- Policy broker image pull policy
+      pullPolicy: IfNotPresent
+
   # PromptKit LSP server for YAML validation
   promptkitLsp:
     # -- Enable the PromptKit LSP server (powers the Arena Project Editor's YAML
