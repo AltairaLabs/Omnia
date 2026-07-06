@@ -1508,9 +1508,9 @@ func TestBuildDeploymentSpec_MetricsPortContract(t *testing.T) {
 	_, hasMerge := anno["prometheus.istio.io/merge-metrics"]
 	assert.False(t, hasMerge, "sidecar-only merge-metrics assumption must be removed")
 	assert.Equal(t,
-		fmt.Sprintf("%d,%d", DefaultFacadeHealthPort, DefaultRuntimeHealthPort),
+		fmt.Sprintf("%d,%d,%d", DefaultFacadeHealthPort, DefaultRuntimeHealthPort, DefaultPolicyBrokerHealthPort),
 		anno["traffic.sidecar.istio.io/excludeInboundPorts"],
-		"both metrics ports must be excluded from sidecar inbound interception")
+		"all three metrics ports must be excluded from sidecar inbound interception")
 }
 
 func TestDeployment_GracePeriodFromDrainTimeout(t *testing.T) {

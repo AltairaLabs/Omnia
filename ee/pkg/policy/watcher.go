@@ -29,6 +29,11 @@ type Watcher struct {
 	logger    logr.Logger
 	namespace string
 	scheme    *runtime.Scheme
+
+	// metrics is optional (nil-safe): when set, the active_policies gauge is
+	// refreshed from the evaluator's compiled-policy count on every load
+	// (initial load and each poll cycle), so it self-corrects on reload.
+	metrics *Metrics
 }
 
 // NewWatcher creates a new ToolPolicy watcher.
@@ -46,6 +51,12 @@ func NewWatcher(
 		namespace: namespace,
 		logger:    logger,
 	}
+}
+
+// SetMetrics attaches Prometheus metrics to the watcher. Nil-safe: when never
+// called, initialLoad skips updating the active_policies gauge.
+func (w *Watcher) SetMetrics(metrics *Metrics) {
+	w.metrics = metrics
 }
 
 // Start begins watching ToolPolicy resources and blocks until the context is cancelled.
@@ -78,7 +89,11 @@ func (w *Watcher) initialLoad(ctx context.Context) error {
 			"rules", len(policy.Spec.Rules))
 	}
 
-	w.logger.Info("initial ToolPolicy load complete", "count", w.evaluator.PolicyCount())
+	count := w.evaluator.PolicyCount()
+	w.logger.Info("initial ToolPolicy load complete", "count", count)
+	if w.metrics != nil {
+		w.metrics.SetActivePolicies(count)
+	}
 	return nil
 }
 

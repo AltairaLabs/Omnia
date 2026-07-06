@@ -20,6 +20,7 @@ import (
 
 	"github.com/go-logr/logr"
 	"github.com/go-logr/zapr"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -41,6 +42,12 @@ const (
 	envListenAddr = "POLICY_BROKER_LISTEN_ADDR"
 	envHealthAddr = "POLICY_BROKER_HEALTH_ADDR"
 	envNamespace  = "OMNIA_NAMESPACE"
+	// envAgentName carries the agent identity (downward API, stamped by the
+	// operator from metadata.labels['app.kubernetes.io/instance']) used as the
+	// "agent" ConstLabel on this process's Prometheus metrics — the same value
+	// the facade and runtime containers use, so all three sidecars' series
+	// join on {agent, namespace}.
+	envAgentName = "OMNIA_AGENT_NAME"
 	// envOperatorAPIURL points at the operator/arena-controller license
 	// endpoint. When set and the license is not valid, the broker logs a
 	// startup reminder. Never blocks.
@@ -93,11 +100,13 @@ func run(logger logr.Logger) error {
 	listenAddr := getEnvOrDefault(envListenAddr, defaultListenAddr)
 	healthAddr := getEnvOrDefault(envHealthAddr, defaultHealthAddr)
 	namespace := os.Getenv(envNamespace)
+	agentName := os.Getenv(envAgentName)
 
 	logger.Info("starting policy broker",
 		"listenAddr", listenAddr,
 		"healthAddr", healthAddr,
-		"namespace", namespace)
+		"namespace", namespace,
+		"agent", agentName)
 
 	evaluator, err := policy.NewEvaluator()
 	if err != nil {
@@ -109,8 +118,13 @@ func run(logger logr.Logger) error {
 		return fmt.Errorf("failed to create Kubernetes client: %w", err)
 	}
 
+	metrics := policy.NewBrokerMetrics(agentName, namespace)
+
 	watcher := policy.NewWatcher(evaluator, k8sClient, scheme, namespace, logger)
+	watcher.SetMetrics(metrics)
+
 	brokerHandler := policy.NewBrokerHandler(evaluator, logger)
+	brokerHandler.SetMetrics(metrics)
 
 	brokerSrv := &http.Server{
 		Addr:              listenAddr,
@@ -171,13 +185,20 @@ func buildDecisionMux(handler *policy.BrokerHandler) *http.ServeMux {
 	return mux
 }
 
-// buildHealthMux registers /healthz and /readyz against the shared
-// policy.HealthHandler. Extracted so a wiring test can assert both routes
-// are registered without spinning up a real listener.
+// buildHealthMux registers /healthz, /readyz, and /metrics against the shared
+// policy.HealthHandler and the default Prometheus registry (promauto in
+// policy.NewBrokerMetrics registers there). Extracted so a wiring test can
+// assert all three routes are registered without spinning up a real listener.
+// Serving /metrics on the health port, not a dedicated port, mirrors the
+// facade (cmd/agent/health_server.go) and runtime health servers exactly, so
+// the omnia-agents scrape job / PodMonitor (which key on the container port
+// NAME "metrics", not a fixed number) pick up the broker with no scrape-config
+// changes.
 func buildHealthMux() *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", policy.HealthHandler())
 	mux.HandleFunc("/readyz", policy.HealthHandler())
+	mux.Handle("/metrics", promhttp.Handler())
 	return mux
 }
 

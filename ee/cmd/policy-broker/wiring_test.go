@@ -20,12 +20,15 @@ import (
 )
 
 // TestBuildHealthMux_RoutesRegistered asserts that buildHealthMux registers
-// both /healthz and /readyz. The policy-broker is fronted by Kubernetes
+// /healthz, /readyz, and /metrics. The policy-broker is fronted by Kubernetes
 // probes; a missing /readyz means the pod never becomes Ready (silently
-// failing the rollout).
+// failing the rollout). /metrics is served on this same health port — not a
+// dedicated port — exactly mirroring the facade (cmd/agent/health_server.go)
+// so the omnia-agents scrape job / PodMonitor (which key on the container
+// port NAME "metrics") pick up the broker with no scrape-config changes.
 func TestBuildHealthMux_RoutesRegistered(t *testing.T) {
 	mux := buildHealthMux()
-	for _, path := range []string{"/healthz", "/readyz"} {
+	for _, path := range []string{"/healthz", "/readyz", "/metrics"} {
 		t.Run(path, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodGet, path, nil)
 			rr := httptest.NewRecorder()
