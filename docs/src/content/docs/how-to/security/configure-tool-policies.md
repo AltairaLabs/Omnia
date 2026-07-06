@@ -149,7 +149,7 @@ spec:
   mode: audit  # Log violations without blocking
 ```
 
-The proxy logs audit decisions with `wouldDeny: true`:
+The policy-broker logs audit decisions with `wouldDeny: true`:
 
 ```json
 {
@@ -158,9 +158,7 @@ The proxy logs audit decisions with `wouldDeny: true`:
   "wouldDeny": true,
   "mode": "audit",
   "policy": "new-limits",
-  "rule": "strict-amount-check",
-  "path": "/v1/refund",
-  "method": "POST"
+  "rule": "strict-amount-check"
 }
 ```
 

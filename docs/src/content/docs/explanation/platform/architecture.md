@@ -28,8 +28,9 @@ graph TB
         subgraph pod["Agent Pod"]
             facade[Facade Container]
             runtime[Runtime Container]
-            proxy[Policy Proxy<br/>sidecar EE]
+            broker[Policy Broker<br/>sidecar EE]
             facade <-->|gRPC| runtime
+            runtime -->|"decision calls"| broker
         end
 
         subgraph data["Data plane (per workspace)"]
@@ -191,9 +192,14 @@ lets storage scale independently.
   (Session API and Memory API drain their enforcement records to it), and the
   **DSAR / right-to-erasure lifecycle** (it fans deletion out across every
   service-group's Session API and Memory API).
-- **Policy Proxy** (`ee/cmd/policy-proxy/`, enterprise) - an
-  operator-**injected sidecar** in the agent pod (not a standalone deployment)
-  that reverse-proxies requests after evaluating AgentPolicy CEL rules.
+- **Policy Broker** (`ee/cmd/policy-broker/`, enterprise) - an
+  operator-**injected sidecar** in the agent pod (not a standalone deployment,
+  and not a reverse proxy in the request path). The runtime calls it once per
+  server-executed tool call (`POST /v1/decision` over `POLICY_BROKER_URL`,
+  localhost) to evaluate ToolPolicy CEL rules against the request
+  headers/body/identity; the broker returns an allow/deny decision plus any
+  header-injection obligations, and the runtime enforces it. Fails closed by
+  default if the broker is unreachable.
 
 See [Multi-Tenancy Architecture](/explanation/platform/multi-tenancy/) for how these
 services are scoped per workspace.

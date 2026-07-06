@@ -147,13 +147,13 @@ refund-guardrails    customer-tools   audit   Active   2       10s
 
 With `mode: audit`, the policy logs violations but does not block requests. This lets you verify the rules are matching correctly before enforcement.
 
-Test the agent by making a refund call that violates the rules (e.g., amount > $500). Then check the policy broker logs (the broker runs as a sidecar in the `support-agent` pod, not on `customer-tools`):
+Test the agent by making a refund call that violates the rules (e.g., amount > $500). Then check the policy-broker logs (the broker runs as a sidecar in the `support-agent` agent pod, not on `customer-tools`). Agent pods carry a fixed `app.kubernetes.io/name=omnia-agent` label across every AgentRuntime, so select on `app.kubernetes.io/instance` (the AgentRuntime name) to target this one agent:
 
 ```bash
-kubectl logs -n production -l app=support-agent -c policy-broker | grep policy_decision
+kubectl logs -n production -l app.kubernetes.io/instance=support-agent -c policy-broker | grep policy_decision
 ```
 
-You should see a pair of audit entries like:
+You should see a pair of audit log lines like:
 
 ```json
 {"msg":"policy_decision","allowed":true,"deniedBy":"max-refund-amount","message":"Refund amount exceeds the $500 limit","mode":"audit","policy":"refund-guardrails"}
@@ -190,13 +190,16 @@ NAME                 REGISTRY         MODE      PHASE    RULES   AGE
 refund-guardrails    customer-tools   enforce   Active   2       1h
 ```
 
-Now any refund over $500 or without a reason returns a 403 response:
+Now any refund over $500 or without a reason is denied — the broker returns `allow: false` and the runtime aborts the tool call instead of invoking it:
 
 ```json
 {
-  "error": "policy_denied",
-  "rule": "max-refund-amount",
-  "message": "Refund amount exceeds the $500 limit"
+  "allow": false,
+  "deniedBy": "max-refund-amount",
+  "message": "Refund amount exceeds the $500 limit",
+  "mode": "enforce",
+  "wouldDeny": false,
+  "injectedHeaders": null
 }
 ```
 
@@ -212,17 +215,17 @@ graph TB
         ISTIO -->|Tool allowlist check| FACADE[Facade]
     end
 
-    FACADE -->|"external-auth: extract team, customer_id"| RUNTIME[Runtime]
+    FACADE -->|"external-auth: extract team, customer_id"| RUNTIME[Runtime PEP]
 
     subgraph "ToolPolicy Enforcement"
-        RUNTIME -->|"POST /v1/decision (headers + body)"| BROKER[Policy Broker]
+        RUNTIME -->|"POST /v1/decision: headers + body + identity"| BROKER[Policy Broker PDP]
         BROKER -->|Check required claims| BROKER
         BROKER -->|Evaluate CEL rules| BROKER
-        BROKER -->|"allow + injectedHeaders (X-Processed-By)"| RUNTIME
+        BROKER -->|"200 {allow, injectedHeaders: X-Processed-By}"| RUNTIME
     end
 
-    RUNTIME -->|"Denied: 403 to caller"| FACADE
-    RUNTIME -->|"Allowed: call tool with injected headers"| TOOL[Tool Service]
+    RUNTIME -->|"Denied: dispatch aborted, tool-call error returned"| RUNTIME
+    RUNTIME -->|Allowed: call tool with injected headers| TOOL[Tool Service]
 ```
 
 **AgentPolicy** provides:
@@ -234,7 +237,7 @@ graph TB
 **ToolPolicy** provides:
 - Required claims — team and customer ID must be present
 - CEL rules — refund amount cap and reason requirement
-- Header injection — team identity forwarded to the tool service
+- Header injection — team identity forwarded to the tool service (applied by the runtime, only when allowed)
 - Audit logging — full decision trail
 
 ## Next steps

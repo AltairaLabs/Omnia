@@ -31,14 +31,15 @@ graph TB
     end
 
     subgraph "Application Layer"
-        TP[ToolPolicy] -->|Evaluates via| PROXY[Policy Proxy Sidecar]
-        PROXY -->|CEL Rules| UPSTREAM[Tool Service]
+        TP[ToolPolicy] -->|Evaluates via| BROKER[Policy Broker Sidecar<br/>PDP]
+        RUNTIME[Runtime<br/>PEP] -->|Calls per tool call| BROKER
+        BROKER -->|Decision| RUNTIME
     end
 
     CLIENT[Client Request] --> SIDECAR
     SIDECAR -->|Allowed| FACADE[Facade]
-    FACADE -->|Tool Call| PROXY
-    PROXY -->|Allowed| UPSTREAM
+    FACADE -->|Tool Call| RUNTIME
+    RUNTIME -->|Allowed| UPSTREAM[Tool Service]
 ```
 
 ### AgentPolicy (network-level)
@@ -54,12 +55,15 @@ Because enforcement happens at the network level, there is no application code t
 
 ### ToolPolicy (application-level, Enterprise)
 
-ToolPolicy operates at the **application level** via a policy proxy sidecar deployed alongside each tool service. It provides:
+ToolPolicy operates at the **application level** as a *called decision broker*, not a reverse proxy in the request path. The **runtime is the enforcement point (PEP)**: its `OmniaExecutor.dispatch` — the single chokepoint all four tool-executor types (HTTP, OpenAPI, gRPC, MCP) funnel through — calls the **policy-broker** sidecar over `POLICY_BROKER_URL` (localhost, `POST /v1/decision`) once per server-executed tool call, before the tool actually runs. The **policy-broker is the decision point (PDP)**: it watches ToolPolicy CRDs and evaluates CEL rules against the request headers, body, and caller identity, then returns a decision. It provides:
 
-- **CEL deny rules** — evaluate request headers and body using [Common Expression Language](https://github.com/google/cel-go) expressions
+- **CEL deny rules** — evaluate request headers, body, and identity using [Common Expression Language](https://github.com/google/cel-go) expressions
 - **Required claims** — verify that specific JWT claims are present before allowing the request
-- **Header injection** — add static or CEL-computed headers to the upstream request
+- **Header injection** — obligations returned alongside the allow/deny decision; the runtime attaches them to the outbound tool call only when the request is allowed
+- **Fail-closed by default** — if the broker is unreachable, the runtime denies the call (a deployment can opt into fail-open instead)
 - **Audit logging** — structured logs for every policy decision with optional field redaction
+
+This shape exists because Omnia runs Istio in **ambient** mode, which has no waypoint proxy on tool egress — a reverse proxy sitting passively in the network path would never see traffic routed to it. Calling the broker directly sidesteps transparent interception entirely.
 
 ToolPolicy is an [Enterprise](/explanation/platform/licensing/) feature.
 
@@ -73,7 +77,7 @@ sequenceDiagram
     participant Istio as Istio Sidecar
     participant Facade
     participant Runtime
-    participant Proxy as Policy Proxy
+    participant Broker as Policy Broker
     participant Tool as Tool Service
 
     Client->>Istio: WebSocket + JWT
@@ -81,9 +85,10 @@ sequenceDiagram
     Istio->>Facade: Forward + x-user-id, x-user-roles, x-user-email
     Facade->>Facade: Build PropagationFields from headers
     Facade->>Runtime: gRPC + X-Omnia-* metadata
-    Runtime->>Proxy: HTTP + X-Omnia-* headers
-    Proxy->>Proxy: Evaluate CEL rules against headers + body
-    Proxy->>Tool: Forward + injected headers
+    Runtime->>Broker: POST /v1/decision (headers + body + identity)
+    Broker->>Broker: Evaluate CEL rules against headers + body + identity
+    Broker->>Runtime: {allow, deniedBy, message, mode, wouldDeny, injectedHeaders}
+    Runtime->>Tool: Forward (if allowed) + injected headers
 ```
 
 ### Propagated headers
@@ -106,6 +111,8 @@ The following headers are propagated across service boundaries:
 | `x-omnia-claim-*` | Facade | Mapped JWT claims (e.g., `x-omnia-claim-team`) |
 | `x-omnia-param-*` | Runtime | Promoted scalar tool parameters |
 
+In addition to these flattened headers, the runtime sends the caller's identity to the broker as a **structured JSON object** (`origin`, `subject`, `endUser`, `workspace`, `agent`, `role`, `claims`) on every decision request, so `identity.*` CEL expressions see the full identity rather than only the scalar claims that get promoted to headers.
+
 ### JWT claim extraction
 
 Claim forwarding is not an AgentPolicy concern — it's configured on the **AgentRuntime**'s external-auth block (`spec.externalAuth.oidc.claimMapping` for customer-IdP OIDC, or the edge-trust equivalent). The facade's auth validator extracts the configured claims from the verified JWT and forwards them as `X-Omnia-Claim-*` headers on every request. See [Configure Agent Authentication](/how-to/security/configure-authentication/) for the field reference.
@@ -119,7 +126,7 @@ Both policy types support a mode that controls whether violations are blocked or
 | Policy Type | Enforce Mode | Permissive/Audit Mode |
 |-------------|-------------|----------------------|
 | AgentPolicy | `enforce` — Istio blocks the request | `permissive` — Istio allows but logs |
-| ToolPolicy | `enforce` — proxy returns 403 | `audit` — proxy allows but logs the would-deny decision |
+| ToolPolicy | `enforce` — broker returns `allow: false`; runtime aborts the tool dispatch | `audit` — broker returns `allow: true` with `wouldDeny: true`; runtime proceeds and logs |
 
 ### Failure behavior
 
@@ -130,7 +137,7 @@ Both policy types also support `onFailure` to control what happens when policy e
 
 ## Audit logging
 
-The policy proxy emits structured JSON logs for every deny decision and, when audit mode is active, for would-deny decisions:
+The policy-broker emits structured JSON logs for every deny decision and, when audit mode is active, for would-deny decisions. Two lines land per non-trivial decision: a shared `policy_decision` line (decision outcome, mode, matched policy/rule, message) and a broker-specific `broker_tool_decision` line carrying `toolName`/`toolRegistry` — since every decision request's path/method is the constant `/v1/decision` POST, tool identity travels in dedicated fields instead:
 
 ```json
 {
@@ -140,39 +147,45 @@ The policy proxy emits structured JSON logs for every deny decision and, when au
   "mode": "audit",
   "policy": "refund-limits",
   "rule": "max-refund-amount",
-  "message": "Refund amount exceeds $500 limit",
-  "path": "/v1/refund",
-  "method": "POST"
+  "message": "Refund amount exceeds $500 limit"
+}
+{
+  "msg": "broker_tool_decision",
+  "toolName": "process_refund",
+  "toolRegistry": "customer-tools",
+  "allowed": true,
+  "deniedBy": "max-refund-amount",
+  "mode": "audit"
 }
 ```
 
 ToolPolicy's `audit.redactFields` option allows sensitive field names to be masked in log output.
 
-## Architecture: policy proxy sidecar
+## Architecture: policy broker (PDP/PEP)
 
-The ToolPolicy proxy runs as a sidecar container in the tool service pod. It intercepts HTTP requests, evaluates CEL rules, and either forwards or denies:
+The policy-broker runs as a sidecar container in the **agent pod** (alongside facade and runtime), not in the tool service's pod. It never sits in the tool-call request path — it only answers decision requests the runtime makes:
 
 ```mermaid
 graph LR
-    subgraph "Tool Pod"
-        PROXY[Policy Proxy :8443] -->|Forward| TOOL[Tool Service :8080]
+    subgraph "Agent Pod"
+        RUNTIME[Runtime :PEP] -->|"POST /v1/decision"| BROKER[Policy Broker :8090<br/>PDP]
+        BROKER -->|"{allow, deniedBy, injectedHeaders}"| RUNTIME
+        RUNTIME -->|Allowed| TOOL[Tool Service]
     end
-
-    RUNTIME[Runtime] -->|HTTP| PROXY
-    PROXY -->|403 Denied| RUNTIME
 
     subgraph "Control Plane"
         CTRL[Operator Controller] -->|Watch| TP[ToolPolicy CRD]
-        CTRL -->|Configure| PROXY
+        BROKER -->|Watch| TP
     end
 ```
 
-The proxy:
-1. Receives the request with all `X-Omnia-*` headers
-2. Checks required claims
-3. Evaluates CEL deny rules in order (first match stops)
-4. If allowed, evaluates header injection rules and adds computed headers
-5. Forwards to the upstream tool service
+Per server-executed tool call:
+1. The runtime's `OmniaExecutor.dispatch` calls the broker with the request headers, body, and structured identity
+2. The broker checks required claims
+3. The broker evaluates CEL deny rules in order (first match stops)
+4. If allowed, the broker evaluates header injection rules and returns the computed headers
+5. The runtime attaches any `injectedHeaders` to the outbound tool call and proceeds; on deny, it aborts the dispatch and surfaces a policy-denied error instead of calling the tool
+6. If the broker is unreachable, the runtime **fails closed by default** (denies the call); this is configurable per deployment to fail open instead
 
 ## Related resources
 
