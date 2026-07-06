@@ -206,6 +206,7 @@ jobs:
           - omnia-arena-dev-console
           - omnia-eval-worker
           - omnia-promptkit-lsp
+          - omnia-policy-broker
     steps:
       - name: Compute image ref (GHCR requires lowercase)
         id: ref

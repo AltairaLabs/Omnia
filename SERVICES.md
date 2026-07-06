@@ -25,12 +25,13 @@ This document maps every deployable service, how they communicate, and where to 
               │ manages  │ ┌──────┴───────┐ │           ▼
               │ + injects│ │ Runtime      │ │      ┌──────────────┐
               │  sidecar │ │ cmd/runtime/ │ │      │  Session API │
-              │          │ └──────────────┘ │      │ cmd/         │
-              │          │ ┌──────────────┐ │      │ session-api/ │
-              │          │ │ Policy Proxy │ │      └──────────────┘
+              │          │ └──────┬───────┘ │      │ cmd/         │
+              │          │  calls │         │      │ session-api/ │
+              │          │ ┌──────┴───────┐ │      └──────────────┘
+              │          │ │Policy Broker │ │
               │          │ │ (EE) sidecar │ │
               │          │ │ ee/cmd/      │ │
-              │          │ │ policy-proxy/│ │
+              │          │ │policy-broker/│ │
               │          │ └──────────────┘ │
               │          └──────────────────┘
               │ manages
@@ -57,10 +58,16 @@ This document maps every deployable service, how they communicate, and where to 
     └──────────┘      └──────────┘
 ```
 
-**Policy Proxy is an operator-INJECTED sidecar**, not a standalone managed
-Deployment. When an AgentPolicy applies to an agent the operator adds the
-policy-proxy container to that agent's pod (alongside facade + runtime); it
+**Policy Broker is an operator-INJECTED sidecar**, not a standalone managed
+Deployment. When ToolPolicy CRDs apply to an agent the operator adds the
+policy-broker container to that agent's pod (alongside facade + runtime); it
 shares the pod lifecycle and is not reconciled as its own top-level service.
+Unlike the retired policy-proxy (a reverse proxy sitting inline in the
+request path), the policy-broker is a **called decision** sidecar — the
+runtime's `OmniaExecutor.dispatch` makes a `POST /v1/decision` call to it over
+`POLICY_BROKER_URL` (localhost `:8090`) per tool call and gets back an
+allow/deny + injected-headers decision; it never proxies traffic itself. It
+watches ToolPolicy CRDs via an informer and fails closed by default.
 
 ### Data plane (per workspace / service-group)
 
@@ -149,7 +156,7 @@ Doctor read that status to dial the management plane. See
 | **Arena Worker** | `ee/cmd/arena-worker/` | [ee/cmd/arena-worker/SERVICE.md](ee/cmd/arena-worker/SERVICE.md) | Executes arena eval work items (direct & fleet modes) |
 | **Arena Eval Worker** | `ee/cmd/arena-eval-worker/` | [ee/cmd/arena-eval-worker/SERVICE.md](ee/cmd/arena-eval-worker/SERVICE.md) | Consumes session events, runs LLM judge evals |
 | **Arena Dev Console** | `ee/cmd/arena-dev-console/` | [ee/cmd/arena-dev-console/SERVICE.md](ee/cmd/arena-dev-console/SERVICE.md) | Interactive WebSocket testing for Arena agents |
-| **Policy Proxy** | `ee/cmd/policy-proxy/` | [ee/cmd/policy-proxy/SERVICE.md](ee/cmd/policy-proxy/SERVICE.md) | HTTP proxy enforcing AgentPolicy via CEL |
+| **Policy Broker** | `ee/cmd/policy-broker/` | [ee/cmd/policy-broker/SERVICE.md](ee/cmd/policy-broker/SERVICE.md) | ToolPolicy CEL decision sidecar — called by the runtime per tool call |
 | **Privacy API** | `ee/cmd/privacy-api/` | [ee/cmd/privacy-api/SERVICE.md](ee/cmd/privacy-api/SERVICE.md) | Per-workspace owner of consent/opt-out, the central privacy/compliance audit hub (#1673), and the DSAR erasure lifecycle (#1676) |
 | **PromptKit LSP** | `ee/cmd/promptkit-lsp/` | [ee/cmd/promptkit-lsp/SERVICE.md](ee/cmd/promptkit-lsp/SERVICE.md) | Language server for Arena agent definitions |
 
@@ -180,8 +187,8 @@ Doctor read that status to dial the management plane. See
 | Compaction | PostgreSQL/Redis/Cold | Direct | Data lifecycle management |
 | Runtime | Memory API | HTTP | Memory retrieval and extraction (when memory enabled) |
 | Memory API | Redis Streams | Redis | Memory event publishing (create/delete) |
-| Policy Proxy | Upstream (facade/runtime) | HTTP | Injected sidecar reverse-proxies requests after CEL policy enforcement + header injection |
-| Policy Proxy | K8s API | K8s client | Policy watching |
+| Runtime | Policy Broker | HTTP | `OmniaExecutor.dispatch` calls `POST /v1/decision` over `POLICY_BROKER_URL` (localhost) per tool call; returns allow/deny + injected headers, fail-closed by default |
+| Policy Broker | K8s API | K8s client | ToolPolicy CRD watching (informer) |
 | Dashboard | Facade (mgmt twin) | WebSocket | Management-plane chat/"Try this agent" — dials the internal `facade-mgmt` twin port from `status.managementEndpoints.ws` with a dashboard-minted mgmt-plane JWT (external ports reject it) |
 | Doctor | Facade (mgmt twin) | WebSocket | Diagnostic round-trip on the internal mgmt twin port (falls back to external 8080 when no mgmt endpoint advertised); exchanges its SA token for a mgmt-plane JWT via the dashboard `/api/auth/service-token` endpoint |
 | Doctor | Session API / Memory API | HTTP | Reachability + CRUD round-trip probes (create then delete a probe record) |
@@ -223,7 +230,7 @@ Browser ──WebSocket──▶ Facade ──gRPC──▶ Runtime ──HTTP�
 - **Eval Worker**: Inherits trace context from session events when available.
 - **Memory API**: Inherits trace context from HTTP requests. Records memory retrieval/extraction latency as spans.
 - **Privacy API**: Configures the W3C trace-context propagator and an optional OTLP provider (service `omnia-privacy-api`) so audit-drain and DSAR fan-out calls join the caller's trace. Does not currently emit its own spans.
-- **Operator, Compaction, Policy Proxy, LSP, Doctor**: No OTel spans.
+- **Operator, Compaction, Policy Broker, LSP, Doctor**: No OTel spans.
 
 ### Metrics Inventory
 

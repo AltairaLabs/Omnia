@@ -1668,3 +1668,51 @@ func TestBuildDeploymentSpec_PolicyBrokerAbsentByDefault(t *testing.T) {
 		}
 	}
 }
+
+// TestBuildDeploymentSpec_PolicyBrokerKeepsOwnSecurityContext is the
+// retirement-era regression guard (formerly
+// TestBuildDeploymentSpec_PolicyProxyKeepsOwnSecurityContext): the hardened
+// facade/runtime SecurityContext loop in buildDeploymentSpec must skip the
+// policy-broker sidecar, since buildPolicyBrokerContainer configures its own
+// SecurityContext (or none) and must not be overwritten.
+func TestBuildDeploymentSpec_PolicyBrokerKeepsOwnSecurityContext(t *testing.T) {
+	scheme := runtime.NewScheme()
+	require.NoError(t, omniav1alpha1.AddToScheme(scheme))
+	require.NoError(t, corev1.AddToScheme(scheme))
+
+	ar := &omniav1alpha1.AgentRuntime{
+		ObjectMeta: metav1.ObjectMeta{Name: "agent", Namespace: "ns"},
+		Spec: omniav1alpha1.AgentRuntimeSpec{
+			Facades: []omniav1alpha1.FacadeConfig{{Type: omniav1alpha1.FacadeTypeWebSocket}},
+		},
+	}
+	pp := newTestPromptPack()
+	r := &AgentRuntimeReconciler{
+		Scheme:            scheme,
+		Client:            fake.NewClientBuilder().WithScheme(scheme).Build(),
+		PolicyBrokerImage: "ghcr.io/altairalabs/omnia-policy-broker:test",
+	}
+
+	dep := &appsv1.Deployment{}
+	r.buildDeploymentSpec(context.Background(), dep, ar, pp, nil, "", nil)
+
+	// Locate the policy-broker sidecar and check its SecurityContext is its
+	// own, not hardenedContainerSecurityContext — the sidecar configures its
+	// own SC.
+	var policyBroker *corev1.Container
+	for i := range dep.Spec.Template.Spec.Containers {
+		c := &dep.Spec.Template.Spec.Containers[i]
+		if c.Name == PolicyBrokerContainerName {
+			policyBroker = c
+			break
+		}
+	}
+	require.NotNil(t, policyBroker, "policy-broker sidecar must be injected when PolicyBrokerImage is set")
+	// Either the policy-broker has no hardened SC (it sets its own or runs
+	// with a different profile) or it has one — but the buildDeploymentSpec
+	// loop must not overwrite with hardenedContainerSecurityContext.
+	hardened := hardenedContainerSecurityContext()
+	if policyBroker.SecurityContext != nil {
+		assert.NotEqual(t, hardened, policyBroker.SecurityContext, "policy-broker must not be overwritten with the facade/runtime hardened SC")
+	}
+}
