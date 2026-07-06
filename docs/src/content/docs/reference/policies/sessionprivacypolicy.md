@@ -139,6 +139,21 @@ Enables end-user control over session recording.
 
 When `userOptOut.enabled` is true and a user has opted out, all session-api write endpoints return 204 No Content and silently drop the request. The `X-Omnia-User-ID` header propagated by the facade and runtime enables per-user enforcement.
 
+:::note[Opt-out state and erasure live in privacy-api]
+`userOptOut` on the policy only *declares* that users may opt out. A specific
+user's opt-out choice is stored and enforced by the per-workspace **privacy-api**
+service (provisioned via [`Workspace.spec.privacy`](/reference/core/workspace/#privacy)),
+not by session-api. Record and read individual preferences with
+[Manage User Consent and Opt-Out](/how-to/privacy/manage-user-consent/).
+
+`userOptOut.honorDeleteRequests` and `deleteWithinDays` express the policy's
+right-to-erasure intent, but the **DSAR (right-to-erasure) lifecycle is owned by
+privacy-api**, which orchestrates deletion across every service group (session-api
+deletes sessions and media; memory-api deletes memories). session-api no longer
+owns the deletion-request lifecycle. Submit and track erasure requests via
+[Handle Data Subject Erasure](/how-to/privacy/handle-data-subject-erasure/).
+:::
+
 ### `encryption`
 
 Configures encryption at rest for session data using envelope encryption (AES-256-GCM with a KMS-managed data key).
@@ -311,5 +326,7 @@ spec:
 ## Related resources
 
 - [Configure Privacy Policies](/how-to/privacy/configure-privacy-policies/) — step-by-step setup guide
-- [Workspace CRD](/reference/core/workspace/) — `spec.services[].privacyPolicyRef`
+- [Manage User Consent and Opt-Out](/how-to/privacy/manage-user-consent/) — record and read per-user opt-out and consent via privacy-api
+- [Handle Data Subject Erasure (DSAR)](/how-to/privacy/handle-data-subject-erasure/) — right-to-erasure lifecycle owned by privacy-api
+- [Workspace CRD](/reference/core/workspace/) — `spec.services[].privacyPolicyRef` and `spec.privacy`
 - [AgentRuntime CRD](/reference/core/agentruntime/) — `spec.privacyPolicyRef`

@@ -272,6 +272,64 @@ static replicas — the reconcile does not fail. Use `type: hpa` (the default) o
 clusters without KEDA.
 :::
 
+#### `services[].privacyPolicyRef`
+
+References a `SessionPrivacyPolicy` in this workspace's namespace that applies to
+**all agents in this service group**. An individual AgentRuntime can override it
+with its own `spec.privacyPolicyRef`.
+
+| Field | Type | Required |
+|-------|------|----------|
+| `services[].privacyPolicyRef.name` | string | No |
+
+```yaml
+spec:
+  services:
+    - name: default
+      privacyPolicyRef:
+        name: gdpr-compliant
+```
+
+See the [SessionPrivacyPolicy CRD](/reference/policies/sessionprivacypolicy/) reference and
+[Configure Privacy Policies](/how-to/privacy/configure-privacy-policies/) for policy
+resolution order and per-agent overrides.
+
+### `privacy`
+
+:::note[Enterprise Feature]
+The per-workspace privacy-api service is an Enterprise feature. It requires an
+active Enterprise license — see [Install an Enterprise License](/how-to/operations/install-license/).
+:::
+
+Configures the per-workspace **privacy-api** service, which owns per-user consent
+grants and opt-out preferences for the workspace. **Setting `spec.privacy` is the
+trigger that provisions the privacy-api** for this workspace: when it is present,
+the operator deploys a privacy-api instance backed by the consent database you
+reference here; when it is omitted, no privacy-api is provisioned and the
+workspace's session/memory services run without centralized preference
+enforcement, consent tracking, the compliance audit hub, or DSAR erasure.
+
+| Field | Type | Required |
+|-------|------|----------|
+| `privacy.database.secretRef.name` | string | Yes |
+
+`privacy.database` points at the PostgreSQL **consent database** for this
+workspace (one database per workspace). The referenced Secret must contain a
+`POSTGRES_CONN` key holding a valid PostgreSQL connection string.
+
+```yaml
+spec:
+  privacy:
+    database:
+      secretRef:
+        name: my-workspace-privacy-db
+```
+
+Once provisioned, the privacy-api's resolved URL is published on
+[`status.privacyURL`](#privacyurl). To manage consent and opt-out preferences
+against it, see [Manage User Consent](/how-to/privacy/manage-user-consent/); to submit
+right-to-erasure requests, see [Handle Data Subject Erasure](/how-to/privacy/handle-data-subject-erasure/).
+
 ### `quotas`
 
 Resource quotas for the workspace.
@@ -574,6 +632,15 @@ Current cost tracking information.
 | `status.costUsage.monthlySpend` | Current month's spending in USD |
 | `status.costUsage.monthlyBudget` | Configured monthly budget in USD |
 | `status.costUsage.lastUpdated` | Timestamp of last cost calculation |
+
+### `privacyURL`
+
+Resolved URL of the per-workspace privacy-api. Populated only when
+[`spec.privacy`](#privacy) is set; empty otherwise.
+
+| Field | Description |
+|-------|-------------|
+| `status.privacyURL` | In-cluster base URL of the provisioned privacy-api service |
 
 ### `conditions`
 

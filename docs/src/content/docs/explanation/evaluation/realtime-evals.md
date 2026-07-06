@@ -102,7 +102,7 @@ flowchart TB
 
 ### Pattern A: platform events (all agents)
 
-Every AgentRuntime uses the facade's `recordingResponseWriter`, which captures assistant messages, tool calls, token counts, and cost. This data flows through session-api to PostgreSQL. Session-api then publishes lightweight events to Redis Streams. The eval worker subscribes and runs evals (either per-namespace or across multiple namespaces depending on configuration).
+Every AgentRuntime uses the facade's `recordingResponseWriter`, which captures assistant messages, tool calls, token counts, and cost. This data flows through session-api to PostgreSQL. Session-api then publishes lightweight events to Redis Streams. The eval worker subscribes and runs evals. The worker is provisioned per service group (see [Eval Worker](#eval-worker) below), so a multi-workspace cluster runs several workers, each scoped to its group's agents.
 
 ```mermaid
 flowchart LR
@@ -170,20 +170,42 @@ The defaults are deliberately disjoint so an agent never runs the same eval twic
 
 ## Eval worker
 
-The eval worker (`eval-worker`) is a long-running cluster singleton Deployment that subscribes to Redis Streams and runs evals for agents using Pattern A. It is deployed automatically when enterprise features are enabled.
+The eval worker (`eval-worker`) is a long-running Deployment that subscribes to Redis Streams and runs evals for agents using Pattern A. It is **provisioned per service group**, not as a single cluster-wide singleton — the operator reconciles one worker for a `WorkspaceServiceGroup` and only when that group has work for it to do.
 
 By default, the worker watches its deployment namespace. To watch additional namespaces, configure the `enterprise.evalWorker.namespaces` Helm value with the list of namespaces to monitor. The worker reads from multiple Redis streams concurrently via `XREADGROUP`. See [Eval Worker Helm values](/reference/platform/helm-values/#eval-worker-configuration) for details.
 
-The worker:
+### When a worker is created
 
-1. Subscribes to Redis Streams events (one stream per namespace) using a consumer group for horizontal scaling
+The operator creates a group's eval-worker automatically when the group has a **non-PromptKit**, eval-enabled AgentRuntime. PromptKit agents self-evaluate lightweight (`fast-running`) evals inline via Pattern C, so a group made up entirely of PromptKit agents would get no worker — and its `long-running` / `external` evals (e.g. `llm_judge`) would run nowhere.
+
+To force a worker for such a group, opt in explicitly on the service group:
+
+```yaml
+# Workspace spec — a service group
+evalWorker:
+  enabled: true          # force an eval-worker even for all-PromptKit groups
+```
+
+This matters for rollout gating: only the worker tags `omnia_eval_*` metrics with the `variant` label that `RolloutAnalysis` gates key on, so a PromptKit agent behind a variant-gated eval must have a worker to produce its gate metric. `enabled` has no effect when the group has no eval-enabled agent — there is nothing to evaluate.
+
+### Worker pod configuration and RBAC
+
+Pod-level configuration comes from the service group's `evalWorker.podOverrides`, mirroring the memory/session `podOverrides` on the group. The most common use is pointing the worker at a shared ServiceAccount (e.g. an `azure.workload.identity/use: "true"` SA) so its `llm_judge` can mint a federated token for a keyless cloud judge provider — otherwise the judge LLM is never actually called and every score is `0`. The operator binds the worker's Role and the workspace-reader ClusterRole to the **effective** ServiceAccount (get on `configmaps`, `secrets`, and `promptpacks`), so an overridden SA keeps working. See the [eval-worker Helm values](/reference/platform/helm-values/) for the group configuration surface.
+
+### What the worker does
+
+1. Subscribes to Redis Streams events using a consumer group for horizontal scaling
 2. Looks up the agent's AgentRuntime to check eval config and PromptPack reference
-3. Loads eval definitions from the PromptPack ConfigMap (cached with a Kubernetes watcher)
+3. Resolves the PromptPack CR to its content source and loads eval definitions (cached per version)
 4. Fetches session data from session-api
 5. Runs assertions using the PromptKit eval engine
 6. Writes results to the `eval_results` table via session-api
 
-**Why a long-running Deployment instead of Kubernetes Jobs?** Enterprise batch evaluation (Arena) uses Jobs because each ArenaJob is a discrete unit of work. Realtime evals are continuous — spinning up a Job per session event would be too slow (pod scheduling takes 5-15 seconds) and wasteful. A persistent worker pool is the right model.
+### Metrics
+
+The worker exposes its `omnia_eval_*` metrics (faithfulness, pass rates, judge cost, etc.) as Prometheus metrics at `/metrics` on port `:9090`. The operator stamps each worker pod with the `app.kubernetes.io/component=eval-worker` label plus `prometheus.io/{scrape,port,path}` annotations, and a scrape job discovers workers by label across namespaces — so metrics scale automatically as more workers appear in a multi-workspace cluster. These metrics feed variant-gated `RolloutAnalysis` gates.
+
+**Why a long-running Deployment instead of Kubernetes Jobs?** Enterprise batch evaluation (Arena) uses Jobs because each ArenaJob is a discrete unit of work. Realtime evals are continuous — spinning up a Job per session event would be too slow (pod scheduling takes 5-15 seconds) and wasteful. A persistent per-group worker pool is the right model.
 
 ## Judge provider resolution
 

@@ -1,16 +1,18 @@
 ---
 title: "Troubleshoot Arena Fleet"
 description: "Diagnose and resolve common Arena Fleet issues"
-enterprise: true
 sidebar:
   order: 13
+  badge:
+    text: Arena
+    variant: note
 ---
 
 This guide helps you diagnose and resolve common issues with Arena Fleet evaluations.
 
-## ArenaSource issues
+## ArenaSource Issues
 
-### Source stuck in pending
+### Source Stuck in Pending
 
 **Symptoms**: ArenaSource stays in `Pending` phase.
 
@@ -60,7 +62,7 @@ spec:
       name: git-credentials
 ```
 
-### Source fetch errors
+### Source Fetch Errors
 
 **Symptoms**: Source shows `Error` phase.
 
@@ -87,7 +89,7 @@ spec:
   timeout: 120s     # Increase if needed
 ```
 
-### ConfigMap source not updating
+### ConfigMap Source Not Updating
 
 **Symptoms**: ConfigMap changes don't trigger source updates.
 
@@ -103,72 +105,73 @@ kubectl get configmap my-prompts -o jsonpath='{.metadata.resourceVersion}'
 kubectl patch configmap my-prompts -p '{"metadata":{"annotations":{"updated":"'$(date +%s)'"}}}'
 ```
 
-## ArenaConfig issues
+## Arena Config File Issues
 
-### Config shows invalid
+There is **no `ArenaConfig` custom resource**. The Arena configuration is the
+`config.arena.yaml` file **inside the ArenaSource bundle**, selected by
+`ArenaJob.spec.arenaFile` (default `config.arena.yaml`). Configuration problems
+therefore surface on the **ArenaSource** status (bundle fetch/validation) or in the
+**worker pod logs** (config parse/validation at job start) — not on a separate resource.
 
-**Symptoms**: ArenaConfig phase is `Invalid`.
+### Config File Not Found or Invalid
 
-```bash
-kubectl describe arenaconfig my-config
-```
+**Symptoms**: The ArenaJob fails early; worker logs show `arena config file not found`
+or a YAML parse error.
 
 **Common Causes**:
 
-1. **Source not ready**:
-   ```
-   Message: ArenaSource "my-source" is not ready
-   ```
-   - Fix the ArenaSource first
+1. **No config file in the bundle**: the bundle must contain a `config.arena.yaml`
+   (or the file named by `spec.arenaFile`). A `pack.json`-only bundle is not enough.
+   - Verify the file is present in the source bundle.
 
 2. **Provider not found**:
    ```
    Message: Provider "claude-provider" not found
    ```
-   - Verify the Provider exists in the referenced namespace
+   - Verify the Provider CRD exists in the referenced namespace and is mapped into a
+     provider group in the job's `spec.providers`.
 
-3. **Invalid scenario filters**:
-   ```
-   Message: no scenarios match the specified filters
-   ```
-   - Check include/exclude patterns match your bundle
+3. **YAML syntax error** in `config.arena.yaml`:
+   - Validate the file locally before packaging the bundle.
 
 **Resolution**:
 
 ```bash
-# Check referenced resources exist
+# Check the source is synced and valid
 kubectl get arenasource my-source
+kubectl describe arenasource my-source
+
+# Check referenced providers exist
 kubectl get provider claude-provider
 
-# Verify scenario patterns
-kubectl get arenaconfig my-config -o jsonpath='{.spec.scenarios}'
+# Inspect the worker logs for the parse/validation error
+kubectl logs -l arena.omnia.altairalabs.ai/job=my-job | grep -i "config\|arena"
 ```
 
-### Zero scenarios resolved
+### Zero Scenarios Resolved
 
-**Symptoms**: Config shows `scenarioCount: 0`.
+**Symptoms**: The job runs but executes `scenarioCount: 0`.
 
 **Causes**:
-- Include patterns don't match any scenarios
-- Exclude patterns filter out all scenarios
-- Bundle doesn't contain scenarios
+- The ArenaJob's `spec.scenarios` include/exclude filters don't match any scenarios
+- The bundle doesn't contain the referenced scenarios
 
 **Resolution**:
 
 ```bash
-# Check the bundle content
-kubectl get configmap my-prompts -o jsonpath='{.data.pack\.json}' | jq '.scenarios'
+# Inspect the ArenaJob's scenario filters
+kubectl get arenajob my-job -o jsonpath='{.spec.scenarios}'
 
-# Adjust filters or use wildcard
+# Widen the filter to match everything
 spec:
   scenarios:
     include:
       - "*"  # Include all scenarios
 ```
 
-## ArenaJob issues
+## ArenaJob Issues
 
-### Job stuck in pending
+### Job Stuck in Pending
 
 **Symptoms**: Job stays in `Pending` phase.
 
@@ -181,11 +184,11 @@ kubectl get events --field-selector involvedObject.name=my-job
 
 **Common Causes**:
 
-1. **Config not ready**:
+1. **Source not ready**:
    ```
-   Message: ArenaConfig "my-config" is not ready
+   Message: ArenaSource "my-source" is not ready
    ```
-   - Fix the ArenaConfig first
+   - Fix the ArenaSource first (the bundle must sync before the job can start)
 
 2. **Insufficient resources**:
    ```
@@ -209,7 +212,7 @@ spec:
     replicas: 1  # Start with fewer workers
 ```
 
-### Workers crash or restart
+### Workers Crash or Restart
 
 **Symptoms**: Worker pods show `CrashLoopBackOff` or frequent restarts.
 
@@ -254,7 +257,7 @@ arena:
         memory: 512Mi
 ```
 
-### High failure rate
+### High Failure Rate
 
 **Symptoms**: Many scenarios failing during evaluation.
 
@@ -301,7 +304,7 @@ evaluation:
   maxRetries: 5
 ```
 
-### Results not stored
+### Results Not Stored
 
 **Symptoms**: Job succeeds but no results in S3/PVC.
 
@@ -332,9 +335,9 @@ kubectl run s3-test --rm -it --image=amazon/aws-cli -- \
 kubectl get secret arena-s3-credentials -o yaml
 ```
 
-## Queue issues (Redis)
+## Queue Issues (Redis)
 
-### Workers not processing
+### Workers Not Processing
 
 **Symptoms**: Job running but progress not advancing.
 
@@ -366,9 +369,9 @@ arena:
       port: 6379
 ```
 
-## Controller issues
+## Controller Issues
 
-### Controllers not reconciling
+### Controllers Not Reconciling
 
 **Symptoms**: CRDs created but nothing happens.
 
@@ -399,23 +402,22 @@ arena:
 ```bash
 # Verify CRDs exist
 kubectl get crd arenasources.omnia.altairalabs.ai
-kubectl get crd arenaconfigs.omnia.altairalabs.ai
 kubectl get crd arenajobs.omnia.altairalabs.ai
 ```
 
-## Debugging commands reference
+## Debugging Commands Reference
 
-### Quick health check
+### Quick Health Check
 
 ```bash
 # Check all Arena resources
-kubectl get arenasource,arenaconfig,arenajob -A
+kubectl get arenasource,arenajob -A
 
 # Check operator logs for errors
 kubectl logs -n omnia-system deployment/omnia-controller-manager --tail=100 | grep -i "error\|arena"
 ```
 
-### Verbose debugging
+### Verbose Debugging
 
 ```bash
 # Enable debug logging (requires operator restart)
@@ -425,7 +427,7 @@ kubectl set env -n omnia-system deployment/omnia-controller-manager LOG_LEVEL=de
 kubectl logs -n omnia-system deployment/omnia-controller-manager -f | grep -i arena
 ```
 
-### Resource cleanup
+### Resource Cleanup
 
 ```bash
 # Delete stuck jobs
@@ -436,10 +438,10 @@ kubectl patch arenajob my-job -p '{"metadata":{"finalizers":null}}' --type=merge
 kubectl delete arenajob my-job
 ```
 
-## Getting help
+## Getting Help
 
 If you're still experiencing issues:
 
 1. Check the [Arena Fleet Architecture](/explanation/evaluation/arena-fleet/) for conceptual understanding
-2. Review the CRD references: [ArenaSource](/reference/evaluation/arenasource/), [ArenaConfig](/reference/evaluation/arenaconfig/), [ArenaJob](/reference/evaluation/arenajob/)
+2. Review the references: [ArenaSource](/reference/evaluation/arenasource/), [Arena Config File](/reference/evaluation/arenaconfig/), [ArenaJob](/reference/evaluation/arenajob/)
 3. Search or open an issue on [GitHub](https://github.com/AltairaLabs/Omnia/issues)

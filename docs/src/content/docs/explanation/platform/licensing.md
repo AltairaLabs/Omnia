@@ -1,5 +1,5 @@
 ---
-title: "Licensing & features"
+title: "Licensing & Features"
 description: "Understand Omnia's Open Core and Enterprise editions"
 sidebar:
   order: 10
@@ -7,7 +7,7 @@ sidebar:
 
 Omnia follows an **Open Core** model: the core platform is free and open source (Apache 2.0), with advanced features available in the Enterprise edition.
 
-## Editions overview
+## Editions Overview
 
 | Edition | Price | Use Case |
 |---------|-------|----------|
@@ -15,80 +15,85 @@ Omnia follows an **Open Core** model: the core platform is free and open source 
 | **Enterprise** | Paid | Production, scale, advanced features |
 | **Trial** | Free (30 days) | Evaluate Enterprise features |
 
-## Feature comparison
+## Feature Comparison
 
-### Agent runtime
-
-| Feature | Open Core | Enterprise |
-|---------|:---------:|:----------:|
-| Deploy AI agents | Yes | Yes |
-| WebSocket streaming | Yes | Yes |
-| Multi-modal support | Yes | Yes |
-| Provider CRDs (OpenAI, Anthropic, etc.) | Yes | Yes |
-| PromptPack CRDs | Yes | Yes |
-| Dashboard UI | Yes | Yes |
-| Observability (metrics, traces) | Yes | Yes |
-
-### Agent memory
+### Agent Runtime
 
 | Feature | Open Core | Enterprise |
 |---------|:---------:|:----------:|
-| Per-user & per-agent memory (save / retrieve / recall) | Yes | Yes |
-| Semantic + hybrid (lexical + vector) recall | Yes | Yes |
-| Agent-scoped memory (operator-curated, per-agent) | Yes | Yes |
-| Institutional (workspace-knowledge) memory tier | No | Yes |
-| Multi-tier recall across user / agent / institutional tiers | No | Yes |
-| Policy-driven tier ranking (`MemoryPolicy.tierPrecedence`) | No | Yes |
-| Per-tier recency half-life (`MemoryPolicy.recall.halfLife`) | No | Yes |
-| LLM-driven memory consolidation | No | Yes |
-| Memory Galaxy visualization | No | Yes |
+| Deploy AI agents | ✅ | ✅ |
+| WebSocket streaming | ✅ | ✅ |
+| Multi-modal support | ✅ | ✅ |
+| Provider CRDs (OpenAI, Anthropic, etc.) | ✅ | ✅ |
+| PromptPack CRDs | ✅ | ✅ |
+| Dashboard UI | ✅ | ✅ |
+| Observability (metrics, traces) | ✅ | ✅ |
 
-When running Open Core, agent memory recall is restricted to the user and agent
-tiers with uniform ranking; everything marked Enterprise above falls back to
-that Open Core behavior.
-
-### Arena Fleet (testing & evaluation)
+### Agent Memory
 
 | Feature | Open Core | Enterprise |
 |---------|:---------:|:----------:|
-| ArenaSource from ConfigMap | Yes | Yes |
-| ArenaSource from Git | No | Yes |
-| ArenaSource from OCI Registry | No | Yes |
-| ArenaSource from S3/GCS | No | Yes |
-| ArenaJob evaluation | Yes (limited) | Yes |
-| ArenaJob load testing | No | Yes |
-| ArenaJob data generation | No | Yes |
+| Per-user & per-agent memory (save / retrieve / recall) | ✅ | ✅ |
+| Semantic + hybrid (lexical + vector) recall | ✅ | ✅ |
+| Agent-scoped memory (operator-curated, per-agent) | ✅ | ✅ |
+| Institutional (workspace-knowledge) memory tier | ❌ | ✅ |
+| Multi-tier recall across user / agent / institutional tiers | ❌ | ✅ |
+| Policy-driven tier ranking (`MemoryPolicy.tierPrecedence`) | ❌ | ✅ |
+| Per-tier recency half-life (`MemoryPolicy.recall.halfLife`) | ❌ | ✅ |
+| LLM-driven memory consolidation | ❌ | ✅ |
+| Memory Galaxy visualization | ❌ | ✅ |
+
+The institutional tier, multi-tier recall, policy-driven ranking, half-life, LLM
+consolidation and Memory Galaxy ship only in the **Enterprise edition**
+(`enterprise.enabled=true`). An Open Core build does not include these code
+paths, so recall uses the user and agent tiers with uniform ranking.
+
+Within an Enterprise deployment these memory features are gated by the
+`enterprise.enabled` edition flag, **not** by license validity: an absent or
+expired license logs a startup reminder but does not disable them. See
+[License enforcement](#license-enforcement) below.
+
+### Arena Fleet (Testing & Evaluation)
+
+| Feature | Open Core | Enterprise |
+|---------|:---------:|:----------:|
+| ArenaSource from ConfigMap | ✅ | ✅ |
+| ArenaSource from Git | ❌ | ✅ |
+| ArenaSource from OCI Registry | ❌ | ✅ |
+| ArenaJob evaluation | ✅ (limited) | ✅ |
+| ArenaJob load testing | ❌ | ✅ |
+| ArenaJob data generation | ❌ | ✅ |
 | Concurrent scenarios | 10 max | Unlimited |
 | Worker replicas | 1 | Unlimited |
-| Scheduled jobs (cron) | No | Yes |
-| Event-based triggers | No | Yes |
-| Persistent artifact storage | No | Yes |
+| Scheduled jobs (cron) | ❌ | ✅ |
+| Event-based triggers | ❌ | ✅ |
+| Persistent artifact storage | ❌ | ✅ |
 
 ### Operations
 
 | Feature | Open Core | Enterprise |
 |---------|:---------:|:----------:|
-| Helm chart deployment | Yes | Yes |
-| Multi-namespace support | Yes | Yes |
-| RBAC integration | Yes | Yes |
-| Network policies | Yes | Yes |
-| Cost tracking & budgets | No | Yes |
-| Multi-cluster aggregation | No | Yes |
-| Priority support | No | Yes |
+| Helm chart deployment | ✅ | ✅ |
+| Multi-namespace support | ✅ | ✅ |
+| RBAC integration | ✅ | ✅ |
+| Network policies | ✅ | ✅ |
+| Cost tracking & budgets | ❌ | ✅ |
+| Multi-cluster aggregation | ❌ | ✅ |
+| Priority support | ❌ | ✅ |
 
 ### Branding
 
 | Feature | Open Core | Enterprise |
 |---------|:---------:|:----------:|
-| Omnia default theme (light / dark) | Yes | Yes |
-| White-label branding (colors, logos, fonts, copy) | No | Yes |
+| Omnia default theme (light / dark) | ✅ | ✅ |
+| White-label branding (colors, logos, fonts, copy) | ❌ | ✅ |
 
 White-label branding is gated by the `whiteLabel` license entitlement and
 enforced server-side — without it, the dashboard falls back to the Omnia
 default regardless of any branding configuration. See
 [White-label the Dashboard](/how-to/operations/white-label-the-dashboard/).
 
-## Enabling Enterprise features
+## Enabling Enterprise Features
 
 To enable Enterprise features in your Helm deployment:
 
@@ -106,12 +111,20 @@ When `enterprise.enabled=true`:
 - Enterprise CRDs (ArenaSource, ArenaJob) are installed
 - Arena controller and worker deployments are created
 - Shared filesystem features for workspaces are available
+- The enterprise memory, privacy and policy services are deployed
+
+`enterprise.enabled` is the **deploy-time gate** — it controls which components
+are installed. The `license.key` is a separate concern: it determines which of
+those deployed features are *entitled*. Today the license genuinely enforces two
+things — dashboard white-labelling and Arena Fleet source/job/limit checks — while
+the enterprise memory, privacy and policy services run on the edition flag alone
+and only log a reminder when unlicensed. See [License enforcement](#license-enforcement).
 
 :::tip[Local Development]
 For local development with Tilt, use `ENABLE_ENTERPRISE=true tilt up` to enable enterprise features.
 :::
 
-## Open core edition
+## Open Core Edition
 
 The Open Core edition is perfect for:
 
@@ -120,7 +133,7 @@ The Open Core edition is perfect for:
 - **Small deployments** with limited testing requirements
 - **Proof of concepts** before committing to Enterprise
 
-### Included features
+### Included Features
 
 - Full agent runtime with all providers
 - Dashboard for management and monitoring
@@ -131,25 +144,24 @@ The Open Core edition is perfect for:
 
 ### Limitations
 
-- No external sources (Git, OCI, S3)
+- No external sources (Git, OCI)
 - No load testing or data generation
 - No scheduled or triggered jobs
 - No distributed workers
 - No persistent artifact storage
 
-## Enterprise edition
+## Enterprise Edition
 
 The Enterprise edition unlocks advanced capabilities for production use:
 
-### Advanced sources
+### Advanced Sources
 
 Pull test scenarios and configurations from your existing infrastructure:
 
 - **Git repositories** - Integrate with GitHub, GitLab, Bitbucket
 - **OCI registries** - Pull from container registries
-- **S3/GCS buckets** - Use cloud storage for large test suites
 
-### Load testing
+### Load Testing
 
 Run realistic load tests against your AI agents:
 
@@ -157,7 +169,7 @@ Run realistic load tests against your AI agents:
 - Distributed workers for horizontal scaling
 - Detailed latency and throughput metrics
 
-### Data generation
+### Data Generation
 
 Generate synthetic data for training and testing:
 
@@ -165,7 +177,7 @@ Generate synthetic data for training and testing:
 - LLM-powered realistic data
 - Batch processing capabilities
 
-### Scheduled jobs
+### Scheduled Jobs
 
 Automate your testing workflows:
 
@@ -173,7 +185,7 @@ Automate your testing workflows:
 - Event-based triggers (webhooks, pub/sub)
 - Integration with CI/CD pipelines
 
-### Persistent storage
+### Persistent Storage
 
 Keep your test artifacts long-term:
 
@@ -193,7 +205,7 @@ All plans include unlimited users and all Enterprise features.
 
 Contact [sales@altairalabs.ai](mailto:sales@altairalabs.ai) for pricing details.
 
-## Trial license
+## Trial License
 
 Try Enterprise features free for 30 days:
 
@@ -207,50 +219,84 @@ Trial licenses include:
 - 100 concurrent scenarios
 - 5 worker replicas
 
-## License validation
+## License enforcement
 
-Omnia validates licenses using cryptographically signed JWT tokens:
+Omnia licenses are cryptographically signed **RS256 JWT** tokens. Validation is
+entirely **offline** — the operator verifies the token against an embedded public
+key (rotatable via a ConfigMap) and re-reads the license Secret every 5 minutes.
+No internet connection is required to validate a license or to run Enterprise
+features.
 
-- **Offline validation** - No internet required for validation
-- **Cached validation** - License checked every 5 minutes
-- **Graceful degradation** - Features degrade to Open Core if license expires
+Enforcement is deliberately light. Omnia is **honour-system** licensing: most
+Enterprise features are gated only by the `enterprise.enabled` deploy flag, and
+each Enterprise component (the operator plus the memory, privacy and policy-proxy
+pods) logs a one-time **startup reminder** when it is running Enterprise features
+without a valid license. That reminder never blocks — the features keep working.
 
-### Activation tracking
+What the license actually enforces today:
 
-Enterprise licenses include activation tracking to prevent unauthorized sharing:
+- **Dashboard white-labelling** — the `whiteLabel` entitlement is checked
+  server-side. Without a valid enterprise-tier license the dashboard renders the
+  Omnia default theme regardless of any branding configuration.
+- **Arena Fleet limits** — admission webhooks reject ArenaSource / ArenaJob
+  resources that exceed the license: non-Git/OCI source types, load-testing and
+  data-generation jobs, cron scheduling, extra worker replicas, and scenario
+  counts above the licensed maximum. Existing resources keep running; only new or
+  updated resources are validated.
 
-- Each license specifies maximum activations
-- Clusters register with the license server on installation
-- Activations can be managed via the dashboard
-- Deactivate old clusters to free up slots
+What is **not** yet enforced:
 
-### Air-gapped environments
+- The `memoryEnterprise`, `privacyEnterprise` and `policyProxy` entitlement
+  booleans exist in the license model (added in #1682) and are surfaced on
+  `GET /api/v1/license`, but no backend reads them yet. The memory, privacy and
+  policy services run whenever `enterprise.enabled=true`, licensed or not. Runtime
+  gates for these are planned in follow-up work.
 
-For environments without internet access:
+### Activation tracking (optional telemetry)
 
-1. Contact support with your cluster fingerprint
-2. Receive a pre-activated license
-3. Install normally - no activation call needed
+For enterprise-tier licenses the operator can register the cluster with the
+Altaira Labs license server (`https://license.altairalabs.ai`): it activates once
+on install and sends a heartbeat every 24 hours. This exists to **count cluster
+activations** for the sales relationship — it records Kubernetes events when a
+license is over its activation limit or a heartbeat lapses, but it does **not**
+disable any feature if the phone-home fails. Open-core licenses skip activation
+entirely.
 
-Get your cluster fingerprint:
+Because activation is not part of feature gating, environments without outbound
+internet access are unaffected: activation attempts simply log a warning event
+and the features keep running.
+
+Get your cluster fingerprint (the activation server's cluster identifier):
 
 ```bash
 kubectl get namespace kube-system -o jsonpath='{.metadata.uid}'
 ```
 
-## Frequently asked questions
+## Frequently Asked Questions
 
-### Can I use open core in production?
+### Can I use Open Core in production?
 
-Open Core is fully functional for agent deployment. The limitations affect Arena Fleet testing and advanced agent memory (see the feature comparison above) — the core agent runtime and per-user/per-agent memory are unrestricted.
+Yes! Open Core is fully functional for agent deployment. The limitations affect Arena Fleet testing and advanced agent memory (see the feature comparison above) — the core agent runtime and per-user/per-agent memory are unrestricted.
 
 ### What happens when my license expires?
 
-Features gracefully degrade to Open Core functionality. Your agents continue running, but Enterprise features become unavailable — for example, memory recall falls back to the Open Core tiers and stored institutional memories are simply not surfaced.
+Nothing stops. Your agents keep running and — because most Enterprise features are
+gated by the `enterprise.enabled` deploy flag rather than by license validity —
+the enterprise memory, privacy and policy services keep working too. Each
+component logs a startup reminder that it is unlicensed. The two exceptions are
+the genuinely enforced entitlements: dashboard white-labelling reverts to the
+Omnia default theme, and Arena Fleet admission webhooks begin rejecting *new or
+updated* enterprise-tier ArenaSource / ArenaJob resources (already-running Arena
+resources are not torn down). See [License enforcement](#license-enforcement).
 
-### Can I downgrade from Enterprise to open core?
+### Can I downgrade from Enterprise to Open Core?
 
-Yes. Remove your license Secret and the operator will run in Open Core mode. Existing resources using Enterprise features will show validation warnings.
+Remove your license Secret and the operator falls back to the open-core license
+(no white-labelling, Arena limited to ConfigMap sources and the open-core
+scenario/worker limits). This is not the same as switching to an Open Core
+*build*: `enterprise.enabled=true` keeps the enterprise components deployed, and
+they continue to run with a startup reminder. To fully remove Enterprise features,
+set `enterprise.enabled=false`.
 
 ### Is the source code available?
 
@@ -261,7 +307,7 @@ Yes. Omnia is fully open source under Apache 2.0. The license validation code is
 - **Open Core**: GitHub issues, community Discord
 - **Enterprise**: Priority email support, dedicated channels for Business/Enterprise plans
 
-## Next steps
+## Next Steps
 
 - [Install with a License](/how-to/operations/install-license/) - Get started with Enterprise
 - [Arena Fleet Overview](/explanation/evaluation/arena-fleet/) - Learn about testing capabilities

@@ -1,330 +1,296 @@
 ---
-title: "ArenaConfig CRD"
-description: "Complete reference for the ArenaConfig custom resource"
-enterprise: true
+title: "Arena Config File"
+description: "Reference for the config.arena.yaml file inside an ArenaSource bundle"
 sidebar:
   order: 11
+  badge:
+    text: Enterprise
+    variant: tip
 ---
 
-The ArenaConfig custom resource defines a test configuration that combines an ArenaSource with providers and evaluation settings. It bridges PromptKit bundles with Omnia's existing Provider and ToolRegistry CRDs.
+:::note[Enterprise Feature]
+The arena config file drives the enterprise Arena Fleet feature. Arena CRDs are only installed when `enterprise.enabled=true` in your Helm values. See [Installing a License](/how-to/operations/install-license/) for details.
+:::
 
-## API version
+The **arena config file** (conventionally `config.arena.yaml`) is a YAML file that lives **inside an [ArenaSource](/reference/evaluation/arenasource/) bundle**. It ties together the prompts, scenarios, providers, tools, and evaluation settings that a run uses. An [ArenaJob](/reference/evaluation/arenajob/) selects it with `spec.arenaFile` (default `config.arena.yaml`) and the arena worker loads it from the bundle at execution time.
+
+:::caution[This is a file, not a CRD]
+There is no `ArenaConfig` Kubernetes resource. Do **not** `kubectl apply` this document — it is a plain YAML file committed alongside your scenarios in the ArenaSource bundle. The only Arena CRDs are [ArenaSource](/reference/evaluation/arenasource/) and [ArenaJob](/reference/evaluation/arenajob/).
+:::
+
+## File shape
+
+The file uses a lightweight PromptKit envelope. Everything below lives under `spec:`.
 
 ```yaml
-apiVersion: omnia.altairalabs.ai/v1alpha1
-kind: ArenaConfig
+apiVersion: promptkit.altairalabs.ai/v1alpha1
+kind: Arena
+metadata:
+  name: customer-support-eval
+spec:
+  # ... fields documented below
 ```
 
-## Overview
+Most sections reference sibling files inside the bundle (relative to the config file's directory) rather than inlining content. This keeps prompts, scenarios, and providers in their own files.
 
-ArenaConfig provides:
+## Spec Fields
 
-- **Source binding**: Reference an ArenaSource for the PromptKit bundle
-- **Provider selection**: Test scenarios against multiple LLM providers
-- **Tool access**: Make ToolRegistry tools available during evaluation
-- **Scenario filtering**: Include/exclude patterns for scenario selection
-- **Self-play support**: Configure agent vs agent evaluation
-- **Evaluation tuning**: Configure timeouts, retries, and concurrency
+### `prompt_configs`
 
-## Spec fields
-
-### `sourceRef`
-
-Reference to the ArenaSource containing the PromptKit bundle.
+Prompt configurations available to scenarios, referenced by file.
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `name` | string | Yes | Name of the ArenaSource |
+| `id` | string | Yes | Prompt identifier referenced by scenarios |
+| `file` | string | Yes | Path to the prompt YAML within the bundle |
 
 ```yaml
 spec:
-  sourceRef:
-    name: customer-support-prompts
+  prompt_configs:
+    - id: assistant
+      file: prompts/assistant.yaml
 ```
-
-### `scenarios`
-
-Filter which scenarios to run from the bundle.
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `include` | []string | Glob patterns for scenarios to include |
-| `exclude` | []string | Glob patterns for scenarios to exclude |
-
-```yaml
-spec:
-  scenarios:
-    include:
-      - "scenarios/billing-*.yaml"
-      - "scenarios/support-*.yaml"
-    exclude:
-      - "*-wip.yaml"
-      - "scenarios/experimental/*"
-```
-
-**Pattern matching:**
-- Uses glob syntax (`*` matches any characters, `**` matches paths)
-- Exclusions are applied after inclusions
-- If `include` is empty, all scenarios are included by default
 
 ### `providers`
 
-List of Provider CRDs to use for LLM credentials. Each provider is tested against all selected scenarios.
+The provider entries used by scenarios. Each entry references a provider YAML file and, optionally, assigns the provider to a **group**.
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `name` | string | Yes | Name of the Provider |
-| `namespace` | string | No | Namespace (defaults to config namespace) |
+| `file` | string | Yes | Path to the provider YAML within the bundle |
+| `group` | string | No | Provider group name (e.g. `default`, `judge`) |
 
 ```yaml
 spec:
   providers:
-    - name: claude-sonnet
-    - name: gpt-4o
-    - name: gemini-pro
-      namespace: shared-providers
+    - file: providers/gpt4.provider.yaml
+      group: default
+    - file: providers/claude-opus.provider.yaml
+      group: judge
 ```
 
-### `toolRegistries`
+:::tip[Groups connect the file to the ArenaJob]
+The `group` value is the join key with [`ArenaJob.spec.providers`](/reference/evaluation/arenajob/#providers). When an ArenaJob sets `spec.providers`, the provider YAML files here are ignored and the worker resolves providers from Provider/AgentRuntime CRDs instead — matching each ArenaJob provider-group name to the `group` used here. Leave `providers` empty (`providers: []`) when you intend to supply all providers from CRDs.
+:::
 
-List of ToolRegistry CRDs to make available during evaluation. Tools from all registries are merged.
+### `scenarios`
+
+Scenario files to run, each referenced by file.
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `name` | string | Yes | Name of the ToolRegistry |
-| `namespace` | string | No | Namespace (defaults to config namespace) |
+| `file` | string | Yes | Path to the scenario YAML within the bundle |
 
 ```yaml
 spec:
-  toolRegistries:
-    - name: customer-tools
-    - name: billing-tools
+  scenarios:
+    - file: scenarios/billing.scenario.yaml
+    - file: scenarios/support.scenario.yaml
 ```
 
-### `selfPlay`
+### `judges` and `judge_defaults`
 
-Configure self-play evaluation where agents compete against each other.
+Named judge (evaluator) targets. Each judge inherits its model from the referenced provider ID.
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `name` | string | Yes | Judge identifier used in assertions |
+| `provider` | string | Yes | Provider ID reference (must exist in `spec.providers`) |
+
+```yaml
+spec:
+  judges:
+    - name: quality-judge
+      provider: claude-opus
+```
+
+### `evals` and `tools`
+
+Additional evaluation definitions and tool definitions, each referenced by file.
+
+```yaml
+spec:
+  evals:
+    - file: evals/quality.eval.yaml
+  tools:
+    - file: tools/search.tool.yaml
+```
+
+:::note
+When an ArenaJob sets `spec.toolRegistries`, the tool file references here are ignored and tools are resolved from ToolRegistry CRDs instead.
+:::
+
+### `mcp_servers`
+
+Model Context Protocol (MCP) servers to expose to the model during a run. Each server specifies exactly one transport (`command` for stdio, `url` for HTTP, or `source` for a host-provisioned endpoint).
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `name` | string | Server identifier |
+| `command` / `args` / `env` | string / []string / map | stdio transport (local subprocess) |
+| `url` / `headers` | string / map | HTTP transport |
+| `transport` | string | `stdio`, `sse`, or `streamable_http` |
+| `tool_filter` | object | `allowlist` / `blocklist` of tool names |
+
+```yaml
+spec:
+  mcp_servers:
+    - name: filesystem
+      command: mcp-server-filesystem
+      args: ["--root", "/data"]
+```
+
+### `self_play`
+
+Configure self-play (agent-vs-simulated-user) evaluation. Self-play is enabled whenever this section is present.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `personas` | []object | Persona files, each `{ file: <path> }` |
+| `roles` | []object | Role-to-provider mapping, each `{ id: <role>, provider: <provider-id> }` |
+
+```yaml
+spec:
+  self_play:
+    personas:
+      - file: personas/frustrated-customer.yaml
+    roles:
+      - id: user
+        provider: gpt4
+```
+
+### `defaults`
+
+Default execution settings applied to every scenario unless it overrides them.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `enabled` | boolean | false | Enable self-play mode |
-| `rounds` | integer | 1 | Number of rounds per scenario |
-| `swapRoles` | boolean | false | Alternate roles between rounds |
+| `temperature` | number | - | Sampling temperature |
+| `max_tokens` | integer | - | Maximum output tokens |
+| `seed` | integer | - | Deterministic sampling seed |
+| `concurrency` | integer | - | Parallel runs |
+| `run_timeout` | string | "5m" | Per-run timeout (e.g. `"30s"`) |
+| `fail_on` | []string | - | Conditions that mark the run failed |
+| `output` | object | - | Output directory and formats |
 
 ```yaml
 spec:
-  selfPlay:
-    enabled: true
-    rounds: 3
-    swapRoles: true
+  defaults:
+    temperature: 0.5
+    max_tokens: 500
+    seed: 42
+    run_timeout: 2m
+    output:
+      dir: out
+      formats:
+        - json
 ```
 
-### `evaluation`
+### `globals`
 
-Configure evaluation criteria and execution settings.
+Cross-cutting settings applied additively to every scenario.
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `metrics` | []string | - | Metrics to collect (latency, tokens, cost, quality) |
-| `timeout` | string | "5m" | Max duration per evaluation |
-| `maxRetries` | integer | 3 | Max retries for failures (0-10) |
-| `concurrency` | integer | 1 | Parallel evaluations per worker (1-100) |
+| Field | Type | Description |
+|-------|------|-------------|
+| `conversation_assertions` | []object | Assertions appended to every scenario's own conversation assertions |
 
-```yaml
-spec:
-  evaluation:
-    metrics:
-      - latency
-      - tokens
-      - cost
-      - quality
-    timeout: 10m
-    maxRetries: 3
-    concurrency: 5
+## Complete Example
+
+A minimal bundle layout:
+
+```
+my-bundle/
+├── config.arena.yaml
+├── prompts/
+│   └── assistant.yaml
+├── providers/
+│   └── gpt4.provider.yaml
+└── scenarios/
+    ├── billing.scenario.yaml
+    └── support.scenario.yaml
 ```
 
-### `suspend`
-
-When `true`, prevents new jobs from being created. Existing jobs continue running.
+`config.arena.yaml`:
 
 ```yaml
-spec:
-  suspend: true
-```
-
-## Status fields
-
-### `phase`
-
-| Value | Description |
-|-------|-------------|
-| `Pending` | Config is being validated |
-| `Ready` | Config is valid and ready for jobs |
-| `Invalid` | Config has validation errors |
-| `Error` | Error occurred during validation |
-
-### `resolvedSource`
-
-Information about the resolved ArenaSource.
-
-| Field | Description |
-|-------|-------------|
-| `revision` | Artifact revision from the source |
-| `url` | Artifact download URL |
-| `scenarioCount` | Number of scenarios matching filter |
-
-### `resolvedProviders`
-
-List of validated provider names.
-
-### `conditions`
-
-| Type | Description |
-|------|-------------|
-| `Ready` | Overall readiness of the config |
-| `SourceResolved` | ArenaSource successfully resolved |
-| `ProvidersValid` | All provider references are valid |
-| `ToolRegistriesValid` | All tool registry references are valid |
-
-### `lastValidatedAt`
-
-Timestamp of the last successful validation.
-
-## Complete examples
-
-### Basic configuration
-
-```yaml
-apiVersion: omnia.altairalabs.ai/v1alpha1
-kind: ArenaConfig
+apiVersion: promptkit.altairalabs.ai/v1alpha1
+kind: Arena
 metadata:
-  name: basic-eval
-  namespace: arena
+  name: customer-support-eval
 spec:
-  sourceRef:
-    name: my-prompts
+  prompt_configs:
+    - id: assistant
+      file: prompts/assistant.yaml
 
   providers:
-    - name: claude-provider
-
-  evaluation:
-    timeout: 5m
-```
-
-### Multi-provider comparison
-
-```yaml
-apiVersion: omnia.altairalabs.ai/v1alpha1
-kind: ArenaConfig
-metadata:
-  name: provider-comparison
-  namespace: arena
-spec:
-  sourceRef:
-    name: customer-support-prompts
+    - file: providers/gpt4.provider.yaml
+      group: default
 
   scenarios:
-    include:
-      - "scenarios/*.yaml"
-    exclude:
-      - "*-experimental.yaml"
+    - file: scenarios/billing.scenario.yaml
+    - file: scenarios/support.scenario.yaml
 
-  providers:
-    - name: claude-sonnet
-    - name: gpt-4o
-    - name: gemini-pro
-
-  evaluation:
-    metrics:
-      - latency
-      - tokens
-      - cost
-      - quality
-    timeout: 10m
-    concurrency: 10
+  defaults:
+    temperature: 0.5
+    max_tokens: 500
+    run_timeout: 2m
+    output:
+      dir: out
+      formats:
+        - json
 ```
 
-### Self-play evaluation
+### Providers from CRDs
+
+When you plan to supply providers from Provider/AgentRuntime CRDs via the ArenaJob, leave the `providers` list empty in the config file. The `group` names you would have used still apply — the ArenaJob's provider-group keys map onto them:
 
 ```yaml
-apiVersion: omnia.altairalabs.ai/v1alpha1
-kind: ArenaConfig
-metadata:
-  name: debate-eval
-  namespace: arena
 spec:
-  sourceRef:
-    name: debate-prompts
+  # Providers supplied by ArenaJob.spec.providers (resolved from CRDs)
+  providers: []
 
-  providers:
-    - name: claude-sonnet
-
-  selfPlay:
-    enabled: true
-    rounds: 5
-    swapRoles: true
-
-  evaluation:
-    timeout: 15m
-    maxRetries: 2
+  scenarios:
+    - file: scenarios/billing.scenario.yaml
 ```
 
-### With tool access
+## Using the config file with an ArenaJob
 
-```yaml
-apiVersion: omnia.altairalabs.ai/v1alpha1
-kind: ArenaConfig
-metadata:
-  name: tool-eval
-  namespace: arena
-spec:
-  sourceRef:
-    name: agent-prompts
-
-  providers:
-    - name: claude-sonnet
-
-  toolRegistries:
-    - name: search-tools
-    - name: calculator-tools
-
-  evaluation:
-    timeout: 5m
-    concurrency: 5
-```
-
-## Using ArenaConfig with ArenaJob
-
-ArenaConfig is referenced by ArenaJob to execute test runs:
+An ArenaJob references the bundle via `sourceRef` and selects this file via `arenaFile`:
 
 ```yaml
 apiVersion: omnia.altairalabs.ai/v1alpha1
 kind: ArenaJob
 metadata:
-  name: evaluation-001
+  name: eval-001
   namespace: arena
 spec:
   sourceRef:
-    name: provider-comparison
+    name: customer-support-source
+  arenaFile: config.arena.yaml
+  providers:
+    default:
+      - providerRef:
+          name: gpt4-prod
+    judge:
+      - providerRef:
+          name: claude-opus
 ```
 
 ## Workflow
 
-1. **Create ArenaSource** - Define where to fetch PromptKit bundles
-2. **Create Providers** - Configure LLM credentials
-3. **Create ArenaConfig** - Combine source with providers and settings
-4. **Create ArenaJob** - Execute the evaluation
+1. **Author the bundle** — write `config.arena.yaml` alongside your prompts and scenarios.
+2. **Create an ArenaSource** — point it at the bundle (git, OCI, ConfigMap, or workspace).
+3. **Create an ArenaJob** — reference the source and set `arenaFile`; optionally supply providers/tools from CRDs.
 
-```mermaid
-flowchart LR
-    ArenaSource --> ArenaConfig
-    Providers["Provider(s)"] --> ArenaConfig
-    ArenaConfig --> ArenaJob --> Results
+```
+config.arena.yaml (in bundle)
+        │
+ArenaSource ──▶ ArenaJob ──▶ Workers ──▶ Results
 ```
 
-## Related resources
+## Related Resources
 
-- **[ArenaSource](/reference/evaluation/arenasource)**: Defines bundle sources
-- **[ArenaJob](/reference/evaluation/arenajob)**: Executes test runs
-- **[Provider](/reference/core/provider)**: LLM provider configuration
-- **[ToolRegistry](/reference/core/toolregistry)**: Tool definitions
+- **[ArenaSource](/reference/evaluation/arenasource/)**: Defines the bundle source that contains this config file
+- **[ArenaJob](/reference/evaluation/arenajob/)**: Executes a run using this config file (`spec.arenaFile`)
+- **[Provider](/reference/core/provider/)**: LLM provider configuration
+- **[ToolRegistry](/reference/core/toolregistry/)**: Tool definitions

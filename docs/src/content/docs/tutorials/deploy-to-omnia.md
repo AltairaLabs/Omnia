@@ -27,9 +27,12 @@ This generates a ready-to-paste `config:` block containing:
   fresh token — any previously downloaded profile for this workspace stops
   working) or **reuse** the token you saved, so re-exporting doesn't pile up
   duplicate keys.
-- a **configure step** listing the **Ready** Providers (with their roles) and
-  SkillSources in the workspace — non-Ready resources (Unavailable, Error, still
-  syncing) are excluded, since a deployment that references one fails. You check
+- a **configure step** listing the **Ready** Providers and SkillSources in the
+  workspace. Only `llm`-role Providers are exported — embedding, TTS, STT and
+  image Providers are workspace-level services (consumed by memory-api and the
+  like), not per-agent extras, and bundling them into a deployment breaks the
+  pack at first request. Non-Ready resources (Unavailable, Error, still syncing)
+  are also excluded, since a deployment that references one fails. You check
   which to include and pick **one LLM as the `default`** provider; the runtime
   requires a provider bound under `default` as its primary, so the export marks
   your choice as `name: default` (with `ref` pointing at the real Provider).
@@ -43,8 +46,7 @@ config:
   api_token: omnia_sk_...        # freshly minted, show-once, revocable
   # --- discovered in this workspace (pick what you need) ---
   providers:
-    - { name: default,  ref: claude-sonnet, role: llm }
-    - { name: embedder, ref: text-embed-3,  role: embedding }
+    - { name: default, ref: claude-sonnet, role: llm }
   skills:
     - docs-search
 ```
@@ -58,6 +60,35 @@ workspace, but anyone holding it can act with your role here.
 If your deployment uses a read-only API-key store, the dashboard still exports
 the discovery menu but leaves the `api_token` as a placeholder — mint a token
 manually under **Settings → API keys** and paste it in.
+
+## Autoconfigure via browser login
+
+When the dashboard runs in OAuth mode, the deploy CLI can skip the manual
+copy-paste and mint everything through a browser-login flow, the same shape as
+`gcloud auth login` or `gh auth login`. This is the fastest path for a local
+workstation:
+
+1. The CLI opens the dashboard's browser-login entry point
+   (`GET /api/cli/authorize`), passing a loopback `callback` URL and a random
+   `state`.
+2. Your browser goes through the normal OIDC login (if you aren't already
+   signed in), then lands on a **workspace picker** (`/cli/select`). You choose
+   the target workspace.
+3. Granting (`POST /api/cli/grant`) re-checks your **editor** access to that
+   workspace, mints a **one-time exchange code**, and redirects the browser back
+   to the CLI's loopback callback with `?code=&state=`. No token crosses the
+   browser — only the short-lived code.
+4. The CLI exchanges the code on a back channel (`POST /api/cli/token`). That
+   endpoint mints a **workspace-scoped, short-lived** `omnia_sk_` token (default
+   TTL 1 hour, `OMNIA_AUTH_CLI_TOKEN_TTL_SECONDS`) and returns it **together with
+   the deploy profile** — the same `api_endpoint` / `workspace` / `providers` /
+   `skills` discovery menu the dashboard export produces. The CLI writes the
+   ready-to-use `config:` block for you.
+
+The exact CLI command that drives this lives in the `promptarena` deploy
+tooling; the endpoints above are the Omnia-side contract. Browser login requires
+the dashboard to be in OAuth mode and API-key creation to be enabled — otherwise
+fall back to the dashboard export or manual setup.
 
 ## Manual setup (fallback)
 
