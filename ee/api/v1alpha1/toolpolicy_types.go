@@ -107,17 +107,6 @@ type HeaderInjectionRule struct {
 	CEL string `json:"cel,omitempty"`
 }
 
-// ToolPolicyAuditConfig configures audit logging for the policy.
-type ToolPolicyAuditConfig struct {
-	// logDecisions enables logging of all policy decisions (allow/deny).
-	// +optional
-	LogDecisions bool `json:"logDecisions,omitempty"`
-
-	// redactFields lists field names whose values should be redacted in audit logs.
-	// +optional
-	RedactFields []string `json:"redactFields,omitempty"`
-}
-
 // ToolPolicySpec defines the desired state of ToolPolicy.
 type ToolPolicySpec struct {
 	// selector defines which tools this policy applies to.
@@ -147,10 +136,6 @@ type ToolPolicySpec struct {
 	// headerInjection defines headers to inject into tool call requests after policy evaluation passes.
 	// +optional
 	HeaderInjection []HeaderInjectionRule `json:"headerInjection,omitempty"`
-
-	// audit configures audit logging for policy decisions.
-	// +optional
-	Audit *ToolPolicyAuditConfig `json:"audit,omitempty"`
 }
 
 // ToolPolicyPhase represents the current phase of the ToolPolicy.

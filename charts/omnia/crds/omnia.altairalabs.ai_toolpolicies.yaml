@@ -57,20 +57,6 @@ spec:
           spec:
             description: spec defines the desired state of ToolPolicy
             properties:
-              audit:
-                description: audit configures audit logging for policy decisions.
-                properties:
-                  logDecisions:
-                    description: logDecisions enables logging of all policy decisions
-                      (allow/deny).
-                    type: boolean
-                  redactFields:
-                    description: redactFields lists field names whose values should
-                      be redacted in audit logs.
-                    items:
-                      type: string
-                    type: array
-                type: object
               headerInjection:
                 description: headerInjection defines headers to inject into tool call
                   requests after policy evaluation passes.
