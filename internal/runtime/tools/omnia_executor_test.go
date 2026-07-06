@@ -47,6 +47,7 @@ import (
 	pktools "github.com/AltairaLabs/PromptKit/runtime/tools"
 
 	"github.com/altairalabs/omnia/internal/tracing"
+	"github.com/altairalabs/omnia/pkg/policy"
 	toolsv1 "github.com/altairalabs/omnia/pkg/tools/v1"
 )
 
@@ -1121,6 +1122,32 @@ func TestOmniaExecutor_BuildHTTPHeaders_WithAuth(t *testing.T) {
 
 	if headers["Authorization"] != "Bearer my-secret-token" {
 		t.Errorf("Authorization = %q, want %q", headers["Authorization"], "Bearer my-secret-token")
+	}
+}
+
+// TestBuildHTTPHeaders_ToolCredentialSurvivesForwardedToken is the customer-facing
+// (Splitz) security regression: a tool with its own authSecretRef credential must
+// present THAT credential to its upstream, even when the caller arrived with an
+// inbound bearer token propagated on the context. Before the auth-passthrough was
+// removed, ToOutboundHeaders re-emitted the caller's token as the outbound
+// Authorization and clobbered the tool's — leaking the user's token to an
+// arbitrary upstream and breaking machine-to-machine auth. The tool's own
+// credential must win.
+func TestBuildHTTPHeaders_ToolCredentialSurvivesForwardedToken(t *testing.T) {
+	e := NewOmniaExecutor(logr.Discard(), nil)
+	cfg := &HTTPCfg{AuthType: "bearer", AuthToken: "tool-sa-key"}
+
+	// Simulate an authenticated end-user whose inbound bearer token is
+	// propagated into the runtime, as it is in production.
+	ctx := policy.WithAuthorization(context.Background(), "Bearer caller-jwt")
+
+	headers, err := e.buildHTTPHeaders(ctx, cfg, "tool", "handler", nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if headers["Authorization"] != "Bearer tool-sa-key" {
+		t.Errorf("Authorization = %q, want the tool's own credential %q — the forwarded caller token must NOT overwrite it",
+			headers["Authorization"], "Bearer tool-sa-key")
 	}
 }
 
