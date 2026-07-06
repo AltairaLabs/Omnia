@@ -165,29 +165,6 @@ Defines behavior when policy evaluation encounters an error (e.g., CEL expressio
 | `deny` | (Default) Deny the request on evaluation failure. |
 | `allow` | Allow the request despite the evaluation error. |
 
-### `audit`
-
-Configures audit logging for policy decisions.
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `logDecisions` | bool | No | Enable logging of all policy decisions (allow and deny). |
-| `redactFields` | []string | No | Field names whose values are redacted in audit logs. |
-
-```yaml
-spec:
-  audit:
-    logDecisions: true
-    redactFields:
-      - credit_card
-      - ssn
-      - password
-```
-
-:::caution[Not yet wired]
-The CRD accepts `audit.logDecisions` and `audit.redactFields`, and the operator compiles them onto the policy, but the policy-broker does not currently read either field: it always emits a `policy_decision`/`broker_tool_decision` log pair for any deny or audit-mode would-deny outcome (regardless of `logDecisions`), and it never redacts `body`/`headers` values in those logs (regardless of `redactFields`). Treat both fields as reserved for now — do not rely on `redactFields` to keep sensitive request data out of broker logs.
-:::
-
 ## Status fields
 
 ### `phase`
@@ -285,11 +262,6 @@ spec:
 
   mode: enforce
   onFailure: deny
-
-  audit:
-    logDecisions: true
-    redactFields:
-      - credit_card
 ```
 
 Expected status after reconciliation:

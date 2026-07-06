@@ -162,25 +162,6 @@ spec:
   mode: enforce
 ```
 
-## Configure audit logging and redaction
-
-The `audit` block is accepted by the CRD and compiled onto the policy:
-
-```yaml
-spec:
-  audit:
-    logDecisions: true
-    redactFields:
-      - credit_card
-      - ssn
-      - api_key
-      - password
-```
-
-:::caution[Not yet wired]
-`logDecisions` and `redactFields` are not currently read by the policy-broker. In practice the broker already logs a `policy_decision`/`broker_tool_decision` pair for every deny and every audit-mode would-deny outcome regardless of `logDecisions` (fully-allowed, no-rule-matched calls are skipped to keep noise down) — and it does **not** redact any `body`/`headers` values in those logs, so `redactFields` currently has no effect. Don't put sensitive field names in a ToolPolicy body expecting them to be masked; if a rule's CEL touches sensitive data, keep that data out of `deny.message` instead.
-:::
-
 ## Apply a policy to all tools in a registry
 
 Omit the `tools` list in the selector to match every tool in the registry:
