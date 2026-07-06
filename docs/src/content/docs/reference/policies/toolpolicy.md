@@ -9,7 +9,7 @@ sidebar:
 ToolPolicy is an Enterprise feature. See [Licensing](/explanation/platform/licensing/) for details.
 :::
 
-The ToolPolicy custom resource defines CEL-based access control rules for tool invocations. Rules are evaluated by a policy proxy sidecar that intercepts requests to tool services.
+The ToolPolicy custom resource defines CEL-based access control rules for tool invocations. Rules are evaluated by the **policy-broker** sidecar in the agent pod: the runtime calls it once per server-executed tool call (`POST /v1/decision`) before the tool runs, rather than a proxy intercepting the tool request itself. See [Policy Engine Architecture](/explanation/security/policy-engine/) for the full PDP/PEP model.
 
 ## API version
 
@@ -22,7 +22,7 @@ kind: ToolPolicy
 
 ### `selector`
 
-Defines which tools this policy applies to. The proxy matches incoming requests based on the `X-Omnia-Tool-Registry` and `X-Omnia-Tool-Name` headers.
+Defines which tools this policy applies to. The broker matches incoming decision requests based on the `X-Omnia-Tool-Registry` and `X-Omnia-Tool-Name` headers.
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
@@ -75,6 +75,7 @@ The following variables are available in CEL expressions:
 |----------|------|-------------|
 | `headers` | `map<string, string>` | All HTTP request headers (first value only for multi-value headers). |
 | `body` | `map<string, dyn>` | Parsed JSON request body. Empty map if body is not JSON. |
+| `identity` | `map<string, dyn>` | Structured caller identity (`origin`, `subject`, `endUser`, `workspace`, `agent`, `role`, `claims`) sent by the runtime alongside headers/body, so identity-aware rules don't depend on lossy header-flattening. |
 
 #### CEL string extensions
 
@@ -143,7 +144,7 @@ spec:
 
     # Computed value
     - header: X-Request-Source
-      cel: '"policy-proxy/" + headers["X-Omnia-Agent-Name"]'
+      cel: '"policy-broker/" + headers["X-Omnia-Agent-Name"]'
 ```
 
 ### `mode`
@@ -152,8 +153,8 @@ Controls how the policy is applied.
 
 | Value | Description |
 |-------|-------------|
-| `enforce` | (Default) Deny rules block the request with a 403 response. |
-| `audit` | Deny rules are evaluated but the request is allowed through. Violations are logged with `wouldDeny: true`. |
+| `enforce` | (Default) The broker returns `allow: false` for a matched deny rule; the runtime aborts the tool dispatch instead of calling the tool. See [Denial response format](#denial-response-format) below — there is no HTTP 403, since the decision endpoint always answers 200. |
+| `audit` | Deny rules are evaluated but the request is allowed through. The decision returned to the runtime carries `wouldDeny: true`; the broker's own `policy_decision` log line for the match has `allowed: true` and a non-empty `deniedBy` naming the rule that would have denied it. |
 
 ### `onFailure`
 
@@ -163,25 +164,6 @@ Defines behavior when policy evaluation encounters an error (e.g., CEL expressio
 |-------|-------------|
 | `deny` | (Default) Deny the request on evaluation failure. |
 | `allow` | Allow the request despite the evaluation error. |
-
-### `audit`
-
-Configures audit logging for policy decisions.
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `logDecisions` | bool | No | Enable logging of all policy decisions (allow and deny). |
-| `redactFields` | []string | No | Field names whose values are redacted in audit logs. |
-
-```yaml
-spec:
-  audit:
-    logDecisions: true
-    redactFields:
-      - credit_card
-      - ssn
-      - password
-```
 
 ## Status fields
 
@@ -218,15 +200,20 @@ When using `kubectl get toolpolicies`, the following columns are displayed:
 
 ## Denial response format
 
-When a request is denied, the proxy returns HTTP 403 with:
+The broker always answers `POST /v1/decision` with HTTP 200 — it is a decision service, not a reverse proxy, so there is no HTTP-level error status for a policy decision. A denied call is expressed in the decision body itself:
 
 ```json
 {
-  "error": "policy_denied",
-  "rule": "max-refund-amount",
-  "message": "Refund amount exceeds the $500 limit"
+  "allow": false,
+  "deniedBy": "max-refund-amount",
+  "message": "Refund amount exceeds the $500 limit",
+  "mode": "enforce",
+  "wouldDeny": false,
+  "injectedHeaders": null
 }
 ```
+
+The runtime reads `allow: false`, aborts the tool dispatch, and surfaces `message` (with `deniedBy` identifying the rule) as a policy-denied tool-call error instead of invoking the tool.
 
 ## Complete example
 
@@ -271,15 +258,10 @@ spec:
     - header: X-Tenant-Id
       cel: 'headers["X-Omnia-Claim-Customer-Id"]'
     - header: X-Audit-Source
-      value: "policy-proxy"
+      value: "policy-broker"
 
   mode: enforce
   onFailure: deny
-
-  audit:
-    logDecisions: true
-    redactFields:
-      - credit_card
 ```
 
 Expected status after reconciliation:

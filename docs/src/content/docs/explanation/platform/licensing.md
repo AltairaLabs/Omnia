@@ -229,7 +229,7 @@ features.
 
 Enforcement is deliberately light. Omnia is **honour-system** licensing: most
 Enterprise features are gated only by the `enterprise.enabled` deploy flag, and
-each Enterprise component (the operator plus the memory, privacy and policy-proxy
+each Enterprise component (the operator plus the memory, privacy and policy-broker
 pods) logs a one-time **startup reminder** when it is running Enterprise features
 without a valid license. That reminder never blocks — the features keep working.
 
@@ -246,11 +246,13 @@ What the license actually enforces today:
 
 What is **not** yet enforced:
 
-- The `memoryEnterprise`, `privacyEnterprise` and `policyProxy` entitlement
-  booleans exist in the license model (added in #1682) and are surfaced on
-  `GET /api/v1/license`, but no backend reads them yet. The memory, privacy and
-  policy services run whenever `enterprise.enabled=true`, licensed or not. Runtime
-  gates for these are planned in follow-up work.
+- The `memoryEnterprise`, `privacyEnterprise` and `policyProxy` (ToolPolicy
+  enforcement — the entitlement field keeps its original internal name)
+  entitlement booleans exist in the license model (added in #1682) and are
+  surfaced on `GET /api/v1/license`, but no backend reads them yet. The
+  memory, privacy and policy-broker services run whenever
+  `enterprise.enabled=true`, licensed or not. Runtime gates for these are
+  planned in follow-up work.
 
 ### Activation tracking (optional telemetry)
 

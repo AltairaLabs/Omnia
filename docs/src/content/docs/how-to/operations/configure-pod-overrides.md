@@ -26,7 +26,7 @@ sidebar:
 - **Tolerations / topologySpreadConstraints / imagePullSecrets / extraVolumes / extraVolumeMounts / extraEnv / extraEnvFrom:** appended.
 - **Affinity / priorityClassName / serviceAccountName:** your value replaces the operator default when non-empty.
 
-For multi-container pods (`AgentRuntime` facade + runtime), container-scoped overrides (`extraEnv`, `extraEnvFrom`, `extraVolumeMounts`) apply to both user containers but skip operator-injected sidecars such as the enterprise `policy-proxy`. Per-container env remains available via `spec.facades[].extraEnv` and `spec.runtime.extraEnv`.
+For multi-container pods (`AgentRuntime` facade + runtime), container-scoped overrides (`extraEnv`, `extraEnvFrom`, `extraVolumeMounts`) apply to both user containers but skip operator-injected sidecars such as the enterprise `policy-broker`. Per-container env remains available via `spec.facades[].extraEnv` and `spec.runtime.extraEnv`.
 
 ## Example — Azure key vault via CSI (workspace session-api)
 

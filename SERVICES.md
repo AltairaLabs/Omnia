@@ -67,7 +67,8 @@ request path), the policy-broker is a **called decision** sidecar — the
 runtime's `OmniaExecutor.dispatch` makes a `POST /v1/decision` call to it over
 `POLICY_BROKER_URL` (localhost `:8090`) per tool call and gets back an
 allow/deny + injected-headers decision; it never proxies traffic itself. It
-watches ToolPolicy CRDs via an informer and fails closed by default.
+watches ToolPolicy CRDs via a list-and-poll loop (`ee/pkg/policy.Watcher`,
+scoped to the agent's namespace) and fails closed by default.
 
 ### Data plane (per workspace / service-group)
 
@@ -188,7 +189,7 @@ Doctor read that status to dial the management plane. See
 | Runtime | Memory API | HTTP | Memory retrieval and extraction (when memory enabled) |
 | Memory API | Redis Streams | Redis | Memory event publishing (create/delete) |
 | Runtime | Policy Broker | HTTP | `OmniaExecutor.dispatch` calls `POST /v1/decision` over `POLICY_BROKER_URL` (localhost) per tool call; returns allow/deny + injected headers, fail-closed by default |
-| Policy Broker | K8s API | K8s client | ToolPolicy CRD watching (informer) |
+| Policy Broker | K8s API | K8s client | ToolPolicy CRD watching (list-and-poll loop) |
 | Dashboard | Facade (mgmt twin) | WebSocket | Management-plane chat/"Try this agent" — dials the internal `facade-mgmt` twin port from `status.managementEndpoints.ws` with a dashboard-minted mgmt-plane JWT (external ports reject it) |
 | Doctor | Facade (mgmt twin) | WebSocket | Diagnostic round-trip on the internal mgmt twin port (falls back to external 8080 when no mgmt endpoint advertised); exchanges its SA token for a mgmt-plane JWT via the dashboard `/api/auth/service-token` endpoint |
 | Doctor | Session API / Memory API | HTTP | Reachability + CRUD round-trip probes (create then delete a probe record) |

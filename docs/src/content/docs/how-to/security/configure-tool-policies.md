@@ -149,19 +149,10 @@ spec:
   mode: audit  # Log violations without blocking
 ```
 
-The proxy logs audit decisions with `wouldDeny: true`:
+The policy-broker logs the match (`mode: "audit"`, `allowed: true`, `deniedBy` naming the rule that would have denied it — `wouldDeny: true` is returned to the runtime in the decision response, not in this log line):
 
 ```json
-{
-  "msg": "policy_decision",
-  "decision": "deny",
-  "wouldDeny": true,
-  "mode": "audit",
-  "policy": "new-limits",
-  "rule": "strict-amount-check",
-  "path": "/v1/refund",
-  "method": "POST"
-}
+{"msg":"policy_decision","allowed":true,"deniedBy":"strict-amount-check","message":"Amount exceeds strict limit","mode":"audit","policy":"new-limits"}
 ```
 
 Once satisfied, switch to `enforce`:
@@ -170,23 +161,6 @@ Once satisfied, switch to `enforce`:
 spec:
   mode: enforce
 ```
-
-## Configure audit logging and redaction
-
-Enable full decision logging and redact sensitive fields:
-
-```yaml
-spec:
-  audit:
-    logDecisions: true
-    redactFields:
-      - credit_card
-      - ssn
-      - api_key
-      - password
-```
-
-With `logDecisions: true`, every request (allowed and denied) generates a structured log entry. Fields listed in `redactFields` have their values masked in log output.
 
 ## Apply a policy to all tools in a registry
 
