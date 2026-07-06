@@ -240,6 +240,9 @@ Browser ──WebSocket──▶ Facade ──gRPC──▶ Runtime ──HTTP�
 | `omnia_facade_realtime_sessions_parked_total` | Facade | Counter | Realtime sessions parked on unintentional WebSocket close (blip-resume) |
 | `omnia_facade_realtime_reattach_total` | Facade | Counter | Successful realtime session reattaches via `resume=<session_id>` |
 | `omnia_facade_realtime_park_expired_total` | Facade | Counter | Parked realtime sessions expired before reattach |
+| `omnia_toolpolicy_decisions_total` | Policy Broker | Counter | ToolPolicy decisions by `outcome` (allowed/denied/would_deny), `tool_registry`, `policy` |
+| `omnia_toolpolicy_decision_duration_seconds` | Policy Broker | Histogram | Broker decision latency (0.5 ms – 0.5 s buckets) |
+| `omnia_toolpolicy_active_policies` | Policy Broker | Gauge | ToolPolicies currently compiled/loaded by the broker |
 
 ## Key Architectural Rules
 

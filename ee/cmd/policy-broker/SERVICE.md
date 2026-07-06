@@ -23,6 +23,8 @@ enforcement now happens exclusively through this decision-broker path.
 - Its own audit-style structured logging of policy decisions
   (`policy_decision` / `broker_tool_decision` log lines); skips
   wholly-uninteresting allows (no rule matched) to keep audit noise low.
+- Prometheus metrics for decision volume, latency, and active-policy count,
+  exported on `/metrics` (see [Observability](#observability)).
 
 ## Inputs
 
@@ -69,12 +71,20 @@ denied call never receives injected headers. `wouldDeny` surfaces
 "would-have-denied" for policies running in dry-run/audit mode without
 actually blocking the call.
 
-### Health server (`:8091`, `POLICY_BROKER_HEALTH_ADDR`)
+### Health + metrics server (`:8091`, `POLICY_BROKER_HEALTH_ADDR`)
 
 | Path | Description |
 |------|-------------|
 | `GET /healthz` | Liveness probe |
 | `GET /readyz` | Readiness probe |
+| `GET /metrics` | Prometheus metrics (see [Observability](#observability)) |
+
+The container port for `:8091` is named **`metrics`** (not `broker-health`)
+so the existing agent-pod scrape config picks it up with no changes — the
+`omnia-agents` Prometheus job and the `PodMonitor` both select container
+ports named `metrics` (the same convention the facade `:8081` and runtime
+`:9001` health/metrics ports follow). `/metrics` shares the health mux
+rather than opening a dedicated port.
 
 ### K8s API
 
@@ -128,7 +138,20 @@ standalone reconciled Deployment.
 
 ## Observability
 
-**Metrics**: None currently — policy decisions are logged, not exported as
-Prometheus metrics.
+**Metrics**: Exported on `/metrics` (`:8091`), agent-labeled with the same
+`{agent, namespace}` const-labels as the facade and runtime (sourced from
+`OMNIA_AGENT_NAME` — injected via the downward API on the pod's
+`app.kubernetes.io/instance` label — and `OMNIA_NAMESPACE`):
+
+| Metric | Type | Labels | Purpose |
+|--------|------|--------|---------|
+| `omnia_toolpolicy_decisions_total` | Counter | `outcome` (`allowed`/`denied`/`would_deny`), `tool_registry`, `policy` | ToolPolicy decision volume by outcome. `policy` is the matched `deniedBy` rule/policy (empty on a clean allow). |
+| `omnia_toolpolicy_decision_duration_seconds` | Histogram | — | Broker decision latency (buckets 0.5 ms – 0.5 s). |
+| `omnia_toolpolicy_active_policies` | Gauge | — | ToolPolicies currently compiled and loaded by the broker. |
+
+These are **operational** signals (decision rates, latency, loaded-policy
+count), not the privacy/compliance audit trail — enforcement events still
+flow through the structured `policy_decision` logs. See `CLAUDE.md` →
+"Observability Boundaries".
 
 **Traces**: None.

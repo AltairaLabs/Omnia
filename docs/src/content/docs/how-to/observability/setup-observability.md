@@ -167,6 +167,18 @@ The session-api exposes HTTP request metrics and event publishing metrics. Prome
 | `omnia_session_api_events_published_total` | Counter | status | Redis stream publish attempts (success/error) |
 | `omnia_session_api_event_publish_duration_seconds` | Histogram | — | Time to publish an event to Redis Streams |
 
+### Policy Broker metrics
+
+The policy-broker sidecar (Enterprise) exposes ToolPolicy decision metrics on `/metrics`. Like the facade and runtime, its metrics port is named `metrics`, so the agent-pod scrape config picks it up with no extra configuration. All series carry `agent` and `namespace` labels.
+
+| Metric | Type | Labels | Description |
+|--------|------|--------|-------------|
+| `omnia_toolpolicy_decisions_total` | Counter | outcome, tool_registry, policy | ToolPolicy decisions by `outcome` (`allowed`/`denied`/`would_deny`). `policy` names the matched deny rule (empty on a clean allow). |
+| `omnia_toolpolicy_decision_duration_seconds` | Histogram | — | Broker decision latency (0.5 ms – 0.5 s buckets) |
+| `omnia_toolpolicy_active_policies` | Gauge | — | ToolPolicies currently compiled and loaded by the broker |
+
+These are operational signals only — enforcement/audit events remain in the broker's structured `policy_decision` logs, not in metrics. See [Policy Engine Architecture](/explanation/security/policy-engine/).
+
 ### Query metrics in Grafana
 
 1. Open Grafana and go to **Explore**
