@@ -201,6 +201,16 @@ func (r *AgentRuntimeReconciler) buildDeploymentSpec(
 		log.Info("injecting policy-proxy sidecar", "agent", agentRuntime.Name)
 	}
 
+	// Inject policy-broker sidecar when configured. The broker watches
+	// ToolPolicy CRDs in the agent's namespace and serves CEL decisions to the
+	// runtime's PolicyBrokerClient over localhost (see buildRuntimeEnvVars,
+	// which points the runtime at it via POLICY_BROKER_URL).
+	if r.PolicyBrokerImage != "" {
+		brokerContainer := buildPolicyBrokerContainer(agentRuntime, r.PolicyBrokerImage, r.PolicyProxyLicenseAPIURL)
+		containers = append(containers, brokerContainer)
+		log.Info("injecting policy-broker sidecar", "agent", agentRuntime.Name)
+	}
+
 	// Build pod spec
 	podSpec := corev1.PodSpec{
 		ServiceAccountName: facadeServiceAccountName(agentRuntime),
@@ -210,10 +220,11 @@ func (r *AgentRuntimeReconciler) buildDeploymentSpec(
 	}
 
 	// Apply hardened container SecurityContext to facade + runtime. The
-	// policy-proxy sidecar (injected separately by buildPolicyProxyContainer)
-	// sets its own SecurityContext and is skipped here.
+	// policy-proxy and policy-broker sidecars (injected separately by
+	// buildPolicyProxyContainer / buildPolicyBrokerContainer) set their own
+	// SecurityContext and are skipped here.
 	for i := range podSpec.Containers {
-		if podSpec.Containers[i].Name == PolicyProxyContainerName {
+		if podSpec.Containers[i].Name == PolicyProxyContainerName || podSpec.Containers[i].Name == PolicyBrokerContainerName {
 			continue
 		}
 		podSpec.Containers[i].SecurityContext = hardenedContainerSecurityContext()
@@ -297,7 +308,7 @@ func (r *AgentRuntimeReconciler) buildDeploymentSpec(
 	// (#1598). An agent that sets its own SA opts out of the workspace identity
 	// as a unit. Container-level fields come only from the agent's own overrides
 	// (the workspace supplies none) and are applied per-container below to
-	// exclude the operator-injected policy-proxy sidecar.
+	// exclude the operator-injected policy-proxy / policy-broker sidecars.
 	if effOverrides := r.effectivePodOverridesForAgent(agentRuntime); effOverrides != nil {
 		podMeta := metav1.ObjectMeta{Labels: labels, Annotations: podAnnotations}
 		podoverrides.ApplyPod(&podSpec, &podMeta, effOverrides)
@@ -306,7 +317,7 @@ func (r *AgentRuntimeReconciler) buildDeploymentSpec(
 	}
 	if agentRuntime.Spec.PodOverrides != nil {
 		for i := range podSpec.Containers {
-			if podSpec.Containers[i].Name == PolicyProxyContainerName {
+			if podSpec.Containers[i].Name == PolicyProxyContainerName || podSpec.Containers[i].Name == PolicyBrokerContainerName {
 				continue
 			}
 			podoverrides.ApplyContainer(&podSpec.Containers[i], agentRuntime.Spec.PodOverrides)

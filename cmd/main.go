@@ -96,6 +96,7 @@ func main() {
 	var evalWorkerImage string
 	var evalWorkerImagePullPolicy string
 	var policyProxyImage string
+	var policyBrokerImage string
 	var agentWorkspaceReaderClusterRole string
 	var defaultExposureBaseDomain string
 	var defaultExposureGatewayName string
@@ -204,6 +205,8 @@ func main() {
 		"Image pull policy for the arena-eval-worker container.")
 	flag.StringVar(&policyProxyImage, "policy-proxy-image", "",
 		"Image for the ToolPolicy enforcement sidecar. If empty, uses the default from policy_proxy_sidecar.go.")
+	flag.StringVar(&policyBrokerImage, "policy-broker-image", "",
+		"Image for the ToolPolicy decision-broker sidecar. If empty, uses the default from policy_broker_sidecar.go.")
 	flag.StringVar(&agentWorkspaceReaderClusterRole, "agent-workspace-reader-clusterrole", "",
 		"Name of the ClusterRole granting agent pods read access to Workspace CRDs. If empty, no binding is created.")
 	flag.StringVar(&defaultExposureBaseDomain, "default-exposure-base-domain", "",
@@ -411,6 +414,7 @@ func main() {
 		},
 		PolicyProxyImage:         policyProxyImageForEnterprise(enterpriseEnabled, policyProxyImage),
 		PolicyProxyLicenseAPIURL: licenseAPIURL,
+		PolicyBrokerImage:        policyBrokerImageForEnterprise(enterpriseEnabled, policyBrokerImage),
 		RolloutMetrics:           controller.NewRolloutMetrics(prometheus.DefaultRegisterer),
 		WorkspaceContentPath:     workspaceContentPath,
 		MgmtPlaneJWKSURL:         mgmtPlaneJWKSURL,
@@ -645,6 +649,20 @@ func policyProxyImageForEnterprise(enterpriseEnabled bool, image string) string 
 	}
 	if image == "" {
 		return controller.DefaultPolicyProxyImage
+	}
+	return image
+}
+
+// policyBrokerImageForEnterprise returns the policy broker image when enterprise
+// is enabled, or empty string when disabled (which prevents sidecar injection
+// and leaves the runtime's PolicyBrokerClient a no-op). When enterprise is
+// enabled but no image is specified, the default is used.
+func policyBrokerImageForEnterprise(enterpriseEnabled bool, image string) string {
+	if !enterpriseEnabled {
+		return ""
+	}
+	if image == "" {
+		return controller.DefaultPolicyBrokerImage
 	}
 	return image
 }

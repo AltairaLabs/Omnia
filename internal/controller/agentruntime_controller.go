@@ -125,6 +125,13 @@ type AgentRuntimeReconciler struct {
 	// stamped onto the policy-proxy sidecar as OPERATOR_API_URL so it logs a
 	// startup nag when unlicensed (#1682). Empty disables the nag. Never gates.
 	PolicyProxyLicenseAPIURL string
+	// PolicyBrokerImage is the container image for the ToolPolicy decision
+	// sidecar (P2.3). When set, this sidecar is injected into the agent pod
+	// alongside the runtime, which is pointed at it via POLICY_BROKER_URL. If
+	// empty, no broker sidecar is injected and the runtime's PolicyBrokerClient
+	// stays a no-op. Reuses PolicyProxyLicenseAPIURL for the broker's
+	// OPERATOR_API_URL license nag.
+	PolicyBrokerImage string
 	// WorkspaceContentPath is the base path for the workspace content PVC.
 	// When set, the runtime container mounts the workspace content PVC at
 	// this path (read-only) and receives OMNIA_PROMPTPACK_MANIFEST_PATH

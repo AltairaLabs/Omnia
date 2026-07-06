@@ -1666,3 +1666,76 @@ func TestDeployment_GracePeriodClampedAtMax(t *testing.T) {
 		t.Fatalf("TerminationGracePeriodSeconds = %d, want %d (1h drainTimeout must clamp to max)", got, want)
 	}
 }
+
+// TestBuildDeploymentSpec_PolicyBrokerInjectedAndRuntimeActivated is the P2.3a
+// wiring guard: when PolicyBrokerImage is set, the pod must gain a
+// policy-broker sidecar AND the runtime container's PolicyBrokerClient must be
+// activated via POLICY_BROKER_URL — otherwise the sidecar runs but the runtime
+// never calls it (silent no-op enforcement).
+func TestBuildDeploymentSpec_PolicyBrokerInjectedAndRuntimeActivated(t *testing.T) {
+	r := &AgentRuntimeReconciler{PolicyBrokerImage: "ghcr.io/altairalabs/omnia-policy-broker:test"}
+	ar := &omniav1alpha1.AgentRuntime{}
+	ar.Name = "broker-agent"
+	ar.Namespace = "ns"
+	ar.Spec.Facades = []omniav1alpha1.FacadeConfig{{Type: omniav1alpha1.FacadeTypeWebSocket}}
+	ar.Spec.PromptPackRef.Name = "p"
+
+	dep := &appsv1.Deployment{}
+	r.buildDeploymentSpec(context.Background(), dep, ar, newTestPromptPack(), nil, "", nil)
+
+	var brokerC, runtimeC *corev1.Container
+	for i := range dep.Spec.Template.Spec.Containers {
+		c := &dep.Spec.Template.Spec.Containers[i]
+		switch c.Name {
+		case PolicyBrokerContainerName:
+			brokerC = c
+		case RuntimeContainerName:
+			runtimeC = c
+		}
+	}
+	require.NotNil(t, brokerC, "policy-broker sidecar must be injected when PolicyBrokerImage is set")
+	require.NotNil(t, runtimeC, "runtime container must be present")
+
+	found := false
+	for _, e := range runtimeC.Env {
+		if e.Name == "POLICY_BROKER_URL" {
+			found = true
+			assert.Equal(t, fmt.Sprintf("http://localhost:%d", DefaultPolicyBrokerPort), e.Value)
+		}
+	}
+	assert.True(t, found, "runtime container must have POLICY_BROKER_URL set to activate the client")
+
+	failMode := ""
+	for _, e := range runtimeC.Env {
+		if e.Name == "POLICY_BROKER_FAIL_MODE" {
+			failMode = e.Value
+		}
+	}
+	assert.Equal(t, "closed", failMode, "runtime must explicitly set fail-closed mode")
+}
+
+// TestBuildDeploymentSpec_PolicyBrokerAbsentByDefault ensures the sidecar and
+// runtime env var are both absent when PolicyBrokerImage is unset (the
+// non-enterprise / no-broker path), so this feature is a strict no-op unless
+// explicitly configured.
+func TestBuildDeploymentSpec_PolicyBrokerAbsentByDefault(t *testing.T) {
+	r := &AgentRuntimeReconciler{}
+	ar := &omniav1alpha1.AgentRuntime{}
+	ar.Name = "no-broker-agent"
+	ar.Namespace = "ns"
+	ar.Spec.Facades = []omniav1alpha1.FacadeConfig{{Type: omniav1alpha1.FacadeTypeWebSocket}}
+	ar.Spec.PromptPackRef.Name = "p"
+
+	dep := &appsv1.Deployment{}
+	r.buildDeploymentSpec(context.Background(), dep, ar, newTestPromptPack(), nil, "", nil)
+
+	for i := range dep.Spec.Template.Spec.Containers {
+		c := &dep.Spec.Template.Spec.Containers[i]
+		assert.NotEqual(t, PolicyBrokerContainerName, c.Name, "policy-broker sidecar must not be injected without PolicyBrokerImage")
+		if c.Name == RuntimeContainerName {
+			for _, e := range c.Env {
+				assert.NotEqual(t, "POLICY_BROKER_URL", e.Name, "runtime must not receive POLICY_BROKER_URL without PolicyBrokerImage")
+			}
+		}
+	}
+}
