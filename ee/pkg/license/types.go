@@ -48,7 +48,8 @@ type Features struct {
 	// privacy-api: consent, opt-out, DSAR erasure, the central audit hub, and
 	// enforcement-stats.
 	PrivacyEnterprise bool `json:"privacyEnterprise"`
-	// ToolPolicy enables AgentPolicy / CEL enforcement (policy-broker).
+	// ToolPolicy licenses ToolPolicy CEL enforcement via the policy-broker.
+	// (AgentPolicy's toolAccess is core/OSS Istio-based and not gated here.)
 	// json tag stays "policyProxy" for signed-license wire compatibility; the
 	// feature is ToolPolicy/CEL enforcement (policy-proxy was retired).
 	ToolPolicy bool `json:"policyProxy"`
@@ -224,7 +225,7 @@ func (l *License) CanUsePrivacyEnterprise() bool {
 	return l.Features.PrivacyEnterprise || l.IsEnterprise()
 }
 
-// CanUseToolPolicy returns true if AgentPolicy / CEL enforcement is licensed.
+// CanUseToolPolicy returns true if ToolPolicy CEL enforcement is licensed.
 func (l *License) CanUseToolPolicy() bool {
 	return l.Features.ToolPolicy || l.IsEnterprise()
 }
