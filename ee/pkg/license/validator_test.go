@@ -64,10 +64,10 @@ func TestOpenCoreLicense(t *testing.T) {
 	// Enterprise memory/privacy/policy features are paid — off in open-core.
 	assert.False(t, license.Features.MemoryEnterprise)
 	assert.False(t, license.Features.PrivacyEnterprise)
-	assert.False(t, license.Features.PolicyProxy)
+	assert.False(t, license.Features.ToolPolicy)
 	assert.False(t, license.CanUseMemoryEnterprise())
 	assert.False(t, license.CanUsePrivacyEnterprise())
-	assert.False(t, license.CanUsePolicyProxy())
+	assert.False(t, license.CanUseToolPolicy())
 
 	// Check limits
 	assert.Equal(t, 10, license.Limits.MaxScenarios)
@@ -89,10 +89,10 @@ func TestDevLicense(t *testing.T) {
 	// memory/privacy/policy entitlements.
 	assert.True(t, license.Features.MemoryEnterprise)
 	assert.True(t, license.Features.PrivacyEnterprise)
-	assert.True(t, license.Features.PolicyProxy)
+	assert.True(t, license.Features.ToolPolicy)
 	assert.True(t, license.CanUseMemoryEnterprise())
 	assert.True(t, license.CanUsePrivacyEnterprise())
-	assert.True(t, license.CanUsePolicyProxy())
+	assert.True(t, license.CanUseToolPolicy())
 }
 
 func TestLicense_EnterpriseFeatureGates(t *testing.T) {
@@ -103,7 +103,7 @@ func TestLicense_EnterpriseFeatureGates(t *testing.T) {
 	}{
 		{"memory", (*License).CanUseMemoryEnterprise, func(f *Features) { f.MemoryEnterprise = true }},
 		{"privacy", (*License).CanUsePrivacyEnterprise, func(f *Features) { f.PrivacyEnterprise = true }},
-		{"policy", (*License).CanUsePolicyProxy, func(f *Features) { f.PolicyProxy = true }},
+		{"policy", (*License).CanUseToolPolicy, func(f *Features) { f.ToolPolicy = true }},
 	}
 
 	for _, tt := range tests {

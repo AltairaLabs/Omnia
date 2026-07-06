@@ -87,7 +87,7 @@ func TestClient_Refresh_Enterprise(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, lic.CanUseMemoryEnterprise())
 	assert.True(t, lic.CanUsePrivacyEnterprise())
-	assert.True(t, lic.CanUsePolicyProxy())
+	assert.True(t, lic.CanUseToolPolicy())
 	// Cache reflects the fetch.
 	assert.True(t, c.License().CanUseMemoryEnterprise())
 }
@@ -100,7 +100,7 @@ func TestClient_Refresh_OpenCore(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, c.License().CanUseMemoryEnterprise())
 	assert.False(t, c.License().CanUsePrivacyEnterprise())
-	assert.False(t, c.License().CanUsePolicyProxy())
+	assert.False(t, c.License().CanUseToolPolicy())
 }
 
 func TestClient_Refresh_Expired(t *testing.T) {
