@@ -152,8 +152,13 @@ func (e *OmniaExecutor) executeGRPC(
 
 	return retryWithBackoff(ctx, e.log, e.currentSpan(ctx), policy, handler.Timeout.Get(), classify,
 		func(attemptCtx context.Context) (json.RawMessage, error) {
-			// Inject policy metadata.
+			// Inject policy metadata. ToolPolicy broker-injected headers win
+			// over policy metadata on key collision — they're an explicit
+			// enforcement decision.
 			md := PolicyGRPCMetadata(attemptCtx, toolName, handlerName, nil)
+			for k, v := range InjectedHeadersFromContext(attemptCtx) {
+				md[k] = v
+			}
 			if len(md) > 0 {
 				pairs := make([]string, 0, len(md)*2)
 				for k, v := range md {

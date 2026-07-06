@@ -197,5 +197,11 @@ func (e *OmniaExecutor) buildHTTPHeaders(
 		}
 	}
 
+	// ToolPolicy broker-injected headers win over static/auth/policy headers
+	// on key collision — they're an explicit enforcement decision.
+	for k, v := range InjectedHeadersFromContext(ctx) {
+		headers[k] = v
+	}
+
 	return headers, nil
 }

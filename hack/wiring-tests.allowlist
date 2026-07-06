@@ -11,5 +11,4 @@
 cmd/doctor/main.go
 ee/cmd/arena-dev-console/main.go
 ee/cmd/omnia-arena-controller/main.go
-ee/cmd/policy-proxy/main.go
 ee/cmd/promptkit-lsp/main.go

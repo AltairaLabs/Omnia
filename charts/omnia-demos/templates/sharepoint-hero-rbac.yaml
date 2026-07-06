@@ -26,7 +26,7 @@ metadata:
   labels:
     app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
 rules:
-  # toolpolicies (EE): the policy-proxy sidecar in the agent pod lists/watches
+  # toolpolicies (EE): the policy-broker sidecar in the agent pod lists/watches
   # ToolPolicies; without this its initial load fails and enforcement silently
   # degrades. toolregistries/providers/agentruntimes drive runtime config.
   - apiGroups: ["omnia.altairalabs.ai"]

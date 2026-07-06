@@ -70,6 +70,53 @@ func TestReconcileRole_IncludesNamespaceReadAccess(t *testing.T) {
 	assert.True(t, hasNamespaceRead, "facade Role must grant GET on namespaces for workspace name resolution")
 }
 
+// TestReconcileRole_IncludesToolPoliciesReadAccess is the P2.3a wiring guard:
+// the policy-broker sidecar runs under the facade's ServiceAccount and watches
+// ToolPolicy CRDs in the agent's namespace to build CEL decisions. Without
+// get/list/watch on toolpolicies here, the broker RBAC-denies its watch and
+// silently never enforces any policy.
+func TestReconcileRole_IncludesToolPoliciesReadAccess(t *testing.T) {
+	ar := &omniav1alpha1.AgentRuntime{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-agent",
+			Namespace: "test-ns",
+			UID:       "fake-uid",
+		},
+	}
+
+	scheme := runtime.NewScheme()
+	require.NoError(t, omniav1alpha1.AddToScheme(scheme))
+	require.NoError(t, rbacv1.AddToScheme(scheme))
+
+	fakeClient := fake.NewClientBuilder().WithScheme(scheme).Build()
+
+	r := &AgentRuntimeReconciler{
+		Client: fakeClient,
+		Scheme: scheme,
+	}
+
+	err := r.reconcileRole(context.Background(), ar)
+	require.NoError(t, err)
+
+	role := &rbacv1.Role{}
+	err = fakeClient.Get(context.Background(), types.NamespacedName{
+		Name:      "test-agent-facade",
+		Namespace: "test-ns",
+	}, role)
+	require.NoError(t, err)
+
+	var verbs []string
+	for _, rule := range role.Rules {
+		for _, res := range rule.Resources {
+			if res == "toolpolicies" {
+				verbs = rule.Verbs
+			}
+		}
+	}
+	assert.ElementsMatch(t, []string{"get", "list", "watch"}, verbs,
+		"facade Role must grant get/list/watch on toolpolicies for the policy-broker sidecar")
+}
+
 // reconcileRoleAndGetSecretVerbs reconciles the facade Role for ar and returns
 // the verbs granted on core/secrets.
 func reconcileRoleAndGetSecretVerbs(t *testing.T, ar *omniav1alpha1.AgentRuntime) []string {

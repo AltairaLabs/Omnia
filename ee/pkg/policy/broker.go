@@ -11,52 +11,43 @@ package policy
 import (
 	"context"
 	"encoding/json"
-	"log/slog"
 	"net/http"
+
+	"github.com/go-logr/logr"
 
 	omniapolicy "github.com/altairalabs/omnia/pkg/policy"
 )
 
 // Broker response constants.
 const (
-	brokerErrMalformedRequest = "malformed_request"
-	brokerErrMethodNotAllowed = "method_not_allowed"
-	logMsgBrokerToolDecision  = "broker_tool_decision"
-	maxDecisionRequestBytes   = 1 << 20 // 1 MiB
+	brokerErrMalformedRequest  = "malformed_request"
+	brokerErrMethodNotAllowed  = "method_not_allowed"
+	logMsgBrokerPolicyDecision = "policy_decision"
+	logMsgBrokerToolDecision   = "broker_tool_decision"
+	maxDecisionRequestBytes    = 1 << 20 // 1 MiB
 )
 
-// DecisionRequest is the JSON request body for POST /v1/decision. The
-// runtime sends the same (headers, body) shape the evaluator already
-// understands, plus a structured Identity so `identity.*` CEL rules and
-// identity-aware header injection work without lossy header-flattening.
-type DecisionRequest struct {
-	Headers  map[string]string      `json:"headers"`
-	Body     map[string]interface{} `json:"body"`
-	Identity *IdentityPayload       `json:"identity"`
-}
+// DecisionRequest, IdentityPayload, and DecisionResponse are the wire types
+// for POST /v1/decision. They live in the shared pkg/policy package (as
+// omniapolicy.DecisionRequest etc.) so internal/runtime (core, must not
+// import ee/) can build requests and parse responses without depending on
+// this enterprise-only package. Aliased here so this file's existing
+// references keep working unchanged.
+type (
+	// DecisionRequest is the JSON request body for POST /v1/decision. The
+	// runtime sends the same (headers, body) shape the evaluator already
+	// understands, plus a structured Identity so `identity.*` CEL rules and
+	// identity-aware header injection work without lossy header-flattening.
+	DecisionRequest = omniapolicy.DecisionRequest
 
-// IdentityPayload carries the caller's AuthenticatedIdentity fields over the
-// wire so the broker can rebuild an omniapolicy.AuthenticatedIdentity and
-// attach it to the evaluation context.
-type IdentityPayload struct {
-	Origin    string            `json:"origin"`
-	Subject   string            `json:"subject"`
-	EndUser   string            `json:"endUser"`
-	Workspace string            `json:"workspace"`
-	Agent     string            `json:"agent"`
-	Role      string            `json:"role"`
-	Claims    map[string]string `json:"claims"`
-}
+	// IdentityPayload carries the caller's AuthenticatedIdentity fields over
+	// the wire so the broker can rebuild an omniapolicy.AuthenticatedIdentity
+	// and attach it to the evaluation context.
+	IdentityPayload = omniapolicy.IdentityPayload
 
-// DecisionResponse is the JSON response body for POST /v1/decision.
-type DecisionResponse struct {
-	Allow           bool              `json:"allow"`
-	DeniedBy        string            `json:"deniedBy"`
-	Message         string            `json:"message"`
-	Mode            string            `json:"mode"`
-	WouldDeny       bool              `json:"wouldDeny"`
-	InjectedHeaders map[string]string `json:"injectedHeaders"`
-}
+	// DecisionResponse is the JSON response body for POST /v1/decision.
+	DecisionResponse = omniapolicy.DecisionResponse
+)
 
 // BrokerHandler is an HTTP handler that answers "may this tool call
 // proceed, and what headers to inject" over a localhost decision endpoint.
@@ -65,11 +56,11 @@ type DecisionResponse struct {
 // tool egress to transparently intercept.
 type BrokerHandler struct {
 	evaluator *Evaluator
-	logger    *slog.Logger
+	logger    logr.Logger
 }
 
 // NewBrokerHandler creates a new decision-endpoint HTTP handler.
-func NewBrokerHandler(evaluator *Evaluator, logger *slog.Logger) *BrokerHandler {
+func NewBrokerHandler(evaluator *Evaluator, logger logr.Logger) *BrokerHandler {
 	return &BrokerHandler{
 		evaluator: evaluator,
 		logger:    logger,
@@ -86,7 +77,7 @@ func (h *BrokerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	req, err := decodeDecisionRequest(w, r)
 	if err != nil {
-		h.logger.Debug("malformed decision request", "error", err.Error())
+		h.logger.V(1).Info("malformed decision request", "error", err.Error())
 		writeMalformedRequestResponse(w)
 		return
 	}
@@ -94,8 +85,7 @@ func (h *BrokerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx := withIdentityFromPayload(r.Context(), req.Identity)
 
 	decision := h.evaluator.EvaluateWithContext(ctx, req.Headers, req.Body)
-	logDecision(h.logger, r, decision)
-	logBrokerToolDecision(h.logger, decision, req.Headers)
+	logBrokerDecision(h.logger, decision, req.Headers)
 
 	// A denied call must not compute or return injected headers — header
 	// injection only applies to calls that are actually allowed to proceed.
@@ -117,17 +107,26 @@ func decodeDecisionRequest(w http.ResponseWriter, r *http.Request) (DecisionRequ
 	return req, err
 }
 
-// logBrokerToolDecision emits a broker-specific structured log line carrying
-// the tool identity for this decision. The shared logDecision (proxy.go)
-// logs r.URL.Path/r.Method, which for every broker call are always
-// "/v1/decision"/"POST" — that loses which tool was evaluated. The tool
-// identity travels in the request headers instead, so it's added here as
-// explicit fields. Skip wholly-uninteresting allows (no rule matched) to
-// match logDecision's own audit-noise gating.
-func logBrokerToolDecision(logger *slog.Logger, decision Decision, headers map[string]string) {
+// logBrokerDecision emits the broker's own structured decision-audit log
+// lines. It emits two lines: a "policy_decision" line with the decision
+// outcome, and a "broker_tool_decision" line carrying the tool identity
+// (which lives in the request headers, not on the request path/method —
+// every broker call's path/method is always "/v1/decision"/"POST", which
+// loses which tool was evaluated). Skips wholly-uninteresting allows (no
+// rule matched) to keep audit noise low.
+func logBrokerDecision(logger logr.Logger, decision Decision, headers map[string]string) {
 	if decision.Allowed && decision.DeniedBy == "" {
 		return
 	}
+
+	logger.Info(logMsgBrokerPolicyDecision,
+		"allowed", decision.Allowed,
+		"deniedBy", decision.DeniedBy,
+		"message", decision.Message,
+		"mode", string(decision.Mode),
+		"policy", decision.Policy,
+	)
+
 	logger.Info(logMsgBrokerToolDecision,
 		"toolName", headers[HeaderToolName],
 		"toolRegistry", headers[HeaderToolRegistry],
@@ -144,7 +143,7 @@ func logBrokerToolDecision(logger *slog.Logger, decision Decision, headers map[s
 func (h *BrokerHandler) evaluateHeaderInjection(ctx context.Context, req DecisionRequest) map[string]string {
 	injected, err := h.evaluator.EvaluateHeaderInjectionWithContext(ctx, req.Headers, req.Body)
 	if err != nil {
-		h.logger.Error("header injection evaluation failed", "error", err.Error())
+		h.logger.Error(err, "header injection evaluation failed")
 		return nil
 	}
 	return injected

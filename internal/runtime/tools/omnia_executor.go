@@ -81,6 +81,10 @@ type OmniaExecutor struct {
 	openAPIOps      map[string]map[string]*OpenAPIOperation // handler → opID → operation
 	openAPIHeaders  map[string]map[string]string            // handler → headers
 
+	// policyBroker enforces ToolPolicy decisions per tool call. Disabled
+	// (zero behavior change) unless POLICY_BROKER_URL is set.
+	policyBroker *PolicyBrokerClient
+
 	mu sync.RWMutex
 }
 
@@ -102,6 +106,7 @@ func NewOmniaExecutor(log logr.Logger, tp *tracing.Provider) *OmniaExecutor {
 		openAPIBaseURLs: make(map[string]string),
 		openAPIOps:      make(map[string]map[string]*OpenAPIOperation),
 		openAPIHeaders:  make(map[string]map[string]string),
+		policyBroker:    NewPolicyBrokerClient(log),
 	}
 }
 
@@ -344,13 +349,21 @@ func (e *OmniaExecutor) Execute(
 	return result, err
 }
 
-// dispatch routes to the type-specific executor.
+// dispatch routes to the type-specific executor. Every handler type funnels
+// through here, so this is the single chokepoint where ToolPolicy broker
+// enforcement is hooked in: the broker is asked for a decision before any
+// backend call is made, and a deny aborts dispatch entirely.
 func (e *OmniaExecutor) dispatch(
 	ctx context.Context,
 	toolName, handlerName string,
 	handler *HandlerEntry,
 	args json.RawMessage,
 ) (json.RawMessage, error) {
+	ctx, err := e.enforcePolicy(ctx, toolName, handlerName, args)
+	if err != nil {
+		return nil, err
+	}
+
 	switch handler.Type {
 	case ToolTypeHTTP:
 		return e.executeHTTP(ctx, toolName, handlerName, handler, args)
@@ -363,6 +376,29 @@ func (e *OmniaExecutor) dispatch(
 	default:
 		return nil, fmt.Errorf("unsupported handler type: %s", handler.Type)
 	}
+}
+
+// enforcePolicy calls the policy broker for a decision on this tool call.
+// A real denial (enforce mode, not matched-but-audit) aborts dispatch with
+// errPolicyDenied. An allow — including audit-mode "would deny" — proceeds,
+// stashing any broker-injected headers on ctx for the executor's
+// header/metadata builder to merge in. Decide never fails transport-side
+// (fail-mode always resolves to a decision), so there is no error path here.
+func (e *OmniaExecutor) enforcePolicy(
+	ctx context.Context,
+	toolName, handlerName string,
+	args json.RawMessage,
+) (context.Context, error) {
+	decision := e.policyBroker.Decide(ctx, toolName, handlerName, args)
+
+	if !decision.Allow && !decision.WouldDeny {
+		return ctx, fmt.Errorf("%w: %s (rule %q)", errPolicyDenied, decision.Message, decision.DeniedBy)
+	}
+
+	if len(decision.InjectedHeaders) > 0 {
+		ctx = WithInjectedHeaders(ctx, decision.InjectedHeaders)
+	}
+	return ctx, nil
 }
 
 // startSpan starts an OTel span for a tool call.

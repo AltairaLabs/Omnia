@@ -78,7 +78,7 @@ func ApplyPod(spec *corev1.PodSpec, meta *metav1.ObjectMeta, overrides *omniav1a
 
 // ApplyContainer appends container-scoped fields from PodOverrides
 // (ExtraEnv, ExtraEnvFrom, ExtraVolumeMounts) onto the given container. It is nil-safe.
-// Callers MUST skip operator-injected sidecars (e.g. policy-proxy)
+// Callers MUST skip operator-injected sidecars (e.g. policy-broker)
 // that should not receive user env.
 func ApplyContainer(container *corev1.Container, overrides *omniav1alpha1.PodOverrides) {
 	if overrides == nil || container == nil {

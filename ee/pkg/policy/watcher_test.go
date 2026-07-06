@@ -10,10 +10,9 @@ package policy
 
 import (
 	"context"
-	"io"
-	"log/slog"
 	"testing"
 
+	"github.com/go-logr/logr"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/watch"
@@ -24,8 +23,8 @@ import (
 	omniav1alpha1 "github.com/altairalabs/omnia/ee/api/v1alpha1"
 )
 
-func discardLogger() *slog.Logger {
-	return slog.New(slog.NewTextHandler(io.Discard, nil))
+func discardLogger() logr.Logger {
+	return logr.Discard()
 }
 
 func makeTestPolicy(name, celExpr string) *omniav1alpha1.ToolPolicy {

@@ -97,7 +97,7 @@ protocol table, tracing/span inventory. This is the condensed view.
                     │   Operator   │  cmd/main.go — K8s controller-manager
                     │              │  Serves dashboard + REST API
                     └──────┬───────┘
-                           │ manages (+ injects policy-proxy sidecar)
+                           │ manages (+ injects policy-broker sidecar)
             ┌──────────────┴───────────────┐
             │  Agent Pod                    │
             │  ┌──────────┐ gRPC ┌────────┐ │       ┌──────────────┐
@@ -105,7 +105,7 @@ protocol table, tracing/span inventory. This is the condensed view.
             │  │cmd/agent/│      │cmd/    │ │       │ cmd/         │   (+Redis
             │  └──────────┘      │runtime/│ │       │ session-api/ │    warm cache)
             │  ┌──────────────┐  └───┬────┘ │       └──────┬───────┘
-            │  │ Policy Proxy │      │ HTTP │              │ audit drain
+            │  │ Policy Broker│◀calls│ HTTP │              │ audit drain
             │  │ (EE, sidecar)│      ▼      │       ┌──────┴───────┐
             │  └──────────────┘  ┌────────┐ │       │ Privacy API  │◀── audit drain
             └────────────────────│Memory  │─┘       │ (EE)         │    (from memory-api)
@@ -120,7 +120,7 @@ protocol table, tracing/span inventory. This is the condensed view.
 - **Session API** (`cmd/session-api/`): Standalone HTTP service for session CRUD. The facade records conversation off the gRPC bus (RuntimeClient interceptor, #1630) and writes via an HTTP client (`internal/session/httpclient/`), NOT directly to Postgres.
 - **Memory API** (`cmd/memory-api/`): Per-workspace HTTP service for cross-session agentic memory (Postgres + pgvector).
 - **Privacy API** (`ee/cmd/privacy-api/`, EE): Per-workspace owner of consent/opt-out, the central privacy/compliance **audit hub** (session-api + memory-api drain enforcement rows to it, #1673), and the **DSAR erasure lifecycle** (fans `delete-by-user` / batch-delete back to each service-group's session-api + memory-api, #1676).
-- **Policy Proxy** (`ee/cmd/policy-proxy/`, EE): operator-**injected sidecar** in the agent pod (not a standalone Deployment) that reverse-proxies requests after CEL AgentPolicy enforcement.
+- **Policy Broker** (`ee/cmd/policy-broker/`, EE): operator-**injected sidecar** in the agent pod (not a standalone Deployment) — a CEL **decision** service, not a reverse proxy. The runtime's `OmniaExecutor.dispatch` calls it over `POLICY_BROKER_URL` (localhost `:8090`, `POST /v1/decision`) once per tool call and gets back allow/deny + injected headers; it fails closed by default. Watches ToolPolicy CRDs.
 - **Operator** (`cmd/main.go`): Kubernetes controller-manager. Reconciles AgentRuntime, PromptPack, ToolRegistry, Provider, Workspace, and SessionRetentionPolicy CRDs. Also serves the dashboard and REST API.
 - **Dashboard** (`dashboard/`): Next.js frontend embedded in the operator binary via `dashboard/server.js`. Reads session data from session-api through proxy routes; dials the facade's internal mgmt twin for "Try this agent".
 

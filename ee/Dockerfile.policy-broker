@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-# Build the policy-proxy binary
+# Build the policy-broker binary
 FROM golang:1.26 AS builder
 ARG TARGETOS
 ARG TARGETARCH
@@ -20,11 +20,11 @@ COPY internal/ internal/
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     CGO_ENABLED=0 GOOS="${TARGETOS:-linux}" GOARCH="${TARGETARCH}" \
-    go build -a -o policy-proxy ./ee/cmd/policy-proxy
+    go build -a -o policy-broker ./ee/cmd/policy-broker
 
 FROM gcr.io/distroless/static:nonroot
 WORKDIR /
-COPY --from=builder /workspace/policy-proxy .
+COPY --from=builder /workspace/policy-broker .
 USER 65532:65532
 
-ENTRYPOINT ["/policy-proxy"]
+ENTRYPOINT ["/policy-broker"]

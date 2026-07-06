@@ -10,11 +10,11 @@ package main
 
 import (
 	"bytes"
-	"io"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/go-logr/logr"
 
 	"github.com/altairalabs/omnia/ee/pkg/policy"
 )
@@ -47,8 +47,7 @@ func TestBuildDecisionMux_RouteRegistered(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewEvaluator() error = %v", err)
 	}
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	handler := policy.NewBrokerHandler(eval, logger)
+	handler := policy.NewBrokerHandler(eval, logr.Discard())
 
 	mux := buildDecisionMux(handler)
 

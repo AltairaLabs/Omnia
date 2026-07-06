@@ -233,14 +233,14 @@ enterprise:
     # -- Fetch timeout
     timeout: 2m
 
-  # Policy proxy sidecar for ToolPolicy enforcement
-  policyProxy:
+  # Policy broker sidecar for ToolPolicy enforcement
+  policyBroker:
     image:
-      # -- Policy proxy image repository
-      repository: ghcr.io/altairalabs/omnia-policy-proxy
-      # -- Policy proxy image tag (defaults to Chart appVersion)
+      # -- Policy broker image repository
+      repository: ghcr.io/altairalabs/omnia-policy-broker
+      # -- Policy broker image tag (defaults to Chart appVersion)
       tag: ""
-      # -- Policy proxy image pull policy
+      # -- Policy broker image pull policy
       pullPolicy: IfNotPresent
 
   # PromptKit LSP server for YAML validation

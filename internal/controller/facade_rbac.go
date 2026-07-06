@@ -167,6 +167,7 @@ func facadeSecretVerbs(agentRuntime *omniav1alpha1.AgentRuntime) []string {
 
 // reconcileRole creates/updates the facade Role with read access to CRDs and secrets.
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=roles,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=omnia.altairalabs.ai,resources=toolpolicies,verbs=get;list;watch
 func (r *AgentRuntimeReconciler) reconcileRole(
 	ctx context.Context,
 	agentRuntime *omniav1alpha1.AgentRuntime,
@@ -210,6 +211,11 @@ func (r *AgentRuntimeReconciler) reconcileRole(
 				APIGroups: []string{""},
 				Resources: []string{"namespaces"},
 				Verbs:     []string{"get"},
+			},
+			{
+				APIGroups: []string{"omnia.altairalabs.ai"},
+				Resources: []string{"toolpolicies"},
+				Verbs:     []string{"get", "list", "watch"},
 			},
 		}
 		return nil

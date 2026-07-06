@@ -147,29 +147,20 @@ refund-guardrails    customer-tools   audit   Active   2       10s
 
 With `mode: audit`, the policy logs violations but does not block requests. This lets you verify the rules are matching correctly before enforcement.
 
-Test the agent by making a refund call that violates the rules (e.g., amount > $500). Then check the policy proxy logs:
+Test the agent by making a refund call that violates the rules (e.g., amount > $500). Then check the policy broker logs (the broker runs as a sidecar in the `support-agent` pod, not on `customer-tools`):
 
 ```bash
-kubectl logs -n production -l app=customer-tools -c policy-proxy | grep policy_decision
+kubectl logs -n production -l app=support-agent -c policy-broker | grep policy_decision
 ```
 
-You should see audit entries like:
+You should see a pair of audit entries like:
 
 ```json
-{
-  "msg": "policy_decision",
-  "decision": "deny",
-  "wouldDeny": true,
-  "mode": "audit",
-  "policy": "refund-guardrails",
-  "rule": "max-refund-amount",
-  "message": "Refund amount exceeds the $500 limit",
-  "path": "/v1/refund",
-  "method": "POST"
-}
+{"msg":"policy_decision","allowed":true,"deniedBy":"max-refund-amount","message":"Refund amount exceeds the $500 limit","mode":"audit","policy":"refund-guardrails"}
+{"msg":"broker_tool_decision","toolName":"process_refund","toolRegistry":"customer-tools","allowed":true,"deniedBy":"max-refund-amount","mode":"audit"}
 ```
 
-The `wouldDeny: true` field confirms the rule would deny in enforce mode, but the request was allowed through.
+In audit mode a matched deny rule still sets `deniedBy` and `message`, but `allowed` stays `true` — the call is let through with the violation logged. That combination (`"mode":"audit"` + non-empty `deniedBy`) is exactly what would flip to a hard denial once the policy switches to `mode: enforce`.
 
 :::tip
 Keep audit mode active for at least a few hours in production to capture a representative sample of traffic before switching to enforce.
@@ -224,13 +215,14 @@ graph TB
     FACADE -->|"external-auth: extract team, customer_id"| RUNTIME[Runtime]
 
     subgraph "ToolPolicy Enforcement"
-        RUNTIME -->|HTTP + X-Omnia-* headers| PROXY[Policy Proxy]
-        PROXY -->|Check required claims| PROXY
-        PROXY -->|Evaluate CEL rules| PROXY
-        PROXY -->|Inject X-Processed-By| TOOL[Tool Service]
+        RUNTIME -->|"POST /v1/decision (headers + body)"| BROKER[Policy Broker]
+        BROKER -->|Check required claims| BROKER
+        BROKER -->|Evaluate CEL rules| BROKER
+        BROKER -->|"allow + injectedHeaders (X-Processed-By)"| RUNTIME
     end
 
-    PROXY -->|403 if denied| RUNTIME
+    RUNTIME -->|"Denied: 403 to caller"| FACADE
+    RUNTIME -->|"Allowed: call tool with injected headers"| TOOL[Tool Service]
 ```
 
 **AgentPolicy** provides:

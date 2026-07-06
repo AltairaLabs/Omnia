@@ -789,7 +789,7 @@ export interface AgentRuntimeSpec {
    * Pod-level fields apply to the pod. Container-level fields
    * (extraEnv, extraEnvFrom, extraVolumeMounts) apply to both the facade
    * and runtime containers but NOT to operator-injected sidecars
-   * (e.g. policy-proxy). Per-container env overrides remain available
+   * (e.g. policy-broker). Per-container env overrides remain available
    * via spec.facades[].extraEnv and spec.runtime.extraEnv. */
   podOverrides?: {
     /** annotations are merged into pod annotations. User values override

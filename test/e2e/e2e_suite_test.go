@@ -74,6 +74,13 @@ var (
 	// doctorImage is the name of the omnia-doctor image used by the doctor
 	// e2e smoke test.
 	doctorImage = "example.com/omnia-doctor:v0.0.1"
+
+	// policyBrokerImage is the name of the ToolPolicy decision-broker sidecar
+	// image (Enterprise, ee/cmd/policy-broker). Built + kind-loaded alongside
+	// the other enterprise binaries so policy_broker_enforcement_e2e_test.go
+	// can enable it on the operator via --policy-broker-image and prove a
+	// deployed agent pod actually enforces ToolPolicy through the broker.
+	policyBrokerImage = "example.com/omnia-policy-broker:v0.0.1"
 )
 
 // buildResult holds the result of an image build operation
@@ -116,6 +123,7 @@ var _ = BeforeSuite(func() {
 		{"arena-controller", "./ee/cmd/omnia-arena-controller", arenaControllerImage},
 		{"arena-eval-worker", "./ee/cmd/arena-eval-worker", evalWorkerImage},
 		{"doctor", "./cmd/doctor", doctorImage},
+		{"policy-broker", "./ee/cmd/policy-broker", policyBrokerImage},
 	}
 
 	projectDir, err := utils.GetProjectDir()
@@ -210,6 +218,7 @@ var _ = BeforeSuite(func() {
 		{"session-api", sessionApiImage},
 		{"memory-api", memoryApiImage},
 		{"doctor", doctorImage},
+		{"policy-broker", policyBrokerImage},
 	}
 
 	for _, img := range images {

@@ -26,44 +26,44 @@ import (
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 )
 
-func TestBuildPolicyProxyContainer_DefaultImage(t *testing.T) {
+func TestBuildPolicyBrokerContainer_DefaultImage(t *testing.T) {
 	agentRuntime := &omniav1alpha1.AgentRuntime{
 		ObjectMeta: metav1.ObjectMeta{Name: "test-agent", Namespace: "default"},
 		Spec:       omniav1alpha1.AgentRuntimeSpec{},
 	}
 
-	container := buildPolicyProxyContainer(agentRuntime, "", "")
-	if container.Name != PolicyProxyContainerName {
-		t.Errorf("Name = %q, want %q", container.Name, PolicyProxyContainerName)
+	container := buildPolicyBrokerContainer(agentRuntime, "", "")
+	if container.Name != PolicyBrokerContainerName {
+		t.Errorf("Name = %q, want %q", container.Name, PolicyBrokerContainerName)
 	}
-	if container.Image != DefaultPolicyProxyImage {
-		t.Errorf("Image = %q, want %q", container.Image, DefaultPolicyProxyImage)
+	if container.Image != DefaultPolicyBrokerImage {
+		t.Errorf("Image = %q, want %q", container.Image, DefaultPolicyBrokerImage)
 	}
 	if len(container.Ports) != 2 {
 		t.Fatalf("Ports count = %d, want 2", len(container.Ports))
 	}
-	if container.Ports[0].ContainerPort != DefaultPolicyProxyPort {
-		t.Errorf("proxy port = %d, want %d", container.Ports[0].ContainerPort, DefaultPolicyProxyPort)
+	if container.Ports[0].ContainerPort != DefaultPolicyBrokerPort {
+		t.Errorf("broker port = %d, want %d", container.Ports[0].ContainerPort, DefaultPolicyBrokerPort)
 	}
-	if container.Ports[1].ContainerPort != DefaultPolicyProxyHealthPort {
-		t.Errorf("health port = %d, want %d", container.Ports[1].ContainerPort, DefaultPolicyProxyHealthPort)
+	if container.Ports[1].ContainerPort != DefaultPolicyBrokerHealthPort {
+		t.Errorf("health port = %d, want %d", container.Ports[1].ContainerPort, DefaultPolicyBrokerHealthPort)
 	}
 }
 
-func TestBuildPolicyProxyContainer_CustomImage(t *testing.T) {
+func TestBuildPolicyBrokerContainer_CustomImage(t *testing.T) {
 	agentRuntime := &omniav1alpha1.AgentRuntime{
 		ObjectMeta: metav1.ObjectMeta{Name: "test-agent", Namespace: "default"},
 		Spec:       omniav1alpha1.AgentRuntimeSpec{},
 	}
 
-	customImage := "my-registry/policy-proxy:v1.0"
-	container := buildPolicyProxyContainer(agentRuntime, customImage, "")
+	customImage := "my-registry/policy-broker:v1.0"
+	container := buildPolicyBrokerContainer(agentRuntime, customImage, "")
 	if container.Image != customImage {
 		t.Errorf("Image = %q, want %q", container.Image, customImage)
 	}
 }
 
-func TestBuildPolicyProxyEnvVars_StampsOperatorAPIURL(t *testing.T) {
+func TestBuildPolicyBrokerEnvVars_StampsOperatorAPIURL(t *testing.T) {
 	agentRuntime := &omniav1alpha1.AgentRuntime{
 		ObjectMeta: metav1.ObjectMeta{Name: "test-agent", Namespace: "default"},
 	}
@@ -78,36 +78,34 @@ func TestBuildPolicyProxyEnvVars_StampsOperatorAPIURL(t *testing.T) {
 		return "", false
 	}
 
-	withURL := buildPolicyProxyEnvVars(agentRuntime, url)
+	withURL := buildPolicyBrokerEnvVars(agentRuntime, url)
 	if v, ok := hasEnv(withURL, "OPERATOR_API_URL"); !ok || v != url {
 		t.Errorf("OPERATOR_API_URL = %q, present=%v; want %q", v, ok, url)
 	}
 
-	withoutURL := buildPolicyProxyEnvVars(agentRuntime, "")
+	withoutURL := buildPolicyBrokerEnvVars(agentRuntime, "")
 	if _, ok := hasEnv(withoutURL, "OPERATOR_API_URL"); ok {
 		t.Error("OPERATOR_API_URL must not be stamped when no license URL is set")
 	}
 }
 
-func TestBuildPolicyProxyEnvVars(t *testing.T) {
+func TestBuildPolicyBrokerEnvVars(t *testing.T) {
 	agentRuntime := &omniav1alpha1.AgentRuntime{
-		ObjectMeta: metav1.ObjectMeta{Name: "test-agent", Namespace: "default"},
+		ObjectMeta: metav1.ObjectMeta{Name: "test-agent", Namespace: "test-ns"},
 		Spec:       omniav1alpha1.AgentRuntimeSpec{},
 	}
 
-	envVars := buildPolicyProxyEnvVars(agentRuntime, "")
+	envVars := buildPolicyBrokerEnvVars(agentRuntime, "")
 
 	expectedEnvs := map[string]string{
-		"POLICY_PROXY_LISTEN_ADDR":  fmt.Sprintf(":%d", DefaultPolicyProxyPort),
-		"POLICY_PROXY_HEALTH_ADDR":  fmt.Sprintf(":%d", DefaultPolicyProxyHealthPort),
-		"POLICY_PROXY_UPSTREAM_URL": fmt.Sprintf("http://localhost:%d", DefaultRuntimeGRPCPort),
+		"OMNIA_NAMESPACE":           "test-ns",
+		"POLICY_BROKER_LISTEN_ADDR": fmt.Sprintf(":%d", DefaultPolicyBrokerPort),
+		"POLICY_BROKER_HEALTH_ADDR": fmt.Sprintf(":%d", DefaultPolicyBrokerHealthPort),
 	}
 
 	envMap := make(map[string]string)
 	for _, env := range envVars {
-		if env.Value != "" {
-			envMap[env.Name] = env.Value
-		}
+		envMap[env.Name] = env.Value
 	}
 
 	for name, expected := range expectedEnvs {
@@ -116,31 +114,22 @@ func TestBuildPolicyProxyEnvVars(t *testing.T) {
 		}
 	}
 
-	foundAgentName := false
-	foundNamespace := false
+	// The broker must NOT receive any upstream URL — unlike policy-proxy it has
+	// no inline proxy path, it only serves decisions to the runtime.
 	for _, env := range envVars {
-		if env.Name == "OMNIA_AGENT_NAME" && env.ValueFrom != nil {
-			foundAgentName = true
+		if env.Name == "POLICY_PROXY_UPSTREAM_URL" || env.Name == "POLICY_BROKER_UPSTREAM_URL" {
+			t.Errorf("policy-broker must not have an upstream URL env, found %q", env.Name)
 		}
-		if env.Name == "OMNIA_NAMESPACE" && env.ValueFrom != nil {
-			foundNamespace = true
-		}
-	}
-	if !foundAgentName {
-		t.Error("missing OMNIA_AGENT_NAME downward API env")
-	}
-	if !foundNamespace {
-		t.Error("missing OMNIA_NAMESPACE downward API env")
 	}
 }
 
-func TestBuildPolicyProxyContainer_Probes(t *testing.T) {
+func TestBuildPolicyBrokerContainer_Probes(t *testing.T) {
 	agentRuntime := &omniav1alpha1.AgentRuntime{
 		ObjectMeta: metav1.ObjectMeta{Name: "test-agent", Namespace: "default"},
 		Spec:       omniav1alpha1.AgentRuntimeSpec{},
 	}
 
-	container := buildPolicyProxyContainer(agentRuntime, "", "")
+	container := buildPolicyBrokerContainer(agentRuntime, "", "")
 
 	if container.ReadinessProbe == nil {
 		t.Fatal("ReadinessProbe is nil")
