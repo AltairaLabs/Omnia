@@ -62,6 +62,32 @@ func newHTTPToolExecutor(toolSrv *httptest.Server) *OmniaExecutor {
 	return e
 }
 
+// TestNewOmniaExecutor_WiresPolicyBrokerClient is the wiring-test companion
+// to the stale TODO removed from cmd/runtime/wiring_test.go (#728 item 4):
+// it proves every OmniaExecutor built by internal/runtime.Server.InitializeTools
+// (server.go, the real runtime construction path) carries a non-nil
+// PolicyBrokerClient, and that the client's enabled/disabled state tracks
+// POLICY_BROKER_URL exactly as NewPolicyBrokerClient documents. This is a
+// pure construction-time assertion (no network call) — the behavioral proof
+// that a wired, enabled client actually blocks/allows tool calls is covered
+// by the TestDispatch_PolicyBroker* tests below and, against a real broker +
+// real CEL evaluation, by test/integration/policy_broker_test.go.
+func TestNewOmniaExecutor_WiresPolicyBrokerClient(t *testing.T) {
+	t.Run("broker_url_unset_client_present_but_disabled", func(t *testing.T) {
+		t.Setenv(envPolicyBrokerURL, "")
+		e := NewOmniaExecutor(logr.Discard(), nil)
+		require.NotNil(t, e.policyBroker, "NewOmniaExecutor must always wire a PolicyBrokerClient")
+		assert.False(t, e.policyBroker.Enabled())
+	})
+
+	t.Run("broker_url_set_client_enabled", func(t *testing.T) {
+		t.Setenv(envPolicyBrokerURL, "http://example-broker:8083")
+		e := NewOmniaExecutor(logr.Discard(), nil)
+		require.NotNil(t, e.policyBroker)
+		assert.True(t, e.policyBroker.Enabled())
+	})
+}
+
 func TestDispatch_PolicyBrokerDeny_AbortsCall(t *testing.T) {
 	toolCalled := false
 	toolSrv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
