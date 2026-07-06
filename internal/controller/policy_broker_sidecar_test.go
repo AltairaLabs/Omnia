@@ -50,6 +50,59 @@ func TestBuildPolicyBrokerContainer_DefaultImage(t *testing.T) {
 	}
 }
 
+// TestBuildPolicyBrokerContainer_MetricsPortName is a regression guard: the
+// broker's health port MUST be named "metrics" (not "broker-health") so the
+// omnia-agents scrape job / PodMonitor — which both select every container
+// port named "metrics" — pick up the broker with no scrape-config changes,
+// exactly like the facade (8081) and runtime (9001) health ports.
+func TestBuildPolicyBrokerContainer_MetricsPortName(t *testing.T) {
+	agentRuntime := &omniav1alpha1.AgentRuntime{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-agent", Namespace: "default"},
+		Spec:       omniav1alpha1.AgentRuntimeSpec{},
+	}
+
+	container := buildPolicyBrokerContainer(agentRuntime, "", "")
+
+	port := containerPortByName(&container, metricsPortName)
+	if port == nil {
+		t.Fatalf("container must declare a %q port", metricsPortName)
+	}
+	if port.ContainerPort != DefaultPolicyBrokerHealthPort {
+		t.Errorf("metrics port number = %d, want %d", port.ContainerPort, DefaultPolicyBrokerHealthPort)
+	}
+}
+
+// TestBuildPolicyBrokerEnvVars_AgentNameDownwardAPI asserts OMNIA_AGENT_NAME
+// is sourced from the downward API (metadata.labels['app.kubernetes.io/instance'])
+// rather than a literal value, so the broker's Prometheus "agent" ConstLabel
+// matches the facade/runtime containers (which use the same field path).
+func TestBuildPolicyBrokerEnvVars_AgentNameDownwardAPI(t *testing.T) {
+	agentRuntime := &omniav1alpha1.AgentRuntime{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-agent", Namespace: "test-ns"},
+		Spec:       omniav1alpha1.AgentRuntimeSpec{},
+	}
+
+	envVars := buildPolicyBrokerEnvVars(agentRuntime, "")
+
+	var found *corev1.EnvVar
+	for i := range envVars {
+		if envVars[i].Name == "OMNIA_AGENT_NAME" {
+			found = &envVars[i]
+			break
+		}
+	}
+	if found == nil {
+		t.Fatal("OMNIA_AGENT_NAME env var not found")
+	}
+	if found.ValueFrom == nil || found.ValueFrom.FieldRef == nil {
+		t.Fatal("OMNIA_AGENT_NAME must be sourced via downward API FieldRef")
+	}
+	if found.ValueFrom.FieldRef.FieldPath != fieldPathInstanceLabel {
+		t.Errorf("OMNIA_AGENT_NAME field path = %q, want %q",
+			found.ValueFrom.FieldRef.FieldPath, fieldPathInstanceLabel)
+	}
+}
+
 func TestBuildPolicyBrokerContainer_CustomImage(t *testing.T) {
 	agentRuntime := &omniav1alpha1.AgentRuntime{
 		ObjectMeta: metav1.ObjectMeta{Name: "test-agent", Namespace: "default"},

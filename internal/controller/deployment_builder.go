@@ -273,11 +273,17 @@ func (r *AgentRuntimeReconciler) buildDeploymentSpec(
 	// key on it. This survives swapping the facade/runtime implementation since
 	// the contract is the port NAME, not its number.
 	//
-	// traffic.sidecar.istio.io/excludeInboundPorts lists BOTH metrics ports so
-	// that on a sidecar deployment Prometheus can scrape them directly without
-	// mTLS (ambient/no-mesh ignore the annotation harmlessly).
+	// traffic.sidecar.istio.io/excludeInboundPorts lists all THREE metrics
+	// ports (facade, runtime, and the policy-broker sidecar's health/metrics
+	// port) so that on a sidecar deployment Prometheus can scrape them
+	// directly without mTLS (ambient/no-mesh ignore the annotation
+	// harmlessly). Listing the broker port here is harmless even on pods
+	// without the sidecar (PolicyBrokerImage unset) since it's just an unused
+	// port number in the exclusion list.
 	podAnnotations := map[string]string{
-		"traffic.sidecar.istio.io/excludeInboundPorts": fmt.Sprintf("%d,%d", DefaultFacadeHealthPort, DefaultRuntimeHealthPort),
+		"traffic.sidecar.istio.io/excludeInboundPorts": fmt.Sprintf(
+			"%d,%d,%d", DefaultFacadeHealthPort, DefaultRuntimeHealthPort, DefaultPolicyBrokerHealthPort,
+		),
 	}
 
 	// Add config hash annotation to trigger rollouts when config changes

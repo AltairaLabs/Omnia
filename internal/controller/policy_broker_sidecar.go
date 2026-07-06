@@ -63,7 +63,14 @@ func buildPolicyBrokerContainer(
 				Protocol:      corev1.ProtocolTCP,
 			},
 			{
-				Name:          "broker-health",
+				// Named "metrics" (not "broker-health") so the broker's health
+				// port is picked up by the same port-NAME contract the facade
+				// and runtime use — the omnia-agents scrape job and the
+				// PodMonitor both select every container port named "metrics"
+				// (see deployment_builder.go), so this sidecar is scraped with
+				// no scrape-config changes. The broker serves /metrics on this
+				// same port (see ee/cmd/policy-broker buildHealthMux).
+				Name:          metricsPortName,
 				ContainerPort: DefaultPolicyBrokerHealthPort,
 				Protocol:      corev1.ProtocolTCP,
 			},
@@ -94,10 +101,22 @@ func buildPolicyBrokerContainer(
 
 // buildPolicyBrokerEnvVars creates environment variables for the policy broker
 // container. OMNIA_NAMESPACE scopes the broker's ToolPolicy watch to the
-// agent's namespace. licenseAPIURL, when set, is passed as OPERATOR_API_URL so
-// the sidecar logs a startup license nag when unlicensed (#1682).
+// agent's namespace. OMNIA_AGENT_NAME (downward API) gives the broker's
+// Prometheus metrics the same "agent" identity the facade and runtime
+// containers use (internal/agent.NewMetrics), so all three sidecars' series
+// join on {agent, namespace}. licenseAPIURL, when set, is passed as
+// OPERATOR_API_URL so the sidecar logs a startup license nag when unlicensed
+// (#1682).
 func buildPolicyBrokerEnvVars(agentRuntime *omniav1alpha1.AgentRuntime, licenseAPIURL string) []corev1.EnvVar {
 	env := []corev1.EnvVar{
+		{
+			Name: envOmniaAgentName,
+			ValueFrom: &corev1.EnvVarSource{
+				FieldRef: &corev1.ObjectFieldSelector{
+					FieldPath: fieldPathInstanceLabel,
+				},
+			},
+		},
 		{
 			Name:  "OMNIA_NAMESPACE",
 			Value: agentRuntime.Namespace,

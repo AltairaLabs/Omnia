@@ -12,6 +12,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"time"
 
 	"github.com/go-logr/logr"
 
@@ -57,6 +58,11 @@ type (
 type BrokerHandler struct {
 	evaluator *Evaluator
 	logger    logr.Logger
+
+	// metrics is optional (nil-safe) so existing callers/tests that build a
+	// BrokerHandler directly via NewBrokerHandler keep compiling without
+	// constructing a *Metrics. Set it via SetMetrics.
+	metrics *Metrics
 }
 
 // NewBrokerHandler creates a new decision-endpoint HTTP handler.
@@ -65,6 +71,13 @@ func NewBrokerHandler(evaluator *Evaluator, logger logr.Logger) *BrokerHandler {
 		evaluator: evaluator,
 		logger:    logger,
 	}
+}
+
+// SetMetrics attaches Prometheus metrics to the handler. Nil-safe: when never
+// called, ServeHTTP skips recording rather than panicking, so unit tests don't
+// need to construct a *Metrics.
+func (h *BrokerHandler) SetMetrics(metrics *Metrics) {
+	h.metrics = metrics
 }
 
 // ServeHTTP decodes a DecisionRequest, evaluates ToolPolicy rules (and
@@ -84,7 +97,9 @@ func (h *BrokerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	ctx := withIdentityFromPayload(r.Context(), req.Identity)
 
+	start := time.Now()
 	decision := h.evaluator.EvaluateWithContext(ctx, req.Headers, req.Body)
+	h.recordDecisionMetrics(decision, req.Headers, time.Since(start))
 	logBrokerDecision(h.logger, decision, req.Headers)
 
 	// A denied call must not compute or return injected headers — header
@@ -95,6 +110,15 @@ func (h *BrokerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeDecisionResponse(w, decision, injected)
+}
+
+// recordDecisionMetrics records the decision outcome and latency when metrics
+// are attached (SetMetrics). No-op when h.metrics is nil.
+func (h *BrokerHandler) recordDecisionMetrics(decision Decision, headers map[string]string, elapsed time.Duration) {
+	if h.metrics == nil {
+		return
+	}
+	h.metrics.RecordDecision(decision, headers[HeaderToolRegistry], elapsed.Seconds())
 }
 
 // decodeDecisionRequest decodes the JSON request body into a DecisionRequest.
