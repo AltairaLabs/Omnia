@@ -25,38 +25,27 @@ const (
 	maxDecisionRequestBytes   = 1 << 20 // 1 MiB
 )
 
-// DecisionRequest is the JSON request body for POST /v1/decision. The
-// runtime sends the same (headers, body) shape the evaluator already
-// understands, plus a structured Identity so `identity.*` CEL rules and
-// identity-aware header injection work without lossy header-flattening.
-type DecisionRequest struct {
-	Headers  map[string]string      `json:"headers"`
-	Body     map[string]interface{} `json:"body"`
-	Identity *IdentityPayload       `json:"identity"`
-}
+// DecisionRequest, IdentityPayload, and DecisionResponse are the wire types
+// for POST /v1/decision. They live in the shared pkg/policy package (as
+// omniapolicy.DecisionRequest etc.) so internal/runtime (core, must not
+// import ee/) can build requests and parse responses without depending on
+// this enterprise-only package. Aliased here so this file's existing
+// references keep working unchanged.
+type (
+	// DecisionRequest is the JSON request body for POST /v1/decision. The
+	// runtime sends the same (headers, body) shape the evaluator already
+	// understands, plus a structured Identity so `identity.*` CEL rules and
+	// identity-aware header injection work without lossy header-flattening.
+	DecisionRequest = omniapolicy.DecisionRequest
 
-// IdentityPayload carries the caller's AuthenticatedIdentity fields over the
-// wire so the broker can rebuild an omniapolicy.AuthenticatedIdentity and
-// attach it to the evaluation context.
-type IdentityPayload struct {
-	Origin    string            `json:"origin"`
-	Subject   string            `json:"subject"`
-	EndUser   string            `json:"endUser"`
-	Workspace string            `json:"workspace"`
-	Agent     string            `json:"agent"`
-	Role      string            `json:"role"`
-	Claims    map[string]string `json:"claims"`
-}
+	// IdentityPayload carries the caller's AuthenticatedIdentity fields over
+	// the wire so the broker can rebuild an omniapolicy.AuthenticatedIdentity
+	// and attach it to the evaluation context.
+	IdentityPayload = omniapolicy.IdentityPayload
 
-// DecisionResponse is the JSON response body for POST /v1/decision.
-type DecisionResponse struct {
-	Allow           bool              `json:"allow"`
-	DeniedBy        string            `json:"deniedBy"`
-	Message         string            `json:"message"`
-	Mode            string            `json:"mode"`
-	WouldDeny       bool              `json:"wouldDeny"`
-	InjectedHeaders map[string]string `json:"injectedHeaders"`
-}
+	// DecisionResponse is the JSON response body for POST /v1/decision.
+	DecisionResponse = omniapolicy.DecisionResponse
+)
 
 // BrokerHandler is an HTTP handler that answers "may this tool call
 // proceed, and what headers to inject" over a localhost decision endpoint.
