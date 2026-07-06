@@ -179,6 +179,35 @@ func TestToGRPCMetadata(t *testing.T) {
 	assert.Equal(t, "model-1", md[HeaderModel])
 }
 
+// TestOutboundHeaders_NeverLeakAuthorization is a security regression guard:
+// the caller's inbound bearer token, held in-process via WithAuthorization,
+// must NEVER be re-emitted as an outbound header to a tool. Doing so leaks the
+// user's credential to arbitrary third-party upstreams AND overwrites a tool's
+// own authSecretRef credential (the runtime applies that first). Identity still
+// travels via X-Omnia-Claim-*; the raw token stays readable in-process only,
+// for a future on-behalf-of exchange.
+func TestOutboundHeaders_NeverLeakAuthorization(t *testing.T) {
+	ctx := context.Background()
+	ctx = WithAuthorization(ctx, "Bearer caller-jwt")
+	ctx = WithUserID(ctx, "user-1")
+	ctx = WithClaims(ctx, map[string]string{"team": "eng"})
+
+	headers := ToOutboundHeaders(ctx)
+	md := ToGRPCMetadata(ctx)
+
+	_, httpHas := headers[HeaderAuthorization]
+	assert.False(t, httpHas, "outbound HTTP headers must not carry the caller's Authorization token")
+	_, grpcHas := md[HeaderAuthorization]
+	assert.False(t, grpcHas, "outbound gRPC metadata must not carry the caller's Authorization token")
+
+	// Identity still propagates safely, and the token remains available
+	// in-process (never emitted) for a future on-behalf-of exchange.
+	assert.Equal(t, "user-1", headers[HeaderUserID])
+	assert.Equal(t, "eng", headers["x-omnia-claim-team"])
+	assert.Equal(t, "Bearer caller-jwt", Authorization(ctx),
+		"token must stay readable in-process for future OBO, just never sent to a tool")
+}
+
 func TestToPascalCase(t *testing.T) {
 	tests := []struct {
 		input    string

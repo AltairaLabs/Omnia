@@ -376,7 +376,15 @@ var headerKeyMap = []struct {
 	{ContextKeyUserID, HeaderUserID},
 	{ContextKeyUserRoles, HeaderUserRoles},
 	{ContextKeyUserEmail, HeaderUserEmail},
-	{ContextKeyAuthorization, HeaderAuthorization},
+	// ContextKeyAuthorization is deliberately NOT propagated outbound. The
+	// caller's inbound bearer token must never be re-emitted as the outbound
+	// Authorization on a tool call: it leaks the user's credential to arbitrary
+	// third-party upstreams, and it would overwrite a tool's own authSecretRef
+	// credential (the runtime applies that first in buildHTTPHeaders, and this
+	// map used to clobber it). User identity travels safely via the
+	// X-Omnia-Claim-* headers instead. The raw token stays available in-process
+	// (Authorization(ctx) / ContextKeyAuthorization) for a future on-behalf-of
+	// token exchange — it is simply never sent to a tool.
 	{ContextKeyProvider, HeaderProvider},
 	{ContextKeyModel, HeaderModel},
 }
