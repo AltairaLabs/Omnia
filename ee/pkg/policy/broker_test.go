@@ -11,22 +11,36 @@ package policy
 import (
 	"bytes"
 	"encoding/json"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/go-logr/logr"
+	"github.com/go-logr/zapr"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/ee/api/v1alpha1"
 )
 
-// newCapturingLogger returns a slog.Logger whose JSON output is captured in
-// the returned buffer, for tests that assert on structured log fields.
-func newCapturingLogger() (*slog.Logger, *bytes.Buffer) {
+// testBrokerLogger returns a discarding logr.Logger for broker tests that
+// don't assert on log output. Distinct from proxy_test.go's testLogger()
+// (*slog.Logger) since BrokerHandler moved to logr while ProxyHandler (the
+// dead reverse-proxy shape, retired in P2.4) stays on slog.
+func testBrokerLogger() logr.Logger {
+	return logr.Discard()
+}
+
+// newCapturingLogger returns a logr.Logger backed by a Zap JSON core whose
+// output is captured in the returned buffer, for tests that assert on
+// structured log fields.
+func newCapturingLogger() (logr.Logger, *bytes.Buffer) {
 	buf := &bytes.Buffer{}
-	return slog.New(slog.NewJSONHandler(buf, nil)), buf
+	encoder := zapcore.NewJSONEncoder(zap.NewProductionEncoderConfig())
+	core := zapcore.NewCore(encoder, zapcore.AddSync(buf), zapcore.DebugLevel)
+	return zapr.NewLogger(zap.New(core)), buf
 }
 
 // newDecisionRequest builds an httptest.Request carrying a JSON-encoded
@@ -80,7 +94,7 @@ func TestBrokerHandler_Deny(t *testing.T) {
 		t.Fatalf("CompilePolicy() error = %v", err)
 	}
 
-	handler := NewBrokerHandler(eval, testLogger())
+	handler := NewBrokerHandler(eval, testBrokerLogger())
 
 	req := newDecisionRequest(t, DecisionRequest{
 		Headers: map[string]string{
@@ -143,7 +157,7 @@ func TestBrokerHandler_Allow(t *testing.T) {
 		t.Fatalf("CompilePolicy() error = %v", err)
 	}
 
-	handler := NewBrokerHandler(eval, testLogger())
+	handler := NewBrokerHandler(eval, testBrokerLogger())
 
 	req := newDecisionRequest(t, DecisionRequest{
 		Headers: map[string]string{
@@ -198,7 +212,7 @@ func TestBrokerHandler_AuditMode(t *testing.T) {
 		t.Fatalf("CompilePolicy() error = %v", err)
 	}
 
-	handler := NewBrokerHandler(eval, testLogger())
+	handler := NewBrokerHandler(eval, testBrokerLogger())
 
 	req := newDecisionRequest(t, DecisionRequest{
 		Headers: map[string]string{
@@ -257,7 +271,7 @@ func TestBrokerHandler_HeaderInjection(t *testing.T) {
 		t.Fatalf("CompilePolicy() error = %v", err)
 	}
 
-	handler := NewBrokerHandler(eval, testLogger())
+	handler := NewBrokerHandler(eval, testBrokerLogger())
 
 	req := newDecisionRequest(t, DecisionRequest{
 		Headers: map[string]string{
@@ -286,7 +300,7 @@ func TestBrokerHandler_MalformedJSON(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewEvaluator() error = %v", err)
 	}
-	handler := NewBrokerHandler(eval, testLogger())
+	handler := NewBrokerHandler(eval, testBrokerLogger())
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/decision", strings.NewReader("not json"))
 	rec := httptest.NewRecorder()
@@ -327,7 +341,7 @@ func TestBrokerHandler_IdentityRoleGate(t *testing.T) {
 		t.Fatalf("CompilePolicy() error = %v", err)
 	}
 
-	handler := NewBrokerHandler(eval, testLogger())
+	handler := NewBrokerHandler(eval, testBrokerLogger())
 
 	headers := map[string]string{
 		HeaderToolName:     "admin_tool",
@@ -382,7 +396,7 @@ func TestBrokerHandler_NoMatchingPolicyAllows(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewEvaluator() error = %v", err)
 	}
-	handler := NewBrokerHandler(eval, testLogger())
+	handler := NewBrokerHandler(eval, testBrokerLogger())
 
 	req := newDecisionRequest(t, DecisionRequest{
 		Headers: map[string]string{
@@ -439,7 +453,7 @@ func TestBrokerHandler_NoInjectionOnDeny(t *testing.T) {
 		t.Fatalf("CompilePolicy() error = %v", err)
 	}
 
-	handler := NewBrokerHandler(eval, testLogger())
+	handler := NewBrokerHandler(eval, testBrokerLogger())
 
 	req := newDecisionRequest(t, DecisionRequest{
 		Headers: map[string]string{
@@ -537,7 +551,7 @@ func TestBrokerHandler_HeaderInjectionErrorDoesNotAffectDecision(t *testing.T) {
 		t.Fatalf("CompilePolicy() error = %v", err)
 	}
 
-	handler := NewBrokerHandler(eval, testLogger())
+	handler := NewBrokerHandler(eval, testBrokerLogger())
 
 	req := newDecisionRequest(t, DecisionRequest{
 		Headers: map[string]string{
@@ -568,7 +582,7 @@ func TestBrokerHandler_OversizedBodyRejected(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewEvaluator() error = %v", err)
 	}
-	handler := NewBrokerHandler(eval, testLogger())
+	handler := NewBrokerHandler(eval, testBrokerLogger())
 
 	oversizedValue := strings.Repeat("a", maxDecisionRequestBytes+1)
 	body := `{"headers":{"` + HeaderToolName + `":"` + oversizedValue + `"}}`
@@ -589,7 +603,7 @@ func TestBrokerHandler_RejectsNonPostMethods(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewEvaluator() error = %v", err)
 	}
-	handler := NewBrokerHandler(eval, testLogger())
+	handler := NewBrokerHandler(eval, testBrokerLogger())
 
 	for _, method := range []string{http.MethodGet, http.MethodPut, http.MethodDelete} {
 		t.Run(method, func(t *testing.T) {

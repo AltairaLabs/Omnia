@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	"github.com/go-logr/zapr"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -29,6 +30,7 @@ import (
 	omniav1alpha1 "github.com/altairalabs/omnia/ee/api/v1alpha1"
 	eelicense "github.com/altairalabs/omnia/ee/pkg/license"
 	"github.com/altairalabs/omnia/ee/pkg/policy"
+	"github.com/altairalabs/omnia/pkg/logging"
 )
 
 const (
@@ -51,14 +53,13 @@ const (
 // enterprise-only, so any non-valid license (open-core, absent, or expired)
 // nags. It never blocks — enforcement keeps running. The "startup license
 // check" line is always emitted so the check is observable when silent.
-func nagLicenseAtStartup(ctx context.Context, logger *slog.Logger) {
+func nagLicenseAtStartup(ctx context.Context, logger logr.Logger) {
 	operatorURL := os.Getenv(envOperatorAPIURL)
 	if operatorURL == "" {
 		logger.Info("startup license check skipped", "reason", "no OPERATOR_API_URL configured")
 		return
 	}
-	log := logr.FromSlogHandler(logger.Handler())
-	licClient := eelicense.NewClient(operatorURL, eelicense.WithClientLogger(log.WithName("license")))
+	licClient := eelicense.NewClient(operatorURL, eelicense.WithClientLogger(logger.WithName("license")))
 	lic, err := licClient.Refresh(ctx)
 	if err != nil {
 		// Operator unreachable — degrade to the open-core fallback and nag.
@@ -69,20 +70,31 @@ func nagLicenseAtStartup(ctx context.Context, logger *slog.Logger) {
 		"tier", string(lic.Tier),
 		"licenseID", lic.ID,
 		"operatorURL", operatorURL)
-	eelicense.NagIfUnlicensed(lic, log)
+	eelicense.NagIfUnlicensed(lic, logger)
 }
 
 func main() {
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
-	slog.SetDefault(logger)
+	// Create the Zap logger directly so we can derive both logr (for the
+	// broker's own structured logging) and slog (for policy.Watcher, which
+	// is shared with the not-yet-migrated policy-proxy binary — P2.4 retires
+	// that component, at which point Watcher can move to logr too) from the
+	// same Zap core without a lossy bridge.
+	zapLog, err := logging.NewZapLogger()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "failed to create logger: %v\n", err)
+		os.Exit(1)
+	}
+	defer func() { _ = zapLog.Sync() }()
+	logger := zapr.NewLogger(zapLog)
+	watcherLogger := logging.SlogFromZap(zapLog)
 
-	if err := run(logger); err != nil {
-		logger.Error("policy broker failed", "error", err.Error())
+	if err := run(logger, watcherLogger); err != nil {
+		logger.Error(err, "policy broker failed")
 		os.Exit(1)
 	}
 }
 
-func run(logger *slog.Logger) error {
+func run(logger logr.Logger, watcherLogger *slog.Logger) error {
 	listenAddr := getEnvOrDefault(envListenAddr, defaultListenAddr)
 	healthAddr := getEnvOrDefault(envHealthAddr, defaultHealthAddr)
 	namespace := os.Getenv(envNamespace)
@@ -102,7 +114,7 @@ func run(logger *slog.Logger) error {
 		return fmt.Errorf("failed to create Kubernetes client: %w", err)
 	}
 
-	watcher := policy.NewWatcher(evaluator, k8sClient, scheme, namespace, logger)
+	watcher := policy.NewWatcher(evaluator, k8sClient, scheme, namespace, watcherLogger)
 	brokerHandler := policy.NewBrokerHandler(evaluator, logger)
 
 	brokerSrv := &http.Server{
@@ -125,21 +137,21 @@ func run(logger *slog.Logger) error {
 
 	go func() {
 		if watchErr := watcher.Start(ctx); watchErr != nil && !errors.Is(watchErr, context.Canceled) {
-			logger.Error("watcher error", "error", watchErr.Error())
+			logger.Error(watchErr, "watcher error")
 		}
 	}()
 
 	go func() {
 		logger.Info("health server starting", "addr", healthAddr)
 		if srvErr := healthSrv.ListenAndServe(); srvErr != nil && !errors.Is(srvErr, http.ErrServerClosed) {
-			logger.Error("health server error", "error", srvErr.Error())
+			logger.Error(srvErr, "health server error")
 		}
 	}()
 
 	go func() {
 		logger.Info("broker server starting", "addr", listenAddr)
 		if srvErr := brokerSrv.ListenAndServe(); srvErr != nil && !errors.Is(srvErr, http.ErrServerClosed) {
-			logger.Error("broker server error", "error", srvErr.Error())
+			logger.Error(srvErr, "broker server error")
 		}
 	}()
 

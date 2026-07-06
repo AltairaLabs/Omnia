@@ -11,18 +11,20 @@ package policy
 import (
 	"context"
 	"encoding/json"
-	"log/slog"
 	"net/http"
+
+	"github.com/go-logr/logr"
 
 	omniapolicy "github.com/altairalabs/omnia/pkg/policy"
 )
 
 // Broker response constants.
 const (
-	brokerErrMalformedRequest = "malformed_request"
-	brokerErrMethodNotAllowed = "method_not_allowed"
-	logMsgBrokerToolDecision  = "broker_tool_decision"
-	maxDecisionRequestBytes   = 1 << 20 // 1 MiB
+	brokerErrMalformedRequest  = "malformed_request"
+	brokerErrMethodNotAllowed  = "method_not_allowed"
+	logMsgBrokerPolicyDecision = "policy_decision"
+	logMsgBrokerToolDecision   = "broker_tool_decision"
+	maxDecisionRequestBytes    = 1 << 20 // 1 MiB
 )
 
 // DecisionRequest, IdentityPayload, and DecisionResponse are the wire types
@@ -54,11 +56,11 @@ type (
 // tool egress to transparently intercept.
 type BrokerHandler struct {
 	evaluator *Evaluator
-	logger    *slog.Logger
+	logger    logr.Logger
 }
 
 // NewBrokerHandler creates a new decision-endpoint HTTP handler.
-func NewBrokerHandler(evaluator *Evaluator, logger *slog.Logger) *BrokerHandler {
+func NewBrokerHandler(evaluator *Evaluator, logger logr.Logger) *BrokerHandler {
 	return &BrokerHandler{
 		evaluator: evaluator,
 		logger:    logger,
@@ -75,7 +77,7 @@ func (h *BrokerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	req, err := decodeDecisionRequest(w, r)
 	if err != nil {
-		h.logger.Debug("malformed decision request", "error", err.Error())
+		h.logger.V(1).Info("malformed decision request", "error", err.Error())
 		writeMalformedRequestResponse(w)
 		return
 	}
@@ -83,8 +85,7 @@ func (h *BrokerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx := withIdentityFromPayload(r.Context(), req.Identity)
 
 	decision := h.evaluator.EvaluateWithContext(ctx, req.Headers, req.Body)
-	logDecision(h.logger, r, decision)
-	logBrokerToolDecision(h.logger, decision, req.Headers)
+	logBrokerDecision(h.logger, decision, req.Headers)
 
 	// A denied call must not compute or return injected headers — header
 	// injection only applies to calls that are actually allowed to proceed.
@@ -106,17 +107,31 @@ func decodeDecisionRequest(w http.ResponseWriter, r *http.Request) (DecisionRequ
 	return req, err
 }
 
-// logBrokerToolDecision emits a broker-specific structured log line carrying
-// the tool identity for this decision. The shared logDecision (proxy.go)
-// logs r.URL.Path/r.Method, which for every broker call are always
-// "/v1/decision"/"POST" — that loses which tool was evaluated. The tool
-// identity travels in the request headers instead, so it's added here as
-// explicit fields. Skip wholly-uninteresting allows (no rule matched) to
-// match logDecision's own audit-noise gating.
-func logBrokerToolDecision(logger *slog.Logger, decision Decision, headers map[string]string) {
+// logBrokerDecision emits the broker's own structured decision-audit log
+// lines. This is deliberately independent of proxy.go's logDecision /
+// logAuditDecision / logEnforceDecision (slog-based, ProxyHandler's audit
+// path for the dead reverse-proxy shape being retired in P2.4) — the broker
+// must not carry a dependency on that soon-to-be-deleted component. It emits
+// two lines, mirroring what the broker previously produced via the shared
+// helpers: a "policy_decision" line with the decision outcome, and a
+// "broker_tool_decision" line carrying the tool identity (which lives in the
+// request headers, not on the request path/method — every broker call's
+// path/method is always "/v1/decision"/"POST", which loses which tool was
+// evaluated). Skips wholly-uninteresting allows (no rule matched) to keep
+// audit noise low.
+func logBrokerDecision(logger logr.Logger, decision Decision, headers map[string]string) {
 	if decision.Allowed && decision.DeniedBy == "" {
 		return
 	}
+
+	logger.Info(logMsgBrokerPolicyDecision,
+		"allowed", decision.Allowed,
+		"deniedBy", decision.DeniedBy,
+		"message", decision.Message,
+		"mode", string(decision.Mode),
+		"policy", decision.Policy,
+	)
+
 	logger.Info(logMsgBrokerToolDecision,
 		"toolName", headers[HeaderToolName],
 		"toolRegistry", headers[HeaderToolRegistry],
@@ -133,7 +148,7 @@ func logBrokerToolDecision(logger *slog.Logger, decision Decision, headers map[s
 func (h *BrokerHandler) evaluateHeaderInjection(ctx context.Context, req DecisionRequest) map[string]string {
 	injected, err := h.evaluator.EvaluateHeaderInjectionWithContext(ctx, req.Headers, req.Body)
 	if err != nil {
-		h.logger.Error("header injection evaluation failed", "error", err.Error())
+		h.logger.Error(err, "header injection evaluation failed")
 		return nil
 	}
 	return injected

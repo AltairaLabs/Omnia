@@ -13,8 +13,6 @@ package integration
 import (
 	"context"
 	"encoding/json"
-	"io"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -69,8 +67,7 @@ func TestPolicyBrokerEndToEnd_RealBrokerDeniesToolCall(t *testing.T) {
 	}
 	require.NoError(t, eval.CompilePolicy(tp))
 
-	brokerLogger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	brokerSrv := httptest.NewServer(eepolicy.NewBrokerHandler(eval, brokerLogger))
+	brokerSrv := httptest.NewServer(eepolicy.NewBrokerHandler(eval, logr.Discard()))
 	defer brokerSrv.Close()
 
 	// The runtime's PolicyBrokerClient reads POLICY_BROKER_URL at
