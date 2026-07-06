@@ -109,8 +109,8 @@ func decodeDecisionRequest(w http.ResponseWriter, r *http.Request) (DecisionRequ
 
 // logBrokerDecision emits the broker's own structured decision-audit log
 // lines. This is deliberately independent of proxy.go's logDecision /
-// logAuditDecision / logEnforceDecision (slog-based, ProxyHandler's audit
-// path for the dead reverse-proxy shape being retired in P2.4) — the broker
+// logAuditDecision / logEnforceDecision (ProxyHandler's structured-log
+// audit path for the dead reverse-proxy shape being retired in P2.4) — the broker
 // must not carry a dependency on that soon-to-be-deleted component. It emits
 // two lines, mirroring what the broker previously produced via the shared
 // helpers: a "policy_decision" line with the decision outcome, and a

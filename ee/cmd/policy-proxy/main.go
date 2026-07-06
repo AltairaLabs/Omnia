@@ -114,7 +114,7 @@ func run(logger *slog.Logger) error {
 		return fmt.Errorf("failed to create Kubernetes client: %w", err)
 	}
 
-	watcher := policy.NewWatcher(evaluator, k8sClient, scheme, namespace, logger)
+	watcher := policy.NewWatcher(evaluator, k8sClient, scheme, namespace, logr.FromSlogHandler(logger.Handler()))
 	proxyHandler := policy.NewProxyHandler(evaluator, upstreamURL, logger)
 
 	proxySrv := &http.Server{

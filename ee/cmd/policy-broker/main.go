@@ -12,7 +12,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -74,11 +73,8 @@ func nagLicenseAtStartup(ctx context.Context, logger logr.Logger) {
 }
 
 func main() {
-	// Create the Zap logger directly so we can derive both logr (for the
-	// broker's own structured logging) and slog (for policy.Watcher, which
-	// is shared with the not-yet-migrated policy-proxy binary — P2.4 retires
-	// that component, at which point Watcher can move to logr too) from the
-	// same Zap core without a lossy bridge.
+	// Create the Zap logger directly and derive a single logr.Logger from it.
+	// The broker binary runs entirely on pkg/logging now — see P2.3.
 	zapLog, err := logging.NewZapLogger()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to create logger: %v\n", err)
@@ -86,15 +82,14 @@ func main() {
 	}
 	defer func() { _ = zapLog.Sync() }()
 	logger := zapr.NewLogger(zapLog)
-	watcherLogger := logging.SlogFromZap(zapLog)
 
-	if err := run(logger, watcherLogger); err != nil {
+	if err := run(logger); err != nil {
 		logger.Error(err, "policy broker failed")
 		os.Exit(1)
 	}
 }
 
-func run(logger logr.Logger, watcherLogger *slog.Logger) error {
+func run(logger logr.Logger) error {
 	listenAddr := getEnvOrDefault(envListenAddr, defaultListenAddr)
 	healthAddr := getEnvOrDefault(envHealthAddr, defaultHealthAddr)
 	namespace := os.Getenv(envNamespace)
@@ -114,7 +109,7 @@ func run(logger logr.Logger, watcherLogger *slog.Logger) error {
 		return fmt.Errorf("failed to create Kubernetes client: %w", err)
 	}
 
-	watcher := policy.NewWatcher(evaluator, k8sClient, scheme, namespace, watcherLogger)
+	watcher := policy.NewWatcher(evaluator, k8sClient, scheme, namespace, logger)
 	brokerHandler := policy.NewBrokerHandler(evaluator, logger)
 
 	brokerSrv := &http.Server{
