@@ -31,7 +31,11 @@ export interface LicenseFeatures {
   memoryEnterprise: boolean;
   /** Privacy/compliance suite: consent, DSAR, audit hub, enforcement-stats */
   privacyEnterprise: boolean;
-  /** AgentPolicy / CEL enforcement (policy-proxy) */
+  /**
+   * AgentPolicy / CEL enforcement (ToolPolicy, enforced by policy-broker;
+   * policy-proxy was retired). Property name stays `policyProxy` because it
+   * mirrors the wire key sent by the operator's /api/v1/license endpoint.
+   */
   policyProxy: boolean;
 }
 

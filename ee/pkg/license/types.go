@@ -48,8 +48,10 @@ type Features struct {
 	// privacy-api: consent, opt-out, DSAR erasure, the central audit hub, and
 	// enforcement-stats.
 	PrivacyEnterprise bool `json:"privacyEnterprise"`
-	// PolicyProxy enables AgentPolicy / CEL enforcement in policy-proxy.
-	PolicyProxy bool `json:"policyProxy"`
+	// ToolPolicy enables AgentPolicy / CEL enforcement (policy-broker).
+	// json tag stays "policyProxy" for signed-license wire compatibility; the
+	// feature is ToolPolicy/CEL enforcement (policy-proxy was retired).
+	ToolPolicy bool `json:"policyProxy"`
 }
 
 // Limits defines the resource limits in the license.
@@ -107,7 +109,7 @@ func OpenCoreLicense() *License {
 			// deployments degrade to open-core behavior (feature disabled).
 			MemoryEnterprise:  false,
 			PrivacyEnterprise: false,
-			PolicyProxy:       false,
+			ToolPolicy:        false,
 		},
 		Limits: Limits{
 			MaxScenarios:      10,
@@ -137,7 +139,7 @@ func DevLicense() *License {
 			WhiteLabel:         true,
 			MemoryEnterprise:   true,
 			PrivacyEnterprise:  true,
-			PolicyProxy:        true,
+			ToolPolicy:         true,
 		},
 		Limits: Limits{
 			MaxScenarios:      0, // unlimited
@@ -222,9 +224,9 @@ func (l *License) CanUsePrivacyEnterprise() bool {
 	return l.Features.PrivacyEnterprise || l.IsEnterprise()
 }
 
-// CanUsePolicyProxy returns true if AgentPolicy / CEL enforcement is licensed.
-func (l *License) CanUsePolicyProxy() bool {
-	return l.Features.PolicyProxy || l.IsEnterprise()
+// CanUseToolPolicy returns true if AgentPolicy / CEL enforcement is licensed.
+func (l *License) CanUseToolPolicy() bool {
+	return l.Features.ToolPolicy || l.IsEnterprise()
 }
 
 // CanUseWorkerReplicas returns true if the given number of replicas is allowed.
