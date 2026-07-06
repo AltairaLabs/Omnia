@@ -173,7 +173,7 @@ The policy-broker sidecar (Enterprise) exposes ToolPolicy decision metrics on `/
 
 | Metric | Type | Labels | Description |
 |--------|------|--------|-------------|
-| `omnia_toolpolicy_decisions_total` | Counter | outcome, tool_registry, policy | ToolPolicy decisions by `outcome` (`allowed`/`denied`/`would_deny`). `policy` names the matched deny rule (empty on a clean allow). |
+| `omnia_toolpolicy_decisions_total` | Counter | outcome, tool_registry, policy | ToolPolicy decisions by `outcome` (`allowed`/`denied`/`would_deny`). `policy` is the ToolPolicy that produced the decision (empty on a clean allow). |
 | `omnia_toolpolicy_decision_duration_seconds` | Histogram | — | Broker decision latency (0.5 ms – 0.5 s buckets) |
 | `omnia_toolpolicy_active_policies` | Gauge | — | ToolPolicies currently compiled and loaded by the broker |
 

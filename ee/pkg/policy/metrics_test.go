@@ -77,7 +77,7 @@ func TestBrokerHandler_RecordsDecisionMetrics(t *testing.T) {
 	handler.ServeHTTP(allowRec, allowReq)
 
 	denyCount := testutil.ToFloat64(metrics.DecisionsTotal.WithLabelValues(
-		OutcomeDenied, "metrics-test-registry", "block-blocked-tool"))
+		OutcomeDenied, "metrics-test-registry", "metrics-test-policy"))
 	if denyCount != 1 {
 		t.Errorf("denied decisions_total = %v, want 1", denyCount)
 	}
@@ -133,6 +133,14 @@ func TestDecisionOutcome(t *testing.T) {
 			name:     "allowed",
 			decision: Decision{Allowed: true},
 			want:     OutcomeAllowed,
+		},
+		{
+			// Defensive: a not-allowed decision counts as denied even if
+			// DeniedBy is somehow empty (classifier keys on Allowed, not
+			// on the presence of a rule name).
+			name:     "denied_without_deniedby",
+			decision: Decision{Allowed: false},
+			want:     OutcomeDenied,
 		},
 	}
 

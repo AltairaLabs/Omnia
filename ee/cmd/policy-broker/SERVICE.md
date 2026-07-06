@@ -145,7 +145,7 @@ standalone reconciled Deployment.
 
 | Metric | Type | Labels | Purpose |
 |--------|------|--------|---------|
-| `omnia_toolpolicy_decisions_total` | Counter | `outcome` (`allowed`/`denied`/`would_deny`), `tool_registry`, `policy` | ToolPolicy decision volume by outcome. `policy` is the matched `deniedBy` rule/policy (empty on a clean allow). |
+| `omnia_toolpolicy_decisions_total` | Counter | `outcome` (`allowed`/`denied`/`would_deny`), `tool_registry`, `policy` | ToolPolicy decision volume by outcome. `policy` is the ToolPolicy CRD that produced the decision (empty on a clean allow). The specific rule that fired stays in the `policy_decision` logs, not as a label. |
 | `omnia_toolpolicy_decision_duration_seconds` | Histogram | — | Broker decision latency (buckets 0.5 ms – 0.5 s). |
 | `omnia_toolpolicy_active_policies` | Gauge | — | ToolPolicies currently compiled and loaded by the broker. |
 

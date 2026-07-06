@@ -79,10 +79,14 @@ func NewBrokerMetrics(agentName, namespace string) *Metrics {
 	}
 }
 
-// RecordDecision records the outcome, tool registry, and matched policy/rule
-// name for a single broker decision, plus its latency.
+// RecordDecision records the outcome, tool registry, and matched ToolPolicy
+// name for a single broker decision, plus its latency. The `policy` label is
+// the ToolPolicy that produced the decision (`decision.Policy`, the CRD name)
+// — empty on a clean allow where no policy denied the call. The specific rule
+// that fired (`decision.DeniedBy`) stays in the structured decision logs
+// rather than as a metric label, keeping cardinality to policies × registries.
 func (m *Metrics) RecordDecision(decision Decision, toolRegistry string, durationSeconds float64) {
-	m.DecisionsTotal.WithLabelValues(decisionOutcome(decision), toolRegistry, decision.DeniedBy).Inc()
+	m.DecisionsTotal.WithLabelValues(decisionOutcome(decision), toolRegistry, decision.Policy).Inc()
 	m.DecisionDuration.Observe(durationSeconds)
 }
 
@@ -96,7 +100,7 @@ func (m *Metrics) SetActivePolicies(count int) {
 // call, "would_deny" when an audit-mode policy would have blocked it, and
 // "allowed" otherwise.
 func decisionOutcome(decision Decision) string {
-	if !decision.Allowed && decision.DeniedBy != "" {
+	if !decision.Allowed {
 		return OutcomeDenied
 	}
 	if decision.WouldDeny {
