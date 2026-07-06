@@ -9,7 +9,7 @@ require (
 	github.com/AltairaLabs/PromptKit/runtime v1.5.3
 	github.com/AltairaLabs/PromptKit/sdk v1.5.3
 	github.com/AltairaLabs/PromptKit/server/a2a v1.5.3
-	github.com/AltairaLabs/PromptKit/tools/arena v1.5.1
+	github.com/AltairaLabs/PromptKit/tools/arena v1.5.3
 	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.22.0
 	github.com/Azure/azure-sdk-for-go/sdk/azidentity v1.14.0
 	github.com/Azure/azure-sdk-for-go/sdk/security/keyvault/azkeys v1.4.0
