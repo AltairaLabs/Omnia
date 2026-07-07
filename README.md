@@ -34,9 +34,16 @@ Omnia is a Kubernetes operator that makes deploying, scaling, and managing AI ag
 
 ```bash
 helm install omnia oci://ghcr.io/altairalabs/charts/omnia \
+  --devel \
   --namespace omnia-system \
-  --create-namespace
+  --create-namespace \
+  --set dashboard.auth.mode=builtin \
+  --set dashboard.auth.sessionSecret="$(openssl rand -base64 32)"
 ```
+
+> `--devel` is required while Omnia ships pre-release (beta) charts. The dashboard
+> uses **builtin** auth — after install, open it and register the first user.
+> See [Dashboard Auth](https://omnia.altairalabs.ai/how-to/configure-dashboard-auth/).
 
 ### Deploy Your First Agent
 

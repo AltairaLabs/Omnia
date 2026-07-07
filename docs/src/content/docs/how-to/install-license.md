@@ -23,8 +23,11 @@ The simplest way to install with a license is to pass it directly to Helm:
 
 ```bash
 helm install omnia oci://ghcr.io/altairalabs/charts/omnia \
+  --devel \
   --namespace omnia-system \
   --create-namespace \
+  --set dashboard.auth.mode=builtin \
+  --set dashboard.auth.sessionSecret="$(openssl rand -base64 32)" \
   --set license.key="eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9..."
 ```
 
@@ -54,8 +57,11 @@ license:
 
 ```bash
 helm install omnia oci://ghcr.io/altairalabs/charts/omnia \
+  --devel \
   --namespace omnia-system \
   --create-namespace \
+  --set dashboard.auth.mode=builtin \
+  --set dashboard.auth.sessionSecret="$(openssl rand -base64 32)" \
   -f values.yaml
 ```
 

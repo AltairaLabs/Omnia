@@ -12,8 +12,11 @@ This document covers all configuration options for the Omnia Helm chart.
 
 ```bash
 helm install omnia oci://ghcr.io/altairalabs/charts/omnia \
+  --devel \
   --namespace omnia-system \
   --create-namespace \
+  --set dashboard.auth.mode=builtin \
+  --set dashboard.auth.sessionSecret="$(openssl rand -base64 32)" \
   -f values.yaml
 ```
 
@@ -869,11 +872,15 @@ Demo agents are now deployed via a separate `omnia-demos` chart. This provides a
 ```bash
 # First, install the main Omnia operator
 helm install omnia oci://ghcr.io/altairalabs/charts/omnia \
+  --devel \
   --namespace omnia-system \
-  --create-namespace
+  --create-namespace \
+  --set dashboard.auth.mode=builtin \
+  --set dashboard.auth.sessionSecret="$(openssl rand -base64 32)"
 
 # Then, install the demo agents
 helm install omnia-demos oci://ghcr.io/altairalabs/charts/omnia-demos \
+  --devel \
   --namespace omnia-demo \
   --create-namespace
 ```
@@ -1040,11 +1047,15 @@ Quick-start demo with local Ollama LLM. Deploy using two separate charts:
 ```bash
 # Main chart with dashboard
 helm install omnia oci://ghcr.io/altairalabs/charts/omnia \
+  --devel \
   -n omnia-system --create-namespace \
-  --set dashboard.enabled=true
+  --set dashboard.enabled=true \
+  --set dashboard.auth.mode=builtin \
+  --set dashboard.auth.sessionSecret="$(openssl rand -base64 32)"
 
 # Demo agents chart
 helm install omnia-demos oci://ghcr.io/altairalabs/charts/omnia-demos \
+  --devel \
   -n omnia-demo --create-namespace \
   --set ollama.persistence.enabled=true
 ```
