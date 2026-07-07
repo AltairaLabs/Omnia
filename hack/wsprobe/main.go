@@ -20,7 +20,7 @@ func probe(url, message string, timeout time.Duration) error {
 	if err != nil {
 		return fmt.Errorf("dial %s: %w", url, err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	if err := conn.WriteJSON(map[string]string{"type": "message", "content": message}); err != nil {
 		return fmt.Errorf("write message: %w", err)
