@@ -22,12 +22,12 @@ data:
         editable: true
         jsonData:
           client: standalone
-          {{- if .Values.redis.auth.enabled }}
+          {{- if dig "auth" "enabled" false .Values.redis }}
           acl: true
           {{- else }}
           acl: false
           {{- end }}
-        {{- if .Values.redis.auth.enabled }}
+        {{- if dig "auth" "enabled" false .Values.redis }}
         secureJsonData:
           password: $REDIS_PASSWORD
         {{- end }}
