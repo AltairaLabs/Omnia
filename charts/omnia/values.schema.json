@@ -749,11 +749,15 @@
 
     "redis": {
       "type": "object",
-      "description": "Bitnami Redis subchart toggle + cluster-wide default Redis target. Per-consumer overrides live on each consumer block (dashboard.session.redis, workspaceServices.memoryApi.cache.redis, enterprise.arena.queue.redis).",
+      "description": "In-repo dev Redis toggle + cluster-wide default Redis target. Per-consumer overrides live on each consumer block (dashboard.session.redis, workspaceServices.memoryApi.cache.redis, enterprise.arena.queue.redis).",
       "properties": {
-        "enabled":      { "type": "boolean", "description": "Bitnami Redis subchart on/off (dev convenience)." },
-        "architecture": { "type": "string", "enum": ["standalone", "replication"] },
-        "default":      { "$ref": "#/$defs/redisConsumer", "description": "Cluster-wide default. Consumers without overrides fall back to this." }
+        "enabled":         { "type": "boolean", "description": "In-repo dev Redis on/off (dev convenience)." },
+        "image":           { "$ref": "#/$defs/image" },
+        "maxmemory":       { "type": "string", "description": "maxmemory ceiling for the dev Redis." },
+        "maxmemoryPolicy": { "type": "string", "description": "Eviction policy once maxmemory is reached." },
+        "resources":       { "$ref": "#/$defs/resources" },
+        "podOverrides":    { "type": "object", "description": "Pod customization for the dev Redis StatefulSet." },
+        "default":         { "$ref": "#/$defs/redisConsumer", "description": "Cluster-wide default. Consumers without overrides fall back to this." }
       }
     },
 

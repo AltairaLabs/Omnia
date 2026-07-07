@@ -1,0 +1,76 @@
+suite: in-repo dev Redis
+release:
+  name: omnia
+values:
+  - ../values-chart-tests.yaml
+templates:
+  - templates/redis/redis.yaml
+tests:
+  - it: renders nothing when redis.enabled is false (default)
+    set:
+      redis.enabled: false
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: renders StatefulSet + Service named <fullname>-redis-master when enabled
+    set:
+      redis.enabled: true
+    asserts:
+      - hasDocuments:
+          count: 2
+      - isKind:
+          of: StatefulSet
+        documentIndex: 0
+      - equal:
+          path: spec.serviceName
+          value: omnia-redis-master
+        documentIndex: 0
+      - equal:
+          path: metadata.name
+          value: omnia-redis-master
+        documentIndex: 0
+      - isKind:
+          of: Service
+        documentIndex: 1
+      - equal:
+          path: metadata.name
+          value: omnia-redis-master
+        documentIndex: 1
+
+  - it: Service exposes port 6379 selecting the redis component
+    set:
+      redis.enabled: true
+    documentIndex: 1
+    asserts:
+      - equal:
+          path: spec.ports[0].port
+          value: 6379
+      - equal:
+          path: spec.selector["app.kubernetes.io/component"]
+          value: redis
+
+  - it: uses the configured image and resources
+    set:
+      redis.enabled: true
+      redis.image.repository: redis
+      redis.image.tag: "7.4-alpine"
+    documentIndex: 0
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: redis:7.4-alpine
+      - equal:
+          path: spec.template.spec.containers[0].resources.requests.cpu
+          value: 50m
+
+  - it: applies podOverrides.nodeSelector to the StatefulSet
+    set:
+      redis.enabled: true
+      redis.podOverrides.nodeSelector:
+        disktype: ssd
+    documentIndex: 0
+    asserts:
+      - equal:
+          path: spec.template.spec.nodeSelector.disktype
+          value: ssd
