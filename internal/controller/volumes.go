@@ -71,6 +71,12 @@ func (r *AgentRuntimeReconciler) buildVolumes(
 				},
 			},
 		})
+		// Writable scratch for the runtime to stage the tool-surfaced pack
+		// (root filesystem is read-only, so /tmp is not writable).
+		volumes = append(volumes, corev1.Volume{
+			Name:         runtimePackCacheVolumeName,
+			VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}},
+		})
 	}
 
 	// Mount the companion tool-secrets Secret only when at least one handler
@@ -85,6 +91,12 @@ func (r *AgentRuntimeReconciler) buildVolumes(
 				},
 			},
 		})
+	}
+
+	// Project audience-bound ServiceAccount tokens for serviceAccount-auth
+	// handlers (one volume, per-handler subpath). No companion Secret involved.
+	if vol, ok := toolSATokenVolume(toolRegistry); ok {
+		volumes = append(volumes, vol)
 	}
 
 	// Mount the workspace content PVC only when the operator is configured
@@ -156,6 +168,12 @@ func (r *AgentRuntimeReconciler) buildRuntimeVolumeMounts(
 			MountPath: ToolsMountPath,
 			ReadOnly:  true,
 		})
+		// Writable pack-cache scratch (see buildVolumes).
+		volumeMounts = append(volumeMounts, corev1.VolumeMount{
+			Name:      runtimePackCacheVolumeName,
+			MountPath: RuntimePackCacheMountPath,
+			ReadOnly:  false,
+		})
 	}
 
 	// Mount the tool-secrets Secret into the runtime container, mirroring the
@@ -166,6 +184,12 @@ func (r *AgentRuntimeReconciler) buildRuntimeVolumeMounts(
 			MountPath: ToolSecretsMountPath,
 			ReadOnly:  true,
 		})
+	}
+
+	// Mount the projected tool SA-token volume when any handler uses
+	// serviceAccount auth, mirroring the buildVolumes gate.
+	if len(collectToolSAHandlers(toolRegistry)) > 0 {
+		volumeMounts = append(volumeMounts, toolSATokenMount())
 	}
 
 	// Mount the workspace content PVC into the runtime container so it can

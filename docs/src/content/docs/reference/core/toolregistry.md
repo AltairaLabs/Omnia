@@ -136,27 +136,60 @@ Configure HTTP-specific options for explicit tool endpoints:
 | `method` | string | `POST` | HTTP method |
 | `headers` | map | - | Additional HTTP headers |
 | `contentType` | string | `application/json` | Content-Type header |
-| `authType` | string | `bearer` | Auth type (`bearer` or `basic`) |
-| `authSecretRef` | object | - | Reference to a Secret holding the credential (see below) |
+| `authType` | string | `bearer` | **Deprecated** — use the handler-level `auth` stanza. Auth type (`bearer` or `basic`). |
+| `authSecretRef` | object | - | **Deprecated** — use the handler-level `auth` stanza. Reference to a Secret holding the credential (see below). |
 
-### Authenticating HTTP / OpenAPI tools
+### Authenticating tools
 
-Set `authType` (`bearer` or `basic`) and `authSecretRef` to authenticate the tool call:
+Authentication is configured with the **handler-level `auth` stanza** (a sibling
+of `httpConfig`/`openAPIConfig`/…), so the same shape applies across handler
+types:
 
 ```yaml
-httpConfig:
-  endpoint: https://api.example.com
-  authType: bearer          # or "basic"
-  authSecretRef:
-    name: my-tool-credentials   # a Kubernetes Secret in the same namespace
-    key: token                  # for basic, the value is "username:password"
+handlers:
+  - name: my-api
+    type: http
+    httpConfig:
+      endpoint: https://api.example.com
+    auth:
+      type: bearer              # none | bearer | basic
+      secretRef:
+        name: my-tool-credentials   # a Kubernetes Secret in the same namespace
+        key: token                  # for basic, the value is "username:password"
 ```
 
-The operator resolves the referenced Secret into an operator-managed
-`<agentruntime>-tool-secrets` Secret, mounts it read-only into the runtime, and
-the runtime attaches the `Authorization` header at call time. The token value is
-never written into the tools ConfigMap. A missing Secret or key fails the
-AgentRuntime reconcile (it does not silently send an unauthenticated request).
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `auth.type` | string | `none` | Authentication mechanism: `none`, `bearer`, `basic`, `serviceAccount`, or `workloadIdentity`. |
+| `auth.secretRef` | object | - | Secret holding the credential (required for `bearer`/`basic`). |
+| `auth.serviceAccount.audience` | string | - | Audience the projected ServiceAccount token binds to (required for `serviceAccount`). |
+| `auth.workloadIdentity` | object | - | Hosted same-cloud identity (`cloud`, `audience`). Required for `workloadIdentity`. |
+
+The `auth` stanza applies to **http, openapi, grpc, and mcp** handlers (the
+runtime attaches the credential as an HTTP `Authorization` header, gRPC
+`authorization` metadata, or an MCP transport header). Auth is not supported on
+a **stdio** MCP transport (no header channel) and is rejected.
+
+- **`bearer` / `basic`** — the operator resolves `secretRef` into an
+  operator-managed `<agentruntime>-tool-secrets` Secret, mounted read-only into
+  the runtime. The token value never enters the tools ConfigMap.
+- **`serviceAccount`** — the operator projects an audience-bound Kubernetes
+  ServiceAccount token into the runtime; the tool backend validates it via
+  TokenReview. Sent as `Authorization: Bearer <token>`.
+- **`workloadIdentity`** — accepted by the schema but **rejected at reconcile**:
+  its credential resolver is the Enterprise policy broker (a later release). It
+  is also rejected when the pod's Provider itself uses workload identity, because
+  tool egress must not reuse the runtime's ambient cloud identity.
+
+A missing Secret/key, an unsupported type, or a stdio-MCP+auth combination fails
+the AgentRuntime reconcile — it does not silently send an unauthenticated request.
+
+:::note[Deprecated: `authType` / `authSecretRef`]
+The per-config `authType` and `authSecretRef` fields on `httpConfig`/`openAPIConfig`
+are deprecated in favour of the `auth` stanza above. They still work and are
+normalized into it, but setting **both** a handler `auth` stanza and a legacy
+`authType`/`authSecretRef` on the same handler is rejected.
+:::
 
 ## GRPC handler
 
@@ -254,8 +287,8 @@ OpenAPI handlers automatically discover tools from an OpenAPI/Swagger specificat
 | `baseURL` | string | No | Override the base URL from spec |
 | `operationFilter` | []string | No | Limit to specific operation IDs |
 | `headers` | map | No | Additional headers for requests |
-| `authType` | string | No | Auth type (`bearer` or `basic`) |
-| `authSecretRef` | object | No | Reference to a Secret holding the credential — see "Authenticating HTTP / OpenAPI tools" under the HTTP Handler section above |
+| `authType` | string | No | **Deprecated** — use the handler-level `auth` stanza. Auth type (`bearer` or `basic`). |
+| `authSecretRef` | object | No | **Deprecated** — use the handler-level `auth` stanza. Reference to a Secret holding the credential — see "Authenticating tools" under the HTTP Handler section above. |
 
 ## Service discovery
 

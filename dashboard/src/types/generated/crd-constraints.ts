@@ -1897,6 +1897,46 @@ export const crdConstraints: Record<string, Record<string, FieldConstraint>> =
     "spec.handlers": {
       "required": true
     },
+    "spec.handlers[].auth.secretRef.key": {
+      "type": "string",
+      "required": true
+    },
+    "spec.handlers[].auth.secretRef.name": {
+      "type": "string",
+      "required": true
+    },
+    "spec.handlers[].auth.serviceAccount.audience": {
+      "type": "string",
+      "required": true
+    },
+    "spec.handlers[].auth.type": {
+      "type": "string",
+      "enum": [
+        "none",
+        "bearer",
+        "basic",
+        "serviceAccount",
+        "workloadIdentity"
+      ],
+      "required": true
+    },
+    "spec.handlers[].auth.workloadIdentity.audience": {
+      "type": "string",
+      "required": true
+    },
+    "spec.handlers[].auth.workloadIdentity.cloud": {
+      "type": "string",
+      "enum": [
+        "azure",
+        "aws",
+        "gcp",
+        "oidc"
+      ],
+      "required": true
+    },
+    "spec.handlers[].auth.workloadIdentity.header": {
+      "type": "string"
+    },
     "spec.handlers[].clientConfig.categories[]": {
       "type": "string"
     },

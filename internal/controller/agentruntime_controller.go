@@ -419,6 +419,13 @@ func (r *AgentRuntimeReconciler) reconcileResources(
 
 	// Reconcile tools ConfigMap and companion tool-secrets Secret
 	if toolRegistry != nil {
+		// Fail loud on tool auth the operator cannot honor (e.g. workloadIdentity
+		// without its Enterprise resolver) before provisioning any credentials.
+		if err := validateToolAuthTypes(toolRegistry, providers); err != nil {
+			log.Error(err, "unsupported tool auth configuration")
+			r.handleRefError(ctx, log, agentRuntime, ConditionTypeDeploymentReady, "ToolAuthUnsupported", err)
+			return nil, err
+		}
 		if err := r.reconcileToolSecrets(ctx, agentRuntime, toolRegistry); err != nil {
 			log.Error(err, "Failed to reconcile tool-secrets Secret")
 			return nil, err // fail loud — do not proceed with a broken auth config

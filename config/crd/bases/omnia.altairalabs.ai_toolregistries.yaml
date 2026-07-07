@@ -61,6 +61,95 @@ spec:
                   description: HandlerDefinition defines a tool handler that exposes
                     one or more tools
                   properties:
+                    auth:
+                      description: |-
+                        auth configures how the runtime authenticates to this handler's backend.
+                        Applies to http, openapi, grpc, and mcp handlers. Supersedes the legacy
+                        per-config authType/authSecretRef fields; setting both is rejected.
+                      properties:
+                        secretRef:
+                          description: |-
+                            secretRef holds the credential for bearer/basic. For bearer the key's value
+                            is the token; for basic it is "username:password".
+                          properties:
+                            key:
+                              description: key is the key in the secret to select.
+                              type: string
+                            name:
+                              description: name is the name of the secret.
+                              type: string
+                          required:
+                          - key
+                          - name
+                          type: object
+                        serviceAccount:
+                          description: |-
+                            serviceAccount configures an audience-bound projected SA token. The tool
+                            backend validates the token via the Kubernetes TokenReview API.
+                          properties:
+                            audience:
+                              description: |-
+                                audience the projected token is bound to; the tool backend validates it
+                                (via TokenReview) against this audience.
+                              type: string
+                          required:
+                          - audience
+                          type: object
+                        type:
+                          default: none
+                          description: |-
+                            type selects the authentication mechanism:
+                              none             — no credential (default)
+                              bearer           — Authorization: Bearer <secretRef value>
+                              basic            — Authorization: Basic <base64(secretRef "user:password")>
+                              serviceAccount   — audience-bound projected Kubernetes ServiceAccount token
+                              workloadIdentity — hosted same-cloud identity, resolved by the Enterprise
+                                                 policy broker; not yet available (rejected by the operator)
+                          enum:
+                          - none
+                          - bearer
+                          - basic
+                          - serviceAccount
+                          - workloadIdentity
+                          type: string
+                        workloadIdentity:
+                          description: |-
+                            workloadIdentity configures hosted same-cloud identity. Resolved by the
+                            Enterprise policy broker under its own federated identity (not yet
+                            available in this release).
+                          properties:
+                            audience:
+                              description: audience for the federated token exchange.
+                              type: string
+                            cloud:
+                              description: cloud identity provider.
+                              enum:
+                              - azure
+                              - aws
+                              - gcp
+                              - oidc
+                              type: string
+                            header:
+                              default: Authorization
+                              description: header carries the resolved token. Defaults
+                                to Authorization.
+                              type: string
+                          required:
+                          - audience
+                          - cloud
+                          type: object
+                      required:
+                      - type
+                      type: object
+                      x-kubernetes-validations:
+                      - message: auth.type bearer/basic requires secretRef
+                        rule: self.type != 'bearer' && self.type != 'basic' || has(self.secretRef)
+                      - message: auth.type serviceAccount requires the serviceAccount
+                          block
+                        rule: self.type != 'serviceAccount' || has(self.serviceAccount)
+                      - message: auth.type workloadIdentity requires the workloadIdentity
+                          block
+                        rule: self.type != 'workloadIdentity' || has(self.workloadIdentity)
                     clientConfig:
                       description: |-
                         clientConfig contains client-side tool configuration.
@@ -154,8 +243,9 @@ spec:
                         Required when type is "http".
                       properties:
                         authSecretRef:
-                          description: authSecretRef references a secret containing
-                            auth credentials.
+                          description: |-
+                            authSecretRef references a secret containing auth credentials.
+                            Deprecated: use the handler-level `auth` stanza. Normalized into it when set.
                           properties:
                             key:
                               description: key is the key in the secret to select.
@@ -168,8 +258,9 @@ spec:
                           - name
                           type: object
                         authType:
-                          description: authType specifies the authentication type
-                            (bearer, basic).
+                          description: |-
+                            authType specifies the authentication type (bearer, basic).
+                            Deprecated: use the handler-level `auth` stanza. Normalized into it when set.
                           enum:
                           - bearer
                           - basic
@@ -400,8 +491,9 @@ spec:
                         Required when type is "openapi".
                       properties:
                         authSecretRef:
-                          description: authSecretRef references a secret containing
-                            auth credentials.
+                          description: |-
+                            authSecretRef references a secret containing auth credentials.
+                            Deprecated: use the handler-level `auth` stanza. Normalized into it when set.
                           properties:
                             key:
                               description: key is the key in the secret to select.
@@ -414,8 +506,9 @@ spec:
                           - name
                           type: object
                         authType:
-                          description: authType specifies the authentication type
-                            (bearer, basic).
+                          description: |-
+                            authType specifies the authentication type (bearer, basic).
+                            Deprecated: use the handler-level `auth` stanza. Normalized into it when set.
                           enum:
                           - bearer
                           - basic
@@ -570,6 +663,12 @@ spec:
                   - name
                   - type
                   type: object
+                  x-kubernetes-validations:
+                  - message: set either the handler-level auth stanza or the legacy
+                      httpConfig/openAPIConfig authType/authSecretRef, not both
+                    rule: '!(has(self.auth) && ((has(self.httpConfig) && (has(self.httpConfig.authType)
+                      || has(self.httpConfig.authSecretRef))) || (has(self.openAPIConfig)
+                      && (has(self.openAPIConfig.authType) || has(self.openAPIConfig.authSecretRef)))))'
                 minItems: 1
                 type: array
             required:

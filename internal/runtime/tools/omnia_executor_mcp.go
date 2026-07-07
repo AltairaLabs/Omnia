@@ -84,16 +84,20 @@ func (e *OmniaExecutor) initMCPHandler(ctx context.Context, name string, h *Hand
 }
 
 func (e *OmniaExecutor) buildMCPTransport(cfg *MCPCfg) (mcp.Transport, error) {
+	authHeader, err := authorizationValue(cfg.AuthType, cfg.AuthToken)
+	if err != nil {
+		return nil, fmt.Errorf("MCP tool auth: %w", err)
+	}
 	switch MCPTransportType(cfg.Transport) {
 	case MCPTransportSSE:
 		return &mcp.SSEClientTransport{
 			Endpoint:   cfg.Endpoint,
-			HTTPClient: &http.Client{Transport: &injectedHeaderTransport{}},
+			HTTPClient: &http.Client{Transport: &injectedHeaderTransport{authHeader: authHeader}},
 		}, nil
 	case MCPTransportStreamableHTTP:
 		return &mcp.StreamableClientTransport{
 			Endpoint:   cfg.Endpoint,
-			HTTPClient: &http.Client{Transport: &injectedHeaderTransport{}},
+			HTTPClient: &http.Client{Transport: &injectedHeaderTransport{authHeader: authHeader}},
 		}, nil
 	case MCPTransportStdio:
 		// Stdio MCP has no header/metadata channel: the subprocess speaks
@@ -128,11 +132,15 @@ func (e *OmniaExecutor) buildMCPTransport(cfg *MCPCfg) (mcp.Transport, error) {
 // transport.
 type injectedHeaderTransport struct {
 	base http.RoundTripper
+	// authHeader is the pre-computed tool-credential Authorization value
+	// ("Bearer <token>" / "Basic <...>"), or "" when the handler has no auth.
+	authHeader string
 }
 
-// RoundTrip merges broker-injected headers in last, so they win over
-// whatever the MCP transport already set (session/protocol/auth headers) on
-// key collision — mirrors the ordering in buildHTTPHeaders and executeGRPC.
+// RoundTrip applies the tool credential first, then merges broker-injected
+// headers last so they win over the tool credential (and any transport-set
+// headers) on key collision — mirrors the ordering in buildHTTPHeaders and
+// executeGRPC.
 func (t *injectedHeaderTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	base := t.base
 	if base == nil {
@@ -140,11 +148,14 @@ func (t *injectedHeaderTransport) RoundTrip(req *http.Request) (*http.Response, 
 	}
 
 	headers := InjectedHeadersFromContext(req.Context())
-	if len(headers) == 0 {
+	if t.authHeader == "" && len(headers) == 0 {
 		return base.RoundTrip(req)
 	}
 
 	req = req.Clone(req.Context())
+	if t.authHeader != "" {
+		req.Header.Set("Authorization", t.authHeader)
+	}
 	for k, v := range headers {
 		req.Header.Set(k, v)
 	}

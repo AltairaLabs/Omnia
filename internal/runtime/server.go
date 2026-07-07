@@ -598,6 +598,13 @@ func (s *Server) InitializeTools(ctx context.Context) error {
 	s.log.Info("tools initialized successfully",
 		"toolCount", len(executor.ToolNames()))
 
+	// Surface the ToolRegistry's tools into the pack prompts' allowed-tools
+	// lists. PromptKit's ProviderStage only exposes a tool to the LLM when the
+	// prompt names it (or it is a system capability); an Omnia ToolRegistry
+	// `http`/`grpc` tool the pack prompt never lists would otherwise be
+	// filtered out and never dispatched. See surfaceRegistryToolsInPack.
+	s.packPath = surfaceRegistryToolsInPack(s.packPath, executor.ToolNames(), s.log)
+
 	return nil
 }
 

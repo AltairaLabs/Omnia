@@ -918,7 +918,7 @@ func TestGetConfigHash(t *testing.T) {
 				Scheme: scheme,
 			}
 
-			hash := r.getConfigHash(context.Background(), tt.providers)
+			hash := r.getConfigHash(context.Background(), tt.providers, nil, nil)
 
 			if tt.expectEmpty {
 				assert.Empty(t, hash, "hash should be empty when no providers")
@@ -929,7 +929,7 @@ func TestGetConfigHash(t *testing.T) {
 
 			// Calculate a baseline hash to compare
 			if tt.expectChanged {
-				baselineHash := r.getConfigHash(context.Background(), nil)
+				baselineHash := r.getConfigHash(context.Background(), nil, nil, nil)
 				assert.NotEqual(t, baselineHash, hash, "hash should differ from baseline when secrets are present")
 			}
 		})
@@ -986,9 +986,9 @@ func TestGetConfigHashDeterministic(t *testing.T) {
 	}
 
 	// Call multiple times to verify determinism
-	hash1 := r.getConfigHash(context.Background(), providers)
-	hash2 := r.getConfigHash(context.Background(), providers)
-	hash3 := r.getConfigHash(context.Background(), providers)
+	hash1 := r.getConfigHash(context.Background(), providers, nil, nil)
+	hash2 := r.getConfigHash(context.Background(), providers, nil, nil)
+	hash3 := r.getConfigHash(context.Background(), providers, nil, nil)
 
 	assert.Equal(t, hash1, hash2, "hash should be deterministic")
 	assert.Equal(t, hash2, hash3, "hash should be deterministic")

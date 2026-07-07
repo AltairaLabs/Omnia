@@ -1165,7 +1165,7 @@ func TestGetConfigHash_ProviderModelChange(t *testing.T) {
 	fakeClient := fake.NewClientBuilder().WithScheme(scheme).Build()
 	r := &AgentRuntimeReconciler{Client: fakeClient, Scheme: scheme}
 
-	hash1 := r.getConfigHash(context.Background(), providers)
+	hash1 := r.getConfigHash(context.Background(), providers, nil, nil)
 	assert.Len(t, hash1, 16)
 
 	// Change model
@@ -1173,7 +1173,7 @@ func TestGetConfigHash_ProviderModelChange(t *testing.T) {
 	provider2.Spec.Model = "qwen2.5:7b"
 	providers2 := map[string]*omniav1alpha1.Provider{"default": provider2}
 
-	hash2 := r.getConfigHash(context.Background(), providers2)
+	hash2 := r.getConfigHash(context.Background(), providers2, nil, nil)
 	assert.Len(t, hash2, 16)
 	assert.NotEqual(t, hash1, hash2, "model change should produce different hash")
 }
@@ -1204,7 +1204,7 @@ func TestGetConfigHash_FieldSensitivity(t *testing.T) {
 		},
 	}
 
-	baseHash := r.getConfigHash(ctx, map[string]*omniav1alpha1.Provider{"default": baseProvider})
+	baseHash := r.getConfigHash(ctx, map[string]*omniav1alpha1.Provider{"default": baseProvider}, nil, nil)
 	assert.NotEmpty(t, baseHash, "baseline hash must not be empty")
 
 	cases := []struct {
@@ -1245,7 +1245,7 @@ func TestGetConfigHash_FieldSensitivity(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			mutated := baseProvider.DeepCopy()
 			tc.mutate(mutated)
-			hash := r.getConfigHash(ctx, map[string]*omniav1alpha1.Provider{"default": mutated})
+			hash := r.getConfigHash(ctx, map[string]*omniav1alpha1.Provider{"default": mutated}, nil, nil)
 			assert.NotEqual(t, baseHash, hash, "mutating %s should change the hash", tc.name)
 		})
 	}
@@ -1269,8 +1269,8 @@ func TestGetConfigHash_MultiProviderOrder(t *testing.T) {
 		Spec:       omniav1alpha1.ProviderSpec{Type: "anthropic", Model: "claude-3-5-sonnet-20241022"},
 	}
 
-	hash1 := r.getConfigHash(ctx, map[string]*omniav1alpha1.Provider{"default": p1, "judge": p2})
-	hash2 := r.getConfigHash(ctx, map[string]*omniav1alpha1.Provider{"judge": p2, "default": p1})
+	hash1 := r.getConfigHash(ctx, map[string]*omniav1alpha1.Provider{"default": p1, "judge": p2}, nil, nil)
+	hash2 := r.getConfigHash(ctx, map[string]*omniav1alpha1.Provider{"judge": p2, "default": p1}, nil, nil)
 
 	assert.Equal(t, hash1, hash2, "hash must be deterministic regardless of map iteration order")
 }
@@ -1284,8 +1284,33 @@ func TestGetConfigHash_EmptyProviders(t *testing.T) {
 	r := &AgentRuntimeReconciler{Client: fakeClient, Scheme: scheme}
 	ctx := context.Background()
 
-	assert.Empty(t, r.getConfigHash(ctx, nil), "nil providers should return empty string")
-	assert.Empty(t, r.getConfigHash(ctx, map[string]*omniav1alpha1.Provider{}), "empty providers map should return empty string")
+	assert.Empty(t, r.getConfigHash(ctx, nil, nil, nil), "nil providers should return empty string")
+	assert.Empty(t, r.getConfigHash(ctx, map[string]*omniav1alpha1.Provider{}, nil, nil), "empty providers map should return empty string")
+}
+
+func TestGetConfigHash_RollsOnPackOrRegistryChange(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = corev1.AddToScheme(scheme)
+	_ = omniav1alpha1.AddToScheme(scheme)
+	r := &AgentRuntimeReconciler{Client: fake.NewClientBuilder().WithScheme(scheme).Build(), Scheme: scheme}
+	ctx := context.Background()
+
+	pack := &omniav1alpha1.PromptPack{ObjectMeta: metav1.ObjectMeta{Name: "p", Generation: 1}}
+	reg := &omniav1alpha1.ToolRegistry{ObjectMeta: metav1.ObjectMeta{Name: "r", Generation: 1}}
+
+	base := r.getConfigHash(ctx, nil, pack, reg)
+	assert.NotEmpty(t, base, "pack/registry alone must produce a hash (so the pod can roll on their changes)")
+
+	// A ToolRegistry spec change bumps Generation -> the hash must change so the
+	// pod rolls and picks up the new tools. This is the reconciliation bug fix:
+	// previously the hash ignored the registry entirely.
+	regBumped := &omniav1alpha1.ToolRegistry{ObjectMeta: metav1.ObjectMeta{Name: "r", Generation: 2}}
+	assert.NotEqual(t, base, r.getConfigHash(ctx, nil, pack, regBumped),
+		"a ToolRegistry change must change the config hash")
+
+	packBumped := &omniav1alpha1.PromptPack{ObjectMeta: metav1.ObjectMeta{Name: "p", Generation: 2}}
+	assert.NotEqual(t, base, r.getConfigHash(ctx, nil, packBumped, reg),
+		"a PromptPack change must change the config hash")
 }
 
 func TestBuildDeploymentSpec_SelectorExcludesMutableModeLabel(t *testing.T) {

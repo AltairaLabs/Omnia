@@ -577,6 +577,35 @@ func TestResolveHTTPAuthSuccess(t *testing.T) {
 	}
 }
 
+func TestResolveHTTPAuthNewStanza(t *testing.T) {
+	// A handler configured with ONLY the new auth stanza (no legacy fields) must
+	// still resolve and apply the credential — the tool-test path reads
+	// EffectiveAuth, not the deprecated fields.
+	log := zap.New(zap.UseDevMode(true))
+	s := testScheme()
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "my-secret", Namespace: "default"},
+		Data:       map[string][]byte{"token": []byte("st4nz4")},
+	}
+	c := fake.NewClientBuilder().WithScheme(s).WithObjects(secret).Build()
+	tester := NewTester(c, log)
+
+	handler := &omniav1alpha1.HandlerDefinition{
+		Type:       omniav1alpha1.HandlerTypeHTTP,
+		HTTPConfig: &omniav1alpha1.HTTPConfig{Endpoint: "https://example.com"},
+		Auth: &omniav1alpha1.ToolAuth{
+			Type:      omniav1alpha1.ToolAuthTypeBearer,
+			SecretRef: &omniav1alpha1.SecretKeySelector{Name: "my-secret", Key: "token"},
+		},
+	}
+	if err := tester.resolveHTTPAuth(context.Background(), "default", handler); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if handler.HTTPConfig.Headers["Authorization"] != "Bearer st4nz4" {
+		t.Errorf("Authorization = %q, want %q", handler.HTTPConfig.Headers["Authorization"], "Bearer st4nz4")
+	}
+}
+
 func TestResolveHTTPAuthCustomAuthType(t *testing.T) {
 	log := zap.New(zap.UseDevMode(true))
 	s := testScheme()

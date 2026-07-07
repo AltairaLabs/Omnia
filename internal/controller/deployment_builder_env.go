@@ -211,6 +211,14 @@ func (r *AgentRuntimeReconciler) buildRuntimeEnvVars(
 			Name:  "OMNIA_TOOLS_CONFIG_PATH",
 			Value: ToolsMountPath + "/" + ToolsConfigFileName,
 		})
+		// The runtime unions the registry's tools into the pack's allowed-tools
+		// list so they reach the model, writing the rewritten pack here. The
+		// container root filesystem is read-only, so this MUST point at the
+		// writable emptyDir the operator mounts (see buildVolumes).
+		envVars = append(envVars, corev1.EnvVar{
+			Name:  "OMNIA_PACK_CACHE_DIR",
+			Value: RuntimePackCacheMountPath,
+		})
 	}
 
 	// Memory: inject workspace UID so the runtime can scope memory operations.

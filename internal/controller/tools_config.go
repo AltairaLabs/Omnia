@@ -106,19 +106,23 @@ type ToolGRPC struct {
 	TLSKeyPath            string                               `json:"tlsKeyPath,omitempty"`
 	TLSCAPath             string                               `json:"tlsCAPath,omitempty"`
 	TLSInsecureSkipVerify bool                                 `json:"tlsInsecureSkipVerify,omitempty"`
+	AuthType              string                               `json:"authType,omitempty"`
+	AuthTokenPath         string                               `json:"authTokenPath,omitempty"`
 	RetryPolicy           *runtimetools.RuntimeGRPCRetryPolicy `json:"retryPolicy,omitempty"`
 }
 
 // ToolMCP represents MCP configuration for a handler.
 type ToolMCP struct {
-	Transport   string                              `json:"transport"`
-	Endpoint    string                              `json:"endpoint,omitempty"`
-	Command     string                              `json:"command,omitempty"`
-	Args        []string                            `json:"args,omitempty"`
-	WorkDir     string                              `json:"workDir,omitempty"`
-	Env         map[string]string                   `json:"env,omitempty"`
-	ToolFilter  *ToolMCPFilter                      `json:"toolFilter,omitempty"`
-	RetryPolicy *runtimetools.RuntimeMCPRetryPolicy `json:"retryPolicy,omitempty"`
+	Transport     string                              `json:"transport"`
+	Endpoint      string                              `json:"endpoint,omitempty"`
+	Command       string                              `json:"command,omitempty"`
+	Args          []string                            `json:"args,omitempty"`
+	WorkDir       string                              `json:"workDir,omitempty"`
+	Env           map[string]string                   `json:"env,omitempty"`
+	AuthType      string                              `json:"authType,omitempty"`
+	AuthTokenPath string                              `json:"authTokenPath,omitempty"`
+	ToolFilter    *ToolMCPFilter                      `json:"toolFilter,omitempty"`
+	RetryPolicy   *runtimetools.RuntimeMCPRetryPolicy `json:"retryPolicy,omitempty"`
 }
 
 // ToolMCPFilter controls which tools from an MCP server are exposed.
@@ -202,20 +206,76 @@ type toolAuthRef struct {
 	ref     *omniav1alpha1.SecretKeySelector
 }
 
-// collectToolAuthSecrets returns, in handler order, every HTTP/OpenAPI handler
-// that references an auth secret.
+// collectToolAuthSecrets returns, in handler order, every handler whose effective
+// auth resolves a credential from a Secret (bearer/basic). It reads
+// HandlerDefinition.EffectiveAuth so it is handler-generic — any protocol whose
+// auth is bearer/basic contributes a companion-Secret key, whether configured via
+// the new auth stanza or the deprecated authType/authSecretRef fields. Non-Secret
+// auth types (serviceAccount, workloadIdentity) do not use the companion Secret.
 func collectToolAuthSecrets(tr *omniav1alpha1.ToolRegistry) []toolAuthRef {
 	var out []toolAuthRef
 	for i := range tr.Spec.Handlers {
 		h := &tr.Spec.Handlers[i]
-		switch {
-		case h.HTTPConfig != nil && h.HTTPConfig.AuthSecretRef != nil:
-			out = append(out, toolAuthRef{handler: h.Name, ref: h.HTTPConfig.AuthSecretRef})
-		case h.OpenAPIConfig != nil && h.OpenAPIConfig.AuthSecretRef != nil:
-			out = append(out, toolAuthRef{handler: h.Name, ref: h.OpenAPIConfig.AuthSecretRef})
+		auth := h.EffectiveAuth()
+		if auth == nil || auth.SecretRef == nil {
+			continue
+		}
+		switch auth.Type {
+		case omniav1alpha1.ToolAuthTypeBearer, omniav1alpha1.ToolAuthTypeBasic:
+			out = append(out, toolAuthRef{handler: h.Name, ref: auth.SecretRef})
 		}
 	}
 	return out
+}
+
+// validateToolAuthTypes rejects tool handlers whose effective auth the operator
+// cannot honor. workloadIdentity has no credential resolver until the Enterprise
+// policy broker provides one, so it is rejected here (fail closed). When the
+// pod's Provider also uses workload identity, the message calls out the identity
+// collision that makes reusing the runtime's ambient cloud identity for tool
+// egress unsafe.
+func validateToolAuthTypes(tr *omniav1alpha1.ToolRegistry, providers map[string]*omniav1alpha1.Provider) error {
+	if tr == nil {
+		return nil
+	}
+	providerUsesWI := anyProviderUsesWorkloadIdentity(providers)
+	for i := range tr.Spec.Handlers {
+		if err := validateHandlerAuth(&tr.Spec.Handlers[i], providerUsesWI); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// anyProviderUsesWorkloadIdentity reports whether any of the pod's Providers
+// authenticates via workload identity (the collision the WI guard cares about).
+func anyProviderUsesWorkloadIdentity(providers map[string]*omniav1alpha1.Provider) bool {
+	for _, p := range providers {
+		if p != nil && p.Spec.Auth != nil && p.Spec.Auth.Type == omniav1alpha1.AuthMethodWorkloadIdentity {
+			return true
+		}
+	}
+	return false
+}
+
+// validateHandlerAuth rejects a single handler's effective auth when the operator
+// cannot honor it: stdio MCP has no header channel, and workloadIdentity has no
+// resolver yet (with a distinct message for the provider-identity collision).
+func validateHandlerAuth(h *omniav1alpha1.HandlerDefinition, providerUsesWI bool) error {
+	auth := h.EffectiveAuth()
+	if auth == nil || auth.Type == omniav1alpha1.ToolAuthTypeNone {
+		return nil
+	}
+	if h.MCPConfig != nil && h.MCPConfig.Transport == omniav1alpha1.MCPTransportStdio {
+		return fmt.Errorf("handler %q: auth is not supported on a stdio MCP transport (no header channel); use an sse or streamable-http transport", h.Name)
+	}
+	if auth.Type != omniav1alpha1.ToolAuthTypeWorkloadIdentity {
+		return nil
+	}
+	if providerUsesWI {
+		return fmt.Errorf("handler %q: auth.type workloadIdentity is not supported — the pod's Provider already uses workload identity, and tool egress must not reuse that identity; the Enterprise policy broker resolves tool workload identity under a separate principal", h.Name)
+	}
+	return fmt.Errorf("handler %q: auth.type workloadIdentity requires the Enterprise policy broker, which is not yet available", h.Name)
 }
 
 // reconcileToolSecrets resolves each referenced auth secret into a single
@@ -528,20 +588,37 @@ func buildHTTPConfig(h *omniav1alpha1.HandlerDefinition, endpoint string) (*Tool
 		return nil, err
 	}
 	cfg.RetryPolicy = rp
-	if h.HTTPConfig.AuthSecretRef != nil {
-		cfg.AuthType = authTypeOrDefault(h.HTTPConfig.AuthType)
-		cfg.AuthTokenPath = ToolSecretsMountPath + "/" + h.Name
+	if authType, tokenPath, ok := authFieldsFor(h); ok {
+		cfg.AuthType = authType
+		cfg.AuthTokenPath = tokenPath
 	}
 	return cfg, nil
 }
 
-// authTypeOrDefault returns the configured auth type, defaulting to "bearer"
-// when a secretRef is present but no type was specified (mirrors omnia tool-test).
-func authTypeOrDefault(t *string) string {
-	if t != nil && *t != "" {
-		return *t
+// authFieldsFor returns the generated-config auth type and mounted token path for
+// a handler's effective auth, and false when there is no credential to apply. It
+// reads HandlerDefinition.EffectiveAuth, so the new auth stanza and the
+// deprecated authType/authSecretRef fields resolve identically. bearer/basic read
+// the companion Secret; serviceAccount reads a projected SA-token file and is
+// applied as a bearer token (Authorization: Bearer).
+func authFieldsFor(h *omniav1alpha1.HandlerDefinition) (authType, tokenPath string, ok bool) {
+	auth := h.EffectiveAuth()
+	if auth == nil {
+		return "", "", false
 	}
-	return authTypeBearer
+	switch auth.Type {
+	case omniav1alpha1.ToolAuthTypeBearer, omniav1alpha1.ToolAuthTypeBasic:
+		if auth.SecretRef == nil {
+			return "", "", false
+		}
+		return auth.Type, ToolSecretsMountPath + "/" + h.Name, true
+	case omniav1alpha1.ToolAuthTypeServiceAccount:
+		if auth.ServiceAccount == nil {
+			return "", "", false
+		}
+		return omniav1alpha1.ToolAuthTypeBearer, toolSATokenPath(h.Name), true
+	}
+	return "", "", false
 }
 
 // buildGRPCConfig builds gRPC configuration for a handler entry.
@@ -568,6 +645,10 @@ func buildGRPCConfig(h *omniav1alpha1.HandlerDefinition, endpoint string) (*Tool
 		return nil, err
 	}
 	cfg.RetryPolicy = rp
+	if authType, tokenPath, ok := authFieldsFor(h); ok {
+		cfg.AuthType = authType
+		cfg.AuthTokenPath = tokenPath
+	}
 	return cfg, nil
 }
 
@@ -603,6 +684,12 @@ func buildMCPConfig(h *omniav1alpha1.HandlerDefinition) (*ToolMCP, error) {
 		return nil, err
 	}
 	cfg.RetryPolicy = rp
+	// stdio+auth is rejected by validateToolAuthTypes, so any auth here is on an
+	// HTTP-based transport the executor can carry a header on.
+	if authType, tokenPath, ok := authFieldsFor(h); ok {
+		cfg.AuthType = authType
+		cfg.AuthTokenPath = tokenPath
+	}
 	return cfg, nil
 }
 
@@ -626,9 +713,9 @@ func buildOpenAPIConfig(h *omniav1alpha1.HandlerDefinition) (*ToolOpenAPI, error
 		return nil, err
 	}
 	cfg.RetryPolicy = rp
-	if h.OpenAPIConfig.AuthSecretRef != nil {
-		cfg.AuthType = authTypeOrDefault(h.OpenAPIConfig.AuthType)
-		cfg.AuthTokenPath = ToolSecretsMountPath + "/" + h.Name
+	if authType, tokenPath, ok := authFieldsFor(h); ok {
+		cfg.AuthType = authType
+		cfg.AuthTokenPath = tokenPath
 	}
 	return cfg, nil
 }

@@ -86,7 +86,7 @@ func (r *AgentRuntimeReconciler) reconcileCandidateDeployment(
 	log := logf.FromContext(ctx)
 	deployName := candidateDeploymentName(ar.Name)
 
-	configHash := r.getConfigHash(ctx, providers)
+	configHash := r.getConfigHash(ctx, providers, promptPack, toolRegistry)
 	resolvedClients, _ := r.resolveA2AClients(ctx, log, ar)
 
 	overrides := applyCandidateOverrides(ar)

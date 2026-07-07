@@ -110,6 +110,12 @@ const (
 	// ToolSecretsMountPath is where the tool-secrets Secret is mounted read-only
 	// on the runtime container.
 	ToolSecretsMountPath = "/etc/omnia/tool-secrets"
+	// RuntimePackCacheMountPath is a writable emptyDir the runtime uses to stage
+	// the tool-surfaced pack. The container root filesystem is read-only, so the
+	// rewritten pack cannot go to /tmp; this emptyDir mount is writable.
+	RuntimePackCacheMountPath = "/var/run/omnia/pack-cache"
+	// runtimePackCacheVolumeName is the emptyDir volume backing the pack cache.
+	runtimePackCacheVolumeName = "pack-cache"
 	// CanaryConfigMapSuffix is the suffix for the per-agent canary override
 	// ConfigMap name (<agent>-canary-config). Mounted only into candidate pods.
 	CanaryConfigMapSuffix = "-canary-config"
