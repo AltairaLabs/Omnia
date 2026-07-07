@@ -308,3 +308,64 @@ func TestPolicyBroker_Pipeline_AnonymousDeniedByIdentityRule(t *testing.T) {
 	require.False(t, drivePipeline(t, pol, 10, nil),
 		"an anonymous caller (no identity) must be denied by an identity.role rule")
 }
+
+// --- requiredClaims (a claim that must be present) --------------------------
+
+func TestPolicyBroker_Pipeline_RequiredClaim(t *testing.T) {
+	// requiredClaims gates on the X-Omnia-Claim-<claim> header being present.
+	// The rule never denies (false); the gate is the required claim itself.
+	pol := amountPolicy(`false`)
+	pol.Spec.RequiredClaims = []omniav1alpha1.RequiredClaim{{Claim: "tier", Message: "tier claim required"}}
+
+	t.Run("missing_claim_denied", func(t *testing.T) {
+		require.False(t, drivePipeline(t, pol, 10, nil),
+			"a call missing the required claim must be denied (upstream not hit)")
+	})
+	t.Run("present_claim_allowed", func(t *testing.T) {
+		ctx := context.WithValue(context.Background(), ompolicy.ContextKeyClaims, map[string]string{"tier": "premium"})
+		require.True(t, drivePipeline(t, pol, 10, ctx),
+			"a call carrying the required claim (X-Omnia-Claim-tier) must be allowed through")
+	})
+}
+
+// --- header injection (broker injects a header the tool receives) -----------
+
+func TestPolicyBroker_Pipeline_HeaderInjectionReachesTool(t *testing.T) {
+	eval, err := eepolicy.NewEvaluator()
+	require.NoError(t, err)
+	require.NoError(t, eval.CompilePolicy(&omniav1alpha1.ToolPolicy{
+		ObjectMeta: metav1.ObjectMeta{Name: "inject", Namespace: "test-ns"},
+		Spec: omniav1alpha1.ToolPolicySpec{
+			Selector: omniav1alpha1.ToolPolicySelector{Registry: pipelineRegistry},
+			Rules: []omniav1alpha1.PolicyRule{{
+				Name: "allow-all", Deny: omniav1alpha1.PolicyRuleDeny{CEL: "false", Message: "n/a"},
+			}},
+			HeaderInjection: []omniav1alpha1.HeaderInjectionRule{{
+				Header: "X-Injected-By-Policy", Value: "broker",
+			}},
+			Mode: omniav1alpha1.PolicyModeEnforce, OnFailure: omniav1alpha1.OnFailureDeny,
+		},
+	}))
+	broker := httptest.NewServer(eepolicy.NewBrokerHandler(eval, logr.Discard()))
+	t.Cleanup(broker.Close)
+	t.Setenv("POLICY_BROKER_URL", broker.URL)
+	t.Setenv("POLICY_BROKER_FAIL_MODE", "closed")
+
+	var gotHeader atomic.Value
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotHeader.Store(r.Header.Get("X-Injected-By-Policy"))
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok": true}`))
+	}))
+	t.Cleanup(upstream.Close)
+
+	server := newPipelineServer(t, upstream.URL, 10)
+	_ = server.Converse(&pipelineStream{
+		ctx:  context.Background(),
+		recv: []*runtimev1.ClientMessage{{SessionId: "s1", Content: "use the echo tool"}},
+	})
+
+	got, _ := gotHeader.Load().(string)
+	require.Equal(t, "broker", got,
+		"the ToolPolicy-injected header must reach the upstream tool call")
+}
