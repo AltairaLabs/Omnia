@@ -151,6 +151,29 @@ func injectToolsIntoPackJSON(data []byte, toolNames []string) (out []byte, chang
 	return out, true, nil
 }
 
+// promptAllowedTools reads a pack file and returns the allowed-tools list for
+// the named prompt (the tools that will actually be offered to the model). Used
+// for diagnostics — a mismatch between this and the registered executor tools is
+// the "registered but not offered to the model" trap. Returns nil on any error.
+func promptAllowedTools(packPath, promptName string) []string {
+	data, err := os.ReadFile(packPath)
+	if err != nil {
+		return nil
+	}
+	var pack struct {
+		Prompts map[string]struct {
+			Tools []string `json:"tools"`
+		} `json:"prompts"`
+	}
+	if err := json.Unmarshal(data, &pack); err != nil {
+		return nil
+	}
+	if p, ok := pack.Prompts[promptName]; ok {
+		return p.Tools
+	}
+	return nil
+}
+
 // injectToolsIntoPrompt unions toolNames into a single prompt's `tools` list,
 // returning the re-encoded prompt and whether it changed. On no change it
 // returns the original bytes so the caller can skip re-marshalling.
