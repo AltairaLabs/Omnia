@@ -1,0 +1,17 @@
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: AgentRuntime
+metadata:
+  name: my-assistant
+  namespace: default
+spec:
+  promptPackRef:
+    name: assistant-pack
+  providerRef:
+    name: my-provider
+  facades:
+    - type: websocket
+      port: 8080
+      handler: demo
+  context:
+    type: memory
+    ttl: "1h"

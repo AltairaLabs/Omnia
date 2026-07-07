@@ -149,6 +149,10 @@ test-e2e: setup-test-e2e manifests generate fmt vet ## Run the e2e tests. Expect
 	KIND=$(KIND) KIND_CLUSTER=$(KIND_CLUSTER) go test -tags=e2e ./test/e2e/ -v -ginkgo.v -timeout 20m
 	$(MAKE) cleanup-test-e2e
 
+.PHONY: test-install-docs
+test-install-docs: ## Smoke-test the documented install + walkthrough on k3d (uses --devel).
+	bash hack/test-install-docs.sh
+
 .PHONY: test-e2e-manager
 test-e2e-manager: setup-test-e2e manifests generate fmt vet ## Run only Manager-labeled e2e tests.
 	KIND=$(KIND) KIND_CLUSTER=$(KIND_CLUSTER) go test -tags=e2e ./test/e2e/ -v -ginkgo.v -ginkgo.label-filter=manager -timeout 20m
