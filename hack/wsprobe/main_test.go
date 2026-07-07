@@ -18,7 +18,7 @@ func TestProbeReceivesDone(t *testing.T) {
 			t.Errorf("upgrade: %v", err)
 			return
 		}
-		defer c.Close()
+		defer func() { _ = c.Close() }()
 		if _, _, err := c.ReadMessage(); err != nil {
 			return
 		}
@@ -43,7 +43,7 @@ func TestProbeTimesOutWithoutDone(t *testing.T) {
 		if err != nil {
 			return
 		}
-		defer c.Close()
+		defer func() { _ = c.Close() }()
 		_, _, _ = c.ReadMessage()
 		_ = c.WriteMessage(websocket.TextMessage, []byte(`{"type":"chunk"}`))
 		time.Sleep(2 * time.Second)
