@@ -23,6 +23,7 @@ If you don't have an API key, you can use the `omnia-demos` chart which includes
 
 ```bash
 helm install omnia-demos oci://ghcr.io/altairalabs/charts/omnia-demos \
+  --devel \
   -n omnia-demo --create-namespace \
   --set arenaDemo.enabled=true
 ```

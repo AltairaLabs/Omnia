@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: llm-credentials
+  namespace: default
+type: Opaque
+stringData:
+  ANTHROPIC_API_KEY: "sk-ant-smoke-test-dummy-key-not-real"
+---
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: Provider
+metadata:
+  name: my-provider
+  namespace: default
+spec:
+  type: claude
+  model: claude-sonnet-4-20250514
+  credential:
+    secretRef:
+      name: llm-credentials

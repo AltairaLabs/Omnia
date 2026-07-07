@@ -23,11 +23,15 @@ If you don't have an API key yet, you can try Omnia with the demo charts that us
 ```bash
 # Install the Omnia operator with dashboard
 helm install omnia oci://ghcr.io/altairalabs/charts/omnia \
+  --devel \
   -n omnia-system --create-namespace \
-  --set dashboard.enabled=true
+  --set dashboard.enabled=true \
+  --set dashboard.auth.mode=builtin \
+  --set dashboard.auth.sessionSecret="$(openssl rand -base64 32)"
 
 # Install the demo agents (separate chart)
 helm install omnia-demos oci://ghcr.io/altairalabs/charts/omnia-demos \
+  --devel \
   -n omnia-demo --create-namespace
 ```
 
@@ -53,13 +57,16 @@ helm repo add altaira https://charts.altairalabs.ai
 helm repo update
 
 kubectl create namespace omnia-system
-helm install omnia altaira/omnia -n omnia-system
+helm install omnia altaira/omnia --devel -n omnia-system \
+  --set dashboard.auth.mode=builtin \
+  --set dashboard.auth.sessionSecret="$(openssl rand -base64 32)"
 ```
 
 Or install directly from the OCI registry:
 
 ```bash
-helm install omnia oci://ghcr.io/altairalabs/charts/omnia -n omnia-system --create-namespace
+helm install omnia oci://ghcr.io/altairalabs/charts/omnia --devel -n omnia-system --create-namespace \
+  --set dashboard.auth.mode=builtin --set dashboard.auth.sessionSecret="$(openssl rand -base64 32)"
 ```
 
 Verify the operator is running:
