@@ -10,13 +10,17 @@
   omnia.redis.url when redis.enabled=true.
 */ -}}
 apiVersion: apps/v1
-kind: Deployment
+kind: StatefulSet
 metadata:
   name: {{ include "omnia.fullname" . }}-redis-master
   labels:
     {{- include "omnia.labels" . | nindent 4 }}
     app.kubernetes.io/component: redis
 spec:
+  # StatefulSet (not Deployment) for a stable pod name (omnia-redis-master-0),
+  # matching what the former Bitnami subchart provided — the e2e suites and
+  # setup scripts exec/rollout against that name.
+  serviceName: {{ include "omnia.fullname" . }}-redis-master
   replicas: 1
   selector:
     matchLabels:

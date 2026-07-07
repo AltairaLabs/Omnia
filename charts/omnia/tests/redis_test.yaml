@@ -13,14 +13,18 @@ tests:
       - hasDocuments:
           count: 0
 
-  - it: renders Deployment + Service named <fullname>-redis-master when enabled
+  - it: renders StatefulSet + Service named <fullname>-redis-master when enabled
     set:
       redis.enabled: true
     asserts:
       - hasDocuments:
           count: 2
       - isKind:
-          of: Deployment
+          of: StatefulSet
+        documentIndex: 0
+      - equal:
+          path: spec.serviceName
+          value: omnia-redis-master
         documentIndex: 0
       - equal:
           path: metadata.name
@@ -60,7 +64,7 @@ tests:
           path: spec.template.spec.containers[0].resources.requests.cpu
           value: 50m
 
-  - it: applies podOverrides.nodeSelector to the Deployment
+  - it: applies podOverrides.nodeSelector to the StatefulSet
     set:
       redis.enabled: true
       redis.podOverrides.nodeSelector:

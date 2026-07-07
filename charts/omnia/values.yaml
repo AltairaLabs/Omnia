@@ -2630,7 +2630,7 @@ redis:
       cpu: 50m
       memory: 128Mi
 
-  # -- Pod customization for the dev Redis Deployment. See charts/omnia/CLAUDE.md
+  # -- Pod customization for the dev Redis StatefulSet. See charts/omnia/CLAUDE.md
   # for the podOverrides contract.
   podOverrides: {}
 

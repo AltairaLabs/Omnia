@@ -756,7 +756,7 @@
         "maxmemory":       { "type": "string", "description": "maxmemory ceiling for the dev Redis." },
         "maxmemoryPolicy": { "type": "string", "description": "Eviction policy once maxmemory is reached." },
         "resources":       { "$ref": "#/$defs/resources" },
-        "podOverrides":    { "type": "object", "description": "Pod customization for the dev Redis Deployment." },
+        "podOverrides":    { "type": "object", "description": "Pod customization for the dev Redis StatefulSet." },
         "default":         { "$ref": "#/$defs/redisConsumer", "description": "Cluster-wide default. Consumers without overrides fall back to this." }
       }
     },
