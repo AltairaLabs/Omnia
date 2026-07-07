@@ -87,6 +87,12 @@ func (r *AgentRuntimeReconciler) buildVolumes(
 		})
 	}
 
+	// Project audience-bound ServiceAccount tokens for serviceAccount-auth
+	// handlers (one volume, per-handler subpath). No companion Secret involved.
+	if vol, ok := toolSATokenVolume(toolRegistry); ok {
+		volumes = append(volumes, vol)
+	}
+
 	// Mount the workspace content PVC only when the operator is configured
 	// AND the pack actually declares skills. Mounting unconditionally would
 	// peg every agent pod to a per-namespace PVC that likely doesn't exist
@@ -166,6 +172,12 @@ func (r *AgentRuntimeReconciler) buildRuntimeVolumeMounts(
 			MountPath: ToolSecretsMountPath,
 			ReadOnly:  true,
 		})
+	}
+
+	// Mount the projected tool SA-token volume when any handler uses
+	// serviceAccount auth, mirroring the buildVolumes gate.
+	if len(collectToolSAHandlers(toolRegistry)) > 0 {
+		volumeMounts = append(volumeMounts, toolSATokenMount())
 	}
 
 	// Mount the workspace content PVC into the runtime container so it can

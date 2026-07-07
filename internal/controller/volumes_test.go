@@ -194,6 +194,29 @@ func TestBuildVolumes_NoToolSecretsVolumeWhenUnauthed(t *testing.T) {
 		"did not expect tool-secrets mount without an authSecretRef")
 }
 
+func TestBuildVolumes_AddsToolSATokenVolumeForServiceAccountAuth(t *testing.T) {
+	r := &AgentRuntimeReconciler{}
+	ar := minimalAgentRuntime()
+	tr := &omniav1alpha1.ToolRegistry{Spec: omniav1alpha1.ToolRegistrySpec{
+		Handlers: []omniav1alpha1.HandlerDefinition{saHandler("sa1", "aud-1")},
+	}}
+
+	vols := r.buildVolumes(ar, minimalPromptPack(), tr)
+	require.True(t, hasVolume(vols, toolSATokenVolumeName), "expected SA-token volume")
+	vol := findVolume(t, vols, toolSATokenVolumeName)
+	require.NotNil(t, vol.Projected, "SA-token volume must be a projected volume")
+
+	mounts := r.buildRuntimeVolumeMounts(ar, minimalPromptPack(), tr)
+	require.True(t, hasMount(mounts, toolSATokenVolumeName), "expected SA-token mount")
+	mount := findMount(t, mounts, toolSATokenVolumeName)
+	assert.Equal(t, toolSATokenMountBase, mount.MountPath)
+	assert.True(t, mount.ReadOnly)
+
+	// A registry without serviceAccount auth gets no SA-token volume.
+	noSA := r.buildVolumes(ar, minimalPromptPack(), unauthedToolRegistry())
+	assert.False(t, hasVolume(noSA, toolSATokenVolumeName))
+}
+
 func TestSkillManifestPath(t *testing.T) {
 	t.Run("empty when WorkspaceContentPath is unset", func(t *testing.T) {
 		r := &AgentRuntimeReconciler{}

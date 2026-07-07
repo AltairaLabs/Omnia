@@ -156,6 +156,18 @@ func (e *OmniaExecutor) executeGRPC(
 			// over policy metadata on key collision — they're an explicit
 			// enforcement decision.
 			md := PolicyGRPCMetadata(attemptCtx, toolName, handlerName, nil)
+			// Tool auth credential (bearer/basic/serviceAccount) as gRPC
+			// authorization metadata. Added before broker-injected headers so an
+			// explicit ToolPolicy enforcement decision still wins on collision.
+			if handler.GRPCConfig != nil {
+				authVal, authErr := authorizationValue(handler.GRPCConfig.AuthType, handler.GRPCConfig.AuthToken)
+				if authErr != nil {
+					return nil, fmt.Errorf("gRPC tool auth: %w", authErr)
+				}
+				if authVal != "" {
+					md["authorization"] = authVal
+				}
+			}
 			for k, v := range InjectedHeadersFromContext(attemptCtx) {
 				md[k] = v
 			}

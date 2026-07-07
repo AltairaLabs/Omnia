@@ -82,24 +82,74 @@ spec:
                           - key
                           - name
                           type: object
+                        serviceAccount:
+                          description: |-
+                            serviceAccount configures an audience-bound projected SA token. The tool
+                            backend validates the token via the Kubernetes TokenReview API.
+                          properties:
+                            audience:
+                              description: |-
+                                audience the projected token is bound to; the tool backend validates it
+                                (via TokenReview) against this audience.
+                              type: string
+                          required:
+                          - audience
+                          type: object
                         type:
                           default: none
                           description: |-
                             type selects the authentication mechanism:
-                              none    — no credential (default)
-                              bearer  — Authorization: Bearer <secretRef value>
-                              basic   — Authorization: Basic <base64(secretRef "user:password")>
+                              none             — no credential (default)
+                              bearer           — Authorization: Bearer <secretRef value>
+                              basic            — Authorization: Basic <base64(secretRef "user:password")>
+                              serviceAccount   — audience-bound projected Kubernetes ServiceAccount token
+                              workloadIdentity — hosted same-cloud identity, resolved by the Enterprise
+                                                 policy broker; not yet available (rejected by the operator)
                           enum:
                           - none
                           - bearer
                           - basic
+                          - serviceAccount
+                          - workloadIdentity
                           type: string
+                        workloadIdentity:
+                          description: |-
+                            workloadIdentity configures hosted same-cloud identity. Resolved by the
+                            Enterprise policy broker under its own federated identity (not yet
+                            available in this release).
+                          properties:
+                            audience:
+                              description: audience for the federated token exchange.
+                              type: string
+                            cloud:
+                              description: cloud identity provider.
+                              enum:
+                              - azure
+                              - aws
+                              - gcp
+                              - oidc
+                              type: string
+                            header:
+                              default: Authorization
+                              description: header carries the resolved token. Defaults
+                                to Authorization.
+                              type: string
+                          required:
+                          - audience
+                          - cloud
+                          type: object
                       required:
                       - type
                       type: object
                       x-kubernetes-validations:
                       - message: auth.type bearer/basic requires secretRef
                         rule: self.type != 'bearer' && self.type != 'basic' || has(self.secretRef)
+                      - message: auth.type serviceAccount requires the serviceAccount
+                          block
+                        rule: self.type != 'serviceAccount' || has(self.serviceAccount)
+                      - message: auth.type workloadIdentity requires the workloadIdentity
+                          block
+                        rule: self.type != 'workloadIdentity' || has(self.workloadIdentity)
                     clientConfig:
                       description: |-
                         clientConfig contains client-side tool configuration.

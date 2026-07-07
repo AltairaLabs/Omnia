@@ -240,11 +240,38 @@ var _ = Describe("ToolRegistry Admission Validation", func() {
 			Expect(err.Error()).To(ContainSubstring("not both"))
 		})
 
-		It("rejects an unsupported auth type (serviceAccount not yet wired)", func() {
+		It("rejects an out-of-enum auth type", func() {
 			h := minimalHandler("h")
-			h.Auth = &omniav1alpha1.ToolAuth{Type: "serviceAccount"}
-			err := k8sClient.Create(ctx, trWith("auth-unsupported", h))
+			h.Auth = &omniav1alpha1.ToolAuth{Type: "oauthOBO"}
+			err := k8sClient.Create(ctx, trWith("auth-out-of-enum", h))
 			Expect(err).To(HaveOccurred())
+		})
+
+		It("rejects serviceAccount without the serviceAccount block", func() {
+			h := minimalHandler("h")
+			h.Auth = &omniav1alpha1.ToolAuth{Type: omniav1alpha1.ToolAuthTypeServiceAccount}
+			err := k8sClient.Create(ctx, trWith("auth-sa-no-block", h))
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("serviceAccount"))
+		})
+
+		It("accepts serviceAccount with an audience", func() {
+			h := minimalHandler("h")
+			h.Auth = &omniav1alpha1.ToolAuth{
+				Type:           omniav1alpha1.ToolAuthTypeServiceAccount,
+				ServiceAccount: &omniav1alpha1.ToolAuthServiceAccount{Audience: "my-tool.svc"},
+			}
+			tr := trWith("auth-sa-ok", h)
+			Expect(k8sClient.Create(ctx, tr)).To(Succeed())
+			defer func() { _ = k8sClient.Delete(ctx, tr) }()
+		})
+
+		It("rejects workloadIdentity without the workloadIdentity block", func() {
+			h := minimalHandler("h")
+			h.Auth = &omniav1alpha1.ToolAuth{Type: omniav1alpha1.ToolAuthTypeWorkloadIdentity}
+			err := k8sClient.Create(ctx, trWith("auth-wi-no-block", h))
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("workloadIdentity"))
 		})
 	})
 })

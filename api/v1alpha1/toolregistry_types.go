@@ -405,17 +405,21 @@ type SecretKeySelector struct {
 // supersedes the per-handler-config authType/authSecretRef fields (which remain
 // for backward compatibility and are normalized into this shape).
 //
-// Additional mechanisms (serviceAccount projected tokens, workloadIdentity) are
-// introduced in later phases; only the types the operator can honor are accepted
-// by the schema, so an unsupported auth type is rejected rather than silently
-// ignored.
+// Only auth types the platform can honor are accepted by the schema, so an
+// unsupported type is rejected rather than silently ignored. workloadIdentity is
+// schema-valid but rejected at reconcile until its Enterprise resolver exists.
 // +kubebuilder:validation:XValidation:rule="self.type != 'bearer' && self.type != 'basic' || has(self.secretRef)",message="auth.type bearer/basic requires secretRef"
+// +kubebuilder:validation:XValidation:rule="self.type != 'serviceAccount' || has(self.serviceAccount)",message="auth.type serviceAccount requires the serviceAccount block"
+// +kubebuilder:validation:XValidation:rule="self.type != 'workloadIdentity' || has(self.workloadIdentity)",message="auth.type workloadIdentity requires the workloadIdentity block"
 type ToolAuth struct {
 	// type selects the authentication mechanism:
-	//   none    — no credential (default)
-	//   bearer  — Authorization: Bearer <secretRef value>
-	//   basic   — Authorization: Basic <base64(secretRef "user:password")>
-	// +kubebuilder:validation:Enum=none;bearer;basic
+	//   none             — no credential (default)
+	//   bearer           — Authorization: Bearer <secretRef value>
+	//   basic            — Authorization: Basic <base64(secretRef "user:password")>
+	//   serviceAccount   — audience-bound projected Kubernetes ServiceAccount token
+	//   workloadIdentity — hosted same-cloud identity, resolved by the Enterprise
+	//                      policy broker; not yet available (rejected by the operator)
+	// +kubebuilder:validation:Enum=none;bearer;basic;serviceAccount;workloadIdentity
 	// +kubebuilder:default=none
 	Type string `json:"type"`
 
@@ -423,6 +427,45 @@ type ToolAuth struct {
 	// is the token; for basic it is "username:password".
 	// +optional
 	SecretRef *SecretKeySelector `json:"secretRef,omitempty"`
+
+	// serviceAccount configures an audience-bound projected SA token. The tool
+	// backend validates the token via the Kubernetes TokenReview API.
+	// +optional
+	ServiceAccount *ToolAuthServiceAccount `json:"serviceAccount,omitempty"`
+
+	// workloadIdentity configures hosted same-cloud identity. Resolved by the
+	// Enterprise policy broker under its own federated identity (not yet
+	// available in this release).
+	// +optional
+	WorkloadIdentity *ToolAuthWorkloadIdentity `json:"workloadIdentity,omitempty"`
+}
+
+// ToolAuthServiceAccount configures an audience-bound projected ServiceAccount
+// token. The token is sent as "Authorization: Bearer <token>"; the tool backend
+// validates it (via TokenReview) against the audience.
+type ToolAuthServiceAccount struct {
+	// audience the projected token is bound to; the tool backend validates it
+	// (via TokenReview) against this audience.
+	// +kubebuilder:validation:Required
+	Audience string `json:"audience"`
+}
+
+// ToolAuthWorkloadIdentity configures hosted same-cloud identity for a tool.
+// Its credential resolution is performed by the Enterprise policy broker; the
+// operator currently rejects handlers that use it.
+type ToolAuthWorkloadIdentity struct {
+	// cloud identity provider.
+	// +kubebuilder:validation:Enum=azure;aws;gcp;oidc
+	Cloud string `json:"cloud"`
+
+	// audience for the federated token exchange.
+	// +kubebuilder:validation:Required
+	Audience string `json:"audience"`
+
+	// header carries the resolved token. Defaults to Authorization.
+	// +kubebuilder:default=Authorization
+	// +optional
+	Header string `json:"header,omitempty"`
 }
 
 // ToolDefinition defines a tool's interface for plain HTTP/gRPC handlers

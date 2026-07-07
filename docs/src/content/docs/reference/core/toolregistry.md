@@ -160,22 +160,35 @@ handlers:
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `auth.type` | string | `none` | Authentication mechanism (`none`, `bearer`, `basic`). |
+| `auth.type` | string | `none` | Authentication mechanism: `none`, `bearer`, `basic`, `serviceAccount`, or `workloadIdentity`. |
 | `auth.secretRef` | object | - | Secret holding the credential (required for `bearer`/`basic`). |
+| `auth.serviceAccount.audience` | string | - | Audience the projected ServiceAccount token binds to (required for `serviceAccount`). |
+| `auth.workloadIdentity` | object | - | Hosted same-cloud identity (`cloud`, `audience`). Required for `workloadIdentity`. |
 
-The operator resolves the referenced Secret into an operator-managed
-`<agentruntime>-tool-secrets` Secret, mounts it read-only into the runtime, and
-the runtime attaches the `Authorization` header at call time. The token value is
-never written into the tools ConfigMap. A missing Secret or key fails the
-AgentRuntime reconcile (it does not silently send an unauthenticated request).
+The `auth` stanza applies to **http, openapi, grpc, and mcp** handlers (the
+runtime attaches the credential as an HTTP `Authorization` header, gRPC
+`authorization` metadata, or an MCP transport header). Auth is not supported on
+a **stdio** MCP transport (no header channel) and is rejected.
+
+- **`bearer` / `basic`** — the operator resolves `secretRef` into an
+  operator-managed `<agentruntime>-tool-secrets` Secret, mounted read-only into
+  the runtime. The token value never enters the tools ConfigMap.
+- **`serviceAccount`** — the operator projects an audience-bound Kubernetes
+  ServiceAccount token into the runtime; the tool backend validates it via
+  TokenReview. Sent as `Authorization: Bearer <token>`.
+- **`workloadIdentity`** — accepted by the schema but **rejected at reconcile**:
+  its credential resolver is the Enterprise policy broker (a later release). It
+  is also rejected when the pod's Provider itself uses workload identity, because
+  tool egress must not reuse the runtime's ambient cloud identity.
+
+A missing Secret/key, an unsupported type, or a stdio-MCP+auth combination fails
+the AgentRuntime reconcile — it does not silently send an unauthenticated request.
 
 :::note[Deprecated: `authType` / `authSecretRef`]
 The per-config `authType` and `authSecretRef` fields on `httpConfig`/`openAPIConfig`
 are deprecated in favour of the `auth` stanza above. They still work and are
 normalized into it, but setting **both** a handler `auth` stanza and a legacy
-`authType`/`authSecretRef` on the same handler is rejected. Additional auth
-mechanisms (audience-bound ServiceAccount tokens, workload identity) and gRPC/MCP
-auth land in follow-up releases.
+`authType`/`authSecretRef` on the same handler is rejected.
 :::
 
 ## GRPC handler

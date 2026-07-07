@@ -16,12 +16,13 @@ limitations under the License.
 
 package v1alpha1
 
-// ToolAuth.Type values. Additional mechanisms (serviceAccount, workloadIdentity)
-// are added alongside their operator support in later phases.
+// ToolAuth.Type values.
 const (
-	ToolAuthTypeNone   = "none"
-	ToolAuthTypeBearer = "bearer"
-	ToolAuthTypeBasic  = "basic"
+	ToolAuthTypeNone             = "none"
+	ToolAuthTypeBearer           = "bearer"
+	ToolAuthTypeBasic            = "basic"
+	ToolAuthTypeServiceAccount   = "serviceAccount"
+	ToolAuthTypeWorkloadIdentity = "workloadIdentity"
 )
 
 // EffectiveAuth returns the handler's effective tool authentication. It is the

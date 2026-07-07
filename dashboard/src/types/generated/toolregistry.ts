@@ -7,6 +7,45 @@ export interface ToolRegistrySpec {
   /** handlers defines the list of tool handlers in this registry.
    * Each handler can expose one or more tools. */
   handlers: {
+    /** auth configures how the runtime authenticates to this handler's backend.
+     * Applies to http, openapi, grpc, and mcp handlers. Supersedes the legacy
+     * per-config authType/authSecretRef fields; setting both is rejected. */
+    auth?: {
+      /** secretRef holds the credential for bearer/basic. For bearer the key's value
+       * is the token; for basic it is "username:password". */
+      secretRef?: {
+        /** key is the key in the secret to select. */
+        key: string;
+        /** name is the name of the secret. */
+        name: string;
+      };
+      /** serviceAccount configures an audience-bound projected SA token. The tool
+       * backend validates the token via the Kubernetes TokenReview API. */
+      serviceAccount?: {
+        /** audience the projected token is bound to; the tool backend validates it
+         * (via TokenReview) against this audience. */
+        audience: string;
+      };
+      /** type selects the authentication mechanism:
+       *   none             — no credential (default)
+       *   bearer           — Authorization: Bearer <secretRef value>
+       *   basic            — Authorization: Basic <base64(secretRef "user:password")>
+       *   serviceAccount   — audience-bound projected Kubernetes ServiceAccount token
+       *   workloadIdentity — hosted same-cloud identity, resolved by the Enterprise
+       *                      policy broker; not yet available (rejected by the operator) */
+      type: "none" | "bearer" | "basic" | "serviceAccount" | "workloadIdentity";
+      /** workloadIdentity configures hosted same-cloud identity. Resolved by the
+       * Enterprise policy broker under its own federated identity (not yet
+       * available in this release). */
+      workloadIdentity?: {
+        /** audience for the federated token exchange. */
+        audience: string;
+        /** cloud identity provider. */
+        cloud: "azure" | "aws" | "gcp" | "oidc";
+        /** header carries the resolved token. Defaults to Authorization. */
+        header?: string;
+      };
+    };
     /** clientConfig contains client-side tool configuration.
      * Used when type is "client". */
     clientConfig?: {
@@ -55,14 +94,16 @@ export interface ToolRegistrySpec {
     /** httpConfig contains HTTP-specific configuration.
      * Required when type is "http". */
     httpConfig?: {
-      /** authSecretRef references a secret containing auth credentials. */
+      /** authSecretRef references a secret containing auth credentials.
+       * Deprecated: use the handler-level `auth` stanza. Normalized into it when set. */
       authSecretRef?: {
         /** key is the key in the secret to select. */
         key: string;
         /** name is the name of the secret. */
         name: string;
       };
-      /** authType specifies the authentication type (bearer, basic). */
+      /** authType specifies the authentication type (bearer, basic).
+       * Deprecated: use the handler-level `auth` stanza. Normalized into it when set. */
       authType?: "bearer" | "basic";
       /** bodyMapping is a JMESPath expression to reshape the request body
        * before sending. */
@@ -167,14 +208,16 @@ export interface ToolRegistrySpec {
     /** openAPIConfig contains OpenAPI-specific configuration.
      * Required when type is "openapi". */
     openAPIConfig?: {
-      /** authSecretRef references a secret containing auth credentials. */
+      /** authSecretRef references a secret containing auth credentials.
+       * Deprecated: use the handler-level `auth` stanza. Normalized into it when set. */
       authSecretRef?: {
         /** key is the key in the secret to select. */
         key: string;
         /** name is the name of the secret. */
         name: string;
       };
-      /** authType specifies the authentication type (bearer, basic). */
+      /** authType specifies the authentication type (bearer, basic).
+       * Deprecated: use the handler-level `auth` stanza. Normalized into it when set. */
       authType?: "bearer" | "basic";
       /** baseURL overrides the base URL from the OpenAPI spec.
        * If not specified, uses the first server URL from the spec. */

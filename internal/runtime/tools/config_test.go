@@ -472,3 +472,39 @@ func TestResolveAuthTokenPaths_OpenAPIReadsFile(t *testing.T) {
 		t.Errorf("AuthToken = %q, want %q", got, "tok123")
 	}
 }
+
+func TestResolveAuthTokenPaths_GRPCReadsFile(t *testing.T) {
+	dir := t.TempDir()
+	tokenFile := filepath.Join(dir, "g1")
+	if err := os.WriteFile(tokenFile, []byte("gtok\n"), 0o600); err != nil {
+		t.Fatalf("write token file: %v", err)
+	}
+	cfg := &ToolConfig{Handlers: []HandlerEntry{{
+		Name: "g1", Type: "grpc",
+		GRPCConfig: &GRPCCfg{Endpoint: "svc:9000", AuthType: "bearer", AuthTokenPath: tokenFile},
+	}}}
+	if err := ResolveAuthTokenPaths(cfg); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := cfg.Handlers[0].GRPCConfig.AuthToken; got != "gtok" {
+		t.Errorf("AuthToken = %q, want %q", got, "gtok")
+	}
+}
+
+func TestResolveAuthTokenPaths_MCPReadsFile(t *testing.T) {
+	dir := t.TempDir()
+	tokenFile := filepath.Join(dir, "m1")
+	if err := os.WriteFile(tokenFile, []byte("mtok\n"), 0o600); err != nil {
+		t.Fatalf("write token file: %v", err)
+	}
+	cfg := &ToolConfig{Handlers: []HandlerEntry{{
+		Name: "m1", Type: "mcp",
+		MCPConfig: &MCPCfg{Transport: "sse", Endpoint: "https://x", AuthType: "bearer", AuthTokenPath: tokenFile},
+	}}}
+	if err := ResolveAuthTokenPaths(cfg); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := cfg.Handlers[0].MCPConfig.AuthToken; got != "mtok" {
+		t.Errorf("AuthToken = %q, want %q", got, "mtok")
+	}
+}

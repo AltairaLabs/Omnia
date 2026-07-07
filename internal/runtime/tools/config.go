@@ -197,19 +197,25 @@ type GRPCCfg struct {
 	TLSKeyPath            string                  `json:"tlsKeyPath,omitempty" yaml:"tlsKeyPath,omitempty"`
 	TLSCAPath             string                  `json:"tlsCAPath,omitempty" yaml:"tlsCAPath,omitempty"`
 	TLSInsecureSkipVerify bool                    `json:"tlsInsecureSkipVerify,omitempty" yaml:"tlsInsecureSkipVerify,omitempty"`
+	AuthType              string                  `json:"authType,omitempty" yaml:"authType,omitempty"`
+	AuthToken             string                  `json:"authToken,omitempty" yaml:"authToken,omitempty"`
+	AuthTokenPath         string                  `json:"authTokenPath,omitempty" yaml:"authTokenPath,omitempty"`
 	RetryPolicy           *RuntimeGRPCRetryPolicy `json:"retryPolicy,omitempty" yaml:"retryPolicy,omitempty"`
 }
 
 // MCPCfg represents MCP configuration for a tool.
 type MCPCfg struct {
-	Transport   string                 `json:"transport" yaml:"transport"`
-	Endpoint    string                 `json:"endpoint,omitempty" yaml:"endpoint,omitempty"`
-	Command     string                 `json:"command,omitempty" yaml:"command,omitempty"`
-	Args        []string               `json:"args,omitempty" yaml:"args,omitempty"`
-	WorkDir     string                 `json:"workDir,omitempty" yaml:"workDir,omitempty"`
-	Env         map[string]string      `json:"env,omitempty" yaml:"env,omitempty"`
-	ToolFilter  *MCPToolFilterCfg      `json:"toolFilter,omitempty" yaml:"toolFilter,omitempty"`
-	RetryPolicy *RuntimeMCPRetryPolicy `json:"retryPolicy,omitempty" yaml:"retryPolicy,omitempty"`
+	Transport     string                 `json:"transport" yaml:"transport"`
+	Endpoint      string                 `json:"endpoint,omitempty" yaml:"endpoint,omitempty"`
+	Command       string                 `json:"command,omitempty" yaml:"command,omitempty"`
+	Args          []string               `json:"args,omitempty" yaml:"args,omitempty"`
+	WorkDir       string                 `json:"workDir,omitempty" yaml:"workDir,omitempty"`
+	Env           map[string]string      `json:"env,omitempty" yaml:"env,omitempty"`
+	AuthType      string                 `json:"authType,omitempty" yaml:"authType,omitempty"`
+	AuthToken     string                 `json:"authToken,omitempty" yaml:"authToken,omitempty"`
+	AuthTokenPath string                 `json:"authTokenPath,omitempty" yaml:"authTokenPath,omitempty"`
+	ToolFilter    *MCPToolFilterCfg      `json:"toolFilter,omitempty" yaml:"toolFilter,omitempty"`
+	RetryPolicy   *RuntimeMCPRetryPolicy `json:"retryPolicy,omitempty" yaml:"retryPolicy,omitempty"`
 }
 
 // MCPToolFilterCfg controls which tools from an MCP server are exposed.
@@ -274,6 +280,20 @@ func ResolveAuthTokenPaths(cfg *ToolConfig) error {
 				return fmt.Errorf("handler %q: %w", h.Name, err)
 			}
 			h.OpenAPIConfig.AuthToken = tok
+		}
+		if h.GRPCConfig != nil && h.GRPCConfig.AuthTokenPath != "" {
+			tok, err := readTokenFile(h.GRPCConfig.AuthTokenPath)
+			if err != nil {
+				return fmt.Errorf("handler %q: %w", h.Name, err)
+			}
+			h.GRPCConfig.AuthToken = tok
+		}
+		if h.MCPConfig != nil && h.MCPConfig.AuthTokenPath != "" {
+			tok, err := readTokenFile(h.MCPConfig.AuthTokenPath)
+			if err != nil {
+				return fmt.Errorf("handler %q: %w", h.Name, err)
+			}
+			h.MCPConfig.AuthToken = tok
 		}
 	}
 	return nil

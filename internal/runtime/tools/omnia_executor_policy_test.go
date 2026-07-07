@@ -256,6 +256,21 @@ func TestDispatch_PolicyBrokerAllowWithInjectedHeaders_ReachesOutboundGRPCMetada
 		"broker-injected header must win over the colliding policy-propagated header")
 }
 
+// TestDispatch_GRPCToolAuth_ReachesOutboundMetadata asserts a resolved gRPC tool
+// credential is sent as the outgoing "authorization" metadata.
+func TestDispatch_GRPCToolAuth_ReachesOutboundMetadata(t *testing.T) {
+	mock := &mockToolServiceClient{executeResp: &toolsv1.ToolResponse{ResultJson: `{"result":"ok"}`}}
+	e := newGRPCToolExecutor(mock)
+	e.handlers["test-grpc"].GRPCConfig = &GRPCCfg{Endpoint: "svc:9000", AuthType: "bearer", AuthToken: "grpc-tok"}
+
+	result, err := e.ExecuteTool(context.Background(), "test-grpc-tool", json.RawMessage(`{}`))
+	require.NoError(t, err)
+	assert.Contains(t, string(result), "ok")
+	require.NotNil(t, mock.capturedMD)
+	assert.Equal(t, []string{"Bearer grpc-tok"}, mock.capturedMD.Get("authorization"),
+		"gRPC tool credential must reach the outgoing authorization metadata")
+}
+
 const mcpInjectedHeaderToolName = "test-mcp-tool"
 
 // newMCPToolServer builds a real Streamable-HTTP MCP server (single echo
@@ -386,6 +401,32 @@ func TestInjectedHeaderTransport_RoundTrip(t *testing.T) {
 		assert.Equal(t, "broker-wins", base.lastReq.Header.Get("X-Existing"),
 			"broker-injected header must win over the colliding pre-existing header")
 		assert.Equal(t, "secret-token", base.lastReq.Header.Get("X-Injected-Auth"))
+	})
+
+	t.Run("static tool credential is applied", func(t *testing.T) {
+		base := &recordingRoundTripper{}
+		rt := &injectedHeaderTransport{base: base, authHeader: "Bearer mcp-tok"}
+
+		req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, "http://mcp.example.invalid", nil)
+		require.NoError(t, err)
+
+		_, err = rt.RoundTrip(req)
+		require.NoError(t, err)
+		assert.Equal(t, "Bearer mcp-tok", base.lastReq.Header.Get("Authorization"))
+	})
+
+	t.Run("broker-injected Authorization wins over the tool credential", func(t *testing.T) {
+		base := &recordingRoundTripper{}
+		rt := &injectedHeaderTransport{base: base, authHeader: "Bearer tool-tok"}
+
+		req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, "http://mcp.example.invalid", nil)
+		require.NoError(t, err)
+		req = req.WithContext(WithInjectedHeaders(req.Context(), map[string]string{"Authorization": "Bearer broker-tok"}))
+
+		_, err = rt.RoundTrip(req)
+		require.NoError(t, err)
+		assert.Equal(t, "Bearer broker-tok", base.lastReq.Header.Get("Authorization"),
+			"an explicit ToolPolicy enforcement decision must win over the static tool credential")
 	})
 }
 

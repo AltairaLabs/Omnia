@@ -22,29 +22,43 @@ import (
 	"strings"
 )
 
-// mergeAuthHeaders adds authentication headers to the map based on auth type.
-func mergeAuthHeaders(headers map[string]string, authType, authToken string) error {
+// authorizationValue returns the Authorization header/metadata value for the
+// given auth type and token, or "" when no authentication applies. It is the
+// shared credential-formatting seam used by the HTTP header path and the gRPC
+// metadata path.
+func authorizationValue(authType, authToken string) (string, error) {
 	switch strings.ToLower(authType) {
 	case "bearer":
 		if authToken == "" {
-			return fmt.Errorf("bearer auth requires a token")
+			return "", fmt.Errorf("bearer auth requires a token")
 		}
-		headers["Authorization"] = "Bearer " + authToken
+		return "Bearer " + authToken, nil
 	case "basic":
 		if authToken == "" {
-			return fmt.Errorf("basic auth requires credentials")
+			return "", fmt.Errorf("basic auth requires credentials")
 		}
 		parts := strings.SplitN(authToken, ":", 2)
 		if len(parts) != 2 {
-			return fmt.Errorf("basic auth token must be 'username:password'")
+			return "", fmt.Errorf("basic auth token must be 'username:password'")
 		}
 		req := &http.Request{Header: http.Header{}}
 		req.SetBasicAuth(parts[0], parts[1])
-		headers["Authorization"] = req.Header.Get("Authorization")
+		return req.Header.Get("Authorization"), nil
 	case "":
-		// No authentication
+		return "", nil
 	default:
-		return fmt.Errorf("unsupported auth type: %s", authType)
+		return "", fmt.Errorf("unsupported auth type: %s", authType)
+	}
+}
+
+// mergeAuthHeaders adds an Authorization header to the map based on auth type.
+func mergeAuthHeaders(headers map[string]string, authType, authToken string) error {
+	val, err := authorizationValue(authType, authToken)
+	if err != nil {
+		return err
+	}
+	if val != "" {
+		headers["Authorization"] = val
 	}
 	return nil
 }
