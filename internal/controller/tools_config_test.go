@@ -1207,6 +1207,55 @@ func TestBuildHTTPConfig_SetsAuthPathWhenSecretRef(t *testing.T) {
 	}
 }
 
+func TestBuildHTTPConfig_NewAuthStanzaEquivalentToLegacy(t *testing.T) {
+	secret := &omniav1alpha1.SecretKeySelector{Name: "s", Key: testAuthSecretKey}
+	legacyType := authTypeBearer
+	legacy := &omniav1alpha1.HandlerDefinition{
+		Name: "h1", Type: omniav1alpha1.HandlerTypeHTTP,
+		HTTPConfig: &omniav1alpha1.HTTPConfig{Endpoint: "https://example.com", AuthType: &legacyType, AuthSecretRef: secret},
+	}
+	stanza := &omniav1alpha1.HandlerDefinition{
+		Name: "h1", Type: omniav1alpha1.HandlerTypeHTTP,
+		HTTPConfig: &omniav1alpha1.HTTPConfig{Endpoint: "https://example.com"},
+		Auth:       &omniav1alpha1.ToolAuth{Type: omniav1alpha1.ToolAuthTypeBearer, SecretRef: secret},
+	}
+
+	lc, err := buildHTTPConfig(legacy, "https://example.com")
+	if err != nil {
+		t.Fatalf("legacy build: %v", err)
+	}
+	sc, err := buildHTTPConfig(stanza, "https://example.com")
+	if err != nil {
+		t.Fatalf("stanza build: %v", err)
+	}
+	if lc.AuthType != sc.AuthType || lc.AuthTokenPath != sc.AuthTokenPath {
+		t.Errorf("new stanza (%q,%q) != legacy (%q,%q)", sc.AuthType, sc.AuthTokenPath, lc.AuthType, lc.AuthTokenPath)
+	}
+	if sc.AuthType != authTypeBearer || sc.AuthTokenPath != ToolSecretsMountPath+"/h1" {
+		t.Errorf("stanza config wrong: type=%q path=%q", sc.AuthType, sc.AuthTokenPath)
+	}
+}
+
+func TestCollectToolAuthSecrets_TypeAware(t *testing.T) {
+	secret := &omniav1alpha1.SecretKeySelector{Name: "s", Key: testAuthSecretKey}
+	tr := &omniav1alpha1.ToolRegistry{Spec: omniav1alpha1.ToolRegistrySpec{Handlers: []omniav1alpha1.HandlerDefinition{
+		{Name: "legacy", Type: omniav1alpha1.HandlerTypeHTTP, HTTPConfig: &omniav1alpha1.HTTPConfig{Endpoint: "x", AuthSecretRef: secret}},
+		{Name: "stanza", Type: omniav1alpha1.HandlerTypeHTTP, HTTPConfig: &omniav1alpha1.HTTPConfig{Endpoint: "y"},
+			Auth: &omniav1alpha1.ToolAuth{Type: omniav1alpha1.ToolAuthTypeBearer, SecretRef: secret}},
+		{Name: "noauth", Type: omniav1alpha1.HandlerTypeHTTP, HTTPConfig: &omniav1alpha1.HTTPConfig{Endpoint: "z"},
+			Auth: &omniav1alpha1.ToolAuth{Type: omniav1alpha1.ToolAuthTypeNone}},
+	}}}
+
+	refs := collectToolAuthSecrets(tr)
+	// legacy + stanza are secret-backed; the none-type handler is NOT collected.
+	if len(refs) != 2 {
+		t.Fatalf("want 2 secret-backed refs, got %d (%+v)", len(refs), refs)
+	}
+	if refs[0].handler != "legacy" || refs[1].handler != "stanza" {
+		t.Errorf("unexpected handler order: %+v", refs)
+	}
+}
+
 func TestReconcileToolSecrets_WritesTokenAndFailsOnMissing(t *testing.T) {
 	scheme := runtime.NewScheme()
 	_ = corev1.AddToScheme(scheme)

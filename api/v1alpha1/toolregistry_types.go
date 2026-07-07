@@ -164,11 +164,13 @@ type OpenAPIConfig struct {
 	Headers map[string]string `json:"headers,omitempty"`
 
 	// authType specifies the authentication type (bearer, basic).
+	// Deprecated: use the handler-level `auth` stanza. Normalized into it when set.
 	// +kubebuilder:validation:Enum=bearer;basic
 	// +optional
 	AuthType *string `json:"authType,omitempty"`
 
 	// authSecretRef references a secret containing auth credentials.
+	// Deprecated: use the handler-level `auth` stanza. Normalized into it when set.
 	// +optional
 	AuthSecretRef *SecretKeySelector `json:"authSecretRef,omitempty"`
 
@@ -270,11 +272,13 @@ type HTTPConfig struct {
 	ContentType string `json:"contentType,omitempty"`
 
 	// authType specifies the authentication type (bearer, basic).
+	// Deprecated: use the handler-level `auth` stanza. Normalized into it when set.
 	// +kubebuilder:validation:Enum=bearer;basic
 	// +optional
 	AuthType *string `json:"authType,omitempty"`
 
 	// authSecretRef references a secret containing auth credentials.
+	// Deprecated: use the handler-level `auth` stanza. Normalized into it when set.
 	// +optional
 	AuthSecretRef *SecretKeySelector `json:"authSecretRef,omitempty"`
 
@@ -396,6 +400,31 @@ type SecretKeySelector struct {
 	Key string `json:"key"`
 }
 
+// ToolAuth configures how the runtime authenticates to a tool's backend. It is
+// handler-level and reusable across http, openapi, grpc, and mcp handlers. It
+// supersedes the per-handler-config authType/authSecretRef fields (which remain
+// for backward compatibility and are normalized into this shape).
+//
+// Additional mechanisms (serviceAccount projected tokens, workloadIdentity) are
+// introduced in later phases; only the types the operator can honor are accepted
+// by the schema, so an unsupported auth type is rejected rather than silently
+// ignored.
+// +kubebuilder:validation:XValidation:rule="self.type != 'bearer' && self.type != 'basic' || has(self.secretRef)",message="auth.type bearer/basic requires secretRef"
+type ToolAuth struct {
+	// type selects the authentication mechanism:
+	//   none    — no credential (default)
+	//   bearer  — Authorization: Bearer <secretRef value>
+	//   basic   — Authorization: Basic <base64(secretRef "user:password")>
+	// +kubebuilder:validation:Enum=none;bearer;basic
+	// +kubebuilder:default=none
+	Type string `json:"type"`
+
+	// secretRef holds the credential for bearer/basic. For bearer the key's value
+	// is the token; for basic it is "username:password".
+	// +optional
+	SecretRef *SecretKeySelector `json:"secretRef,omitempty"`
+}
+
 // ToolDefinition defines a tool's interface for plain HTTP/gRPC handlers
 type ToolDefinition struct {
 	// name is the tool name that will be exposed to the LLM.
@@ -435,6 +464,7 @@ type ServiceSelector struct {
 }
 
 // HandlerDefinition defines a tool handler that exposes one or more tools
+// +kubebuilder:validation:XValidation:rule="!(has(self.auth) && ((has(self.httpConfig) && has(self.httpConfig.authType)) || (has(self.openAPIConfig) && has(self.openAPIConfig.authType))))",message="set either the handler-level auth stanza or the legacy httpConfig/openAPIConfig authType, not both"
 type HandlerDefinition struct {
 	// name is a unique identifier for this handler within the registry.
 	// +kubebuilder:validation:Required
@@ -480,6 +510,12 @@ type HandlerDefinition struct {
 	// Used when type is "client".
 	// +optional
 	ClientConfig *ClientToolConfig `json:"clientConfig,omitempty"`
+
+	// auth configures how the runtime authenticates to this handler's backend.
+	// Applies to http, openapi, grpc, and mcp handlers. Supersedes the legacy
+	// per-config authType/authSecretRef fields; setting both is rejected.
+	// +optional
+	Auth *ToolAuth `json:"auth,omitempty"`
 
 	// timeout specifies the maximum duration for a single tool invocation (wall clock).
 	// Applies to all handler types.

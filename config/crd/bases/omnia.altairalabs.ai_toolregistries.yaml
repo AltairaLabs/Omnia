@@ -61,6 +61,45 @@ spec:
                   description: HandlerDefinition defines a tool handler that exposes
                     one or more tools
                   properties:
+                    auth:
+                      description: |-
+                        auth configures how the runtime authenticates to this handler's backend.
+                        Applies to http, openapi, grpc, and mcp handlers. Supersedes the legacy
+                        per-config authType/authSecretRef fields; setting both is rejected.
+                      properties:
+                        secretRef:
+                          description: |-
+                            secretRef holds the credential for bearer/basic. For bearer the key's value
+                            is the token; for basic it is "username:password".
+                          properties:
+                            key:
+                              description: key is the key in the secret to select.
+                              type: string
+                            name:
+                              description: name is the name of the secret.
+                              type: string
+                          required:
+                          - key
+                          - name
+                          type: object
+                        type:
+                          default: none
+                          description: |-
+                            type selects the authentication mechanism:
+                              none    — no credential (default)
+                              bearer  — Authorization: Bearer <secretRef value>
+                              basic   — Authorization: Basic <base64(secretRef "user:password")>
+                          enum:
+                          - none
+                          - bearer
+                          - basic
+                          type: string
+                      required:
+                      - type
+                      type: object
+                      x-kubernetes-validations:
+                      - message: auth.type bearer/basic requires secretRef
+                        rule: self.type != 'bearer' && self.type != 'basic' || has(self.secretRef)
                     clientConfig:
                       description: |-
                         clientConfig contains client-side tool configuration.
@@ -154,8 +193,9 @@ spec:
                         Required when type is "http".
                       properties:
                         authSecretRef:
-                          description: authSecretRef references a secret containing
-                            auth credentials.
+                          description: |-
+                            authSecretRef references a secret containing auth credentials.
+                            Deprecated: use the handler-level `auth` stanza. Normalized into it when set.
                           properties:
                             key:
                               description: key is the key in the secret to select.
@@ -168,8 +208,9 @@ spec:
                           - name
                           type: object
                         authType:
-                          description: authType specifies the authentication type
-                            (bearer, basic).
+                          description: |-
+                            authType specifies the authentication type (bearer, basic).
+                            Deprecated: use the handler-level `auth` stanza. Normalized into it when set.
                           enum:
                           - bearer
                           - basic
@@ -400,8 +441,9 @@ spec:
                         Required when type is "openapi".
                       properties:
                         authSecretRef:
-                          description: authSecretRef references a secret containing
-                            auth credentials.
+                          description: |-
+                            authSecretRef references a secret containing auth credentials.
+                            Deprecated: use the handler-level `auth` stanza. Normalized into it when set.
                           properties:
                             key:
                               description: key is the key in the secret to select.
@@ -414,8 +456,9 @@ spec:
                           - name
                           type: object
                         authType:
-                          description: authType specifies the authentication type
-                            (bearer, basic).
+                          description: |-
+                            authType specifies the authentication type (bearer, basic).
+                            Deprecated: use the handler-level `auth` stanza. Normalized into it when set.
                           enum:
                           - bearer
                           - basic
@@ -570,6 +613,11 @@ spec:
                   - name
                   - type
                   type: object
+                  x-kubernetes-validations:
+                  - message: set either the handler-level auth stanza or the legacy
+                      httpConfig/openAPIConfig authType, not both
+                    rule: '!(has(self.auth) && ((has(self.httpConfig) && has(self.httpConfig.authType))
+                      || (has(self.openAPIConfig) && has(self.openAPIConfig.authType))))'
                 minItems: 1
                 type: array
             required:

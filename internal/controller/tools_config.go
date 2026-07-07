@@ -202,17 +202,23 @@ type toolAuthRef struct {
 	ref     *omniav1alpha1.SecretKeySelector
 }
 
-// collectToolAuthSecrets returns, in handler order, every HTTP/OpenAPI handler
-// that references an auth secret.
+// collectToolAuthSecrets returns, in handler order, every handler whose effective
+// auth resolves a credential from a Secret (bearer/basic). It reads
+// HandlerDefinition.EffectiveAuth so it is handler-generic — any protocol whose
+// auth is bearer/basic contributes a companion-Secret key, whether configured via
+// the new auth stanza or the deprecated authType/authSecretRef fields. Non-Secret
+// auth types (serviceAccount, workloadIdentity) do not use the companion Secret.
 func collectToolAuthSecrets(tr *omniav1alpha1.ToolRegistry) []toolAuthRef {
 	var out []toolAuthRef
 	for i := range tr.Spec.Handlers {
 		h := &tr.Spec.Handlers[i]
-		switch {
-		case h.HTTPConfig != nil && h.HTTPConfig.AuthSecretRef != nil:
-			out = append(out, toolAuthRef{handler: h.Name, ref: h.HTTPConfig.AuthSecretRef})
-		case h.OpenAPIConfig != nil && h.OpenAPIConfig.AuthSecretRef != nil:
-			out = append(out, toolAuthRef{handler: h.Name, ref: h.OpenAPIConfig.AuthSecretRef})
+		auth := h.EffectiveAuth()
+		if auth == nil || auth.SecretRef == nil {
+			continue
+		}
+		switch auth.Type {
+		case omniav1alpha1.ToolAuthTypeBearer, omniav1alpha1.ToolAuthTypeBasic:
+			out = append(out, toolAuthRef{handler: h.Name, ref: auth.SecretRef})
 		}
 	}
 	return out
@@ -528,20 +534,28 @@ func buildHTTPConfig(h *omniav1alpha1.HandlerDefinition, endpoint string) (*Tool
 		return nil, err
 	}
 	cfg.RetryPolicy = rp
-	if h.HTTPConfig.AuthSecretRef != nil {
-		cfg.AuthType = authTypeOrDefault(h.HTTPConfig.AuthType)
-		cfg.AuthTokenPath = ToolSecretsMountPath + "/" + h.Name
+	if authType, tokenPath, ok := secretAuthFields(h); ok {
+		cfg.AuthType = authType
+		cfg.AuthTokenPath = tokenPath
 	}
 	return cfg, nil
 }
 
-// authTypeOrDefault returns the configured auth type, defaulting to "bearer"
-// when a secretRef is present but no type was specified (mirrors omnia tool-test).
-func authTypeOrDefault(t *string) string {
-	if t != nil && *t != "" {
-		return *t
+// secretAuthFields returns the generated-config auth type and mounted token path
+// for a handler whose effective auth is secret-backed (bearer/basic), and false
+// otherwise. It reads HandlerDefinition.EffectiveAuth, so both the new auth
+// stanza and the deprecated authType/authSecretRef fields resolve identically
+// (the bearer default for a bare secretRef is applied during normalization).
+func secretAuthFields(h *omniav1alpha1.HandlerDefinition) (authType, tokenPath string, ok bool) {
+	auth := h.EffectiveAuth()
+	if auth == nil || auth.SecretRef == nil {
+		return "", "", false
 	}
-	return authTypeBearer
+	switch auth.Type {
+	case omniav1alpha1.ToolAuthTypeBearer, omniav1alpha1.ToolAuthTypeBasic:
+		return auth.Type, ToolSecretsMountPath + "/" + h.Name, true
+	}
+	return "", "", false
 }
 
 // buildGRPCConfig builds gRPC configuration for a handler entry.
@@ -626,9 +640,9 @@ func buildOpenAPIConfig(h *omniav1alpha1.HandlerDefinition) (*ToolOpenAPI, error
 		return nil, err
 	}
 	cfg.RetryPolicy = rp
-	if h.OpenAPIConfig.AuthSecretRef != nil {
-		cfg.AuthType = authTypeOrDefault(h.OpenAPIConfig.AuthType)
-		cfg.AuthTokenPath = ToolSecretsMountPath + "/" + h.Name
+	if authType, tokenPath, ok := secretAuthFields(h); ok {
+		cfg.AuthType = authType
+		cfg.AuthTokenPath = tokenPath
 	}
 	return cfg, nil
 }
