@@ -18,7 +18,7 @@ tests:
           path: spec.template.spec.containers[0].args[*]
           pattern: ^--redis-url=
 
-  - it: passes --redis-url from the Bitnami subchart when redis.enabled=true
+  - it: passes --redis-url from the in-repo dev Redis when redis.enabled=true
     set:
       doctor.enabled: true
       redis.enabled: true

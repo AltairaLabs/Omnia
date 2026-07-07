@@ -1,0 +1,142 @@
+{{- if .Values.redis.enabled }}
+{{- $po := .Values.redis.podOverrides | default dict }}
+{{- /*
+  In-repo development Redis. Single replica, no auth, no persistence — a
+  convenience for local/dev installs (redis.enabled=true). NOT for production:
+  point redis.default at an external managed Redis (ElastiCache / MemoryStore /
+  Azure Cache) instead. Replaces the former Bitnami Redis subchart, dropped to
+  shed the wound-down Bitnami/Broadcom Helm catalog dependency. Rendered as a
+  StatefulSet named <fullname>-redis-master so the pod is omnia-redis-master-0
+  (matching what the e2e suites + setup scripts exec/rollout against), and the
+  Service name matches the URL synthesised by omnia.redis.url.
+*/ -}}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "omnia.fullname" . }}-redis-master
+  labels:
+    {{- include "omnia.labels" . | nindent 4 }}
+    app.kubernetes.io/component: redis
+spec:
+  serviceName: {{ include "omnia.fullname" . }}-redis-master
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "omnia.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: redis
+  template:
+    metadata:
+      {{- with $po.annotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- with $po.labels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+        {{- include "omnia.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: redis
+    spec:
+      {{- with $po.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $po.serviceAccountName }}
+      serviceAccountName: {{ . }}
+      {{- end }}
+      {{- with $po.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
+        fsGroup: 999
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: redis
+          image: "{{ .Values.redis.image.repository }}:{{ .Values.redis.image.tag }}"
+          imagePullPolicy: {{ .Values.redis.image.pullPolicy }}
+          args:
+            - "--maxmemory"
+            - {{ .Values.redis.maxmemory | quote }}
+            - "--maxmemory-policy"
+            - {{ .Values.redis.maxmemoryPolicy | quote }}
+            - "--save"
+            - ""
+            - "--appendonly"
+            - "no"
+          ports:
+            - name: redis
+              containerPort: 6379 # keep-hardcoded: Redis wire-protocol port; omnia.redis.url hardcodes it too
+              protocol: TCP
+          livenessProbe:
+            tcpSocket:
+              port: redis
+            initialDelaySeconds: 10 # keep-hardcoded: dev-only Redis, not a tunable
+            periodSeconds: 10 # keep-hardcoded: dev-only Redis, not a tunable
+          readinessProbe:
+            exec:
+              command: ["redis-cli", "ping"]
+            initialDelaySeconds: 5 # keep-hardcoded: dev-only Redis, not a tunable
+            periodSeconds: 10 # keep-hardcoded: dev-only Redis, not a tunable
+          resources:
+            {{- toYaml .Values.redis.resources | nindent 12 }}
+          {{- with $po.extraEnv }}
+          env:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            {{- with $po.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+      volumes:
+        - name: data
+          emptyDir: {}
+        {{- with $po.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with $po.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $po.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $po.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $po.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "omnia.fullname" . }}-redis-master
+  labels:
+    {{- include "omnia.labels" . | nindent 4 }}
+    app.kubernetes.io/component: redis
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "omnia.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: redis
+  ports:
+    - name: redis
+      port: 6379 # keep-hardcoded: Redis wire-protocol port
+      targetPort: redis
+      protocol: TCP
+{{- end }}

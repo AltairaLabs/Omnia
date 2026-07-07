@@ -2535,7 +2535,7 @@ keda:
 # ============================================================================
 
 redis:
-  # -- Enable Redis subchart (Bitnami Redis)
+  # -- Enable the in-repo dev Redis (templates/redis/redis.yaml)
   # Dev convenience. When true, populates redis.default.url with the
   # in-cluster service URL automatically. Production installs typically
   # leave this false and point redis.default at an external Redis
@@ -2562,7 +2562,7 @@ redis:
   #
   # Resolution order at consumer-rendering time:
   #   consumer.url → consumer.{host,...} → default.url → default.{host,...}
-  #   → Bitnami subchart (when redis.enabled=true) → "" (disabled)
+  #   → in-repo dev Redis (when redis.enabled=true) → "" (disabled)
   # ============================================================================
   default:
     # ONE OF the three forms below. Resolution order on this block:
@@ -2602,44 +2602,37 @@ redis:
         name: ""
         key: ""
 
-  # -- Subchart values for Bitnami Redis
-  # See: https://github.com/bitnami/charts/tree/main/bitnami/redis
-  # Architecture: standalone (1 master) or replication (master + replicas + sentinel).
-  # For production HA, set to "replication" and enable sentinel below.
-  architecture: standalone
+  # ============================================================================
+  # In-repo development Redis (rendered by templates/redis/redis.yaml when
+  # redis.enabled=true). Single-replica StatefulSet, no auth, no persistence — a
+  # dev/local convenience only. For production, leave redis.enabled=false and
+  # point redis.default at an external managed Redis. Replaces the former Bitnami
+  # Redis subchart (dropped with the wound-down Bitnami/Broadcom catalog).
+  # ============================================================================
 
-  auth:
-    # -- Disable auth for development (enable and set password for production)
-    enabled: false
+  # -- Redis image for the in-cluster dev instance (official multi-arch image).
+  image:
+    repository: redis
+    tag: "7.4-alpine"
+    pullPolicy: IfNotPresent
 
-  sentinel:
-    # -- Enable Redis Sentinel for automatic failover (requires architecture: replication)
-    enabled: false
-    # -- Sentinel master set name
-    masterSet: omnia-master
+  # -- maxmemory ceiling for the dev Redis.
+  maxmemory: "256mb"
+  # -- Eviction policy once maxmemory is reached.
+  maxmemoryPolicy: "allkeys-lru"
 
-  master:
-    persistence:
-      # -- Disable persistence for development
-      enabled: false
-    # -- Extra Redis server flags for memory management
-    # Production deployments should adjust maxmemory based on workload.
-    extraFlags:
-      - "--maxmemory"
-      - "1gb"
-      - "--maxmemory-policy"
-      - "allkeys-lru"
-    resources:
-      limits:
-        cpu: 200m
-        memory: 1280Mi
-      requests:
-        cpu: 50m
-        memory: 256Mi
+  # -- Resource requests/limits for the dev Redis pod.
+  resources:
+    limits:
+      cpu: 200m
+      memory: 320Mi
+    requests:
+      cpu: 50m
+      memory: 128Mi
 
-  replica:
-    # -- Number of replicas for Redis HA
-    replicaCount: 3
+  # -- Pod customization for the dev Redis StatefulSet. See charts/omnia/CLAUDE.md
+  # for the podOverrides contract.
+  podOverrides: {}
 
 # ============================================================================
 # Memory Consolidation Reference Packs
