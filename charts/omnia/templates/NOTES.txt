@@ -184,3 +184,13 @@ For more information, visit: https://omnia.altairalabs.ai/docs
     traffic.sidecar.istio.io/excludeInboundPorts: "{{ .Values.webhook.port }}"
 {{- end }}
 {{- end }}
+{{- if .Values.redis.enabled }}
+
+  Redis: an in-cluster dev Redis ({{ include "omnia.fullname" . }}-redis-master)
+  is running. This replaced the Bitnami Redis subchart — the old
+  redis.architecture / redis.auth / redis.sentinel / redis.master / redis.replica
+  values no longer apply; tune redis.image / redis.resources / redis.podOverrides
+  instead. It is single-replica, no-auth, no-persistence — NOT for production.
+  For production, set redis.enabled=false and point redis.default at an external
+  managed Redis.
+{{- end }}

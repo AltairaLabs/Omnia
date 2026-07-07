@@ -53,10 +53,6 @@ dependencies:
     version: "~2.16"
     repository: https://kedacore.github.io/charts
     condition: keda.enabled
-  - name: redis
-    version: "~24.0"
-    repository: https://charts.bitnami.com/bitnami
-    condition: redis.enabled
   - name: csi-driver-nfs
     version: "~4.9"
     repository: https://raw.githubusercontent.com/kubernetes-csi/csi-driver-nfs/master/charts
