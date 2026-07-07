@@ -81,8 +81,10 @@ func (r *AgentRuntimeReconciler) reconcileDeployment(
 ) (*appsv1.Deployment, error) {
 	log := logf.FromContext(ctx)
 
-	// Calculate config hash for rollout triggering
-	configHash := r.getConfigHash(ctx, providers)
+	// Calculate config hash for rollout triggering — covers provider config +
+	// secrets AND the PromptPack / ToolRegistry the runtime loads, so a tool or
+	// prompt change actually rolls the pod instead of silently leaving it stale.
+	configHash := r.getConfigHash(ctx, providers, promptPack, toolRegistry)
 
 	// Resolve A2A clients for env injection.
 	resolvedClients, _ := r.resolveA2AClients(ctx, log, agentRuntime)

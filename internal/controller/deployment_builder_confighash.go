@@ -31,17 +31,40 @@ import (
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 )
 
-// getConfigHash calculates a hash of all provider config and secrets.
-// This is used to trigger pod rollouts when provider spec or secrets change.
+// getConfigHash calculates a hash of the external config the agent pod depends
+// on but that does NOT live in the pod spec: provider config + secrets, and the
+// PromptPack / ToolRegistry the runtime loads from mounted ConfigMaps. It is set
+// as the pod-template config-hash annotation so the Deployment rolls when any of
+// them changes. Without the pack/registry inputs, editing a ToolRegistry or
+// PromptPack would leave the pod running stale tool/prompt config — the change
+// silently no-ops until something else restarts the pod.
 func (r *AgentRuntimeReconciler) getConfigHash(
 	ctx context.Context,
 	providers map[string]*omniav1alpha1.Provider,
+	promptPack *omniav1alpha1.PromptPack,
+	toolRegistry *omniav1alpha1.ToolRegistry,
 ) string {
-	if len(providers) == 0 {
-		return ""
+	hasher := sha256.New()
+
+	// PromptPack / ToolRegistry: Generation increments on every spec change, so
+	// a hash over it rolls the pod when the pack or the tool set changes. The
+	// operator generates the tools ConfigMap from the ToolRegistry spec, so the
+	// registry Generation transitively covers the runtime's tools.yaml too.
+	if promptPack != nil {
+		hashField(hasher, "promptPack.name", promptPack.Name)
+		hashField(hasher, "promptPack.generation", fmt.Sprintf("%d", promptPack.Generation))
+	}
+	if toolRegistry != nil {
+		hashField(hasher, "toolRegistry.name", toolRegistry.Name)
+		hashField(hasher, "toolRegistry.generation", fmt.Sprintf("%d", toolRegistry.Generation))
 	}
 
-	hasher := sha256.New()
+	if len(providers) == 0 {
+		if promptPack == nil && toolRegistry == nil {
+			return ""
+		}
+		return finishHash(hasher)
+	}
 
 	// Include all providers in sorted key order for determinism
 	providerNames := make([]string, 0, len(providers))
@@ -70,8 +93,12 @@ func (r *AgentRuntimeReconciler) getConfigHash(
 		}
 	}
 
+	return finishHash(hasher)
+}
+
+// finishHash renders the hasher's digest as the first 16 hex chars.
+func finishHash(hasher hash.Hash) string {
 	hashStr := hex.EncodeToString(hasher.Sum(nil))
-	// Use first 16 chars for brevity
 	if len(hashStr) > 16 {
 		hashStr = hashStr[:16]
 	}
