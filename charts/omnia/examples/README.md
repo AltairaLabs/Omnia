@@ -17,18 +17,24 @@ Worked values files for common deployment shapes. Each is intended as a starting
 
 Helm applies `-f` arguments left-to-right; later files override earlier ones.
 
+> **`--devel` is required for now** — Omnia publishes only pre-release (beta)
+> charts, which `helm install` skips by default. See the [chart README](../README.md#minimum-install).
+
 ```bash
 # Dev (local)
 helm install omnia oci://ghcr.io/altairalabs/charts/omnia \
+  --devel \
   -f charts/omnia/examples/values-minimal.yaml
 
 # OSS prod on AWS with IRSA
 helm install omnia oci://ghcr.io/altairalabs/charts/omnia \
+  --devel \
   -f charts/omnia/examples/values-prod-oauth.yaml \
   -f charts/omnia/examples/values-aws-irsa.yaml
 
 # Enterprise on Azure with KV + observability
 helm install omnia oci://ghcr.io/altairalabs/charts/omnia \
+  --devel \
   -f charts/omnia/examples/values-prod-oauth.yaml \
   -f charts/omnia/examples/values-prod-enterprise.yaml \
   -f charts/omnia/examples/values-azure-kv-csi.yaml \

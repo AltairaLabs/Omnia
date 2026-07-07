@@ -25,10 +25,17 @@ Every install **must** set these two values. The chart refuses to render without
 | `dashboard.auth.mode` | One of `oauth`, `builtin`, `proxy`, `anonymous`. No default — prevents accidental unauthenticated deploys. |
 | `dashboard.auth.allowAnonymous: true` | Only required when `mode: anonymous`. Explicit opt-in. |
 
+> **`--devel` is required for now.** Omnia currently publishes only pre-release
+> (beta) charts, and `helm install`/`upgrade` **skip pre-release versions by
+> default** — without `--devel` the command fails with `no chart version found`.
+> Every command below includes it. Once a stable (non-beta) release is cut,
+> `--devel` is no longer needed. (Alternatively, pin an exact `--version <x.y.z-beta.N>`.)
+
 Smallest possible install (local kind/k3d, no auth):
 
 ```bash
 helm install omnia oci://ghcr.io/altairalabs/charts/omnia \
+  --devel \
   --set dashboard.auth.mode=anonymous \
   --set dashboard.auth.allowAnonymous=true
 ```
@@ -47,6 +54,7 @@ Goal: install Omnia with zero external dependencies. Dev Postgres + NFS server b
 
 ```bash
 helm install omnia oci://ghcr.io/altairalabs/charts/omnia \
+  --devel \
   --values values-dev.yaml \
   --set dashboard.auth.mode=anonymous \
   --set dashboard.auth.allowAnonymous=true
@@ -97,7 +105,7 @@ dashboard:
 Install:
 
 ```bash
-helm install omnia oci://ghcr.io/altairalabs/charts/omnia --values values-prod.yaml
+helm install omnia oci://ghcr.io/altairalabs/charts/omnia --devel --values values-prod.yaml
 ```
 
 ### 3. Enterprise (Arena + advanced features)
@@ -132,6 +140,7 @@ Install:
 
 ```bash
 helm install omnia oci://ghcr.io/altairalabs/charts/omnia \
+  --devel \
   --values values-prod.yaml \
   --values values-enterprise.yaml
 ```
