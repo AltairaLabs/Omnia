@@ -1376,35 +1376,6 @@ func TestBuildDeploymentSpec_PodOverrides(t *testing.T) {
 	}
 }
 
-func TestBuildDeploymentSpec_PodOverrides_SkipsPolicyProxy(t *testing.T) {
-	r := &AgentRuntimeReconciler{PolicyProxyImage: "policy-proxy:latest"}
-	ar := &omniav1alpha1.AgentRuntime{}
-	ar.Name = "a"
-	ar.Namespace = "ns"
-	ar.Spec.Facades = []omniav1alpha1.FacadeConfig{{Type: omniav1alpha1.FacadeTypeWebSocket}}
-	ar.Spec.PromptPackRef.Name = "p"
-	ar.Spec.PodOverrides = &omniav1alpha1.PodOverrides{
-		ExtraEnv: []corev1.EnvVar{{Name: "USER_VAR", Value: "x"}},
-	}
-
-	dep := &appsv1.Deployment{}
-	r.buildDeploymentSpec(context.Background(), dep, ar, newTestPromptPack(), nil, "", nil)
-
-	for _, c := range dep.Spec.Template.Spec.Containers {
-		hasUserVar := false
-		for _, e := range c.Env {
-			if e.Name == "USER_VAR" {
-				hasUserVar = true
-			}
-		}
-		if c.Name == PolicyProxyContainerName {
-			require.False(t, hasUserVar, "policy-proxy must NOT receive user extraEnv")
-		} else {
-			require.True(t, hasUserVar, "container %s must receive user extraEnv", c.Name)
-		}
-	}
-}
-
 func TestHardenedPodSecurityContext(t *testing.T) {
 	sc := hardenedPodSecurityContext()
 	require.NotNil(t, sc)
@@ -1474,48 +1445,6 @@ func TestBuildDeploymentSpec_HardenedSecurityContext(t *testing.T) {
 	}
 }
 
-func TestBuildDeploymentSpec_PolicyProxyKeepsOwnSecurityContext(t *testing.T) {
-	scheme := runtime.NewScheme()
-	require.NoError(t, omniav1alpha1.AddToScheme(scheme))
-	require.NoError(t, corev1.AddToScheme(scheme))
-
-	ar := &omniav1alpha1.AgentRuntime{
-		ObjectMeta: metav1.ObjectMeta{Name: "agent", Namespace: "ns"},
-		Spec: omniav1alpha1.AgentRuntimeSpec{
-			Facades: []omniav1alpha1.FacadeConfig{{Type: omniav1alpha1.FacadeTypeWebSocket}},
-		},
-	}
-	pp := newTestPromptPack()
-	r := &AgentRuntimeReconciler{
-		Scheme:           scheme,
-		Client:           fake.NewClientBuilder().WithScheme(scheme).Build(),
-		PolicyProxyImage: "ghcr.io/altairalabs/omnia-policy-proxy:test",
-	}
-
-	dep := &appsv1.Deployment{}
-	r.buildDeploymentSpec(context.Background(), dep, ar, pp, nil, "", nil)
-
-	// Locate the policy-proxy sidecar and check its SecurityContext is its own,
-	// not hardenedContainerSecurityContext — the sidecar configures its own SC.
-	var policyProxy *corev1.Container
-	for i := range dep.Spec.Template.Spec.Containers {
-		c := &dep.Spec.Template.Spec.Containers[i]
-		if c.Name == PolicyProxyContainerName {
-			policyProxy = c
-			break
-		}
-	}
-	require.NotNil(t, policyProxy, "policy-proxy sidecar must be injected when PolicyProxyImage is set")
-	// Either the policy-proxy has no hardened SC (it sets its own or runs with
-	// a different profile) or it has one — but the buildDeploymentSpec loop
-	// must not overwrite with hardenedContainerSecurityContext.
-	// The test's intent is "not our hardened context"; a different SC or nil is acceptable.
-	hardened := hardenedContainerSecurityContext()
-	if policyProxy.SecurityContext != nil {
-		assert.NotEqual(t, hardened, policyProxy.SecurityContext, "policy-proxy must not be overwritten with the facade/runtime hardened SC")
-	}
-}
-
 // containerPortByName returns the named container port, or nil. Test helper for
 // the metrics-port discovery contract assertions below.
 func containerPortByName(c *corev1.Container, name string) *corev1.ContainerPort {
@@ -1579,9 +1508,9 @@ func TestBuildDeploymentSpec_MetricsPortContract(t *testing.T) {
 	_, hasMerge := anno["prometheus.istio.io/merge-metrics"]
 	assert.False(t, hasMerge, "sidecar-only merge-metrics assumption must be removed")
 	assert.Equal(t,
-		fmt.Sprintf("%d,%d", DefaultFacadeHealthPort, DefaultRuntimeHealthPort),
+		fmt.Sprintf("%d,%d,%d", DefaultFacadeHealthPort, DefaultRuntimeHealthPort, DefaultPolicyBrokerHealthPort),
 		anno["traffic.sidecar.istio.io/excludeInboundPorts"],
-		"both metrics ports must be excluded from sidecar inbound interception")
+		"all three metrics ports must be excluded from sidecar inbound interception")
 }
 
 func TestDeployment_GracePeriodFromDrainTimeout(t *testing.T) {
@@ -1664,5 +1593,126 @@ func TestDeployment_GracePeriodClampedAtMax(t *testing.T) {
 	want := int64(maxDrainTimeoutSeconds + drainGraceBufferSeconds)
 	if got != want {
 		t.Fatalf("TerminationGracePeriodSeconds = %d, want %d (1h drainTimeout must clamp to max)", got, want)
+	}
+}
+
+// TestBuildDeploymentSpec_PolicyBrokerInjectedAndRuntimeActivated is the P2.3a
+// wiring guard: when PolicyBrokerImage is set, the pod must gain a
+// policy-broker sidecar AND the runtime container's PolicyBrokerClient must be
+// activated via POLICY_BROKER_URL — otherwise the sidecar runs but the runtime
+// never calls it (silent no-op enforcement).
+func TestBuildDeploymentSpec_PolicyBrokerInjectedAndRuntimeActivated(t *testing.T) {
+	r := &AgentRuntimeReconciler{PolicyBrokerImage: "ghcr.io/altairalabs/omnia-policy-broker:test"}
+	ar := &omniav1alpha1.AgentRuntime{}
+	ar.Name = "broker-agent"
+	ar.Namespace = "ns"
+	ar.Spec.Facades = []omniav1alpha1.FacadeConfig{{Type: omniav1alpha1.FacadeTypeWebSocket}}
+	ar.Spec.PromptPackRef.Name = "p"
+
+	dep := &appsv1.Deployment{}
+	r.buildDeploymentSpec(context.Background(), dep, ar, newTestPromptPack(), nil, "", nil)
+
+	var brokerC, runtimeC *corev1.Container
+	for i := range dep.Spec.Template.Spec.Containers {
+		c := &dep.Spec.Template.Spec.Containers[i]
+		switch c.Name {
+		case PolicyBrokerContainerName:
+			brokerC = c
+		case RuntimeContainerName:
+			runtimeC = c
+		}
+	}
+	require.NotNil(t, brokerC, "policy-broker sidecar must be injected when PolicyBrokerImage is set")
+	require.NotNil(t, runtimeC, "runtime container must be present")
+
+	found := false
+	for _, e := range runtimeC.Env {
+		if e.Name == "POLICY_BROKER_URL" {
+			found = true
+			assert.Equal(t, fmt.Sprintf("http://localhost:%d", DefaultPolicyBrokerPort), e.Value)
+		}
+	}
+	assert.True(t, found, "runtime container must have POLICY_BROKER_URL set to activate the client")
+
+	failMode := ""
+	for _, e := range runtimeC.Env {
+		if e.Name == "POLICY_BROKER_FAIL_MODE" {
+			failMode = e.Value
+		}
+	}
+	assert.Equal(t, "closed", failMode, "runtime must explicitly set fail-closed mode")
+}
+
+// TestBuildDeploymentSpec_PolicyBrokerAbsentByDefault ensures the sidecar and
+// runtime env var are both absent when PolicyBrokerImage is unset (the
+// non-enterprise / no-broker path), so this feature is a strict no-op unless
+// explicitly configured.
+func TestBuildDeploymentSpec_PolicyBrokerAbsentByDefault(t *testing.T) {
+	r := &AgentRuntimeReconciler{}
+	ar := &omniav1alpha1.AgentRuntime{}
+	ar.Name = "no-broker-agent"
+	ar.Namespace = "ns"
+	ar.Spec.Facades = []omniav1alpha1.FacadeConfig{{Type: omniav1alpha1.FacadeTypeWebSocket}}
+	ar.Spec.PromptPackRef.Name = "p"
+
+	dep := &appsv1.Deployment{}
+	r.buildDeploymentSpec(context.Background(), dep, ar, newTestPromptPack(), nil, "", nil)
+
+	for i := range dep.Spec.Template.Spec.Containers {
+		c := &dep.Spec.Template.Spec.Containers[i]
+		assert.NotEqual(t, PolicyBrokerContainerName, c.Name, "policy-broker sidecar must not be injected without PolicyBrokerImage")
+		if c.Name == RuntimeContainerName {
+			for _, e := range c.Env {
+				assert.NotEqual(t, "POLICY_BROKER_URL", e.Name, "runtime must not receive POLICY_BROKER_URL without PolicyBrokerImage")
+			}
+		}
+	}
+}
+
+// TestBuildDeploymentSpec_PolicyBrokerKeepsOwnSecurityContext is the
+// retirement-era regression guard (formerly
+// TestBuildDeploymentSpec_PolicyProxyKeepsOwnSecurityContext): the hardened
+// facade/runtime SecurityContext loop in buildDeploymentSpec must skip the
+// policy-broker sidecar, since buildPolicyBrokerContainer configures its own
+// SecurityContext (or none) and must not be overwritten.
+func TestBuildDeploymentSpec_PolicyBrokerKeepsOwnSecurityContext(t *testing.T) {
+	scheme := runtime.NewScheme()
+	require.NoError(t, omniav1alpha1.AddToScheme(scheme))
+	require.NoError(t, corev1.AddToScheme(scheme))
+
+	ar := &omniav1alpha1.AgentRuntime{
+		ObjectMeta: metav1.ObjectMeta{Name: "agent", Namespace: "ns"},
+		Spec: omniav1alpha1.AgentRuntimeSpec{
+			Facades: []omniav1alpha1.FacadeConfig{{Type: omniav1alpha1.FacadeTypeWebSocket}},
+		},
+	}
+	pp := newTestPromptPack()
+	r := &AgentRuntimeReconciler{
+		Scheme:            scheme,
+		Client:            fake.NewClientBuilder().WithScheme(scheme).Build(),
+		PolicyBrokerImage: "ghcr.io/altairalabs/omnia-policy-broker:test",
+	}
+
+	dep := &appsv1.Deployment{}
+	r.buildDeploymentSpec(context.Background(), dep, ar, pp, nil, "", nil)
+
+	// Locate the policy-broker sidecar and check its SecurityContext is its
+	// own, not hardenedContainerSecurityContext — the sidecar configures its
+	// own SC.
+	var policyBroker *corev1.Container
+	for i := range dep.Spec.Template.Spec.Containers {
+		c := &dep.Spec.Template.Spec.Containers[i]
+		if c.Name == PolicyBrokerContainerName {
+			policyBroker = c
+			break
+		}
+	}
+	require.NotNil(t, policyBroker, "policy-broker sidecar must be injected when PolicyBrokerImage is set")
+	// Either the policy-broker has no hardened SC (it sets its own or runs
+	// with a different profile) or it has one — but the buildDeploymentSpec
+	// loop must not overwrite with hardenedContainerSecurityContext.
+	hardened := hardenedContainerSecurityContext()
+	if policyBroker.SecurityContext != nil {
+		assert.NotEqual(t, hardened, policyBroker.SecurityContext, "policy-broker must not be overwritten with the facade/runtime hardened SC")
 	}
 }

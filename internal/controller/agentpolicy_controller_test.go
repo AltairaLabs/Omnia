@@ -59,110 +59,6 @@ func newTestSchemeWithIstio(t *testing.T) *runtime.Scheme {
 	return scheme
 }
 
-// --- Claim Mapping Validation Tests ---
-
-func TestValidateClaimMappings_Valid(t *testing.T) {
-	entries := []omniav1alpha1.ClaimMappingEntry{
-		{Claim: "team", Header: "X-Omnia-Claim-Team"},
-		{Claim: "region", Header: "X-Omnia-Claim-Region"},
-	}
-	err := validateClaimMappings(entries)
-	assert.NoError(t, err)
-}
-
-func TestValidateClaimMappings_EmptyClaim(t *testing.T) {
-	entries := []omniav1alpha1.ClaimMappingEntry{
-		{Claim: "", Header: "X-Omnia-Claim-Team"},
-	}
-	err := validateClaimMappings(entries)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "claim name must not be empty")
-}
-
-func TestValidateClaimMappings_EmptyHeader(t *testing.T) {
-	entries := []omniav1alpha1.ClaimMappingEntry{
-		{Claim: "team", Header: ""},
-	}
-	err := validateClaimMappings(entries)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "header name must not be empty")
-}
-
-func TestValidateClaimMappings_WrongPrefix(t *testing.T) {
-	entries := []omniav1alpha1.ClaimMappingEntry{
-		{Claim: "team", Header: "X-Custom-Team"},
-	}
-	err := validateClaimMappings(entries)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "must start with")
-}
-
-func TestValidateClaimMappings_DuplicateHeader(t *testing.T) {
-	entries := []omniav1alpha1.ClaimMappingEntry{
-		{Claim: "team", Header: "X-Omnia-Claim-Team"},
-		{Claim: "group", Header: "X-Omnia-Claim-Team"},
-	}
-	err := validateClaimMappings(entries)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "duplicate header")
-}
-
-func TestValidateClaimMappings_DuplicateHeaderCaseInsensitive(t *testing.T) {
-	// Both entries have valid prefix; duplicate detection is case-insensitive
-	entries := []omniav1alpha1.ClaimMappingEntry{
-		{Claim: "team", Header: "X-Omnia-Claim-Team"},
-		{Claim: "group", Header: "X-Omnia-Claim-team"},
-	}
-	err := validateClaimMappings(entries)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "duplicate header")
-}
-
-func TestValidateClaimMappings_Empty(t *testing.T) {
-	err := validateClaimMappings(nil)
-	assert.NoError(t, err)
-}
-
-func TestValidateClaimEntry(t *testing.T) {
-	tests := []struct {
-		name    string
-		entry   omniav1alpha1.ClaimMappingEntry
-		wantErr bool
-	}{
-		{
-			name:    "valid entry",
-			entry:   omniav1alpha1.ClaimMappingEntry{Claim: "team", Header: "X-Omnia-Claim-Team"},
-			wantErr: false,
-		},
-		{
-			name:    "empty claim",
-			entry:   omniav1alpha1.ClaimMappingEntry{Claim: "", Header: "X-Omnia-Claim-Team"},
-			wantErr: true,
-		},
-		{
-			name:    "empty header",
-			entry:   omniav1alpha1.ClaimMappingEntry{Claim: "team", Header: ""},
-			wantErr: true,
-		},
-		{
-			name:    "wrong prefix",
-			entry:   omniav1alpha1.ClaimMappingEntry{Claim: "team", Header: "X-Custom-Header"},
-			wantErr: true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := validateClaimEntry(tt.entry, make(map[string]bool))
-			if tt.wantErr {
-				assert.Error(t, err)
-			} else {
-				assert.NoError(t, err)
-			}
-		})
-	}
-}
-
 // --- ToolAccess Validation Tests ---
 
 func TestValidateToolAccess_Valid(t *testing.T) {
@@ -245,43 +141,13 @@ func TestValidateToolAccess_MultipleRules(t *testing.T) {
 
 // --- Policy Validation Tests ---
 
-func TestValidatePolicy_NilClaimMapping(t *testing.T) {
+func TestValidatePolicy_EmptySpec(t *testing.T) {
 	r := &AgentPolicyReconciler{}
 	policy := &omniav1alpha1.AgentPolicy{
 		Spec: omniav1alpha1.AgentPolicySpec{},
 	}
 	err := r.validatePolicy(policy)
 	assert.NoError(t, err)
-}
-
-func TestValidatePolicy_ValidClaimMapping(t *testing.T) {
-	r := &AgentPolicyReconciler{}
-	policy := &omniav1alpha1.AgentPolicy{
-		Spec: omniav1alpha1.AgentPolicySpec{
-			ClaimMapping: &omniav1alpha1.ClaimMapping{
-				ForwardClaims: []omniav1alpha1.ClaimMappingEntry{
-					{Claim: "team", Header: "X-Omnia-Claim-Team"},
-				},
-			},
-		},
-	}
-	err := r.validatePolicy(policy)
-	assert.NoError(t, err)
-}
-
-func TestValidatePolicy_InvalidClaimMapping(t *testing.T) {
-	r := &AgentPolicyReconciler{}
-	policy := &omniav1alpha1.AgentPolicy{
-		Spec: omniav1alpha1.AgentPolicySpec{
-			ClaimMapping: &omniav1alpha1.ClaimMapping{
-				ForwardClaims: []omniav1alpha1.ClaimMappingEntry{
-					{Claim: "team", Header: "Invalid-Header"},
-				},
-			},
-		},
-	}
-	err := r.validatePolicy(policy)
-	assert.Error(t, err)
 }
 
 func TestValidatePolicy_ValidToolAccess(t *testing.T) {
@@ -312,27 +178,6 @@ func TestValidatePolicy_InvalidToolAccess(t *testing.T) {
 	}
 	err := r.validatePolicy(policy)
 	assert.Error(t, err)
-}
-
-func TestValidatePolicy_BothClaimMappingAndToolAccess(t *testing.T) {
-	r := &AgentPolicyReconciler{}
-	policy := &omniav1alpha1.AgentPolicy{
-		Spec: omniav1alpha1.AgentPolicySpec{
-			ClaimMapping: &omniav1alpha1.ClaimMapping{
-				ForwardClaims: []omniav1alpha1.ClaimMappingEntry{
-					{Claim: "team", Header: "X-Omnia-Claim-Team"},
-				},
-			},
-			ToolAccess: &omniav1alpha1.ToolAccessConfig{
-				Mode: omniav1alpha1.ToolAccessModeDenylist,
-				Rules: []omniav1alpha1.ToolAccessRule{
-					{Registry: "reg", Tools: []string{"tool"}},
-				},
-			},
-		},
-	}
-	err := r.validatePolicy(policy)
-	assert.NoError(t, err)
 }
 
 // --- PolicyMatchesAgent Tests ---
@@ -418,13 +263,7 @@ func TestReconcile_ValidPolicy(t *testing.T) {
 			Namespace:  "default",
 			Generation: 1,
 		},
-		Spec: omniav1alpha1.AgentPolicySpec{
-			ClaimMapping: &omniav1alpha1.ClaimMapping{
-				ForwardClaims: []omniav1alpha1.ClaimMappingEntry{
-					{Claim: "team", Header: "X-Omnia-Claim-Team"},
-				},
-			},
-		},
+		Spec: omniav1alpha1.AgentPolicySpec{},
 	}
 
 	agent := &omniav1alpha1.AgentRuntime{
@@ -462,50 +301,6 @@ func TestReconcile_ValidPolicy(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, omniav1alpha1.AgentPolicyPhaseActive, updated.Status.Phase)
 	assert.Equal(t, int32(1), updated.Status.MatchedAgents)
-}
-
-func TestReconcile_InvalidPolicy(t *testing.T) {
-	scheme := newTestScheme(t)
-
-	policy := &omniav1alpha1.AgentPolicy{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:       "bad-policy",
-			Namespace:  "default",
-			Generation: 1,
-		},
-		Spec: omniav1alpha1.AgentPolicySpec{
-			ClaimMapping: &omniav1alpha1.ClaimMapping{
-				ForwardClaims: []omniav1alpha1.ClaimMappingEntry{
-					{Claim: "team", Header: "Bad-Header"},
-				},
-			},
-		},
-	}
-
-	fakeClient := fake.NewClientBuilder().
-		WithScheme(scheme).
-		WithObjects(policy).
-		WithStatusSubresource(policy).
-		Build()
-
-	r := &AgentPolicyReconciler{
-		Client: fakeClient,
-		Scheme: scheme,
-	}
-
-	result, err := r.Reconcile(context.Background(), ctrl.Request{
-		NamespacedName: types.NamespacedName{Name: "bad-policy", Namespace: "default"},
-	})
-
-	// Validation errors return nil error (no retry)
-	assert.NoError(t, err)
-	assert.Equal(t, ctrl.Result{}, result)
-
-	// Verify status was updated to Error
-	updated := &omniav1alpha1.AgentPolicy{}
-	err = fakeClient.Get(context.Background(), types.NamespacedName{Name: "bad-policy", Namespace: "default"}, updated)
-	require.NoError(t, err)
-	assert.Equal(t, omniav1alpha1.AgentPolicyPhaseError, updated.Status.Phase)
 }
 
 func TestReconcile_InvalidToolAccess(t *testing.T) {
@@ -561,11 +356,6 @@ func TestReconcile_WithSelector(t *testing.T) {
 		Spec: omniav1alpha1.AgentPolicySpec{
 			Selector: &omniav1alpha1.AgentPolicySelector{
 				Agents: []string{"agent-a"},
-			},
-			ClaimMapping: &omniav1alpha1.ClaimMapping{
-				ForwardClaims: []omniav1alpha1.ClaimMappingEntry{
-					{Claim: "team", Header: "X-Omnia-Claim-Team"},
-				},
 			},
 		},
 	}
@@ -683,22 +473,17 @@ func TestCountMatchedAgents_Filtered(t *testing.T) {
 	assert.Equal(t, int32(1), count)
 }
 
-func TestReconcile_PermissiveModeClaimMapping(t *testing.T) {
+func TestReconcile_PermissiveModeCondition(t *testing.T) {
 	scheme := newTestScheme(t)
 
 	policy := &omniav1alpha1.AgentPolicy{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:       "permissive-claim-policy",
+			Name:       "permissive-policy",
 			Namespace:  "default",
 			Generation: 1,
 		},
 		Spec: omniav1alpha1.AgentPolicySpec{
 			Mode: omniav1alpha1.AgentPolicyModePermissive,
-			ClaimMapping: &omniav1alpha1.ClaimMapping{
-				ForwardClaims: []omniav1alpha1.ClaimMappingEntry{
-					{Claim: "team", Header: "X-Omnia-Claim-Team"},
-				},
-			},
 		},
 	}
 
@@ -722,14 +507,14 @@ func TestReconcile_PermissiveModeClaimMapping(t *testing.T) {
 	}
 
 	result, err := r.Reconcile(context.Background(), ctrl.Request{
-		NamespacedName: types.NamespacedName{Name: "permissive-claim-policy", Namespace: "default"},
+		NamespacedName: types.NamespacedName{Name: "permissive-policy", Namespace: "default"},
 	})
 
 	assert.NoError(t, err)
 	assert.Equal(t, ctrl.Result{}, result)
 
 	updated := &omniav1alpha1.AgentPolicy{}
-	err = fakeClient.Get(context.Background(), types.NamespacedName{Name: "permissive-claim-policy", Namespace: "default"}, updated)
+	err = fakeClient.Get(context.Background(), types.NamespacedName{Name: "permissive-policy", Namespace: "default"}, updated)
 	require.NoError(t, err)
 	assert.Equal(t, omniav1alpha1.AgentPolicyPhaseActive, updated.Status.Phase)
 	assert.Equal(t, int32(1), updated.Status.MatchedAgents)

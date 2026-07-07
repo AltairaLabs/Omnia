@@ -50,7 +50,7 @@ func (s *PostgresMemoryStore) SaveWithResult(ctx context.Context, mem *Memory) (
 	if mem.Scope[ScopeWorkspaceID] == "" {
 		return nil, errors.New(errWorkspaceRequired)
 	}
-	if mem.Scope[ScopeUserID] == "" {
+	if mem.Scope[ScopeVirtualUserID] == "" {
 		return nil, errors.New(errUserIDRequired)
 	}
 
@@ -163,7 +163,7 @@ func upsertEntityByAboutKey(ctx context.Context, tx pgx.Tx, mem *Memory) (bool, 
 		              title = COALESCE(EXCLUDED.title, memory_entities.title)
 		RETURNING id, created_at, (xmax <> 0) AS conflicted`,
 		mem.Scope[ScopeWorkspaceID],
-		scopeOrNil(mem.Scope, ScopeUserID),
+		scopeOrNil(mem.Scope, ScopeVirtualUserID),
 		scopeOrNil(mem.Scope, ScopeAgentID),
 		mem.Content,
 		mem.Type,
@@ -246,7 +246,7 @@ func insertEntity(ctx context.Context, tx pgx.Tx, mem *Memory) error {
 		    $11)
 		RETURNING id, created_at`,
 		mem.Scope[ScopeWorkspaceID],
-		scopeOrNil(mem.Scope, ScopeUserID),
+		scopeOrNil(mem.Scope, ScopeVirtualUserID),
 		scopeOrNil(mem.Scope, ScopeAgentID),
 		mem.Content, // entity name = content (short identifier)
 		mem.Type,
@@ -284,7 +284,7 @@ func updateEntity(ctx context.Context, tx pgx.Tx, mem *Memory) error {
 		mem.ExpiresAt,
 		mem.ID,
 		mem.Scope[ScopeWorkspaceID],
-		scopeOrNil(mem.Scope, ScopeUserID),
+		scopeOrNil(mem.Scope, ScopeVirtualUserID),
 		scopeOrNil(mem.Scope, ScopeAgentID),
 	)
 	if err != nil {
@@ -457,7 +457,7 @@ func (s *PostgresMemoryStore) SupersedeMany(
 	// handler already enforces this, but other callers (gRPC,
 	// in-process) must not be able to supersede across all users
 	// in a workspace by omitting user_id.
-	if mem.Scope[ScopeUserID] == "" {
+	if mem.Scope[ScopeVirtualUserID] == "" {
 		return "", nil, errors.New(errUserIDRequired)
 	}
 
@@ -526,7 +526,7 @@ func assertEntitiesInScope(ctx context.Context, tx pgx.Tx, entityIDs []string, s
 		FOR KEY SHARE`,
 		uniqueIDs,
 		scope[ScopeWorkspaceID],
-		scopeOrNil(scope, ScopeUserID),
+		scopeOrNil(scope, ScopeVirtualUserID),
 		scopeOrNil(scope, ScopeAgentID),
 	)
 	if err != nil {

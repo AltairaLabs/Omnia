@@ -10,6 +10,22 @@ or `api/proto/`, add an entry below with the date, affected API, and reason.
 
 ## Unreleased
 
+### Changed (memory-api: scope param `user_id` → `virtual_user_id`, #1280)
+
+- The memory per-subject scope is now named **`virtual_user_id`** on the wire, matching
+  the `memory_entities.virtual_user_id` column and making it self-documenting that callers
+  supply a **pseudonym**, never a real identity. Affects the query param on
+  `GET/DELETE /api/v1/memories` (+ list/export/delete-all/batch-delete) and the `scope`
+  map key in the `POST /api/v1/memories` (save/update/supersede) request body.
+- **Transition window (non-breaking):** memory-api accepts **both** `virtual_user_id` and
+  the legacy `user_id` for one release (`virtual_user_id` wins if both are sent), logging a
+  deprecation when the legacy name is received. The legacy `user_id` name is dropped the
+  release after. In-repo callers (facade memory httpclient, dashboard memory proxies) already
+  send `virtual_user_id`.
+- **Out of scope:** the typed `user_id` JSON body field on `POST /api/v1/memories/retrieve`
+  and the compaction endpoints is a separate, internally-consistent client↔server contract
+  and is unchanged.
+
 ### Added (arena-controller: license entitlements for memory/privacy/policy, #1682 Slice A)
 
 - **`GET /api/v1/license`** response `features` object gains three boolean fields:

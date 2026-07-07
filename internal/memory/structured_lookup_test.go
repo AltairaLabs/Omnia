@@ -116,12 +116,12 @@ func TestLookupStructured_UserAndAgentFilters(t *testing.T) {
 	// User-scoped.
 	must(t, store.Save(ctx, &Memory{
 		Type: "rule", Content: "user", Confidence: 1.0,
-		Scope: map[string]string{ScopeWorkspaceID: ws, ScopeUserID: user},
+		Scope: map[string]string{ScopeWorkspaceID: ws, ScopeVirtualUserID: user},
 	}))
 	// User-for-agent.
 	must(t, store.Save(ctx, &Memory{
 		Type: "rule", Content: "ua", Confidence: 1.0,
-		Scope: map[string]string{ScopeWorkspaceID: ws, ScopeUserID: user, ScopeAgentID: agent},
+		Scope: map[string]string{ScopeWorkspaceID: ws, ScopeVirtualUserID: user, ScopeAgentID: agent},
 	}))
 
 	// Lookup with UserID set should include institutional + user + user-for-agent

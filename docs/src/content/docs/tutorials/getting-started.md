@@ -1,5 +1,5 @@
 ---
-title: "Getting Started"
+title: "Getting started"
 description: "Deploy your first AI agent with Omnia in 10 minutes"
 sidebar:
   order: 1
@@ -35,7 +35,7 @@ helm install omnia-demos oci://ghcr.io/altairalabs/charts/omnia-demos \
   -n omnia-demo --create-namespace
 ```
 
-This deploys a vision-capable agent using the llava:7b model running locally. No API keys required!
+This deploys a vision-capable agent using the llava:7b model running locally. No API keys required.
 
 **Requirements**: 8GB+ RAM, 10GB disk for the model.
 
@@ -48,7 +48,7 @@ kubectl port-forward -n omnia-system svc/omnia-dashboard 3000:3000
 Visit `http://localhost:3000` and connect to the `vision-demo` agent.
 :::
 
-## Step 1: Install the Operator
+## Step 1: install the operator
 
 Add the Omnia Helm repository and install the operator:
 
@@ -77,7 +77,7 @@ kubectl get pods -n omnia-system
 
 You should see the operator pod in a `Running` state.
 
-## Step 2: Create a PromptPack
+## Step 2: create a PromptPack
 
 A PromptPack defines the prompts your agent will use. PromptPacks follow the [PromptPack specification](https://promptpack.org/docs/spec/schema-reference) - a structured JSON format for packaging multi-prompt conversational systems.
 
@@ -151,7 +151,7 @@ kubectl get promptpack assistant-pack
 > kubectl create configmap assistant-prompts --from-file=pack.json
 > ```
 
-## Step 3: Configure the LLM Provider
+## Step 3: configure the LLM provider
 
 Create a Secret with your LLM provider API key, then create a Provider resource:
 
@@ -193,9 +193,9 @@ kubectl get provider my-provider
 # Should show: my-provider   claude   claude-sonnet-4-20250514   Ready   ...
 ```
 
-> **Tip**: Don't have an API key yet? Use `handler: demo` in your AgentRuntime to test with simulated responses, or set `type: mock` on the Provider for a no-network testing provider. See [Handler Modes](/reference/agentruntime/#handler-modes) for details.
+> **Tip**: Don't have an API key yet? Use `handler: demo` in your AgentRuntime to test with simulated responses, or set `type: mock` on the Provider for a no-network testing provider. See [Handler Modes](/reference/core/agentruntime/#handler-modes) for details.
 
-## Step 4: Deploy the Agent
+## Step 4: deploy the agent
 
 Now create an AgentRuntime to deploy your agent:
 
@@ -208,8 +208,10 @@ metadata:
 spec:
   promptPackRef:
     name: assistant-pack
-  providerRef:
-    name: my-provider
+  providers:
+    - name: default
+      providerRef:
+        name: my-provider
   facades:
     - type: websocket
       port: 8080
@@ -230,7 +232,7 @@ spec:
 kubectl apply -f agentruntime.yaml
 ```
 
-## Step 5: Verify the Deployment
+## Step 5: verify the deployment
 
 Check that all resources are ready:
 
@@ -245,7 +247,7 @@ kubectl get pods -l app.kubernetes.io/instance=my-assistant
 kubectl get svc my-assistant
 ```
 
-## Step 6: Connect to the Agent
+## Step 6: connect to the agent
 
 Port-forward to access the agent:
 
@@ -280,12 +282,12 @@ You should see responses like:
 > echo '{"type":"message","content":"Hello!"}' | websocat "ws://localhost:8080/ws?agent=my-assistant"
 > ```
 
-## Next Steps
+## Next steps
 
-- Learn about [Provider configuration](/reference/provider/) for LLM settings
+- Learn about [Provider configuration](/reference/core/provider/) for LLM settings
 - Explore [ToolRegistry](/tutorials/adding-tools/) to give your agent capabilities
-- Read about [session management](/explanation/sessions/) for stateful conversations
-- Set up [observability](/how-to/setup-observability/) for monitoring
-- Configure [autoscaling](/how-to/scale-agents/) for production workloads
+- Read about [session management](/explanation/agents/sessions/) for stateful conversations
+- Set up [observability](/how-to/observability/setup-observability/) for monitoring
+- Configure [autoscaling](/how-to/agents/scale-agents/) for production workloads
 
-Congratulations! You've deployed your first AI agent with Omnia.
+You've deployed your first AI agent with Omnia.

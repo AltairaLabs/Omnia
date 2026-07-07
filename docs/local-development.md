@@ -75,7 +75,7 @@ make kind-cluster
 # agents, Ollama, skills, sessions). Arena/EE features stay gated.
 tilt up
 
-# Or with enterprise features (Arena Fleet on a dev license, NFS, policy-proxy)
+# Or with enterprise features (Arena Fleet on a dev license, NFS, policy-broker)
 ENABLE_ENTERPRISE=true tilt up
 ```
 
@@ -95,7 +95,7 @@ for platform-only work) to skip it — notably the heavy `ollama-vision` model.
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `ENABLE_DEMO` | `true` | Deploy the demo content; set `false` for a lean/platform-only cluster |
-| `ENABLE_ENTERPRISE` | `false` | EE: Arena controller + dev license, NFS, policy-proxy, Redis |
+| `ENABLE_ENTERPRISE` | `false` | EE: Arena controller + dev license, NFS, policy-broker, Redis |
 | `ENABLE_OBSERVABILITY` | `true` | Prometheus / Grafana / Loki / Tempo / Alloy |
 | `ENABLE_FULL_STACK` | `false` | Istio service mesh + Gateway API |
 | `ENABLE_NFS` | auto | RWX NFS storage (auto-on under `ENABLE_ENTERPRISE` / memory demo) |

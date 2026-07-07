@@ -233,14 +233,14 @@ enterprise:
     # -- Fetch timeout
     timeout: 2m
 
-  # Policy proxy sidecar for ToolPolicy enforcement
-  policyProxy:
+  # Policy broker sidecar for ToolPolicy enforcement
+  policyBroker:
     image:
-      # -- Policy proxy image repository
-      repository: ghcr.io/altairalabs/omnia-policy-proxy
-      # -- Policy proxy image tag (defaults to Chart appVersion)
+      # -- Policy broker image repository
+      repository: ghcr.io/altairalabs/omnia-policy-broker
+      # -- Policy broker image tag (defaults to Chart appVersion)
       tag: ""
-      # -- Policy proxy image pull policy
+      # -- Policy broker image pull policy
       pullPolicy: IfNotPresent
 
   # PromptKit LSP server for YAML validation
@@ -1212,9 +1212,15 @@ workspaceServices:
 # OTLP listeners). Callers read their token from a projected SA-token volume
 # (audience-bound) and send it as `Authorization: Bearer <token>`.
 #
-# Default is `false` for an opt-in rollout — turning it on flips behaviour for
-# an existing install (session-api starts rejecting tokenless calls), so it
-# rolls out deliberately. PRODUCTION DEPLOYMENTS SHOULD SET THIS TO `true`.
+# Default is `true` (secure by default, #1720). Every caller the operator and
+# chart manage (facade/agent, dashboard, memory-api, eval-worker) already
+# presents an audience-bound SA token, so default-on authenticates all in-tree
+# callers automatically. UPGRADE NOTE: if you run a custom, non-enumerated
+# caller of session-api that cannot present an SA token, it will start getting
+# 401s once this is on — set `internalServiceAuth.enabled: false` (or add its
+# ServiceAccount to the allowlist) before upgrading. The mechanism is
+# fail-safe: with a CNI that does not enforce NetworkPolicy the default-deny
+# policy is a no-op, but the TokenReview gate still applies.
 #
 # How the pieces are provisioned when enabled:
 #   - The chart passes --session-api-auth-* flags to the operator, which
@@ -1240,8 +1246,14 @@ workspaceServices:
 # pointing at its own projected token). See cmd/session-api/SERVICE.md.
 internalServiceAuth:
   # -- Require ServiceAccount auth on session-api (TokenReview + allowlist).
-  # Default false (opt-in). Set true in production to close SEC-1/SEC-5.
-  enabled: false
+  # Default true (secure by default): closes SEC-1/SEC-5 (#1720). The operator
+  # mounts audience-bound projected SA tokens on every caller pod it manages
+  # (facade, memory-api, eval-worker) and enrols the dashboard SA as an
+  # exact-match subject, so all in-tree callers authenticate automatically.
+  # Set to false ONLY if you run a custom, non-enumerated caller of session-api
+  # that cannot present an SA token (it will otherwise get 401s). See the
+  # "internal service auth" trust-boundary note in the chart README.
+  enabled: true
   # -- Audience bound into caller projected SA tokens and enforced by
   # session-api (--auth-audiences). Must match on both sides. The audience
   # scopes the token so it is only valid for session-api, not arbitrary

@@ -112,7 +112,7 @@ func (p *PrivacyChecker) saveMemory(ctx context.Context, content string, extraHe
 		"type":       privacyTestUserID,
 		"content":    content,
 		"confidence": 0.9,
-		"scope":      map[string]string{"workspace_id": p.workspace, "user_id": privacyTestUserID},
+		"scope":      map[string]string{scopeWorkspaceID: p.workspace, scopeVirtualUserID: privacyTestUserID},
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -152,7 +152,7 @@ func (p *PrivacyChecker) saveMemory(ctx context.Context, content string, extraHe
 // searchMemories queries the memory search endpoint for a query string.
 // Returns the raw JSON body contents of the memories array items.
 func (p *PrivacyChecker) searchMemories(ctx context.Context, query string) ([]map[string]interface{}, error) {
-	params := url.Values{"workspace": {p.workspace}, "q": {query}, "user_id": {privacyTestUserID}}
+	params := url.Values{"workspace": {p.workspace}, "q": {query}, scopeVirtualUserID: {privacyTestUserID}}
 	searchURL := p.memoryAPIURL + privacyMemorySearchPath + "?" + params.Encode()
 	body, err := fetchBody(ctx, memoryClient(), searchURL)
 	if err != nil {

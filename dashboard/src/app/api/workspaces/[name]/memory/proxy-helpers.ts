@@ -9,6 +9,12 @@ import { serviceApiHeaders } from "@/lib/auth/session-api-token";
 import { pseudonymizeId } from "@/lib/identity";
 import type { User } from "@/lib/auth/types";
 import { resolveScopedUserId } from "@/lib/auth/scoped-user";
+import { fetchWithTimeout } from "@/lib/fetch-with-timeout";
+
+/** True when the upstream fetch failed because it exceeded fetchWithTimeout's deadline. */
+function isUpstreamTimeout(error: unknown): boolean {
+  return error instanceof Error && error.message === "upstream timeout";
+}
 
 /** Resolve workspace name to UID for memory-api scoping. */
 export async function resolveWorkspaceUID(name: string): Promise<string | null> {
@@ -34,7 +40,7 @@ export function buildBackendParams(
   params.set("workspace", workspaceUID);
 
   const scopedUserId = resolveScopedUserId(searchParams, user);
-  if (scopedUserId) params.set("user_id", pseudonymizeId(scopedUserId));
+  if (scopedUserId) params.set("virtual_user_id", pseudonymizeId(scopedUserId));
 
   // "Visible to me" mode — institutional + agent + the user's own.
   if (searchParams.get("includeShared") === "true") {
@@ -47,6 +53,52 @@ export function buildBackendParams(
   }
 
   return params;
+}
+
+/** Builds the fetch() init for a proxied request, forwarding the body on writes. */
+async function buildFetchInit(request: NextRequest): Promise<RequestInit> {
+  const isWrite = request.method === "POST" || request.method === "PUT";
+  const baseHeaders: Record<string, string> = { Accept: "application/json" };
+  if (isWrite) baseHeaders["Content-Type"] = "application/json";
+
+  const fetchInit: RequestInit = {
+    method: request.method,
+    headers: serviceApiHeaders(baseHeaders),
+  };
+  if (isWrite) fetchInit.body = await request.text();
+  return fetchInit;
+}
+
+/** Parses the memory-api response body, falling back gracefully on non-JSON. */
+async function parseMemoryApiResponse(response: Response): Promise<NextResponse> {
+  const text = await response.text();
+  try {
+    const data = JSON.parse(text);
+    return NextResponse.json(data, { status: response.status });
+  } catch {
+    if (response.status === 404) {
+      return NextResponse.json({ memories: [], total: 0 }, { status: 200 });
+    }
+    return NextResponse.json(
+      { error: `Memory API returned non-JSON (HTTP ${response.status})`, memories: [], total: 0 },
+      { status: 502 }
+    );
+  }
+}
+
+/** Maps a failed upstream fetch (including a fetchWithTimeout timeout) to a response. */
+function memoryApiErrorResponse(error: unknown): NextResponse {
+  console.error("Memory API proxy error:", error);
+  const timedOut = isUpstreamTimeout(error);
+  return NextResponse.json(
+    {
+      error: timedOut ? "Memory API timed out" : "Failed to connect to Memory API",
+      details: error instanceof Error ? error.message : String(error),
+      memories: [],
+      total: 0,
+    },
+    { status: timedOut ? 504 : 502 }
+  );
 }
 
 /** Proxy a request to the memory-api backend. */
@@ -84,44 +136,10 @@ export async function proxyToMemoryApi(
   const targetUrl = `${baseUrl}${backendPath}?${params.toString()}`;
 
   try {
-    const baseHeaders: Record<string, string> = { Accept: "application/json" };
-    if (request.method === "POST" || request.method === "PUT") {
-      baseHeaders["Content-Type"] = "application/json";
-    }
-
-    const fetchInit: RequestInit = {
-      method: request.method,
-      headers: serviceApiHeaders(baseHeaders),
-    };
-
-    if (request.method === "POST" || request.method === "PUT") {
-      fetchInit.body = await request.text();
-    }
-
-    const response = await fetch(targetUrl, fetchInit);
-    const text = await response.text();
-    try {
-      const data = JSON.parse(text);
-      return NextResponse.json(data, { status: response.status });
-    } catch {
-      if (response.status === 404) {
-        return NextResponse.json({ memories: [], total: 0 }, { status: 200 });
-      }
-      return NextResponse.json(
-        { error: `Memory API returned non-JSON (HTTP ${response.status})`, memories: [], total: 0 },
-        { status: 502 }
-      );
-    }
+    const fetchInit = await buildFetchInit(request);
+    const response = await fetchWithTimeout(targetUrl, fetchInit);
+    return await parseMemoryApiResponse(response);
   } catch (error) {
-    console.error("Memory API proxy error:", error);
-    return NextResponse.json(
-      {
-        error: "Failed to connect to Memory API",
-        details: error instanceof Error ? error.message : String(error),
-        memories: [],
-        total: 0,
-      },
-      { status: 502 }
-    );
+    return memoryApiErrorResponse(error);
   }
 }

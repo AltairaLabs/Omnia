@@ -203,6 +203,135 @@ func TestReconcileServices_GroupRedisWiredIntoDeployments(t *testing.T) {
 		"group-level redis must be wired into the memory-api pod via the reconciler")
 }
 
+// TestReconcileServices_TokenReviewBindingsForBothSAs is a WIRING test: it drives
+// the full operator path (reconcileServices → reconcileManagedServiceGroup) with
+// internal service auth enabled and asserts that BOTH the session-api AND the
+// memory-api ServiceAccounts get a ClusterRoleBinding to the install-wide
+// tokenreview ClusterRole. memory-api validates caller tokens via the Kubernetes
+// TokenReview API just like session-api; without this binding its TokenReview
+// calls 403 and it rejects all callers. The session binding was already wired;
+// this proves the memory binding is too (call site in reconcileManagedServiceGroup).
+func TestReconcileServices_TokenReviewBindingsForBothSAs(t *testing.T) {
+	g := NewWithT(t)
+	scheme := testScheme()
+
+	ws := newTestWorkspace("myws", "myws-ns", []omniav1alpha1.WorkspaceServiceGroup{
+		{
+			Name: "primary",
+			Mode: omniav1alpha1.ServiceModeManaged,
+			Memory: &omniav1alpha1.MemoryServiceConfig{
+				Database: omniav1alpha1.DatabaseConfig{
+					SecretRef: corev1.LocalObjectReference{Name: "db-secret"},
+				},
+			},
+			Session: &omniav1alpha1.SessionServiceConfig{
+				Database: omniav1alpha1.DatabaseConfig{
+					SecretRef: corev1.LocalObjectReference{Name: "db-secret"},
+				},
+			},
+		},
+	})
+
+	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "myws-ns"}}
+	r := newTestReconciler(scheme, ws, ns)
+	r.ServiceBuilder.ServiceAuth = ServiceAuthConfig{Enabled: true}
+	r.SessionAPITokenReviewClusterRole = "omnia-session-api-tokenreview"
+
+	ctx := context.Background()
+	err := r.reconcileServices(ctx, ws)
+	g.Expect(err).NotTo(HaveOccurred())
+
+	// session-api SA must be bound to the tokenreview ClusterRole.
+	sessionCRB := &rbacv1.ClusterRoleBinding{}
+	err = r.Get(ctx, types.NamespacedName{Name: "session-tokenreview-myws-ns-session-myws-primary"}, sessionCRB)
+	g.Expect(err).NotTo(HaveOccurred(), "session-api SA must be bound to the tokenreview ClusterRole")
+	g.Expect(sessionCRB.RoleRef.Name).To(Equal("omnia-session-api-tokenreview"))
+	g.Expect(sessionCRB.Subjects).To(HaveLen(1))
+	g.Expect(sessionCRB.Subjects[0].Name).To(Equal("session-myws-primary"))
+
+	// memory-api SA must ALSO be bound to the tokenreview ClusterRole (#1730).
+	memoryCRB := &rbacv1.ClusterRoleBinding{}
+	err = r.Get(ctx, types.NamespacedName{Name: "session-tokenreview-myws-ns-memory-myws-primary"}, memoryCRB)
+	g.Expect(err).NotTo(HaveOccurred(), "memory-api SA must be bound to the tokenreview ClusterRole")
+	g.Expect(memoryCRB.RoleRef.Name).To(Equal("omnia-session-api-tokenreview"))
+	g.Expect(memoryCRB.Subjects).To(HaveLen(1))
+	g.Expect(memoryCRB.Subjects[0].Name).To(Equal("memory-myws-primary"))
+	g.Expect(memoryCRB.Subjects[0].Namespace).To(Equal("myws-ns"))
+}
+
+// TestReconcileServices_MemoryTokenReviewBindingCreateError verifies that when
+// creating the memory-api ClusterRoleBinding fails (e.g. the API server
+// rejects it), reconcileManagedServiceGroup surfaces the error wrapped with
+// "memory tokenreview binding" rather than swallowing it. The fake client's
+// interceptor is used to fail only the memory-api binding's Create call so
+// the session-api binding (created first) succeeds, proving the error path
+// is specific to the memory call site added in #1730.
+func TestReconcileServices_MemoryTokenReviewBindingCreateError(t *testing.T) {
+	g := NewWithT(t)
+	scheme := testScheme()
+
+	ws := newTestWorkspace("myws", "myws-ns", []omniav1alpha1.WorkspaceServiceGroup{
+		{
+			Name: "primary",
+			Mode: omniav1alpha1.ServiceModeManaged,
+			Memory: &omniav1alpha1.MemoryServiceConfig{
+				Database: omniav1alpha1.DatabaseConfig{
+					SecretRef: corev1.LocalObjectReference{Name: "db-secret"},
+				},
+			},
+			Session: &omniav1alpha1.SessionServiceConfig{
+				Database: omniav1alpha1.DatabaseConfig{
+					SecretRef: corev1.LocalObjectReference{Name: "db-secret"},
+				},
+			},
+		},
+	})
+
+	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "myws-ns"}}
+
+	wantErr := fmt.Errorf("simulated apiserver rejection")
+	cl := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithRuntimeObjects(ws, ns).
+		WithInterceptorFuncs(interceptor.Funcs{
+			Create: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
+				if crb, ok := obj.(*rbacv1.ClusterRoleBinding); ok &&
+					crb.Name == "session-tokenreview-myws-ns-memory-myws-primary" {
+					return wantErr
+				}
+				return c.Create(ctx, obj, opts...)
+			},
+		}).
+		Build()
+
+	sb := &ServiceBuilder{
+		SessionImage:           "ghcr.io/altairalabs/omnia-session-api:test",
+		SessionImagePullPolicy: corev1.PullIfNotPresent,
+		MemoryImage:            "ghcr.io/altairalabs/omnia-memory-api:test",
+		MemoryImagePullPolicy:  corev1.PullIfNotPresent,
+		ServiceAuth:            ServiceAuthConfig{Enabled: true},
+	}
+	r := &WorkspaceReconciler{
+		Client:                           cl,
+		Scheme:                           scheme,
+		ServiceBuilder:                   sb,
+		AgentWorkspaceReaderClusterRole:  "omnia-agent-workspace-reader",
+		SessionAPITokenReviewClusterRole: "omnia-session-api-tokenreview",
+	}
+
+	ctx := context.Background()
+	err := r.reconcileServices(ctx, ws)
+	g.Expect(err).To(HaveOccurred())
+	g.Expect(err.Error()).To(ContainSubstring("memory tokenreview binding"))
+	g.Expect(err.Error()).To(ContainSubstring(wantErr.Error()))
+
+	// The session-api binding (created before the memory one) must still have
+	// succeeded — proving the injected failure is specific to the memory CRB.
+	sessionCRB := &rbacv1.ClusterRoleBinding{}
+	getErr := r.Get(ctx, types.NamespacedName{Name: "session-tokenreview-myws-ns-session-myws-primary"}, sessionCRB)
+	g.Expect(getErr).NotTo(HaveOccurred())
+}
+
 func TestReconcileServices_ManagedUpdatesExistingResources(t *testing.T) {
 	g := NewWithT(t)
 	scheme := testScheme()

@@ -2,12 +2,48 @@
 /**
  * Custom PageTitle Component
  *
- * Extends Starlight's PageTitle to include a version banner for non-latest docs.
+ * Extends Starlight's PageTitle to add:
+ *  - a version banner for non-latest docs, and
+ *  - an "Enterprise" badge beside the title for enterprise-flagged pages
+ *    (frontmatter `enterprise: true`). The badge lives on the title, not the
+ *    left nav.
  */
 import type { Props } from '@astrojs/starlight/props';
 import Default from '@astrojs/starlight/components/PageTitle.astro';
 import VersionBanner from './VersionBanner.astro';
+
+const isEnterprise = Astro.locals.starlightRoute?.entry?.data?.enterprise === true;
 ---
 
 <VersionBanner />
-<Default {...Astro.props}><slot /></Default>
+<div class:list={['page-title', { enterprise: isEnterprise }]}>
+  <Default {...Astro.props}><slot /></Default>
+  {isEnterprise && <span class="ee-badge">Enterprise</span>}
+</div>
+
+<style>
+  /* Only becomes a flex row when the badge is present, so non-enterprise pages
+     keep Starlight's default title layout untouched. */
+  .page-title.enterprise {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+  }
+  .ee-badge {
+    flex: none;
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    font-weight: 500;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--gold-300);
+    background: var(--gold-tint);
+    border: 1px solid var(--gold-border);
+    border-radius: var(--radius-tag);
+    padding: 0.3em 0.7em;
+    white-space: nowrap;
+    /* nudge up to sit with the cap-height of the large title */
+    align-self: center;
+  }
+</style>

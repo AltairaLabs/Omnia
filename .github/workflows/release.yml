@@ -113,11 +113,11 @@ jobs:
           - image: omnia-eval-worker
             dockerfile: ee/Dockerfile.eval-worker
             context: .
-          - image: omnia-policy-proxy
-            dockerfile: ee/Dockerfile.policy-proxy
-            context: .
           - image: omnia-promptkit-lsp
             dockerfile: ee/Dockerfile.promptkit-lsp
+            context: .
+          - image: omnia-policy-broker
+            dockerfile: ee/Dockerfile.policy-broker
             context: .
     steps:
       - name: Checkout
@@ -205,8 +205,8 @@ jobs:
           - omnia-arena-worker
           - omnia-arena-dev-console
           - omnia-eval-worker
-          - omnia-policy-proxy
           - omnia-promptkit-lsp
+          - omnia-policy-broker
     steps:
       - name: Compute image ref (GHCR requires lowercase)
         id: ref
@@ -584,7 +584,6 @@ jobs:
           - `ghcr.io/altairalabs/omnia-arena-worker:${{ needs.parse-version.outputs.version }}`
           - `ghcr.io/altairalabs/omnia-arena-dev-console:${{ needs.parse-version.outputs.version }}`
           - `ghcr.io/altairalabs/omnia-eval-worker:${{ needs.parse-version.outputs.version }}`
-          - `ghcr.io/altairalabs/omnia-policy-proxy:${{ needs.parse-version.outputs.version }}`
           - `ghcr.io/altairalabs/omnia-promptkit-lsp:${{ needs.parse-version.outputs.version }}`
 
           ## Documentation

@@ -5,9 +5,19 @@
 // build emits a single index page. See Starlight CHANGELOG 0.30 →
 // "Update your collections".
 import { defineCollection } from 'astro:content';
+import { z } from 'astro:schema';
 import { docsLoader } from '@astrojs/starlight/loaders';
 import { docsSchema } from '@astrojs/starlight/schema';
 
 export const collections = {
-  docs: defineCollection({ loader: docsLoader(), schema: docsSchema() }),
+  docs: defineCollection({
+    loader: docsLoader(),
+    schema: docsSchema({
+      extend: z.object({
+        // Marks an Enterprise-edition feature. Rendered as a badge next to the
+        // page title (via the PageTitle override), not in the sidebar.
+        enterprise: z.boolean().optional(),
+      }),
+    }),
+  }),
 };

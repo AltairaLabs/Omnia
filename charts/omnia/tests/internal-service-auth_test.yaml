@@ -1,0 +1,71 @@
+suite: internal service auth is on by default and wires the operator flags (#1720)
+release:
+  name: omnia
+values:
+  - ../values-chart-tests.yaml
+templates:
+  - templates/deployment.yaml
+tests:
+  - it: default install (no override) enables session-api SA-token auth
+    # #1720: internalServiceAuth.enabled defaults to true (secure by default),
+    # so the operator renders the --session-api-auth-* flags with no operator
+    # action required. This is the assertion that the default flipped.
+    template: templates/deployment.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --session-api-auth-enabled
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --session-api-auth-audience=omnia-session-api
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --session-api-auth-token-expiration-seconds=3600
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --session-api-tokenreview-clusterrole=omnia-session-api-tokenreview
+
+  - it: enrols the cross-namespace dashboard SA as an exact-match subject
+    # The dashboard runs in the release namespace, not the workspace namespace,
+    # so it cannot be authorized by the namespace allowlist — it must be passed
+    # as an explicit extra subject. dashboard.enabled defaults to true.
+    template: templates/deployment.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --session-api-auth-extra-subjects=system:serviceaccount:NAMESPACE:omnia-dashboard
+
+  - it: does not enable Istio STRICT mTLS unless internalServiceAuth.istio.enabled
+    # Istio PeerAuthentication is defence-in-depth and independent of the base
+    # SA-token gate; it stays off by default even though auth is on.
+    template: templates/deployment.yaml
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].args
+          content: --session-api-auth-istio-mtls
+
+  - it: adds --session-api-auth-istio-mtls when Istio mTLS is requested
+    set:
+      internalServiceAuth.istio.enabled: true
+    template: templates/deployment.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --session-api-auth-istio-mtls
+
+  - it: emits no session-api auth flags when explicitly disabled
+    # The documented opt-out for operators running a custom, non-enumerated
+    # caller of session-api that cannot present an SA token.
+    set:
+      internalServiceAuth.enabled: false
+    template: templates/deployment.yaml
+    asserts:
+      - notMatchRegex:
+          path: spec.template.spec.containers[0].args[*]
+          pattern: ^--session-api-auth-enabled$
+      - notMatchRegex:
+          path: spec.template.spec.containers[0].args[*]
+          pattern: ^--session-api-auth-audience=
+      - notMatchRegex:
+          path: spec.template.spec.containers[0].args[*]
+          pattern: ^--session-api-tokenreview-clusterrole=

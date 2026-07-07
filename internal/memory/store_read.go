@@ -153,7 +153,7 @@ func (s *PostgresMemoryStore) GetMemory(ctx context.Context, scope map[string]st
 		LIMIT 1`,
 		entityID,
 		scope[ScopeWorkspaceID],
-		scopeOrNil(scope, ScopeUserID),
+		scopeOrNil(scope, ScopeVirtualUserID),
 		scopeOrNil(scope, ScopeAgentID),
 	)
 
@@ -280,7 +280,7 @@ func (s *PostgresMemoryStore) FindSimilarObservations(
 			LIMIT $6`,
 			pgvector.NewVector(queryEmbedding),
 			scope[ScopeWorkspaceID],
-			scopeOrNil(scope, ScopeUserID),
+			scopeOrNil(scope, ScopeVirtualUserID),
 			scopeOrNil(scope, ScopeAgentID),
 			maxDistance,
 			k,
@@ -382,7 +382,7 @@ func (s *PostgresMemoryStore) RetrieveHybrid(
 	err := s.withHNSWEFSearch(ctx, clampEFSearch(fanout*4), func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, hybridRetrieveSQL,
 			scope[ScopeWorkspaceID],
-			scopeOrNil(scope, ScopeUserID),
+			scopeOrNil(scope, ScopeVirtualUserID),
 			scopeOrNil(scope, ScopeAgentID),
 			query,
 			pgvector.NewVector(queryEmbedding),

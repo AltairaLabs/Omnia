@@ -132,6 +132,21 @@ func TestServiceAuth_MemoryCallerToken_Disabled(t *testing.T) {
 	assert.False(t, hasVolume(dep.Spec.Template.Spec.Volumes, sessionAuthTokenVolumeName))
 }
 
+// TestServiceAuth_MemoryServerEnv_Enabled proves memory-api joins the shared
+// SESSION_API_AUTH_* data-plane auth: the operator stamps the same server-auth
+// env onto the memory-api deployment it stamps onto session-api and privacy-api.
+func TestServiceAuth_MemoryServerEnv_Enabled(t *testing.T) {
+	sb := newTestServiceBuilder()
+	sb.ServiceAuth = enabledAuth()
+	sg := newTestServiceGroup("default")
+
+	dep := sb.BuildMemoryDeployment("acme", testAuthNS, sg)
+	env := envMap(dep.Spec.Template.Spec.Containers[0].Env)
+	assert.Equal(t, "true", env[envSessionAPIAuthEnabled])
+	require.Contains(t, env, envSessionAPIAuthAllowedNamespaces)
+	assert.Contains(t, strings.Split(env[envSessionAPIAuthAllowedNamespaces], ","), testAuthNS)
+}
+
 func TestServiceAuth_MemoryCallerToken_Enabled(t *testing.T) {
 	sb := newTestServiceBuilder()
 	sb.ServiceAuth = enabledAuth()
@@ -207,4 +222,15 @@ func hasMount(mounts []corev1.VolumeMount, name string) bool {
 		}
 	}
 	return false
+}
+
+func findMount(t *testing.T, mounts []corev1.VolumeMount, name string) corev1.VolumeMount {
+	t.Helper()
+	for _, m := range mounts {
+		if m.Name == name {
+			return m
+		}
+	}
+	t.Fatalf("mount %q not found", name)
+	return corev1.VolumeMount{}
 }

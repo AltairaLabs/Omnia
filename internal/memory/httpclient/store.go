@@ -28,6 +28,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -35,9 +36,15 @@ import (
 	"github.com/go-logr/logr"
 
 	pkmemory "github.com/AltairaLabs/PromptKit/runtime/memory"
+	"github.com/altairalabs/omnia/internal/serviceauth"
 	"github.com/altairalabs/omnia/pkg/logging"
 	"github.com/altairalabs/omnia/pkg/policy"
 )
+
+// tokenPathEnv is the same env var session-api's HTTP client reads: memory-api
+// shares session-api's audience/token per #1730's design, so both clients
+// authenticate against the same projected ServiceAccount token.
+const tokenPathEnv = "SESSION_API_TOKEN_PATH"
 
 // Default timeout for HTTP requests to the memory-api.
 const defaultHTTPTimeout = 30 * time.Second
@@ -60,9 +67,10 @@ type errorResponse struct {
 
 // Store implements pkmemory.Store by calling the memory-api over HTTP.
 type Store struct {
-	baseURL    string
-	httpClient *http.Client
-	log        logr.Logger
+	baseURL     string
+	httpClient  *http.Client
+	log         logr.Logger
+	tokenSource *serviceauth.TokenSource
 }
 
 // NewStore creates a new HTTP-backed memory store.
@@ -77,7 +85,8 @@ func NewStore(baseURL string, log logr.Logger) *Store {
 				IdleConnTimeout:     90 * time.Second,
 			},
 		},
-		log: log.WithName("memory-httpclient"),
+		log:         log.WithName("memory-httpclient"),
+		tokenSource: serviceauth.NewTokenSource(os.Getenv(tokenPathEnv), 0),
 	}
 }
 
@@ -85,7 +94,7 @@ func NewStore(baseURL string, log logr.Logger) *Store {
 func (s *Store) Save(ctx context.Context, mem *pkmemory.Memory) error {
 	s.log.V(1).Info("memory save request",
 		"hasScope", len(mem.Scope) > 0,
-		"scopeUserIDHash", logging.HashID(mem.Scope["user_id"]),
+		"scopeUserIDHash", logging.HashID(mem.Scope["virtual_user_id"]),
 		"scopeWorkspaceID", mem.Scope["workspace_id"],
 		"contentLen", len(mem.Content),
 	)
@@ -284,6 +293,9 @@ func (s *Store) doRequest(ctx context.Context, method, path string, body []byte)
 	if layer := policy.ConsentLayerFromContext(ctx); layer != "" {
 		req.Header.Set("X-Consent-Layer", layer)
 	}
+	if err := s.tokenSource.Authorize(req); err != nil {
+		return nil, fmt.Errorf("memory httpclient: authorize request: %w", err)
+	}
 
 	s.log.V(2).Info("memory-api request", "method", method, "path", path)
 
@@ -311,8 +323,8 @@ func scopeParams(scope map[string]string) url.Values {
 	if ws := scope["workspace_id"]; ws != "" {
 		params.Set("workspace", ws)
 	}
-	if uid := scope["user_id"]; uid != "" {
-		params.Set("user_id", uid)
+	if uid := scope["virtual_user_id"]; uid != "" {
+		params.Set("virtual_user_id", uid)
 	}
 	if agent := scope["agent_id"]; agent != "" {
 		params.Set("agent", agent)

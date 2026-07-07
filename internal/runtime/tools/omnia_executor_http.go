@@ -117,7 +117,10 @@ func (e *OmniaExecutor) executeHTTPCall(
 	cfg *HTTPCfg,
 	args json.RawMessage,
 ) (json.RawMessage, error) {
-	headers := e.buildHTTPHeaders(ctx, cfg, toolName, handlerName, args)
+	headers, err := e.buildHTTPHeaders(ctx, cfg, toolName, handlerName, args)
+	if err != nil {
+		return nil, err
+	}
 	policy := httpRetryParams(cfg)
 
 	var lastCallResult httpCallResult
@@ -168,7 +171,7 @@ func (e *OmniaExecutor) buildHTTPHeaders(
 	cfg *HTTPCfg,
 	toolName, handlerName string,
 	args json.RawMessage,
-) map[string]string {
+) (map[string]string, error) {
 	headers := make(map[string]string)
 
 	// Static headers from config
@@ -178,7 +181,7 @@ func (e *OmniaExecutor) buildHTTPHeaders(
 
 	// Auth headers
 	if err := mergeAuthHeaders(headers, cfg.AuthType, cfg.AuthToken); err != nil {
-		e.log.Error(err, "invalid auth config", "handler", handlerName)
+		return nil, fmt.Errorf("handler %q auth: %w", handlerName, err)
 	}
 
 	// Omnia policy headers
@@ -194,5 +197,11 @@ func (e *OmniaExecutor) buildHTTPHeaders(
 		}
 	}
 
-	return headers
+	// ToolPolicy broker-injected headers win over static/auth/policy headers
+	// on key collision — they're an explicit enforcement decision.
+	for k, v := range InjectedHeadersFromContext(ctx) {
+		headers[k] = v
+	}
+
+	return headers, nil
 }

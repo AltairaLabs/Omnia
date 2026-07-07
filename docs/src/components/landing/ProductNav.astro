@@ -1,0 +1,130 @@
+---
+import ThemeToggle from './ThemeToggle.astro';
+
+const links = [
+  { label: 'Overview', href: '/overview/', active: true },
+  { label: 'Tutorials', href: '/tutorials/getting-started/' },
+  { label: 'How-to', href: '/how-to/operations/local-development/' },
+  { label: 'Reference', href: '/reference/core/agentruntime/' },
+];
+---
+
+<nav class="product-nav">
+  <div class="atlas-inner row">
+    <div class="left">
+      <a class="brand" href="/">
+        <img src="/atlas/logo-omnia.svg" width="26" height="26" alt="" />
+        <span class="name">Omnia</span>
+        <span class="tag">docs</span>
+      </a>
+      <ul class="links">
+        {
+          links.map((l) => (
+            <li>
+              <a href={l.href} class={l.active ? 'active' : ''}>
+                {l.label}
+              </a>
+            </li>
+          ))
+        }
+      </ul>
+    </div>
+    <div class="right">
+      <span class="badge">k8s 1.28+</span>
+      <ThemeToggle />
+      <a class="gh-link" href="https://github.com/AltairaLabs/Omnia">View on GitHub ↗</a>
+    </div>
+  </div>
+</nav>
+
+<style>
+  .product-nav {
+    background: var(--ink-canvas);
+    border-bottom: 1px solid var(--hairline);
+  }
+  .row {
+    height: 62px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 30px;
+  }
+  .left {
+    display: flex;
+    align-items: center;
+    gap: 34px;
+  }
+  .brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .name {
+    font-family: var(--font-sans);
+    font-weight: 600;
+    font-size: 16px;
+    color: var(--star-100);
+  }
+  .tag {
+    font-family: var(--font-mono);
+    font-weight: 500;
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--star-800);
+    border: 1px solid var(--hairline);
+    border-radius: 5px;
+    padding: 4px 7px;
+  }
+  .links {
+    display: flex;
+    align-items: center;
+    gap: 26px;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  .links a {
+    font-weight: 500;
+    font-size: 13.5px;
+    color: var(--star-700);
+    transition: color var(--dur-base) var(--ease-standard);
+  }
+  .links a.active {
+    color: var(--star-500);
+  }
+  .links a:hover {
+    color: var(--star-200);
+  }
+  .right {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+  }
+  .badge {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--star-900);
+    border: 1px solid var(--hairline);
+    border-radius: var(--radius-tag);
+    padding: 5px 8px;
+  }
+  .gh-link {
+    font-weight: 600;
+    font-size: 13px;
+    color: var(--starlight);
+    border: 1px solid var(--starlight-border);
+    border-radius: var(--radius-btn);
+    padding: 9px 14px;
+    transition: border-color var(--dur-base) var(--ease-standard);
+  }
+  .gh-link:hover {
+    border-color: var(--starlight);
+  }
+  @media (max-width: 780px) {
+    .links,
+    .badge {
+      display: none;
+    }
+  }
+</style>

@@ -10,10 +10,9 @@ package controller
 
 import (
 	"context"
-	"io"
-	"log/slog"
 	"time"
 
+	"github.com/go-logr/logr"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -28,8 +27,8 @@ var _ = Describe("ToolPolicy Watcher envtest integration", func() {
 		interval = time.Millisecond * 250
 	)
 
-	discardLogger := func() *slog.Logger {
-		return slog.New(slog.NewTextHandler(io.Discard, nil))
+	discardLogger := func() logr.Logger {
+		return logr.Discard()
 	}
 
 	Context("When using policy.Watcher with a real K8s API server", func() {

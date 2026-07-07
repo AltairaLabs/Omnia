@@ -21,7 +21,7 @@ const (
 	fieldConfidence       = "confidence"
 	fieldType             = "type"
 	fieldContent          = "content"
-	fieldUserID           = "user_id"
+	fieldUserID           = "virtual_user_id"
 	aboutKindSupportTopic = "support_topic"
 
 	// observationOwnerUser owns the compaction-fodder observation clusters.

@@ -350,7 +350,7 @@ func (c *CachedStore) SaveCompactionSummary(ctx context.Context, summary Compact
 	}
 	scope := map[string]string{ScopeWorkspaceID: summary.WorkspaceID}
 	if summary.UserID != "" {
-		scope[ScopeUserID] = summary.UserID
+		scope[ScopeVirtualUserID] = summary.UserID
 	}
 	if summary.AgentID != "" {
 		scope[ScopeAgentID] = summary.AgentID

@@ -1,5 +1,5 @@
 ---
-title: "Securing Agents with Policies"
+title: "Securing agents with policies"
 description: "End-to-end tutorial for adding guardrails to AI agents using AgentPolicy and ToolPolicy"
 sidebar:
   order: 5
@@ -21,11 +21,11 @@ The agent should be able to look up orders and process refunds, but **not** dele
 
 ## Prerequisites
 
-- A running Omnia cluster with Istio enabled
-- JWT authentication configured (see [Configure Agent Authentication](/how-to/configure-authentication/))
+- A running Omnia cluster with Istio enabled — **and, under ambient mode, a waypoint proxy enrolled for the `support-agent` Service**, since AgentPolicy's `toolAccess` rules match on the `X-Omnia-Tool-Name` HTTP header (an L7 attribute) and ztunnel alone only enforces L4. Without a waypoint, the generated AuthorizationPolicy is created but never enforced.
+- JWT authentication configured (see [Configure Agent Authentication](/how-to/security/configure-authentication/))
 - The `support-agent` AgentRuntime and `customer-tools` ToolRegistry deployed
 
-## Step 1: Restrict Tool Access with AgentPolicy
+## Step 1: restrict tool access with AgentPolicy
 
 Start by limiting which tools the agent can call. Create an AgentPolicy with a tool allowlist:
 
@@ -68,52 +68,18 @@ NAME                    MODE      PHASE    MATCHED   AGE
 support-agent-policy    enforce   Active   1         10s
 ```
 
-The agent can now only call `lookup_order`, `check_status`, and `process_refund`. Any attempt to call `delete_account` is blocked at the Istio network level.
+The agent can now only call `lookup_order`, `check_status`, and `process_refund`. Any attempt to call `delete_account` is blocked at the Istio network level — **provided the agent's Service is enrolled behind a waypoint** (see prerequisites); plain ambient mode with no waypoint leaves the generated `AuthorizationPolicy` unenforced.
 
-## Step 2: Map JWT Claims for User Identity
+## Step 2: forward user identity claims
 
-Add claim mapping so the user's team and customer ID flow through to tool services:
+AgentPolicy has no claim-mapping configuration — it only governs tool allow/deny. Claim forwarding to downstream tools is configured on the `support-agent` AgentRuntime's external-auth block (`spec.externalAuth.oidc.claimMapping`, already set up as part of the JWT authentication prerequisite — see [Configure Agent Authentication](/how-to/security/configure-authentication/)).
 
-```yaml
-apiVersion: omnia.altairalabs.ai/v1alpha1
-kind: AgentPolicy
-metadata:
-  name: support-agent-policy
-  namespace: production
-spec:
-  selector:
-    agents:
-      - support-agent
+Once that's in place, the facade extracts the configured claims from the verified JWT and forwards them as `X-Omnia-Claim-*` headers on every tool call — for example `X-Omnia-Claim-Team` and `X-Omnia-Claim-Customer-Id` — with no further AgentPolicy changes needed.
 
-  toolAccess:
-    mode: allowlist
-    rules:
-      - registry: customer-tools
-        tools:
-          - lookup_order
-          - check_status
-          - process_refund
-
-  claimMapping:
-    forwardClaims:
-      - claim: team
-        header: X-Omnia-Claim-Team
-      - claim: customer_id
-        header: X-Omnia-Claim-Customer-Id
-```
-
-Apply the update:
-
-```bash
-kubectl apply -f support-agent-policy.yaml
-```
-
-Now every tool call includes `X-Omnia-Claim-Team` and `X-Omnia-Claim-Customer-Id` headers, extracted from the user's JWT.
-
-## Step 3: Add Business Rules with ToolPolicy
+## Step 3: add business rules with ToolPolicy
 
 :::note[Enterprise]
-ToolPolicy is an Enterprise feature. See [Licensing](/explanation/licensing/) for details.
+ToolPolicy is an Enterprise feature. See [Licensing](/explanation/platform/licensing/) for details.
 :::
 
 Create a ToolPolicy with CEL rules to enforce refund limits and require a reason:
@@ -155,9 +121,6 @@ spec:
 
   mode: audit  # Start in audit mode
   onFailure: deny
-
-  audit:
-    logDecisions: true
 ```
 
 Apply it:
@@ -177,39 +140,30 @@ NAME                 REGISTRY         MODE    PHASE    RULES   AGE
 refund-guardrails    customer-tools   audit   Active   2       10s
 ```
 
-## Step 4: Validate in Audit Mode
+## Step 4: validate in audit mode
 
 With `mode: audit`, the policy logs violations but does not block requests. This lets you verify the rules are matching correctly before enforcement.
 
-Test the agent by making a refund call that violates the rules (e.g., amount > $500). Then check the policy proxy logs:
+Test the agent by making a refund call that violates the rules (e.g., amount > $500). Then check the policy-broker logs (the broker runs as a sidecar in the `support-agent` agent pod, not on `customer-tools`). Agent pods carry a fixed `app.kubernetes.io/name=omnia-agent` label across every AgentRuntime, so select on `app.kubernetes.io/instance` (the AgentRuntime name) to target this one agent:
 
 ```bash
-kubectl logs -n production -l app=customer-tools -c policy-proxy | grep policy_decision
+kubectl logs -n production -l app.kubernetes.io/instance=support-agent -c policy-broker | grep policy_decision
 ```
 
-You should see audit entries like:
+You should see a pair of audit log lines like:
 
 ```json
-{
-  "msg": "policy_decision",
-  "decision": "deny",
-  "wouldDeny": true,
-  "mode": "audit",
-  "policy": "refund-guardrails",
-  "rule": "max-refund-amount",
-  "message": "Refund amount exceeds the $500 limit",
-  "path": "/v1/refund",
-  "method": "POST"
-}
+{"msg":"policy_decision","allowed":true,"deniedBy":"max-refund-amount","message":"Refund amount exceeds the $500 limit","mode":"audit","policy":"refund-guardrails"}
+{"msg":"broker_tool_decision","toolName":"process_refund","toolRegistry":"customer-tools","allowed":true,"deniedBy":"max-refund-amount","mode":"audit"}
 ```
 
-The `wouldDeny: true` field confirms the rule would deny in enforce mode, but the request was allowed through.
+In audit mode a matched deny rule still sets `deniedBy` and `message`, but `allowed` stays `true` — the call is let through with the violation logged. That combination (`"mode":"audit"` + non-empty `deniedBy`) is exactly what would flip to a hard denial once the policy switches to `mode: enforce`.
 
 :::tip
 Keep audit mode active for at least a few hours in production to capture a representative sample of traffic before switching to enforce.
 :::
 
-## Step 5: Switch to Enforce Mode
+## Step 5: switch to enforce mode
 
 Once audit logs confirm the policy is working correctly, switch to enforce mode:
 
@@ -233,17 +187,20 @@ NAME                 REGISTRY         MODE      PHASE    RULES   AGE
 refund-guardrails    customer-tools   enforce   Active   2       1h
 ```
 
-Now any refund over $500 or without a reason returns a 403 response:
+Now any refund over $500 or without a reason is denied — the broker returns `allow: false` and the runtime aborts the tool call instead of invoking it:
 
 ```json
 {
-  "error": "policy_denied",
-  "rule": "max-refund-amount",
-  "message": "Refund amount exceeds the $500 limit"
+  "allow": false,
+  "deniedBy": "max-refund-amount",
+  "message": "Refund amount exceeds the $500 limit",
+  "mode": "enforce",
+  "wouldDeny": false,
+  "injectedHeaders": null
 }
 ```
 
-## What You've Built
+## What you've built
 
 Here's the complete security architecture for your agent:
 
@@ -253,42 +210,43 @@ graph TB
 
     subgraph "AgentPolicy Enforcement"
         ISTIO -->|Tool allowlist check| FACADE[Facade]
-        ISTIO -->|Extract team, customer_id| FACADE
     end
 
-    FACADE --> RUNTIME[Runtime]
+    FACADE -->|"external-auth: extract team, customer_id"| RUNTIME[Runtime PEP]
 
     subgraph "ToolPolicy Enforcement"
-        RUNTIME -->|HTTP + X-Omnia-* headers| PROXY[Policy Proxy]
-        PROXY -->|Check required claims| PROXY
-        PROXY -->|Evaluate CEL rules| PROXY
-        PROXY -->|Inject X-Processed-By| TOOL[Tool Service]
+        RUNTIME -->|"POST /v1/decision: headers + body + identity"| BROKER[Policy Broker PDP]
+        BROKER -->|Check required claims| BROKER
+        BROKER -->|Evaluate CEL rules| BROKER
+        BROKER -->|"200 {allow, injectedHeaders: X-Processed-By}"| RUNTIME
     end
 
-    PROXY -->|403 if denied| RUNTIME
+    RUNTIME -->|"Denied: dispatch aborted, tool-call error returned"| RUNTIME
+    RUNTIME -->|Allowed: call tool with injected headers| TOOL[Tool Service]
 ```
 
 **AgentPolicy** provides:
 - Tool allowlist — `delete_account` blocked at the network level
-- Claim mapping — `team` and `customer_id` propagated as headers
+
+**AgentRuntime external-auth** provides:
+- Claim mapping — `team` and `customer_id` propagated as `X-Omnia-Claim-*` headers
 
 **ToolPolicy** provides:
 - Required claims — team and customer ID must be present
 - CEL rules — refund amount cap and reason requirement
-- Header injection — team identity forwarded to the tool service
+- Header injection — team identity forwarded to the tool service (applied by the runtime, only when allowed)
 - Audit logging — full decision trail
 
-## Next Steps
+## Next steps
 
 - Add more CEL rules for other tools in the registry
-- Configure `audit.redactFields` to mask sensitive data in logs
 - Create policies for other agents in the namespace
-- Review the [AgentPolicy Reference](/reference/agentpolicy/) and [ToolPolicy Reference](/reference/toolpolicy/) for all available fields
+- Review the [AgentPolicy Reference](/reference/policies/agentpolicy/) and [ToolPolicy Reference](/reference/policies/toolpolicy/) for all available fields
 
-## Related Resources
+## Related resources
 
-- [Policy Engine Architecture](/explanation/policy-engine/) — how the policy engine works
-- [AgentPolicy CRD Reference](/reference/agentpolicy/) — field-by-field specification
-- [ToolPolicy CRD Reference](/reference/toolpolicy/) — field-by-field specification
-- [Configure Agent Policies](/how-to/configure-agent-policies/) — operational guide
-- [Configure Tool Policies](/how-to/configure-tool-policies/) — operational guide
+- [Policy Engine Architecture](/explanation/security/policy-engine/) — how the policy engine works
+- [AgentPolicy CRD Reference](/reference/policies/agentpolicy/) — field-by-field specification
+- [ToolPolicy CRD Reference](/reference/policies/toolpolicy/) — field-by-field specification
+- [Configure Agent Policies](/how-to/security/configure-agent-policies/) — operational guide
+- [Configure Tool Policies](/how-to/security/configure-tool-policies/) — operational guide

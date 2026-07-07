@@ -1,5 +1,5 @@
 ---
-title: "Production Setup"
+title: "Production setup"
 description: "Deploy Omnia for production with Istio, Gateway API, and observability"
 sidebar:
   order: 2
@@ -19,7 +19,7 @@ This tutorial walks through deploying Omnia for production use with:
 - `kubectl`, `helm`, and `istioctl` installed
 - Domain name with DNS configured (for external access)
 
-## Step 1: Install Istio
+## Step 1: install Istio
 
 Install Istio with the Gateway API integration:
 
@@ -39,7 +39,7 @@ Verify Istio is running:
 kubectl get pods -n istio-system
 ```
 
-## Step 2: Install Omnia with Full Stack
+## Step 2: install Omnia with full stack
 
 Create a values file for production:
 
@@ -106,7 +106,7 @@ helm install omnia altaira/omnia \
   -f production-values.yaml
 ```
 
-## Step 3: Configure TLS Certificate
+## Step 3: configure TLS certificate
 
 Create a TLS secret for HTTPS:
 
@@ -132,7 +132,7 @@ kubectl create secret tls omnia-tls \
   --key=path/to/tls.key
 ```
 
-## Step 4: Configure JWT Authentication
+## Step 4: configure JWT authentication
 
 Set up JWT authentication for agent access:
 
@@ -145,9 +145,9 @@ authentication:
       - "omnia-agents"
 ```
 
-See [Configure Authentication](/how-to/configure-authentication) for detailed provider configuration.
+See [Configure Authentication](/how-to/security/configure-authentication) for detailed provider configuration.
 
-## Step 5: Deploy a Production Agent
+## Step 5: deploy a production agent
 
 First, create a Provider for your LLM:
 
@@ -186,8 +186,10 @@ metadata:
 spec:
   promptPackRef:
     name: my-promptpack
-  providerRef:
-    name: claude-production
+  providers:
+    - name: default
+      providerRef:
+        name: claude-production
   facades:
     - type: websocket
       port: 8080
@@ -246,7 +248,7 @@ spec:
           port: 8080
 ```
 
-## Step 6: Access Observability Tools
+## Step 6: access observability tools
 
 The internal gateway exposes Grafana and Prometheus. Port-forward to access:
 
@@ -267,7 +269,7 @@ Pre-configured dashboards include:
 - **Agent Metrics**: Per-agent performance and scaling
 - **Cost Tracking**: Token usage and estimated costs
 
-## Step 7: Connect to Your Agent
+## Step 7: connect to your agent
 
 With the external gateway configured, connect via WebSocket:
 
@@ -282,7 +284,7 @@ Or using the internal service (from within the cluster):
 websocat "ws://production-agent.default.svc:8080/ws?agent=production-agent"
 ```
 
-## Verification Checklist
+## Verification checklist
 
 - [ ] Istio pods running in `istio-system`
 - [ ] Omnia operator running in `omnia-system`
@@ -292,9 +294,9 @@ websocat "ws://production-agent.default.svc:8080/ws?agent=production-agent"
 - [ ] Agent pods running with Istio sidecar
 - [ ] WebSocket connections working through Gateway
 
-## Next Steps
+## Next steps
 
-- [Set Up Observability](/how-to/setup-observability) - Configure dashboards and alerts
-- [Configure Authentication](/how-to/configure-authentication) - Detailed JWT setup
-- [Scale Agent Deployments](/how-to/scale-agents) - KEDA and HPA configuration
-- [Autoscaling Explained](/explanation/autoscaling) - Understanding scaling strategies
+- [Set Up Observability](/how-to/observability/setup-observability) - Configure dashboards and alerts
+- [Configure Authentication](/how-to/security/configure-authentication) - Detailed JWT setup
+- [Scale Agent Deployments](/how-to/agents/scale-agents) - KEDA and HPA configuration
+- [Autoscaling Explained](/explanation/agents/autoscaling) - Understanding scaling strategies

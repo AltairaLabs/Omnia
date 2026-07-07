@@ -1,5 +1,5 @@
 ---
-title: "Adding Tools to Agents"
+title: "Adding tools to agents"
 description: "Extend your agent's capabilities with tool integrations"
 sidebar:
   order: 2
@@ -17,7 +17,7 @@ Tools allow agents to perform actions beyond generating text. With Omnia's ToolR
 - Integrate with OpenAPI-documented services
 - Mix multiple handler types in a single registry
 
-## Handler Types
+## Handler types
 
 Omnia supports four types of tool handlers:
 
@@ -30,7 +30,7 @@ Omnia supports four types of tool handlers:
 
 **Self-describing** handlers (MCP, OpenAPI) automatically discover available tools at runtime. **Explicit** handlers (HTTP, gRPC) require you to define the tool name, description, and input schema.
 
-## Step 1: Create a Tool Service
+## Step 1: create a tool service
 
 First, deploy a simple tool service. This example provides a calculator tool:
 
@@ -69,7 +69,7 @@ spec:
       targetPort: 8080
 ```
 
-## Step 2: Create a ToolRegistry
+## Step 2: create a ToolRegistry
 
 Create a ToolRegistry with an HTTP handler pointing to your service:
 
@@ -109,7 +109,7 @@ Apply it:
 kubectl apply -f toolregistry.yaml
 ```
 
-## Step 3: Check Tool Discovery
+## Step 3: check tool discovery
 
 Verify the tools were discovered:
 
@@ -135,7 +135,7 @@ status:
       status: "True"
 ```
 
-## Step 4: Connect Tools to Your Agent
+## Step 4: connect tools to your agent
 
 Update your AgentRuntime to reference the ToolRegistry:
 
@@ -169,7 +169,7 @@ Apply the update:
 kubectl apply -f agentruntime.yaml
 ```
 
-## Step 5: Test Tool Invocation
+## Step 5: test tool invocation
 
 Connect to your agent and ask it to use a tool:
 
@@ -191,9 +191,9 @@ You'll see tool call and result messages in the response stream:
 {"type": "done", "content": "25 multiplied by 4 equals 100."}
 ```
 
-## Adding Self-Describing Tools
+## Adding self-describing tools
 
-### MCP Server
+### MCP server
 
 Connect to an MCP server that automatically exposes its tools:
 
@@ -213,7 +213,7 @@ spec:
 
 The MCP server announces its tools, and Omnia automatically makes them available to agents.
 
-### OpenAPI Service
+### OpenAPI service
 
 Connect to any service with an OpenAPI specification:
 
@@ -235,7 +235,7 @@ spec:
 
 Each OpenAPI operation becomes a tool. Use `operationFilter` to limit which operations are exposed.
 
-## Combining Multiple Handlers
+## Combining multiple handlers
 
 A single ToolRegistry can contain multiple handlers of different types:
 
@@ -277,7 +277,7 @@ spec:
         specURL: https://api.weather.com/openapi.yaml
 ```
 
-## Tool Discovery via Labels
+## Tool discovery via labels
 
 You can also discover tool services via Kubernetes labels:
 
@@ -315,8 +315,8 @@ spec:
     - port: 80
 ```
 
-## Next Steps
+## Next steps
 
-- Read the [ToolRegistry Reference](/reference/toolregistry/) for all configuration options
-- Learn about [configuring authentication](/how-to/configure-authentication/) for tool access
-- Explore [observability](/how-to/setup-observability/) to monitor tool calls
+- Read the [ToolRegistry Reference](/reference/core/toolregistry/) for all configuration options
+- Learn about [configuring authentication](/how-to/security/configure-authentication/) for tool access
+- Explore [observability](/how-to/observability/setup-observability/) to monitor tool calls

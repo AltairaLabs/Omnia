@@ -167,6 +167,17 @@ type flags struct {
 	ingestChunkSize    int    // env: INGEST_CHUNK_SIZE; default 200
 	ingestChunkOverlap int    // env: INGEST_CHUNK_OVERLAP; default 40
 	ingestQueueDir     string // env: INGEST_QUEUE_DIR; empty disables the agent path
+
+	// ServiceAccount auth (opt-in). When authEnabled is true, the JSON API
+	// requires a Kubernetes ServiceAccount bearer token whose TokenReview
+	// subject is either in authAllowedSubjects (exact match) or whose
+	// ServiceAccount namespace is in authAllowedNamespaces. Defaults to false
+	// so existing deployments see zero behavior change until an operator
+	// explicitly turns it on.
+	authEnabled           bool
+	authAllowedSubjects   string // comma-separated SA subjects
+	authAllowedNamespaces string // comma-separated trusted namespaces
+	authAudiences         string // comma-separated, optional
 }
 
 func parseFlags() *flags {
@@ -207,6 +218,18 @@ func parseFlags() *flags {
 	flag.IntVar(&f.ingestChunkSize, "ingest-chunk-size", 200, "Word-window size for RAG chunking (INGEST_CHUNK_SIZE).")
 	flag.IntVar(&f.ingestChunkOverlap, "ingest-chunk-overlap", 40, "Word overlap between adjacent chunks (INGEST_CHUNK_OVERLAP).")
 	flag.StringVar(&f.ingestQueueDir, "ingest-queue-dir", "", "Directory for the agent summary work-queue. Empty disables the agent path (INGEST_QUEUE_DIR).")
+	flag.BoolVar(&f.authEnabled, "auth-enabled", false,
+		"Require Kubernetes ServiceAccount bearer-token auth on the JSON API (opt-in)")
+	flag.StringVar(&f.authAllowedSubjects, "auth-allowed-subjects", "",
+		"Comma-separated allowed ServiceAccount subjects, exact-matched "+
+			"(e.g. system:serviceaccount:omnia-system:omnia-dashboard). "+
+			"Use for cross-namespace callers")
+	flag.StringVar(&f.authAllowedNamespaces, "auth-allowed-namespaces", "",
+		"Comma-separated trusted namespaces: any ServiceAccount in one of these "+
+			"namespaces is allowed (covers per-AgentRuntime facade SAs, session-api, "+
+			"eval-worker — the in-workspace callers)")
+	flag.StringVar(&f.authAudiences, "auth-audiences", "",
+		"Comma-separated audiences for audience-bound projected tokens (optional; empty = default)")
 	flag.Parse()
 
 	f.applyEnvFallbacks()
@@ -275,6 +298,14 @@ func (f *flags) applyEnvFallbacks() {
 			f.ingestChunkOverlap = n
 		}
 	}
+
+	// ServiceAccount auth — reads the SHARED SESSION_API_AUTH_* config the
+	// operator stamps onto data-plane services via applySessionAPIServerAuthEnv
+	// (internal/controller/service_auth.go), same as session-api and privacy-api.
+	envBoolFallback(&f.authEnabled, "SESSION_API_AUTH_ENABLED")
+	envFallback(&f.authAllowedSubjects, "", "SESSION_API_AUTH_ALLOWED_SUBJECTS")
+	envFallback(&f.authAllowedNamespaces, "", "SESSION_API_AUTH_ALLOWED_NAMESPACES")
+	envFallback(&f.authAudiences, "", "SESSION_API_AUTH_AUDIENCES")
 }
 
 // envFallback sets *dst from the environment variable envKey when *dst still
@@ -396,7 +427,12 @@ func (f *flags) reembedWorkerOptions(embeddingSvc *memory.EmbeddingService) (mem
 
 func main() {
 	if err := run(); err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		if log, syncLog, lerr := logging.NewLogger(); lerr == nil {
+			log.Error(err, "startup failed")
+			syncLog()
+		} else {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		}
 		os.Exit(1)
 	}
 }
@@ -677,8 +713,14 @@ func run() error {
 		log.Info("audit forwarder skipped", "reason", "no privacy URL")
 	}
 
+	// --- ServiceAccount auth (opt-in) ---
+	reviewer, allowedSubjects, allowedNamespaces, err := buildServiceAuth(f, log)
+	if err != nil {
+		return err
+	}
+
 	// --- Build API mux ---
-	apiMux, cleanup := buildAPIMux(ctx, apiStore, embeddingSvc, svcCfg, eventPublisher, f.enterprise, pool, policyLoader, auditLogger, log, buildIngestOptions(f, log), f.workspace, f.serviceGroup, pgStore)
+	apiMux, cleanup := buildAPIMux(ctx, apiStore, embeddingSvc, svcCfg, eventPublisher, f.enterprise, pool, policyLoader, auditLogger, log, buildIngestOptions(f, log), f.workspace, f.serviceGroup, pgStore, reviewer, allowedSubjects, allowedNamespaces)
 	defer cleanup()
 
 	// --- Consolidation worker ---
@@ -731,6 +773,7 @@ func run() error {
 		"health", f.healthAddr,
 		"metrics", f.metricsAddr,
 		"enterprise", f.enterprise,
+		"authEnabled", f.authEnabled,
 	)
 
 	// --- Wait for shutdown ---
@@ -881,6 +924,82 @@ func buildIngestOptions(f *flags, log logr.Logger) memoryapi.IngestOptions {
 	return opts
 }
 
+// buildServiceAuth constructs the ServiceAccount TokenReviewer and parses the
+// allowlists when --auth-enabled is set. It returns (nil, nil, nil, nil) when
+// auth is disabled (after logging a clear startup WARNING that the API is
+// unauthenticated). It returns an error when auth is enabled but misconfigured
+// (both the subject and namespace allowlists empty) or the TokenReviewer cannot
+// be built.
+//
+// A caller is authorized when its TokenReview subject is an exact match in
+// allowedSubjects OR its ServiceAccount namespace is in allowedNamespaces. The
+// namespace allow is what lets in-workspace callers (per-AgentRuntime facade
+// SAs, session-api, eval-worker) pass without enumerating every facade SA up
+// front; cross-namespace callers (dashboard) stay on the exact-subject list.
+//
+// The memory-api ServiceAccount must have RBAC to create TokenReviews
+// (`authentication.k8s.io/tokenreviews: create`). The Role/RoleBinding is wired
+// in the Helm chart (a later task); without it the reviewer's TokenReview calls
+// fail closed (401).
+func buildServiceAuth(f *flags, log logr.Logger) (serviceauth.TokenReviewer, []string, []string, error) {
+	if !f.authEnabled {
+		log.Info("WARNING: memory-api JSON API is UNAUTHENTICATED " +
+			"(auth-enabled=false); set --auth-enabled to require ServiceAccount tokens")
+		return nil, nil, nil, nil
+	}
+
+	allowedSubjects := splitAndTrim(f.authAllowedSubjects)
+	allowedNamespaces := splitAndTrim(f.authAllowedNamespaces)
+	if len(allowedSubjects) == 0 && len(allowedNamespaces) == 0 {
+		return nil, nil, nil, fmt.Errorf(
+			"--auth-enabled is set but both --auth-allowed-subjects and " +
+				"--auth-allowed-namespaces are empty; refusing to start " +
+				"(would reject every caller — misconfiguration)")
+	}
+
+	// In-cluster rest config — same source the privacy middleware uses.
+	cfg, err := rest.InClusterConfig()
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("auth-enabled requires in-cluster config: %w", err)
+	}
+
+	audiences := splitAndTrim(f.authAudiences)
+	reviewer, err := serviceauth.NewK8sTokenReviewer(cfg, audiences)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("building token reviewer: %w", err)
+	}
+
+	log.Info("ServiceAccount auth enabled",
+		"allowedSubjects", allowedSubjects,
+		"allowedNamespaces", allowedNamespaces,
+		"audiences", audiences)
+	return reviewer, allowedSubjects, allowedNamespaces, nil
+}
+
+// splitAndTrim splits a comma-separated string, trims whitespace from each
+// element, and drops empty elements. Returns nil for an empty/whitespace input.
+func splitAndTrim(s string) []string {
+	var out []string
+	for _, part := range strings.Split(s, ",") {
+		if trimmed := strings.TrimSpace(part); trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+	return out
+}
+
+// buildAPIMux assembles the HTTP handler with all memory-api routes, wrapped
+// with rate limiting, ServiceAccount auth, privacy (enterprise), metrics, and
+// tracing middleware. Returns the handler and a cleanup function. The
+// auditLogger is constructed upstream so it can be shared with the
+// consolidation worker.
+//
+// reviewer, allowedSubjects and allowedNamespaces wire ServiceAccount auth: when
+// reviewer is non-nil the JSON API requires a ServiceAccount bearer token whose
+// subject is in allowedSubjects OR whose namespace is in allowedNamespaces
+// (/healthz exempt). A nil reviewer leaves the API unauthenticated. These are
+// parameters (rather than read from flags) so wiring tests can inject a fake
+// reviewer.
 func buildAPIMux(
 	ctx context.Context,
 	store memory.Store,
@@ -895,6 +1014,8 @@ func buildAPIMux(
 	ingestOpts memoryapi.IngestOptions,
 	workspace, serviceGroup string,
 	consentPruner memory.ConsentEventPruner,
+	reviewer serviceauth.TokenReviewer,
+	allowedSubjects, allowedNamespaces []string,
 ) (http.Handler, func()) {
 	httpMetrics := memoryapi.NewHTTPMetrics(nil)
 
@@ -986,7 +1107,12 @@ func buildAPIMux(
 		// auditLogger lifecycle is owned by the caller (lifted out so
 		// the consolidation worker shares it).
 	}
-	return rlMiddleware(httpMetrics.MetricsMiddleware(traced)), cleanup
+
+	// ServiceAccount auth runs after rate-limiting but around the
+	// metrics/trace/handler chain. /healthz is exempt so liveness probes are
+	// never gated. A nil reviewer makes this a pass-through (unauthenticated).
+	authMW := serviceauth.RequireServiceAccount(reviewer, allowedSubjects, allowedNamespaces, "/healthz")
+	return rlMiddleware(authMW(httpMetrics.MetricsMiddleware(traced))), cleanup
 }
 
 // wrapPrivacyMiddleware creates and wires the enterprise privacy middleware.
@@ -1190,7 +1316,7 @@ func traceLogMiddleware(next http.Handler) http.Handler {
 // startHTTPServer starts an HTTP server in a background goroutine.
 func startHTTPServer(log logr.Logger, name, addr string, srv *http.Server) {
 	go func() {
-		log.Info("starting server", "server", name, "addr", addr)
+		log.Info(fmt.Sprintf("starting %s server on %s", name, addr), "addr", addr)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Error(err, "server error", "server", name)
 		}

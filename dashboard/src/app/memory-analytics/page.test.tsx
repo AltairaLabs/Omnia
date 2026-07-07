@@ -167,4 +167,39 @@ describe("MemoryAnalyticsPage", () => {
     expect(screen.getByText(/Memory analytics$/)).toBeInTheDocument();
   });
 
+  it("shows the culprit banner and suppresses the loading skeletons when memory-api is crashlooping", async () => {
+    const crashloopingHealth = {
+      workspaceServices: [],
+      groups: [
+        {
+          name: "default",
+          ready: false,
+          members: [
+            { service: "memory-api", state: "crashlooping", ready: false, restarts: 5 },
+            { service: "session-api", state: "ready", ready: true, restarts: 0 },
+          ],
+        },
+      ],
+      source: "crd" as const,
+    };
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.includes("/services")) {
+        return { ok: true, json: async () => crashloopingHealth };
+      }
+      // Every memory-aggregate/consent/enforcement fetch hangs — this is
+      // the crashlooping-backend scenario the banner exists to surface.
+      return new Promise(() => {});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<MemoryAnalyticsPage />, { wrapper });
+
+    await waitFor(() => {
+      expect(screen.getByText(/memory-api unhealthy/i)).toBeInTheDocument();
+    });
+
+    expect(document.querySelectorAll('[data-slot="skeleton"]')).toHaveLength(0);
+  });
 });

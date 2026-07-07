@@ -46,7 +46,7 @@ type ConsentEventResponse struct {
 // Query: ?workspace=<workspaceID>
 // Body:  { "userId": "...", "category": "..." }
 func (h *Handler) handleConsentEvent(w http.ResponseWriter, r *http.Request) {
-	scope, err := parseWorkspaceScope(r)
+	scope, err := h.parseWorkspaceScope(r)
 	if err != nil {
 		writeError(w, err)
 		return

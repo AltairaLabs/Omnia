@@ -19,8 +19,14 @@ import { withWorkspaceAccess, type WorkspaceRouteContext } from "@/lib/auth/work
 import { getWorkspace } from "@/lib/k8s/workspace-route-helpers";
 import { resolveServiceURLs } from "@/lib/k8s/service-url-resolver";
 import { serviceApiHeaders } from "@/lib/auth/session-api-token";
+import { fetchWithTimeout } from "@/lib/fetch-with-timeout";
 import type { WorkspaceAccess } from "@/types/workspace";
 import type { User } from "@/lib/auth/types";
+
+/** True when the upstream fetch failed because it exceeded fetchWithTimeout's deadline. */
+function isUpstreamTimeout(error: unknown): boolean {
+  return error instanceof Error && error.message === "upstream timeout";
+}
 
 export const GET = withWorkspaceAccess(
   "viewer",
@@ -70,7 +76,7 @@ export const GET = withWorkspaceAccess(
     const targetUrl = `${baseUrl}/api/v1/${endpoint}?${params.toString()}`;
 
     try {
-      const response = await fetch(targetUrl, {
+      const response = await fetchWithTimeout(targetUrl, {
         headers: serviceApiHeaders({ Accept: "application/json" }),
       });
 
@@ -80,13 +86,13 @@ export const GET = withWorkspaceAccess(
       console.error("Session API proxy error:", error);
       return NextResponse.json(
         {
-          error: "Failed to connect to Session API",
+          error: isUpstreamTimeout(error) ? "Session API timed out" : "Failed to connect to Session API",
           details: error instanceof Error ? error.message : String(error),
           sessions: [],
           total: 0,
           hasMore: false,
         },
-        { status: 502 }
+        { status: isUpstreamTimeout(error) ? 504 : 502 }
       );
     }
   }
@@ -130,7 +136,7 @@ export const DELETE = withWorkspaceAccess(
     const targetUrl = `${baseUrl}/api/v1/sessions?${params.toString()}`;
 
     try {
-      const response = await fetch(targetUrl, {
+      const response = await fetchWithTimeout(targetUrl, {
         method: "DELETE",
         headers: serviceApiHeaders({ Accept: "application/json" }),
       });
@@ -141,10 +147,10 @@ export const DELETE = withWorkspaceAccess(
       console.error("Session API proxy error:", error);
       return NextResponse.json(
         {
-          error: "Failed to connect to Session API",
+          error: isUpstreamTimeout(error) ? "Session API timed out" : "Failed to connect to Session API",
           details: error instanceof Error ? error.message : String(error),
         },
-        { status: 502 }
+        { status: isUpstreamTimeout(error) ? 504 : 502 }
       );
     }
   }

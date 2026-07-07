@@ -42,7 +42,7 @@ func TestPostgresMemoryStore_AppendObservationToEntity_NotFoundWrapsErrNotFound(
 func TestUpdateEntity_ScopeGuardBlocksCrossTierMutation(t *testing.T) {
 	store := newStore(t)
 	ctx := context.Background()
-	userScope := map[string]string{ScopeWorkspaceID: testWorkspace1, ScopeUserID: hybridTestUser}
+	userScope := map[string]string{ScopeWorkspaceID: testWorkspace1, ScopeVirtualUserID: hybridTestUser}
 
 	mem := &Memory{Type: hybridKindFact, Content: "user fact", Confidence: 1.0, Scope: userScope}
 	require.NoError(t, store.Save(ctx, mem))

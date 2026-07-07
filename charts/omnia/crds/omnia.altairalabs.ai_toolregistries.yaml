@@ -169,7 +169,10 @@ spec:
                           type: object
                         authType:
                           description: authType specifies the authentication type
-                            (none, bearer, basic).
+                            (bearer, basic).
+                          enum:
+                          - bearer
+                          - basic
                           type: string
                         bodyMapping:
                           description: |-
@@ -412,7 +415,10 @@ spec:
                           type: object
                         authType:
                           description: authType specifies the authentication type
-                            (none, bearer, basic).
+                            (bearer, basic).
+                          enum:
+                          - bearer
+                          - basic
                           type: string
                         baseURL:
                           description: |-

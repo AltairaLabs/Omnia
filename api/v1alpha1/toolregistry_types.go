@@ -163,7 +163,8 @@ type OpenAPIConfig struct {
 	// +optional
 	Headers map[string]string `json:"headers,omitempty"`
 
-	// authType specifies the authentication type (none, bearer, basic).
+	// authType specifies the authentication type (bearer, basic).
+	// +kubebuilder:validation:Enum=bearer;basic
 	// +optional
 	AuthType *string `json:"authType,omitempty"`
 
@@ -268,7 +269,8 @@ type HTTPConfig struct {
 	// +optional
 	ContentType string `json:"contentType,omitempty"`
 
-	// authType specifies the authentication type (none, bearer, basic).
+	// authType specifies the authentication type (bearer, basic).
+	// +kubebuilder:validation:Enum=bearer;basic
 	// +optional
 	AuthType *string `json:"authType,omitempty"`
 

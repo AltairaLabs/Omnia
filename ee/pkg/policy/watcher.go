@@ -11,9 +11,9 @@ package policy
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"time"
 
+	"github.com/go-logr/logr"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/tools/cache"
@@ -26,9 +26,14 @@ import (
 type Watcher struct {
 	evaluator *Evaluator
 	client    client.Client
-	logger    *slog.Logger
+	logger    logr.Logger
 	namespace string
 	scheme    *runtime.Scheme
+
+	// metrics is optional (nil-safe): when set, the active_policies gauge is
+	// refreshed from the evaluator's compiled-policy count on every load
+	// (initial load and each poll cycle), so it self-corrects on reload.
+	metrics *Metrics
 }
 
 // NewWatcher creates a new ToolPolicy watcher.
@@ -37,7 +42,7 @@ func NewWatcher(
 	k8sClient client.Client,
 	scheme *runtime.Scheme,
 	namespace string,
-	logger *slog.Logger,
+	logger logr.Logger,
 ) *Watcher {
 	return &Watcher{
 		evaluator: evaluator,
@@ -46,6 +51,12 @@ func NewWatcher(
 		namespace: namespace,
 		logger:    logger,
 	}
+}
+
+// SetMetrics attaches Prometheus metrics to the watcher. Nil-safe: when never
+// called, initialLoad skips updating the active_policies gauge.
+func (w *Watcher) SetMetrics(metrics *Metrics) {
+	w.metrics = metrics
 }
 
 // Start begins watching ToolPolicy resources and blocks until the context is cancelled.
@@ -67,10 +78,9 @@ func (w *Watcher) initialLoad(ctx context.Context) error {
 	for i := range list.Items {
 		policy := &list.Items[i]
 		if err := w.evaluator.CompilePolicy(policy); err != nil {
-			w.logger.Error("failed to compile ToolPolicy on load",
+			w.logger.Error(err, "failed to compile ToolPolicy on load",
 				"name", policy.Name,
-				"namespace", policy.Namespace,
-				"error", err.Error())
+				"namespace", policy.Namespace)
 			continue
 		}
 		w.logger.Info("compiled ToolPolicy",
@@ -79,7 +89,11 @@ func (w *Watcher) initialLoad(ctx context.Context) error {
 			"rules", len(policy.Spec.Rules))
 	}
 
-	w.logger.Info("initial ToolPolicy load complete", "count", w.evaluator.PolicyCount())
+	count := w.evaluator.PolicyCount()
+	w.logger.Info("initial ToolPolicy load complete", "count", count)
+	if w.metrics != nil {
+		w.metrics.SetActivePolicies(count)
+	}
 	return nil
 }
 
@@ -102,7 +116,7 @@ func (w *Watcher) pollLoop(ctx context.Context) error {
 			return ctx.Err()
 		case <-ticker.C:
 			if err := w.initialLoad(ctx); err != nil {
-				w.logger.Error("poll cycle failed", "error", err.Error())
+				w.logger.Error(err, "poll cycle failed")
 			}
 		}
 	}
@@ -121,10 +135,9 @@ func (w *Watcher) HandleEvent(eventType watch.EventType, policy *omniav1alpha1.T
 // handleAddOrUpdate compiles or recompiles a ToolPolicy.
 func (w *Watcher) handleAddOrUpdate(policy *omniav1alpha1.ToolPolicy) {
 	if err := w.evaluator.CompilePolicy(policy); err != nil {
-		w.logger.Error("failed to compile ToolPolicy",
+		w.logger.Error(err, "failed to compile ToolPolicy",
 			"name", policy.Name,
-			"namespace", policy.Namespace,
-			"error", err.Error())
+			"namespace", policy.Namespace)
 		return
 	}
 	w.logger.Info("compiled ToolPolicy",
@@ -145,7 +158,7 @@ func (w *Watcher) handleDelete(policy *omniav1alpha1.ToolPolicy) {
 // This is the production implementation that provides efficient event-driven updates.
 type InformerWatcher struct {
 	evaluator *Evaluator
-	logger    *slog.Logger
+	logger    logr.Logger
 	informer  cache.SharedIndexInformer
 }
 
@@ -153,7 +166,7 @@ type InformerWatcher struct {
 func NewInformerWatcher(
 	evaluator *Evaluator,
 	informer cache.SharedIndexInformer,
-	logger *slog.Logger,
+	logger logr.Logger,
 ) *InformerWatcher {
 	iw := &InformerWatcher{
 		evaluator: evaluator,
@@ -179,7 +192,7 @@ func (iw *InformerWatcher) Start(ctx context.Context) error {
 func (iw *InformerWatcher) onAdd(obj interface{}) {
 	policy, ok := obj.(*omniav1alpha1.ToolPolicy)
 	if !ok {
-		iw.logger.Warn("received non-ToolPolicy object in add handler")
+		iw.logger.V(1).Info("received non-ToolPolicy object in add handler")
 		return
 	}
 	iw.compilePolicy(policy)
@@ -188,7 +201,7 @@ func (iw *InformerWatcher) onAdd(obj interface{}) {
 func (iw *InformerWatcher) onUpdate(_ interface{}, newObj interface{}) {
 	policy, ok := newObj.(*omniav1alpha1.ToolPolicy)
 	if !ok {
-		iw.logger.Warn("received non-ToolPolicy object in update handler")
+		iw.logger.V(1).Info("received non-ToolPolicy object in update handler")
 		return
 	}
 	iw.compilePolicy(policy)
@@ -197,7 +210,7 @@ func (iw *InformerWatcher) onUpdate(_ interface{}, newObj interface{}) {
 func (iw *InformerWatcher) onDelete(obj interface{}) {
 	policy, ok := extractDeletedObject(obj)
 	if !ok {
-		iw.logger.Warn("received unexpected object in delete handler")
+		iw.logger.V(1).Info("received unexpected object in delete handler")
 		return
 	}
 	iw.evaluator.RemovePolicy(policy.Namespace, policy.Name)
@@ -220,10 +233,9 @@ func extractDeletedObject(obj interface{}) (*omniav1alpha1.ToolPolicy, bool) {
 
 func (iw *InformerWatcher) compilePolicy(policy *omniav1alpha1.ToolPolicy) {
 	if err := iw.evaluator.CompilePolicy(policy); err != nil {
-		iw.logger.Error("failed to compile ToolPolicy",
+		iw.logger.Error(err, "failed to compile ToolPolicy",
 			"name", policy.Name,
-			"namespace", policy.Namespace,
-			"error", err.Error())
+			"namespace", policy.Namespace)
 		return
 	}
 	iw.logger.Info("compiled ToolPolicy",

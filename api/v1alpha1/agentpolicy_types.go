@@ -28,31 +28,6 @@ type AgentPolicySelector struct {
 	Agents []string `json:"agents,omitempty"`
 }
 
-// ClaimMappingEntry maps a single JWT claim to an outbound header.
-type ClaimMappingEntry struct {
-	// claim is the JWT claim name to extract (e.g., "team", "region", "customer_id").
-	// Supports dot-notation for nested claims (e.g., "org.team").
-	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:MinLength=1
-	Claim string `json:"claim"`
-
-	// header is the HTTP header name to propagate the claim value as.
-	// Must start with "X-Omnia-Claim-" prefix for security.
-	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:MinLength=1
-	// +kubebuilder:validation:Pattern=`^X-Omnia-Claim-[A-Za-z0-9-]+$`
-	Header string `json:"header"`
-}
-
-// ClaimMapping configures JWT claim extraction and header forwarding.
-type ClaimMapping struct {
-	// forwardClaims is the list of JWT claims to extract and forward as headers.
-	// +optional
-	// +listType=map
-	// +listMapKey=claim
-	ForwardClaims []ClaimMappingEntry `json:"forwardClaims,omitempty"`
-}
-
 // AgentPolicyMode defines how the agent policy is applied.
 // +kubebuilder:validation:Enum=enforce;permissive
 type AgentPolicyMode string
@@ -116,10 +91,6 @@ type AgentPolicySpec struct {
 	// selector determines which agents this policy applies to.
 	// +optional
 	Selector *AgentPolicySelector `json:"selector,omitempty"`
-
-	// claimMapping configures JWT claim extraction and header forwarding.
-	// +optional
-	ClaimMapping *ClaimMapping `json:"claimMapping,omitempty"`
 
 	// toolAccess defines tool allowlist/denylist rules.
 	// +optional

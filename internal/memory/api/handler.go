@@ -97,7 +97,7 @@ const previewRunes = 240
 // the TierUserForAgent / TierUser / TierAgent / TierInstitutional
 // constants in retrieve_multi_tier.go.
 func deriveTier(scope map[string]string) string {
-	hasUser := scope[memory.ScopeUserID] != ""
+	hasUser := scope[memory.ScopeVirtualUserID] != ""
 	hasAgent := scope[memory.ScopeAgentID] != ""
 	switch {
 	case hasUser && hasAgent:
@@ -460,28 +460,38 @@ type ConflictsResponse struct {
 	Total     int                       `json:"total"`
 }
 
-// parseWorkspaceScope extracts and validates the workspace parameter, then builds the full scope.
-func parseWorkspaceScope(r *http.Request) (map[string]string, error) {
+// parseWorkspaceScope extracts and validates the workspace parameter, then
+// builds the full scope. It logs a deprecation warning when the caller supplies
+// the legacy user_id query param instead of virtual_user_id (#1280).
+func (h *Handler) parseWorkspaceScope(r *http.Request) (map[string]string, error) {
 	q := r.URL.Query()
 	workspace := truncateParam(q.Get("workspace"))
 	if workspace == "" {
 		return nil, ErrMissingWorkspace
 	}
-	return buildScope(q), nil
+	scope, usedLegacy := buildScope(q)
+	if usedLegacy {
+		h.log.V(1).Info(deprecatedUserIDParam, "path", r.URL.Path)
+	}
+	return scope, nil
 }
 
-// buildScope constructs a scope map from query parameters.
-func buildScope(q interface{ Get(string) string }) map[string]string {
-	scope := map[string]string{
+// buildScope constructs a scope map from query parameters. It accepts both the
+// canonical virtual_user_id param and, during the #1280 transition window, the
+// legacy user_id param; usedLegacy reports that the legacy param supplied the
+// value.
+func buildScope(q interface{ Get(string) string }) (scope map[string]string, usedLegacy bool) {
+	scope = map[string]string{
 		memory.ScopeWorkspaceID: truncateParam(q.Get("workspace")),
 	}
-	if uid := q.Get("user_id"); uid != "" {
-		scope[memory.ScopeUserID] = truncateParam(uid)
+	uid, usedLegacy := resolveVirtualUserID(q.Get)
+	if uid != "" {
+		scope[memory.ScopeVirtualUserID] = truncateParam(uid)
 	}
 	if agent := q.Get("agent"); agent != "" {
 		scope[memory.ScopeAgentID] = truncateParam(agent)
 	}
-	return scope
+	return scope, usedLegacy
 }
 
 // parseTypes splits a comma-separated type parameter into a slice.

@@ -120,8 +120,8 @@ func TestClassifyTierFromScope(t *testing.T) {
 	}{
 		{"institutional", map[string]string{ScopeWorkspaceID: "w"}, TierInstitutional},
 		{"agent", map[string]string{ScopeWorkspaceID: "w", ScopeAgentID: "a"}, TierAgent},
-		{"user", map[string]string{ScopeWorkspaceID: "w", ScopeUserID: "u"}, TierUser},
-		{"user-for-agent", map[string]string{ScopeWorkspaceID: "w", ScopeUserID: "u", ScopeAgentID: "a"}, TierUserForAgent},
+		{"user", map[string]string{ScopeWorkspaceID: "w", ScopeVirtualUserID: "u"}, TierUser},
+		{"user-for-agent", map[string]string{ScopeWorkspaceID: "w", ScopeVirtualUserID: "u", ScopeAgentID: "a"}, TierUserForAgent},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

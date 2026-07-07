@@ -42,11 +42,13 @@ import (
 	"google.golang.org/grpc"
 	grpcCodes "google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	grpcmetadata "google.golang.org/grpc/metadata"
 	grpcStatus "google.golang.org/grpc/status"
 
 	pktools "github.com/AltairaLabs/PromptKit/runtime/tools"
 
 	"github.com/altairalabs/omnia/internal/tracing"
+	"github.com/altairalabs/omnia/pkg/policy"
 	toolsv1 "github.com/altairalabs/omnia/pkg/tools/v1"
 )
 
@@ -56,13 +58,22 @@ type mockToolServiceClient struct {
 	executeErr  error
 	listResp    *toolsv1.ListToolsResponse
 	listErr     error
+
+	// capturedMD records the outgoing gRPC metadata from the last Execute
+	// call, so tests can assert on what the tool actually received (e.g.
+	// broker-injected headers winning a collision) instead of only the
+	// return value.
+	capturedMD grpcmetadata.MD
 }
 
 func (m *mockToolServiceClient) Execute(
-	_ context.Context,
+	ctx context.Context,
 	_ *toolsv1.ToolRequest,
 	_ ...grpc.CallOption,
 ) (*toolsv1.ToolResponse, error) {
+	if md, ok := grpcmetadata.FromOutgoingContext(ctx); ok {
+		m.capturedMD = md
+	}
 	return m.executeResp, m.executeErr
 }
 
@@ -181,6 +192,64 @@ func TestOmniaExecutor_LoadConfig_InvalidYAML(t *testing.T) {
 	err := e.LoadConfig(path)
 	if err == nil {
 		t.Fatal("expected error for invalid YAML")
+	}
+}
+
+func TestOmniaExecutor_LoadConfig_ResolvesTokenPath(t *testing.T) {
+	dir := t.TempDir()
+	tokenFile := filepath.Join(dir, "h1")
+	if err := os.WriteFile(tokenFile, []byte("tok123"), 0o600); err != nil {
+		t.Fatalf("write token: %v", err)
+	}
+	cfgYAML := "handlers:\n" +
+		"  - name: h1\n" +
+		"    type: http\n" +
+		"    endpoint: https://example.com\n" +
+		"    httpConfig:\n" +
+		"      endpoint: https://example.com\n" +
+		"      authType: bearer\n" +
+		"      authTokenPath: " + tokenFile + "\n"
+	cfgPath := filepath.Join(dir, "tools.yaml")
+	if err := os.WriteFile(cfgPath, []byte(cfgYAML), 0o600); err != nil {
+		t.Fatalf("write cfg: %v", err)
+	}
+
+	e := NewOmniaExecutor(logr.Discard(), nil)
+	if err := e.LoadConfig(cfgPath); err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+
+	h, ok := e.handlers["h1"]
+	if !ok || h.HTTPConfig == nil {
+		t.Fatalf("expected handler h1 with HTTPConfig, got %+v", h)
+	}
+	if h.HTTPConfig.AuthToken != "tok123" {
+		t.Errorf("AuthToken = %q, want %q", h.HTTPConfig.AuthToken, "tok123")
+	}
+}
+
+func TestOmniaExecutor_LoadConfig_TokenPathReadError(t *testing.T) {
+	dir := t.TempDir()
+	cfgYAML := "handlers:\n" +
+		"  - name: h1\n" +
+		"    type: http\n" +
+		"    endpoint: https://example.com\n" +
+		"    httpConfig:\n" +
+		"      endpoint: https://example.com\n" +
+		"      authType: bearer\n" +
+		"      authTokenPath: " + filepath.Join(dir, "missing-token") + "\n"
+	cfgPath := filepath.Join(dir, "tools.yaml")
+	if err := os.WriteFile(cfgPath, []byte(cfgYAML), 0o600); err != nil {
+		t.Fatalf("write cfg: %v", err)
+	}
+
+	e := NewOmniaExecutor(logr.Discard(), nil)
+	err := e.LoadConfig(cfgPath)
+	if err == nil {
+		t.Fatal("expected error for missing auth token file")
+	}
+	if !strings.Contains(err.Error(), "resolve tool auth tokens") {
+		t.Errorf("unexpected error: %v", err)
 	}
 }
 
@@ -1007,13 +1076,16 @@ func TestOmniaExecutor_BuildHTTPHeaders(t *testing.T) {
 		},
 	}
 
-	headers := e.buildHTTPHeaders(
+	headers, err := e.buildHTTPHeaders(
 		context.Background(),
 		cfg,
 		"tool-name",
 		"handler-name",
 		json.RawMessage(`{"key":"val"}`),
 	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	if headers["X-Custom"] != "value1" {
 		t.Errorf("X-Custom = %q, want %q", headers["X-Custom"], "value1")
@@ -1024,13 +1096,16 @@ func TestOmniaExecutor_BuildHTTPHeaders_NilStaticHeaders(t *testing.T) {
 	e := NewOmniaExecutor(logr.Discard(), nil)
 	cfg := &HTTPCfg{}
 
-	headers := e.buildHTTPHeaders(
+	headers, err := e.buildHTTPHeaders(
 		context.Background(),
 		cfg,
 		"tool",
 		"handler",
 		nil,
 	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	if headers == nil {
 		t.Fatal("headers map is nil")
@@ -1044,16 +1119,66 @@ func TestOmniaExecutor_BuildHTTPHeaders_WithAuth(t *testing.T) {
 		AuthToken: "my-secret-token",
 	}
 
-	headers := e.buildHTTPHeaders(
+	headers, err := e.buildHTTPHeaders(
 		context.Background(),
 		cfg,
 		"tool",
 		"handler",
 		nil,
 	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	if headers["Authorization"] != "Bearer my-secret-token" {
 		t.Errorf("Authorization = %q, want %q", headers["Authorization"], "Bearer my-secret-token")
+	}
+}
+
+// TestBuildHTTPHeaders_ToolCredentialSurvivesForwardedToken is the customer-facing
+// (Splitz) security regression: a tool with its own authSecretRef credential must
+// present THAT credential to its upstream, even when the caller arrived with an
+// inbound bearer token propagated on the context. Before the auth-passthrough was
+// removed, ToOutboundHeaders re-emitted the caller's token as the outbound
+// Authorization and clobbered the tool's — leaking the user's token to an
+// arbitrary upstream and breaking machine-to-machine auth. The tool's own
+// credential must win.
+func TestBuildHTTPHeaders_ToolCredentialSurvivesForwardedToken(t *testing.T) {
+	e := NewOmniaExecutor(logr.Discard(), nil)
+	cfg := &HTTPCfg{AuthType: "bearer", AuthToken: "tool-sa-key"}
+
+	// Simulate an authenticated end-user whose inbound bearer token is
+	// propagated into the runtime, as it is in production.
+	ctx := policy.WithAuthorization(context.Background(), "Bearer caller-jwt")
+
+	headers, err := e.buildHTTPHeaders(ctx, cfg, "tool", "handler", nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if headers["Authorization"] != "Bearer tool-sa-key" {
+		t.Errorf("Authorization = %q, want the tool's own credential %q — the forwarded caller token must NOT overwrite it",
+			headers["Authorization"], "Bearer tool-sa-key")
+	}
+}
+
+func TestBuildHTTPHeaders_InvalidAuthReturnsError(t *testing.T) {
+	e := NewOmniaExecutor(logr.Discard(), nil)
+	cfg := &HTTPCfg{Endpoint: "https://x", AuthType: "bearer", AuthToken: ""} // bearer with empty token
+	_, err := e.buildHTTPHeaders(context.Background(), cfg, "tool", "handler", nil)
+	if err == nil {
+		t.Fatal("expected error for bearer auth with empty token, got nil")
+	}
+}
+
+func TestBuildHTTPHeaders_ValidAuthSetsHeader(t *testing.T) {
+	e := NewOmniaExecutor(logr.Discard(), nil)
+	cfg := &HTTPCfg{Endpoint: "https://x", AuthType: "bearer", AuthToken: "tok123"}
+	headers, err := e.buildHTTPHeaders(context.Background(), cfg, "tool", "handler", nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if headers["Authorization"] != "Bearer tok123" {
+		t.Errorf("Authorization = %q, want %q", headers["Authorization"], "Bearer tok123")
 	}
 }
 

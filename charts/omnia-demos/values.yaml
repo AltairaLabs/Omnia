@@ -458,7 +458,7 @@ sharepointHero:
   # The omnia-demo namespace must ALSO be ambient-enrolled
   # (kubectl label namespace omnia-demo istio.io/dataplane-mode=ambient).
   # Disabled by default since not every demo cluster runs ambient — see
-  # SHAREPOINT_HERO.md. On-cluster validation of the waypoint + CEL policy-proxy
+  # SHAREPOINT_HERO.md. On-cluster validation of the waypoint + CEL policy-broker
   # interaction on the WebSocket path is still pending.
   meshWaypoint: false
 

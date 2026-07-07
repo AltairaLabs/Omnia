@@ -51,39 +51,6 @@ var _ = Describe("AgentPolicy Controller (envtest)", func() {
 	})
 
 	Context("field validation (API server enforcement)", func() {
-		It("rejects a claim mapping header that doesn't start with X-Omnia-Claim-", func() {
-			p := &omniav1alpha1.AgentPolicy{
-				ObjectMeta: metav1.ObjectMeta{Name: nextName("ap"), Namespace: namespace},
-				Spec: omniav1alpha1.AgentPolicySpec{
-					ClaimMapping: &omniav1alpha1.ClaimMapping{
-						ForwardClaims: []omniav1alpha1.ClaimMappingEntry{
-							{Claim: "team", Header: "X-Custom-Team"},
-						},
-					},
-				},
-			}
-			err := k8sClient.Create(ctx, p)
-			Expect(err).To(HaveOccurred())
-			Expect(apierrors.IsInvalid(err)).To(BeTrue(),
-				"expected 400 Invalid, got: %v", err)
-		})
-
-		It("rejects an empty claim name", func() {
-			p := &omniav1alpha1.AgentPolicy{
-				ObjectMeta: metav1.ObjectMeta{Name: nextName("ap"), Namespace: namespace},
-				Spec: omniav1alpha1.AgentPolicySpec{
-					ClaimMapping: &omniav1alpha1.ClaimMapping{
-						ForwardClaims: []omniav1alpha1.ClaimMappingEntry{
-							{Claim: "", Header: "X-Omnia-Claim-Team"},
-						},
-					},
-				},
-			}
-			err := k8sClient.Create(ctx, p)
-			Expect(err).To(HaveOccurred())
-			Expect(apierrors.IsInvalid(err)).To(BeTrue())
-		})
-
 		It("rejects an invalid mode enum value", func() {
 			p := &omniav1alpha1.AgentPolicy{
 				ObjectMeta: metav1.ObjectMeta{Name: nextName("ap"), Namespace: namespace},
@@ -128,13 +95,14 @@ var _ = Describe("AgentPolicy Controller (envtest)", func() {
 			Expect(apierrors.IsInvalid(err)).To(BeTrue())
 		})
 
-		It("accepts a well-formed claim-mapping policy", func() {
+		It("accepts a well-formed toolAccess policy", func() {
 			p := &omniav1alpha1.AgentPolicy{
 				ObjectMeta: metav1.ObjectMeta{Name: nextName("ap"), Namespace: namespace},
 				Spec: omniav1alpha1.AgentPolicySpec{
-					ClaimMapping: &omniav1alpha1.ClaimMapping{
-						ForwardClaims: []omniav1alpha1.ClaimMappingEntry{
-							{Claim: "team", Header: "X-Omnia-Claim-Team"},
+					ToolAccess: &omniav1alpha1.ToolAccessConfig{
+						Mode: omniav1alpha1.ToolAccessModeAllowlist,
+						Rules: []omniav1alpha1.ToolAccessRule{
+							{Registry: "r1", Tools: []string{"tool-a"}},
 						},
 					},
 					Mode: omniav1alpha1.AgentPolicyModeEnforce,
@@ -149,13 +117,7 @@ var _ = Describe("AgentPolicy Controller (envtest)", func() {
 			name := nextName("ap")
 			p := &omniav1alpha1.AgentPolicy{
 				ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
-				Spec: omniav1alpha1.AgentPolicySpec{
-					ClaimMapping: &omniav1alpha1.ClaimMapping{
-						ForwardClaims: []omniav1alpha1.ClaimMappingEntry{
-							{Claim: "team", Header: "X-Omnia-Claim-Team"},
-						},
-					},
-				},
+				Spec:       omniav1alpha1.AgentPolicySpec{},
 			}
 			Expect(k8sClient.Create(ctx, p)).To(Succeed())
 
@@ -180,13 +142,7 @@ var _ = Describe("AgentPolicy Controller (envtest)", func() {
 			name := nextName("ap")
 			p := &omniav1alpha1.AgentPolicy{
 				ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
-				Spec: omniav1alpha1.AgentPolicySpec{
-					ClaimMapping: &omniav1alpha1.ClaimMapping{
-						ForwardClaims: []omniav1alpha1.ClaimMappingEntry{
-							{Claim: "team", Header: "X-Omnia-Claim-Team"},
-						},
-					},
-				},
+				Spec:       omniav1alpha1.AgentPolicySpec{},
 			}
 			Expect(k8sClient.Create(ctx, p)).To(Succeed())
 
@@ -201,8 +157,7 @@ var _ = Describe("AgentPolicy Controller (envtest)", func() {
 			Expect(k8sClient.Get(ctx, req.NamespacedName, &first)).To(Succeed())
 			gen1 := first.Generation
 
-			first.Spec.ClaimMapping.ForwardClaims = append(first.Spec.ClaimMapping.ForwardClaims,
-				omniav1alpha1.ClaimMappingEntry{Claim: "region", Header: "X-Omnia-Claim-Region"})
+			first.Spec.Selector = &omniav1alpha1.AgentPolicySelector{Agents: []string{"agent-a"}}
 			Expect(k8sClient.Update(ctx, &first)).To(Succeed())
 
 			var afterUpdate omniav1alpha1.AgentPolicy
@@ -239,11 +194,6 @@ var _ = Describe("AgentPolicy Controller (envtest)", func() {
 				ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
 				Spec: omniav1alpha1.AgentPolicySpec{
 					Selector: &omniav1alpha1.AgentPolicySelector{Agents: []string{"agent-a", "agent-b"}},
-					ClaimMapping: &omniav1alpha1.ClaimMapping{
-						ForwardClaims: []omniav1alpha1.ClaimMappingEntry{
-							{Claim: "team", Header: "X-Omnia-Claim-Team"},
-						},
-					},
 				},
 			}
 			Expect(k8sClient.Create(ctx, p)).To(Succeed())

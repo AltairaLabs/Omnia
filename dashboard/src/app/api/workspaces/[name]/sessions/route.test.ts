@@ -202,6 +202,39 @@ describe("GET /api/workspaces/[name]/sessions", () => {
 
     expect(response.status).toBe(403);
   });
+
+  it("returns 504 (not a hang) when the backend never responds", async () => {
+    const { getUser } = await import("@/lib/auth");
+    const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
+    const { getWorkspace } = await import("@/lib/k8s/workspace-route-helpers");
+    const { resolveServiceURLs } = await import("@/lib/k8s/service-url-resolver");
+
+    vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://session-api:8080", memoryURL: "https://memory-api:8080", namespace: "omnia-test", privacyURL: "" });
+    vi.mocked(getUser).mockResolvedValue(mockUser);
+    vi.mocked(checkWorkspaceAccess).mockResolvedValue({ granted: true, role: "viewer", permissions: viewerPermissions });
+    vi.mocked(getWorkspace).mockResolvedValue({ spec: { namespace: { name: "test-ns" } } } as never);
+
+    vi.useFakeTimers();
+    mockFetch.mockImplementationOnce((_url: string, init?: RequestInit) => {
+      return new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => {
+          const err = new Error("aborted");
+          err.name = "AbortError";
+          reject(err);
+        });
+      });
+    });
+
+    const { GET } = await import("./route");
+    const responsePromise = GET(createMockRequest(), createMockContext());
+    await vi.advanceTimersByTimeAsync(6000);
+    const response = await responsePromise;
+    vi.useRealTimers();
+
+    expect(response.status).toBe(504);
+    const body = await response.json();
+    expect(body.error).toContain("timed out");
+  });
 });
 
 describe("DELETE /api/workspaces/[name]/sessions (bulk purge)", () => {
@@ -335,5 +368,38 @@ describe("DELETE /api/workspaces/[name]/sessions (bulk purge)", () => {
     const response = await DELETE(createMockRequest("", "DELETE"), createMockContext());
 
     expect(response.status).toBe(502);
+  });
+
+  it("returns 504 (not a hang) when the backend never responds", async () => {
+    const { getUser } = await import("@/lib/auth");
+    const { checkWorkspaceAccess } = await import("@/lib/auth/workspace-authz");
+    const { getWorkspace } = await import("@/lib/k8s/workspace-route-helpers");
+    const { resolveServiceURLs } = await import("@/lib/k8s/service-url-resolver");
+
+    vi.mocked(resolveServiceURLs).mockResolvedValue({ sessionURL: "https://session-api:8080", memoryURL: "https://memory-api:8080", namespace: "omnia-test", privacyURL: "" });
+    vi.mocked(getUser).mockResolvedValue(mockUser);
+    vi.mocked(checkWorkspaceAccess).mockResolvedValue({ granted: true, role: "owner", permissions: ownerPermissions });
+    vi.mocked(getWorkspace).mockResolvedValue({ spec: { namespace: { name: "test-ns" } } } as never);
+
+    vi.useFakeTimers();
+    mockFetch.mockImplementationOnce((_url: string, init?: RequestInit) => {
+      return new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => {
+          const err = new Error("aborted");
+          err.name = "AbortError";
+          reject(err);
+        });
+      });
+    });
+
+    const { DELETE } = await import("./route");
+    const responsePromise = DELETE(createMockRequest("", "DELETE"), createMockContext());
+    await vi.advanceTimersByTimeAsync(6000);
+    const response = await responsePromise;
+    vi.useRealTimers();
+
+    expect(response.status).toBe(504);
+    const body = await response.json();
+    expect(body.error).toContain("timed out");
   });
 });

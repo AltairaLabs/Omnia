@@ -17,13 +17,26 @@ limitations under the License.
 package controller
 
 import (
+	"context"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/go-logr/logr"
+	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/record"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
+	"sigs.k8s.io/yaml"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 	runtimetools "github.com/altairalabs/omnia/internal/runtime/tools"
@@ -1148,5 +1161,335 @@ func TestBuildHandlerEntry_OpenAPIWithRetryPolicy(t *testing.T) {
 	}
 	if entry.OpenAPIConfig.RetryPolicy.MaxAttempts != 4 {
 		t.Errorf("MaxAttempts = %d, want 4", entry.OpenAPIConfig.RetryPolicy.MaxAttempts)
+	}
+}
+
+func TestToolHTTP_HasAuthFields(t *testing.T) {
+	h := ToolHTTP{AuthType: authTypeBearer, AuthTokenPath: "/etc/omnia/tool-secrets/h1"}
+	if h.AuthType != authTypeBearer || h.AuthTokenPath == "" {
+		t.Fatal("ToolHTTP must carry AuthType and AuthTokenPath")
+	}
+}
+
+func TestToolSecretsConstants(t *testing.T) {
+	if ToolSecretsSecretSuffix == "" || ToolSecretsMountPath == "" || toolSecretsVolumeName == "" {
+		t.Fatal("tool-secrets constants must be defined")
+	}
+}
+
+// testAuthSecretKey is the secret key name used across the tool-auth tests
+// in this file. Extracted to silence goconst (go:S1192).
+const testAuthSecretKey = "token"
+
+func TestBuildHTTPConfig_SetsAuthPathWhenSecretRef(t *testing.T) {
+	authType := authTypeBearer
+	h := &omniav1alpha1.HandlerDefinition{
+		Name: "h1", Type: omniav1alpha1.HandlerTypeHTTP,
+		HTTPConfig: &omniav1alpha1.HTTPConfig{
+			Endpoint:      "https://example.com",
+			AuthType:      &authType,
+			AuthSecretRef: &omniav1alpha1.SecretKeySelector{Name: "s", Key: testAuthSecretKey},
+		},
+	}
+	cfg, err := buildHTTPConfig(h, "https://example.com")
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	if cfg.AuthType != authTypeBearer {
+		t.Errorf("AuthType = %q, want bearer", cfg.AuthType)
+	}
+	if cfg.AuthTokenPath != ToolSecretsMountPath+"/h1" {
+		t.Errorf("AuthTokenPath = %q, want %s/h1", cfg.AuthTokenPath, ToolSecretsMountPath)
+	}
+	// The token VALUE must never be in the generated config.
+	if cfg.Headers["Authorization"] != "" {
+		t.Errorf("generated config must not contain a resolved Authorization header")
+	}
+}
+
+func TestReconcileToolSecrets_WritesTokenAndFailsOnMissing(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = corev1.AddToScheme(scheme)
+	_ = omniav1alpha1.AddToScheme(scheme)
+
+	ar := &omniav1alpha1.AgentRuntime{ObjectMeta: metav1.ObjectMeta{Name: "agent", Namespace: "default"}}
+	tr := &omniav1alpha1.ToolRegistry{
+		Spec: omniav1alpha1.ToolRegistrySpec{Handlers: []omniav1alpha1.HandlerDefinition{{
+			Name: "h1", Type: omniav1alpha1.HandlerTypeHTTP,
+			HTTPConfig: &omniav1alpha1.HTTPConfig{
+				Endpoint:      "https://example.com",
+				AuthSecretRef: &omniav1alpha1.SecretKeySelector{Name: "src", Key: testAuthSecretKey},
+			},
+		}}},
+	}
+	src := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "src", Namespace: "default"},
+		Data:       map[string][]byte{testAuthSecretKey: []byte("tok123")},
+	}
+
+	// happy path
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(ar, src).Build()
+	r := &AgentRuntimeReconciler{Client: c, Scheme: scheme}
+	if err := r.reconcileToolSecrets(context.Background(), ar, tr); err != nil {
+		t.Fatalf("reconcileToolSecrets: %v", err)
+	}
+	got := &corev1.Secret{}
+	if err := c.Get(context.Background(),
+		types.NamespacedName{Name: "agent" + ToolSecretsSecretSuffix, Namespace: "default"}, got); err != nil {
+		t.Fatalf("get companion secret: %v", err)
+	}
+	if string(got.Data["h1"]) != "tok123" {
+		t.Errorf("companion secret key h1 = %q, want tok123", string(got.Data["h1"]))
+	}
+	if len(got.OwnerReferences) == 0 || got.OwnerReferences[0].Name != ar.Name {
+		t.Errorf("companion secret must be owner-referenced to the AgentRuntime, got %+v", got.OwnerReferences)
+	}
+
+	// missing source secret -> error
+	c2 := fake.NewClientBuilder().WithScheme(scheme).WithObjects(ar).Build()
+	r2 := &AgentRuntimeReconciler{Client: c2, Scheme: scheme}
+	if err := r2.reconcileToolSecrets(context.Background(), ar, tr); err == nil {
+		t.Fatal("expected error when source secret is missing, got nil")
+	}
+}
+
+func TestReconcileToolSecrets_DeletesStaleCompanionSecretWhenNoAuthedHandlers(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = corev1.AddToScheme(scheme)
+	_ = omniav1alpha1.AddToScheme(scheme)
+
+	ar := &omniav1alpha1.AgentRuntime{ObjectMeta: metav1.ObjectMeta{Name: "agent", Namespace: "default"}}
+	// No authSecretRef on any handler.
+	tr := &omniav1alpha1.ToolRegistry{
+		Spec: omniav1alpha1.ToolRegistrySpec{Handlers: []omniav1alpha1.HandlerDefinition{{
+			Name:       "h1",
+			Type:       omniav1alpha1.HandlerTypeHTTP,
+			HTTPConfig: &omniav1alpha1.HTTPConfig{Endpoint: "https://example.com"},
+		}}},
+	}
+
+	t.Run("removes a previously-created companion Secret", func(t *testing.T) {
+		stale := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Name: "agent" + ToolSecretsSecretSuffix, Namespace: "default"},
+			Data:       map[string][]byte{"h1": []byte("stale-token")},
+		}
+		c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(ar, stale).Build()
+		r := &AgentRuntimeReconciler{Client: c, Scheme: scheme}
+
+		if err := r.reconcileToolSecrets(context.Background(), ar, tr); err != nil {
+			t.Fatalf("reconcileToolSecrets: %v", err)
+		}
+
+		got := &corev1.Secret{}
+		err := c.Get(context.Background(),
+			types.NamespacedName{Name: "agent" + ToolSecretsSecretSuffix, Namespace: "default"}, got)
+		if !apierrors.IsNotFound(err) {
+			t.Fatalf("expected companion Secret to be deleted (NotFound), got err=%v", err)
+		}
+	})
+
+	t.Run("no-op when no companion Secret exists", func(t *testing.T) {
+		c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(ar).Build()
+		r := &AgentRuntimeReconciler{Client: c, Scheme: scheme}
+
+		if err := r.reconcileToolSecrets(context.Background(), ar, tr); err != nil {
+			t.Fatalf("expected nil error when no companion Secret exists, got: %v", err)
+		}
+	})
+}
+
+func TestReconcileToolSecrets_DeleteErrorIsWrapped(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = corev1.AddToScheme(scheme)
+	_ = omniav1alpha1.AddToScheme(scheme)
+
+	ar := &omniav1alpha1.AgentRuntime{ObjectMeta: metav1.ObjectMeta{Name: "agent", Namespace: "default"}}
+	// No authSecretRef on any handler, so reconcileToolSecrets takes the
+	// stale-companion-secret delete path (len(refs) == 0).
+	tr := &omniav1alpha1.ToolRegistry{
+		Spec: omniav1alpha1.ToolRegistrySpec{Handlers: []omniav1alpha1.HandlerDefinition{{
+			Name:       "h1",
+			Type:       omniav1alpha1.HandlerTypeHTTP,
+			HTTPConfig: &omniav1alpha1.HTTPConfig{Endpoint: "https://example.com"},
+		}}},
+	}
+	stale := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "agent" + ToolSecretsSecretSuffix, Namespace: "default"},
+		Data:       map[string][]byte{"h1": []byte("stale-token")},
+	}
+
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(ar, stale).
+		WithInterceptorFuncs(interceptor.Funcs{
+			Delete: func(_ context.Context, _ client.WithWatch, _ client.Object, _ ...client.DeleteOption) error {
+				return apierrors.NewInternalError(fmt.Errorf("boom"))
+			},
+		}).Build()
+	r := &AgentRuntimeReconciler{Client: c, Scheme: scheme}
+
+	err := r.reconcileToolSecrets(context.Background(), ar, tr)
+	if err == nil || !strings.Contains(err.Error(), "delete stale tool-secrets Secret") {
+		t.Fatalf("want wrapped delete-stale error, got %v", err)
+	}
+}
+
+func TestBuildOpenAPIConfig_SetsAuthPathWhenSecretRef(t *testing.T) {
+	// AuthType intentionally nil -> exercises authTypeOrDefault default ("bearer")
+	h := &omniav1alpha1.HandlerDefinition{
+		Name: "h1", Type: omniav1alpha1.HandlerTypeOpenAPI,
+		OpenAPIConfig: &omniav1alpha1.OpenAPIConfig{
+			SpecURL:       "https://example.com/spec",
+			AuthSecretRef: &omniav1alpha1.SecretKeySelector{Name: "s", Key: "token"},
+		},
+	}
+	cfg, err := buildOpenAPIConfig(h)
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	if cfg.AuthType != "bearer" {
+		t.Errorf("AuthType = %q, want bearer (default)", cfg.AuthType)
+	}
+	if cfg.AuthTokenPath != ToolSecretsMountPath+"/h1" {
+		t.Errorf("AuthTokenPath = %q, want %s/h1", cfg.AuthTokenPath, ToolSecretsMountPath)
+	}
+	if cfg.Headers["Authorization"] != "" {
+		t.Error("generated OpenAPI config must not contain a resolved Authorization header")
+	}
+}
+
+// TestReconcileResources_ToolSecretsFailure_BlocksReconcile proves the
+// fail-loud contract at the reconcileResources level: a ToolRegistry handler
+// with an authSecretRef pointing at a Secret that does not exist must block
+// the whole reconcile (no Deployment attempted), mirroring the pattern
+// TestReconcileResources_UnresolvableFramework_Blocks uses for the framework-
+// image gate. Unlike the tools ConfigMap path (logged-and-continues), a
+// tool-secrets failure must never let a broken auth config through.
+func TestReconcileResources_ToolSecretsFailure_BlocksReconcile(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = corev1.AddToScheme(scheme)
+	_ = appsv1.AddToScheme(scheme)
+	_ = omniav1alpha1.AddToScheme(scheme)
+
+	ar := &omniav1alpha1.AgentRuntime{
+		ObjectMeta: metav1.ObjectMeta{Name: "toolsecret-agent", Namespace: "toolsecret-ns"},
+	}
+	tr := &omniav1alpha1.ToolRegistry{
+		ObjectMeta: metav1.ObjectMeta{Name: "tr1", Namespace: "toolsecret-ns"},
+		Spec: omniav1alpha1.ToolRegistrySpec{Handlers: []omniav1alpha1.HandlerDefinition{{
+			Name: "h1", Type: omniav1alpha1.HandlerTypeHTTP,
+			HTTPConfig: &omniav1alpha1.HTTPConfig{
+				Endpoint:      "https://example.com",
+				AuthSecretRef: &omniav1alpha1.SecretKeySelector{Name: "missing-secret", Key: testAuthSecretKey},
+			},
+		}}},
+	}
+	// Deliberately no Secret named "missing-secret" is added to the fake
+	// client, so reconcileToolSecrets must fail resolving it.
+
+	c := fake.NewClientBuilder().WithScheme(scheme).
+		WithObjects(ar).
+		WithStatusSubresource(&omniav1alpha1.AgentRuntime{}).
+		Build()
+	rec := record.NewFakeRecorder(10)
+	r := &AgentRuntimeReconciler{Client: c, Scheme: scheme, Recorder: rec, FrameworkImages: promptkitImage(testFacadeImage)}
+
+	dep, err := r.reconcileResources(context.Background(), logr.Discard(), ar, nil, tr, nil)
+	if err == nil {
+		t.Fatal("expected error when the tool-auth Secret is missing")
+	}
+	if dep != nil {
+		t.Fatal("no Deployment should be built when tool-secrets reconcile fails")
+	}
+
+	// Belt-and-braces: confirm reconcileDeployment never ran by checking the
+	// fake client directly for the Deployment the happy path would create.
+	got := &appsv1.Deployment{}
+	getErr := c.Get(context.Background(), types.NamespacedName{Name: ar.Name, Namespace: ar.Namespace}, got)
+	if getErr == nil {
+		t.Fatal("no Deployment should exist after a tool-secrets reconcile failure")
+	}
+	if !apierrors.IsNotFound(getErr) {
+		t.Fatalf("expected NotFound, got: %v", getErr)
+	}
+}
+
+func TestReconcileToolSecrets_MissingKeyErrors(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = corev1.AddToScheme(scheme)
+	_ = omniav1alpha1.AddToScheme(scheme)
+	ar := &omniav1alpha1.AgentRuntime{ObjectMeta: metav1.ObjectMeta{Name: "agent", Namespace: "default"}}
+	tr := &omniav1alpha1.ToolRegistry{Spec: omniav1alpha1.ToolRegistrySpec{Handlers: []omniav1alpha1.HandlerDefinition{{
+		Name: "h1", Type: omniav1alpha1.HandlerTypeHTTP,
+		HTTPConfig: &omniav1alpha1.HTTPConfig{
+			Endpoint:      "https://x",
+			AuthSecretRef: &omniav1alpha1.SecretKeySelector{Name: "src", Key: "token"},
+		},
+	}}}}
+	src := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "src", Namespace: "default"},
+		Data:       map[string][]byte{"wrongkey": []byte("x")},
+	}
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(ar, src).Build()
+	r := &AgentRuntimeReconciler{Client: c, Scheme: scheme}
+	if err := r.reconcileToolSecrets(context.Background(), ar, tr); err == nil {
+		t.Fatal("expected error when key is missing from source secret, got nil")
+	}
+}
+
+// TestToolAuth_EndToEnd_PathInConfigValueInSecret is the wiring test whose
+// absence let the original bug ship: it proves reconcileToolSecrets and
+// buildToolsConfig compose correctly end-to-end — the operator emits a PATH
+// (never the token value) in the generated tools config, while the token
+// value itself lands only in the companion tool-secrets Secret.
+func TestToolAuth_EndToEnd_PathInConfigValueInSecret(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = corev1.AddToScheme(scheme)
+	_ = omniav1alpha1.AddToScheme(scheme)
+
+	ar := &omniav1alpha1.AgentRuntime{ObjectMeta: metav1.ObjectMeta{Name: "agent", Namespace: "default"}}
+	tr := &omniav1alpha1.ToolRegistry{
+		Status: omniav1alpha1.ToolRegistryStatus{DiscoveredTools: []omniav1alpha1.DiscoveredTool{
+			{HandlerName: "h1", Status: omniav1alpha1.ToolStatusAvailable, Endpoint: "https://example.com"},
+		}},
+		Spec: omniav1alpha1.ToolRegistrySpec{Handlers: []omniav1alpha1.HandlerDefinition{{
+			Name: "h1", Type: omniav1alpha1.HandlerTypeHTTP,
+			HTTPConfig: &omniav1alpha1.HTTPConfig{
+				Endpoint:      "https://example.com",
+				AuthSecretRef: &omniav1alpha1.SecretKeySelector{Name: "src", Key: "token"},
+			},
+		}}},
+	}
+	src := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "src", Namespace: "default"},
+		Data:       map[string][]byte{"token": []byte("tok123")},
+	}
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(ar, src).Build()
+	r := &AgentRuntimeReconciler{Client: c, Scheme: scheme}
+
+	if err := r.reconcileToolSecrets(context.Background(), ar, tr); err != nil {
+		t.Fatalf("reconcileToolSecrets: %v", err)
+	}
+	toolsCfg, err := r.buildToolsConfig(tr)
+	if err != nil {
+		t.Fatalf("buildToolsConfig: %v", err)
+	}
+
+	// 1. Config carries the PATH, never the token value.
+	entry := toolsCfg.Handlers[0]
+	if entry.HTTPConfig.AuthTokenPath != ToolSecretsMountPath+"/h1" {
+		t.Errorf("AuthTokenPath = %q", entry.HTTPConfig.AuthTokenPath)
+	}
+	blob, _ := yaml.Marshal(toolsCfg)
+	if strings.Contains(string(blob), "tok123") {
+		t.Fatal("token value leaked into the tools config")
+	}
+
+	// 2. Companion Secret carries the token value.
+	got := &corev1.Secret{}
+	if err := c.Get(context.Background(),
+		types.NamespacedName{Name: "agent" + ToolSecretsSecretSuffix, Namespace: "default"}, got); err != nil {
+		t.Fatalf("get companion secret: %v", err)
+	}
+	if string(got.Data["h1"]) != "tok123" {
+		t.Errorf("companion secret h1 = %q, want tok123", string(got.Data["h1"]))
 	}
 }

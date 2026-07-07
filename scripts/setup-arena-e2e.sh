@@ -287,6 +287,13 @@ EOF
 
 log_info "Deploying via Helm..."
 
+# internalServiceAuth.enabled defaults to true (#1720, secure by default), which
+# makes the per-workspace session-api reject tokenless callers. The e2e suite
+# verifies session-api via a plain `curl` helper pod that presents no SA token
+# (see eval_worker_e2e_test.go / function_mcp_e2e_test.go), so we opt this test
+# environment out — the documented escape hatch for non-token callers. Auth-on is
+# covered by the serviceauth unit + cmd/session-api wiring + helm-render tests;
+# authenticated-e2e coverage is a follow-up (rides the OTLP-ingest work).
 retry 2 15 helm upgrade --install omnia charts/omnia \
     --namespace "$NAMESPACE" \
     --create-namespace \
@@ -339,7 +346,8 @@ retry 2 15 helm upgrade --install omnia charts/omnia \
     --set loki.enabled=false \
     --set tempo.enabled=false \
     --set alloy.enabled=false \
-    --set keda.enabled=false
+    --set keda.enabled=false \
+    --set internalServiceAuth.enabled=false
 
 # Create storage class for tests (uses kind's local-path)
 log_info "Creating storage class..."

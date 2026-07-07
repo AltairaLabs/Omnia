@@ -24,6 +24,12 @@ const (
 	memoryTestMarker  = "smoke-42"
 	memoryTestUserID  = "doctor-test-user"
 	memoryOtherUserID = "doctor-other-user"
+	// scopeVirtualUserID is the per-subject memory scope key (#1280). Kept as a
+	// local const so the doctor's scope builders don't repeat the literal.
+	scopeVirtualUserID = "virtual_user_id"
+	// scopeWorkspaceID is the workspace memory scope key, kept as a const for
+	// the same reason.
+	scopeWorkspaceID = "workspace_id"
 )
 
 // MemoryChecker runs REST API checks against the memory-api service, and
@@ -77,8 +83,8 @@ func memoryClient() *http.Client {
 // scope returns the scope map for memory operations with the default test user.
 func (m *MemoryChecker) scope() map[string]string {
 	return map[string]string{
-		"workspace_id": m.workspace,
-		"user_id":      memoryTestUserID,
+		scopeWorkspaceID:   m.workspace,
+		scopeVirtualUserID: memoryTestUserID,
 	}
 }
 
@@ -87,16 +93,16 @@ func (m *MemoryChecker) scope() map[string]string {
 // same hashed value when searching for agent-created memories.
 func (m *MemoryChecker) agentScope() map[string]string {
 	return map[string]string{
-		"workspace_id": m.workspace,
-		"user_id":      identity.PseudonymizeID("doctor-smoke-test"),
+		scopeWorkspaceID:   m.workspace,
+		scopeVirtualUserID: identity.PseudonymizeID("doctor-smoke-test"),
 	}
 }
 
 // scopeForUser returns a scope map for a specific user ID.
 func (m *MemoryChecker) scopeForUser(userID string) map[string]string {
 	return map[string]string{
-		"workspace_id": m.workspace,
-		"user_id":      userID,
+		scopeWorkspaceID:   m.workspace,
+		scopeVirtualUserID: userID,
 	}
 }
 
@@ -407,7 +413,7 @@ func (m *MemoryChecker) checkUserOwnership(ctx context.Context) doctor.TestResul
 		_ = m.memoryStore.Delete(ctx, m.scope(), mem.ID)
 	}()
 
-	// Retrieve and verify the memory has user_id in scope
+	// Retrieve and verify the memory has virtual_user_id in scope
 	memories, err := m.memoryStore.Retrieve(ctx, m.scope(), "ownership test", pkmemory.RetrieveOptions{})
 	if err != nil {
 		return doctor.TestResult{Status: doctor.StatusFail, Error: err.Error(), Detail: "retrieve failed"}
@@ -415,15 +421,15 @@ func (m *MemoryChecker) checkUserOwnership(ctx context.Context) doctor.TestResul
 
 	for _, found := range memories {
 		if found.ID == mem.ID {
-			if found.Scope["user_id"] == "" {
+			if found.Scope[scopeVirtualUserID] == "" {
 				return doctor.TestResult{
 					Status: doctor.StatusFail,
-					Detail: "memory saved without user_id — all memories must be owned by a user",
+					Detail: "memory saved without virtual_user_id — all memories must be owned by a user",
 				}
 			}
 			return doctor.TestResult{
 				Status: doctor.StatusPass,
-				Detail: fmt.Sprintf("memory %s has user_id scope", mem.ID),
+				Detail: fmt.Sprintf("memory %s has virtual_user_id scope", mem.ID),
 			}
 		}
 	}

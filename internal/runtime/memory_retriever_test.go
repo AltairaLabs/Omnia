@@ -100,7 +100,7 @@ func mem(id, category, content string) *pkmemory.Memory {
 func userMsg(content string) types.Message { return types.Message{Role: "user", Content: content} }
 
 func defaultScope() map[string]string {
-	return map[string]string{"workspace_id": "ws", "user_id": "u"}
+	return map[string]string{"workspace_id": "ws", "virtual_user_id": "u"}
 }
 
 // mustRetriever builds a CompositeRetriever and fails the test on a constructor
@@ -412,10 +412,10 @@ func TestCompositeRetriever_ProfileCacheKeyedPerUser(t *testing.T) {
 	store := &fakeStore{listMemories: []*pkmemory.Memory{mem("p1", "memory:identity", "Sarah")}}
 	r := mustRetriever(t, store, RetrievalConfig{}, logr.Discard())
 
-	if _, err := r.RetrieveContext(context.Background(), map[string]string{"workspace_id": "ws", "user_id": "alice"}, nil); err != nil {
+	if _, err := r.RetrieveContext(context.Background(), map[string]string{"workspace_id": "ws", "virtual_user_id": "alice"}, nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := r.RetrieveContext(context.Background(), map[string]string{"workspace_id": "ws", "user_id": "bob"}, nil); err != nil {
+	if _, err := r.RetrieveContext(context.Background(), map[string]string{"workspace_id": "ws", "virtual_user_id": "bob"}, nil); err != nil {
 		t.Fatal(err)
 	}
 	if calls := store.listCalls.Load(); calls != 2 {

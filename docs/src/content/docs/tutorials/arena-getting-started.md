@@ -28,77 +28,92 @@ helm install omnia-demos oci://ghcr.io/altairalabs/charts/omnia-demos \
   --set arenaDemo.enabled=true
 ```
 
-This deploys a complete Arena demo with sample evaluations using Ollama. Skip to [Step 5](#step-5-monitor-the-job) to see results.
+This deploys a complete Arena demo with sample evaluations using Ollama. Skip to [Step 4](#step-4-monitor-the-job) to see results.
 :::
 
 ## Overview
 
-Arena Fleet evaluates prompts through three CRDs:
+Arena Fleet evaluates prompts through **two CRDs** and a config file that lives inside your bundle:
 
 ```
-ArenaSource → ArenaConfig → ArenaJob → Results
-    │              │            │
-    │              │            └── Executes the evaluation
-    │              └── Defines what to test and how
-    └── Fetches your PromptKit bundle
+ArenaSource ───────────────▶ ArenaJob ───▶ Results
+ (bundle:                       │
+  config.arena.yaml   ◀─────────┘ selects with spec.arenaFile
+  + prompts + scenarios)          executes the evaluation
 ```
+
+- **[ArenaSource](/reference/evaluation/arenasource/)** fetches your bundle. The bundle contains the arena config file (`config.arena.yaml`), plus the prompt and scenario files it references.
+- **[ArenaJob](/reference/evaluation/arenajob/)** references the source, selects the config file with `spec.arenaFile`, supplies providers, and runs the evaluation.
+
+There is **no `ArenaConfig` Kubernetes resource** — the configuration is the [`config.arena.yaml` file](/reference/evaluation/arenaconfig/) inside the bundle, not something you `kubectl apply`.
 
 ## Step 1: Create an ArenaSource
 
-An ArenaSource defines where to fetch your PromptKit bundle from. For this tutorial, we'll use a ConfigMap source.
+An ArenaSource defines where to fetch your bundle from. For this tutorial, we'll use a ConfigMap source. Each key in the ConfigMap becomes a file in the bundle — nested paths are encoded with `__` (double underscore) in place of `/`, because Kubernetes ConfigMap keys cannot contain slashes.
 
-First, create a ConfigMap with a simple PromptKit bundle containing a test scenario:
+Create a ConfigMap containing the whole bundle: the arena config file, one prompt, and one scenario with an assertion:
 
 ```yaml
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: greeting-prompts
+  name: greeting-bundle
   namespace: default
 data:
-  pack.json: |
-    {
-      "$schema": "https://promptpack.org/schema/latest/promptpack.schema.json",
-      "id": "greeting-prompts",
-      "name": "Greeting Prompts",
-      "version": "1.0.0",
-      "template_engine": {
-        "version": "v1",
-        "syntax": "{{variable}}"
-      },
-      "prompts": {
-        "greeting": {
-          "id": "greeting",
-          "name": "Greeting Prompt",
-          "version": "1.0.0",
-          "system_template": "You are a friendly assistant. Respond warmly to greetings.",
-          "user_template": "Say hello to {{name}}.",
-          "parameters": {
-            "temperature": 0.7
-          }
-        }
-      },
-      "scenarios": {
-        "greeting-test": {
-          "id": "greeting-test",
-          "name": "Greeting Test",
-          "prompt_ref": "greeting",
-          "variables": {
-            "name": "World"
-          },
-          "assertions": [
-            {
-              "type": "contains",
-              "value": "hello",
-              "case_insensitive": true
-            }
-          ]
-        }
-      }
-    }
+  config.arena.yaml: |
+    apiVersion: promptkit.altairalabs.ai/v1alpha1
+    kind: Arena
+    metadata:
+      name: greeting-eval
+    spec:
+      prompt_configs:
+        - id: assistant
+          file: prompts/assistant.yaml
+      # Providers are supplied by the ArenaJob from Provider CRDs.
+      providers: []
+      scenarios:
+        - file: scenarios/greeting.scenario.yaml
+      defaults:
+        temperature: 0.7
+        max_tokens: 200
+        output:
+          dir: out
+          formats:
+            - json
+
+  # "prompts__assistant.yaml" decodes to "prompts/assistant.yaml"
+  prompts__assistant.yaml: |
+    apiVersion: promptkit.altairalabs.ai/v1alpha1
+    kind: PromptConfig
+    metadata:
+      name: assistant
+    spec:
+      task_type: assistant
+      version: v1.0.0
+      description: A friendly greeting assistant
+      system_template: "You are a friendly assistant. Respond warmly to greetings."
+
+  # "scenarios__greeting.scenario.yaml" decodes to "scenarios/greeting.scenario.yaml"
+  scenarios__greeting.scenario.yaml: |
+    apiVersion: promptkit.altairalabs.ai/v1alpha1
+    kind: Scenario
+    metadata:
+      name: greeting-test
+    spec:
+      id: greeting-test
+      task_type: assistant
+      description: Greeting test
+      turns:
+        - role: user
+          content: "Say hello to the world."
+          assertions:
+            - type: contains
+              params:
+                patterns:
+                  - "hello"
 ```
 
-Now create the ArenaSource:
+Now create the ArenaSource that points at the ConfigMap:
 
 ```yaml
 apiVersion: omnia.altairalabs.ai/v1alpha1
@@ -109,8 +124,7 @@ metadata:
 spec:
   type: configmap
   configMap:
-    name: greeting-prompts
-    key: pack.json
+    name: greeting-bundle
   interval: 5m
 ```
 
@@ -130,13 +144,13 @@ kubectl get arenasource greeting-source
 You should see:
 
 ```
-NAME              TYPE        PHASE   REVISION   AGE
-greeting-source   configmap   Ready   12345      10s
+NAME              TYPE        PHASE   AGE
+greeting-source   configmap   Ready   10s
 ```
 
 ## Step 2: Configure a Provider
 
-If you don't already have a Provider configured, create one:
+If you don't already have a Provider configured, create one. The ArenaJob will resolve providers from this CRD, so no provider file is needed inside the bundle.
 
 ```yaml
 apiVersion: v1
@@ -170,43 +184,9 @@ Verify the provider is ready:
 kubectl get provider claude-provider
 ```
 
-## Step 3: Create an ArenaConfig
+## Step 3: Run an ArenaJob
 
-The ArenaConfig combines your source with providers and evaluation settings:
-
-```yaml
-apiVersion: omnia.altairalabs.ai/v1alpha1
-kind: ArenaConfig
-metadata:
-  name: greeting-eval
-  namespace: default
-spec:
-  sourceRef:
-    name: greeting-source
-  providers:
-    - name: claude-provider
-  evaluation:
-    timeout: "2m"
-    maxRetries: 2
-    concurrency: 1
-    metrics:
-      - latency
-      - tokens
-```
-
-```bash
-kubectl apply -f arenaconfig.yaml
-```
-
-Verify the config is ready:
-
-```bash
-kubectl get arenaconfig greeting-eval
-```
-
-## Step 4: Run an ArenaJob
-
-Create an ArenaJob to execute the evaluation:
+Create an ArenaJob to execute the evaluation. It references the source, selects the config file with `arenaFile`, and maps the Provider CRD into the config's `default` provider group:
 
 ```yaml
 apiVersion: omnia.altairalabs.ai/v1alpha1
@@ -216,8 +196,13 @@ metadata:
   namespace: default
 spec:
   sourceRef:
-    name: greeting-eval
+    name: greeting-source
+  arenaFile: config.arena.yaml
   type: evaluation
+  providers:
+    default:
+      - providerRef:
+          name: claude-provider
   evaluation:
     outputFormats:
       - json
@@ -230,7 +215,7 @@ spec:
 kubectl apply -f arenajob.yaml
 ```
 
-## Step 5: Monitor the Job
+## Step 4: Monitor the Job
 
 Watch the job progress:
 
@@ -241,11 +226,10 @@ kubectl get arenajob greeting-eval-001 -w
 You'll see the job progress through phases:
 
 ```
-NAME                PHASE      PROGRESS   AGE
-greeting-eval-001   Pending    0/1        5s
-greeting-eval-001   Running    0/1        10s
-greeting-eval-001   Running    1/1        25s
-greeting-eval-001   Succeeded  1/1        30s
+NAME                SOURCE            TYPE         PHASE      AGE
+greeting-eval-001   greeting-source   evaluation   Pending    5s
+greeting-eval-001   greeting-source   evaluation   Running    10s
+greeting-eval-001   greeting-source   evaluation   Succeeded  30s
 ```
 
 Get detailed status:
@@ -265,12 +249,11 @@ status:
     failed: 0
   result:
     summary:
-      passed: 1
-      failed: 0
-      duration: "5.2s"
+      passed: "1"
+      failed: "0"
 ```
 
-## Step 6: View Results
+## Step 5: View Results
 
 For jobs with S3 or PVC output configured, results are stored at the configured location. For this simple example, view results in the job status:
 
@@ -288,7 +271,7 @@ kubectl logs -l arena.omnia.altairalabs.ai/job=greeting-eval-001
 
 Arena Fleet evaluations produce results showing:
 
-- **Pass/Fail**: Whether assertions passed
+- **Pass/Fail**: Whether assertions passed (our scenario asserts the response `contains` "hello")
 - **Latency**: Response time from the LLM
 - **Tokens**: Input/output token counts
 - **Cost**: Estimated cost (if pricing configured)
@@ -311,8 +294,6 @@ Example result summary:
       "assertions": [
         {
           "type": "contains",
-          "expected": "hello",
-          "actual": "Hello, World! How can I help you today?",
           "passed": true
         }
       ]
@@ -325,11 +306,12 @@ Example result summary:
 
 Now that you've run your first evaluation:
 
-- **[Configure S3 Storage](/how-to/configure-arena-s3-storage/)**: Store results in S3 for persistence
-- **[Set Up Scheduled Jobs](/how-to/setup-arena-scheduled-jobs/)**: Run evaluations on a schedule
-- **[Monitor Job Progress](/how-to/monitor-arena-jobs/)**: Track evaluations in real-time
-- **[Use Git Sources](/reference/arenasource/#git)**: Fetch bundles from Git repositories
-- **[Compare Providers](/reference/arenaconfig/#providers)**: Test against multiple LLMs
+- **[Configure S3 Storage](/how-to/evaluation/configure-arena-s3-storage/)**: Store results in S3 for persistence
+- **[Set Up Scheduled Jobs](/how-to/evaluation/setup-arena-scheduled-jobs/)**: Run evaluations on a schedule
+- **[Monitor Job Progress](/how-to/evaluation/monitor-arena-jobs/)**: Track evaluations in real-time
+- **[Use Git Sources](/reference/evaluation/arenasource/#git)**: Fetch bundles from Git repositories
+- **[Compare Providers](/reference/evaluation/arenajob/#providers)**: Test against multiple LLMs
+- **[Tune the config file](/reference/evaluation/arenaconfig/)**: Learn the full `config.arena.yaml` schema
 
 ## Cleanup
 
@@ -337,9 +319,8 @@ Remove the resources created in this tutorial:
 
 ```bash
 kubectl delete arenajob greeting-eval-001
-kubectl delete arenaconfig greeting-eval
 kubectl delete arenasource greeting-source
-kubectl delete configmap greeting-prompts
+kubectl delete configmap greeting-bundle
 kubectl delete provider claude-provider
 kubectl delete secret llm-credentials
 ```

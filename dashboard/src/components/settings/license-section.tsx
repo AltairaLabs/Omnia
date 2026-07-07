@@ -27,7 +27,7 @@ const FEATURE_LABELS: Record<keyof LicenseFeatures, string> = {
   whiteLabel: "White-Label Branding",
   memoryEnterprise: "Memory Enterprise",
   privacyEnterprise: "Privacy & Compliance",
-  policyProxy: "Policy Enforcement",
+  policyProxy: "ToolPolicy Enforcement",
 };
 
 interface LicenseStatusProps {

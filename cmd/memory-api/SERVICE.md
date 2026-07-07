@@ -14,6 +14,25 @@ and searches memory entries with optional semantic search via embeddings.
 - Memory retention/TTL enforcement
 - Privacy/deletion processing
 
+## Authentication (internal service-to-service)
+
+Opt-in, off by default; gated by the same chart value `internalServiceAuth.enabled`
+as session-api, and reads the **shared** `SESSION_API_AUTH_*` config (not a
+memory-specific prefix) — memory-api joined this data-plane auth in #1730 (#1720).
+When enabled, every caller must present a Kubernetes ServiceAccount bearer token,
+validated server-side via the **TokenReview API** against the same
+allowed-subjects / allowed-namespaces allowlist session-api uses. `/healthz` is
+exempt. The operator's `BuildMemoryDeployment` stamps the `SESSION_API_AUTH_*`
+env, and the memory-api ServiceAccount is bound to the install-wide tokenreview
+ClusterRole so it can create TokenReviews.
+
+Callers (facade/runtime, privacy-api DSAR fan-out) reuse the audience-bound
+projected token the operator already mounts at `SESSION_API_TOKEN_PATH`; the
+memory HTTP client (`internal/memory/httpclient`) attaches it as
+`Authorization: Bearer`. A missing token file is a no-op, so out-of-cluster and
+auth-disabled deployments are unaffected. Defence-in-depth STRICT Istio mTLS is
+still available behind `internalServiceAuth.istio.enabled`.
+
 ## Embedding schema (reconciler-owned, #1309)
 
 The `memory_entities.embedding` and `memory_observations.embedding` pgvector
@@ -168,9 +187,12 @@ path) and **scope-independent** (it applies even with a `user_id` filter, so an
 operator cannot enumerate users to defeat it).
 
 **Not yet covered:** retroactive opt-out masking (hiding memories whose user has
-since opted out) is deferred to #1642 — the consent table keys on a raw user id
-while projection points key on a pseudonym, so the correlation can't be made
-reliable until the id contract is unified.
+since opted out) remains unimplemented. Consent enforcement (#1642) and live-id
+unification to `virtual_user_id` (#1280) have since shipped, but #1280 only
+unified *live* write/recall identity — it does not backfill or correlate the
+historical Galaxy projection points, which were rendered against the older
+pseudonym contract. Until those projection points can be reliably correlated back
+to a user, a retroactive opt-out cannot be applied to already-rendered dots.
 
 ### Metrics
 

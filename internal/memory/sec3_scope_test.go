@@ -41,7 +41,7 @@ func TestSEC3_EmptyUserReadAnchorsToInstitutional(t *testing.T) {
 func TestSEC3_EmptyUserCannotOpenOrDeleteUserRow(t *testing.T) {
 	store := newStore(t)
 	ctx := context.Background()
-	ownerScope := map[string]string{ScopeWorkspaceID: testWorkspace1, ScopeUserID: sec3UserA}
+	ownerScope := map[string]string{ScopeWorkspaceID: testWorkspace1, ScopeVirtualUserID: sec3UserA}
 	wsOnly := map[string]string{ScopeWorkspaceID: testWorkspace1}
 
 	mem := &Memory{Type: hybridKindFact, Content: "user A private", Confidence: 1.0, Scope: ownerScope}

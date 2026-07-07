@@ -54,7 +54,7 @@ func TestSaveUserMemoryHashesUserAndScopes(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
 		gotWorkspace = r.URL.Query().Get("workspace")
-		gotUserParam = r.URL.Query().Get("user_id")
+		gotUserParam = r.URL.Query().Get("virtual_user_id")
 		gotBody = decode(t, r)
 		w.WriteHeader(http.StatusCreated)
 		_ = json.NewEncoder(w).Encode(map[string]any{fieldMemory: map[string]any{"id": "ent-1"}})
@@ -83,7 +83,7 @@ func TestSaveUserMemoryHashesUserAndScopes(t *testing.T) {
 		t.Errorf("user_id param = %q, want hashed %q", gotUserParam, wantHash)
 	}
 	scope, _ := gotBody["scope"].(map[string]any)
-	if scope[fieldWorkspaceID] != testWSUID || scope["user_id"] != wantHash {
+	if scope[fieldWorkspaceID] != testWSUID || scope["virtual_user_id"] != wantHash {
 		t.Errorf("body scope = %v", scope)
 	}
 	if gotBody["category"] != "memory:identity" {

@@ -116,15 +116,16 @@ jobs:
             omnia-eval-worker:
               - 'ee/cmd/arena-eval-worker/**'
 
-            omnia-policy-proxy:
-              - 'ee/cmd/policy-proxy/**'
-
             omnia-promptkit-lsp:
               - 'ee/cmd/promptkit-lsp/**'
 
             omnia-privacy-api:
               - 'ee/cmd/privacy-api/**'
               - 'ee/pkg/privacy/**'
+
+            omnia-policy-broker:
+              - 'ee/cmd/policy-broker/**'
+              - 'ee/pkg/policy/**'
 
       - name: Resolve service list
         id: resolve
@@ -133,7 +134,7 @@ jobs:
           MATCHED: ${{ steps.filter.outputs.changes }}
         run: |
           # Full image list — matches docker-build.yml + release.yml matrices.
-          ALL='["omnia-operator","omnia-facade","omnia-runtime","omnia-dashboard","omnia-session-api","omnia-memory-api","omnia-doctor","omnia-compaction","omnia-arena-controller","omnia-arena-worker","omnia-arena-dev-console","omnia-eval-worker","omnia-policy-proxy","omnia-promptkit-lsp","omnia-privacy-api"]'
+          ALL='["omnia-operator","omnia-facade","omnia-runtime","omnia-dashboard","omnia-session-api","omnia-memory-api","omnia-doctor","omnia-compaction","omnia-arena-controller","omnia-arena-worker","omnia-arena-dev-console","omnia-eval-worker","omnia-promptkit-lsp","omnia-privacy-api","omnia-policy-broker"]'
 
           if [[ "$SHARED" == "true" ]]; then
             echo "Shared paths changed — rebuilding all services."
@@ -218,11 +219,6 @@ jobs:
             context: .
             title: Omnia Eval Worker (Enterprise)
             description: Per-namespace worker that executes realtime evals against active agent sessions.
-          - image: omnia-policy-proxy
-            dockerfile: ee/Dockerfile.policy-proxy
-            context: .
-            title: Omnia Policy Proxy (Enterprise)
-            description: Sidecar proxy that intercepts tool calls and evaluates ToolPolicy CEL rules before they reach the runtime.
           - image: omnia-promptkit-lsp
             dockerfile: ee/Dockerfile.promptkit-lsp
             context: .
@@ -233,6 +229,11 @@ jobs:
             context: .
             title: Omnia Privacy API (Enterprise)
             description: Per-workspace service that owns consent grants, opt-out preferences, and deletion-outbox fan-out to memory-api.
+          - image: omnia-policy-broker
+            dockerfile: ee/Dockerfile.policy-broker
+            context: .
+            title: Omnia Policy Broker (Enterprise)
+            description: Enterprise service that evaluates and enforces tool-policy decisions for agent runtimes.
     steps:
       - name: Checkout
         uses: actions/checkout@v7

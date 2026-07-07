@@ -191,14 +191,14 @@ func (r *AgentRuntimeReconciler) buildDeploymentSpec(
 		containers = []corev1.Container{facadeContainer, runtimeContainer}
 	}
 
-	// Inject policy-proxy sidecar when enterprise edition is enabled.
-	// The sidecar intercepts tool calls and evaluates ToolPolicy CEL rules
-	// before they reach the runtime. PolicyProxyImage is only set when
-	// the --enterprise flag is active.
-	if r.PolicyProxyImage != "" {
-		policyContainer := buildPolicyProxyContainer(agentRuntime, r.PolicyProxyImage, r.PolicyProxyLicenseAPIURL)
-		containers = append(containers, policyContainer)
-		log.Info("injecting policy-proxy sidecar", "agent", agentRuntime.Name)
+	// Inject policy-broker sidecar when configured. The broker watches
+	// ToolPolicy CRDs in the agent's namespace and serves CEL decisions to the
+	// runtime's PolicyBrokerClient over localhost (see buildRuntimeEnvVars,
+	// which points the runtime at it via POLICY_BROKER_URL).
+	if r.PolicyBrokerImage != "" {
+		brokerContainer := buildPolicyBrokerContainer(agentRuntime, r.PolicyBrokerImage, r.LicenseAPIURL)
+		containers = append(containers, brokerContainer)
+		log.Info("injecting policy-broker sidecar", "agent", agentRuntime.Name)
 	}
 
 	// Build pod spec
@@ -210,10 +210,10 @@ func (r *AgentRuntimeReconciler) buildDeploymentSpec(
 	}
 
 	// Apply hardened container SecurityContext to facade + runtime. The
-	// policy-proxy sidecar (injected separately by buildPolicyProxyContainer)
+	// policy-broker sidecar (injected separately by buildPolicyBrokerContainer)
 	// sets its own SecurityContext and is skipped here.
 	for i := range podSpec.Containers {
-		if podSpec.Containers[i].Name == PolicyProxyContainerName {
+		if podSpec.Containers[i].Name == PolicyBrokerContainerName {
 			continue
 		}
 		podSpec.Containers[i].SecurityContext = hardenedContainerSecurityContext()
@@ -273,11 +273,17 @@ func (r *AgentRuntimeReconciler) buildDeploymentSpec(
 	// key on it. This survives swapping the facade/runtime implementation since
 	// the contract is the port NAME, not its number.
 	//
-	// traffic.sidecar.istio.io/excludeInboundPorts lists BOTH metrics ports so
-	// that on a sidecar deployment Prometheus can scrape them directly without
-	// mTLS (ambient/no-mesh ignore the annotation harmlessly).
+	// traffic.sidecar.istio.io/excludeInboundPorts lists all THREE metrics
+	// ports (facade, runtime, and the policy-broker sidecar's health/metrics
+	// port) so that on a sidecar deployment Prometheus can scrape them
+	// directly without mTLS (ambient/no-mesh ignore the annotation
+	// harmlessly). Listing the broker port here is harmless even on pods
+	// without the sidecar (PolicyBrokerImage unset) since it's just an unused
+	// port number in the exclusion list.
 	podAnnotations := map[string]string{
-		"traffic.sidecar.istio.io/excludeInboundPorts": fmt.Sprintf("%d,%d", DefaultFacadeHealthPort, DefaultRuntimeHealthPort),
+		"traffic.sidecar.istio.io/excludeInboundPorts": fmt.Sprintf(
+			"%d,%d,%d", DefaultFacadeHealthPort, DefaultRuntimeHealthPort, DefaultPolicyBrokerHealthPort,
+		),
 	}
 
 	// Add config hash annotation to trigger rollouts when config changes
@@ -297,7 +303,7 @@ func (r *AgentRuntimeReconciler) buildDeploymentSpec(
 	// (#1598). An agent that sets its own SA opts out of the workspace identity
 	// as a unit. Container-level fields come only from the agent's own overrides
 	// (the workspace supplies none) and are applied per-container below to
-	// exclude the operator-injected policy-proxy sidecar.
+	// exclude the operator-injected policy-broker sidecar.
 	if effOverrides := r.effectivePodOverridesForAgent(agentRuntime); effOverrides != nil {
 		podMeta := metav1.ObjectMeta{Labels: labels, Annotations: podAnnotations}
 		podoverrides.ApplyPod(&podSpec, &podMeta, effOverrides)
@@ -306,7 +312,7 @@ func (r *AgentRuntimeReconciler) buildDeploymentSpec(
 	}
 	if agentRuntime.Spec.PodOverrides != nil {
 		for i := range podSpec.Containers {
-			if podSpec.Containers[i].Name == PolicyProxyContainerName {
+			if podSpec.Containers[i].Name == PolicyBrokerContainerName {
 				continue
 			}
 			podoverrides.ApplyContainer(&podSpec.Containers[i], agentRuntime.Spec.PodOverrides)

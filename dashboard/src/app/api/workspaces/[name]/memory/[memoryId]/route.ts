@@ -18,6 +18,12 @@ import { resolveServiceURLs } from "@/lib/k8s/service-url-resolver";
 import { serviceApiHeaders } from "@/lib/auth/session-api-token";
 import { resolveScopedUserId } from "@/lib/auth/scoped-user";
 import { pseudonymizeId } from "@/lib/identity";
+import { fetchWithTimeout } from "@/lib/fetch-with-timeout";
+
+/** True when the upstream fetch failed because it exceeded fetchWithTimeout's deadline. */
+function isUpstreamTimeout(error: unknown): boolean {
+  return error instanceof Error && error.message === "upstream timeout";
+}
 
 export const DELETE = withWorkspaceAccess<{ name: string; memoryId: string }>(
   "viewer",
@@ -46,13 +52,13 @@ export const DELETE = withWorkspaceAccess<{ name: string; memoryId: string }>(
     // delete-all paths: session identity for authenticated users, the device
     // pseudonym for anonymous.
     const scopedUserId = resolveScopedUserId(request.nextUrl.searchParams, user);
-    if (scopedUserId) params.set("user_id", pseudonymizeId(scopedUserId));
+    if (scopedUserId) params.set("virtual_user_id", pseudonymizeId(scopedUserId));
 
     const baseUrl = urls.memoryURL.endsWith("/") ? urls.memoryURL.slice(0, -1) : urls.memoryURL;
     const targetUrl = `${baseUrl}/api/v1/memories/${encodeURIComponent(memoryId)}?${params.toString()}`;
 
     try {
-      const response = await fetch(targetUrl, { method: "DELETE", headers: serviceApiHeaders() });
+      const response = await fetchWithTimeout(targetUrl, { method: "DELETE", headers: serviceApiHeaders() });
       if (!response.ok) {
         const data = await response.json().catch(() => ({ error: "Delete failed" }));
         return NextResponse.json(data, { status: response.status });
@@ -61,8 +67,8 @@ export const DELETE = withWorkspaceAccess<{ name: string; memoryId: string }>(
     } catch (error) {
       console.error("Memory API proxy error:", error);
       return NextResponse.json(
-        { error: "Failed to connect to Memory API" },
-        { status: 502 }
+        { error: isUpstreamTimeout(error) ? "Memory API timed out" : "Failed to connect to Memory API" },
+        { status: isUpstreamTimeout(error) ? 504 : 502 }
       );
     }
   }

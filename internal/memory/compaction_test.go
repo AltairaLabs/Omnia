@@ -45,7 +45,7 @@ func TestFindCompactionCandidates_GroupsAndFiltersByAge(t *testing.T) {
 	for i := 0; i < 12; i++ {
 		must(t, store.Save(ctx, &Memory{
 			Type: "note", Content: "recent", Confidence: 1.0,
-			Scope: map[string]string{ScopeWorkspaceID: ws, ScopeUserID: user},
+			Scope: map[string]string{ScopeWorkspaceID: ws, ScopeVirtualUserID: user},
 		}))
 	}
 	// Seed 15 old observations via raw insert with a back-dated observed_at.

@@ -72,7 +72,7 @@ func TestHandleSupersedeMemories_StoreError(t *testing.T) {
 	body := SupersedeRequest{
 		SourceIDs: []string{"a"},
 		Content:   "x",
-		Scope:     map[string]string{memory.ScopeWorkspaceID: testWS, memory.ScopeUserID: testUser},
+		Scope:     map[string]string{memory.ScopeWorkspaceID: testWS, memory.ScopeVirtualUserID: testUser},
 	}
 	b, _ := json.Marshal(body)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/memories/supersede",
@@ -124,7 +124,7 @@ func TestHandleLinkMemories_NotFound(t *testing.T) {
 		SourceID:     "a",
 		TargetID:     "b",
 		RelationType: relTypeAbout,
-		Scope:        map[string]string{memory.ScopeWorkspaceID: testWS, memory.ScopeUserID: testUser},
+		Scope:        map[string]string{memory.ScopeWorkspaceID: testWS, memory.ScopeVirtualUserID: testUser},
 	}
 	b, _ := json.Marshal(body)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/relations",
@@ -143,7 +143,7 @@ func TestHandleLinkMemories_StoreError(t *testing.T) {
 		SourceID:     "a",
 		TargetID:     "b",
 		RelationType: relTypeAbout,
-		Scope:        map[string]string{memory.ScopeWorkspaceID: testWS, memory.ScopeUserID: testUser},
+		Scope:        map[string]string{memory.ScopeWorkspaceID: testWS, memory.ScopeVirtualUserID: testUser},
 	}
 	b, _ := json.Marshal(body)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/relations",
@@ -172,7 +172,7 @@ func TestHandleUpdateMemory_MissingID(t *testing.T) {
 	// Call directly: the mux can't route an empty {id} segment.
 	body := UpdateMemoryRequest{
 		Content: "x",
-		Scope:   map[string]string{memory.ScopeWorkspaceID: testWS, memory.ScopeUserID: testUser},
+		Scope:   map[string]string{memory.ScopeWorkspaceID: testWS, memory.ScopeVirtualUserID: testUser},
 	}
 	b, _ := json.Marshal(body)
 	req := httptest.NewRequest(http.MethodPatch, "/api/v1/memories/", bytes.NewReader(b))
@@ -205,7 +205,7 @@ func TestHandleUpdateMemory_NotFound(t *testing.T) {
 
 	body := UpdateMemoryRequest{
 		Content: "x",
-		Scope:   map[string]string{memory.ScopeWorkspaceID: testWS, memory.ScopeUserID: testUser},
+		Scope:   map[string]string{memory.ScopeWorkspaceID: testWS, memory.ScopeVirtualUserID: testUser},
 	}
 	b, _ := json.Marshal(body)
 	req := httptest.NewRequest(http.MethodPatch, "/api/v1/memories/ent-1",
@@ -222,7 +222,7 @@ func TestHandleUpdateMemory_StoreError(t *testing.T) {
 
 	body := UpdateMemoryRequest{
 		Content: "x",
-		Scope:   map[string]string{memory.ScopeWorkspaceID: testWS, memory.ScopeUserID: testUser},
+		Scope:   map[string]string{memory.ScopeWorkspaceID: testWS, memory.ScopeVirtualUserID: testUser},
 	}
 	b, _ := json.Marshal(body)
 	req := httptest.NewRequest(http.MethodPatch, "/api/v1/memories/ent-1",

@@ -4,59 +4,137 @@ This document maps every deployable service, how they communicate, and where to 
 
 ## Service Topology
 
+### Control plane + agent pod
+
 ```
                          ┌──────────────┐
                          │  Dashboard   │  Next.js (dashboard/)
                          │  port 3000   │  WS proxy on port 3002
                          └──────┬───────┘
-                                │
-              ┌─────────────────┼─────────────────┐
-              │ HTTP            │ WebSocket        │ WebSocket
-              ▼                 ▼                  ▼
-       ┌──────────────┐  ┌───────────┐   ┌──────────────────┐
-       │   Operator   │  │  Facade   │   │  Arena Dev       │
-       │   cmd/       │  │  cmd/     │   │  Console (EE)    │
-       │   main.go    │  │  agent/   │   │  ee/cmd/arena-   │
-       │              │  │          │   │  dev-console/    │
-       └──────┬───────┘  └─────┬─────┘   └────────┬─────────┘
-              │                │ gRPC              │ HTTP
-              │ K8s API        ▼                   ▼
-              │          ┌───────────┐      ┌──────────────┐
-              │          │  Runtime  │      │  Session API │
-              │          │  cmd/     │      │  cmd/        │
-              │          │  runtime/ │      │  session-api/│
-              │          └─────┬─────┘      └──────┬───────┘
-              │                │ HTTP               │
-              │                └────────┬───────────┘
-              │                         ▼
-              │                  ┌──────────────┐
-              │                  │  PostgreSQL  │
-              │                  │  + Redis     │
-              │                  └──────────────┘
-              │
+              ┌─────────────────┼──────────────────┐
+              │ HTTP            │ WebSocket         │ WebSocket
+              │                 │ (external + mgmt  │
+              ▼                 ▼  twin listeners)  ▼
+       ┌──────────────┐  ┌──────────────────┐  ┌──────────────────┐
+       │   Operator   │  │    Agent Pod     │  │  Arena Dev       │
+       │  cmd/main.go │  │ ┌──────────────┐ │  │  Console (EE)    │
+       │  K8s ctrl +  │  │ │ Facade       │ │  │  ee/cmd/arena-   │
+       │  REST + dash │  │ │ cmd/agent/   │ │  │  dev-console/    │
+       └──────┬───────┘  │ └──────┬───────┘ │  └────────┬─────────┘
+              │          │   gRPC │         │           │ HTTP
+              │ manages  │ ┌──────┴───────┐ │           ▼
+              │ + injects│ │ Runtime      │ │      ┌──────────────┐
+              │  sidecar │ │ cmd/runtime/ │ │      │  Session API │
+              │          │ └──────┬───────┘ │      │ cmd/         │
+              │          │  calls │         │      │ session-api/ │
+              │          │ ┌──────┴───────┐ │      └──────────────┘
+              │          │ │Policy Broker │ │
+              │          │ │ (EE) sidecar │ │
+              │          │ │ ee/cmd/      │ │
+              │          │ │policy-broker/│ │
+              │          │ └──────────────┘ │
+              │          └──────────────────┘
               │ manages
-    ┌─────────┼──────────────────────────────┐
-    │         │                              │
-    ▼         ▼                              ▼
+    ┌─────────┼───────────────────────────────┐
+    │         │                               │
+    ▼         ▼                               ▼
 ┌────────┐ ┌────────────────┐    ┌───────────────────┐
-│Compact-│ │ Arena          │    │  Policy Proxy (EE)│
+│Compact-│ │ Arena          │    │  PromptKit LSP(EE)│
 │ion     │ │ Controller (EE)│    │  ee/cmd/          │
-│cmd/    │ │ ee/cmd/omnia-  │    │  policy-proxy/    │
+│cmd/    │ │ ee/cmd/omnia-  │    │  promptkit-lsp/   │
 │compact-│ │ arena-         │    └───────────────────┘
 │ion/    │ │ controller/    │
 └────────┘ └───────┬────────┘
                    │ creates
-          ┌────────┼────────┐
-          ▼        ▼        ▼
-    ┌──────────┐ ┌──────┐ ┌──────────────┐
-    │Eval      │ │Arena │ │PromptKit     │
-    │Worker(EE)│ │Worker│ │LSP (EE)      │
-    │ee/cmd/   │ │(EE)  │ │ee/cmd/       │
-    │arena-    │ │      │ │promptkit-lsp/│
-    │eval-     │ │      │ └──────────────┘
-    │worker/   │ │      │
-    └──────────┘ └──────┘
+          ┌────────┴────────┐
+          ▼                 ▼
+    ┌──────────┐      ┌──────────┐
+    │Eval      │      │Arena     │
+    │Worker(EE)│      │Worker(EE)│
+    │ee/cmd/   │      │ee/cmd/   │
+    │arena-    │      │arena-    │
+    │eval-     │      │worker/   │
+    │worker/   │      │          │
+    └──────────┘      └──────────┘
 ```
+
+**Policy Broker is an operator-INJECTED sidecar**, not a standalone managed
+Deployment. When ToolPolicy CRDs apply to an agent the operator adds the
+policy-broker container to that agent's pod (alongside facade + runtime); it
+shares the pod lifecycle and is not reconciled as its own top-level service.
+Unlike the retired policy-proxy (a reverse proxy sitting inline in the
+request path), the policy-broker is a **called decision** sidecar — the
+runtime's `OmniaExecutor.dispatch` makes a `POST /v1/decision` call to it over
+`POLICY_BROKER_URL` (localhost `:8090`) per tool call and gets back an
+allow/deny + injected-headers decision; it never proxies traffic itself. It
+watches ToolPolicy CRDs via a list-and-poll loop (`ee/pkg/policy.Watcher`,
+scoped to the agent's namespace) and fails closed by default.
+
+### Data plane (per workspace / service-group)
+
+```
+   Facade ──HTTP (session record)──┐   Runtime ──HTTP (memory)──┐
+   Runtime ─HTTP (events)──────────┤                            │
+                                   ▼                            ▼
+                            ┌──────────────┐            ┌──────────────┐
+                            │  Session API │            │  Memory API  │
+                            │  cmd/        │            │  cmd/        │
+                            │  session-api/│            │  memory-api/ │
+                            └──────┬───────┘            └──────┬───────┘
+                                   ▼                           ▼
+                            ┌──────────────┐            ┌──────────────┐
+                            │  PostgreSQL  │            │  PostgreSQL  │
+                            │  + Redis     │            │  + pgvector  │
+                            │ (warm cache) │            └──────────────┘
+                            └──────────────┘
+                                   │  audit drain (HTTP)       │
+                                   └───────────┬───────────────┘
+                                               ▼
+                                  ┌────────────────────────────┐
+                                  │      Privacy API (EE)      │
+                                  │     ee/cmd/privacy-api/    │
+                                  │  central audit hub + DSAR  │
+                                  └────────────────────────────┘
+```
+
+Edges: `runtime → memory-api` (memory retrieval/extraction). `session-api →
+privacy-api` and `memory-api → privacy-api` are the **audit drain** (each
+service records enforcement rows locally, then a drain-forwarder ships them
+at-least-once to privacy-api's central hub, #1673). The reverse direction —
+`privacy-api → session-api` (`delete-by-user`) and `privacy-api → memory-api`
+(batch-delete) — is the **DSAR erasure fan-out** privacy-api runs across every
+service-group (#1676). Redis inside session-api is a warm cache, not a separate
+store; memory-api's PostgreSQL carries the pgvector embedding columns.
+
+### Diagnostics
+
+```
+Doctor (cmd/doctor/) ──probes──▶ facade internal mgmt twin port · session-api
+· memory-api · operator · dashboard · arena-controller · (optional) Ollama,
+Redis · K8s API (CRD presence + status.managementEndpoints)
+```
+
+Doctor is a diagnostic tool (CLI `--run-once` or an in-cluster HTTP dashboard),
+not part of the request path. See [cmd/doctor/SERVICE.md](cmd/doctor/SERVICE.md).
+
+### Facade composition + plane isolation
+
+An `AgentRuntime` composes one or more single-protocol facade surfaces via
+`spec.facades[]` — each entry is `type: websocket | a2a | rest | mcp`. A single
+agent pod can therefore serve, say, a WebSocket surface plus an A2A surface plus
+an MCP surface, each on its own port, all backed by the same runtime.
+
+Each management-capable facade surface is served on **two listeners**: an
+*external* port running the data-plane auth chain (`spec.externalAuth`
+validators), and an *internal management-plane twin* port
+(`facade-mgmt` 18080 / `a2a-mgmt` 19999 / `mcp-mgmt` 19998) that accepts only
+dashboard-minted management-plane JWTs. Twin ports are ClusterIP-only, never on
+an external Gateway/HTTPRoute, and fail closed without a valid mgmt JWT. The
+twin is gated per-facade by `spec.facades[].managementPlane` (default true); the
+enabled internal endpoints are advertised on
+`AgentRuntime.status.managementEndpoints{ws,a2a,mcp}`. The dashboard WS proxy and
+Doctor read that status to dial the management plane. See
+[cmd/agent/SERVICE.md](cmd/agent/SERVICE.md) for the full listener contract.
 
 ## Core Services
 
@@ -66,8 +144,9 @@ This document maps every deployable service, how they communicate, and where to 
 | **Facade** | `cmd/agent/` | [cmd/agent/SERVICE.md](cmd/agent/SERVICE.md) | WebSocket server, protocol translation to gRPC |
 | **Runtime** | `cmd/runtime/` | [cmd/runtime/SERVICE.md](cmd/runtime/SERVICE.md) | LLM interaction via PromptKit SDK, tool execution |
 | **Session API** | `cmd/session-api/` | [cmd/session-api/SERVICE.md](cmd/session-api/SERVICE.md) | Session CRUD, tiered storage (Redis/Postgres/cold) |
-| **Memory API** | `cmd/memory-api/` | — | Cross-session memory CRUD, entity-relation-observation store (Postgres+pgvector) |
+| **Memory API** | `cmd/memory-api/` | [cmd/memory-api/SERVICE.md](cmd/memory-api/SERVICE.md) | Cross-session memory CRUD, entity-relation-observation store (Postgres+pgvector) |
 | **Compaction** | `cmd/compaction/` | [cmd/compaction/SERVICE.md](cmd/compaction/SERVICE.md) | Tiered storage compaction (hot→warm→cold) |
+| **Doctor** | `cmd/doctor/` | [cmd/doctor/SERVICE.md](cmd/doctor/SERVICE.md) | Diagnostic tool — probes every service's reachability + round-trips (CLI `--run-once` or in-cluster HTTP dashboard) |
 | **Dashboard** | `dashboard/` | [dashboard/SERVICE.md](dashboard/SERVICE.md) | Next.js UI, WebSocket proxy to facade/LSP/dev-console |
 
 ## Enterprise Services
@@ -78,7 +157,7 @@ This document maps every deployable service, how they communicate, and where to 
 | **Arena Worker** | `ee/cmd/arena-worker/` | [ee/cmd/arena-worker/SERVICE.md](ee/cmd/arena-worker/SERVICE.md) | Executes arena eval work items (direct & fleet modes) |
 | **Arena Eval Worker** | `ee/cmd/arena-eval-worker/` | [ee/cmd/arena-eval-worker/SERVICE.md](ee/cmd/arena-eval-worker/SERVICE.md) | Consumes session events, runs LLM judge evals |
 | **Arena Dev Console** | `ee/cmd/arena-dev-console/` | [ee/cmd/arena-dev-console/SERVICE.md](ee/cmd/arena-dev-console/SERVICE.md) | Interactive WebSocket testing for Arena agents |
-| **Policy Proxy** | `ee/cmd/policy-proxy/` | [ee/cmd/policy-proxy/SERVICE.md](ee/cmd/policy-proxy/SERVICE.md) | HTTP proxy enforcing AgentPolicy via CEL |
+| **Policy Broker** | `ee/cmd/policy-broker/` | [ee/cmd/policy-broker/SERVICE.md](ee/cmd/policy-broker/SERVICE.md) | ToolPolicy CEL decision sidecar — called by the runtime per tool call |
 | **Privacy API** | `ee/cmd/privacy-api/` | [ee/cmd/privacy-api/SERVICE.md](ee/cmd/privacy-api/SERVICE.md) | Per-workspace owner of consent/opt-out, the central privacy/compliance audit hub (#1673), and the DSAR erasure lifecycle (#1676) |
 | **PromptKit LSP** | `ee/cmd/promptkit-lsp/` | [ee/cmd/promptkit-lsp/SERVICE.md](ee/cmd/promptkit-lsp/SERVICE.md) | Language server for Arena agent definitions |
 
@@ -91,7 +170,7 @@ This document maps every deployable service, how they communicate, and where to 
 | Dashboard | LSP | WebSocket | Code intelligence for Arena |
 | Dashboard | Dev Console | WebSocket | Interactive agent testing |
 | Facade | Runtime | gRPC (bidirectional) | LLM conversation stream; duplex audio transport (persistent `Converse` stream opened per audio session, carrying `AudioInputChunk` inbound and `MediaChunk` outbound) |
-| Facade | Session API | HTTP | Session recording |
+| Facade | Session API | HTTP | Session recording — conversation messages are captured off the gRPC bus by a protocol-agnostic RuntimeClient interceptor (#1630), then written via the session HTTP client |
 | Facade | Redis | Direct | Realtime session route table (`rt:route:<session_id>`→podIP, TTL=grace period) for reconnect routing in multi-replica deployments |
 | Runtime | Session API | HTTP | Event recording |
 | Memory API | Privacy API | HTTP | Audit drain-forwarder: `POST /api/v1/privacy/audit-events` ships local enforcement audit rows to the central audit hub, at-least-once (#1673) |
@@ -109,7 +188,13 @@ This document maps every deployable service, how they communicate, and where to 
 | Compaction | PostgreSQL/Redis/Cold | Direct | Data lifecycle management |
 | Runtime | Memory API | HTTP | Memory retrieval and extraction (when memory enabled) |
 | Memory API | Redis Streams | Redis | Memory event publishing (create/delete) |
-| Policy Proxy | K8s API | K8s client | Policy watching |
+| Runtime | Policy Broker | HTTP | `OmniaExecutor.dispatch` calls `POST /v1/decision` over `POLICY_BROKER_URL` (localhost) per tool call; returns allow/deny + injected headers, fail-closed by default |
+| Policy Broker | K8s API | K8s client | ToolPolicy CRD watching (list-and-poll loop) |
+| Dashboard | Facade (mgmt twin) | WebSocket | Management-plane chat/"Try this agent" — dials the internal `facade-mgmt` twin port from `status.managementEndpoints.ws` with a dashboard-minted mgmt-plane JWT (external ports reject it) |
+| Doctor | Facade (mgmt twin) | WebSocket | Diagnostic round-trip on the internal mgmt twin port (falls back to external 8080 when no mgmt endpoint advertised); exchanges its SA token for a mgmt-plane JWT via the dashboard `/api/auth/service-token` endpoint |
+| Doctor | Session API / Memory API | HTTP | Reachability + CRUD round-trip probes (create then delete a probe record) |
+| Doctor | Operator / Dashboard / Arena Controller | HTTP | Reachability probes |
+| Doctor | K8s API | K8s client | CRD presence checks, workspace-UID resolution, reading `status.managementEndpoints` |
 
 ## Distributed Tracing
 
@@ -145,7 +230,8 @@ Browser ──WebSocket──▶ Facade ──gRPC──▶ Runtime ──HTTP�
 - **Arena Worker**: Derives trace ID from job name. Spans: `arena.worker` (root), `arena.work-item` (per item), `arena.engine.execute`, `arena.fleet.session` (links to agent session trace).
 - **Eval Worker**: Inherits trace context from session events when available.
 - **Memory API**: Inherits trace context from HTTP requests. Records memory retrieval/extraction latency as spans.
-- **Operator, Compaction, Policy Proxy, LSP**: No OTel spans.
+- **Privacy API**: Configures the W3C trace-context propagator and an optional OTLP provider (service `omnia-privacy-api`) so audit-drain and DSAR fan-out calls join the caller's trace. Does not currently emit its own spans.
+- **Operator, Compaction, Policy Broker, LSP, Doctor**: No OTel spans.
 
 ### Metrics Inventory
 
@@ -154,6 +240,9 @@ Browser ──WebSocket──▶ Facade ──gRPC──▶ Runtime ──HTTP�
 | `omnia_facade_realtime_sessions_parked_total` | Facade | Counter | Realtime sessions parked on unintentional WebSocket close (blip-resume) |
 | `omnia_facade_realtime_reattach_total` | Facade | Counter | Successful realtime session reattaches via `resume=<session_id>` |
 | `omnia_facade_realtime_park_expired_total` | Facade | Counter | Parked realtime sessions expired before reattach |
+| `omnia_toolpolicy_decisions_total` | Policy Broker | Counter | ToolPolicy decisions by `outcome` (allowed/denied/would_deny), `tool_registry`, `policy` |
+| `omnia_toolpolicy_decision_duration_seconds` | Policy Broker | Histogram | Broker decision latency (0.5 ms – 0.5 s buckets) |
+| `omnia_toolpolicy_active_policies` | Policy Broker | Gauge | ToolPolicies currently compiled/loaded by the broker |
 
 ## Key Architectural Rules
 

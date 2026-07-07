@@ -33,8 +33,18 @@ var _ Store = (*PostgresMemoryStore)(nil)
 // Scope key constants used in memory scope maps.
 const (
 	ScopeWorkspaceID = "workspace_id"
-	ScopeUserID      = "user_id"
-	ScopeAgentID     = "agent_id"
+	// ScopeVirtualUserID is the per-subject scope key. The value is always a
+	// pseudonym the caller supplies (never a real identity) — it is written
+	// verbatim into the memory_entities.virtual_user_id column. The key name
+	// intentionally matches that column so the contract is self-documenting.
+	// See #1280.
+	ScopeVirtualUserID = "virtual_user_id"
+	// ScopeLegacyUserID is the pre-#1280 wire name for ScopeVirtualUserID.
+	// memory-api still accepts it (query param and request-body scope key) for
+	// one transition release, logging a deprecation warning; it is dropped the
+	// release after.
+	ScopeLegacyUserID = "user_id"
+	ScopeAgentID      = "agent_id"
 	// ScopeIncludeShared is a list-only control key. When set to scopeFlagTrue,
 	// List returns everything visible to the user — institutional + agent
 	// tiers plus the user's own — instead of strictly the user's own rows.

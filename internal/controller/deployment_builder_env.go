@@ -280,6 +280,26 @@ func (r *AgentRuntimeReconciler) buildRuntimeEnvVars(
 		})
 	}
 
+	// Activate the runtime's PolicyBrokerClient (internal/runtime/tools) by
+	// pointing it at the co-located policy-broker sidecar. The client is a
+	// no-op unless POLICY_BROKER_URL is set, so this env var is the sole
+	// activation switch — gated on the same PolicyBrokerImage condition that
+	// injects the sidecar (see buildDeploymentSpec), so pods without the
+	// sidecar never set an unreachable URL. FAIL_MODE=closed is stamped
+	// explicitly to match the client's own default (fail-closed enforcement).
+	if r.PolicyBrokerImage != "" {
+		envVars = append(envVars,
+			corev1.EnvVar{
+				Name:  "POLICY_BROKER_URL",
+				Value: fmt.Sprintf("http://localhost:%d", DefaultPolicyBrokerPort),
+			},
+			corev1.EnvVar{
+				Name:  "POLICY_BROKER_FAIL_MODE",
+				Value: "closed",
+			},
+		)
+	}
+
 	// Add extra env vars from CRD
 	if agentRuntime.Spec.Runtime != nil && agentRuntime.Spec.Runtime.ExtraEnv != nil {
 		envVars = append(envVars, agentRuntime.Spec.Runtime.ExtraEnv...)
