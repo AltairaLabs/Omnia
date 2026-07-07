@@ -420,15 +420,19 @@ spec:
 		}
 	})
 
-	// PENDING (PIt): the deterministic mock-provider tool dispatch does not fire in
-	// the deployed pod yet — the runtime returns the mock's defaultResponse instead
-	// of the scripted `echo` tool_call, so the broker is never exercised end-to-end
-	// through the conversation here. This is a mock-provider harness gap, NOT an
-	// enforcement bug: the runtime->broker->CEL-deny path is proven by
-	// test/integration/policy_broker_test.go (full executor + real broker + real
-	// ToolPolicy), and the deployed wiring is proven by the passing "wires the
-	// policy-broker sidecar" spec above (broker injected + POLICY_BROKER_URL set).
-	// Follow-up: make the mock provider emit the tool_call so this drives green.
+	// PENDING (PIt): the mock-provider tool dispatch now works — registry tools are
+	// surfaced to the model (see internal/runtime/pack_tools.go) so the scripted
+	// `echo` tool_call fires and dispatches to the http executor. Verified manually
+	// in-cluster (tool_call → backend hit) and by internal/runtime's
+	// TestServer_MockScriptedToolCall_DispatchesExecutor. What remains is a
+	// FRESH-POD TIMING RACE: at fast (non-debug) runtime startup the tool is not yet
+	// offered to the provider by the time the first turn runs, so the dispatch is
+	// intermittent in the deployed pod (LOG_LEVEL=debug, which slows startup, makes
+	// it pass — a heisenbug). Enforcement itself stays proven by
+	// test/integration/policy_broker_test.go and the deployed wiring by the passing
+	// "wires the policy-broker sidecar" spec above.
+	// Follow-up: fix the runtime startup ordering (config-mount readiness vs
+	// pipeline build) so the tool is reliably offered on the first turn, then un-pend.
 	PIt("denies a tool call whose amount exceeds the policy limit and never reaches the upstream", func() {
 		baseline, err := echoHitCount()
 		Expect(err).NotTo(HaveOccurred())
@@ -460,9 +464,10 @@ spec:
 			"a denied tool call must abort dispatch before the HTTP call — echo upstream hit count must not change")
 	})
 
-	// PENDING (PIt): same mock-provider dispatch gap as the deny spec above — the
-	// scripted tool_call isn't emitted, so the allow path can't be driven through
-	// the deployed conversation yet. Enforcement is proven by the integration test.
+	// PENDING (PIt): same fresh-pod startup race as the deny spec above — dispatch
+	// now works (registry tools surfaced to the model) but is intermittent at fast
+	// runtime startup. Un-pend once the startup ordering is fixed. Enforcement is
+	// proven by the integration test.
 	PIt("allows a tool call within the policy limit and reaches the upstream", func() {
 		baseline, err := echoHitCount()
 		Expect(err).NotTo(HaveOccurred())

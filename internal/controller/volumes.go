@@ -71,6 +71,12 @@ func (r *AgentRuntimeReconciler) buildVolumes(
 				},
 			},
 		})
+		// Writable scratch for the runtime to stage the tool-surfaced pack
+		// (root filesystem is read-only, so /tmp is not writable).
+		volumes = append(volumes, corev1.Volume{
+			Name:         runtimePackCacheVolumeName,
+			VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}},
+		})
 	}
 
 	// Mount the companion tool-secrets Secret only when at least one handler
@@ -161,6 +167,12 @@ func (r *AgentRuntimeReconciler) buildRuntimeVolumeMounts(
 			Name:      toolsConfigVolumeName,
 			MountPath: ToolsMountPath,
 			ReadOnly:  true,
+		})
+		// Writable pack-cache scratch (see buildVolumes).
+		volumeMounts = append(volumeMounts, corev1.VolumeMount{
+			Name:      runtimePackCacheVolumeName,
+			MountPath: RuntimePackCacheMountPath,
+			ReadOnly:  false,
 		})
 	}
 
