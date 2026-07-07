@@ -278,26 +278,44 @@ func (t *Tester) resolveAuthSecrets(
 	}
 }
 
+// resolveEffectiveToolAuth reads the handler's effective auth (new stanza or the
+// normalized legacy fields — the same seam the operator uses) and, when it is a
+// secret-backed bearer/basic credential, resolves the token. ok is false when
+// there is no secret-backed auth to apply.
+func (t *Tester) resolveEffectiveToolAuth(
+	ctx context.Context,
+	namespace string,
+	handler *omniav1alpha1.HandlerDefinition,
+) (authType, token string, ok bool, err error) {
+	// EffectiveAuth reads the new handler-level auth stanza first, falling back to
+	// the deprecated authType/authSecretRef — the same seam the operator uses, so
+	// the tool-test path and the runtime path resolve credentials identically.
+	auth := handler.EffectiveAuth()
+	if auth == nil || auth.SecretRef == nil || auth.Type == omniav1alpha1.ToolAuthTypeNone {
+		return "", "", false, nil
+	}
+	tok, err := t.readSecretKey(ctx, namespace, auth.SecretRef.Name, auth.SecretRef.Key)
+	if err != nil {
+		return "", "", false, err
+	}
+	return auth.Type, tok, true, nil
+}
+
 func (t *Tester) resolveHTTPAuth(
 	ctx context.Context,
 	namespace string,
 	handler *omniav1alpha1.HandlerDefinition,
 ) error {
-	if handler.HTTPConfig == nil || handler.HTTPConfig.AuthSecretRef == nil {
+	if handler.HTTPConfig == nil {
 		return nil
 	}
-	ref := handler.HTTPConfig.AuthSecretRef
-	token, err := t.readSecretKey(ctx, namespace, ref.Name, ref.Key)
-	if err != nil {
+	authType, token, ok, err := t.resolveEffectiveToolAuth(ctx, namespace, handler)
+	if err != nil || !ok {
 		return err
 	}
-	// Inject into headers so the runtime config builder can use it
+	// Inject into headers so the runtime config builder can use it.
 	if handler.HTTPConfig.Headers == nil {
 		handler.HTTPConfig.Headers = make(map[string]string)
-	}
-	authType := "bearer"
-	if handler.HTTPConfig.AuthType != nil {
-		authType = *handler.HTTPConfig.AuthType
 	}
 	applyAuthHeader(handler.HTTPConfig.Headers, authType, token)
 	return nil
@@ -308,20 +326,15 @@ func (t *Tester) resolveOpenAPIAuth(
 	namespace string,
 	handler *omniav1alpha1.HandlerDefinition,
 ) error {
-	if handler.OpenAPIConfig == nil || handler.OpenAPIConfig.AuthSecretRef == nil {
+	if handler.OpenAPIConfig == nil {
 		return nil
 	}
-	ref := handler.OpenAPIConfig.AuthSecretRef
-	token, err := t.readSecretKey(ctx, namespace, ref.Name, ref.Key)
-	if err != nil {
+	authType, token, ok, err := t.resolveEffectiveToolAuth(ctx, namespace, handler)
+	if err != nil || !ok {
 		return err
 	}
 	if handler.OpenAPIConfig.Headers == nil {
 		handler.OpenAPIConfig.Headers = make(map[string]string)
-	}
-	authType := "bearer"
-	if handler.OpenAPIConfig.AuthType != nil {
-		authType = *handler.OpenAPIConfig.AuthType
 	}
 	applyAuthHeader(handler.OpenAPIConfig.Headers, authType, token)
 	return nil

@@ -190,4 +190,61 @@ var _ = Describe("ToolRegistry Admission Validation", func() {
 			Expect(rp.MaxBackoff.Duration).To(Equal(30 * time.Second))
 		})
 	})
+
+	Context("Auth stanza validation (CEL)", func() {
+		newSecretRef := func() *omniav1alpha1.SecretKeySelector {
+			return &omniav1alpha1.SecretKeySelector{Name: "creds", Key: "token"}
+		}
+		trWith := func(name string, h omniav1alpha1.HandlerDefinition) *omniav1alpha1.ToolRegistry {
+			return &omniav1alpha1.ToolRegistry{
+				ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
+				Spec:       omniav1alpha1.ToolRegistrySpec{Handlers: []omniav1alpha1.HandlerDefinition{h}},
+			}
+		}
+
+		It("accepts a bearer auth stanza with secretRef", func() {
+			h := minimalHandler("h")
+			h.Auth = &omniav1alpha1.ToolAuth{Type: omniav1alpha1.ToolAuthTypeBearer, SecretRef: newSecretRef()}
+			tr := trWith("auth-ok", h)
+			Expect(k8sClient.Create(ctx, tr)).To(Succeed())
+			defer func() { _ = k8sClient.Delete(ctx, tr) }()
+		})
+
+		It("rejects bearer auth without secretRef", func() {
+			h := minimalHandler("h")
+			h.Auth = &omniav1alpha1.ToolAuth{Type: omniav1alpha1.ToolAuthTypeBearer}
+			err := k8sClient.Create(ctx, trWith("auth-no-secret", h))
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("requires secretRef"))
+		})
+
+		It("rejects both the auth stanza and a legacy authType", func() {
+			h := minimalHandler("h")
+			bearer := "bearer"
+			h.HTTPConfig.AuthType = &bearer
+			h.Auth = &omniav1alpha1.ToolAuth{Type: omniav1alpha1.ToolAuthTypeBearer, SecretRef: newSecretRef()}
+			err := k8sClient.Create(ctx, trWith("auth-both-type", h))
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("not both"))
+		})
+
+		It("rejects both the auth stanza and a legacy authSecretRef without authType", func() {
+			// Regression guard: legacy auth was enabled by authSecretRef presence,
+			// with authType optional. The both-set rule must catch this shape, else
+			// a legacy secretRef + auth:{type:none} silently drops auth.
+			h := minimalHandler("h")
+			h.HTTPConfig.AuthSecretRef = newSecretRef()
+			h.Auth = &omniav1alpha1.ToolAuth{Type: omniav1alpha1.ToolAuthTypeNone}
+			err := k8sClient.Create(ctx, trWith("auth-both-secretref", h))
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("not both"))
+		})
+
+		It("rejects an unsupported auth type (serviceAccount not yet wired)", func() {
+			h := minimalHandler("h")
+			h.Auth = &omniav1alpha1.ToolAuth{Type: "serviceAccount"}
+			err := k8sClient.Create(ctx, trWith("auth-unsupported", h))
+			Expect(err).To(HaveOccurred())
+		})
+	})
 })

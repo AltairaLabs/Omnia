@@ -464,7 +464,7 @@ type ServiceSelector struct {
 }
 
 // HandlerDefinition defines a tool handler that exposes one or more tools
-// +kubebuilder:validation:XValidation:rule="!(has(self.auth) && ((has(self.httpConfig) && has(self.httpConfig.authType)) || (has(self.openAPIConfig) && has(self.openAPIConfig.authType))))",message="set either the handler-level auth stanza or the legacy httpConfig/openAPIConfig authType, not both"
+// +kubebuilder:validation:XValidation:rule="!(has(self.auth) && ((has(self.httpConfig) && (has(self.httpConfig.authType) || has(self.httpConfig.authSecretRef))) || (has(self.openAPIConfig) && (has(self.openAPIConfig.authType) || has(self.openAPIConfig.authSecretRef)))))",message="set either the handler-level auth stanza or the legacy httpConfig/openAPIConfig authType/authSecretRef, not both"
 type HandlerDefinition struct {
 	// name is a unique identifier for this handler within the registry.
 	// +kubebuilder:validation:Required

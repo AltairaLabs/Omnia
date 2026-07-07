@@ -615,9 +615,10 @@ spec:
                   type: object
                   x-kubernetes-validations:
                   - message: set either the handler-level auth stanza or the legacy
-                      httpConfig/openAPIConfig authType, not both
-                    rule: '!(has(self.auth) && ((has(self.httpConfig) && has(self.httpConfig.authType))
-                      || (has(self.openAPIConfig) && has(self.openAPIConfig.authType))))'
+                      httpConfig/openAPIConfig authType/authSecretRef, not both
+                    rule: '!(has(self.auth) && ((has(self.httpConfig) && (has(self.httpConfig.authType)
+                      || has(self.httpConfig.authSecretRef))) || (has(self.openAPIConfig)
+                      && (has(self.openAPIConfig.authType) || has(self.openAPIConfig.authSecretRef)))))'
                 minItems: 1
                 type: array
             required:
