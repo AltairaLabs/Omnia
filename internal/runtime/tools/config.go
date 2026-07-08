@@ -251,6 +251,9 @@ type OpenAPICfg struct {
 	AuthType        string                  `json:"authType,omitempty" yaml:"authType,omitempty"`
 	AuthToken       string                  `json:"authToken,omitempty" yaml:"authToken,omitempty"`
 	AuthTokenPath   string                  `json:"authTokenPath,omitempty" yaml:"authTokenPath,omitempty"`
+	AuthHeader      string                  `json:"authHeader,omitempty" yaml:"authHeader,omitempty"`
+	AuthCloud       string                  `json:"authCloud,omitempty" yaml:"authCloud,omitempty"`
+	AuthAudience    string                  `json:"authAudience,omitempty" yaml:"authAudience,omitempty"`
 	RetryPolicy     *RuntimeHTTPRetryPolicy `json:"retryPolicy,omitempty" yaml:"retryPolicy,omitempty"`
 }
 

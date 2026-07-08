@@ -129,8 +129,19 @@ func (a *OpenAPIAdapter) setRequestHeaders(req *http.Request, hasBody bool, para
 	}
 }
 
-// setAuth sets authentication headers on a request.
+// setAuth sets authentication headers on a request. workloadIdentity is
+// matched case-sensitively (like buildHTTPHeaders) before falling into the
+// case-insensitive bearer/basic switch, since strings.ToLower would otherwise
+// never match the mixed-case authTypeWorkloadIdentity constant.
 func (a *OpenAPIAdapter) setAuth(req *http.Request) error {
+	if a.config.AuthType == authTypeWorkloadIdentity {
+		name, val, err := resolveWorkloadIdentityHeader(req.Context(), a.config.TokenAcquirer, a.config.AuthCloud, a.config.AuthAudience, a.config.AuthHeader)
+		if err != nil {
+			return err
+		}
+		req.Header.Set(name, val)
+		return nil
+	}
 	switch strings.ToLower(a.config.AuthType) {
 	case "bearer":
 		if a.config.AuthToken == "" {

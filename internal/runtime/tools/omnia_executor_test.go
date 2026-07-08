@@ -1726,6 +1726,78 @@ func TestOmniaExecutor_ExecuteOpenAPI_WithServer(t *testing.T) {
 	}
 }
 
+func TestOmniaExecutor_ExecuteOpenAPI_WorkloadIdentity(t *testing.T) {
+	var receivedAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"name":"alice"}`))
+	}))
+	defer srv.Close()
+
+	e := NewOmniaExecutor(logr.Discard(), nil)
+	e.tokenAcquirer = fakeAcquirer{tok: "wtok"}
+	e.openAPIOps["handler"] = map[string]*OpenAPIOperation{
+		"getUser": {
+			OperationID: "getUser",
+			Method:      "GET",
+			Path:        "/users/1",
+		},
+	}
+	e.openAPIBaseURLs["handler"] = srv.URL
+	e.openAPIHeaders["handler"] = map[string]string{}
+
+	handler := &HandlerEntry{
+		Name: "handler",
+		Type: ToolTypeOpenAPI,
+		OpenAPIConfig: &OpenAPICfg{
+			AuthType:     authTypeWorkloadIdentity,
+			AuthCloud:    cloudAzure,
+			AuthAudience: "api://tool",
+		},
+	}
+
+	result, err := e.executeOpenAPI(context.Background(), "getUser", "handler", handler, nil)
+	if err != nil {
+		t.Fatalf("executeOpenAPI: %v", err)
+	}
+	if !strings.Contains(string(result), "alice") {
+		t.Errorf("result = %s, want to contain 'alice'", result)
+	}
+	if receivedAuth != "Bearer wtok" {
+		t.Errorf("Authorization = %q, want %q", receivedAuth, "Bearer wtok")
+	}
+}
+
+func TestOmniaExecutor_ExecuteOpenAPI_WorkloadIdentity_NilAcquirerFailsLoud(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	e := NewOmniaExecutor(logr.Discard(), nil)
+	e.openAPIOps["handler"] = map[string]*OpenAPIOperation{
+		"getUser": {OperationID: "getUser", Method: "GET", Path: "/users/1"},
+	}
+	e.openAPIBaseURLs["handler"] = srv.URL
+	e.openAPIHeaders["handler"] = map[string]string{}
+
+	handler := &HandlerEntry{
+		Name: "handler",
+		Type: ToolTypeOpenAPI,
+		OpenAPIConfig: &OpenAPICfg{
+			AuthType:     authTypeWorkloadIdentity,
+			AuthCloud:    cloudAzure,
+			AuthAudience: "api://tool",
+		},
+	}
+
+	if _, err := e.executeOpenAPI(context.Background(), "getUser", "handler", handler, nil); err == nil {
+		t.Fatal("expected error when no tokenAcquirer is configured")
+	}
+}
+
 // --- initOpenAPIHandler nil config ---
 
 func TestOmniaExecutor_InitOpenAPIHandler_NilConfig(t *testing.T) {

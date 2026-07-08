@@ -53,6 +53,10 @@ func (e *OmniaExecutor) initOpenAPIHandler(ctx context.Context, name string, h *
 		Headers:         h.OpenAPIConfig.Headers,
 		AuthType:        h.OpenAPIConfig.AuthType,
 		AuthToken:       h.OpenAPIConfig.AuthToken,
+		AuthCloud:       h.OpenAPIConfig.AuthCloud,
+		AuthAudience:    h.OpenAPIConfig.AuthAudience,
+		AuthHeader:      h.OpenAPIConfig.AuthHeader,
+		TokenAcquirer:   e.tokenAcquirer,
 	}, e.log)
 
 	if err := adapter.Connect(ctx); err != nil {
@@ -100,6 +104,9 @@ func (e *OmniaExecutor) executeOpenAPI(
 	if handler.OpenAPIConfig != nil {
 		cfg.AuthType = handler.OpenAPIConfig.AuthType
 		cfg.AuthToken = handler.OpenAPIConfig.AuthToken
+		cfg.AuthCloud = handler.OpenAPIConfig.AuthCloud
+		cfg.AuthAudience = handler.OpenAPIConfig.AuthAudience
+		cfg.AuthHeader = handler.OpenAPIConfig.AuthHeader
 		cfg.RetryPolicy = handler.OpenAPIConfig.RetryPolicy
 	}
 

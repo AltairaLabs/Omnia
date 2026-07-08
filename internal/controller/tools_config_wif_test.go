@@ -38,12 +38,27 @@ func TestValidateHandlerAuth_AllowsAzureHTTPWIF(t *testing.T) {
 	}
 }
 
-func TestValidateHandlerAuth_RejectsOpenAPIWIF(t *testing.T) {
+func TestValidateHandlerAuth_AllowsOpenAPIWIF(t *testing.T) {
 	h := wifHTTPHandler()
 	h.Type = omniav1alpha1.HandlerTypeOpenAPI
 	h.HTTPConfig, h.OpenAPIConfig = nil, &omniav1alpha1.OpenAPIConfig{SpecURL: "http://x/spec"}
+	if err := validateHandlerAuth(&h); err != nil {
+		t.Fatalf("OpenAPI WIF should now be allowed: %v", err)
+	}
+}
+
+func TestValidateHandlerAuth_RejectsClientWIF(t *testing.T) {
+	// Client (browser) tools have no runtime-side backend request to attach a
+	// credential to — workloadIdentity can never apply. The CRD schema doesn't
+	// structurally forbid `auth` on a client handler (the XValidation only
+	// guards against combining the new stanza with the legacy http/openAPI
+	// authType fields), so this must be rejected at validateHandlerAuth via
+	// wifSupportedHandlerType.
+	h := wifHTTPHandler()
+	h.Type = omniav1alpha1.HandlerTypeClient
+	h.HTTPConfig, h.ClientConfig = nil, &omniav1alpha1.ClientToolConfig{}
 	if err := validateHandlerAuth(&h); err == nil {
-		t.Fatal("OpenAPI WIF should be rejected in this milestone (http only)")
+		t.Fatal("client WIF should be rejected (no backend request to authenticate)")
 	}
 }
 
@@ -160,12 +175,31 @@ func TestWifSupportedHandlerType(t *testing.T) {
 	}{
 		{omniav1alpha1.HandlerTypeHTTP, true},
 		{omniav1alpha1.HandlerTypeGRPC, true},
-		{omniav1alpha1.HandlerTypeOpenAPI, false},
+		{omniav1alpha1.HandlerTypeOpenAPI, true},
 		{omniav1alpha1.HandlerTypeMCP, true},
+		{omniav1alpha1.HandlerTypeClient, false},
 	}
 	for _, tc := range cases {
 		if got := wifSupportedHandlerType(tc.typ); got != tc.want {
 			t.Errorf("wifSupportedHandlerType(%v) = %v, want %v", tc.typ, got, tc.want)
 		}
+	}
+}
+
+func wifOpenAPIHandler() omniav1alpha1.HandlerDefinition {
+	h := wifHTTPHandler()
+	h.Type = omniav1alpha1.HandlerTypeOpenAPI
+	h.HTTPConfig, h.OpenAPIConfig = nil, &omniav1alpha1.OpenAPIConfig{SpecURL: "http://x/spec"}
+	return h
+}
+
+func TestBuildOpenAPIConfig_SetsWIFFields(t *testing.T) {
+	h := wifOpenAPIHandler()
+	cfg, err := buildOpenAPIConfig(&h)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.AuthType != string(omniav1alpha1.ToolAuthTypeWorkloadIdentity) || cfg.AuthCloud != "azure" || cfg.AuthAudience != "api://tool" {
+		t.Fatalf("WIF fields not set: %+v", cfg)
 	}
 }

@@ -152,9 +152,17 @@ func TestValidateToolAuthTypes(t *testing.T) {
 			t.Errorf("gRPC WIF should now be allowed: %v", err)
 		}
 	})
-	t.Run("workloadIdentity rejected on non-wif-supported handler", func(t *testing.T) {
+	t.Run("workloadIdentity on openapi is now allowed", func(t *testing.T) {
 		h := wiHandler("wi")
 		h.Type, h.HTTPConfig, h.OpenAPIConfig = omniav1alpha1.HandlerTypeOpenAPI, nil, &omniav1alpha1.OpenAPIConfig{SpecURL: "http://x/spec"}
+		tr := &omniav1alpha1.ToolRegistry{Spec: omniav1alpha1.ToolRegistrySpec{Handlers: []omniav1alpha1.HandlerDefinition{h}}}
+		if err := validateToolAuthTypes(tr); err != nil {
+			t.Errorf("OpenAPI WIF should now be allowed: %v", err)
+		}
+	})
+	t.Run("workloadIdentity rejected on non-wif-supported handler", func(t *testing.T) {
+		h := wiHandler("wi")
+		h.Type, h.HTTPConfig, h.ClientConfig = omniav1alpha1.HandlerTypeClient, nil, &omniav1alpha1.ClientToolConfig{}
 		tr := &omniav1alpha1.ToolRegistry{Spec: omniav1alpha1.ToolRegistrySpec{Handlers: []omniav1alpha1.HandlerDefinition{h}}}
 		err := validateToolAuthTypes(tr)
 		if err == nil || !strings.Contains(err.Error(), "not yet supported") {
