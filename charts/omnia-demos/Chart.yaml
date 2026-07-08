@@ -2,8 +2,8 @@ apiVersion: v2
 name: omnia-demos
 description: Demo agents and providers for Omnia - showcasing vision, audio, and tool capabilities
 type: application
-version: 0.1.0
-appVersion: "0.1.0"
+version: 0.9.0-beta.17
+appVersion: "0.9.0-beta.17"
 kubeVersion: ">=1.26.0-0"
 home: https://github.com/AltairaLabs/Omnia
 sources:
@@ -20,7 +20,6 @@ keywords:
   - demo
   - vision
   - audio
-
 annotations:
   artifacthub.io/prerelease: "true"
   artifacthub.io/license: Apache-2.0
