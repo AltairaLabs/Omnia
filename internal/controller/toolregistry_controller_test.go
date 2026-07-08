@@ -122,23 +122,20 @@ var _ = Describe("ToolRegistry Controller", func() {
 		})
 	})
 
-	Context("When reconciling a ToolRegistry with an unresolvable endpoint", func() {
+	Context("When reconciling a ToolRegistry with an invalid handler", func() {
 		var toolRegistry *omniav1alpha1.ToolRegistry
 
 		BeforeEach(func() {
-			By("creating the ToolRegistry with an MCP handler that cannot resolve an endpoint")
-			// streamable-http transport is a valid MCPTransport but validateHandler only
-			// requires an endpoint/command for sse/stdio, so this passes validation and
-			// then fails at endpoint resolution — exercising processHandlers' failure path.
+			By("creating a ToolRegistry with a streamable-http MCP handler missing its endpoint")
 			toolRegistry = &omniav1alpha1.ToolRegistry{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      "unresolvable-registry",
+					Name:      "invalid-registry",
 					Namespace: registryNamespace,
 				},
 				Spec: omniav1alpha1.ToolRegistrySpec{
 					Handlers: []omniav1alpha1.HandlerDefinition{
 						{
-							Name: "unresolvable-handler",
+							Name: "invalid-handler",
 							Type: omniav1alpha1.HandlerTypeMCP,
 							MCPConfig: &omniav1alpha1.MCPClientConfig{
 								Transport: omniav1alpha1.MCPTransportStreamableHTTP,
@@ -154,7 +151,7 @@ var _ = Describe("ToolRegistry Controller", func() {
 			By("cleaning up the ToolRegistry")
 			resource := &omniav1alpha1.ToolRegistry{}
 			err := k8sClient.Get(ctx, types.NamespacedName{
-				Name:      "unresolvable-registry",
+				Name:      "invalid-registry",
 				Namespace: registryNamespace,
 			}, resource)
 			if err == nil {
@@ -162,7 +159,7 @@ var _ = Describe("ToolRegistry Controller", func() {
 			}
 		})
 
-		It("should set tool as unavailable and phase as Failed", func() {
+		It("should set phase Failed and HandlersValid False", func() {
 			By("reconciling the ToolRegistry")
 			reconciler := &ToolRegistryReconciler{
 				Client: k8sClient,
@@ -171,7 +168,7 @@ var _ = Describe("ToolRegistry Controller", func() {
 
 			_, err := reconciler.Reconcile(ctx, reconcile.Request{
 				NamespacedName: types.NamespacedName{
-					Name:      "unresolvable-registry",
+					Name:      "invalid-registry",
 					Namespace: registryNamespace,
 				},
 			})
@@ -180,93 +177,63 @@ var _ = Describe("ToolRegistry Controller", func() {
 			By("checking the updated status")
 			updatedTR := &omniav1alpha1.ToolRegistry{}
 			Expect(k8sClient.Get(ctx, types.NamespacedName{
-				Name:      "unresolvable-registry",
+				Name:      "invalid-registry",
 				Namespace: registryNamespace,
 			}, updatedTR)).To(Succeed())
 
 			Expect(updatedTR.Status.Phase).To(Equal(omniav1alpha1.ToolRegistryPhaseFailed))
-			Expect(updatedTR.Status.DiscoveredToolsCount).To(Equal(int32(1)))
-			Expect(updatedTR.Status.DiscoveredTools[0].Status).To(Equal(omniav1alpha1.ToolStatusUnavailable))
-			Expect(updatedTR.Status.DiscoveredTools[0].Error).NotTo(BeNil())
-			Expect(*updatedTR.Status.DiscoveredTools[0].Error).To(ContainSubstring("no endpoint configured"))
+			Expect(updatedTR.Status.DiscoveredToolsCount).To(Equal(int32(0)))
+
+			By("checking the HandlersValid condition")
+			condition := meta.FindStatusCondition(updatedTR.Status.Conditions, ToolRegistryConditionTypeHandlersValid)
+			Expect(condition).NotTo(BeNil())
+			Expect(condition.Status).To(Equal(metav1.ConditionFalse))
+			Expect(condition.Message).To(ContainSubstring("endpoint is required"))
 		})
 	})
 
-	Context("When reconciling a ToolRegistry with mixed handler availability", func() {
-		var toolRegistry *omniav1alpha1.ToolRegistry
+	// determinePhase maps discovered-tool availability onto the registry phase.
+	// The Degraded / all-Unavailable paths depend on a tool being marked
+	// Unavailable, which today only the endpoint-resolution failure branch does
+	// (reserved for future probe-backed status — see the "wire tool probing into
+	// ToolRegistry status" follow-up). Exercise the mapping directly so the
+	// phase logic stays covered independent of how a tool becomes Unavailable.
+	Context("When determining phase from discovered tools", func() {
+		var reconciler *ToolRegistryReconciler
 
 		BeforeEach(func() {
-			By("creating the ToolRegistry with one available and one unavailable handler")
-			toolRegistry = &omniav1alpha1.ToolRegistry{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "mixed-registry",
-					Namespace: registryNamespace,
-				},
-				Spec: omniav1alpha1.ToolRegistrySpec{
-					Handlers: []omniav1alpha1.HandlerDefinition{
-						{
-							Name: "available-handler",
-							Type: omniav1alpha1.HandlerTypeHTTP,
-							HTTPConfig: &omniav1alpha1.HTTPConfig{
-								Endpoint: "https://api.example.com/available",
-							},
-							Tool: &omniav1alpha1.ToolDefinition{
-								Name:        "available_tool",
-								Description: "An available tool",
-								InputSchema: apiextensionsv1.JSON{
-									Raw: []byte(`{"type":"object"}`),
-								},
-							},
-						},
-						{
-							Name: "unavailable-handler",
-							Type: omniav1alpha1.HandlerTypeMCP,
-							MCPConfig: &omniav1alpha1.MCPClientConfig{
-								Transport: omniav1alpha1.MCPTransportStreamableHTTP,
-							},
-						},
-					},
-				},
-			}
-			Expect(k8sClient.Create(ctx, toolRegistry)).To(Succeed())
-		})
-
-		AfterEach(func() {
-			By("cleaning up the ToolRegistry")
-			resource := &omniav1alpha1.ToolRegistry{}
-			err := k8sClient.Get(ctx, types.NamespacedName{
-				Name:      "mixed-registry",
-				Namespace: registryNamespace,
-			}, resource)
-			if err == nil {
-				Expect(k8sClient.Delete(ctx, resource)).To(Succeed())
-			}
-		})
-
-		It("should set phase as Degraded", func() {
-			By("reconciling the ToolRegistry")
-			reconciler := &ToolRegistryReconciler{
+			reconciler = &ToolRegistryReconciler{
 				Client: k8sClient,
 				Scheme: k8sClient.Scheme(),
 			}
+		})
 
-			_, err := reconciler.Reconcile(ctx, reconcile.Request{
-				NamespacedName: types.NamespacedName{
-					Name:      "mixed-registry",
-					Namespace: registryNamespace,
-				},
+		It("returns Ready when all tools are available", func() {
+			phase := reconciler.determinePhase([]omniav1alpha1.DiscoveredTool{
+				{Name: "a", Status: omniav1alpha1.ToolStatusAvailable},
+				{Name: "b", Status: omniav1alpha1.ToolStatusAvailable},
 			})
-			Expect(err).NotTo(HaveOccurred())
+			Expect(phase).To(Equal(omniav1alpha1.ToolRegistryPhaseReady))
+		})
 
-			By("checking the updated status")
-			updatedTR := &omniav1alpha1.ToolRegistry{}
-			Expect(k8sClient.Get(ctx, types.NamespacedName{
-				Name:      "mixed-registry",
-				Namespace: registryNamespace,
-			}, updatedTR)).To(Succeed())
+		It("returns Degraded when some tools are unavailable", func() {
+			phase := reconciler.determinePhase([]omniav1alpha1.DiscoveredTool{
+				{Name: "a", Status: omniav1alpha1.ToolStatusAvailable},
+				{Name: "b", Status: omniav1alpha1.ToolStatusUnavailable},
+			})
+			Expect(phase).To(Equal(omniav1alpha1.ToolRegistryPhaseDegraded))
+		})
 
-			Expect(updatedTR.Status.Phase).To(Equal(omniav1alpha1.ToolRegistryPhaseDegraded))
-			Expect(updatedTR.Status.DiscoveredToolsCount).To(Equal(int32(2)))
+		It("returns Failed when all tools are unavailable", func() {
+			phase := reconciler.determinePhase([]omniav1alpha1.DiscoveredTool{
+				{Name: "a", Status: omniav1alpha1.ToolStatusUnavailable},
+			})
+			Expect(phase).To(Equal(omniav1alpha1.ToolRegistryPhaseFailed))
+		})
+
+		It("returns Failed when no tools are discovered", func() {
+			phase := reconciler.determinePhase(nil)
+			Expect(phase).To(Equal(omniav1alpha1.ToolRegistryPhaseFailed))
 		})
 	})
 
@@ -485,10 +452,52 @@ var _ = Describe("ToolRegistry Controller", func() {
 			Expect(err.Error()).To(ContainSubstring("unknown handler type"))
 		})
 
-		It("should accept client handler without server config", func() {
+		It("should accept client handler with a tool and no server config", func() {
 			handler := &omniav1alpha1.HandlerDefinition{
 				Name: "client-tool",
 				Type: omniav1alpha1.HandlerTypeClient,
+				Tool: &omniav1alpha1.ToolDefinition{
+					Name:        "read_location",
+					Description: "Read the browser location",
+					InputSchema: apiextensionsv1.JSON{Raw: []byte(`{"type":"object"}`)},
+				},
+			}
+			err := reconciler.validateHandler(handler)
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("should reject client handler without tool definition", func() {
+			handler := &omniav1alpha1.HandlerDefinition{
+				Name: "client-no-tool",
+				Type: omniav1alpha1.HandlerTypeClient,
+			}
+			err := reconciler.validateHandler(handler)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("tool definition is required for client handlers"))
+		})
+
+		It("should reject MCP streamable-http handler without endpoint", func() {
+			handler := &omniav1alpha1.HandlerDefinition{
+				Name: "mcp-streamable-no-endpoint",
+				Type: omniav1alpha1.HandlerTypeMCP,
+				MCPConfig: &omniav1alpha1.MCPClientConfig{
+					Transport: omniav1alpha1.MCPTransportStreamableHTTP,
+				},
+			}
+			err := reconciler.validateHandler(handler)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("endpoint is required for mcp handlers with streamable-http transport"))
+		})
+
+		It("should accept MCP streamable-http handler with endpoint", func() {
+			endpoint := "http://mcp-server/mcp"
+			handler := &omniav1alpha1.HandlerDefinition{
+				Name: "mcp-streamable",
+				Type: omniav1alpha1.HandlerTypeMCP,
+				MCPConfig: &omniav1alpha1.MCPClientConfig{
+					Transport: omniav1alpha1.MCPTransportStreamableHTTP,
+					Endpoint:  &endpoint,
+				},
 			}
 			err := reconciler.validateHandler(handler)
 			Expect(err).NotTo(HaveOccurred())

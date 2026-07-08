@@ -117,6 +117,11 @@ func (r *ToolRegistryReconciler) processHandlers(ctx context.Context, toolRegist
 		}
 
 		// Resolve the handler endpoint from its type-specific config.
+		// A validated handler always resolves to an endpoint, so this failure
+		// branch is currently unreachable; it is retained as the wiring point
+		// for future probe-backed status (marking a reachable-but-unhealthy tool
+		// Unavailable → Degraded). See the "wire tool probing into ToolRegistry
+		// status" follow-up.
 		endpoint, err := r.resolveEndpoint(ctx, toolRegistry, &h)
 		if err != nil {
 			log.Error(err, "Failed to resolve endpoint", "handler", h.Name)
@@ -172,12 +177,21 @@ func (r *ToolRegistryReconciler) validateHandler(h *omniav1alpha1.HandlerDefinit
 		if h.MCPConfig.Transport == omniav1alpha1.MCPTransportSSE && h.MCPConfig.Endpoint == nil {
 			return fmt.Errorf("endpoint is required for mcp handlers with SSE transport")
 		}
+		if h.MCPConfig.Transport == omniav1alpha1.MCPTransportStreamableHTTP && h.MCPConfig.Endpoint == nil {
+			return fmt.Errorf("endpoint is required for mcp handlers with streamable-http transport")
+		}
 		if h.MCPConfig.Transport == omniav1alpha1.MCPTransportStdio && h.MCPConfig.Command == nil {
 			return fmt.Errorf("command is required for mcp handlers with stdio transport")
 		}
 	case omniav1alpha1.HandlerTypeOpenAPI:
 		if h.OpenAPIConfig == nil {
 			return fmt.Errorf("openAPIConfig is required for openapi handlers")
+		}
+	case omniav1alpha1.HandlerTypeClient:
+		// Client handlers execute in the browser but still declare their tool
+		// interface (name/description/inputSchema) like http/grpc handlers.
+		if h.Tool == nil {
+			return fmt.Errorf("tool definition is required for client handlers")
 		}
 	}
 
