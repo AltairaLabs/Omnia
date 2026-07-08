@@ -18,6 +18,9 @@ metadata:
   labels:
     app.kubernetes.io/name: mock-agent-with-media
     app.kubernetes.io/component: agent
+  annotations:
+    # Point the mock provider at the mounted mock-response config (see volumes below)
+    omnia.altairalabs.ai/mock-config-path: /etc/omnia/mock/responses.yaml
 spec:
   # Reference to a PromptPack containing agent prompts
   promptPackRef:
