@@ -62,6 +62,12 @@ log "Installing operator from ${CHART_REF}"
 # + csi-driver-nfs so it provisions the `omnia-nfs` RWX StorageClass the PVC
 # auto-binds to (the dev-storage path the values document). Production installs
 # supply a cloud RWX class (Azure Files / EFS / Filestore) instead.
+#
+# --burst-limit/--qps raise helm's client-side throttle above its 100-burst
+# default: the chart creates many large CRDs and `--wait` then polls every
+# resource, and on a cold CI k3d (slow API + fresh image pulls) the default
+# limiter's queue backs up until the timeout fires as "client rate limiter
+# Wait ... context deadline exceeded" — even though the install itself is fine.
 helm install omnia "${CHART_REF}" \
 	"${VERSION_ARGS[@]}" \
 	--namespace "${NS_SYSTEM}" --create-namespace \
@@ -69,6 +75,7 @@ helm install omnia "${CHART_REF}" \
 	--set dashboard.auth.sessionSecret="${SESSION_SECRET}" \
 	--set nfs.server.enabled=true \
 	--set nfs.csiDriver.enabled=true \
+	--burst-limit 500 --qps 50 \
 	--wait --timeout "${HELM_TIMEOUT}"
 
 log "Waiting for omnia-system deployments + CRDs"
