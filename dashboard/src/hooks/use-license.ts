@@ -21,7 +21,9 @@ const LICENSE_REFRESH_INTERVAL = 5 * 60 * 1000; // 5 minutes
  * Fetcher function for license data.
  */
 async function fetcher(): Promise<License> {
-  const response = await fetch("/api/license");
+  // no-store so a license change is reflected on refetch instead of the browser
+  // serving a stale cached response.
+  const response = await fetch("/api/license", { cache: "no-store" });
   if (!response.ok) {
     throw new Error("Failed to fetch license");
   }

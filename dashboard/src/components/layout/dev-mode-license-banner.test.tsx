@@ -14,6 +14,11 @@ vi.mock("@/hooks/core", () => ({
   useDevMode: () => mockUseDevMode(),
 }));
 
+const mockUseLicense = vi.fn();
+vi.mock("@/hooks/auth", () => ({
+  useLicense: () => mockUseLicense(),
+}));
+
 const BRAND: BrandConfig = {
   ...OMNIA_BRAND,
   productName: "Acme Cloud",
@@ -29,10 +34,21 @@ function renderBanner(brand: BrandConfig) {
 }
 
 describe("DevModeLicenseBanner", () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // Default: actually running the synthetic dev license.
+    mockUseLicense.mockReturnValue({ license: { id: "dev-mode" } });
+  });
 
   it("renders nothing when not in dev mode", () => {
     mockUseDevMode.mockReturnValue({ isDevMode: false, loading: false });
+    const { container } = renderBanner(BRAND);
+    expect(container).toBeEmptyDOMElement();
+  });
+
+  it("renders nothing when a real license is installed, even in dev mode", () => {
+    mockUseDevMode.mockReturnValue({ isDevMode: true, loading: false });
+    mockUseLicense.mockReturnValue({ license: { id: "ent_real_customer_123" } });
     const { container } = renderBanner(BRAND);
     expect(container).toBeEmptyDOMElement();
   });
