@@ -5,7 +5,7 @@ sidebar:
   order: 8
 ---
 
-This guide covers creating workspaces, configuring access control, and setting resource quotas for multi-tenant deployments.
+This guide covers creating workspaces, configuring access control, and setting network isolation for multi-tenant deployments.
 
 ## Prerequisites
 
@@ -15,7 +15,7 @@ This guide covers creating workspaces, configuring access control, and setting r
 
 ## Create a workspace
 
-A workspace provides an isolated environment for a team with its own namespace, RBAC, and resource quotas.
+A workspace provides an isolated environment for a team with its own namespace, RBAC, and network isolation.
 
 ### Basic workspace
 
@@ -57,12 +57,49 @@ status:
   phase: Ready
   namespace:
     name: omnia-my-team
-    created: true
   serviceAccounts:
-    owner: my-team-owner
-    editor: my-team-editor
-    viewer: my-team-viewer
+    owner: workspace-my-team-owner-sa
+    editor: workspace-my-team-editor-sa
+    viewer: workspace-my-team-viewer-sa
 ```
+
+:::caution[A Ready workspace is only visible to users who have access to it]
+The dashboard lists only the workspaces the **current user resolves to a role on**. A
+workspace with no `roleBindings`, `directGrants`, or `anonymousAccess` reconciles to
+`Ready` but is visible to **nobody** — an empty dashboard almost always means "no access",
+not "no workspace". Confirm what the API actually serves for the current user with
+`curl http://localhost:3000/api/workspaces` (an empty `{"workspaces":[],"count":0}` is the
+"no access" signal).
+
+The controller computes each user's role from three sources, matched against the identity
+and **group claims** the dashboard's authentication establishes for the request:
+
+- **`roleBindings`** — map IdP **group** names to a role; the user's group claims must
+  exactly match a binding's `groups` (see [Role bindings](#role-bindings-with-idp-groups)).
+- **`directGrants`** — grant a role to a specific user identity, with optional expiry
+  (see [Direct user grants](#direct-user-grants)).
+- **`anonymousAccess`** — applies only when the dashboard runs in anonymous mode.
+
+Which identity and groups a request carries depends on how the dashboard is authenticated,
+so configure that first, then make your `roleBindings.groups` match the group names your IdP
+emits:
+
+- **Production:** configure [dashboard authentication](/how-to/security/configure-dashboard-auth/)
+  (proxy or OAuth mode) so users arrive with an identity and IdP group claims, and
+  [agent authentication](/how-to/security/configure-authentication/) for programmatic
+  callers. For scoped machine access, see
+  [Durable API keys → scope a key to workspaces](/how-to/security/api-keys/#scope-a-key-to-workspaces).
+- **Local dev only** (`dashboard.auth.mode=anonymous`, the mode the Tilt/dev stack ships):
+  there is no real identity, so grant the anonymous user access explicitly to see the
+  workspace:
+
+  ```yaml
+  spec:
+    anonymousAccess:
+      enabled: true
+      role: owner   # never in production — anyone reaching the dashboard gets this role
+  ```
+:::
 
 ## Configure access control
 
@@ -153,58 +190,40 @@ spec:
 Never enable anonymous access with `editor` or `owner` roles in production. Anonymous users could modify or delete resources.
 :::
 
-## Configure resource quotas
+## Limit resource usage
 
-### Compute quotas
+:::note
+The Workspace controller does **not** currently manage resource quotas or budgets. The
+`spec` has no `quotas` field — applying one is rejected by the API server with
+`strict decoding error: unknown field "spec.quotas"`. Tracking enforcement is
+[issue #1781](https://github.com/AltairaLabs/Omnia/issues/1781).
+:::
 
-Limit CPU and memory usage:
+Until workspace-native quotas land, apply a standard Kubernetes
+[`ResourceQuota`](https://kubernetes.io/docs/concepts/policy/resource-quotas/) directly to
+the workspace namespace. The controller creates the namespace for you (see above), so you
+can quota it like any other namespace:
 
 ```yaml
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: workspace-limits
+  namespace: omnia-customer-support  # Workspace namespace
 spec:
-  quotas:
-    compute:
-      requests.cpu: "50"
-      requests.memory: "100Gi"
-      limits.cpu: "100"
-      limits.memory: "200Gi"
+  hard:
+    requests.cpu: "50"
+    requests.memory: "100Gi"
+    limits.cpu: "100"
+    limits.memory: "200Gi"
+    configmaps: "100"
+    secrets: "50"
+    persistentvolumeclaims: "20"
 ```
 
-### Object quotas
-
-Limit the number of Kubernetes objects:
-
-```yaml
-spec:
-  quotas:
-    objects:
-      configmaps: 100
-      secrets: 50
-      persistentvolumeclaims: 20
-```
-
-### Agent quotas
-
-Control AgentRuntime deployments:
-
-```yaml
-spec:
-  quotas:
-    agents:
-      maxAgentRuntimes: 20
-      maxReplicasPerAgent: 10
-```
-
-### Arena quotas
-
-Limit Arena evaluation jobs:
-
-```yaml
-spec:
-  quotas:
-    arena:
-      maxConcurrentJobs: 10
-      maxJobsPerDay: 100
-      maxWorkersPerJob: 50
+```bash
+kubectl apply -f resourcequota.yaml
+kubectl describe resourcequota workspace-limits -n omnia-customer-support
 ```
 
 ## Set environment and tags
@@ -355,9 +374,25 @@ spec:
 
 The controller will automatically delete the NetworkPolicy.
 
+## Provide session and memory backends
+
+A workspace's namespace and RBAC don't give its agents anywhere to persist conversations or
+memory — that comes from a **service group** (`spec.services[]`), which provisions the
+session-api and memory-api the agents use.
+
+:::caution
+Without a ready service group, agents still start but **silently fall back to a
+non-persistent in-memory session store** — no session history, tokens, cost, or memory. Most
+real workspaces need a group named `default`.
+:::
+
+Setting this up (database secrets, managed vs external mode, pointing agents at a group) is
+covered in its own guide: **[Configure workspace service groups](/how-to/workspaces/configure-service-groups/)**.
+
 ## Deploy resources to a workspace
 
-Once your workspace is ready, deploy agents to its namespace:
+Once your workspace is ready — and its service group is provisioned — deploy agents to its
+namespace:
 
 ```yaml
 apiVersion: omnia.altairalabs.ai/v1alpha1
@@ -366,6 +401,7 @@ metadata:
   name: support-bot
   namespace: omnia-customer-support  # Workspace namespace
 spec:
+  serviceGroup: default              # session/memory backend (see service groups guide)
   promptPackRef:
     name: support-prompts
   providers:
@@ -442,26 +478,6 @@ spec:
           namespace: argocd
       role: editor
 
-  quotas:
-    compute:
-      requests.cpu: "50"
-      requests.memory: "100Gi"
-      limits.cpu: "100"
-      limits.memory: "200Gi"
-
-    objects:
-      configmaps: 100
-      secrets: 50
-      persistentvolumeclaims: 20
-
-    agents:
-      maxAgentRuntimes: 20
-      maxReplicasPerAgent: 10
-
-    arena:
-      maxConcurrentJobs: 10
-      maxJobsPerDay: 100
-
   networkPolicy:
     isolate: true
     allowFrom:
@@ -511,10 +527,13 @@ spec:
 
 **Symptom:** Cannot create new resources
 
+Quotas are not managed by the Workspace controller; if you applied a native
+`ResourceQuota` to the namespace (see [Limit resource usage](#limit-resource-usage)):
+
 **Check:**
 1. View current usage: `kubectl describe resourcequota -n omnia-customer-support`
-2. Review workspace quota settings
-3. Clean up unused resources or increase quotas
+2. Review the `ResourceQuota` `spec.hard` limits
+3. Clean up unused resources or raise the limits
 
 ### Network connectivity issues
 
@@ -552,6 +571,7 @@ wget -qO- https://api.anthropic.com  # Test external access
 
 ## Next steps
 
+- [Configure workspace service groups](/how-to/workspaces/configure-service-groups/) - Provision the session/memory backends agents need
 - [Multi-Tenancy Architecture](/explanation/platform/multi-tenancy/) - Understand workspace isolation
 - [Configure Dashboard Authentication](/how-to/security/configure-dashboard-auth/) - Set up OIDC
 - [Workspace CRD Reference](/reference/core/workspace/) - Complete field reference
