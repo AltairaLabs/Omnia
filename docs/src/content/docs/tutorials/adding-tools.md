@@ -83,10 +83,10 @@ spec:
   handlers:
     - name: calculator
       type: http
-      endpoint:
-        serviceRef:
-          name: calculator
-          port: 80
+      httpConfig:
+        endpoint: "http://calculator.default.svc.cluster.local:80/calculate"
+        method: POST
+        contentType: application/json
       tool:
         name: calculate
         description: "Perform mathematical calculations"
@@ -97,9 +97,6 @@ spec:
               type: string
               description: "Mathematical expression to evaluate"
           required: [expression]
-      httpConfig:
-        method: POST
-        contentType: application/json
       timeout: "10s"
 ```
 
@@ -123,17 +120,23 @@ You should see the status showing discovered tools:
 status:
   phase: Ready
   discoveredToolsCount: 1
-  availableToolsCount: 1
   discoveredTools:
     - handlerName: calculator
       name: calculate
       status: Available
+      endpoint: http://calculator.default.svc.cluster.local:80/calculate
   conditions:
-    - type: HandlersAvailable
+    - type: HandlersValid
       status: "True"
-    - type: AllHandlersReady
+    - type: ToolsDiscovered
       status: "True"
 ```
+
+:::note[`Ready` means the config is valid, not that the backend is reachable]
+The controller does not probe the tool endpoint — it marks the tool `Available`
+when the handler config validates and the endpoint resolves. A `Ready`
+ToolRegistry can still point at a service that is down.
+:::
 
 ## Step 4: connect tools to your agent
 
@@ -158,9 +161,10 @@ spec:
     ttl: "1h"
   runtime:
     replicas: 1
-  provider:
-    secretRef:
-      name: llm-credentials
+  providers:
+    - name: default
+      providerRef:
+        name: my-provider   # a Provider CRD (see the Provider reference)
 ```
 
 Apply the update:
@@ -249,8 +253,9 @@ spec:
     # Explicit HTTP tool
     - name: search
       type: http
-      endpoint:
-        url: https://api.search.com/query
+      httpConfig:
+        endpoint: https://api.search.com/query
+        method: POST
       tool:
         name: web_search
         description: "Search the web"
@@ -260,8 +265,6 @@ spec:
             query:
               type: string
           required: [query]
-      httpConfig:
-        method: POST
 
     # Self-describing MCP server
     - name: code-assistant
@@ -279,7 +282,13 @@ spec:
 
 ## Tool discovery via labels
 
-You can also discover tool services via Kubernetes labels:
+You can also discover a tool's backing Service via Kubernetes labels instead of
+hard-coding the endpoint. When a `selector` matches a Service, the resolved
+Service address **overrides** the `httpConfig.endpoint` value.
+
+Because `http` handlers still require a `type`, an `httpConfig` block (whose
+`endpoint` is schema-required), and a `tool` definition, you supply a
+**placeholder** endpoint that the selector then overrides:
 
 ```yaml
 apiVersion: omnia.altairalabs.ai/v1alpha1
@@ -289,13 +298,24 @@ metadata:
 spec:
   handlers:
     - name: platform-tools
+      type: http
       selector:
         matchLabels:
           omnia.altairalabs.ai/tool: "true"
           team: platform
+        port: "http"
+      httpConfig:
+        endpoint: "http://placeholder.invalid"   # ignored once the selector resolves a Service
+        method: POST
+      tool:
+        name: platform_action
+        description: "Invoke the platform tool"
+        inputSchema:
+          type: object
 ```
 
-Services matching the selector are automatically added. Annotate your services to customize behavior:
+The first Service matching the selector is used. Annotate it to set the request
+path:
 
 ```yaml
 apiVersion: v1
@@ -307,16 +327,18 @@ metadata:
     team: platform
   annotations:
     omnia.altairalabs.ai/tool-path: "/api/action"
-    omnia.altairalabs.ai/tool-description: "Perform custom action"
 spec:
   selector:
     app: my-tool
   ports:
-    - port: 80
+    - name: http
+      port: 80
 ```
 
 ## Next steps
 
 - Read the [ToolRegistry Reference](/reference/core/toolregistry/) for all configuration options
-- Learn about [configuring authentication](/how-to/security/configure-authentication/) for tool access
+- [Authenticate tools](/how-to/tools/authenticate-tools/) — bearer/basic secrets, projected ServiceAccount tokens, and the secret-handling model
+- Build [advanced HTTP tools](/how-to/tools/advanced-http-tools/) — URL templates, static injection, request/response mapping, redaction, and retry policies
+- Add [client-side (browser) tools](/how-to/tools/client-tools/) with user consent
 - Explore [observability](/how-to/observability/setup-observability/) to monitor tool calls
