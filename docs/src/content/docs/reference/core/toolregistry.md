@@ -102,7 +102,6 @@ Common fields for all handler types:
 | `mcpConfig` | object | Conditional | Required when `type: mcp` |
 | `openAPIConfig` | object | Conditional | Required when `type: openapi` |
 | `clientConfig` | object | No | Optional consent configuration for `type: client` |
-| `selector` | object | No | Discover the endpoint from a Kubernetes Service (see [Service discovery](#service-discovery)) |
 | `auth` | object | No | How the runtime authenticates to the backend (see [Authenticating tools](/how-to/tools/authenticate-tools/)) |
 | `timeout` | string | No | Per-invocation wall-clock timeout. Defaults to `30s` |
 
@@ -342,61 +341,6 @@ like HTTP/gRPC handlers, plus optional consent configuration. See
       type: object
 ```
 
-## Service discovery
-
-Instead of a hard-coded endpoint, a handler can discover its backing Kubernetes
-Service via a **label selector**. When `selector` is set, the resolved Service
-endpoint **overrides** the endpoint in the type-specific config block.
-
-:::caution[`http`/`grpc` selector handlers still need their config block and `tool`]
-Handler validation still requires `httpConfig` (for `http`) or `grpcConfig` (for
-`grpc`) and a `tool` definition even when you use a `selector`. Because
-`httpConfig.endpoint` / `grpcConfig.endpoint` are schema-required, you must
-supply a **placeholder** endpoint — it is ignored once the selector resolves a
-Service. There is no name-based `serviceRef`; discovery is label-based only.
-:::
-
-```yaml
-- name: platform-weather
-  type: http
-  selector:
-    matchLabels:
-      omnia.altairalabs.ai/tool: "true"
-      team: platform
-    port: "http"          # optional: Service port name; defaults to the first port
-  httpConfig:
-    endpoint: "http://placeholder.invalid"   # required by schema, ignored when the selector resolves
-    method: GET
-  tool:
-    name: get_weather
-    description: "Get the weather forecast"
-    inputSchema:
-      type: object
-      properties:
-        city:
-          type: string
-      required: [city]
-```
-
-### ServiceSelector fields
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `matchLabels` | map | Labels the Service must carry |
-| `namespace` | string | Namespace to search (defaults to the ToolRegistry's namespace) |
-| `port` | string | Service **port name** to use (defaults to the first port) |
-
-The first matching Service is used. The resolved endpoint is
-`<protocol>://<service>.<namespace>.svc.cluster.local:<port><path>`, where
-`<path>` comes from the `omnia.altairalabs.ai/tool-path` annotation on the
-Service (if present).
-
-### Service annotations
-
-| Annotation | Description | Default |
-|------------|-------------|---------|
-| `omnia.altairalabs.ai/tool-path` | Path appended to the resolved endpoint | `` (empty) |
-
 ## Status fields
 
 ### `phase`
@@ -407,7 +351,7 @@ Current phase of the ToolRegistry:
 |-------|-------------|
 | `Pending` | Initial state before the first reconcile completes |
 | `Ready` | Every discovered tool is `Available` |
-| `Degraded` | Some tools are `Unavailable` (e.g. a selector matched no Service) |
+| `Degraded` | Some tools are `Unavailable` (e.g. one handler's endpoint is unconfigured while others resolve successfully) |
 | `Failed` | A handler failed validation, or no tools were discovered |
 
 :::note[Status is config-level, not a live health check]

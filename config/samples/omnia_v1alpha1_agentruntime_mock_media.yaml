@@ -4,6 +4,14 @@
 # 2. Mount a PVC for media files (images, audio, etc.)
 # 3. Mount a ConfigMap for mock response configuration
 apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: Provider
+metadata:
+  name: mock-provider
+spec:
+  type: mock
+  model: mock
+---
+apiVersion: omnia.altairalabs.ai/v1alpha1
 kind: AgentRuntime
 metadata:
   name: mock-agent-with-media
@@ -21,11 +29,10 @@ spec:
     - type: websocket
 
   # Mock provider for testing without real LLM API calls
-  provider:
-    type: mock
-    additionalConfig:
-      # Path to mock response configuration file
-      mock_config: /etc/omnia/mock/responses.yaml
+  providers:
+    - name: default
+      providerRef:
+        name: mock-provider
 
   # Media configuration for mock:// URL resolution
   media:
