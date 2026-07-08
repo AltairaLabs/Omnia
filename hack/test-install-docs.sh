@@ -12,8 +12,11 @@ CHART_REF="${CHART_REF:-oci://ghcr.io/altairalabs/charts/omnia}"
 CLUSTER_NAME="${CLUSTER_NAME:-omnia-install-test}"
 # Timeouts are env-overridable so slower environments (e.g. emulated nodes) can
 # extend them without editing the script. Defaults suit a native CI runner.
-HELM_TIMEOUT="${HELM_TIMEOUT:-5m}"
-WAIT_TIMEOUT="${WAIT_TIMEOUT:-300s}"
+# The internal NFS server + csi-driver-nfs (enabled below to satisfy the
+# workspace-content RWX requirement) adds pod startup + PV provisioning time
+# over a bare install, so the default is a little roomier than a no-storage run.
+HELM_TIMEOUT="${HELM_TIMEOUT:-8m}"
+WAIT_TIMEOUT="${WAIT_TIMEOUT:-480s}"
 NS_SYSTEM="omnia-system"
 NS_APP="default"
 SESSION_SECRET="smoke-test-only-not-a-real-secret-0000000"
@@ -53,11 +56,19 @@ if [ -n "${CHART_VERSION:-}" ]; then
 fi
 
 log "Installing operator from ${CHART_REF}"
+# workspace-content is a ReadWriteMany PVC the operator mounts; k3d's default
+# local-path StorageClass is RWO-only and rejects RWX, leaving the PVC Pending
+# and the operator unschedulable. Enable the chart's bundled internal NFS server
+# + csi-driver-nfs so it provisions the `omnia-nfs` RWX StorageClass the PVC
+# auto-binds to (the dev-storage path the values document). Production installs
+# supply a cloud RWX class (Azure Files / EFS / Filestore) instead.
 helm install omnia "${CHART_REF}" \
 	"${VERSION_ARGS[@]}" \
 	--namespace "${NS_SYSTEM}" --create-namespace \
 	--set dashboard.auth.mode=builtin \
 	--set dashboard.auth.sessionSecret="${SESSION_SECRET}" \
+	--set nfs.server.enabled=true \
+	--set nfs.csiDriver.enabled=true \
 	--wait --timeout "${HELM_TIMEOUT}"
 
 log "Waiting for omnia-system deployments + CRDs"
