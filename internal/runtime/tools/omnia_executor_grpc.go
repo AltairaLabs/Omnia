@@ -211,7 +211,11 @@ func (e *OmniaExecutor) resolveGRPCAuth(ctx context.Context, cfg *GRPCCfg) (stri
 		}
 		return strings.ToLower(name), val, nil
 	}
-	val, err := authorizationValue(cfg.AuthType, cfg.AuthToken)
+	tok, err := freshAuthToken(cfg.AuthType, cfg.AuthToken, cfg.AuthTokenPath)
+	if err != nil {
+		return "", "", err
+	}
+	val, err := authorizationValue(cfg.AuthType, tok)
 	if err != nil {
 		return "", "", err
 	}

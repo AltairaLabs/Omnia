@@ -53,6 +53,7 @@ func (e *OmniaExecutor) initOpenAPIHandler(ctx context.Context, name string, h *
 		Headers:         h.OpenAPIConfig.Headers,
 		AuthType:        h.OpenAPIConfig.AuthType,
 		AuthToken:       h.OpenAPIConfig.AuthToken,
+		AuthTokenPath:   h.OpenAPIConfig.AuthTokenPath,
 		AuthCloud:       h.OpenAPIConfig.AuthCloud,
 		AuthAudience:    h.OpenAPIConfig.AuthAudience,
 		AuthHeader:      h.OpenAPIConfig.AuthHeader,

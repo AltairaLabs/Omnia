@@ -93,11 +93,18 @@ func (e *OmniaExecutor) buildMCPTransport(cfg *MCPCfg) (mcp.Transport, error) {
 		tr.acquirer = e.tokenAcquirer
 		tr.wifCloud, tr.wifAudience, tr.wifHeader = cfg.AuthCloud, cfg.AuthAudience, cfg.AuthHeader
 	} else {
-		authHeader, err := authorizationValue(cfg.AuthType, cfg.AuthToken)
+		// Validate the credential is well-formed at init (fail fast), but store
+		// the source so RoundTrip re-reads it per request: a projected
+		// serviceAccount token file rotates before its ~1h expiry and this
+		// transport outlives it, so a value pre-computed here would go stale.
+		tok, err := freshAuthToken(cfg.AuthType, cfg.AuthToken, cfg.AuthTokenPath)
 		if err != nil {
 			return nil, fmt.Errorf("MCP tool auth: %w", err)
 		}
-		tr.authHeader = authHeader
+		if _, err := authorizationValue(cfg.AuthType, tok); err != nil {
+			return nil, fmt.Errorf("MCP tool auth: %w", err)
+		}
+		tr.authType, tr.authToken, tr.authTokenPath = cfg.AuthType, cfg.AuthToken, cfg.AuthTokenPath
 	}
 	switch MCPTransportType(cfg.Transport) {
 	case MCPTransportSSE:
@@ -143,9 +150,12 @@ func (e *OmniaExecutor) buildMCPTransport(cfg *MCPCfg) (mcp.Transport, error) {
 // transport.
 type injectedHeaderTransport struct {
 	base http.RoundTripper
-	// authHeader is the pre-computed static tool-credential Authorization value
-	// ("Bearer <token>"/"Basic <...>"), or "" when the handler has no static auth.
-	authHeader string
+	// bearer/basic tool credential source, resolved per-request in RoundTrip so a
+	// rotated Secret or a refreshed projected serviceAccount token (expires ~1h)
+	// is picked up. Empty authType means the handler has no static auth.
+	authType      string
+	authToken     string
+	authTokenPath string
 	// WIF fields (set only for auth.type workloadIdentity): the token is
 	// acquired per-request in RoundTrip because it expires and the transport
 	// outlives it.
@@ -174,14 +184,28 @@ func (t *injectedHeaderTransport) RoundTrip(req *http.Request) (*http.Response, 
 		wifName, wifVal = n, v
 	}
 
+	// Resolve the bearer/basic credential fresh so a rotated Secret or refreshed
+	// projected serviceAccount token is used, not a value cached at handler init.
+	var authHeader string
+	if t.authType != "" {
+		tok, err := freshAuthToken(t.authType, t.authToken, t.authTokenPath)
+		if err != nil {
+			return nil, fmt.Errorf("MCP tool auth: %w", err)
+		}
+		authHeader, err = authorizationValue(t.authType, tok)
+		if err != nil {
+			return nil, fmt.Errorf("MCP tool auth: %w", err)
+		}
+	}
+
 	headers := InjectedHeadersFromContext(req.Context())
-	if t.authHeader == "" && wifVal == "" && len(headers) == 0 {
+	if authHeader == "" && wifVal == "" && len(headers) == 0 {
 		return base.RoundTrip(req)
 	}
 
 	req = req.Clone(req.Context())
-	if t.authHeader != "" {
-		req.Header.Set("Authorization", t.authHeader)
+	if authHeader != "" {
+		req.Header.Set("Authorization", authHeader)
 	}
 	if wifVal != "" {
 		req.Header.Set(wifName, wifVal)

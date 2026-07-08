@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
 )
 
@@ -46,5 +47,44 @@ func TestBuildHTTPHeaders_WIFFailsLoud(t *testing.T) {
 	cfg := &HTTPCfg{AuthType: "workloadIdentity", AuthCloud: "azure", AuthAudience: "api://tool"}
 	if _, err := exec.buildHTTPHeaders(context.Background(), cfg, "tool", "h", nil); err == nil {
 		t.Fatal("expected error when no tokenAcquirer is configured")
+	}
+}
+
+// TestBuildHTTPHeaders_FileToken_Reread proves the HTTP header path re-reads the
+// token file each call, so a rotated projected serviceAccount token is used
+// rather than a value cached at startup (#1797).
+func TestBuildHTTPHeaders_FileToken_Reread(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/token"
+	if err := os.WriteFile(path, []byte("tok-A"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	exec := &OmniaExecutor{}
+	cfg := &HTTPCfg{AuthType: "bearer", AuthTokenPath: path}
+
+	headers, err := exec.buildHTTPHeaders(context.Background(), cfg, "tool", "h", nil)
+	if err != nil {
+		t.Fatalf("buildHTTPHeaders: %v", err)
+	}
+	if headers["Authorization"] != "Bearer tok-A" {
+		t.Fatalf("first: got %q, want Bearer tok-A", headers["Authorization"])
+	}
+	if err := os.WriteFile(path, []byte("tok-B"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	headers, err = exec.buildHTTPHeaders(context.Background(), cfg, "tool", "h", nil)
+	if err != nil {
+		t.Fatalf("buildHTTPHeaders: %v", err)
+	}
+	if headers["Authorization"] != "Bearer tok-B" {
+		t.Fatalf("second: got %q, want fresh Bearer tok-B", headers["Authorization"])
+	}
+}
+
+func TestBuildHTTPHeaders_FileToken_MissingFileErrors(t *testing.T) {
+	exec := &OmniaExecutor{}
+	cfg := &HTTPCfg{AuthType: "bearer", AuthTokenPath: "/nonexistent/token"}
+	if _, err := exec.buildHTTPHeaders(context.Background(), cfg, "tool", "h", nil); err == nil {
+		t.Fatal("expected error when the token file is unreadable")
 	}
 }

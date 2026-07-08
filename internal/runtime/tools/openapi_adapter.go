@@ -57,6 +57,11 @@ type OpenAPIAdapterConfig struct {
 	// AuthToken is the authentication token or credentials.
 	AuthToken string
 
+	// AuthTokenPath, when set, is a file (mounted Secret or projected
+	// serviceAccount token) re-read per request in setAuth so a rotated or
+	// refreshed token is used instead of a value cached at startup.
+	AuthTokenPath string
+
 	// WIF fields (auth.type workloadIdentity): the spec-fetch token is acquired
 	// per request in setAuth under the pod's ambient identity.
 	AuthCloud    string

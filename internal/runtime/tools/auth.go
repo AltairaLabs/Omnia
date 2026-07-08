@@ -80,6 +80,21 @@ func authorizationValue(authType, authToken string) (string, error) {
 	}
 }
 
+// freshAuthToken returns the credential token for a handler at call time.
+// When authTokenPath is set — a bearer/basic Secret file or a projected
+// serviceAccount token — it re-reads the file so a rotated Secret or a
+// refreshed projected token is picked up. The projected serviceAccount token
+// expires (~1h) and the kubelet rotates the file before expiry, so reading it
+// once at startup left long-lived pods sending a stale token. workloadIdentity
+// resolves its own token elsewhere (per request); authToken is the fallback for
+// a directly-supplied static token with no path.
+func freshAuthToken(authType, authToken, authTokenPath string) (string, error) {
+	if authType == authTypeWorkloadIdentity || authTokenPath == "" {
+		return authToken, nil
+	}
+	return readTokenFile(authTokenPath)
+}
+
 // mergeAuthHeaders adds an Authorization header to the map based on auth type.
 func mergeAuthHeaders(headers map[string]string, authType, authToken string) error {
 	val, err := authorizationValue(authType, authToken)

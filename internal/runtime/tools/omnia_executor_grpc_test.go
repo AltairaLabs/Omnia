@@ -19,6 +19,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"testing"
 
 	"github.com/go-logr/logr"
@@ -148,5 +149,44 @@ func TestOmniaExecutor_ExecuteGRPC_StaticBearerStillWorks(t *testing.T) {
 	got := mock.capturedMD.Get("authorization")
 	if len(got) != 1 || got[0] != "Bearer btok" {
 		t.Fatalf("captured authorization metadata = %v, want [\"Bearer btok\"]", got)
+	}
+}
+
+// TestResolveGRPCAuth_FileToken_Reread proves the gRPC auth path re-reads the
+// token file each call, so a rotated projected serviceAccount token is used
+// rather than a value cached at startup (#1797).
+func TestResolveGRPCAuth_FileToken_Reread(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/token"
+	if err := os.WriteFile(path, []byte("tok-A"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	e := &OmniaExecutor{}
+	cfg := &GRPCCfg{AuthType: "bearer", AuthTokenPath: path}
+
+	_, val, err := e.resolveGRPCAuth(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("resolveGRPCAuth: %v", err)
+	}
+	if val != "Bearer tok-A" {
+		t.Fatalf("first: got %q, want Bearer tok-A", val)
+	}
+	if err := os.WriteFile(path, []byte("tok-B"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, val, err = e.resolveGRPCAuth(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("resolveGRPCAuth: %v", err)
+	}
+	if val != "Bearer tok-B" {
+		t.Fatalf("second: got %q, want fresh Bearer tok-B", val)
+	}
+}
+
+func TestResolveGRPCAuth_FileToken_MissingFileErrors(t *testing.T) {
+	e := &OmniaExecutor{}
+	cfg := &GRPCCfg{AuthType: "bearer", AuthTokenPath: "/nonexistent/token"}
+	if _, _, err := e.resolveGRPCAuth(context.Background(), cfg); err == nil {
+		t.Fatal("expected error when the token file is unreadable")
 	}
 }

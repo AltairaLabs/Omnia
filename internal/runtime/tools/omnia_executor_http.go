@@ -186,8 +186,14 @@ func (e *OmniaExecutor) buildHTTPHeaders(
 			return nil, fmt.Errorf("handler %q auth: %w", handlerName, err)
 		}
 		headers[name] = val
-	} else if err := mergeAuthHeaders(headers, cfg.AuthType, cfg.AuthToken); err != nil {
-		return nil, fmt.Errorf("handler %q auth: %w", handlerName, err)
+	} else {
+		tok, err := freshAuthToken(cfg.AuthType, cfg.AuthToken, cfg.AuthTokenPath)
+		if err != nil {
+			return nil, fmt.Errorf("handler %q auth: %w", handlerName, err)
+		}
+		if err := mergeAuthHeaders(headers, cfg.AuthType, tok); err != nil {
+			return nil, fmt.Errorf("handler %q auth: %w", handlerName, err)
+		}
 	}
 
 	// Omnia policy headers

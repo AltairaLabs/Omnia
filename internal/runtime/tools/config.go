@@ -272,10 +272,12 @@ func LoadConfig(path string) (*ToolConfig, error) {
 	return &config, nil
 }
 
-// ResolveAuthTokenPaths reads any per-handler AuthTokenPath file and populates
-// the in-memory AuthToken so the HTTP and OpenAPI executors can apply it. The
-// token value is never stored in the tools ConfigMap — only the path is — so
-// resolution happens here, in the runtime, from a mounted Secret file.
+// ResolveAuthTokenPaths reads any per-handler AuthTokenPath file at startup to
+// fail fast on a missing/unreadable mount, and primes AuthToken as a fallback.
+// The token value is never stored in the tools ConfigMap — only the path is.
+// At request time the executors re-read the file via freshAuthToken so a
+// rotated Secret or a refreshed (expiring) projected serviceAccount token is
+// used rather than this startup value (see #1797).
 func ResolveAuthTokenPaths(cfg *ToolConfig) error {
 	for i := range cfg.Handlers {
 		h := &cfg.Handlers[i]
