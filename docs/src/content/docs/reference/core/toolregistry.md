@@ -177,12 +177,13 @@ a **stdio** MCP transport (no header channel) and is rejected.
   ServiceAccount token into the runtime; the tool backend validates it via
   TokenReview. Sent as `Authorization: Bearer <token>`.
 - **`workloadIdentity`** — resolved by the runtime under the pod's ambient
-  Azure identity (core), currently on **http handlers only**; `cloud` must be
-  `azure`. The runtime acquires a token for `audience` and sets it on `header`
-  (default `Authorization`). Only http handlers are supported in this
-  milestone — the operator rejects `workloadIdentity` on openapi, grpc, and mcp
-  handlers at reconcile. The pod's identity must be granted every WIF tool's
-  API; per-tool identity separation is a future option.
+  Azure identity (core); `cloud` must be `azure`. The runtime acquires a token
+  for `audience` and sets it on `header` (default `Authorization`). Supported on
+  **http, grpc, and mcp (sse / streamable-http) and openapi** handlers — the
+  token is acquired per call (per request for mcp/openapi, so it survives token
+  expiry). Not supported on **stdio** MCP (no header channel), which is rejected
+  at reconcile. The pod's identity must be granted every WIF tool's API; per-tool
+  identity separation is a future option.
 
 A missing Secret/key, an unsupported type, or a stdio-MCP+auth combination fails
 the AgentRuntime reconcile — it does not silently send an unauthenticated request.

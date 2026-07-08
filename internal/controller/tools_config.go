@@ -242,7 +242,8 @@ func collectToolAuthSecrets(tr *omniav1alpha1.ToolRegistry) []toolAuthRef {
 
 // validateToolAuthTypes rejects tool handlers whose effective auth the operator
 // cannot honor: stdio MCP has no header channel, and workloadIdentity is
-// currently resolved only on http handlers (runtime-ambient azure).
+// resolved (runtime-ambient azure) on all header-capable handler types
+// (http/grpc/mcp/openapi) but not on handler types without a credential channel.
 func validateToolAuthTypes(tr *omniav1alpha1.ToolRegistry) error {
 	if tr == nil {
 		return nil
