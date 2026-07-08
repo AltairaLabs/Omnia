@@ -120,8 +120,7 @@ func (r *ToolRegistryReconciler) processHandlers(ctx context.Context, toolRegist
 		// A validated handler always resolves to an endpoint, so this failure
 		// branch is currently unreachable; it is retained as the wiring point
 		// for future probe-backed status (marking a reachable-but-unhealthy tool
-		// Unavailable → Degraded). See the "wire tool probing into ToolRegistry
-		// status" follow-up.
+		// Unavailable → Degraded). See #1791.
 		endpoint, err := r.resolveEndpoint(ctx, toolRegistry, &h)
 		if err != nil {
 			log.Error(err, "Failed to resolve endpoint", "handler", h.Name)
