@@ -33,6 +33,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
+	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
 	"github.com/go-logr/logr"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/sony/gobreaker/v2"
@@ -51,6 +53,24 @@ import (
 	"github.com/altairalabs/omnia/pkg/policy"
 	toolsv1 "github.com/altairalabs/omnia/pkg/tools/v1"
 )
+
+// TestNewOmniaExecutor_WiresTokenAcquirer is a wiring test: it asserts that
+// NewOmniaExecutor actually populates e.tokenAcquirer from the Azure credential
+// seam. Without this, deleting the constructor's default-acquirer lines leaves
+// every other test green while WIF silently breaks in production (the HTTP WIF
+// path resolves against a nil acquirer and fails closed on every tool call).
+func TestNewOmniaExecutor_WiresTokenAcquirer(t *testing.T) {
+	orig := newDefaultAzureCredential
+	defer func() { newDefaultAzureCredential = orig }()
+	newDefaultAzureCredential = func(*azidentity.DefaultAzureCredentialOptions) (azcore.TokenCredential, error) {
+		return &fakeCred{tok: "abc", exp: time.Now().Add(time.Hour)}, nil
+	}
+
+	e := NewOmniaExecutor(logr.Discard(), nil)
+	if e.tokenAcquirer == nil {
+		t.Fatal("NewOmniaExecutor did not wire tokenAcquirer from the Azure credential seam")
+	}
+}
 
 // mockToolServiceClient implements toolsv1.ToolServiceClient for testing.
 type mockToolServiceClient struct {
