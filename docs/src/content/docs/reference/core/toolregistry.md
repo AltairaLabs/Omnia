@@ -193,9 +193,59 @@ handlers:
         type: object
 ```
 
-For the full auth model — `serviceAccount` (projected token + TokenReview),
-`workloadIdentity`, and the secret-handling guarantees — see the dedicated
-how-to: [Authenticating tools](/how-to/tools/authenticate-tools/).
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `auth.type` | string | `none` | Authentication mechanism: `none`, `bearer`, `basic`, `serviceAccount`, or `workloadIdentity`. |
+| `auth.secretRef` | object | - | Secret holding the credential (required for `bearer`/`basic`). |
+| `auth.serviceAccount.audience` | string | - | Audience the projected ServiceAccount token binds to (required for `serviceAccount`). |
+| `auth.workloadIdentity` | object | - | Hosted same-cloud identity (`cloud`, `audience`). Required for `workloadIdentity`. Only `cloud: azure` is supported. |
+
+The `auth` stanza applies to **http, openapi, grpc, and mcp** handlers (the
+runtime attaches the credential as an HTTP `Authorization` header, gRPC
+`authorization` metadata, or an MCP transport header). Auth is not supported on
+a **stdio** MCP transport (no header channel) and is rejected.
+
+- **`bearer` / `basic`** — the operator resolves `secretRef` into an
+  operator-managed `<agentruntime>-tool-secrets` Secret, mounted read-only into
+  the runtime. The token value never enters the tools ConfigMap.
+- **`serviceAccount`** — the operator projects an audience-bound Kubernetes
+  ServiceAccount token into the runtime; the tool backend validates it via
+  TokenReview. Sent as `Authorization: Bearer <token>`.
+- **`workloadIdentity`** — resolved by the runtime under the pod's ambient
+  Azure identity (core); `cloud` must be `azure`. The runtime acquires a token
+  for `audience` and sets it on `header` (default `Authorization`). Supported on
+  **http, grpc, and mcp (sse / streamable-http) and openapi** handlers — the
+  token is acquired per call (per request for mcp/openapi, so it survives token
+  expiry). Not supported on **stdio** MCP (no header channel), which is rejected
+  at reconcile. The pod's identity must be granted every WIF tool's API; per-tool
+  identity separation is a future option.
+
+A missing Secret/key, an unsupported type, or a stdio-MCP+auth combination fails
+the AgentRuntime reconcile — it does not silently send an unauthenticated request.
+A `workloadIdentity` handler whose token cannot be acquired at call time fails
+that tool call rather than calling the backend unauthenticated.
+
+:::note[Azure workload-identity setup]
+`workloadIdentity` reuses the agent pod's **ambient** Azure identity — the same
+identity keyless [Azure provider auth](/reference/core/provider/) uses — resolved
+via `DefaultAzureCredential`. No credential is stored by Omnia. To enable it, the
+cluster/infra side must, once per agent identity:
+
+1. Give the agent pod an Azure Workload Identity: label the pod
+   `azure.workload.identity/use: "true"` and annotate its ServiceAccount with
+   `azure.workload.identity/client-id: <app-or-uami-client-id>`.
+2. Create a **federated identity credential** on that Entra ID app / user-assigned
+   managed identity trusting the cluster OIDC issuer and subject
+   `system:serviceaccount:<namespace>:<serviceAccount>` (Terraform-side).
+3. Grant that identity access to **every** WIF tool's API. Because one pod identity
+   is shared across the model provider and all tools, its API grants are the union
+   of what those tools need — the "one-identity" consequence noted above. Per-tool
+   identity separation is a future option.
+:::
+
+For a task-oriented walkthrough (creating the credential Secret and verifying the
+mounted `<agentruntime>-tool-secrets`), see the how-to:
+[Authenticating tools](/how-to/tools/authenticate-tools/).
 
 :::note[Deprecated: `authType` / `authSecretRef`]
 The per-config `authType` and `authSecretRef` fields on `httpConfig`/`openAPIConfig`

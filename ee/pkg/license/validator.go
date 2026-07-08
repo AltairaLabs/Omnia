@@ -199,12 +199,9 @@ func (v *Validator) RefreshPublicKey(ctx context.Context) error {
 // Returns OpenCoreLicense if no license is found or validation fails.
 // In dev mode, returns a full-featured dev license.
 func (v *Validator) GetLicense(ctx context.Context) (*License, error) {
-	// In dev mode, always return a full-featured license
-	if v.devMode {
-		return DevLicense(), nil
-	}
-
-	// Check cache
+	// Check cache first. This applies in dev mode too: a real license that has
+	// been picked up stays cached like any other, and the dev fallback is cached
+	// the same way so we don't hit the API on every call.
 	v.mu.RLock()
 	if v.cache != nil && time.Now().Before(v.cacheExp) {
 		license := v.cache
@@ -213,14 +210,21 @@ func (v *Validator) GetLicense(ctx context.Context) (*License, error) {
 	}
 	v.mu.RUnlock()
 
-	// Fetch from Secret
+	// Try to load a real, signed license from the Secret.
 	license, err := v.fetchAndValidate(ctx)
 	if err != nil {
-		// Return open-core license on any error
-		return OpenCoreLicense(), err
+		// No valid real license is installed. In dev mode, fall back to a
+		// full-featured dev license so local development works without one.
+		// A real license always wins over the dev fallback: install one and it
+		// takes over on the next cache refresh — no reinstall, no flag change.
+		// Outside dev mode, degrade to open-core (and don't cache the error).
+		if !v.devMode {
+			return OpenCoreLicense(), err
+		}
+		license = DevLicense()
 	}
 
-	// Update cache
+	// Cache and return (the real license, or the dev fallback).
 	v.mu.Lock()
 	v.cache = license
 	v.cacheExp = time.Now().Add(v.cacheTTL)
@@ -251,6 +255,13 @@ func (v *Validator) InvalidateCache() {
 
 // fetchAndValidate fetches the license Secret and validates the JWT.
 func (v *Validator) fetchAndValidate(ctx context.Context) (*License, error) {
+	// No client means there is no Secret to read (e.g. a dev-mode validator
+	// constructed without one). Treat it as "not found" so callers fall back to
+	// the dev license or open-core rather than dereferencing a nil client.
+	if v.client == nil {
+		return nil, ErrLicenseNotFound
+	}
+
 	secret := &corev1.Secret{}
 	err := v.client.Get(ctx, types.NamespacedName{
 		Name:      LicenseSecretName,

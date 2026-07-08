@@ -57,6 +57,14 @@ type OpenAPIAdapterConfig struct {
 	// AuthToken is the authentication token or credentials.
 	AuthToken string
 
+	// WIF fields (auth.type workloadIdentity): the spec-fetch token is acquired
+	// per request in setAuth under the pod's ambient identity.
+	AuthCloud    string
+	AuthAudience string
+	AuthHeader   string
+	// TokenAcquirer resolves workloadIdentity tokens (nil for non-WIF handlers).
+	TokenAcquirer TokenAcquirer
+
 	// Timeout is the request timeout.
 	Timeout time.Duration
 }

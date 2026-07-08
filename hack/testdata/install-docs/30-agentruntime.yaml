@@ -6,8 +6,11 @@ metadata:
 spec:
   promptPackRef:
     name: assistant-pack
-  providerRef:
-    name: my-provider
+  providers:
+    - name: default
+      providerRef:
+        name: my-provider
+      role: llm
   facades:
     - type: websocket
       port: 8080

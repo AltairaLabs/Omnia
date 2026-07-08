@@ -95,12 +95,34 @@ func (h *BrokerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Entry log for EVERY well-formed call, before evaluation. logBrokerDecision
+	// (below) skips plain allows, so without this a broker that IS being called
+	// but only ever plain-allows looks identical to one nothing calls at all —
+	// which made "is the runtime reaching the broker?" undiagnosable. With
+	// LOG_LEVEL=debug this answers it in one grep.
+	h.logger.V(1).Info("decision request received",
+		"toolName", req.Headers[HeaderToolName],
+		"toolRegistry", req.Headers[HeaderToolRegistry])
+
 	ctx := withIdentityFromPayload(r.Context(), req.Identity)
 
 	start := time.Now()
 	decision := h.evaluator.EvaluateWithContext(ctx, req.Headers, req.Body)
 	h.recordDecisionMetrics(decision, req.Headers, time.Since(start))
 	logBrokerDecision(h.logger, decision, req.Headers)
+
+	// A rule that failed to evaluate (CEL runtime error / non-bool result) is an
+	// operator-actionable misconfiguration, not a normal decision — surface it at
+	// Error level (and as the `error` metric outcome) so a rule erroring on every
+	// call is loud, not silently folded into the deny count.
+	if decision.Error != nil {
+		h.logger.Error(decision.Error, "ToolPolicy rule evaluation failed",
+			"toolName", req.Headers[HeaderToolName],
+			"toolRegistry", req.Headers[HeaderToolRegistry],
+			"policy", decision.Policy,
+			"deniedBy", decision.DeniedBy,
+			"mode", string(decision.Mode))
+	}
 
 	// A denied call must not compute or return injected headers — header
 	// injection only applies to calls that are actually allowed to proceed.
@@ -140,6 +162,16 @@ func decodeDecisionRequest(w http.ResponseWriter, r *http.Request) (DecisionRequ
 // rule matched) to keep audit noise low.
 func logBrokerDecision(logger logr.Logger, decision Decision, headers map[string]string) {
 	if decision.Allowed && decision.DeniedBy == "" {
+		// Plain allow — no rule denied. Kept out of the Info audit stream to
+		// avoid noise, but emitted at debug: this is the ONLY signal that a
+		// misconfigured selector produced an unexpected allow. `policy` empty
+		// here means NO ToolPolicy matched this call at all — cross-check the
+		// logged toolRegistry against your policy's `selector.registry`.
+		logger.V(1).Info("broker allowed (no rule denied)",
+			"toolName", headers[HeaderToolName],
+			"toolRegistry", headers[HeaderToolRegistry],
+			"matchedPolicy", decision.Policy,
+		)
 		return
 	}
 

@@ -33,6 +33,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
+	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
 	"github.com/go-logr/logr"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/sony/gobreaker/v2"
@@ -51,6 +53,24 @@ import (
 	"github.com/altairalabs/omnia/pkg/policy"
 	toolsv1 "github.com/altairalabs/omnia/pkg/tools/v1"
 )
+
+// TestNewOmniaExecutor_WiresTokenAcquirer is a wiring test: it asserts that
+// NewOmniaExecutor actually populates e.tokenAcquirer from the Azure credential
+// seam. Without this, deleting the constructor's default-acquirer lines leaves
+// every other test green while WIF silently breaks in production (the HTTP WIF
+// path resolves against a nil acquirer and fails closed on every tool call).
+func TestNewOmniaExecutor_WiresTokenAcquirer(t *testing.T) {
+	orig := newDefaultAzureCredential
+	defer func() { newDefaultAzureCredential = orig }()
+	newDefaultAzureCredential = func(*azidentity.DefaultAzureCredentialOptions) (azcore.TokenCredential, error) {
+		return &fakeCred{tok: "abc", exp: time.Now().Add(time.Hour)}, nil
+	}
+
+	e := NewOmniaExecutor(logr.Discard(), nil)
+	if e.tokenAcquirer == nil {
+		t.Fatal("NewOmniaExecutor did not wire tokenAcquirer from the Azure credential seam")
+	}
+}
 
 // mockToolServiceClient implements toolsv1.ToolServiceClient for testing.
 type mockToolServiceClient struct {
@@ -1703,6 +1723,78 @@ func TestOmniaExecutor_ExecuteOpenAPI_WithServer(t *testing.T) {
 	}
 	if !strings.Contains(string(result), "alice") {
 		t.Errorf("result = %s, want to contain 'alice'", result)
+	}
+}
+
+func TestOmniaExecutor_ExecuteOpenAPI_WorkloadIdentity(t *testing.T) {
+	var receivedAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"name":"alice"}`))
+	}))
+	defer srv.Close()
+
+	e := NewOmniaExecutor(logr.Discard(), nil)
+	e.tokenAcquirer = fakeAcquirer{tok: "wtok"}
+	e.openAPIOps["handler"] = map[string]*OpenAPIOperation{
+		"getUser": {
+			OperationID: "getUser",
+			Method:      "GET",
+			Path:        "/users/1",
+		},
+	}
+	e.openAPIBaseURLs["handler"] = srv.URL
+	e.openAPIHeaders["handler"] = map[string]string{}
+
+	handler := &HandlerEntry{
+		Name: "handler",
+		Type: ToolTypeOpenAPI,
+		OpenAPIConfig: &OpenAPICfg{
+			AuthType:     authTypeWorkloadIdentity,
+			AuthCloud:    cloudAzure,
+			AuthAudience: "api://tool",
+		},
+	}
+
+	result, err := e.executeOpenAPI(context.Background(), "getUser", "handler", handler, nil)
+	if err != nil {
+		t.Fatalf("executeOpenAPI: %v", err)
+	}
+	if !strings.Contains(string(result), "alice") {
+		t.Errorf("result = %s, want to contain 'alice'", result)
+	}
+	if receivedAuth != "Bearer wtok" {
+		t.Errorf("Authorization = %q, want %q", receivedAuth, "Bearer wtok")
+	}
+}
+
+func TestOmniaExecutor_ExecuteOpenAPI_WorkloadIdentity_NilAcquirerFailsLoud(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	e := NewOmniaExecutor(logr.Discard(), nil)
+	e.openAPIOps["handler"] = map[string]*OpenAPIOperation{
+		"getUser": {OperationID: "getUser", Method: "GET", Path: "/users/1"},
+	}
+	e.openAPIBaseURLs["handler"] = srv.URL
+	e.openAPIHeaders["handler"] = map[string]string{}
+
+	handler := &HandlerEntry{
+		Name: "handler",
+		Type: ToolTypeOpenAPI,
+		OpenAPIConfig: &OpenAPICfg{
+			AuthType:     authTypeWorkloadIdentity,
+			AuthCloud:    cloudAzure,
+			AuthAudience: "api://tool",
+		},
+	}
+
+	if _, err := e.executeOpenAPI(context.Background(), "getUser", "handler", handler, nil); err == nil {
+		t.Fatal("expected error when no tokenAcquirer is configured")
 	}
 }
 

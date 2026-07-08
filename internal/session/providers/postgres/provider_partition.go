@@ -18,6 +18,7 @@ package postgres
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -25,6 +26,30 @@ import (
 
 	"github.com/altairalabs/omnia/internal/session/providers"
 )
+
+// EnsurePartitionsAhead makes sure weekly partitions exist for the current week
+// and each of the next weeksAhead weeks. It is idempotent: weeks whose
+// partitions already exist are skipped (CreatePartition's ErrPartitionExists is
+// treated as success). This is the ongoing maintenance the one-shot migration
+// seed (manage_session_partitions) does not provide — without it, inserts fail
+// with SQLSTATE 23514 once the seeded window lapses (~2 weeks post-migration).
+func (p *Provider) EnsurePartitionsAhead(ctx context.Context, weeksAhead int) error {
+	return ensurePartitionsAhead(ctx, p.CreatePartition, weeksAhead, time.Now().UTC())
+}
+
+// ensurePartitionsAhead creates a partition for `now` and each of the next
+// weeksAhead weeks via create. An already-present week (ErrPartitionExists) is
+// treated as success; any other error aborts. Extracted so the loop is
+// unit-testable with a fake creator (no database).
+func ensurePartitionsAhead(ctx context.Context, create func(context.Context, time.Time) error, weeksAhead int, now time.Time) error {
+	for i := 0; i <= weeksAhead; i++ {
+		date := now.AddDate(0, 0, i*7)
+		if err := create(ctx, date); err != nil && !errors.Is(err, providers.ErrPartitionExists) {
+			return fmt.Errorf("ensure partitions ahead (week +%d): %w", i, err)
+		}
+	}
+	return nil
+}
 
 func (p *Provider) CreatePartition(ctx context.Context, date time.Time) error {
 	// Align to ISO week boundary (Monday).

@@ -23,6 +23,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 
 	pktools "github.com/AltairaLabs/PromptKit/runtime/tools"
 	"google.golang.org/grpc"
@@ -160,12 +161,12 @@ func (e *OmniaExecutor) executeGRPC(
 			// authorization metadata. Added before broker-injected headers so an
 			// explicit ToolPolicy enforcement decision still wins on collision.
 			if handler.GRPCConfig != nil {
-				authVal, authErr := authorizationValue(handler.GRPCConfig.AuthType, handler.GRPCConfig.AuthToken)
+				name, authVal, authErr := e.resolveGRPCAuth(attemptCtx, handler.GRPCConfig)
 				if authErr != nil {
 					return nil, fmt.Errorf("gRPC tool auth: %w", authErr)
 				}
 				if authVal != "" {
-					md["authorization"] = authVal
+					md[name] = authVal
 				}
 			}
 			for k, v := range InjectedHeadersFromContext(attemptCtx) {
@@ -196,6 +197,28 @@ func (e *OmniaExecutor) executeGRPC(
 			return marshalGRPCResponse(resp)
 		},
 	)
+}
+
+// resolveGRPCAuth returns the lowercase metadata key and value for a gRPC
+// handler's tool auth: workloadIdentity is resolved per call under the pod's
+// ambient identity; static types go through authorizationValue on the
+// conventional "authorization" key.
+func (e *OmniaExecutor) resolveGRPCAuth(ctx context.Context, cfg *GRPCCfg) (string, string, error) {
+	if cfg.AuthType == authTypeWorkloadIdentity {
+		name, val, err := resolveWorkloadIdentityHeader(ctx, e.tokenAcquirer, cfg.AuthCloud, cfg.AuthAudience, cfg.AuthHeader)
+		if err != nil {
+			return "", "", err
+		}
+		return strings.ToLower(name), val, nil
+	}
+	val, err := authorizationValue(cfg.AuthType, cfg.AuthToken)
+	if err != nil {
+		return "", "", err
+	}
+	if val == "" {
+		return "", "", nil
+	}
+	return "authorization", val, nil
 }
 
 func marshalGRPCResponse(resp *toolsv1.ToolResponse) (json.RawMessage, error) {

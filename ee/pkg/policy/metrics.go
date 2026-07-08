@@ -18,6 +18,11 @@ const (
 	OutcomeAllowed   = "allowed"
 	OutcomeDenied    = "denied"
 	OutcomeWouldDeny = "would_deny"
+	// OutcomeError is emitted when a rule failed to evaluate (CEL runtime error
+	// or non-bool result). Distinct from "denied" so a misconfigured policy that
+	// errors on every call is alertable, not hidden inside the deny count —
+	// whether it then fails closed (deny) or open (allow).
+	OutcomeError = "error"
 )
 
 // Metrics holds the Prometheus metrics emitted by the policy-broker sidecar.
@@ -100,6 +105,9 @@ func (m *Metrics) SetActivePolicies(count int) {
 // call, "would_deny" when an audit-mode policy would have blocked it, and
 // "allowed" otherwise.
 func decisionOutcome(decision Decision) string {
+	if decision.Error != nil {
+		return OutcomeError
+	}
 	if !decision.Allowed {
 		return OutcomeDenied
 	}

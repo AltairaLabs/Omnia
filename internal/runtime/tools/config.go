@@ -178,6 +178,9 @@ type HTTPCfg struct {
 	AuthType        string                  `json:"authType,omitempty" yaml:"authType,omitempty"`
 	AuthToken       string                  `json:"authToken,omitempty" yaml:"authToken,omitempty"`
 	AuthTokenPath   string                  `json:"authTokenPath,omitempty" yaml:"authTokenPath,omitempty"`
+	AuthHeader      string                  `json:"authHeader,omitempty" yaml:"authHeader,omitempty"`
+	AuthCloud       string                  `json:"authCloud,omitempty" yaml:"authCloud,omitempty"`
+	AuthAudience    string                  `json:"authAudience,omitempty" yaml:"authAudience,omitempty"`
 	QueryParams     []string                `json:"queryParams,omitempty" yaml:"queryParams,omitempty"`
 	HeaderParams    map[string]string       `json:"headerParams,omitempty" yaml:"headerParams,omitempty"`
 	StaticQuery     map[string]string       `json:"staticQuery,omitempty" yaml:"staticQuery,omitempty"`
@@ -200,6 +203,9 @@ type GRPCCfg struct {
 	AuthType              string                  `json:"authType,omitempty" yaml:"authType,omitempty"`
 	AuthToken             string                  `json:"authToken,omitempty" yaml:"authToken,omitempty"`
 	AuthTokenPath         string                  `json:"authTokenPath,omitempty" yaml:"authTokenPath,omitempty"`
+	AuthHeader            string                  `json:"authHeader,omitempty" yaml:"authHeader,omitempty"`
+	AuthCloud             string                  `json:"authCloud,omitempty" yaml:"authCloud,omitempty"`
+	AuthAudience          string                  `json:"authAudience,omitempty" yaml:"authAudience,omitempty"`
 	RetryPolicy           *RuntimeGRPCRetryPolicy `json:"retryPolicy,omitempty" yaml:"retryPolicy,omitempty"`
 }
 
@@ -214,6 +220,9 @@ type MCPCfg struct {
 	AuthType      string                 `json:"authType,omitempty" yaml:"authType,omitempty"`
 	AuthToken     string                 `json:"authToken,omitempty" yaml:"authToken,omitempty"`
 	AuthTokenPath string                 `json:"authTokenPath,omitempty" yaml:"authTokenPath,omitempty"`
+	AuthHeader    string                 `json:"authHeader,omitempty" yaml:"authHeader,omitempty"`
+	AuthCloud     string                 `json:"authCloud,omitempty" yaml:"authCloud,omitempty"`
+	AuthAudience  string                 `json:"authAudience,omitempty" yaml:"authAudience,omitempty"`
 	ToolFilter    *MCPToolFilterCfg      `json:"toolFilter,omitempty" yaml:"toolFilter,omitempty"`
 	RetryPolicy   *RuntimeMCPRetryPolicy `json:"retryPolicy,omitempty" yaml:"retryPolicy,omitempty"`
 }
@@ -242,6 +251,9 @@ type OpenAPICfg struct {
 	AuthType        string                  `json:"authType,omitempty" yaml:"authType,omitempty"`
 	AuthToken       string                  `json:"authToken,omitempty" yaml:"authToken,omitempty"`
 	AuthTokenPath   string                  `json:"authTokenPath,omitempty" yaml:"authTokenPath,omitempty"`
+	AuthHeader      string                  `json:"authHeader,omitempty" yaml:"authHeader,omitempty"`
+	AuthCloud       string                  `json:"authCloud,omitempty" yaml:"authCloud,omitempty"`
+	AuthAudience    string                  `json:"authAudience,omitempty" yaml:"authAudience,omitempty"`
 	RetryPolicy     *RuntimeHTTPRetryPolicy `json:"retryPolicy,omitempty" yaml:"retryPolicy,omitempty"`
 }
 
@@ -267,28 +279,28 @@ func LoadConfig(path string) (*ToolConfig, error) {
 func ResolveAuthTokenPaths(cfg *ToolConfig) error {
 	for i := range cfg.Handlers {
 		h := &cfg.Handlers[i]
-		if h.HTTPConfig != nil && h.HTTPConfig.AuthTokenPath != "" {
+		if h.HTTPConfig != nil && h.HTTPConfig.AuthTokenPath != "" && h.HTTPConfig.AuthType != authTypeWorkloadIdentity {
 			tok, err := readTokenFile(h.HTTPConfig.AuthTokenPath)
 			if err != nil {
 				return fmt.Errorf("handler %q: %w", h.Name, err)
 			}
 			h.HTTPConfig.AuthToken = tok
 		}
-		if h.OpenAPIConfig != nil && h.OpenAPIConfig.AuthTokenPath != "" {
+		if h.OpenAPIConfig != nil && h.OpenAPIConfig.AuthTokenPath != "" && h.OpenAPIConfig.AuthType != authTypeWorkloadIdentity {
 			tok, err := readTokenFile(h.OpenAPIConfig.AuthTokenPath)
 			if err != nil {
 				return fmt.Errorf("handler %q: %w", h.Name, err)
 			}
 			h.OpenAPIConfig.AuthToken = tok
 		}
-		if h.GRPCConfig != nil && h.GRPCConfig.AuthTokenPath != "" {
+		if h.GRPCConfig != nil && h.GRPCConfig.AuthTokenPath != "" && h.GRPCConfig.AuthType != authTypeWorkloadIdentity {
 			tok, err := readTokenFile(h.GRPCConfig.AuthTokenPath)
 			if err != nil {
 				return fmt.Errorf("handler %q: %w", h.Name, err)
 			}
 			h.GRPCConfig.AuthToken = tok
 		}
-		if h.MCPConfig != nil && h.MCPConfig.AuthTokenPath != "" {
+		if h.MCPConfig != nil && h.MCPConfig.AuthTokenPath != "" && h.MCPConfig.AuthType != authTypeWorkloadIdentity {
 			tok, err := readTokenFile(h.MCPConfig.AuthTokenPath)
 			if err != nil {
 				return fmt.Errorf("handler %q: %w", h.Name, err)

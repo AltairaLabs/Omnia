@@ -5,7 +5,7 @@ sidebar:
   order: 10
 ---
 
-The Workspace custom resource defines a multi-tenant workspace with isolated namespace, RBAC, and resource quotas in Kubernetes.
+The Workspace custom resource defines a multi-tenant workspace with isolated namespace, RBAC, and network isolation in Kubernetes.
 
 ## API version
 
@@ -330,85 +330,18 @@ Once provisioned, the privacy-api's resolved URL is published on
 against it, see [Manage User Consent](/how-to/privacy/manage-user-consent/); to submit
 right-to-erasure requests, see [Handle Data Subject Erasure](/how-to/privacy/handle-data-subject-erasure/).
 
-### `quotas`
+### `quotas` — not implemented
 
-Resource quotas for the workspace.
-
-#### `quotas.compute`
-
-Standard Kubernetes compute resource quotas.
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `requests.cpu` | string | Total CPU requests (e.g., "50") |
-| `requests.memory` | string | Total memory requests (e.g., "100Gi") |
-| `limits.cpu` | string | Total CPU limits (e.g., "100") |
-| `limits.memory` | string | Total memory limits (e.g., "200Gi") |
-
-```yaml
-spec:
-  quotas:
-    compute:
-      requests.cpu: "50"
-      requests.memory: "100Gi"
-      limits.cpu: "100"
-      limits.memory: "200Gi"
-```
-
-#### `quotas.objects`
-
-Object count quotas.
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `configmaps` | integer | Maximum number of ConfigMaps |
-| `secrets` | integer | Maximum number of Secrets |
-| `persistentvolumeclaims` | integer | Maximum number of PVCs |
-
-```yaml
-spec:
-  quotas:
-    objects:
-      configmaps: 100
-      secrets: 50
-      persistentvolumeclaims: 20
-```
-
-#### `quotas.arena`
-
-Arena-specific quotas.
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `maxConcurrentJobs` | integer | Maximum concurrent Arena jobs |
-| `maxJobsPerDay` | integer | Maximum Arena jobs per day |
-| `maxWorkersPerJob` | integer | Maximum workers per Arena job |
-
-```yaml
-spec:
-  quotas:
-    arena:
-      maxConcurrentJobs: 10
-      maxJobsPerDay: 100
-      maxWorkersPerJob: 50
-```
-
-#### `quotas.agents`
-
-AgentRuntime-specific quotas.
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `maxAgentRuntimes` | integer | Maximum number of AgentRuntimes |
-| `maxReplicasPerAgent` | integer | Maximum replicas per AgentRuntime |
-
-```yaml
-spec:
-  quotas:
-    agents:
-      maxAgentRuntimes: 20
-      maxReplicasPerAgent: 10
-```
+:::caution
+`spec.quotas` is **not a field on the Workspace CRD** and the controller enforces no
+resource quotas. Applying a `quotas` block is rejected by the API server with
+`strict decoding error: unknown field "spec.quotas"`. To limit resource usage, apply a
+native Kubernetes [`ResourceQuota`](https://kubernetes.io/docs/concepts/policy/resource-quotas/)
+to the workspace namespace directly — see
+[Limit resource usage](/how-to/workspaces/manage-workspaces/#limit-resource-usage).
+Workspace-native quotas are tracked in
+[issue #1781](https://github.com/AltairaLabs/Omnia/issues/1781).
+:::
 
 ### `networkPolicy`
 
@@ -532,6 +465,13 @@ spec:
 
 Budget and cost control settings for the workspace.
 
+:::note
+`costControls` is accepted and stored on the CRD, but the Workspace controller does **not
+yet enforce it** — it does not populate [`status.costUsage`](#costusage) or apply
+`budgetExceededAction`. Treat this as declarative intent until enforcement lands
+([issue #1781](https://github.com/AltairaLabs/Omnia/issues/1781)).
+:::
+
 | Field | Type | Default | Required |
 |-------|------|---------|----------|
 | `costControls.dailyBudget` | string | - | No |
@@ -624,6 +564,11 @@ NetworkPolicy status information.
 ### `costUsage`
 
 Current cost tracking information.
+
+:::note
+Not currently populated — the controller does not yet compute cost usage (see
+[`costControls`](#costcontrols) and [issue #1781](https://github.com/AltairaLabs/Omnia/issues/1781)).
+:::
 
 | Field | Description |
 |-------|-------------|

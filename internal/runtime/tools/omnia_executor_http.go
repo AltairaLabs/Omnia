@@ -180,7 +180,13 @@ func (e *OmniaExecutor) buildHTTPHeaders(
 	}
 
 	// Auth headers
-	if err := mergeAuthHeaders(headers, cfg.AuthType, cfg.AuthToken); err != nil {
+	if cfg.AuthType == authTypeWorkloadIdentity {
+		name, val, err := resolveWorkloadIdentityHeader(ctx, e.tokenAcquirer, cfg.AuthCloud, cfg.AuthAudience, cfg.AuthHeader)
+		if err != nil {
+			return nil, fmt.Errorf("handler %q auth: %w", handlerName, err)
+		}
+		headers[name] = val
+	} else if err := mergeAuthHeaders(headers, cfg.AuthType, cfg.AuthToken); err != nil {
 		return nil, fmt.Errorf("handler %q auth: %w", handlerName, err)
 	}
 

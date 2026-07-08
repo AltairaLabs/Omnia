@@ -84,20 +84,31 @@ func (e *OmniaExecutor) initMCPHandler(ctx context.Context, name string, h *Hand
 }
 
 func (e *OmniaExecutor) buildMCPTransport(cfg *MCPCfg) (mcp.Transport, error) {
-	authHeader, err := authorizationValue(cfg.AuthType, cfg.AuthToken)
-	if err != nil {
-		return nil, fmt.Errorf("MCP tool auth: %w", err)
+	tr := &injectedHeaderTransport{}
+	if cfg.AuthType == authTypeWorkloadIdentity {
+		// workloadIdentity tokens expire (~1h) but the MCP transport/session is
+		// built once at handler init and reused for the connection's life, so
+		// the token cannot be pre-computed here — resolve it per-request in
+		// RoundTrip instead (the acquirer caches, so this is cheap).
+		tr.acquirer = e.tokenAcquirer
+		tr.wifCloud, tr.wifAudience, tr.wifHeader = cfg.AuthCloud, cfg.AuthAudience, cfg.AuthHeader
+	} else {
+		authHeader, err := authorizationValue(cfg.AuthType, cfg.AuthToken)
+		if err != nil {
+			return nil, fmt.Errorf("MCP tool auth: %w", err)
+		}
+		tr.authHeader = authHeader
 	}
 	switch MCPTransportType(cfg.Transport) {
 	case MCPTransportSSE:
 		return &mcp.SSEClientTransport{
 			Endpoint:   cfg.Endpoint,
-			HTTPClient: &http.Client{Transport: &injectedHeaderTransport{authHeader: authHeader}},
+			HTTPClient: &http.Client{Transport: tr},
 		}, nil
 	case MCPTransportStreamableHTTP:
 		return &mcp.StreamableClientTransport{
 			Endpoint:   cfg.Endpoint,
-			HTTPClient: &http.Client{Transport: &injectedHeaderTransport{authHeader: authHeader}},
+			HTTPClient: &http.Client{Transport: tr},
 		}, nil
 	case MCPTransportStdio:
 		// Stdio MCP has no header/metadata channel: the subprocess speaks
@@ -132,29 +143,48 @@ func (e *OmniaExecutor) buildMCPTransport(cfg *MCPCfg) (mcp.Transport, error) {
 // transport.
 type injectedHeaderTransport struct {
 	base http.RoundTripper
-	// authHeader is the pre-computed tool-credential Authorization value
-	// ("Bearer <token>" / "Basic <...>"), or "" when the handler has no auth.
+	// authHeader is the pre-computed static tool-credential Authorization value
+	// ("Bearer <token>"/"Basic <...>"), or "" when the handler has no static auth.
 	authHeader string
+	// WIF fields (set only for auth.type workloadIdentity): the token is
+	// acquired per-request in RoundTrip because it expires and the transport
+	// outlives it.
+	acquirer    TokenAcquirer
+	wifCloud    string
+	wifAudience string
+	wifHeader   string
 }
 
-// RoundTrip applies the tool credential first, then merges broker-injected
-// headers last so they win over the tool credential (and any transport-set
-// headers) on key collision — mirrors the ordering in buildHTTPHeaders and
-// executeGRPC.
+// RoundTrip resolves workloadIdentity auth fresh (if configured), applies the
+// tool credential, then merges broker-injected headers last so they win over
+// the tool credential (and any transport-set headers) on key collision —
+// mirrors the ordering in buildHTTPHeaders and executeGRPC.
 func (t *injectedHeaderTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	base := t.base
 	if base == nil {
 		base = http.DefaultTransport
 	}
 
+	var wifName, wifVal string
+	if t.wifAudience != "" {
+		n, v, err := resolveWorkloadIdentityHeader(req.Context(), t.acquirer, t.wifCloud, t.wifAudience, t.wifHeader)
+		if err != nil {
+			return nil, fmt.Errorf("MCP workloadIdentity auth: %w", err)
+		}
+		wifName, wifVal = n, v
+	}
+
 	headers := InjectedHeadersFromContext(req.Context())
-	if t.authHeader == "" && len(headers) == 0 {
+	if t.authHeader == "" && wifVal == "" && len(headers) == 0 {
 		return base.RoundTrip(req)
 	}
 
 	req = req.Clone(req.Context())
 	if t.authHeader != "" {
 		req.Header.Set("Authorization", t.authHeader)
+	}
+	if wifVal != "" {
+		req.Header.Set(wifName, wifVal)
 	}
 	for k, v := range headers {
 		req.Header.Set(k, v)

@@ -31,17 +31,16 @@ export interface ToolRegistrySpec {
        *   bearer           — Authorization: Bearer <secretRef value>
        *   basic            — Authorization: Basic <base64(secretRef "user:password")>
        *   serviceAccount   — audience-bound projected Kubernetes ServiceAccount token
-       *   workloadIdentity — hosted same-cloud identity, resolved by the Enterprise
-       *                      policy broker; not yet available (rejected by the operator) */
+       *   workloadIdentity — resolved by the runtime under the pod's ambient Azure
+       *                      identity (core) */
       type: "none" | "bearer" | "basic" | "serviceAccount" | "workloadIdentity";
-      /** workloadIdentity configures hosted same-cloud identity. Resolved by the
-       * Enterprise policy broker under its own federated identity (not yet
-       * available in this release). */
+      /** workloadIdentity configures hosted same-cloud identity, resolved by the
+       * runtime under the pod's ambient Azure identity (core). */
       workloadIdentity?: {
         /** audience for the federated token exchange. */
         audience: string;
         /** cloud identity provider. */
-        cloud: "azure" | "aws" | "gcp" | "oidc";
+        cloud: "azure";
         /** header carries the resolved token. Defaults to Authorization. */
         header?: string;
       };

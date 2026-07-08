@@ -85,12 +85,17 @@ type OmniaExecutor struct {
 	// (zero behavior change) unless POLICY_BROKER_URL is set.
 	policyBroker *PolicyBrokerClient
 
+	// tokenAcquirer resolves workloadIdentity auth for HTTP/OpenAPI handlers.
+	// nil (safe default) unless the ambient environment has an Azure identity;
+	// only handlers that actually set authType: workloadIdentity need it.
+	tokenAcquirer TokenAcquirer
+
 	mu sync.RWMutex
 }
 
 // NewOmniaExecutor creates a new executor.
 func NewOmniaExecutor(log logr.Logger, tp *tracing.Provider) *OmniaExecutor {
-	return &OmniaExecutor{
+	e := &OmniaExecutor{
 		log:             log.WithName("tools"),
 		tracingProvider: tp,
 		handlers:        make(map[string]*HandlerEntry),
@@ -108,6 +113,20 @@ func NewOmniaExecutor(log logr.Logger, tp *tracing.Provider) *OmniaExecutor {
 		openAPIHeaders:  make(map[string]map[string]string),
 		policyBroker:    NewPolicyBrokerClient(log),
 	}
+	// Best-effort: only handlers that set authType: workloadIdentity need
+	// this. Absence of an ambient Azure identity (e.g. non-Azure clusters)
+	// is not an error here — it only surfaces if a WIF handler is invoked.
+	if acq, err := newAzureTokenAcquirer(); err == nil {
+		e.tokenAcquirer = acq
+	}
+	// Enforcement visibility: a disabled broker client makes Decide return a
+	// synthetic allow for every tool call — enforcement silently no-ops. Log its
+	// state at construction so "is this pod actually enforcing ToolPolicy?" is a
+	// one-line grep. enabled=false when a ToolPolicy is expected means the pod
+	// came up without POLICY_BROKER_URL wired (e.g. started before the operator
+	// injected the broker and never rolled).
+	log.Info("policy broker client initialized", "enabled", e.policyBroker.Enabled())
+	return e
 }
 
 // Name implements tools.Executor. The PromptKit registry uses this to match
@@ -332,10 +351,12 @@ func (e *OmniaExecutor) Execute(
 	descriptor *pktools.ToolDescriptor,
 	args json.RawMessage,
 ) (json.RawMessage, error) {
+	e.log.V(1).Info("OmniaExecutor.Execute ENTER", "tool", descriptor.Name)
 	e.mu.RLock()
 	handlerName, ok := e.toolHandlers[descriptor.Name]
 	if !ok {
 		e.mu.RUnlock()
+		e.log.V(1).Info("OmniaExecutor.Execute tool NOT FOUND", "tool", descriptor.Name)
 		return nil, fmt.Errorf("tool %q not found", descriptor.Name)
 	}
 	handler := e.handlers[handlerName]
@@ -359,8 +380,10 @@ func (e *OmniaExecutor) dispatch(
 	handler *HandlerEntry,
 	args json.RawMessage,
 ) (json.RawMessage, error) {
+	e.log.V(1).Info("OmniaExecutor.dispatch ENTER", "tool", toolName, "handlerType", handler.Type)
 	ctx, err := e.enforcePolicy(ctx, toolName, handlerName, args)
 	if err != nil {
+		e.log.V(1).Info("OmniaExecutor.dispatch DENIED by policy", "tool", toolName, "err", err.Error())
 		return nil, err
 	}
 
@@ -389,7 +412,18 @@ func (e *OmniaExecutor) enforcePolicy(
 	toolName, handlerName string,
 	args json.RawMessage,
 ) (context.Context, error) {
-	decision := e.policyBroker.Decide(ctx, toolName, handlerName, args)
+	// ToolPolicy `registry:` selectors match on the ToolRegistry NAME, so the
+	// decision request must carry that — not the handler name. The two differ in
+	// practice (e.g. handler "echo" inside registry "orders"); sending the
+	// handler name made every registry-scoped policy silently fail to match and
+	// allow. Fall back to the handler name only when registry metadata is unset.
+	registryName := handlerName
+	if meta, ok := e.GetToolMeta(toolName); ok && meta.RegistryName != "" {
+		registryName = meta.RegistryName
+	}
+	e.log.V(1).Info("enforcePolicy calling broker", "tool", toolName, "registry", registryName, "brokerEnabled", e.policyBroker.Enabled())
+	decision := e.policyBroker.Decide(ctx, toolName, registryName, args)
+	e.log.V(1).Info("enforcePolicy decision", "tool", toolName, "allow", decision.Allow, "wouldDeny", decision.WouldDeny, "deniedBy", decision.DeniedBy)
 
 	if !decision.Allow && !decision.WouldDeny {
 		return ctx, fmt.Errorf("%w: %s (rule %q)", errPolicyDenied, decision.Message, decision.DeniedBy)

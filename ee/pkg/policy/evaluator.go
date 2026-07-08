@@ -11,6 +11,7 @@ package policy
 import (
 	"context"
 	"fmt"
+	"net/textproto"
 	"sync"
 
 	"github.com/google/cel-go/cel"
@@ -407,7 +408,12 @@ func (e *Evaluator) evaluatePolicy(
 // checkRequiredClaims verifies that all required claims are present in headers.
 func checkRequiredClaims(claims []omniav1alpha1.RequiredClaim, headers map[string]string) Decision {
 	for _, claim := range claims {
-		headerKey := HeaderClaimPrefix + claim.Claim
+		// The decision request headers are canonicalized (buildDecisionHeaders
+		// sets them via a scratch http.Request), so the claim-name segment is
+		// Title-cased on the wire (X-Omnia-Claim-Tier). Canonicalize the lookup
+		// key too — otherwise a lowercase claim name (the common case) never
+		// matches and requiredClaims denies every call, even ones that carry it.
+		headerKey := textproto.CanonicalMIMEHeaderKey(HeaderClaimPrefix + claim.Claim)
 		if _, ok := headers[headerKey]; !ok {
 			return Decision{
 				Allowed:  false,

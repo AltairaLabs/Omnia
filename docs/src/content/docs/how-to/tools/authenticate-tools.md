@@ -28,7 +28,7 @@ an MCP transport header.
 | `bearer` | `secretRef` value | `Authorization: Bearer <token>` |
 | `basic` | `secretRef` value `user:password` | `Authorization: Basic <base64>` |
 | `serviceAccount` | projected, audience-bound SA token | `Authorization: Bearer <token>` |
-| `workloadIdentity` | hosted same-cloud identity | *(not yet available — rejected at reconcile)* |
+| `workloadIdentity` | pod's ambient Azure identity (no stored secret) | `Authorization: Bearer <token>` (or custom `header`) |
 
 ## Bearer / basic token
 
@@ -135,13 +135,46 @@ long-lived secret is stored.
 The token is sent as `Authorization: Bearer <token>`. `serviceAccount.audience`
 is required.
 
-## workloadIdentity (not yet available)
+## workloadIdentity (Azure)
 
-`auth.type: workloadIdentity` is accepted by the schema but **rejected at
-reconcile** — its credential resolver is the Enterprise policy broker, which is a
-later release. It is also rejected when the pod's Provider itself uses workload
-identity, because tool egress must not reuse the runtime's ambient cloud
-identity.
+`auth.type: workloadIdentity` authenticates a tool call as the agent pod's
+**ambient Azure identity** — no credential is stored by Omnia. Only `cloud: azure`
+is supported today, on `http`, `grpc`, `openapi`, and MCP `sse`/`streamable-http`
+handlers (not `stdio`).
+
+```yaml
+- name: graph-api
+  type: http
+  httpConfig:
+    endpoint: https://graph.microsoft.com/v1.0/me
+    method: GET
+  auth:
+    type: workloadIdentity
+    workloadIdentity:
+      cloud: azure
+      audience: "https://graph.microsoft.com/.default"  # token scope/audience
+      # header: Authorization                           # optional; default Authorization
+  tool:
+    name: whoami
+    description: "Read the caller's Graph profile"
+    inputSchema:
+      type: object
+```
+
+The runtime acquires a token for `audience` (via `DefaultAzureCredential`) and
+sets it on `header` (default `Authorization: Bearer <token>`). Tokens are acquired
+per call, so they survive expiry. If a token can't be acquired, that tool call
+fails rather than calling the backend unauthenticated.
+
+**Cluster setup** (once per agent identity — same ambient identity keyless Azure
+provider auth uses): label the pod `azure.workload.identity/use: "true"`, annotate
+its ServiceAccount with `azure.workload.identity/client-id: <client-id>`, and
+create a federated identity credential trusting the cluster OIDC issuer + subject
+`system:serviceaccount:<namespace>:<serviceAccount>`. Because one pod identity is
+shared across the model provider and all WIF tools, grant it the union of every
+WIF tool's API. See the reference's
+[Authenticating tools](/reference/core/toolregistry/#authenticating-tools) for the
+full setup note.
 
 ## Transport constraints
 

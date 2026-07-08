@@ -1927,10 +1927,7 @@ export const crdConstraints: Record<string, Record<string, FieldConstraint>> =
     "spec.handlers[].auth.workloadIdentity.cloud": {
       "type": "string",
       "enum": [
-        "azure",
-        "aws",
-        "gcp",
-        "oidc"
+        "azure"
       ],
       "required": true
     },

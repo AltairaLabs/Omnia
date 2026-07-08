@@ -324,7 +324,7 @@ describe("useLicense", () => {
     renderHook(() => useLicense(), { wrapper: createWrapper() });
 
     await waitFor(() => {
-      expect(mockFetch).toHaveBeenCalledWith("/api/license");
+      expect(mockFetch).toHaveBeenCalledWith("/api/license", { cache: "no-store" });
     });
   });
 });
