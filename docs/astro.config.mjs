@@ -127,6 +127,7 @@ export default defineConfig({
         label: "How-To Guides",
         items: [
         { label: "Agents", collapsed: true, items: [{ autogenerate: { directory: "how-to/agents" } }] },
+        { label: "Tools", collapsed: true, items: [{ autogenerate: { directory: "how-to/tools" } }] },
         { label: "Providers", collapsed: true, items: [{ autogenerate: { directory: "how-to/providers" } }] },
         { label: "Memory", collapsed: true, items: [{ autogenerate: { directory: "how-to/memory" } }] },
         { label: "Observability", collapsed: true, items: [{ autogenerate: { directory: "how-to/observability" } }] },

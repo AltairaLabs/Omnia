@@ -13,6 +13,10 @@ spec:
       httpConfig:
         endpoint: "https://orders-api.backend.svc.cluster.local:8443/api/v1/orders"
         method: GET
+        # Retries are configured per transport (the handler-level `retries`
+        # field was removed).
+        retryPolicy:
+          maxAttempts: 3
       tool:
         name: order_lookup
         description: Look up the status of a customer order by order ID
@@ -55,15 +59,9 @@ spec:
               type: string
               description: Shipping tracking number (present when shipped)
       timeout: "10s"
-      retries: 2
     # Tool for checking product inventory
     - name: inventory-check
       type: http
-      selector:
-        matchLabels:
-          app: inventory-service
-        namespace: backend
-        port: "http"
       httpConfig:
         endpoint: "https://inventory.backend.svc.cluster.local:8443/api/v1/inventory"
         method: GET

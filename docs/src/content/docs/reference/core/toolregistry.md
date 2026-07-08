@@ -9,7 +9,15 @@ sidebar:
 The ToolRegistry custom resource defines tool handlers available to AI agents. Handlers can expose one or more tools and come in two categories:
 
 - **Self-describing** (MCP, OpenAPI): Automatically discover tools at runtime
-- **Explicit** (HTTP, gRPC): Require a tool definition with name, description, and input schema
+- **Explicit** (HTTP, gRPC, client): Require a tool definition with name, description, and input schema
+
+:::note[Endpoints live inside the type-specific config block]
+There is **no** handler-level `endpoint` field. The endpoint for a handler lives
+inside its type block: `httpConfig.endpoint`, `grpcConfig.endpoint`,
+`mcpConfig.endpoint`, or `openAPIConfig.specURL`. The CRD uses strict schema
+validation, so an unknown field such as a top-level `endpoint:` is **rejected**
+by the API server.
+:::
 
 ## API version
 
@@ -24,10 +32,12 @@ graph TB
     TR --> H2[gRPC Handler]
     TR --> H3[MCP Handler]
     TR --> H4[OpenAPI Handler]
+    TR --> H5[Client Handler]
 
     subgraph explicit["Explicit (schema required)"]
         H1
         H2
+        H5
     end
 
     subgraph selfDesc["Self-Describing (auto-discovery)"]
@@ -39,21 +49,24 @@ graph TB
     H2 --> T2[Single Tool]
     H3 --> T3[Multiple Tools]
     H4 --> T4[Multiple Tools]
+    H5 --> T5[Browser Tool]
 ```
 
 ## Spec fields
 
 ### `handlers`
 
-List of handler definitions. Each handler connects to an external service that provides tools.
+List of handler definitions (at least one is required). Each handler connects to
+a tool source and exposes one or more tools.
 
 ```yaml
 spec:
   handlers:
     - name: calculator
       type: http
-      endpoint:
-        url: https://api.example.com/calculate
+      httpConfig:
+        endpoint: https://api.example.com/calculate
+        method: POST
       tool:
         name: calculate
         description: "Perform mathematical calculations"
@@ -70,9 +83,10 @@ spec:
 | Type | Category | Description |
 |------|----------|-------------|
 | `http` | Explicit | HTTP REST endpoint |
-| `grpc` | Explicit | gRPC service using Tool protocol |
+| `grpc` | Explicit | gRPC service using the Omnia Tool protocol |
 | `mcp` | Self-describing | Model Context Protocol server |
 | `openapi` | Self-describing | OpenAPI/Swagger-documented service |
+| `client` | Explicit | Browser-executed tool (runs in the connected client) |
 
 ### Handler definition
 
@@ -80,33 +94,48 @@ Common fields for all handler types:
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `name` | string | Yes | Unique handler name |
-| `type` | string | Yes | Handler type (http, grpc, mcp, openapi) |
-| `endpoint.url` | string | Conditional | Direct URL (for http/grpc) |
-| `endpoint.serviceRef` | object | Conditional | Kubernetes Service reference |
-| `timeout` | string | No | Request timeout (e.g., "30s") |
-| `retries` | int | No | Number of retry attempts |
+| `name` | string | Yes | Unique handler name (`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`, max 63 chars) |
+| `type` | string | Yes | Handler type (`http`, `grpc`, `mcp`, `openapi`, `client`) |
+| `tool` | object | Conditional | Tool definition — required for `http`, `grpc`, and `client` |
+| `httpConfig` | object | Conditional | Required when `type: http` |
+| `grpcConfig` | object | Conditional | Required when `type: grpc` |
+| `mcpConfig` | object | Conditional | Required when `type: mcp` |
+| `openAPIConfig` | object | Conditional | Required when `type: openapi` |
+| `clientConfig` | object | No | Optional consent configuration for `type: client` |
+| `auth` | object | No | How the runtime authenticates to the backend (see [Authenticating tools](/how-to/tools/authenticate-tools/)) |
+| `timeout` | string | No | Per-invocation wall-clock timeout. Defaults to `30s` |
+
+:::caution[There is no `retries` field]
+A handler-level `retries` field existed in earlier releases and has been
+**removed**. Retry behaviour is now configured per transport via
+`httpConfig.retryPolicy`, `grpcConfig.retryPolicy`, `mcpConfig.retryPolicy`, and
+`openAPIConfig.retryPolicy`. See [Advanced HTTP tools](/how-to/tools/advanced-http-tools/).
+:::
 
 ### Tool definition (for explicit handlers)
 
-HTTP and gRPC handlers require a `tool` definition:
+`http`, `grpc`, and `client` handlers require a `tool` definition:
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `tool.name` | string | Yes | Tool name exposed to the LLM |
+| `tool.name` | string | Yes | Tool name exposed to the LLM (`^[a-z][a-z0-9_]*$`, max 64) |
 | `tool.description` | string | Yes | Human-readable description |
 | `tool.inputSchema` | object | Yes | JSON Schema for input parameters |
 | `tool.outputSchema` | object | No | JSON Schema for output (optional) |
 
 ## HTTP handler
 
-Configure HTTP-specific options for explicit tool endpoints:
+The endpoint URL lives in `httpConfig.endpoint` (**required**):
 
 ```yaml
 - name: search-api
   type: http
-  endpoint:
-    url: https://api.example.com/search
+  httpConfig:
+    endpoint: https://api.example.com/search
+    method: POST
+    headers:
+      Content-Type: application/json
+    contentType: application/json
   tool:
     name: search
     description: "Search the knowledge base"
@@ -120,24 +149,25 @@ Configure HTTP-specific options for explicit tool endpoints:
           type: integer
           default: 10
       required: [query]
-  httpConfig:
-    method: POST
-    headers:
-      Content-Type: application/json
-    contentType: application/json
   timeout: "30s"
-  retries: 3
 ```
 
 ### HTTP configuration options
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
+| `endpoint` | string | — | **Required.** HTTP endpoint URL |
 | `method` | string | `POST` | HTTP method |
-| `headers` | map | - | Additional HTTP headers |
+| `headers` | map | — | Additional HTTP headers |
 | `contentType` | string | `application/json` | Content-Type header |
-| `authType` | string | `bearer` | **Deprecated** — use the handler-level `auth` stanza. Auth type (`bearer` or `basic`). |
-| `authSecretRef` | object | - | **Deprecated** — use the handler-level `auth` stanza. Reference to a Secret holding the credential (see below). |
+| `retryPolicy` | object | — | Retry behaviour — see [Advanced HTTP tools](/how-to/tools/advanced-http-tools/) |
+| `authType` | string | — | **Deprecated** — use the handler-level `auth` stanza. Auth type (`bearer` or `basic`). |
+| `authSecretRef` | object | — | **Deprecated** — use the handler-level `auth` stanza. Reference to a Secret holding the credential. |
+
+The HTTP handler also supports request/response shaping fields —
+`urlTemplate`, `queryParams`, `headerParams`, `staticQuery`, `staticBody`,
+`bodyMapping`, `responseMapping`, and `redact`. These are **not** exposed in the
+dashboard UI; see [Advanced HTTP tools](/how-to/tools/advanced-http-tools/).
 
 ### Authenticating tools
 
@@ -152,10 +182,15 @@ handlers:
     httpConfig:
       endpoint: https://api.example.com
     auth:
-      type: bearer              # none | bearer | basic
+      type: bearer              # none | bearer | basic | serviceAccount | workloadIdentity
       secretRef:
         name: my-tool-credentials   # a Kubernetes Secret in the same namespace
         key: token                  # for basic, the value is "username:password"
+    tool:
+      name: my_tool
+      description: "Call the authenticated API"
+      inputSchema:
+        type: object
 ```
 
 | Field | Type | Default | Description |
@@ -208,22 +243,28 @@ cluster/infra side must, once per agent identity:
    identity separation is a future option.
 :::
 
+For a task-oriented walkthrough (creating the credential Secret and verifying the
+mounted `<agentruntime>-tool-secrets`), see the how-to:
+[Authenticating tools](/how-to/tools/authenticate-tools/).
+
 :::note[Deprecated: `authType` / `authSecretRef`]
 The per-config `authType` and `authSecretRef` fields on `httpConfig`/`openAPIConfig`
-are deprecated in favour of the `auth` stanza above. They still work and are
-normalized into it, but setting **both** a handler `auth` stanza and a legacy
+are deprecated in favour of the `auth` stanza. They still work and are normalized
+into it, but setting **both** a handler `auth` stanza and a legacy
 `authType`/`authSecretRef` on the same handler is rejected.
 :::
 
 ## GRPC handler
 
-Configure gRPC handlers using the Omnia Tool protocol:
+The endpoint (`host:port`) lives in `grpcConfig.endpoint` (**required**):
 
 ```yaml
 - name: grpc-tools
   type: grpc
-  endpoint:
-    url: tool-service.tools.svc.cluster.local:50051
+  grpcConfig:
+    endpoint: tool-service.tools.svc.cluster.local:50051
+    tls: false
+    tlsInsecureSkipVerify: false
   tool:
     name: process_data
     description: "Process data via gRPC"
@@ -233,20 +274,19 @@ Configure gRPC handlers using the Omnia Tool protocol:
         data:
           type: string
       required: [data]
-  grpcConfig:
-    tls: false
-    tlsInsecureSkipVerify: false
 ```
 
 ### GRPC configuration options
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
+| `endpoint` | string | — | **Required.** gRPC server address (`host:port`) |
 | `tls` | bool | `false` | Enable TLS |
-| `tlsCertPath` | string | - | Path to TLS certificate |
-| `tlsKeyPath` | string | - | Path to TLS key |
-| `tlsCAPath` | string | - | Path to CA certificate |
+| `tlsCertPath` | string | — | Path to TLS certificate |
+| `tlsKeyPath` | string | — | Path to TLS key |
+| `tlsCAPath` | string | — | Path to CA certificate |
 | `tlsInsecureSkipVerify` | bool | `false` | Skip TLS verification |
+| `retryPolicy` | object | — | Retry behaviour (per gRPC status code) |
 
 ## MCP handler (self-describing)
 
@@ -260,6 +300,16 @@ Model Context Protocol handlers automatically discover tools from the MCP server
   mcpConfig:
     transport: sse
     endpoint: http://mcp-server.tools.svc.cluster.local:8080/sse
+```
+
+**Streamable HTTP Transport**:
+
+```yaml
+- name: mcp-http
+  type: mcp
+  mcpConfig:
+    transport: streamable-http
+    endpoint: http://mcp-server.tools.svc.cluster.local:8080/mcp
 ```
 
 **Stdio Transport** (spawn MCP server as subprocess):
@@ -281,12 +331,18 @@ Model Context Protocol handlers automatically discover tools from the MCP server
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `transport` | string | Yes | `sse` or `stdio` |
-| `endpoint` | string | For SSE | SSE endpoint URL |
-| `command` | string | For stdio | Command to execute |
+| `transport` | string | Yes | `sse`, `streamable-http`, or `stdio` |
+| `endpoint` | string | For `sse` / `streamable-http` | Server URL |
+| `command` | string | For `stdio` | Command to execute |
 | `args` | []string | No | Command arguments |
 | `workDir` | string | No | Working directory |
 | `env` | map | No | Environment variables |
+| `toolFilter` | object | No | `allowlist` / `blocklist` of tool names to expose |
+| `retryPolicy` | object | No | Retry behaviour for CallTool failures |
+
+`auth` is supported on `sse` and `streamable-http` transports (the credential is
+attached as a transport header). Auth on a `stdio` transport is rejected (no
+header channel).
 
 ## OpenAPI handler (self-describing)
 
@@ -311,82 +367,28 @@ OpenAPI handlers automatically discover tools from an OpenAPI/Swagger specificat
 | `baseURL` | string | No | Override the base URL from spec |
 | `operationFilter` | []string | No | Limit to specific operation IDs |
 | `headers` | map | No | Additional headers for requests |
-| `authType` | string | No | **Deprecated** — use the handler-level `auth` stanza. Auth type (`bearer` or `basic`). |
-| `authSecretRef` | object | No | **Deprecated** — use the handler-level `auth` stanza. Reference to a Secret holding the credential — see "Authenticating tools" under the HTTP Handler section above. |
+| `retryPolicy` | object | No | Retry behaviour (uses the HTTP retry policy shape) |
+| `authType` | string | No | **Deprecated** — use the handler-level `auth` stanza. |
+| `authSecretRef` | object | No | **Deprecated** — use the handler-level `auth` stanza. |
 
-## Service discovery
+## Client handler (browser-executed)
 
-Handlers can reference Kubernetes Services instead of direct URLs:
-
-```mermaid
-graph LR
-    TR[ToolRegistry] -->|selector| S1[Service A]
-    TR -->|selector| S2[Service B]
-    TR -->|serviceRef| S3[Service C]
-
-    S1 -->|annotations| T1[Tool: action_a]
-    S2 -->|annotations| T2[Tool: action_b]
-    S3 -->|endpoint| T3[Tool: action_c]
-```
+`client` handlers are executed by the connected browser client over the
+WebSocket facade, not by the runtime. They take an explicit `tool` definition
+like HTTP/gRPC handlers, plus optional consent configuration. See
+[Client-side tools](/how-to/tools/client-tools/).
 
 ```yaml
-- name: internal-tool
-  type: http
-  endpoint:
-    serviceRef:
-      name: tool-service
-      namespace: tools  # Optional, defaults to ToolRegistry namespace
-      port: 8080
+- name: geolocation
+  type: client
+  clientConfig:
+    consentMessage: "Allow the assistant to read your location?"
+    categories: [location]
   tool:
-    name: internal_action
-    description: "Perform internal action"
+    name: get_location
+    description: "Read the user's current location from the browser"
     inputSchema:
       type: object
-```
-
-### Service labels for discovery
-
-Services can be automatically discovered using label selectors:
-
-```yaml
-spec:
-  handlers:
-    - name: platform-tools
-      selector:
-        matchLabels:
-          omnia.altairalabs.ai/tool: "true"
-          team: platform
-```
-
-### Service annotations
-
-Customize discovered tool behavior with annotations:
-
-| Annotation | Description | Default |
-|------------|-------------|---------|
-| `omnia.altairalabs.ai/tool-path` | API endpoint path | `/` |
-| `omnia.altairalabs.ai/tool-description` | Tool description | Service name |
-| `omnia.altairalabs.ai/tool-type` | Handler type | `http` |
-
-Example annotated Service:
-
-```yaml
-apiVersion: v1
-kind: Service
-metadata:
-  name: weather-api
-  labels:
-    omnia.altairalabs.ai/tool: "true"
-  annotations:
-    omnia.altairalabs.ai/tool-path: "/v1/weather"
-    omnia.altairalabs.ai/tool-description: "Get weather forecasts"
-spec:
-  selector:
-    app: weather-service
-  ports:
-    - name: http
-      port: 80
-      targetPort: 8080
 ```
 
 ## Status fields
@@ -397,18 +399,23 @@ Current phase of the ToolRegistry:
 
 | Value | Description |
 |-------|-------------|
-| `Pending` | Discovering tools |
-| `Ready` | All handlers available |
-| `Degraded` | Some handlers unavailable |
-| `Failed` | No handlers available |
+| `Pending` | Initial state before the first reconcile completes |
+| `Ready` | Every discovered tool is `Available` |
+| `Degraded` | Some tools `Available`, some `Unavailable`. Reserved for backend health — **not currently emitted** (see note) |
+| `Failed` | A handler failed validation, or no tools were discovered |
+
+:::note[Status is config-level, not a live health check]
+The controller marks a tool `Available` when its handler config is valid and the
+endpoint resolves — it does **not** probe the backend for reachability. `phase:
+Ready` means "the configuration is valid", not "the backend is up". Because there
+is no reachability probe today, no tool is ever marked `Unavailable`, so
+`Degraded` is not currently emitted — it is reserved for a future probe-backed
+status.
+:::
 
 ### `discoveredToolsCount`
 
 Total number of tools discovered across all handlers.
-
-### `availableToolsCount`
-
-Number of tools currently available.
 
 ### `discoveredTools`
 
@@ -422,17 +429,17 @@ status:
       status: Available
       endpoint: https://api.example.com/calculate
     - handlerName: petstore
-      name: getPetById
+      name: petstore
       status: Available
-      endpoint: https://petstore.swagger.io/v2
+      endpoint: https://petstore.swagger.io/v2/swagger.json
 ```
 
 ### `conditions`
 
 | Type | Description |
 |------|-------------|
-| `HandlersAvailable` | At least one handler is connected |
-| `AllHandlersReady` | All configured handlers are ready |
+| `HandlersValid` | `True` when every handler passed validation; `False` (with the errors) otherwise |
+| `ToolsDiscovered` | Reports how many tools were discovered from how many handlers |
 
 ## Complete example
 
@@ -449,8 +456,9 @@ spec:
     # Explicit HTTP tool with schema
     - name: calculator
       type: http
-      endpoint:
-        url: https://api.example.com/calculate
+      httpConfig:
+        endpoint: https://api.example.com/calculate
+        method: POST
       tool:
         name: calculate
         description: "Perform mathematical calculations"
@@ -461,18 +469,13 @@ spec:
               type: string
               description: "Mathematical expression to evaluate"
           required: [expression]
-      httpConfig:
-        method: POST
       timeout: "10s"
 
     # gRPC tool service
     - name: user-service
       type: grpc
-      endpoint:
-        serviceRef:
-          name: user-grpc
-          namespace: internal
-          port: 50051
+      grpcConfig:
+        endpoint: user-grpc.internal.svc.cluster.local:50051
       tool:
         name: get_user
         description: "Retrieve user information"
@@ -500,13 +503,12 @@ spec:
           - getProductDetails
 ```
 
-Status after discovery:
+Status after reconcile:
 
 ```yaml
 status:
   phase: Ready
-  discoveredToolsCount: 8
-  availableToolsCount: 8
+  discoveredToolsCount: 4
   discoveredTools:
     - handlerName: calculator
       name: calculate
@@ -515,20 +517,20 @@ status:
       name: get_user
       status: Available
     - handlerName: code-tools
-      name: read_file
-      status: Available
-    - handlerName: code-tools
-      name: write_file
+      name: code-tools
       status: Available
     - handlerName: external-api
-      name: searchProducts
-      status: Available
-    - handlerName: external-api
-      name: getProductDetails
+      name: external-api
       status: Available
   conditions:
-    - type: HandlersAvailable
+    - type: HandlersValid
       status: "True"
-    - type: AllHandlersReady
+    - type: ToolsDiscovered
       status: "True"
 ```
+
+:::note[Self-describing handlers report one placeholder entry until runtime]
+`mcp` and `openapi` handlers contribute a single placeholder `discoveredTools`
+entry (named after the handler) at reconcile time. The individual tools they
+expose are discovered by the runtime when the agent starts.
+:::

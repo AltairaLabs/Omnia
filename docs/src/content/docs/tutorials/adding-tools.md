@@ -19,16 +19,17 @@ Tools allow agents to perform actions beyond generating text. With Omnia's ToolR
 
 ## Handler types
 
-Omnia supports four types of tool handlers:
+Omnia supports five types of tool handlers:
 
 | Type | Category | Description |
 |------|----------|-------------|
 | `http` | Explicit | HTTP REST endpoints with defined schema |
-| `grpc` | Explicit | gRPC services using Tool protocol |
+| `grpc` | Explicit | gRPC services using the Omnia Tool protocol |
 | `mcp` | Self-describing | Model Context Protocol servers |
 | `openapi` | Self-describing | OpenAPI/Swagger services |
+| `client` | Explicit | Browser-executed tools (see [Client-side tools](/how-to/tools/client-tools/)) |
 
-**Self-describing** handlers (MCP, OpenAPI) automatically discover available tools at runtime. **Explicit** handlers (HTTP, gRPC) require you to define the tool name, description, and input schema.
+**Self-describing** handlers (MCP, OpenAPI) automatically discover available tools at runtime. **Explicit** handlers (HTTP, gRPC, client) require you to define the tool name, description, and input schema. This tutorial focuses on server-side handlers; see the [client-side tools how-to](/how-to/tools/client-tools/) for browser-executed tools.
 
 ## Step 1: create a tool service
 
@@ -83,10 +84,10 @@ spec:
   handlers:
     - name: calculator
       type: http
-      endpoint:
-        serviceRef:
-          name: calculator
-          port: 80
+      httpConfig:
+        endpoint: "http://calculator.default.svc.cluster.local:80/calculate"
+        method: POST
+        contentType: application/json
       tool:
         name: calculate
         description: "Perform mathematical calculations"
@@ -97,9 +98,6 @@ spec:
               type: string
               description: "Mathematical expression to evaluate"
           required: [expression]
-      httpConfig:
-        method: POST
-        contentType: application/json
       timeout: "10s"
 ```
 
@@ -123,17 +121,23 @@ You should see the status showing discovered tools:
 status:
   phase: Ready
   discoveredToolsCount: 1
-  availableToolsCount: 1
   discoveredTools:
     - handlerName: calculator
       name: calculate
       status: Available
+      endpoint: http://calculator.default.svc.cluster.local:80/calculate
   conditions:
-    - type: HandlersAvailable
+    - type: HandlersValid
       status: "True"
-    - type: AllHandlersReady
+    - type: ToolsDiscovered
       status: "True"
 ```
+
+:::note[`Ready` means the config is valid, not that the backend is reachable]
+The controller does not probe the tool endpoint — it marks the tool `Available`
+when the handler config validates and the endpoint resolves. A `Ready`
+ToolRegistry can still point at a service that is down.
+:::
 
 ## Step 4: connect tools to your agent
 
@@ -158,9 +162,10 @@ spec:
     ttl: "1h"
   runtime:
     replicas: 1
-  provider:
-    secretRef:
-      name: llm-credentials
+  providers:
+    - name: default
+      providerRef:
+        name: my-provider   # a Provider CRD (see the Provider reference)
 ```
 
 Apply the update:
@@ -249,8 +254,9 @@ spec:
     # Explicit HTTP tool
     - name: search
       type: http
-      endpoint:
-        url: https://api.search.com/query
+      httpConfig:
+        endpoint: https://api.search.com/query
+        method: POST
       tool:
         name: web_search
         description: "Search the web"
@@ -260,8 +266,6 @@ spec:
             query:
               type: string
           required: [query]
-      httpConfig:
-        method: POST
 
     # Self-describing MCP server
     - name: code-assistant
@@ -277,46 +281,10 @@ spec:
         specURL: https://api.weather.com/openapi.yaml
 ```
 
-## Tool discovery via labels
-
-You can also discover tool services via Kubernetes labels:
-
-```yaml
-apiVersion: omnia.altairalabs.ai/v1alpha1
-kind: ToolRegistry
-metadata:
-  name: discovered-tools
-spec:
-  handlers:
-    - name: platform-tools
-      selector:
-        matchLabels:
-          omnia.altairalabs.ai/tool: "true"
-          team: platform
-```
-
-Services matching the selector are automatically added. Annotate your services to customize behavior:
-
-```yaml
-apiVersion: v1
-kind: Service
-metadata:
-  name: my-tool-service
-  labels:
-    omnia.altairalabs.ai/tool: "true"
-    team: platform
-  annotations:
-    omnia.altairalabs.ai/tool-path: "/api/action"
-    omnia.altairalabs.ai/tool-description: "Perform custom action"
-spec:
-  selector:
-    app: my-tool
-  ports:
-    - port: 80
-```
-
 ## Next steps
 
 - Read the [ToolRegistry Reference](/reference/core/toolregistry/) for all configuration options
-- Learn about [configuring authentication](/how-to/security/configure-authentication/) for tool access
+- [Authenticate tools](/how-to/tools/authenticate-tools/) — bearer/basic secrets, projected ServiceAccount tokens, and the secret-handling model
+- Build [advanced HTTP tools](/how-to/tools/advanced-http-tools/) — URL templates, static injection, request/response mapping, redaction, and retry policies
+- Add [client-side (browser) tools](/how-to/tools/client-tools/) with user consent
 - Explore [observability](/how-to/observability/setup-observability/) to monitor tool calls
