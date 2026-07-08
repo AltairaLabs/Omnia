@@ -116,7 +116,7 @@ func (r *ToolRegistryReconciler) processHandlers(ctx context.Context, toolRegist
 			continue
 		}
 
-		// Resolve endpoint if using service selector
+		// Resolve the handler endpoint from its type-specific config.
 		endpoint, err := r.resolveEndpoint(ctx, toolRegistry, &h)
 		if err != nil {
 			log.Error(err, "Failed to resolve endpoint", "handler", h.Name)

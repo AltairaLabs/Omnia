@@ -234,7 +234,7 @@ Defines tool handlers available to agents:
 - **gRPC handlers** - gRPC services using the Tool protocol
 - **MCP handlers** - Self-describing Model Context Protocol servers
 - **OpenAPI handlers** - Self-describing services with OpenAPI specs
-- Service discovery via label selectors
+- **Client handlers** - Browser-executed tools run by the connected client
 
 #### Provider
 
