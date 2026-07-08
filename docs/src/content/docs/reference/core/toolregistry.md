@@ -351,13 +351,16 @@ Current phase of the ToolRegistry:
 |-------|-------------|
 | `Pending` | Initial state before the first reconcile completes |
 | `Ready` | Every discovered tool is `Available` |
-| `Degraded` | Some tools are `Unavailable` (e.g. one handler's endpoint is unconfigured while others resolve successfully) |
+| `Degraded` | Some tools `Available`, some `Unavailable`. Reserved for backend health — **not currently emitted** (see note) |
 | `Failed` | A handler failed validation, or no tools were discovered |
 
 :::note[Status is config-level, not a live health check]
 The controller marks a tool `Available` when its handler config is valid and the
 endpoint resolves — it does **not** probe the backend for reachability. `phase:
-Ready` means "the configuration is valid", not "the backend is up".
+Ready` means "the configuration is valid", not "the backend is up". Because there
+is no reachability probe today, no tool is ever marked `Unavailable`, so
+`Degraded` is not currently emitted — it is reserved for a future probe-backed
+status.
 :::
 
 ### `discoveredToolsCount`
