@@ -489,23 +489,6 @@ type ToolDefinition struct {
 	OutputSchema *apiextensionsv1.JSON `json:"outputSchema,omitempty"`
 }
 
-// ServiceSelector defines how to discover handler endpoints via Kubernetes Services
-type ServiceSelector struct {
-	// matchLabels specifies labels that must match on the Service.
-	// +optional
-	MatchLabels map[string]string `json:"matchLabels,omitempty"`
-
-	// namespace specifies the namespace to search for Services.
-	// If empty, searches in the same namespace as the ToolRegistry.
-	// +optional
-	Namespace *string `json:"namespace,omitempty"`
-
-	// port specifies the port name or number on the Service.
-	// If empty, uses the first port.
-	// +optional
-	Port *string `json:"port,omitempty"`
-}
-
 // HandlerDefinition defines a tool handler that exposes one or more tools
 // +kubebuilder:validation:XValidation:rule="!(has(self.auth) && ((has(self.httpConfig) && (has(self.httpConfig.authType) || has(self.httpConfig.authSecretRef))) || (has(self.openAPIConfig) && (has(self.openAPIConfig.authType) || has(self.openAPIConfig.authSecretRef)))))",message="set either the handler-level auth stanza or the legacy httpConfig/openAPIConfig authType/authSecretRef, not both"
 type HandlerDefinition struct {
@@ -518,11 +501,6 @@ type HandlerDefinition struct {
 	// type specifies the handler protocol.
 	// +kubebuilder:validation:Required
 	Type HandlerType `json:"type"`
-
-	// selector discovers the handler endpoint from Kubernetes Services.
-	// Mutually exclusive with inline endpoint configuration.
-	// +optional
-	Selector *ServiceSelector `json:"selector,omitempty"`
 
 	// tool defines the tool interface (required for http and grpc types).
 	// Self-describing handlers (mcp, openapi) discover tools automatically.

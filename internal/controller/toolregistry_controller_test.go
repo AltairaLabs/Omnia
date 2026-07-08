@@ -21,13 +21,11 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	corev1 "k8s.io/api/core/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/apimachinery/pkg/util/intstr"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
@@ -124,149 +122,26 @@ var _ = Describe("ToolRegistry Controller", func() {
 		})
 	})
 
-	Context("When reconciling a ToolRegistry with service selector", func() {
-		var (
-			toolRegistry *omniav1alpha1.ToolRegistry
-			service      *corev1.Service
-		)
-
-		BeforeEach(func() {
-			By("creating a Service with matching labels")
-			service = &corev1.Service{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "tool-service",
-					Namespace: registryNamespace,
-					Labels: map[string]string{
-						"app": "my-tool",
-					},
-				},
-				Spec: corev1.ServiceSpec{
-					Ports: []corev1.ServicePort{
-						{
-							Name:       "http",
-							Port:       8080,
-							TargetPort: intstr.FromInt(8080),
-						},
-					},
-				},
-			}
-			Expect(k8sClient.Create(ctx, service)).To(Succeed())
-
-			By("creating the ToolRegistry with selector")
-			toolRegistry = &omniav1alpha1.ToolRegistry{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "selector-registry",
-					Namespace: registryNamespace,
-				},
-				Spec: omniav1alpha1.ToolRegistrySpec{
-					Handlers: []omniav1alpha1.HandlerDefinition{
-						{
-							Name: "discovered-handler",
-							Type: omniav1alpha1.HandlerTypeHTTP,
-							Selector: &omniav1alpha1.ServiceSelector{
-								MatchLabels: map[string]string{
-									"app": "my-tool",
-								},
-							},
-							HTTPConfig: &omniav1alpha1.HTTPConfig{
-								Endpoint: "", // Will be resolved from selector
-							},
-							Tool: &omniav1alpha1.ToolDefinition{
-								Name:        "discovered_tool",
-								Description: "A discovered tool",
-								InputSchema: apiextensionsv1.JSON{
-									Raw: []byte(`{"type":"object"}`),
-								},
-							},
-						},
-					},
-				},
-			}
-			Expect(k8sClient.Create(ctx, toolRegistry)).To(Succeed())
-		})
-
-		AfterEach(func() {
-			By("cleaning up resources")
-			tr := &omniav1alpha1.ToolRegistry{}
-			err := k8sClient.Get(ctx, types.NamespacedName{
-				Name:      "selector-registry",
-				Namespace: registryNamespace,
-			}, tr)
-			if err == nil {
-				Expect(k8sClient.Delete(ctx, tr)).To(Succeed())
-			}
-
-			svc := &corev1.Service{}
-			err = k8sClient.Get(ctx, types.NamespacedName{
-				Name:      "tool-service",
-				Namespace: registryNamespace,
-			}, svc)
-			if err == nil {
-				Expect(k8sClient.Delete(ctx, svc)).To(Succeed())
-			}
-		})
-
-		It("should discover the tool via service selector", func() {
-			By("reconciling the ToolRegistry")
-			reconciler := &ToolRegistryReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
-			}
-
-			_, err := reconciler.Reconcile(ctx, reconcile.Request{
-				NamespacedName: types.NamespacedName{
-					Name:      "selector-registry",
-					Namespace: registryNamespace,
-				},
-			})
-			Expect(err).NotTo(HaveOccurred())
-
-			By("checking the updated status")
-			updatedTR := &omniav1alpha1.ToolRegistry{}
-			Expect(k8sClient.Get(ctx, types.NamespacedName{
-				Name:      "selector-registry",
-				Namespace: registryNamespace,
-			}, updatedTR)).To(Succeed())
-
-			Expect(updatedTR.Status.Phase).To(Equal(omniav1alpha1.ToolRegistryPhaseReady))
-			Expect(updatedTR.Status.DiscoveredToolsCount).To(Equal(int32(1)))
-			Expect(updatedTR.Status.DiscoveredTools).To(HaveLen(1))
-			Expect(updatedTR.Status.DiscoveredTools[0].Name).To(Equal("discovered_tool"))
-			Expect(updatedTR.Status.DiscoveredTools[0].Endpoint).To(ContainSubstring("tool-service"))
-			Expect(updatedTR.Status.DiscoveredTools[0].Endpoint).To(ContainSubstring("8080"))
-			Expect(updatedTR.Status.DiscoveredTools[0].Status).To(Equal(omniav1alpha1.ToolStatusAvailable))
-		})
-	})
-
-	Context("When reconciling a ToolRegistry with no matching services", func() {
+	Context("When reconciling a ToolRegistry with an unresolvable endpoint", func() {
 		var toolRegistry *omniav1alpha1.ToolRegistry
 
 		BeforeEach(func() {
-			By("creating the ToolRegistry with selector that won't match")
+			By("creating the ToolRegistry with an MCP handler that cannot resolve an endpoint")
+			// streamable-http transport is a valid MCPTransport but validateHandler only
+			// requires an endpoint/command for sse/stdio, so this passes validation and
+			// then fails at endpoint resolution — exercising processHandlers' failure path.
 			toolRegistry = &omniav1alpha1.ToolRegistry{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      "no-match-registry",
+					Name:      "unresolvable-registry",
 					Namespace: registryNamespace,
 				},
 				Spec: omniav1alpha1.ToolRegistrySpec{
 					Handlers: []omniav1alpha1.HandlerDefinition{
 						{
-							Name: "missing-handler",
-							Type: omniav1alpha1.HandlerTypeHTTP,
-							Selector: &omniav1alpha1.ServiceSelector{
-								MatchLabels: map[string]string{
-									"app": "nonexistent",
-								},
-							},
-							HTTPConfig: &omniav1alpha1.HTTPConfig{
-								Endpoint: "", // Will be resolved from selector
-							},
-							Tool: &omniav1alpha1.ToolDefinition{
-								Name:        "missing_tool",
-								Description: "A missing tool",
-								InputSchema: apiextensionsv1.JSON{
-									Raw: []byte(`{"type":"object"}`),
-								},
+							Name: "unresolvable-handler",
+							Type: omniav1alpha1.HandlerTypeMCP,
+							MCPConfig: &omniav1alpha1.MCPClientConfig{
+								Transport: omniav1alpha1.MCPTransportStreamableHTTP,
 							},
 						},
 					},
@@ -279,7 +154,7 @@ var _ = Describe("ToolRegistry Controller", func() {
 			By("cleaning up the ToolRegistry")
 			resource := &omniav1alpha1.ToolRegistry{}
 			err := k8sClient.Get(ctx, types.NamespacedName{
-				Name:      "no-match-registry",
+				Name:      "unresolvable-registry",
 				Namespace: registryNamespace,
 			}, resource)
 			if err == nil {
@@ -296,7 +171,7 @@ var _ = Describe("ToolRegistry Controller", func() {
 
 			_, err := reconciler.Reconcile(ctx, reconcile.Request{
 				NamespacedName: types.NamespacedName{
-					Name:      "no-match-registry",
+					Name:      "unresolvable-registry",
 					Namespace: registryNamespace,
 				},
 			})
@@ -305,17 +180,19 @@ var _ = Describe("ToolRegistry Controller", func() {
 			By("checking the updated status")
 			updatedTR := &omniav1alpha1.ToolRegistry{}
 			Expect(k8sClient.Get(ctx, types.NamespacedName{
-				Name:      "no-match-registry",
+				Name:      "unresolvable-registry",
 				Namespace: registryNamespace,
 			}, updatedTR)).To(Succeed())
 
 			Expect(updatedTR.Status.Phase).To(Equal(omniav1alpha1.ToolRegistryPhaseFailed))
 			Expect(updatedTR.Status.DiscoveredToolsCount).To(Equal(int32(1)))
 			Expect(updatedTR.Status.DiscoveredTools[0].Status).To(Equal(omniav1alpha1.ToolStatusUnavailable))
+			Expect(updatedTR.Status.DiscoveredTools[0].Error).NotTo(BeNil())
+			Expect(*updatedTR.Status.DiscoveredTools[0].Error).To(ContainSubstring("no endpoint configured"))
 		})
 	})
 
-	Context("When reconciling a ToolRegistry with mixed availability", func() {
+	Context("When reconciling a ToolRegistry with mixed handler availability", func() {
 		var toolRegistry *omniav1alpha1.ToolRegistry
 
 		BeforeEach(func() {
@@ -343,21 +220,9 @@ var _ = Describe("ToolRegistry Controller", func() {
 						},
 						{
 							Name: "unavailable-handler",
-							Type: omniav1alpha1.HandlerTypeHTTP,
-							Selector: &omniav1alpha1.ServiceSelector{
-								MatchLabels: map[string]string{
-									"app": "nonexistent",
-								},
-							},
-							HTTPConfig: &omniav1alpha1.HTTPConfig{
-								Endpoint: "", // Will be resolved from selector
-							},
-							Tool: &omniav1alpha1.ToolDefinition{
-								Name:        "unavailable_tool",
-								Description: "An unavailable tool",
-								InputSchema: apiextensionsv1.JSON{
-									Raw: []byte(`{"type":"object"}`),
-								},
+							Type: omniav1alpha1.HandlerTypeMCP,
+							MCPConfig: &omniav1alpha1.MCPClientConfig{
+								Transport: omniav1alpha1.MCPTransportStreamableHTTP,
 							},
 						},
 					},
@@ -420,433 +285,6 @@ var _ = Describe("ToolRegistry Controller", func() {
 				},
 			})
 			Expect(err).NotTo(HaveOccurred())
-		})
-	})
-
-	Context("When testing service endpoint building", func() {
-		var (
-			toolRegistry *omniav1alpha1.ToolRegistry
-			service      *corev1.Service
-		)
-
-		BeforeEach(func() {
-			By("creating a Service with path annotation")
-			service = &corev1.Service{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "annotated-service",
-					Namespace: registryNamespace,
-					Labels: map[string]string{
-						"app": "annotated-tool",
-					},
-					Annotations: map[string]string{
-						AnnotationToolPath: "/api/v1/tool",
-					},
-				},
-				Spec: corev1.ServiceSpec{
-					Ports: []corev1.ServicePort{
-						{
-							Name:       "http",
-							Port:       9090,
-							TargetPort: intstr.FromInt(9090),
-						},
-					},
-				},
-			}
-			Expect(k8sClient.Create(ctx, service)).To(Succeed())
-
-			By("creating the ToolRegistry")
-			toolRegistry = &omniav1alpha1.ToolRegistry{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "annotated-registry",
-					Namespace: registryNamespace,
-				},
-				Spec: omniav1alpha1.ToolRegistrySpec{
-					Handlers: []omniav1alpha1.HandlerDefinition{
-						{
-							Name: "annotated-handler",
-							Type: omniav1alpha1.HandlerTypeHTTP,
-							Selector: &omniav1alpha1.ServiceSelector{
-								MatchLabels: map[string]string{
-									"app": "annotated-tool",
-								},
-							},
-							HTTPConfig: &omniav1alpha1.HTTPConfig{
-								Endpoint: "", // Will be resolved from selector
-							},
-							Tool: &omniav1alpha1.ToolDefinition{
-								Name:        "annotated_tool",
-								Description: "An annotated tool",
-								InputSchema: apiextensionsv1.JSON{
-									Raw: []byte(`{"type":"object"}`),
-								},
-							},
-						},
-					},
-				},
-			}
-			Expect(k8sClient.Create(ctx, toolRegistry)).To(Succeed())
-		})
-
-		AfterEach(func() {
-			By("cleaning up resources")
-			tr := &omniav1alpha1.ToolRegistry{}
-			err := k8sClient.Get(ctx, types.NamespacedName{
-				Name:      "annotated-registry",
-				Namespace: registryNamespace,
-			}, tr)
-			if err == nil {
-				Expect(k8sClient.Delete(ctx, tr)).To(Succeed())
-			}
-
-			svc := &corev1.Service{}
-			err = k8sClient.Get(ctx, types.NamespacedName{
-				Name:      "annotated-service",
-				Namespace: registryNamespace,
-			}, svc)
-			if err == nil {
-				Expect(k8sClient.Delete(ctx, svc)).To(Succeed())
-			}
-		})
-
-		It("should include path annotation in endpoint", func() {
-			By("reconciling the ToolRegistry")
-			reconciler := &ToolRegistryReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
-			}
-
-			_, err := reconciler.Reconcile(ctx, reconcile.Request{
-				NamespacedName: types.NamespacedName{
-					Name:      "annotated-registry",
-					Namespace: registryNamespace,
-				},
-			})
-			Expect(err).NotTo(HaveOccurred())
-
-			By("checking the endpoint includes path")
-			updatedTR := &omniav1alpha1.ToolRegistry{}
-			Expect(k8sClient.Get(ctx, types.NamespacedName{
-				Name:      "annotated-registry",
-				Namespace: registryNamespace,
-			}, updatedTR)).To(Succeed())
-
-			Expect(updatedTR.Status.DiscoveredTools[0].Endpoint).To(ContainSubstring("/api/v1/tool"))
-			Expect(updatedTR.Status.DiscoveredTools[0].Endpoint).To(ContainSubstring("9090"))
-		})
-	})
-
-	Context("When testing gRPC handler type", func() {
-		var toolRegistry *omniav1alpha1.ToolRegistry
-		var service *corev1.Service
-
-		BeforeEach(func() {
-			By("creating a gRPC Service")
-			service = &corev1.Service{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "grpc-service",
-					Namespace: registryNamespace,
-					Labels: map[string]string{
-						"app": "grpc-tool",
-					},
-				},
-				Spec: corev1.ServiceSpec{
-					Ports: []corev1.ServicePort{
-						{
-							Name:       "grpc",
-							Port:       50051,
-							TargetPort: intstr.FromInt(50051),
-						},
-					},
-				},
-			}
-			Expect(k8sClient.Create(ctx, service)).To(Succeed())
-
-			By("creating the ToolRegistry for gRPC")
-			toolRegistry = &omniav1alpha1.ToolRegistry{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "grpc-registry",
-					Namespace: registryNamespace,
-				},
-				Spec: omniav1alpha1.ToolRegistrySpec{
-					Handlers: []omniav1alpha1.HandlerDefinition{
-						{
-							Name: "grpc-handler",
-							Type: omniav1alpha1.HandlerTypeGRPC,
-							Selector: &omniav1alpha1.ServiceSelector{
-								MatchLabels: map[string]string{
-									"app": "grpc-tool",
-								},
-							},
-							GRPCConfig: &omniav1alpha1.GRPCConfig{
-								Endpoint: "grpc://placeholder:50051", // Required for validation, but will be overridden by selector
-							},
-							Tool: &omniav1alpha1.ToolDefinition{
-								Name:        "grpc_tool",
-								Description: "A gRPC tool",
-								InputSchema: apiextensionsv1.JSON{
-									Raw: []byte(`{"type":"object"}`),
-								},
-							},
-						},
-					},
-				},
-			}
-			Expect(k8sClient.Create(ctx, toolRegistry)).To(Succeed())
-		})
-
-		AfterEach(func() {
-			By("cleaning up resources")
-			tr := &omniav1alpha1.ToolRegistry{}
-			err := k8sClient.Get(ctx, types.NamespacedName{
-				Name:      "grpc-registry",
-				Namespace: registryNamespace,
-			}, tr)
-			if err == nil {
-				Expect(k8sClient.Delete(ctx, tr)).To(Succeed())
-			}
-
-			svc := &corev1.Service{}
-			err = k8sClient.Get(ctx, types.NamespacedName{
-				Name:      "grpc-service",
-				Namespace: registryNamespace,
-			}, svc)
-			if err == nil {
-				Expect(k8sClient.Delete(ctx, svc)).To(Succeed())
-			}
-		})
-
-		It("should use grpc protocol in endpoint", func() {
-			By("reconciling the ToolRegistry")
-			reconciler := &ToolRegistryReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
-			}
-
-			_, err := reconciler.Reconcile(ctx, reconcile.Request{
-				NamespacedName: types.NamespacedName{
-					Name:      "grpc-registry",
-					Namespace: registryNamespace,
-				},
-			})
-			Expect(err).NotTo(HaveOccurred())
-
-			By("checking the endpoint uses grpc protocol")
-			updatedTR := &omniav1alpha1.ToolRegistry{}
-			Expect(k8sClient.Get(ctx, types.NamespacedName{
-				Name:      "grpc-registry",
-				Namespace: registryNamespace,
-			}, updatedTR)).To(Succeed())
-
-			Expect(updatedTR.Status.DiscoveredTools[0].Endpoint).To(HavePrefix("grpc://"))
-		})
-	})
-
-	Context("When testing findToolRegistriesForService", func() {
-		var (
-			toolRegistry *omniav1alpha1.ToolRegistry
-			service      *corev1.Service
-		)
-
-		BeforeEach(func() {
-			By("creating a Service")
-			service = &corev1.Service{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "watch-service",
-					Namespace: registryNamespace,
-					Labels: map[string]string{
-						"app": "watched-tool",
-					},
-				},
-				Spec: corev1.ServiceSpec{
-					Ports: []corev1.ServicePort{
-						{
-							Port: 8080,
-						},
-					},
-				},
-			}
-			Expect(k8sClient.Create(ctx, service)).To(Succeed())
-
-			By("creating the ToolRegistry")
-			toolRegistry = &omniav1alpha1.ToolRegistry{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "watch-registry",
-					Namespace: registryNamespace,
-				},
-				Spec: omniav1alpha1.ToolRegistrySpec{
-					Handlers: []omniav1alpha1.HandlerDefinition{
-						{
-							Name: "watched-handler",
-							Type: omniav1alpha1.HandlerTypeHTTP,
-							Selector: &omniav1alpha1.ServiceSelector{
-								MatchLabels: map[string]string{
-									"app": "watched-tool",
-								},
-							},
-							HTTPConfig: &omniav1alpha1.HTTPConfig{
-								Endpoint: "", // Will be resolved from selector
-							},
-							Tool: &omniav1alpha1.ToolDefinition{
-								Name:        "watched_tool",
-								Description: "A watched tool",
-								InputSchema: apiextensionsv1.JSON{
-									Raw: []byte(`{"type":"object"}`),
-								},
-							},
-						},
-					},
-				},
-			}
-			Expect(k8sClient.Create(ctx, toolRegistry)).To(Succeed())
-		})
-
-		AfterEach(func() {
-			By("cleaning up resources")
-			tr := &omniav1alpha1.ToolRegistry{}
-			err := k8sClient.Get(ctx, types.NamespacedName{
-				Name:      "watch-registry",
-				Namespace: registryNamespace,
-			}, tr)
-			if err == nil {
-				Expect(k8sClient.Delete(ctx, tr)).To(Succeed())
-			}
-
-			svc := &corev1.Service{}
-			err = k8sClient.Get(ctx, types.NamespacedName{
-				Name:      "watch-service",
-				Namespace: registryNamespace,
-			}, svc)
-			if err == nil {
-				Expect(k8sClient.Delete(ctx, svc)).To(Succeed())
-			}
-		})
-
-		It("should return reconcile requests for matching ToolRegistries", func() {
-			By("calling findToolRegistriesForService")
-			reconciler := &ToolRegistryReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
-			}
-
-			requests := reconciler.findToolRegistriesForService(ctx, service)
-			Expect(requests).To(HaveLen(1))
-			Expect(requests[0].Name).To(Equal("watch-registry"))
-			Expect(requests[0].Namespace).To(Equal(registryNamespace))
-		})
-	})
-
-	Context("When testing specific port selection", func() {
-		var (
-			toolRegistry *omniav1alpha1.ToolRegistry
-			service      *corev1.Service
-		)
-
-		BeforeEach(func() {
-			By("creating a Service with multiple ports")
-			service = &corev1.Service{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "multiport-service",
-					Namespace: registryNamespace,
-					Labels: map[string]string{
-						"app": "multiport-tool",
-					},
-				},
-				Spec: corev1.ServiceSpec{
-					Ports: []corev1.ServicePort{
-						{
-							Name:       "http",
-							Port:       8080,
-							TargetPort: intstr.FromInt(8080),
-						},
-						{
-							Name:       "admin",
-							Port:       9090,
-							TargetPort: intstr.FromInt(9090),
-						},
-					},
-				},
-			}
-			Expect(k8sClient.Create(ctx, service)).To(Succeed())
-
-			By("creating the ToolRegistry with specific port")
-			portName := "admin"
-			toolRegistry = &omniav1alpha1.ToolRegistry{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "multiport-registry",
-					Namespace: registryNamespace,
-				},
-				Spec: omniav1alpha1.ToolRegistrySpec{
-					Handlers: []omniav1alpha1.HandlerDefinition{
-						{
-							Name: "multiport-handler",
-							Type: omniav1alpha1.HandlerTypeHTTP,
-							Selector: &omniav1alpha1.ServiceSelector{
-								MatchLabels: map[string]string{
-									"app": "multiport-tool",
-								},
-								Port: &portName,
-							},
-							HTTPConfig: &omniav1alpha1.HTTPConfig{
-								Endpoint: "", // Will be resolved from selector
-							},
-							Tool: &omniav1alpha1.ToolDefinition{
-								Name:        "multiport_tool",
-								Description: "A multiport tool",
-								InputSchema: apiextensionsv1.JSON{
-									Raw: []byte(`{"type":"object"}`),
-								},
-							},
-						},
-					},
-				},
-			}
-			Expect(k8sClient.Create(ctx, toolRegistry)).To(Succeed())
-		})
-
-		AfterEach(func() {
-			By("cleaning up resources")
-			tr := &omniav1alpha1.ToolRegistry{}
-			err := k8sClient.Get(ctx, types.NamespacedName{
-				Name:      "multiport-registry",
-				Namespace: registryNamespace,
-			}, tr)
-			if err == nil {
-				Expect(k8sClient.Delete(ctx, tr)).To(Succeed())
-			}
-
-			svc := &corev1.Service{}
-			err = k8sClient.Get(ctx, types.NamespacedName{
-				Name:      "multiport-service",
-				Namespace: registryNamespace,
-			}, svc)
-			if err == nil {
-				Expect(k8sClient.Delete(ctx, svc)).To(Succeed())
-			}
-		})
-
-		It("should use the specified port name", func() {
-			By("reconciling the ToolRegistry")
-			reconciler := &ToolRegistryReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
-			}
-
-			_, err := reconciler.Reconcile(ctx, reconcile.Request{
-				NamespacedName: types.NamespacedName{
-					Name:      "multiport-registry",
-					Namespace: registryNamespace,
-				},
-			})
-			Expect(err).NotTo(HaveOccurred())
-
-			By("checking the endpoint uses the admin port (9090)")
-			updatedTR := &omniav1alpha1.ToolRegistry{}
-			Expect(k8sClient.Get(ctx, types.NamespacedName{
-				Name:      "multiport-registry",
-				Namespace: registryNamespace,
-			}, updatedTR)).To(Succeed())
-
-			Expect(updatedTR.Status.DiscoveredTools[0].Endpoint).To(ContainSubstring("9090"))
 		})
 	})
 
