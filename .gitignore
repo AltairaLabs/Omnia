@@ -41,7 +41,11 @@ cover.out
 *~
 
 # Helm
-charts/*/charts/
+# Ignore vendored dependency packages pulled by `helm dependency build`, but
+# NOT in-tree subchart directories (e.g. charts/omnia/charts/omnia-ee-crds/),
+# which are source and must be committed. Git can't re-include children of an
+# excluded directory, so this scopes the ignore to the packaged .tgz artifacts.
+charts/*/charts/*.tgz
 charts/*/Chart.lock
 charts/omnia/values-dev-entra.yaml
 

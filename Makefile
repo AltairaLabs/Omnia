@@ -354,7 +354,7 @@ docker-build-dashboard: ## Build docker image for the dashboard
 
 .PHONY: sync-chart-crds
 sync-chart-crds: manifests manifests-ee ## Sync CRDs from config/crd/bases to charts/omnia/crds
-	# Copy core CRDs (excluding enterprise arena CRDs which are conditional templates)
+	# Copy core (non-enterprise) CRDs into the chart's crds/ dir.
 	cp config/crd/bases/omnia.altairalabs.ai_agentruntimes.yaml charts/omnia/crds/
 	cp config/crd/bases/omnia.altairalabs.ai_promptpacks.yaml charts/omnia/crds/
 	cp config/crd/bases/omnia.altairalabs.ai_providers.yaml charts/omnia/crds/
@@ -363,17 +363,18 @@ sync-chart-crds: manifests manifests-ee ## Sync CRDs from config/crd/bases to ch
 	cp config/crd/bases/omnia.altairalabs.ai_sessionretentionpolicies.yaml charts/omnia/crds/
 	cp config/crd/bases/omnia.altairalabs.ai_memorypolicies.yaml charts/omnia/crds/
 	cp config/crd/bases/omnia.altairalabs.ai_agentpolicies.yaml charts/omnia/crds/
-	cp config/crd/bases/omnia.altairalabs.ai_toolpolicies.yaml charts/omnia/crds/
 	cp config/crd/bases/omnia.altairalabs.ai_skillsources.yaml charts/omnia/crds/
-	# Sync enterprise CRDs to conditional templates (wrapped with enterprise.enabled check)
-	@echo "Syncing enterprise CRDs to conditional templates..."
+	# Copy enterprise CRDs into the omnia-ee-crds subchart's crds/ dir. Shipping
+	# them as crds/ (not templates) means Helm installs them before templates and
+	# never deletes them on uninstall; the subchart's `enterprise.enabled`
+	# condition keeps them off community installs. ToolPolicy is EE (ee/api),
+	# so it lives here too — not in the core crds/ dir.
+	@echo "Syncing enterprise CRDs to omnia-ee-crds subchart..."
 	@for f in config/crd/bases/omnia.altairalabs.ai_arena*.yaml \
 	          config/crd/bases/omnia.altairalabs.ai_sessionprivacypolicies.yaml \
-	          config/crd/bases/omnia.altairalabs.ai_rolloutanalyses.yaml; do \
-		base=$$(basename $$f); \
-		echo "{{- if .Values.enterprise.enabled }}" > charts/omnia/templates/enterprise/$$base; \
-		cat $$f >> charts/omnia/templates/enterprise/$$base; \
-		echo "{{- end }}" >> charts/omnia/templates/enterprise/$$base; \
+	          config/crd/bases/omnia.altairalabs.ai_rolloutanalyses.yaml \
+	          config/crd/bases/omnia.altairalabs.ai_toolpolicies.yaml; do \
+		cp $$f charts/omnia/charts/omnia-ee-crds/crds/; \
 	done
 
 .PHONY: generate-dashboard-types

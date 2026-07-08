@@ -544,11 +544,6 @@ rbac:
   # -- Create RBAC resources
   create: true
 
-# CRD configuration
-crds:
-  # -- Install CRDs with the chart
-  install: true
-
 # ============================================================================
 # Dashboard Configuration
 # Web UI for managing Omnia agents and resources
