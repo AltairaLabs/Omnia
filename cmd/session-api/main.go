@@ -274,6 +274,12 @@ func run() error {
 	}
 	defer providerCleanup()
 
+	// --- Partition maintenance ---
+	// The initial migration seeds partitions only ~2 weeks ahead and nothing
+	// else rolls the window forward, so inserts would eventually fail with
+	// SQLSTATE 23514. Keep several weeks of partitions ahead, on startup + daily.
+	startPartitionMaintenance(ctx, pgprovider.NewFromPool(pool), 24*time.Hour, log)
+
 	// --- Tracing ---
 	// Set propagator so incoming trace context (e.g. from facade httpclient)
 	// is extracted and spans become children of the caller's trace.
@@ -369,6 +375,42 @@ func run() error {
 }
 
 // startHTTPServer starts an HTTP server in a background goroutine.
+// partitionWeeksAhead is how many future weeks of partitions the maintenance
+// loop keeps provisioned.
+const partitionWeeksAhead = 4
+
+// partitionMaintainer is the subset of the postgres provider the maintenance
+// loop needs; declared here so the behaviour is unit-testable with a fake.
+type partitionMaintainer interface {
+	EnsurePartitionsAhead(ctx context.Context, weeksAhead int) error
+}
+
+// startPartitionMaintenance ensures weekly partitions exist for the current week
+// and partitionWeeksAhead weeks ahead — immediately, then every interval — so
+// session inserts keep working as time advances. Failures are logged, not fatal.
+func startPartitionMaintenance(ctx context.Context, m partitionMaintainer, interval time.Duration, log logr.Logger) {
+	ensure := func() {
+		if err := m.EnsurePartitionsAhead(ctx, partitionWeeksAhead); err != nil {
+			log.Error(err, "partition maintenance failed", "weeksAhead", partitionWeeksAhead)
+			return
+		}
+		log.V(1).Info("partition maintenance complete", "weeksAhead", partitionWeeksAhead)
+	}
+	ensure()
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				ensure()
+			}
+		}
+	}()
+}
+
 func startHTTPServer(log logr.Logger, name, addr string, srv *http.Server) {
 	go func() {
 		log.Info(fmt.Sprintf("starting %s server on %s", name, addr), "addr", addr)
