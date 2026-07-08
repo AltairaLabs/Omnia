@@ -23,6 +23,67 @@ For agent endpoint authentication (JWT/Istio), see [Configure Agent Authenticati
 - Access to environment configuration
 - (For OAuth) Identity provider credentials
 
+## Where these settings go
+
+The examples below show the `OMNIA_*` **environment variables** the dashboard container
+reads. You don't set these by hand — the **Helm chart renders them** from `dashboard.auth.*`
+and `dashboard.oauth.*` values into the dashboard's ConfigMap (non-secret settings) and wires
+credentials in from a Kubernetes Secret. So you configure auth at **install/upgrade time** in
+your values file:
+
+```bash
+helm upgrade --install omnia altaira/omnia -f values.yaml
+```
+
+Each env var maps to a value:
+
+| Environment variable | Helm value |
+|----------------------|-----------|
+| `OMNIA_AUTH_MODE` | `dashboard.auth.mode` |
+| `OMNIA_AUTH_ROLE_ADMIN_GROUPS` | `dashboard.auth.roleMapping.adminGroups` (list) |
+| `OMNIA_AUTH_ROLE_EDITOR_GROUPS` | `dashboard.auth.roleMapping.editorGroups` (list) |
+| `OMNIA_OAUTH_PROVIDER` | `dashboard.oauth.provider` |
+| `OMNIA_OAUTH_ISSUER_URL` | `dashboard.oauth.issuerUrl` |
+| `OMNIA_OAUTH_SCOPES` | `dashboard.oauth.scopes` |
+| `OMNIA_OAUTH_AZURE_TENANT_ID` | `dashboard.oauth.azureTenantId` |
+| `OMNIA_OAUTH_CLAIM_USERNAME` / `_EMAIL` / `_GROUPS` | `dashboard.oauth.claims.username` / `.email` / `.groups` |
+
+**Credentials come from a Secret, never values.yaml.** Create a Kubernetes Secret and
+reference it — the chart mounts its keys as env:
+
+- `dashboard.oauth.existingSecret` → a Secret with keys `OMNIA_OAUTH_CLIENT_ID` and
+  `OMNIA_OAUTH_CLIENT_SECRET`
+- `dashboard.auth.existingSessionSecret` → a Secret with key `OMNIA_SESSION_SECRET` (the
+  session cookie signing key)
+
+A complete OAuth values block (Cognito) looks like:
+
+```yaml
+dashboard:
+  auth:
+    mode: oauth
+    existingSessionSecret: omnia-dashboard-oauth   # holds OMNIA_SESSION_SECRET
+    roleMapping:
+      adminGroups: [omnia-admins]                  # platform admins
+  oauth:
+    provider: generic
+    existingSecret: omnia-dashboard-oauth          # holds client id + secret
+    issuerUrl: https://cognito-idp.<region>.amazonaws.com/<userPoolId>
+    scopes: "openid,email,profile"
+    claims:
+      username: cognito:username
+      groups: cognito:groups
+```
+
+For Entra ID, swap `oauth.provider: azure` + `oauth.azureTenantId`, and use the default
+`groups` claim (object-ID GUIDs). The mode-by-mode sections below show the individual
+settings; combine them under `dashboard.auth` / `dashboard.oauth` as above.
+
+:::note
+For a non-Helm deployment (running the dashboard container directly), set the `OMNIA_*`
+environment variables shown below on the container yourself — the names are identical.
+:::
+
 ## Anonymous mode
 
 The default mode with no authentication. All users can access the dashboard as viewers.
