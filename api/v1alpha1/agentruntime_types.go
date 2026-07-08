@@ -514,48 +514,6 @@ type ProviderRef struct {
 	Namespace *string `json:"namespace,omitempty"`
 }
 
-// ProviderConfig defines the LLM provider configuration.
-type ProviderConfig struct {
-	// type specifies the provider type.
-	// "claude", "openai", "gemini", "ollama", or "mock".
-	// +kubebuilder:validation:Required
-	Type ProviderType `json:"type"`
-
-	// model specifies the model identifier (e.g., "claude-sonnet-4-20250514", "gpt-4o").
-	// If not specified, the provider's default model is used.
-	// +optional
-	Model string `json:"model,omitempty"`
-
-	// secretRef references a Secret containing API credentials.
-	// The secret should contain a key matching the provider's expected env var:
-	// - ANTHROPIC_API_KEY for Claude
-	// - OPENAI_API_KEY for OpenAI
-	// - GEMINI_API_KEY or GOOGLE_API_KEY for Gemini
-	// Or use "api-key" as a generic key name.
-	// +optional
-	SecretRef *corev1.LocalObjectReference `json:"secretRef,omitempty"`
-
-	// baseURL overrides the provider's default API endpoint.
-	// Useful for proxies or self-hosted models.
-	// +optional
-	BaseURL string `json:"baseURL,omitempty"`
-
-	// config contains provider tuning parameters.
-	// +optional
-	Config *ProviderDefaults `json:"config,omitempty"`
-
-	// pricing configures cost tracking for this provider.
-	// If not specified, PromptKit's built-in pricing is used.
-	// +optional
-	Pricing *ProviderPricing `json:"pricing,omitempty"`
-
-	// additionalConfig contains provider-specific settings passed to PromptKit.
-	// For Ollama: "keep_alive" (e.g., "5m") to keep model loaded between requests.
-	// For Mock: "mock_config" path to mock responses YAML file.
-	// +optional
-	AdditionalConfig map[string]string `json:"additionalConfig,omitempty"`
-}
-
 // FrameworkType defines which agent framework to use.
 // +kubebuilder:validation:Enum=promptkit;langchain;autogen;custom
 type FrameworkType string
