@@ -186,6 +186,26 @@ a **stdio** MCP transport (no header channel) and is rejected.
 
 A missing Secret/key, an unsupported type, or a stdio-MCP+auth combination fails
 the AgentRuntime reconcile — it does not silently send an unauthenticated request.
+A `workloadIdentity` handler whose token cannot be acquired at call time fails
+that tool call rather than calling the backend unauthenticated.
+
+:::note[Azure workload-identity setup]
+`workloadIdentity` reuses the agent pod's **ambient** Azure identity — the same
+identity keyless [Azure provider auth](/reference/core/provider/) uses — resolved
+via `DefaultAzureCredential`. No credential is stored by Omnia. To enable it, the
+cluster/infra side must, once per agent identity:
+
+1. Give the agent pod an Azure Workload Identity: label the pod
+   `azure.workload.identity/use: "true"` and annotate its ServiceAccount with
+   `azure.workload.identity/client-id: <app-or-uami-client-id>`.
+2. Create a **federated identity credential** on that Entra ID app / user-assigned
+   managed identity trusting the cluster OIDC issuer and subject
+   `system:serviceaccount:<namespace>:<serviceAccount>` (Terraform-side).
+3. Grant that identity access to **every** WIF tool's API. Because one pod identity
+   is shared across the model provider and all tools, its API grants are the union
+   of what those tools need — the "one-identity" consequence noted above. Per-tool
+   identity separation is a future option.
+:::
 
 :::note[Deprecated: `authType` / `authSecretRef`]
 The per-config `authType` and `authSecretRef` fields on `httpConfig`/`openAPIConfig`
