@@ -47,12 +47,12 @@ func TestValidateHandlerAuth_RejectsOpenAPIWIF(t *testing.T) {
 	}
 }
 
-func TestValidateHandlerAuth_RejectsGRPCWIF(t *testing.T) {
+func TestValidateHandlerAuth_AllowsGRPCWIF(t *testing.T) {
 	h := wifHTTPHandler()
 	h.Type = omniav1alpha1.HandlerTypeGRPC
 	h.HTTPConfig, h.GRPCConfig = nil, &omniav1alpha1.GRPCConfig{Endpoint: "x:1"}
-	if err := validateHandlerAuth(&h); err == nil {
-		t.Fatal("gRPC WIF should be rejected in this milestone (http only)")
+	if err := validateHandlerAuth(&h); err != nil {
+		t.Fatalf("gRPC WIF should now be allowed: %v", err)
 	}
 }
 
@@ -86,5 +86,40 @@ func TestBuildHTTPConfig_SetsWIFFields(t *testing.T) {
 	}
 	if cfg.AuthType != string(omniav1alpha1.ToolAuthTypeWorkloadIdentity) || cfg.AuthCloud != "azure" || cfg.AuthAudience != "api://tool" {
 		t.Fatalf("WIF fields not set: %+v", cfg)
+	}
+}
+
+func wifGRPCHandler() omniav1alpha1.HandlerDefinition {
+	h := wifHTTPHandler()
+	h.Type = omniav1alpha1.HandlerTypeGRPC
+	h.HTTPConfig, h.GRPCConfig = nil, &omniav1alpha1.GRPCConfig{Endpoint: "x:1"}
+	return h
+}
+
+func TestBuildGRPCConfig_SetsWIFFields(t *testing.T) {
+	h := wifGRPCHandler()
+	cfg, err := buildGRPCConfig(&h, "tool:1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.AuthType != string(omniav1alpha1.ToolAuthTypeWorkloadIdentity) || cfg.AuthCloud != "azure" || cfg.AuthAudience != "api://tool" {
+		t.Fatalf("WIF fields not set: %+v", cfg)
+	}
+}
+
+func TestWifSupportedHandlerType(t *testing.T) {
+	cases := []struct {
+		typ  omniav1alpha1.HandlerType
+		want bool
+	}{
+		{omniav1alpha1.HandlerTypeHTTP, true},
+		{omniav1alpha1.HandlerTypeGRPC, true},
+		{omniav1alpha1.HandlerTypeOpenAPI, false},
+		{omniav1alpha1.HandlerTypeMCP, false},
+	}
+	for _, tc := range cases {
+		if got := wifSupportedHandlerType(tc.typ); got != tc.want {
+			t.Errorf("wifSupportedHandlerType(%v) = %v, want %v", tc.typ, got, tc.want)
+		}
 	}
 }

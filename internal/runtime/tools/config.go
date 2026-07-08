@@ -203,6 +203,9 @@ type GRPCCfg struct {
 	AuthType              string                  `json:"authType,omitempty" yaml:"authType,omitempty"`
 	AuthToken             string                  `json:"authToken,omitempty" yaml:"authToken,omitempty"`
 	AuthTokenPath         string                  `json:"authTokenPath,omitempty" yaml:"authTokenPath,omitempty"`
+	AuthHeader            string                  `json:"authHeader,omitempty" yaml:"authHeader,omitempty"`
+	AuthCloud             string                  `json:"authCloud,omitempty" yaml:"authCloud,omitempty"`
+	AuthAudience          string                  `json:"authAudience,omitempty" yaml:"authAudience,omitempty"`
 	RetryPolicy           *RuntimeGRPCRetryPolicy `json:"retryPolicy,omitempty" yaml:"retryPolicy,omitempty"`
 }
 
@@ -284,7 +287,7 @@ func ResolveAuthTokenPaths(cfg *ToolConfig) error {
 			}
 			h.OpenAPIConfig.AuthToken = tok
 		}
-		if h.GRPCConfig != nil && h.GRPCConfig.AuthTokenPath != "" {
+		if h.GRPCConfig != nil && h.GRPCConfig.AuthTokenPath != "" && h.GRPCConfig.AuthType != authTypeWorkloadIdentity {
 			tok, err := readTokenFile(h.GRPCConfig.AuthTokenPath)
 			if err != nil {
 				return fmt.Errorf("handler %q: %w", h.Name, err)

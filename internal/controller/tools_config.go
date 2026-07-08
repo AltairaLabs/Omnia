@@ -111,6 +111,9 @@ type ToolGRPC struct {
 	TLSInsecureSkipVerify bool                                 `json:"tlsInsecureSkipVerify,omitempty"`
 	AuthType              string                               `json:"authType,omitempty"`
 	AuthTokenPath         string                               `json:"authTokenPath,omitempty"`
+	AuthCloud             string                               `json:"authCloud,omitempty"`
+	AuthAudience          string                               `json:"authAudience,omitempty"`
+	AuthHeader            string                               `json:"authHeader,omitempty"`
 	RetryPolicy           *runtimetools.RuntimeGRPCRetryPolicy `json:"retryPolicy,omitempty"`
 }
 
@@ -246,9 +249,21 @@ func validateToolAuthTypes(tr *omniav1alpha1.ToolRegistry) error {
 	return nil
 }
 
+// wifSupportedHandlerType reports whether the runtime resolves workloadIdentity
+// for a handler of this type today. Extended per protocol as support lands.
+func wifSupportedHandlerType(t omniav1alpha1.HandlerType) bool {
+	switch t {
+	case omniav1alpha1.HandlerTypeHTTP, omniav1alpha1.HandlerTypeGRPC:
+		return true
+	default:
+		return false
+	}
+}
+
 // validateHandlerAuth rejects a single handler's effective auth the operator
 // cannot honor: stdio MCP has no header channel, and workloadIdentity is
-// currently resolved only on http handlers (runtime-ambient azure).
+// currently resolved only on handler types the runtime knows how to apply it
+// to (see wifSupportedHandlerType).
 func validateHandlerAuth(h *omniav1alpha1.HandlerDefinition) error {
 	auth := h.EffectiveAuth()
 	if auth == nil || auth.Type == omniav1alpha1.ToolAuthTypeNone {
@@ -257,8 +272,8 @@ func validateHandlerAuth(h *omniav1alpha1.HandlerDefinition) error {
 	if h.MCPConfig != nil && h.MCPConfig.Transport == omniav1alpha1.MCPTransportStdio {
 		return fmt.Errorf("handler %q: auth is not supported on a stdio MCP transport (no header channel); use an sse or streamable-http transport", h.Name)
 	}
-	if auth.Type == omniav1alpha1.ToolAuthTypeWorkloadIdentity && h.Type != omniav1alpha1.HandlerTypeHTTP {
-		return fmt.Errorf("handler %q: auth.type workloadIdentity is currently supported only on http handlers", h.Name)
+	if auth.Type == omniav1alpha1.ToolAuthTypeWorkloadIdentity && !wifSupportedHandlerType(h.Type) {
+		return fmt.Errorf("handler %q: auth.type workloadIdentity is not yet supported on %s handlers", h.Name, h.Type)
 	}
 	return nil
 }
@@ -648,6 +663,10 @@ func buildGRPCConfig(h *omniav1alpha1.HandlerDefinition, endpoint string) (*Tool
 	if authType, tokenPath, ok := authFieldsFor(h); ok {
 		cfg.AuthType = authType
 		cfg.AuthTokenPath = tokenPath
+	}
+	if cloud, aud, header, ok := workloadIdentityFieldsFor(h); ok {
+		cfg.AuthType = string(omniav1alpha1.ToolAuthTypeWorkloadIdentity)
+		cfg.AuthCloud, cfg.AuthAudience, cfg.AuthHeader = cloud, aud, header
 	}
 	return cfg, nil
 }

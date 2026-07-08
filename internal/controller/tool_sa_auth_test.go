@@ -144,13 +144,21 @@ func TestValidateToolAuthTypes(t *testing.T) {
 			t.Errorf("azure HTTP WIF should be allowed: %v", err)
 		}
 	})
-	t.Run("workloadIdentity rejected on non-http handler", func(t *testing.T) {
+	t.Run("workloadIdentity on grpc is allowed", func(t *testing.T) {
 		h := wiHandler("wi")
 		h.Type, h.HTTPConfig, h.GRPCConfig = omniav1alpha1.HandlerTypeGRPC, nil, &omniav1alpha1.GRPCConfig{Endpoint: "x:1"}
 		tr := &omniav1alpha1.ToolRegistry{Spec: omniav1alpha1.ToolRegistrySpec{Handlers: []omniav1alpha1.HandlerDefinition{h}}}
+		if err := validateToolAuthTypes(tr); err != nil {
+			t.Errorf("gRPC WIF should now be allowed: %v", err)
+		}
+	})
+	t.Run("workloadIdentity rejected on non-wif-supported handler", func(t *testing.T) {
+		h := wiHandler("wi")
+		h.Type, h.HTTPConfig, h.OpenAPIConfig = omniav1alpha1.HandlerTypeOpenAPI, nil, &omniav1alpha1.OpenAPIConfig{SpecURL: "http://x/spec"}
+		tr := &omniav1alpha1.ToolRegistry{Spec: omniav1alpha1.ToolRegistrySpec{Handlers: []omniav1alpha1.HandlerDefinition{h}}}
 		err := validateToolAuthTypes(tr)
-		if err == nil || !strings.Contains(err.Error(), "http handlers") {
-			t.Errorf("want http-only rejection, got %v", err)
+		if err == nil || !strings.Contains(err.Error(), "not yet supported") {
+			t.Errorf("want not-yet-supported rejection, got %v", err)
 		}
 	})
 	t.Run("stdio MCP with auth rejected", func(t *testing.T) {
