@@ -265,6 +265,35 @@ OMNIA_OAUTH_CLIENT_SECRET=your-client-secret
 GitHub uses OAuth 2.0, not OIDC. User info is fetched from the GitHub API. Groups are not supported; all GitHub users get the default role.
 :::
 
+#### AWS Cognito
+
+Cognito is OIDC-compliant, so use the `generic` provider pointed at your user pool's issuer URL:
+
+```bash
+OMNIA_OAUTH_PROVIDER=generic
+OMNIA_OAUTH_ISSUER_URL=https://cognito-idp.<region>.amazonaws.com/<userPoolId>
+OMNIA_OAUTH_CLIENT_ID=your-app-client-id
+OMNIA_OAUTH_CLIENT_SECRET=your-app-client-secret
+
+# Cognito uses non-standard claim names — map them explicitly:
+OMNIA_OAUTH_CLAIM_USERNAME=cognito:username
+OMNIA_OAUTH_CLAIM_GROUPS=cognito:groups
+
+# Cognito has no "groups" scope; the generic provider requests one by default,
+# which Cognito rejects. Override the scope list:
+OMNIA_OAUTH_SCOPES=openid,email,profile
+```
+
+Configure the user pool (console or Terraform):
+
+1. Create an app client whose callback URL is `https://dashboard.example.com/api/auth/callback`.
+2. Create groups (e.g. `omnia-admins`) and add users: `aws cognito-idp admin-add-user-to-group --user-pool-id <id> --username <user> --group-name omnia-admins`.
+3. Cognito emits the group **name** in the `cognito:groups` claim — that's the value you reference in role mappings and workspace `roleBindings`.
+
+:::caution
+Two Cognito specifics silently break group-based access: the group claim is `cognito:groups` (not `groups`), and the app client must not request a `groups` scope (Cognito doesn't define one). The settings above handle both.
+:::
+
 ### Claim mapping
 
 Map OIDC claims to user fields:
@@ -283,12 +312,15 @@ OMNIA_OAUTH_CLAIM_DISPLAY_NAME=name
 OMNIA_OAUTH_CLAIM_GROUPS=groups
 ```
 
-For Azure AD with nested claims:
+For Entra ID / Azure AD, the default `groups` claim carries group **object IDs (GUIDs)**, not names:
 
 ```bash
-OMNIA_OAUTH_CLAIM_GROUPS=wids  # Uses role IDs
-# Or configure group claims in Azure AD token configuration
+OMNIA_OAUTH_CLAIM_GROUPS=groups   # values are group object-ID GUIDs
 ```
+
+Enable the claim in the app registration's **Token configuration → Add groups claim**. See
+[Use IdP groups for workspace access](#use-idp-groups-for-workspace-access) for how those
+GUIDs map to workspace roles.
 
 ### Role mapping
 
@@ -298,6 +330,70 @@ Same as proxy mode:
 OMNIA_AUTH_ROLE_ADMIN_GROUPS=omnia-admins
 OMNIA_AUTH_ROLE_EDITOR_GROUPS=omnia-editors
 ```
+
+## Use IdP groups for workspace access
+
+Authenticating a user is only half the story — you also decide what they can see and do.
+Omnia uses IdP groups at **two independent layers**, and getting a user productively into a
+workspace usually means setting **both**.
+
+### Two layers
+
+| Layer | Configured by | Grants |
+|-------|---------------|--------|
+| **Platform role** (dashboard-wide) | `OMNIA_AUTH_ROLE_ADMIN_GROUPS` / `OMNIA_AUTH_ROLE_EDITOR_GROUPS` | `admin` / `editor` / `viewer` across the whole dashboard. |
+| **Workspace role** (per-workspace) | the Workspace's [`spec.roleBindings`](/reference/core/workspace/#rolebindings) (and `directGrants`) | `owner` / `editor` / `viewer` on that specific workspace — the role that actually lets a user work with its agents, sessions, and data. |
+
+:::caution[A platform admin still sees an empty workspace]
+Being in an `OMNIA_AUTH_ROLE_ADMIN_GROUPS` group is **not** the same as having a role on a
+workspace. A platform admin can see every workspace and open **Settings → Access** to manage
+its bindings (including self-granting), but until a `roleBinding` or `directGrant` gives them
+`owner`/`editor`/`viewer`, the workspace reads as **empty**. Grant workspace access
+explicitly — don't rely on the platform-admin role for data access.
+:::
+
+### Match the group identifier your IdP actually emits
+
+`roleBindings[].groups` (and the `OMNIA_AUTH_ROLE_*` lists) are compared against the user's
+group claim by **exact, case-sensitive string equality**. The value you must list is whatever
+your IdP puts in the claim — which differs by provider:
+
+| IdP | Group claim | Value to list in `roleBindings.groups` |
+|-----|-------------|-----------------------------------------|
+| **AWS Cognito** | `cognito:groups` | the group **name**, e.g. `omnia-admins` |
+| **Entra ID / Azure AD** | `groups` | the group **object ID (GUID)**, e.g. `c16e8ed8-544e-489c-bbb6-9b027822ddc7` |
+| **Okta / generic OIDC** | `groups` (or your `OMNIA_OAUTH_CLAIM_GROUPS`) | whatever the claim carries (usually the name) |
+
+:::tip[Entra emits GUIDs, not names]
+By default Entra ID puts group **object IDs** in the `groups` claim, so your `roleBindings`
+must list the GUID — not the friendly group name. (Entra can be configured to emit names via
+the app registration's token configuration, but object IDs are the default.)
+:::
+
+### End-to-end example
+
+Map a Cognito group `omnia-admins` to both a dashboard admin and `owner` on a workspace:
+
+```yaml
+# Dashboard (helm values / env): OMNIA_AUTH_ROLE_ADMIN_GROUPS=omnia-admins
+---
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: Workspace
+metadata:
+  name: customer-support
+spec:
+  displayName: "Customer Support"
+  namespace:
+    name: omnia-customer-support
+    create: true
+  roleBindings:
+    - groups: ["omnia-admins"]   # Cognito group NAME (use the object-ID GUID for Entra)
+      role: owner
+```
+
+For the full workspace access model — `editor`/`viewer`, `directGrants`, and ServiceAccount
+bindings — see
+[Manage workspaces → Configure access control](/how-to/workspaces/manage-workspaces/#configure-access-control).
 
 ## Builtin mode
 
