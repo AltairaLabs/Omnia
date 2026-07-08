@@ -287,8 +287,10 @@ type HTTPConfig struct {
 	// +optional
 	QueryParams []string `json:"queryParams,omitempty"`
 
-	// headerParams maps arg names to HTTP header names using template strings.
-	// Example: {"X-Customer-ID": "{{.customer_id}}"}
+	// headerParams maps an argument NAME to the HTTP header NAME it is sent as
+	// (arg -> header). The argument's value is sent as-is (no templating), and the
+	// argument is consumed (removed from the request body).
+	// Example: {"customer_id": "X-Customer-ID"}
 	// +optional
 	HeaderParams map[string]string `json:"headerParams,omitempty"`
 
@@ -312,13 +314,17 @@ type HTTPConfig struct {
 	// +optional
 	ResponseMapping *string `json:"responseMapping,omitempty"`
 
-	// redact lists response field names to exclude from logs and tracing.
+	// redact lists top-level response field names whose values are replaced with
+	// "[REDACTED]" in the tool result returned to the LLM. Applies only when the
+	// response body is a JSON object; runs before responseMapping.
 	// +optional
 	Redact []string `json:"redact,omitempty"`
 
-	// urlTemplate is a Go text/template for constructing the URL with path parameters.
-	// Example: "/users/{{.user_id}}/orders/{{.order_id}}"
-	// When set, overrides endpoint for URL construction; endpoint is used as the base URL.
+	// urlTemplate builds the request URL using single-brace {argName} placeholders
+	// (plain string substitution, NOT Go text/template). When set it REPLACES
+	// endpoint, so it must be a full URL (scheme + host). Arguments used in the
+	// template are consumed (removed from the request body/query).
+	// Example: "https://api.example.com/users/{user_id}/orders/{order_id}"
 	// +optional
 	URLTemplate *string `json:"urlTemplate,omitempty"`
 

@@ -15,17 +15,22 @@ All examples below are fields of a single handler's `httpConfig`. See the
 
 ## Path parameters with `urlTemplate`
 
-`urlTemplate` is a Go `text/template` evaluated against the tool arguments. When
-set, `endpoint` is used as the base URL and `urlTemplate` builds the path:
+`urlTemplate` substitutes tool arguments into the URL using **single-brace
+`{argName}`** placeholders (plain string replacement — not Go `text/template`,
+so `{{.argName}}` does **not** work). When set, it **replaces** `endpoint`
+entirely, so `urlTemplate` must be a **full URL** including scheme and host — a
+relative path produces a broken request:
 
 ```yaml
 httpConfig:
-  endpoint: https://api.example.com
+  endpoint: https://api.example.com          # ignored when urlTemplate is set
   method: GET
-  urlTemplate: "/users/{{.user_id}}/orders/{{.order_id}}"
+  urlTemplate: "https://api.example.com/users/{user_id}/orders/{order_id}"
 ```
 
-Arguments consumed by the template still come from the tool's `inputSchema`.
+Each argument used in the template is **consumed** — it fills the path and is
+removed from the request body/query. The argument names still come from the
+tool's `inputSchema`.
 
 ## Send arguments as query params or headers
 
@@ -37,10 +42,14 @@ httpConfig:
   method: GET
   # These arg names become URL query parameters instead of body fields:
   queryParams: [query, limit]
-  # Map an arg into a request header via a template:
+  # Map an argument to a header — the KEY is the arg name, the VALUE is the
+  # header name (arg → header). No templating; the arg's value is sent as-is.
   headerParams:
-    X-Customer-ID: "{{.customer_id}}"
+    customer_id: X-Customer-ID
 ```
+
+Both `queryParams` and `headerParams` **consume** the arguments they use, so
+those fields are removed from the request body.
 
 ## Inject fixed values the LLM never sees
 
@@ -81,11 +90,12 @@ httpConfig:
   responseMapping: "results[].{name: name, price: price, inStock: available}"
 ```
 
-## Redact fields from logs and traces
+## Redact fields from the response
 
-`redact` lists response field names to exclude from logs and tracing (they are
-still returned to the model — this controls observability output, not the tool
-result):
+`redact` lists **top-level** response field names whose values are replaced with
+the literal string `"[REDACTED]"` in the tool result — so the model (and anything
+downstream, including logs) never sees them. Redaction runs **before**
+`responseMapping`, and only applies when the response body is a JSON object:
 
 ```yaml
 httpConfig:
@@ -93,6 +103,9 @@ httpConfig:
   method: GET
   redact: [ssn, date_of_birth]
 ```
+
+With this config, a response `{"name":"Ada","ssn":"123-45-6789"}` reaches the LLM
+as `{"name":"Ada","ssn":"[REDACTED]"}`.
 
 ## Retry policy
 
