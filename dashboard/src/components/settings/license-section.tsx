@@ -147,7 +147,7 @@ function UploadLicenseDialog({ onUpload }: { onUpload: (file: File) => void }) {
             <input
               type="file"
               className="hidden"
-              accept=".pem,.license"
+              accept=".jwt,.license,.txt,.pem"
               onChange={handleFileSelect}
             />
             <Button variant="secondary" size="sm" asChild>
@@ -165,16 +165,25 @@ function UploadLicenseDialog({ onUpload }: { onUpload: (file: File) => void }) {
  */
 export function LicenseSection() {
   const { license, isExpired, isEnterprise, refresh } = useLicense();
+  const [uploadResult, setUploadResult] = useState<{
+    ok: boolean;
+    message: string;
+  } | null>(null);
 
-  const daysUntilExpiry = useMemo(() => {
-    const now = Date.now();
-    return Math.floor(
-      (new Date(license.expiresAt).getTime() - now) / (1000 * 60 * 60 * 24)
-    );
-  }, [license.expiresAt]);
+  // Read "now" once at mount via a lazy state initializer — calling Date.now()
+  // directly in render/useMemo is an impurity (react-hooks/purity).
+  const [now] = useState(() => Date.now());
+  const daysUntilExpiry = useMemo(
+    () =>
+      Math.floor(
+        (new Date(license.expiresAt).getTime() - now) / (1000 * 60 * 60 * 24)
+      ),
+    [license.expiresAt, now]
+  );
 
   const handleUpload = useCallback(
     async (file: File) => {
+      setUploadResult({ ok: true, message: "Uploading license…" });
       const formData = new FormData();
       formData.append("license", file);
 
@@ -183,14 +192,29 @@ export function LicenseSection() {
           method: "POST",
           body: formData,
         });
+        const data = (await response.json().catch(() => ({}))) as {
+          error?: string;
+          message?: string;
+        };
 
         if (!response.ok) {
-          throw new Error("Failed to upload license");
+          setUploadResult({
+            ok: false,
+            message: data.error || "Failed to upload license.",
+          });
+          return;
         }
 
+        setUploadResult({
+          ok: true,
+          message: data.message || "License uploaded.",
+        });
         refresh();
       } catch {
-        // Error handling will be added in a future iteration
+        setUploadResult({
+          ok: false,
+          message: "Failed to upload license. Check your connection and try again.",
+        });
       }
     },
     [refresh]
@@ -261,8 +285,18 @@ export function LicenseSection() {
           </div>
         )}
 
-        <div className="pt-2">
+        <div className="pt-2 space-y-2">
           <UploadLicenseDialog onUpload={handleUpload} />
+          {uploadResult && (
+            <p
+              role="status"
+              className={`text-sm ${
+                uploadResult.ok ? "text-success" : "text-destructive"
+              }`}
+            >
+              {uploadResult.message}
+            </p>
+          )}
         </div>
       </CardContent>
     </Card>
