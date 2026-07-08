@@ -8,7 +8,7 @@
 # dynamically-linked binary needing libc + the ELF loader even with CGO_ENABLED=0,
 # and that cannot exec on distroless/static. Building against the published SDK
 # keeps the binary fully static so it stays on the tiny distroless/static base.
-FROM golang:1.26 AS builder
+FROM --platform=$BUILDPLATFORM golang:1.26 AS builder
 ARG TARGETOS
 ARG TARGETARCH
 
