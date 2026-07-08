@@ -2145,12 +2145,6 @@ export const crdConstraints: Record<string, Record<string, FieldConstraint>> =
       "type": "string",
       "required": true
     },
-    "spec.handlers[].selector.namespace": {
-      "type": "string"
-    },
-    "spec.handlers[].selector.port": {
-      "type": "string"
-    },
     "spec.handlers[].timeout": {
       "type": "string"
     },

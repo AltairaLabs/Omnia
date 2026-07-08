@@ -10,12 +10,6 @@ export type MCPTransport = "sse" | "stdio";
 export type HTTPAuthType = "none" | "bearer" | "basic";
 
 // Nested types
-export interface ServiceSelector {
-  matchLabels?: Record<string, string>;
-  namespace?: string;
-  port?: string | number;
-}
-
 export interface ToolDefinition {
   name: string;
   description: string;
@@ -64,7 +58,6 @@ export interface MCPClientConfig {
 export interface HandlerDefinition {
   name: string;
   type: HandlerType;
-  selector?: ServiceSelector;
   tool?: ToolDefinition;
   httpConfig?: HTTPConfig;
   openAPIConfig?: OpenAPIConfig;

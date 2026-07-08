@@ -775,7 +775,6 @@ export interface components {
         };
         ToolRegistrySpec: {
             tools?: components["schemas"]["ToolDefinition"][];
-            selector?: components["schemas"]["ServiceSelector"];
         };
         ToolDefinition: {
             name?: string;
@@ -785,11 +784,6 @@ export interface components {
             url?: string;
             inputSchema?: {
                 [key: string]: unknown;
-            };
-        };
-        ServiceSelector: {
-            matchLabels?: {
-                [key: string]: string;
             };
         };
         ToolRegistryStatus: {

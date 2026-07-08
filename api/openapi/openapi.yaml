@@ -1350,8 +1350,6 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/ToolDefinition'
-        selector:
-          $ref: '#/components/schemas/ServiceSelector'
 
     ToolDefinition:
       type: object
@@ -1368,14 +1366,6 @@ components:
         inputSchema:
           type: object
           additionalProperties: true
-
-    ServiceSelector:
-      type: object
-      properties:
-        matchLabels:
-          type: object
-          additionalProperties:
-            type: string
 
     ToolRegistryStatus:
       type: object

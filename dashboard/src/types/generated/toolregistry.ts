@@ -256,18 +256,6 @@ export interface ToolRegistrySpec {
       /** specURL is the URL to the OpenAPI specification (JSON or YAML). */
       specURL: string;
     };
-    /** selector discovers the handler endpoint from Kubernetes Services.
-     * Mutually exclusive with inline endpoint configuration. */
-    selector?: {
-      /** matchLabels specifies labels that must match on the Service. */
-      matchLabels?: Record<string, string>;
-      /** namespace specifies the namespace to search for Services.
-       * If empty, searches in the same namespace as the ToolRegistry. */
-      namespace?: string;
-      /** port specifies the port name or number on the Service.
-       * If empty, uses the first port. */
-      port?: string;
-    };
     /** timeout specifies the maximum duration for a single tool invocation (wall clock).
      * Applies to all handler types. */
     timeout?: string;
