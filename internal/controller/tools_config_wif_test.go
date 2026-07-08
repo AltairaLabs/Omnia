@@ -56,17 +56,45 @@ func TestValidateHandlerAuth_AllowsGRPCWIF(t *testing.T) {
 	}
 }
 
-func TestValidateHandlerAuth_RejectsMCPWIFWithStrayHTTPConfig(t *testing.T) {
+func TestValidateHandlerAuth_AllowsMCPWIFDespiteStrayHTTPConfig(t *testing.T) {
 	// A handler declared type: mcp that also carries a stray non-nil HTTPConfig
-	// must still be rejected: buildHandlerEntry dispatches on h.Type (mcp), so the
-	// MCP builder runs and never applies workloadIdentityFieldsFor — allowing it
-	// would silently drop the auth header (fail-open). The guard keys off h.Type.
+	// must still validate on h.Type (mcp): buildHandlerEntry dispatches on
+	// h.Type, so the MCP builder runs and applies workloadIdentityFieldsFor to
+	// ToolMCP; the stray HTTPConfig is simply unused. Now that MCP is a
+	// wifSupportedHandlerType, this is allowed — confirms the guard keys off
+	// h.Type, not config presence.
 	h := wifHTTPHandler()
 	h.Type = omniav1alpha1.HandlerTypeMCP
 	h.MCPConfig = &omniav1alpha1.MCPClientConfig{Transport: omniav1alpha1.MCPTransportStreamableHTTP}
 	// HTTPConfig deliberately left non-nil (the stray block).
+	if err := validateHandlerAuth(&h); err != nil {
+		t.Fatalf("MCP WIF should be allowed now that MCP is a supported WIF handler type: %v", err)
+	}
+}
+
+func TestValidateHandlerAuth_AllowsMCPWIF(t *testing.T) {
+	h := wifHTTPHandler()
+	h.Type = omniav1alpha1.HandlerTypeMCP
+	h.HTTPConfig, h.MCPConfig = nil, &omniav1alpha1.MCPClientConfig{Transport: omniav1alpha1.MCPTransportStreamableHTTP}
+	if err := validateHandlerAuth(&h); err != nil {
+		t.Fatalf("streamable-http MCP WIF should be allowed: %v", err)
+	}
+
+	h.MCPConfig = &omniav1alpha1.MCPClientConfig{Transport: omniav1alpha1.MCPTransportSSE}
+	if err := validateHandlerAuth(&h); err != nil {
+		t.Fatalf("sse MCP WIF should be allowed: %v", err)
+	}
+}
+
+func TestValidateHandlerAuth_RejectsStdioMCPWIF(t *testing.T) {
+	// Stdio MCP speaks JSON-RPC over stdin/stdout with no header channel, so
+	// no auth (including workloadIdentity) can be applied. This guard must
+	// keep rejecting stdio even though MCP is now a wifSupportedHandlerType.
+	h := wifHTTPHandler()
+	h.Type = omniav1alpha1.HandlerTypeMCP
+	h.HTTPConfig, h.MCPConfig = nil, &omniav1alpha1.MCPClientConfig{Transport: omniav1alpha1.MCPTransportStdio}
 	if err := validateHandlerAuth(&h); err == nil {
-		t.Fatal("MCP WIF with a stray HTTPConfig should be rejected (fail-closed)")
+		t.Fatal("stdio MCP WIF should still be rejected (no header channel)")
 	}
 }
 
@@ -107,6 +135,24 @@ func TestBuildGRPCConfig_SetsWIFFields(t *testing.T) {
 	}
 }
 
+func wifMCPHandler() omniav1alpha1.HandlerDefinition {
+	h := wifHTTPHandler()
+	h.Type = omniav1alpha1.HandlerTypeMCP
+	h.HTTPConfig, h.MCPConfig = nil, &omniav1alpha1.MCPClientConfig{Transport: omniav1alpha1.MCPTransportStreamableHTTP}
+	return h
+}
+
+func TestBuildMCPConfig_SetsWIFFields(t *testing.T) {
+	h := wifMCPHandler()
+	cfg, err := buildMCPConfig(&h)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.AuthType != string(omniav1alpha1.ToolAuthTypeWorkloadIdentity) || cfg.AuthCloud != "azure" || cfg.AuthAudience != "api://tool" {
+		t.Fatalf("WIF fields not set: %+v", cfg)
+	}
+}
+
 func TestWifSupportedHandlerType(t *testing.T) {
 	cases := []struct {
 		typ  omniav1alpha1.HandlerType
@@ -115,7 +161,7 @@ func TestWifSupportedHandlerType(t *testing.T) {
 		{omniav1alpha1.HandlerTypeHTTP, true},
 		{omniav1alpha1.HandlerTypeGRPC, true},
 		{omniav1alpha1.HandlerTypeOpenAPI, false},
-		{omniav1alpha1.HandlerTypeMCP, false},
+		{omniav1alpha1.HandlerTypeMCP, true},
 	}
 	for _, tc := range cases {
 		if got := wifSupportedHandlerType(tc.typ); got != tc.want {

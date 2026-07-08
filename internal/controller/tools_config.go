@@ -127,6 +127,9 @@ type ToolMCP struct {
 	Env           map[string]string                   `json:"env,omitempty"`
 	AuthType      string                              `json:"authType,omitempty"`
 	AuthTokenPath string                              `json:"authTokenPath,omitempty"`
+	AuthCloud     string                              `json:"authCloud,omitempty"`
+	AuthAudience  string                              `json:"authAudience,omitempty"`
+	AuthHeader    string                              `json:"authHeader,omitempty"`
 	ToolFilter    *ToolMCPFilter                      `json:"toolFilter,omitempty"`
 	RetryPolicy   *runtimetools.RuntimeMCPRetryPolicy `json:"retryPolicy,omitempty"`
 }
@@ -253,7 +256,7 @@ func validateToolAuthTypes(tr *omniav1alpha1.ToolRegistry) error {
 // for a handler of this type today. Extended per protocol as support lands.
 func wifSupportedHandlerType(t omniav1alpha1.HandlerType) bool {
 	switch t {
-	case omniav1alpha1.HandlerTypeHTTP, omniav1alpha1.HandlerTypeGRPC:
+	case omniav1alpha1.HandlerTypeHTTP, omniav1alpha1.HandlerTypeGRPC, omniav1alpha1.HandlerTypeMCP:
 		return true
 	default:
 		return false
@@ -708,6 +711,10 @@ func buildMCPConfig(h *omniav1alpha1.HandlerDefinition) (*ToolMCP, error) {
 	if authType, tokenPath, ok := authFieldsFor(h); ok {
 		cfg.AuthType = authType
 		cfg.AuthTokenPath = tokenPath
+	}
+	if cloud, aud, header, ok := workloadIdentityFieldsFor(h); ok {
+		cfg.AuthType = string(omniav1alpha1.ToolAuthTypeWorkloadIdentity)
+		cfg.AuthCloud, cfg.AuthAudience, cfg.AuthHeader = cloud, aud, header
 	}
 	return cfg, nil
 }

@@ -220,6 +220,9 @@ type MCPCfg struct {
 	AuthType      string                 `json:"authType,omitempty" yaml:"authType,omitempty"`
 	AuthToken     string                 `json:"authToken,omitempty" yaml:"authToken,omitempty"`
 	AuthTokenPath string                 `json:"authTokenPath,omitempty" yaml:"authTokenPath,omitempty"`
+	AuthHeader    string                 `json:"authHeader,omitempty" yaml:"authHeader,omitempty"`
+	AuthCloud     string                 `json:"authCloud,omitempty" yaml:"authCloud,omitempty"`
+	AuthAudience  string                 `json:"authAudience,omitempty" yaml:"authAudience,omitempty"`
 	ToolFilter    *MCPToolFilterCfg      `json:"toolFilter,omitempty" yaml:"toolFilter,omitempty"`
 	RetryPolicy   *RuntimeMCPRetryPolicy `json:"retryPolicy,omitempty" yaml:"retryPolicy,omitempty"`
 }
@@ -294,7 +297,7 @@ func ResolveAuthTokenPaths(cfg *ToolConfig) error {
 			}
 			h.GRPCConfig.AuthToken = tok
 		}
-		if h.MCPConfig != nil && h.MCPConfig.AuthTokenPath != "" {
+		if h.MCPConfig != nil && h.MCPConfig.AuthTokenPath != "" && h.MCPConfig.AuthType != authTypeWorkloadIdentity {
 			tok, err := readTokenFile(h.MCPConfig.AuthTokenPath)
 			if err != nil {
 				return fmt.Errorf("handler %q: %w", h.Name, err)
