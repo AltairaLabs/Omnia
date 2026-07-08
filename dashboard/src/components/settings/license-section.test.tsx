@@ -325,6 +325,63 @@ describe("LicenseSection", () => {
     expect(mockRefresh).not.toHaveBeenCalled();
   });
 
+  it("should show a success message after a successful upload", async () => {
+    mockEnterpriseLicense();
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ tier: "enterprise", message: "License stored." }),
+    });
+
+    render(<LicenseSection />);
+    fireEvent.click(screen.getByRole("button", { name: /Upload License/i }));
+    const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
+    const file = new File(["header.payload.sig"], "license.jwt");
+    fireEvent.change(fileInput, { target: { files: [file] } });
+
+    await waitFor(() => {
+      expect(screen.getByText("License stored.")).toBeInTheDocument();
+    });
+    expect(mockRefresh).toHaveBeenCalled();
+  });
+
+  it("should show the server error message when upload fails", async () => {
+    mockEnterpriseLicense();
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 400,
+      json: () => Promise.resolve({ error: "License is missing a 'tier' claim" }),
+    });
+
+    render(<LicenseSection />);
+    fireEvent.click(screen.getByRole("button", { name: /Upload License/i }));
+    const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
+    const file = new File(["bad"], "license.jwt");
+    fireEvent.change(fileInput, { target: { files: [file] } });
+
+    await waitFor(() => {
+      expect(
+        screen.getByText("License is missing a 'tier' claim")
+      ).toBeInTheDocument();
+    });
+    expect(mockRefresh).not.toHaveBeenCalled();
+  });
+
+  it("should show a connection error when the request throws", async () => {
+    mockEnterpriseLicense();
+    global.fetch = vi.fn().mockRejectedValue(new Error("network"));
+
+    render(<LicenseSection />);
+    fireEvent.click(screen.getByRole("button", { name: /Upload License/i }));
+    const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
+    const file = new File(["header.payload.sig"], "license.jwt");
+    fireEvent.change(fileInput, { target: { files: [file] } });
+
+    await waitFor(() => {
+      expect(screen.getByText(/Check your connection/i)).toBeInTheDocument();
+    });
+    expect(mockRefresh).not.toHaveBeenCalled();
+  });
+
   it("should activate drag state on drag over", () => {
     mockEnterpriseLicense();
     render(<LicenseSection />);

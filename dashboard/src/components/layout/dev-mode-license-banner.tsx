@@ -2,18 +2,25 @@
 
 import { ShieldAlert } from "lucide-react";
 import { useDevMode } from "@/hooks/core";
+import { useLicense } from "@/hooks/auth";
 import { useBrand } from "@/hooks/use-brand";
 import { OMNIA_BRAND } from "@/lib/branding/types";
 
 /**
- * Banner displayed when the instance is running with a development license.
- * Detects dev mode via NEXT_PUBLIC_DEV_MODE runtime config (set by Helm when devMode=true).
+ * Banner displayed when the instance is actually running the synthetic
+ * development license.
+ *
+ * This is gated on the *effective* license, not merely the NEXT_PUBLIC_DEV_MODE
+ * flag: a dev-mode deployment that has a real license installed serves that
+ * license (the dev license is only a fallback, #1780), so the banner must clear.
+ * The dev license is identifiable by its fixed id "dev-mode".
  */
 export function DevModeLicenseBanner() {
   const { isDevMode, loading } = useDevMode();
+  const { license } = useLicense();
   const { brand } = useBrand();
 
-  if (loading || !isDevMode) {
+  if (loading || !isDevMode || license.id !== "dev-mode") {
     return null;
   }
 

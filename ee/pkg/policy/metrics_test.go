@@ -9,6 +9,7 @@ Functional Source License. See ee/LICENSE for details.
 package policy
 
 import (
+	"errors"
 	"net/http/httptest"
 	"testing"
 
@@ -113,6 +114,8 @@ func TestBrokerHandler_NilMetricsDoesNotPanic(t *testing.T) {
 
 // TestDecisionOutcome covers the outcome classification used for the
 // decisions_total counter's "outcome" label.
+var errTest = errors.New("cel eval boom")
+
 func TestDecisionOutcome(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -141,6 +144,21 @@ func TestDecisionOutcome(t *testing.T) {
 			name:     "denied_without_deniedby",
 			decision: Decision{Allowed: false},
 			want:     OutcomeDenied,
+		},
+		{
+			// Eval error that failed closed: classified as "error", NOT
+			// "denied", so a rule erroring on every call is alertable rather
+			// than hidden in the deny count.
+			name:     "eval_error_fail_closed",
+			decision: Decision{Allowed: false, DeniedBy: "some-rule", Error: errTest},
+			want:     OutcomeError,
+		},
+		{
+			// Eval error that failed OPEN (onFailure=allow): still surfaced as
+			// "error" — the misconfiguration matters regardless of fail mode.
+			name:     "eval_error_fail_open",
+			decision: Decision{Allowed: true, Error: errTest},
+			want:     OutcomeError,
 		},
 	}
 

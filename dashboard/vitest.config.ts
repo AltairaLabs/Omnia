@@ -104,8 +104,10 @@ export default defineConfig({
         // Prometheus API routes - require Prometheus server
         "src/app/api/prometheus/**",
 
-        // License API routes - require license server
-        "src/app/api/license/**",
+        // License activation routes proxy the operator's license server; the
+        // GET/POST /api/license handlers themselves are unit-tested (#1682
+        // upload fix) so they stay in coverage.
+        "src/app/api/license/activations/**",
 
         // Arena project/source content API routes are now covered by tests
         // (migrated off direct NFS onto the operator content API, #1462), so

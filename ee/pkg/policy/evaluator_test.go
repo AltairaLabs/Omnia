@@ -314,9 +314,11 @@ func TestEvaluate_RequiredClaimsPresent(t *testing.T) {
 	}
 
 	headers := map[string]string{
-		HeaderToolName:              "process_refund",
-		HeaderToolRegistry:          "customer-tools",
-		"X-Omnia-Claim-customer_id": "cust-123",
+		HeaderToolName:     "process_refund",
+		HeaderToolRegistry: "customer-tools",
+		// Canonical header casing, as the runtime actually sends it
+		// (buildDecisionHeaders sets claim headers via an http.Request).
+		"X-Omnia-Claim-Customer_id": "cust-123",
 	}
 
 	decision := eval.Evaluate(headers, nil)
@@ -1174,11 +1176,12 @@ func TestEvaluate_RequiredClaimsMultiple(t *testing.T) {
 	}
 
 	t.Run("both present", func(t *testing.T) {
+		// Canonical claim-header casing, as the runtime sends it.
 		headers := map[string]string{
 			HeaderToolName:         "process_refund",
 			HeaderToolRegistry:     "customer-tools",
-			"X-Omnia-Claim-team":   "billing",
-			"X-Omnia-Claim-region": "us-east",
+			"X-Omnia-Claim-Team":   "billing",
+			"X-Omnia-Claim-Region": "us-east",
 		}
 		decision := eval.Evaluate(headers, nil)
 		if !decision.Allowed {
@@ -1190,7 +1193,7 @@ func TestEvaluate_RequiredClaimsMultiple(t *testing.T) {
 		headers := map[string]string{
 			HeaderToolName:         "process_refund",
 			HeaderToolRegistry:     "customer-tools",
-			"X-Omnia-Claim-region": "us-east",
+			"X-Omnia-Claim-Region": "us-east",
 		}
 		decision := eval.Evaluate(headers, nil)
 		if decision.Allowed {

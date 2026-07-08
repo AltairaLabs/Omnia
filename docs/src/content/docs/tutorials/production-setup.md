@@ -100,7 +100,8 @@ Install Omnia:
 ```bash
 kubectl create namespace omnia-system
 
-helm install omnia omnia/omnia \
+helm install omnia altaira/omnia \
+  --devel \
   -n omnia-system \
   -f production-values.yaml
 ```

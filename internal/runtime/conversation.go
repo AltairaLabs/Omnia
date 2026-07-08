@@ -268,5 +268,13 @@ func (s *Server) resumeOrOpenConversation(sessionID string, opts []sdk.Option, l
 	} else {
 		log.V(1).Info("resumed existing conversation")
 	}
+	// Diagnostics: the tools this prompt actually offers the model. Empty here
+	// while an executor tool is registered means the "registered but not offered"
+	// trap — the model can't call it. Logged at info so it is visible without
+	// debug (the class of bug that is otherwise invisible).
+	log.Info("conversation tool offering",
+		"packPath", s.packPath,
+		"prompt", s.promptName,
+		"allowedTools", promptAllowedTools(s.packPath, s.promptName))
 	return conv, nil
 }

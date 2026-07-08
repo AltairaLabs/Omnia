@@ -45,6 +45,95 @@ func createTestToken(t *testing.T, privateKey *rsa.PrivateKey, claims *licenseCl
 	return tokenString
 }
 
+// newValidatorWithSecret builds a validator verifying against publicKey and,
+// when token is non-empty, seeds an arena-license Secret with that token.
+func newValidatorWithSecret(
+	t *testing.T,
+	publicKey *rsa.PublicKey,
+	token string,
+	opts ...ValidatorOption,
+) *Validator {
+	t.Helper()
+	scheme := runtime.NewScheme()
+	require.NoError(t, corev1.AddToScheme(scheme))
+	builder := fake.NewClientBuilder().WithScheme(scheme)
+	if token != "" {
+		builder = builder.WithObjects(&corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      LicenseSecretName,
+				Namespace: LicenseSecretNamespace,
+			},
+			Data: map[string][]byte{LicenseSecretKey: []byte(token)},
+		})
+	}
+	base := []ValidatorOption{WithPublicKey(publicKey), WithNamespace(LicenseSecretNamespace)}
+	v, err := NewValidator(builder.Build(), append(base, opts...)...)
+	require.NoError(t, err)
+	return v
+}
+
+// In dev mode with no license Secret, the dev license is the fallback.
+func TestGetLicense_DevModeNoSecret_FallsBackToDevLicense(t *testing.T) {
+	_, publicKey := generateTestKeyPair(t)
+	v := newValidatorWithSecret(t, publicKey, "", WithDevMode())
+
+	license, err := v.GetLicense(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, "dev-mode", license.ID)
+	assert.Equal(t, TierEnterprise, license.Tier)
+}
+
+// A dev-mode validator built without a client (as the admission webhooks do)
+// still returns the dev license rather than dereferencing the nil client.
+func TestGetLicense_DevModeNilClient_FallsBackToDevLicense(t *testing.T) {
+	v, err := NewValidator(nil, WithDevMode())
+	require.NoError(t, err)
+
+	license, err := v.GetLicense(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, "dev-mode", license.ID)
+}
+
+// A real, valid license installed while in dev mode WINS over the dev fallback —
+// no reinstall or flag flip needed.
+func TestGetLicense_DevModeWithValidSecret_RealLicenseWins(t *testing.T) {
+	privateKey, publicKey := generateTestKeyPair(t)
+	token := createTestToken(t, privateKey, &licenseClaims{
+		RegisteredClaims: jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(24 * time.Hour)),
+			IssuedAt:  jwt.NewNumericDate(time.Now()),
+		},
+		LicenseID: "real-123",
+		Tier:      "enterprise",
+		Customer:  "Real Customer",
+	})
+	v := newValidatorWithSecret(t, publicKey, token, WithDevMode())
+
+	license, err := v.GetLicense(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, "real-123", license.ID)
+	assert.Equal(t, "Real Customer", license.Customer)
+}
+
+// In dev mode, an invalid/forged license Secret (signed by the wrong key) does
+// not take over — it falls back to the dev license.
+func TestGetLicense_DevModeWithInvalidSecret_FallsBackToDevLicense(t *testing.T) {
+	_, publicKey := generateTestKeyPair(t)
+	otherPriv, _ := generateTestKeyPair(t)
+	badToken := createTestToken(t, otherPriv, &licenseClaims{
+		RegisteredClaims: jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(24 * time.Hour)),
+		},
+		LicenseID: "forged",
+		Tier:      "enterprise",
+	})
+	v := newValidatorWithSecret(t, publicKey, badToken, WithDevMode())
+
+	license, err := v.GetLicense(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, "dev-mode", license.ID)
+}
+
 func TestOpenCoreLicense(t *testing.T) {
 	license := OpenCoreLicense()
 

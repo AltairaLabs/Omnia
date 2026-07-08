@@ -1,0 +1,35 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: assistant-prompts
+  namespace: default
+data:
+  pack.json: |
+    {
+      "$schema": "https://promptpack.org/schema/latest/promptpack.schema.json",
+      "id": "assistant",
+      "name": "Assistant",
+      "version": "1.0.0",
+      "template_engine": {"version": "v1", "syntax": "{{variable}}"},
+      "prompts": {
+        "main": {
+          "id": "main",
+          "name": "Main Assistant",
+          "version": "1.0.0",
+          "system_template": "You are a helpful AI assistant. Be concise and accurate.",
+          "parameters": {"temperature": 0.7, "max_tokens": 4096}
+        }
+      }
+    }
+---
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: PromptPack
+metadata:
+  name: assistant-pack
+  namespace: default
+spec:
+  version: "1.0.0"
+  source:
+    type: configmap
+    configMapRef:
+      name: assistant-prompts

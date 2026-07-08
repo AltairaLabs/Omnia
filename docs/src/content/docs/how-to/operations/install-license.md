@@ -23,8 +23,11 @@ The simplest way to install with a license is to pass it directly to Helm:
 
 ```bash
 helm install omnia oci://ghcr.io/altairalabs/charts/omnia \
+  --devel \
   --namespace omnia-system \
   --create-namespace \
+  --set dashboard.auth.mode=builtin \
+  --set dashboard.auth.sessionSecret="$(openssl rand -base64 32)" \
   --set license.key="eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9..."
 ```
 
@@ -34,7 +37,9 @@ This creates the `arena-license` Secret automatically.
 
 If you prefer to manage the license Secret separately (recommended for GitOps):
 
-1. Create the Secret:
+1. Create the Secret. The name **must** be `arena-license`, in the operator's
+   namespace, with the JWT under the `license` key — the operator looks the
+   Secret up by that fixed name, so a different name will not be found:
 
 ```bash
 kubectl create secret generic arena-license \
@@ -42,7 +47,7 @@ kubectl create secret generic arena-license \
   --from-literal=license="eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9..."
 ```
 
-2. Reference it in your Helm values:
+2. Tell Helm not to create its own Secret:
 
 ```yaml
 # values.yaml
@@ -50,12 +55,19 @@ license:
   existingSecret: "arena-license"
 ```
 
+   `license.existingSecret` only suppresses the chart-managed Secret; it does
+   **not** rename the Secret the operator reads. Any non-empty value skips
+   creation, but the Secret you provide must still be named `arena-license`.
+
 3. Install Omnia:
 
 ```bash
 helm install omnia oci://ghcr.io/altairalabs/charts/omnia \
+  --devel \
   --namespace omnia-system \
   --create-namespace \
+  --set dashboard.auth.mode=builtin \
+  --set dashboard.auth.sessionSecret="$(openssl rand -base64 32)" \
   -f values.yaml
 ```
 
@@ -97,12 +109,22 @@ The operator will detect the new license within 5 minutes (or restart it for imm
 
 ## Upload via Dashboard
 
-You can also upload a license through the dashboard:
+You can also install a license through the dashboard without touching `kubectl`
+or Helm:
 
-1. Open the Omnia dashboard
-2. Navigate to **Settings** → **License**
-3. Click **Upload License**
-4. Paste your license key and click **Save**
+1. Open the Omnia dashboard as a user with the **admin** role (the upload
+   requires the `settings:edit` permission).
+2. Navigate to **Settings** → **License**.
+3. Click **Upload License**.
+4. Drag your license file onto the drop zone, or click **Browse Files** and
+   select it. The file just needs to contain the JWT (a `.jwt`, `.txt`,
+   `.license`, or `.pem` file all work).
+
+The dashboard writes the JWT into the `arena-license` Secret for you. As with a
+Helm-managed license, the operator re-reads the Secret on its 5-minute refresh
+cycle, so the License panel can take up to 5 minutes to reflect the new key. A
+confirmation (or a specific error) is shown beneath the **Upload License**
+button.
 
 ## How the License Is Validated
 

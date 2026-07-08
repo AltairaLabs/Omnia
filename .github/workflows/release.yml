@@ -136,6 +136,9 @@ jobs:
           owner="${GITHUB_REPOSITORY_OWNER,,}"
           echo "image=${REGISTRY}/${owner}/${IMAGE}" >> "$GITHUB_OUTPUT"
 
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
@@ -161,7 +164,7 @@ jobs:
         with:
           context: ${{ matrix.context }}
           file: ${{ matrix.dockerfile }}
-          platforms: linux/amd64
+          platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
@@ -249,15 +252,19 @@ jobs:
         run: |
           VERSION="${{ needs.parse-version.outputs.version }}"
 
-          # Update chart version and appVersion
+          # Update chart version and appVersion (core + demos)
           yq eval -i ".version = \"$VERSION\"" charts/omnia/Chart.yaml
           yq eval -i ".appVersion = \"$VERSION\"" charts/omnia/Chart.yaml
+          yq eval -i ".version = \"$VERSION\"" charts/omnia-demos/Chart.yaml
+          yq eval -i ".appVersion = \"$VERSION\"" charts/omnia-demos/Chart.yaml
 
           echo "Updated Chart.yaml:"
           cat charts/omnia/Chart.yaml
 
       - name: Update dependencies
-        run: helm dependency update charts/omnia
+        run: |
+          helm dependency update charts/omnia
+          helm dependency update charts/omnia-demos
 
       - name: Lint chart
         run: helm lint charts/omnia
@@ -266,6 +273,7 @@ jobs:
         run: |
           mkdir -p dist
           helm package charts/omnia --destination dist/
+          helm package charts/omnia-demos --destination dist/
 
       - name: Login to GHCR
         run: echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ${{ env.REGISTRY }} -u ${{ github.actor }} --password-stdin
@@ -274,6 +282,7 @@ jobs:
         run: |
           VERSION="${{ needs.parse-version.outputs.version }}"
           helm push dist/omnia-${VERSION}.tgz oci://${{ env.CHART_REGISTRY }}
+          helm push dist/omnia-demos-${VERSION}.tgz oci://${{ env.CHART_REGISTRY }}
 
       - name: Upload chart artifact
         uses: actions/upload-artifact@v7
@@ -333,6 +342,33 @@ jobs:
 
           git commit -m "chore: publish omnia v${VERSION} [skip ci]"
           git push
+
+  install-smoke-test:
+    name: Smoke test published install
+    needs: [parse-version, docker-release, helm-release, helm-repo-publish]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v5
+        with:
+          version: v3.14.0
+
+      - name: Install k3d
+        run: curl -fsSL https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh | TAG=v5.7.4 bash
+
+      - name: Run install smoke test
+        env:
+          CHART_REF: oci://${{ env.CHART_REGISTRY }}/omnia
+          CHART_VERSION: ${{ needs.parse-version.outputs.version }}
+        run: bash hack/test-install-docs.sh
 
   docs-build:
     name: Build Documentation
@@ -495,7 +531,7 @@ jobs:
     # NOT gated on docs-deploy: a docs-site failure must never block cutting
     # the release (images + chart are the release artifacts). Docs deploy
     # independently.
-    needs: [parse-version, docker-release, helm-release, helm-repo-publish]
+    needs: [parse-version, docker-release, helm-release, helm-repo-publish, install-smoke-test]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
