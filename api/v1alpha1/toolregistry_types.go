@@ -407,7 +407,8 @@ type SecretKeySelector struct {
 //
 // Only auth types the platform can honor are accepted by the schema, so an
 // unsupported type is rejected rather than silently ignored. workloadIdentity is
-// schema-valid but rejected at reconcile until its Enterprise resolver exists.
+// currently resolved only on http handlers (runtime-ambient azure); other handler
+// types are rejected at reconcile.
 // +kubebuilder:validation:XValidation:rule="self.type != 'bearer' && self.type != 'basic' || has(self.secretRef)",message="auth.type bearer/basic requires secretRef"
 // +kubebuilder:validation:XValidation:rule="self.type != 'serviceAccount' || has(self.serviceAccount)",message="auth.type serviceAccount requires the serviceAccount block"
 // +kubebuilder:validation:XValidation:rule="self.type != 'workloadIdentity' || has(self.workloadIdentity)",message="auth.type workloadIdentity requires the workloadIdentity block"
@@ -417,8 +418,8 @@ type ToolAuth struct {
 	//   bearer           — Authorization: Bearer <secretRef value>
 	//   basic            — Authorization: Basic <base64(secretRef "user:password")>
 	//   serviceAccount   — audience-bound projected Kubernetes ServiceAccount token
-	//   workloadIdentity — hosted same-cloud identity, resolved by the Enterprise
-	//                      policy broker; not yet available (rejected by the operator)
+	//   workloadIdentity — resolved by the runtime under the pod's ambient Azure
+	//                      identity (core)
 	// +kubebuilder:validation:Enum=none;bearer;basic;serviceAccount;workloadIdentity
 	// +kubebuilder:default=none
 	Type string `json:"type"`
@@ -433,9 +434,8 @@ type ToolAuth struct {
 	// +optional
 	ServiceAccount *ToolAuthServiceAccount `json:"serviceAccount,omitempty"`
 
-	// workloadIdentity configures hosted same-cloud identity. Resolved by the
-	// Enterprise policy broker under its own federated identity (not yet
-	// available in this release).
+	// workloadIdentity configures hosted same-cloud identity, resolved by the
+	// runtime under the pod's ambient Azure identity (core).
 	// +optional
 	WorkloadIdentity *ToolAuthWorkloadIdentity `json:"workloadIdentity,omitempty"`
 }
@@ -450,12 +450,14 @@ type ToolAuthServiceAccount struct {
 	Audience string `json:"audience"`
 }
 
-// ToolAuthWorkloadIdentity configures hosted same-cloud identity for a tool.
-// Its credential resolution is performed by the Enterprise policy broker; the
-// operator currently rejects handlers that use it.
+// ToolAuthWorkloadIdentity configures hosted same-cloud identity for a tool. The
+// runtime acquires a token for the audience under the pod's ambient Azure
+// identity (core) and sets it on the header. Only azure is supported; currently
+// http handlers only. The pod's identity must be granted every WIF tool's API —
+// per-tool identity separation is a future option.
 type ToolAuthWorkloadIdentity struct {
 	// cloud identity provider.
-	// +kubebuilder:validation:Enum=azure;aws;gcp;oidc
+	// +kubebuilder:validation:Enum=azure
 	Cloud string `json:"cloud"`
 
 	// audience for the federated token exchange.

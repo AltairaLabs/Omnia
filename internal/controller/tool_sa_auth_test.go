@@ -126,33 +126,31 @@ func TestValidateToolAuthTypes(t *testing.T) {
 				WorkloadIdentity: &omniav1alpha1.ToolAuthWorkloadIdentity{Cloud: "azure", Audience: "a"}},
 		}
 	}
-	wiProvider := map[string]*omniav1alpha1.Provider{
-		"p": {Spec: omniav1alpha1.ProviderSpec{Auth: &omniav1alpha1.AuthConfig{Type: omniav1alpha1.AuthMethodWorkloadIdentity}}},
-	}
 
 	t.Run("nil registry is fine", func(t *testing.T) {
-		if err := validateToolAuthTypes(nil, nil); err != nil {
+		if err := validateToolAuthTypes(nil); err != nil {
 			t.Errorf("unexpected: %v", err)
 		}
 	})
 	t.Run("serviceAccount is allowed", func(t *testing.T) {
 		tr := &omniav1alpha1.ToolRegistry{Spec: omniav1alpha1.ToolRegistrySpec{Handlers: []omniav1alpha1.HandlerDefinition{saHandler("sa", "a")}}}
-		if err := validateToolAuthTypes(tr, nil); err != nil {
+		if err := validateToolAuthTypes(tr); err != nil {
 			t.Errorf("serviceAccount should be allowed: %v", err)
 		}
 	})
-	t.Run("workloadIdentity rejected (no provider collision)", func(t *testing.T) {
+	t.Run("workloadIdentity on http is allowed", func(t *testing.T) {
 		tr := &omniav1alpha1.ToolRegistry{Spec: omniav1alpha1.ToolRegistrySpec{Handlers: []omniav1alpha1.HandlerDefinition{wiHandler("wi")}}}
-		err := validateToolAuthTypes(tr, nil)
-		if err == nil || !strings.Contains(err.Error(), "not yet available") {
-			t.Errorf("want not-yet-available rejection, got %v", err)
+		if err := validateToolAuthTypes(tr); err != nil {
+			t.Errorf("azure HTTP WIF should be allowed: %v", err)
 		}
 	})
-	t.Run("workloadIdentity rejected with provider collision message", func(t *testing.T) {
-		tr := &omniav1alpha1.ToolRegistry{Spec: omniav1alpha1.ToolRegistrySpec{Handlers: []omniav1alpha1.HandlerDefinition{wiHandler("wi")}}}
-		err := validateToolAuthTypes(tr, wiProvider)
-		if err == nil || !strings.Contains(err.Error(), "already uses workload identity") {
-			t.Errorf("want collision message, got %v", err)
+	t.Run("workloadIdentity rejected on non-http handler", func(t *testing.T) {
+		h := wiHandler("wi")
+		h.Type, h.HTTPConfig, h.GRPCConfig = omniav1alpha1.HandlerTypeGRPC, nil, &omniav1alpha1.GRPCConfig{Endpoint: "x:1"}
+		tr := &omniav1alpha1.ToolRegistry{Spec: omniav1alpha1.ToolRegistrySpec{Handlers: []omniav1alpha1.HandlerDefinition{h}}}
+		err := validateToolAuthTypes(tr)
+		if err == nil || !strings.Contains(err.Error(), "http handlers") {
+			t.Errorf("want http-only rejection, got %v", err)
 		}
 	})
 	t.Run("stdio MCP with auth rejected", func(t *testing.T) {
@@ -161,7 +159,7 @@ func TestValidateToolAuthTypes(t *testing.T) {
 			MCPConfig: &omniav1alpha1.MCPClientConfig{Transport: omniav1alpha1.MCPTransportStdio},
 			Auth:      &omniav1alpha1.ToolAuth{Type: omniav1alpha1.ToolAuthTypeBearer, SecretRef: &omniav1alpha1.SecretKeySelector{Name: "s", Key: "k"}},
 		}}}}
-		err := validateToolAuthTypes(tr, nil)
+		err := validateToolAuthTypes(tr)
 		if err == nil || !strings.Contains(err.Error(), "stdio MCP") {
 			t.Errorf("want stdio-MCP rejection, got %v", err)
 		}

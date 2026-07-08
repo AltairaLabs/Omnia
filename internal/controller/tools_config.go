@@ -87,6 +87,9 @@ type ToolHTTP struct {
 	ContentType     string                               `json:"contentType,omitempty"`
 	AuthType        string                               `json:"authType,omitempty"`
 	AuthTokenPath   string                               `json:"authTokenPath,omitempty"`
+	AuthCloud       string                               `json:"authCloud,omitempty"`
+	AuthAudience    string                               `json:"authAudience,omitempty"`
+	AuthHeader      string                               `json:"authHeader,omitempty"`
 	QueryParams     []string                             `json:"queryParams,omitempty"`
 	HeaderParams    map[string]string                    `json:"headerParams,omitempty"`
 	StaticQuery     map[string]string                    `json:"staticQuery,omitempty"`
@@ -229,39 +232,24 @@ func collectToolAuthSecrets(tr *omniav1alpha1.ToolRegistry) []toolAuthRef {
 }
 
 // validateToolAuthTypes rejects tool handlers whose effective auth the operator
-// cannot honor. workloadIdentity has no credential resolver until the Enterprise
-// policy broker provides one, so it is rejected here (fail closed). When the
-// pod's Provider also uses workload identity, the message calls out the identity
-// collision that makes reusing the runtime's ambient cloud identity for tool
-// egress unsafe.
-func validateToolAuthTypes(tr *omniav1alpha1.ToolRegistry, providers map[string]*omniav1alpha1.Provider) error {
+// cannot honor: stdio MCP has no header channel, and workloadIdentity is
+// currently resolved only on http handlers (runtime-ambient azure).
+func validateToolAuthTypes(tr *omniav1alpha1.ToolRegistry) error {
 	if tr == nil {
 		return nil
 	}
-	providerUsesWI := anyProviderUsesWorkloadIdentity(providers)
 	for i := range tr.Spec.Handlers {
-		if err := validateHandlerAuth(&tr.Spec.Handlers[i], providerUsesWI); err != nil {
+		if err := validateHandlerAuth(&tr.Spec.Handlers[i]); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-// anyProviderUsesWorkloadIdentity reports whether any of the pod's Providers
-// authenticates via workload identity (the collision the WI guard cares about).
-func anyProviderUsesWorkloadIdentity(providers map[string]*omniav1alpha1.Provider) bool {
-	for _, p := range providers {
-		if p != nil && p.Spec.Auth != nil && p.Spec.Auth.Type == omniav1alpha1.AuthMethodWorkloadIdentity {
-			return true
-		}
-	}
-	return false
-}
-
-// validateHandlerAuth rejects a single handler's effective auth when the operator
-// cannot honor it: stdio MCP has no header channel, and workloadIdentity has no
-// resolver yet (with a distinct message for the provider-identity collision).
-func validateHandlerAuth(h *omniav1alpha1.HandlerDefinition, providerUsesWI bool) error {
+// validateHandlerAuth rejects a single handler's effective auth the operator
+// cannot honor: stdio MCP has no header channel, and workloadIdentity is
+// currently resolved only on http handlers (runtime-ambient azure).
+func validateHandlerAuth(h *omniav1alpha1.HandlerDefinition) error {
 	auth := h.EffectiveAuth()
 	if auth == nil || auth.Type == omniav1alpha1.ToolAuthTypeNone {
 		return nil
@@ -269,13 +257,10 @@ func validateHandlerAuth(h *omniav1alpha1.HandlerDefinition, providerUsesWI bool
 	if h.MCPConfig != nil && h.MCPConfig.Transport == omniav1alpha1.MCPTransportStdio {
 		return fmt.Errorf("handler %q: auth is not supported on a stdio MCP transport (no header channel); use an sse or streamable-http transport", h.Name)
 	}
-	if auth.Type != omniav1alpha1.ToolAuthTypeWorkloadIdentity {
-		return nil
+	if auth.Type == omniav1alpha1.ToolAuthTypeWorkloadIdentity && h.Type != omniav1alpha1.HandlerTypeHTTP {
+		return fmt.Errorf("handler %q: auth.type workloadIdentity is currently supported only on http handlers", h.Name)
 	}
-	if providerUsesWI {
-		return fmt.Errorf("handler %q: auth.type workloadIdentity is not supported — the pod's Provider already uses workload identity, and tool egress must not reuse that identity; the Enterprise policy broker resolves tool workload identity under a separate principal", h.Name)
-	}
-	return fmt.Errorf("handler %q: auth.type workloadIdentity requires the Enterprise policy broker, which is not yet available", h.Name)
+	return nil
 }
 
 // reconcileToolSecrets resolves each referenced auth secret into a single
@@ -592,7 +577,22 @@ func buildHTTPConfig(h *omniav1alpha1.HandlerDefinition, endpoint string) (*Tool
 		cfg.AuthType = authType
 		cfg.AuthTokenPath = tokenPath
 	}
+	if cloud, aud, header, ok := workloadIdentityFieldsFor(h); ok {
+		cfg.AuthType = string(omniav1alpha1.ToolAuthTypeWorkloadIdentity)
+		cfg.AuthCloud, cfg.AuthAudience, cfg.AuthHeader = cloud, aud, header
+	}
 	return cfg, nil
+}
+
+// workloadIdentityFieldsFor returns the runtime WIF params for a handler whose
+// effective auth is workloadIdentity, and false otherwise.
+func workloadIdentityFieldsFor(h *omniav1alpha1.HandlerDefinition) (cloud, audience, header string, ok bool) {
+	auth := h.EffectiveAuth()
+	if auth == nil || auth.Type != omniav1alpha1.ToolAuthTypeWorkloadIdentity || auth.WorkloadIdentity == nil {
+		return "", "", "", false
+	}
+	w := auth.WorkloadIdentity
+	return w.Cloud, w.Audience, w.Header, true
 }
 
 // authFieldsFor returns the generated-config auth type and mounted token path for
