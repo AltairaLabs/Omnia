@@ -133,7 +133,17 @@ long-lived secret is stored.
 ```
 
 The token is sent as `Authorization: Bearer <token>`. `serviceAccount.audience`
-is required.
+is required. The backend's ServiceAccount needs RBAC to create `tokenreviews`
+(`authentication.k8s.io`), and should validate the token against the configured
+`audience`.
+
+:::caution[Known limitation: long-lived pods]
+The runtime reads the projected token **once at startup** and does not yet
+re-read it on rotation, so `serviceAccount`-authed tool calls can start failing
+auth roughly an hour after the pod starts (token expiry), until the pod
+restarts. Tracked in [#1797](https://github.com/AltairaLabs/Omnia/issues/1797).
+`workloadIdentity` does not have this issue (it re-acquires per call).
+:::
 
 ## workloadIdentity (Azure)
 

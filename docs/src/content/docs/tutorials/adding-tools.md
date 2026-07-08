@@ -19,16 +19,17 @@ Tools allow agents to perform actions beyond generating text. With Omnia's ToolR
 
 ## Handler types
 
-Omnia supports four types of tool handlers:
+Omnia supports five types of tool handlers:
 
 | Type | Category | Description |
 |------|----------|-------------|
 | `http` | Explicit | HTTP REST endpoints with defined schema |
-| `grpc` | Explicit | gRPC services using Tool protocol |
+| `grpc` | Explicit | gRPC services using the Omnia Tool protocol |
 | `mcp` | Self-describing | Model Context Protocol servers |
 | `openapi` | Self-describing | OpenAPI/Swagger services |
+| `client` | Explicit | Browser-executed tools (see [Client-side tools](/how-to/tools/client-tools/)) |
 
-**Self-describing** handlers (MCP, OpenAPI) automatically discover available tools at runtime. **Explicit** handlers (HTTP, gRPC) require you to define the tool name, description, and input schema.
+**Self-describing** handlers (MCP, OpenAPI) automatically discover available tools at runtime. **Explicit** handlers (HTTP, gRPC, client) require you to define the tool name, description, and input schema. This tutorial focuses on server-side handlers; see the [client-side tools how-to](/how-to/tools/client-tools/) for browser-executed tools.
 
 ## Step 1: create a tool service
 
