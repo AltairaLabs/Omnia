@@ -103,8 +103,8 @@ spec:
                               bearer           — Authorization: Bearer <secretRef value>
                               basic            — Authorization: Basic <base64(secretRef "user:password")>
                               serviceAccount   — audience-bound projected Kubernetes ServiceAccount token
-                              workloadIdentity — hosted same-cloud identity, resolved by the Enterprise
-                                                 policy broker; not yet available (rejected by the operator)
+                              workloadIdentity — resolved by the runtime under the pod's ambient Azure
+                                                 identity (core)
                           enum:
                           - none
                           - bearer
@@ -114,9 +114,8 @@ spec:
                           type: string
                         workloadIdentity:
                           description: |-
-                            workloadIdentity configures hosted same-cloud identity. Resolved by the
-                            Enterprise policy broker under its own federated identity (not yet
-                            available in this release).
+                            workloadIdentity configures hosted same-cloud identity, resolved by the
+                            runtime under the pod's ambient Azure identity (core).
                           properties:
                             audience:
                               description: audience for the federated token exchange.
@@ -125,9 +124,6 @@ spec:
                               description: cloud identity provider.
                               enum:
                               - azure
-                              - aws
-                              - gcp
-                              - oidc
                               type: string
                             header:
                               default: Authorization

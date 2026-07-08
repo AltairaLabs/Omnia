@@ -101,7 +101,7 @@ func TestOpenAPIAdapter_Connect(t *testing.T) {
 	// Create a test server that serves the OpenAPI spec
 	specServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(testOpenAPISpec))
+		_, _ = w.Write([]byte(testOpenAPISpec))
 	}))
 	defer specServer.Close()
 
@@ -146,7 +146,7 @@ func TestOpenAPIAdapter_Connect(t *testing.T) {
 func TestOpenAPIAdapter_ConnectWithBaseURLOverride(t *testing.T) {
 	specServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(testOpenAPISpec))
+		_, _ = w.Write([]byte(testOpenAPISpec))
 	}))
 	defer specServer.Close()
 
@@ -169,7 +169,7 @@ func TestOpenAPIAdapter_ConnectWithBaseURLOverride(t *testing.T) {
 func TestOpenAPIAdapter_OperationFilter(t *testing.T) {
 	specServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(testOpenAPISpec))
+		_, _ = w.Write([]byte(testOpenAPISpec))
 	}))
 	defer specServer.Close()
 
@@ -206,7 +206,7 @@ func TestOpenAPIAdapter_Call(t *testing.T) {
 	// Create a test server for the spec
 	specServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(testOpenAPISpec))
+		_, _ = w.Write([]byte(testOpenAPISpec))
 	}))
 	defer specServer.Close()
 
@@ -297,7 +297,7 @@ func TestOpenAPIAdapter_Call(t *testing.T) {
 func TestOpenAPIAdapter_InputSchema(t *testing.T) {
 	specServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(testOpenAPISpec))
+		_, _ = w.Write([]byte(testOpenAPISpec))
 	}))
 	defer specServer.Close()
 
@@ -347,7 +347,7 @@ func TestOpenAPIAdapter_InputSchema(t *testing.T) {
 func TestOpenAPIAdapter_Close(t *testing.T) {
 	specServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(testOpenAPISpec))
+		_, _ = w.Write([]byte(testOpenAPISpec))
 	}))
 	defer specServer.Close()
 
@@ -369,6 +369,81 @@ func TestOpenAPIAdapter_Close(t *testing.T) {
 	_, err = adapter.Call(context.Background(), "listUsers", nil)
 	if err == nil {
 		t.Error("Expected error after Close")
+	}
+}
+
+func TestOpenAPIAdapter_Authentication_WorkloadIdentity(t *testing.T) {
+	var receivedAuth string
+	specServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(testOpenAPISpec))
+	}))
+	defer specServer.Close()
+
+	config := OpenAPIAdapterConfig{
+		Name:          "test-api",
+		SpecURL:       specServer.URL + "/openapi.json",
+		AuthType:      authTypeWorkloadIdentity,
+		AuthCloud:     cloudAzure,
+		AuthAudience:  "api://tool",
+		TokenAcquirer: fakeAcquirer{tok: "stok"},
+		Timeout:       5 * time.Second,
+	}
+
+	adapter := NewOpenAPIAdapter(config, logr.Discard())
+	if err := adapter.Connect(context.Background()); err != nil {
+		t.Fatalf("Connect failed: %v", err)
+	}
+
+	expected := "Bearer stok"
+	if receivedAuth != expected {
+		t.Errorf("Expected Authorization header %q, got %q", expected, receivedAuth)
+	}
+}
+
+func TestOpenAPIAdapter_Authentication_WorkloadIdentity_UnsupportedCloud(t *testing.T) {
+	specServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(testOpenAPISpec))
+	}))
+	defer specServer.Close()
+
+	config := OpenAPIAdapterConfig{
+		Name:          "test-api",
+		SpecURL:       specServer.URL + "/openapi.json",
+		AuthType:      authTypeWorkloadIdentity,
+		AuthCloud:     "aws",
+		AuthAudience:  "api://tool",
+		TokenAcquirer: fakeAcquirer{tok: "stok"},
+		Timeout:       5 * time.Second,
+	}
+
+	adapter := NewOpenAPIAdapter(config, logr.Discard())
+	if err := adapter.Connect(context.Background()); err == nil {
+		t.Fatal("expected error for non-azure workloadIdentity cloud")
+	}
+}
+
+func TestOpenAPIAdapter_Authentication_WorkloadIdentity_NilAcquirer(t *testing.T) {
+	specServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(testOpenAPISpec))
+	}))
+	defer specServer.Close()
+
+	config := OpenAPIAdapterConfig{
+		Name:         "test-api",
+		SpecURL:      specServer.URL + "/openapi.json",
+		AuthType:     authTypeWorkloadIdentity,
+		AuthCloud:    cloudAzure,
+		AuthAudience: "api://tool",
+		Timeout:      5 * time.Second,
+	}
+
+	adapter := NewOpenAPIAdapter(config, logr.Discard())
+	if err := adapter.Connect(context.Background()); err == nil {
+		t.Fatal("expected error when no TokenAcquirer is configured")
 	}
 }
 
@@ -464,7 +539,7 @@ func TestOpenAPIAdapter_Authentication(t *testing.T) {
 	specServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		receivedAuth = r.Header.Get("Authorization")
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(testOpenAPISpec))
+		_, _ = w.Write([]byte(testOpenAPISpec))
 	}))
 	defer specServer.Close()
 

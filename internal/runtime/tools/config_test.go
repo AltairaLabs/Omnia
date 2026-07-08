@@ -473,6 +473,19 @@ func TestResolveAuthTokenPaths_OpenAPIReadsFile(t *testing.T) {
 	}
 }
 
+func TestResolveAuthTokenPaths_HTTPSkipsWorkloadIdentity(t *testing.T) {
+	cfg := &ToolConfig{Handlers: []HandlerEntry{{
+		Name: "h1", Type: "http",
+		HTTPConfig: &HTTPCfg{Endpoint: "https://x", AuthType: authTypeWorkloadIdentity, AuthTokenPath: "/no/such/file"},
+	}}}
+	if err := ResolveAuthTokenPaths(cfg); err != nil {
+		t.Fatalf("workloadIdentity should skip file read (and its errors), got: %v", err)
+	}
+	if cfg.Handlers[0].HTTPConfig.AuthToken != "" {
+		t.Errorf("AuthToken should stay empty for workloadIdentity, got %q", cfg.Handlers[0].HTTPConfig.AuthToken)
+	}
+}
+
 func TestResolveAuthTokenPaths_GRPCReadsFile(t *testing.T) {
 	dir := t.TempDir()
 	tokenFile := filepath.Join(dir, "g1")

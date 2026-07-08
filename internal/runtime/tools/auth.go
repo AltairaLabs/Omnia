@@ -17,10 +17,39 @@ limitations under the License.
 package tools
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"strings"
 )
+
+const (
+	authTypeWorkloadIdentity = "workloadIdentity"
+	cloudAzure               = "azure"
+	defaultAuthHeader        = "Authorization"
+)
+
+// resolveWorkloadIdentityHeader acquires a workloadIdentity token for the audience
+// and returns the header name + "Bearer <token>" value. Only azure is implemented;
+// other clouds and a nil acquirer fail loud rather than sending an unauthenticated
+// request.
+func resolveWorkloadIdentityHeader(ctx context.Context, acq TokenAcquirer, cloud, audience, header string) (string, string, error) {
+	if cloud != cloudAzure {
+		return "", "", fmt.Errorf("workloadIdentity cloud %q not supported (only %q)", cloud, cloudAzure)
+	}
+	if acq == nil {
+		return "", "", fmt.Errorf("workloadIdentity: no token acquirer configured")
+	}
+	tok, err := acq.Token(ctx, audience)
+	if err != nil {
+		return "", "", err
+	}
+	name := header
+	if name == "" {
+		name = defaultAuthHeader
+	}
+	return name, "Bearer " + tok, nil
+}
 
 // authorizationValue returns the Authorization header/metadata value for the
 // given auth type and token, or "" when no authentication applies. It is the
