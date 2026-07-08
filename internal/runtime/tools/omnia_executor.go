@@ -85,12 +85,17 @@ type OmniaExecutor struct {
 	// (zero behavior change) unless POLICY_BROKER_URL is set.
 	policyBroker *PolicyBrokerClient
 
+	// tokenAcquirer resolves workloadIdentity auth for HTTP/OpenAPI handlers.
+	// nil (safe default) unless the ambient environment has an Azure identity;
+	// only handlers that actually set authType: workloadIdentity need it.
+	tokenAcquirer TokenAcquirer
+
 	mu sync.RWMutex
 }
 
 // NewOmniaExecutor creates a new executor.
 func NewOmniaExecutor(log logr.Logger, tp *tracing.Provider) *OmniaExecutor {
-	return &OmniaExecutor{
+	e := &OmniaExecutor{
 		log:             log.WithName("tools"),
 		tracingProvider: tp,
 		handlers:        make(map[string]*HandlerEntry),
@@ -108,6 +113,13 @@ func NewOmniaExecutor(log logr.Logger, tp *tracing.Provider) *OmniaExecutor {
 		openAPIHeaders:  make(map[string]map[string]string),
 		policyBroker:    NewPolicyBrokerClient(log),
 	}
+	// Best-effort: only handlers that set authType: workloadIdentity need
+	// this. Absence of an ambient Azure identity (e.g. non-Azure clusters)
+	// is not an error here — it only surfaces if a WIF handler is invoked.
+	if acq, err := newAzureTokenAcquirer(); err == nil {
+		e.tokenAcquirer = acq
+	}
+	return e
 }
 
 // Name implements tools.Executor. The PromptKit registry uses this to match
