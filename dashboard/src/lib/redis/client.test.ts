@@ -126,38 +126,34 @@ describe("getArenaRedisClient", () => {
     consoleSpy.mockRestore();
   });
 
-  it("URL-based retryStrategy returns null after 5 retries", () => {
+  it("URL-based retryStrategy scales delay and never gives up (#1810)", () => {
     process.env.ARENA_REDIS_URL = "redis://host:6379";
 
     getArenaRedisClient();
 
-    const options = constructorCalls[0][1] as Record<string, (times: number) => number | null>;
+    const options = constructorCalls[0][1] as Record<string, (times: number) => number>;
     const retryStrategy = options.retryStrategy;
 
-    // Within retry limit
     expect(retryStrategy(1)).toBe(200);
     expect(retryStrategy(3)).toBe(600);
-    expect(retryStrategy(5)).toBe(1000);
-
-    // Exceeds retry limit
-    expect(retryStrategy(6)).toBeNull();
-    expect(retryStrategy(10)).toBeNull();
+    // Past the old 5-attempt cap the client must keep reconnecting, not return
+    // null (which would permanently brick the singleton until pod restart).
+    expect(retryStrategy(6)).toBe(1200);
+    expect(retryStrategy(100)).toBe(2000);
   });
 
-  it("ADDR-based retryStrategy returns null after 5 retries", () => {
+  it("ADDR-based retryStrategy scales delay and never gives up (#1810)", () => {
     process.env.ARENA_REDIS_ADDR = "host:6379";
 
     getArenaRedisClient();
 
-    const options = constructorCalls[0][0] as Record<string, (times: number) => number | null>;
+    const options = constructorCalls[0][0] as Record<string, (times: number) => number>;
     const retryStrategy = options.retryStrategy;
 
-    // Within retry limit
     expect(retryStrategy(1)).toBe(200);
     expect(retryStrategy(5)).toBe(1000);
-
-    // Exceeds retry limit
-    expect(retryStrategy(6)).toBeNull();
+    expect(retryStrategy(6)).toBe(1200);
+    expect(retryStrategy(100)).toBe(2000);
   });
 
   it("retry delay is capped via Math.min(times * 200, 2000)", () => {
@@ -165,13 +161,13 @@ describe("getArenaRedisClient", () => {
 
     getArenaRedisClient();
 
-    const options = constructorCalls[0][1] as Record<string, (times: number) => number | null>;
+    const options = constructorCalls[0][1] as Record<string, (times: number) => number>;
     const retryStrategy = options.retryStrategy;
 
     // Verify delay scaling
     expect(retryStrategy(1)).toBe(200);
-    expect(retryStrategy(2)).toBe(400);
     expect(retryStrategy(4)).toBe(800);
-    expect(retryStrategy(5)).toBe(1000);
+    expect(retryStrategy(10)).toBe(2000);
+    expect(retryStrategy(50)).toBe(2000);
   });
 });

@@ -16,10 +16,15 @@ const CONNECT_TIMEOUT_MS = 5000;
 const MAX_RETRIES_PER_REQUEST = 3;
 const RETRY_DELAY_STEP_MS = 200;
 const RETRY_DELAY_CAP_MS = 2000;
-const RETRY_MAX_ATTEMPTS = 5;
 
-function retryStrategy(times: number): number | null {
-  if (times > RETRY_MAX_ATTEMPTS) return null;
+// This is a process-lifetime singleton, so retryStrategy MUST NEVER return
+// null: returning null tells ioredis to stop reconnecting for good, which
+// bricks the client until the pod restarts. If Redis is briefly unavailable
+// around startup (e.g. its pod becomes Ready after the dashboard pod), the
+// client would give up permanently and every login would fail with
+// "Connection is closed" (#1810). Retry forever with capped backoff instead;
+// maxRetriesPerRequest keeps individual commands failing fast in the meantime.
+function retryStrategy(times: number): number {
   return Math.min(times * RETRY_DELAY_STEP_MS, RETRY_DELAY_CAP_MS);
 }
 
