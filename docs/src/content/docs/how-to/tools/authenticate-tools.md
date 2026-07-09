@@ -133,9 +133,40 @@ long-lived secret is stored.
 ```
 
 The token is sent as `Authorization: Bearer <token>`. `serviceAccount.audience`
-is required. The backend's ServiceAccount needs RBAC to create `tokenreviews`
-(`authentication.k8s.io`), and should validate the token against the configured
-`audience`.
+is required.
+
+### Backend validation
+
+The backend must validate the incoming `Authorization: Bearer <token>` via
+the Kubernetes **TokenReview API** and check that the token's audience
+matches the configured `serviceAccount.audience`. That means the backend's
+own ServiceAccount needs RBAC to `create` `tokenreviews` in the
+`authentication.k8s.io` API group — TokenReview is a cluster-scoped
+subresource, so this is a `ClusterRole`:
+
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: internal-api-tokenreview
+rules:
+  - apiGroups: [authentication.k8s.io]
+    resources: [tokenreviews]
+    verbs: [create]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: internal-api-tokenreview
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: internal-api-tokenreview
+subjects:
+  - kind: ServiceAccount
+    name: internal-api            # the backend's own ServiceAccount
+    namespace: agents
+```
 
 :::caution[Known limitation: long-lived pods]
 The runtime reads the projected token **once at startup** and does not yet
@@ -222,4 +253,5 @@ auth:
 
 - [ToolRegistry CRD reference](/reference/core/toolregistry/)
 - [Advanced HTTP tools](/how-to/tools/advanced-http-tools/)
+- [Build a tool backend](/how-to/tools/build-a-tool-backend/) — the request/response contract your backend must implement
 - [Configure tool policies](/how-to/security/configure-tool-policies/) — CEL allow/deny and header injection on top of authenticated tools

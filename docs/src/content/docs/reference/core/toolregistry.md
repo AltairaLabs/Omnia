@@ -288,6 +288,12 @@ The endpoint (`host:port`) lives in `grpcConfig.endpoint` (**required**):
 | `tlsInsecureSkipVerify` | bool | `false` | Skip TLS verification |
 | `retryPolicy` | object | — | Retry behaviour (per gRPC status code) |
 
+The backend behind `grpcConfig.endpoint` must implement the **Omnia Tool
+protocol** defined by [`api/proto/tools/v1/tools.proto`](https://github.com/AltairaLabs/Omnia/blob/main/api/proto/tools/v1/tools.proto)
+(`ToolService`), not an arbitrary gRPC API. See
+[Build a tool backend](/how-to/tools/build-a-tool-backend/) for the full
+contract, including when `ListTools` is required.
+
 ## MCP handler (self-describing)
 
 Model Context Protocol handlers automatically discover tools from the MCP server. No `tool` definition is required.
