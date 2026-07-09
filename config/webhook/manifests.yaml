@@ -64,3 +64,23 @@ webhooks:
     resources:
     - skillsources
   sideEffects: None
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: webhook-service
+      namespace: system
+      path: /validate-omnia-altairalabs-ai-v1alpha1-workspace
+  failurePolicy: Ignore
+  name: vworkspace.kb.io
+  rules:
+  - apiGroups:
+    - omnia.altairalabs.ai
+    apiVersions:
+    - v1alpha1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - workspaces
+  sideEffects: None

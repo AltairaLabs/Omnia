@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
@@ -29,6 +30,13 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 )
+
+// errNamespaceConflict is returned by reconcileNamespace when the target
+// namespace already exists and carries a different Workspace's owner label.
+// Reconcile maps it to a NamespaceConflict condition (not the generic
+// NamespaceFailed) so the collision is unambiguous in status. A namespace must
+// have exactly one owning Workspace (#1821).
+var errNamespaceConflict = errors.New("namespace already owned by another workspace")
 
 //nolint:gocognit,gocyclo // Namespace reconcile handles create + update-existing label/tag merge paths
 func (r *WorkspaceReconciler) reconcileNamespace(ctx context.Context, workspace *omniav1alpha1.Workspace) error {
@@ -86,6 +94,16 @@ func (r *WorkspaceReconciler) reconcileNamespace(ctx context.Context, workspace 
 			Created: true,
 		}
 	} else {
+		// Refuse to adopt a namespace already owned by a *different* Workspace.
+		// Reading a nil map returns "", so this is safe before the nil-init below.
+		// Only an unowned namespace (no owner label — e.g. a pre-existing
+		// namespace.create=false install) or one already owned by self may be
+		// adopted; anything else is a collision we must not silently claim (#1821).
+		if owner := ns.Labels[labelWorkspace]; owner != "" && owner != workspace.Name {
+			return fmt.Errorf("%w: namespace %s is already owned by workspace %s",
+				errNamespaceConflict, namespaceName, owner)
+		}
+
 		// Namespace exists, update labels if needed
 		updated := false
 		if ns.Labels == nil {
@@ -135,6 +153,16 @@ func (r *WorkspaceReconciler) reconcileNamespace(ctx context.Context, workspace 
 	}
 
 	return nil
+}
+
+// namespaceConditionReason maps a reconcileNamespace error to the condition
+// reason surfaced on the Workspace: NamespaceConflict for an ownership
+// collision (#1821), NamespaceFailed for anything else.
+func namespaceConditionReason(err error) string {
+	if errors.Is(err, errNamespaceConflict) {
+		return "NamespaceConflict"
+	}
+	return "NamespaceFailed"
 }
 
 func (r *WorkspaceReconciler) reconcileServiceAccounts(ctx context.Context, workspace *omniav1alpha1.Workspace) error {
