@@ -55,6 +55,15 @@ namespace with a `POSTGRES_CONN` key.
 
 ### 2. Add the service group to the workspace
 
+:::caution[Add this to your *existing* workspace — don't create a new one]
+If you already have a workspace (the one your agents deploy into), add the `services:` block
+to **it** — `kubectl edit workspace <your-workspace>` — rather than applying this as a new
+`Workspace`. A namespace can be owned by **only one** workspace: pointing a second workspace
+at an existing namespace collides with the first, producing duplicate session/memory
+deployments and agents that resolve the wrong backend. The manifest below shows a full
+from-scratch workspace; **if yours already exists, copy only the `services:` block into it.**
+:::
+
 A `managed` group **must** define both `session` and `memory` (the CRD rejects a managed
 group missing either):
 
