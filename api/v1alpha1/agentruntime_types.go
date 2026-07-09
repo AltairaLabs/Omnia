@@ -1193,11 +1193,17 @@ type MemoryToolsConfig struct {
 // +kubebuilder:validation:XValidation:rule="self.mode == 'function' || !has(self.inputSchema)",message="spec.inputSchema is only valid when spec.mode is 'function'"
 // +kubebuilder:validation:XValidation:rule="self.mode == 'function' || !has(self.outputSchema)",message="spec.outputSchema is only valid when spec.mode is 'function'"
 // +kubebuilder:validation:XValidation:rule="self.mode == 'function' || !has(self.outputFormat)",message="spec.outputFormat is only valid when spec.mode is 'function'"
-// Facade composition validations (#1576):
-// +kubebuilder:validation:XValidation:rule="self.facades.all(f, self.facades.exists_one(g, g.type == f.type))",message="spec.facades must not contain duplicate facade types"
-// +kubebuilder:validation:XValidation:rule="self.mode != 'agent' || self.facades.all(f, f.type == 'websocket' || f.type == 'a2a')",message="mode 'agent' allows only 'websocket' and 'a2a' facades"
-// +kubebuilder:validation:XValidation:rule="self.mode != 'function' || self.facades.all(f, f.type == 'rest' || f.type == 'mcp')",message="mode 'function' allows only 'rest' and 'mcp' facades"
-// +kubebuilder:validation:XValidation:rule="self.mode != 'function' || self.facades.exists_one(f, f.type == 'rest')",message="mode 'function' requires exactly one 'rest' facade"
+// Facade composition validations (#1576). Each rule is guarded by
+// has(self.facades) so a CR without spec.facades short-circuits to valid (#1815):
+// MinItems=1 + Required already reject absent facades on create/update, but the
+// unguarded rules erred with "no such key: facades" on any legacy CR lacking the
+// field, which wedged the operator's finalizer-removal update and left the CR
+// stuck Terminating. The guard lets deletion proceed; create-time validation is
+// unaffected because the field is Required there.
+// +kubebuilder:validation:XValidation:rule="!has(self.facades) || self.facades.all(f, self.facades.exists_one(g, g.type == f.type))",message="spec.facades must not contain duplicate facade types"
+// +kubebuilder:validation:XValidation:rule="!has(self.facades) || self.mode != 'agent' || self.facades.all(f, f.type == 'websocket' || f.type == 'a2a')",message="mode 'agent' allows only 'websocket' and 'a2a' facades"
+// +kubebuilder:validation:XValidation:rule="!has(self.facades) || self.mode != 'function' || self.facades.all(f, f.type == 'rest' || f.type == 'mcp')",message="mode 'function' allows only 'rest' and 'mcp' facades"
+// +kubebuilder:validation:XValidation:rule="!has(self.facades) || self.mode != 'function' || self.facades.exists_one(f, f.type == 'rest')",message="mode 'function' requires exactly one 'rest' facade"
 type AgentRuntimeSpec struct {
 	// mode controls how the AgentRuntime is invoked. "agent" (default) is
 	// the existing conversational runtime (websocket and/or a2a facades);
