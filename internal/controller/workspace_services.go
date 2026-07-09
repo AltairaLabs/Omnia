@@ -221,6 +221,20 @@ func (r *WorkspaceReconciler) reconcileManagedServiceGroup(
 	sessionDepName := fmt.Sprintf("session-%s-%s", workspace.Name, sg.Name)
 	memoryDepName := fmt.Sprintf("memory-%s-%s", workspace.Name, sg.Name)
 
+	// The SA each pod actually runs as may be overridden via podOverrides (e.g.
+	// memory-api on a Workload-Identity SA for keyless embeddings). RBAC bindings
+	// below must target that effective SA, not the default per-deployment SA, or
+	// the grant lands on an SA the pod never uses (#1817).
+	var sessionOverrides, memoryOverrides *omniav1alpha1.PodOverrides
+	if sg.Session != nil {
+		sessionOverrides = sg.Session.PodOverrides
+	}
+	if sg.Memory != nil {
+		memoryOverrides = sg.Memory.PodOverrides
+	}
+	sessionSA := podServiceAccountName(sessionDepName, sessionOverrides)
+	memorySA := podServiceAccountName(memoryDepName, memoryOverrides)
+
 	// Reconcile ServiceAccounts for service pods. Per-workspace session-api
 	// and memory-api need to read the cluster-scoped Workspace CRD to
 	// resolve their own config (workspace name, service group, DB secret).
@@ -234,10 +248,10 @@ func (r *WorkspaceReconciler) reconcileManagedServiceGroup(
 	// tokens via the TokenReview API, which requires its ServiceAccount to be
 	// able to create TokenReviews (cluster-scoped). Bind the session-api SA to
 	// the install-wide tokenreview ClusterRole (provisioned by the chart).
-	if err := r.reconcileSessionAPITokenReviewBinding(ctx, namespace, sessionDepName); err != nil {
+	if err := r.reconcileSessionAPITokenReviewBinding(ctx, namespace, sessionSA); err != nil {
 		return omniav1alpha1.ServiceGroupStatus{}, fmt.Errorf("session tokenreview binding: %w", err)
 	}
-	if err := r.reconcileSessionAPITokenReviewBinding(ctx, namespace, memoryDepName); err != nil {
+	if err := r.reconcileSessionAPITokenReviewBinding(ctx, namespace, memorySA); err != nil {
 		return omniav1alpha1.ServiceGroupStatus{}, fmt.Errorf("memory tokenreview binding: %w", err)
 	}
 
@@ -246,10 +260,10 @@ func (r *WorkspaceReconciler) reconcileManagedServiceGroup(
 	// Bind each SA to the enterprise reader ClusterRole (provisioned by the
 	// chart) so the watchers can start (#1444 memory-api, #1567 session-api).
 	// No-op on OSS installs.
-	if err := r.reconcileEnterpriseReaderBinding(ctx, namespace, memoryDepName); err != nil {
+	if err := r.reconcileEnterpriseReaderBinding(ctx, namespace, memorySA); err != nil {
 		return omniav1alpha1.ServiceGroupStatus{}, fmt.Errorf("memory enterprise reader binding: %w", err)
 	}
-	if err := r.reconcileEnterpriseReaderBinding(ctx, namespace, sessionDepName); err != nil {
+	if err := r.reconcileEnterpriseReaderBinding(ctx, namespace, sessionSA); err != nil {
 		return omniav1alpha1.ServiceGroupStatus{}, fmt.Errorf("session enterprise reader binding: %w", err)
 	}
 
