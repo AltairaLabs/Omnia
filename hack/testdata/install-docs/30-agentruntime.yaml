@@ -3,6 +3,10 @@ kind: AgentRuntime
 metadata:
   name: my-assistant
   namespace: default
+  annotations:
+    # Belt-and-suspenders with the mock Provider (#1795): the runtime also
+    # auto-enables mock mode when the resolved provider type is "mock".
+    omnia.altairalabs.ai/mock-provider: "true"
 spec:
   promptPackRef:
     name: assistant-pack
@@ -15,6 +19,13 @@ spec:
     - type: websocket
       port: 8080
       handler: demo
+      # The smoke test's wsprobe connects without a credential and no
+      # externalAuth is configured, so the facade's strict default would
+      # 401 the handshake. Opt into the dev/CI escape hatch so the
+      # roundtrip completes. Production installs MUST never set this.
+      extraEnv:
+        - name: OMNIA_FACADE_ALLOW_UNAUTHENTICATED
+          value: "true"
   context:
     type: memory
     ttl: "1h"

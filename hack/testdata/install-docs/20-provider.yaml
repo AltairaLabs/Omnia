@@ -1,20 +1,14 @@
-apiVersion: v1
-kind: Secret
-metadata:
-  name: llm-credentials
-  namespace: default
-type: Opaque
-stringData:
-  ANTHROPIC_API_KEY: "sk-ant-smoke-test-dummy-key-not-real"
----
+# Mock provider so the release install smoke test is hermetic — it must
+# pass in CI with no real LLM credentials (#1795). `type: mock` requires
+# no credential (provider_controller: providerRequiresCredentials=false)
+# and skips the health probe, so `provider/my-provider` reaches
+# status.phase=Ready and the runtime returns scripted responses. The
+# getting-started docs still show a real `type: claude` provider; this
+# fixture deliberately diverges to keep the smoke test self-contained.
 apiVersion: omnia.altairalabs.ai/v1alpha1
 kind: Provider
 metadata:
   name: my-provider
   namespace: default
 spec:
-  type: claude
-  model: claude-sonnet-4-20250514
-  credential:
-    secretRef:
-      name: llm-credentials
+  type: mock

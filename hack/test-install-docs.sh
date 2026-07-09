@@ -92,6 +92,17 @@ log "Waiting for Provider ready + agent pod running"
 # reaching Ready + the WebSocket roundtrip are the authoritative gates.
 kubectl -n "${NS_APP}" wait --for=jsonpath='{.status.phase}'=Ready provider/my-provider --timeout=120s ||
 	kubectl -n "${NS_APP}" get provider my-provider -o yaml
+# The operator creates the agent Deployment asynchronously after the
+# AgentRuntime is applied, so there's a window where no pod matches the
+# selector yet. `kubectl wait` doesn't tolerate that — it exits 1 with
+# "no matching resources found" instead of waiting — so poll until the
+# first pod exists before gating on Ready.
+for _ in $(seq 1 60); do
+	if [ -n "$(kubectl -n "${NS_APP}" get pod -l app.kubernetes.io/instance=my-assistant -o name 2>/dev/null)" ]; then
+		break
+	fi
+	sleep 2
+done
 kubectl -n "${NS_APP}" wait --for=condition=Ready pod \
 	-l app.kubernetes.io/instance=my-assistant --timeout="${WAIT_TIMEOUT}"
 
