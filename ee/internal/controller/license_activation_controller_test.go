@@ -590,8 +590,8 @@ func TestLicenseActivationReconciler_ActivationServerError(t *testing.T) {
 
 	result, err := reconciler.Reconcile(ctx, req)
 	require.NoError(t, err)
-	// Should requeue after 5 minutes on error
-	assert.Equal(t, 5*time.Minute, result.RequeueAfter)
+	// First failure requeues at the exponential-backoff base (not a fixed 5m).
+	assert.Equal(t, activationBackoffBase, result.RequeueAfter)
 }
 
 func TestLicenseActivationReconciler_HeartbeatFailure(t *testing.T) {
@@ -869,7 +869,7 @@ func TestLicenseActivationReconciler_FingerprintError(t *testing.T) {
 	// Should requeue after fingerprint error
 	result, err := reconciler.Reconcile(ctx, req)
 	require.NoError(t, err)
-	assert.Equal(t, 5*time.Minute, result.RequeueAfter)
+	assert.Equal(t, activationBackoffBase, result.RequeueAfter)
 }
 
 func TestLicenseActivationReconciler_Deactivate_ServerError(t *testing.T) {
