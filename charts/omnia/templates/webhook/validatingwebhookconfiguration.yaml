@@ -61,6 +61,25 @@ webhooks:
         apiVersions: ["v1alpha1"]
         operations: ["CREATE", "UPDATE"]
         resources: ["providers"]
+  - name: vworkspace.kb.io
+    admissionReviewVersions: ["v1"]
+    sideEffects: None
+    # Ignore: rejects a Workspace whose spec.namespace.name is already claimed by
+    # another Workspace (#1821). The controller's reconcileNamespace ownership
+    # check is the hard backstop, so a down operator must not block Workspace
+    # writes cluster-wide — this webhook is the fail-fast convenience.
+    failurePolicy: Ignore
+    matchPolicy: Equivalent
+    clientConfig:
+      service:
+        name: {{ include "omnia.fullname" . }}-webhook
+        namespace: {{ .Release.Namespace }}
+        path: /validate-omnia-altairalabs-ai-v1alpha1-workspace
+    rules:
+      - apiGroups: ["omnia.altairalabs.ai"]
+        apiVersions: ["v1alpha1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["workspaces"]
   {{- if .Values.enterprise.enabled }}
   - name: vsessionprivacypolicy.kb.io
     admissionReviewVersions: ["v1"]

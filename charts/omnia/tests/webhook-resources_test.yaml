@@ -79,6 +79,29 @@ tests:
           path: webhooks[?(@.name=='vprovider.kb.io')].rules[0].operations
           content: UPDATE
 
+  - it: workspace webhook is present, covers create+update, and advisory (failurePolicy Ignore)
+    template: templates/webhook/validatingwebhookconfiguration.yaml
+    set:
+      webhook.enabled: true
+    asserts:
+      - contains:
+          path: webhooks
+          content:
+            name: vworkspace.kb.io
+          any: true
+      - equal:
+          path: webhooks[?(@.name=='vworkspace.kb.io')].failurePolicy
+          value: Ignore
+      - contains:
+          path: webhooks[?(@.name=='vworkspace.kb.io')].rules[0].operations
+          content: CREATE
+      - contains:
+          path: webhooks[?(@.name=='vworkspace.kb.io')].rules[0].operations
+          content: UPDATE
+      - equal:
+          path: webhooks[?(@.name=='vworkspace.kb.io')].rules[0].resources[0]
+          value: workspaces
+
   - it: validatingwebhookconfiguration has cert-manager inject-ca-from annotation
     template: templates/webhook/validatingwebhookconfiguration.yaml
     set:

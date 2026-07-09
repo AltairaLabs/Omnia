@@ -183,7 +183,7 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	// Reconcile namespace
 	if err := r.reconcileNamespace(ctx, workspace); err != nil {
 		SetCondition(&workspace.Status.Conditions, workspace.Generation, ConditionTypeNamespaceReady, metav1.ConditionFalse,
-			"NamespaceFailed", err.Error())
+			namespaceConditionReason(err), err.Error())
 		workspace.Status.Phase = omniav1alpha1.WorkspacePhaseError
 		if statusErr := r.Status().Update(ctx, workspace); statusErr != nil {
 			log.Error(statusErr, logMsgFailedToUpdateStatus)
