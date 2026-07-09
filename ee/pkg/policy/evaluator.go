@@ -11,7 +11,6 @@ package policy
 import (
 	"context"
 	"fmt"
-	"net/textproto"
 	"sync"
 
 	"github.com/google/cel-go/cel"
@@ -23,11 +22,14 @@ import (
 	omniapolicy "github.com/altairalabs/omnia/pkg/policy"
 )
 
-// Header name constants for CEL evaluation context.
+// Header name constants for CEL evaluation context. These are the canonical
+// (MIME-canonicalized) forms of the lowercase emit-side constants in
+// pkg/policy, because decision-request headers arrive canonicalized on the
+// wire. The claim prefix has a single source of truth in pkg/policy — read it
+// via omniapolicy.CanonicalClaimHeader rather than redeclaring it here.
 const (
 	HeaderToolName     = "X-Omnia-Tool-Name"
 	HeaderToolRegistry = "X-Omnia-Tool-Registry"
-	HeaderClaimPrefix  = "X-Omnia-Claim-"
 )
 
 // Decision represents the outcome of a policy evaluation.
@@ -413,7 +415,7 @@ func checkRequiredClaims(claims []omniav1alpha1.RequiredClaim, headers map[strin
 		// Title-cased on the wire (X-Omnia-Claim-Tier). Canonicalize the lookup
 		// key too — otherwise a lowercase claim name (the common case) never
 		// matches and requiredClaims denies every call, even ones that carry it.
-		headerKey := textproto.CanonicalMIMEHeaderKey(HeaderClaimPrefix + claim.Claim)
+		headerKey := omniapolicy.CanonicalClaimHeader(claim.Claim)
 		if _, ok := headers[headerKey]; !ok {
 			return Decision{
 				Allowed:  false,

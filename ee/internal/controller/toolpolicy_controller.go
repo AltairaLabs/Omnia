@@ -11,6 +11,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -26,11 +27,14 @@ import (
 
 // ToolPolicy controller condition types and event reasons.
 const (
-	toolPolicyConditionReady    = "Ready"
-	toolPolicyConditionCompiled = "Compiled"
-	toolPolicyEventCompiled     = "PolicyCompiled"
-	toolPolicyEventCompileError = "CompileError"
-	toolPolicyEventValidated    = "PolicyValidated"
+	toolPolicyConditionReady            = "Ready"
+	toolPolicyConditionCompiled         = "Compiled"
+	toolPolicyConditionHeaderRefsCanon  = "HeaderRefsCanonical"
+	toolPolicyEventCompiled             = "PolicyCompiled"
+	toolPolicyEventCompileError         = "CompileError"
+	toolPolicyEventValidated            = "PolicyValidated"
+	toolPolicyEventNonCanonicalHeader   = "NonCanonicalHeaderRef"
+	toolPolicyReasonHeaderRefsCanonical = "HeaderRefsCanonical"
 )
 
 // ToolPolicyReconciler reconciles a ToolPolicy object.
@@ -66,6 +70,10 @@ func (r *ToolPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	if err := r.validateAndCompile(ctx, tp); err != nil {
 		return r.handleCompileError(ctx, tp, err)
 	}
+
+	// Warn (non-blocking) on CEL that references non-canonical header keys —
+	// they compile and run but silently miss on the wire (#1766).
+	r.warnNonCanonicalHeaderRefs(tp)
 
 	// Set success status
 	r.setSuccessStatus(tp)
@@ -131,6 +139,59 @@ func validateSingleHeaderInjectionRule(
 		}
 	}
 	return nil
+}
+
+// warnNonCanonicalHeaderRefs scans every rule and header-injection CEL
+// expression for headers["..."] literals that are not in canonical HTTP form.
+// Such references are valid CEL and never fail compilation, but the
+// decision-request headers map is canonicalized on the wire, so a lowercase
+// literal silently misses. This is advisory only: it records a Warning event
+// and a non-blocking HeaderRefsCanonical=False condition, never failing the
+// reconcile.
+func (r *ToolPolicyReconciler) warnNonCanonicalHeaderRefs(tp *omniav1alpha1.ToolPolicy) {
+	warnings := collectNonCanonicalHeaderRefs(tp)
+	if len(warnings) == 0 {
+		SetCondition(&tp.Status.Conditions, tp.Generation,
+			toolPolicyConditionHeaderRefsCanon, metav1.ConditionTrue,
+			toolPolicyReasonHeaderRefsCanonical, "all header references are canonical")
+		return
+	}
+	msg := "CEL references to non-canonical header keys will silently miss: " +
+		strings.Join(warnings, "; ")
+	SetCondition(&tp.Status.Conditions, tp.Generation,
+		toolPolicyConditionHeaderRefsCanon, metav1.ConditionFalse,
+		toolPolicyEventNonCanonicalHeader, msg)
+	r.recordEvent(tp, "Warning", toolPolicyEventNonCanonicalHeader, msg)
+}
+
+// collectNonCanonicalHeaderRefs returns one human-readable warning per
+// non-canonical header reference across all rule and header-injection CEL,
+// each naming its location and the canonical key the author should have used.
+func collectNonCanonicalHeaderRefs(tp *omniav1alpha1.ToolPolicy) []string {
+	var warnings []string
+	for _, rule := range tp.Spec.Rules {
+		warnings = appendHeaderRefWarnings(warnings,
+			fmt.Sprintf("rule %q", rule.Name), rule.Deny.CEL)
+	}
+	for _, inj := range tp.Spec.HeaderInjection {
+		if inj.CEL == "" {
+			continue
+		}
+		warnings = appendHeaderRefWarnings(warnings,
+			fmt.Sprintf("headerInjection %q", inj.Header), inj.CEL)
+	}
+	return warnings
+}
+
+// appendHeaderRefWarnings appends a warning for each non-canonical header
+// reference found in expr, attributed to location.
+func appendHeaderRefWarnings(warnings []string, location, expr string) []string {
+	for _, ref := range policy.NonCanonicalHeaderRefs(expr) {
+		warnings = append(warnings, fmt.Sprintf(
+			"%s references non-canonical header %q (use %q)",
+			location, ref.Raw, ref.Canonical))
+	}
+	return warnings
 }
 
 // handleCompileError sets error status and returns the result.

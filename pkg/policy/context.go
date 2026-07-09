@@ -22,6 +22,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/textproto"
 	"strings"
 	"unicode"
 )
@@ -94,7 +95,11 @@ const (
 	HeaderToolName = "x-omnia-tool-name"
 	// HeaderToolRegistry identifies the tool registry.
 	HeaderToolRegistry = "x-omnia-tool-registry"
-	// HeaderClaimPrefix is the prefix for claim-mapped headers.
+	// HeaderClaimPrefix is the single source of truth for the claim-mapped
+	// header prefix, in lowercase emit form. Claim headers are emitted through
+	// an http.Request, so they land canonicalized on the wire — read paths must
+	// reference the canonical key via CanonicalClaimHeader, never this raw
+	// prefix.
 	HeaderClaimPrefix = "x-omnia-claim-"
 	// HeaderParamPrefix is the prefix for promoted tool parameters.
 	HeaderParamPrefix = "x-omnia-param-"
@@ -105,6 +110,17 @@ const (
 	// observability on suppressed writes.
 	HeaderConsentLayer = "x-omnia-consent-layer"
 )
+
+// CanonicalClaimHeader returns the canonical (MIME-canonicalized) header key for
+// a claim. Claim headers are emitted through an http.Request, so they always
+// land Title-cased per hyphen-separated segment on the wire — claim "tier"
+// becomes "X-Omnia-Claim-Tier", "customer_id" becomes "X-Omnia-Claim-Customer_id".
+// Every read path (requiredClaims lookups, CEL rules referencing
+// headers['X-Omnia-Claim-*']) MUST reference this canonical key; using the raw
+// lowercase prefix silently misses.
+func CanonicalClaimHeader(claim string) string {
+	return textproto.CanonicalMIMEHeaderKey(HeaderClaimPrefix + claim)
+}
 
 // Istio-injected header names that the facade reads from the WebSocket upgrade request.
 const (

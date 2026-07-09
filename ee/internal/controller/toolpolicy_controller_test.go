@@ -156,6 +156,67 @@ var _ = Describe("ToolPolicy Controller", func() {
 		})
 	})
 
+	Context("When a ToolPolicy CEL references a non-canonical header", func() {
+		It("should stay Active but warn via event and condition", func() {
+			policyName := "test-noncanonical-header"
+			tp := &omniav1alpha1.ToolPolicy{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      policyName,
+					Namespace: "default",
+				},
+				Spec: omniav1alpha1.ToolPolicySpec{
+					Selector: omniav1alpha1.ToolPolicySelector{
+						Registry: "test-registry",
+					},
+					Rules: []omniav1alpha1.PolicyRule{
+						{
+							Name: "team-check",
+							Deny: omniav1alpha1.PolicyRuleDeny{
+								// Lowercase claim segment — valid CEL, silently misses.
+								CEL:     "headers['x-omnia-claim-team'] != 'platform'",
+								Message: "team must be platform",
+							},
+						},
+					},
+					Mode:      omniav1alpha1.PolicyModeEnforce,
+					OnFailure: omniav1alpha1.OnFailureDeny,
+				},
+			}
+
+			Expect(k8sClient.Create(ctx, tp)).To(Succeed())
+			DeferCleanup(func() {
+				_ = k8sClient.Delete(ctx, tp)
+			})
+
+			_, err := reconciler.Reconcile(ctx, ctrl.Request{
+				NamespacedName: types.NamespacedName{
+					Name:      policyName,
+					Namespace: "default",
+				},
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			// The policy still compiles and activates — warning is non-blocking.
+			updated := &omniav1alpha1.ToolPolicy{}
+			Eventually(func(g Gomega) {
+				g.Expect(k8sClient.Get(ctx, types.NamespacedName{
+					Name:      policyName,
+					Namespace: "default",
+				}, updated)).To(Succeed())
+				g.Expect(updated.Status.Phase).To(Equal(omniav1alpha1.ToolPolicyPhaseActive))
+
+				cond := findCondition(updated.Status.Conditions, toolPolicyConditionHeaderRefsCanon)
+				g.Expect(cond).NotTo(BeNil())
+				g.Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+				g.Expect(cond.Message).To(ContainSubstring("X-Omnia-Claim-Team"))
+			}, timeout, interval).Should(Succeed())
+
+			// A Warning event names the offending reference.
+			fakeRecorder := reconciler.Recorder.(*record.FakeRecorder)
+			Eventually(fakeRecorder.Events).Should(Receive(ContainSubstring(toolPolicyEventNonCanonicalHeader)))
+		})
+	})
+
 	Context("When a ToolPolicy is deleted", func() {
 		It("should remove the policy from the evaluator", func() {
 			policyName := "test-delete-policy"

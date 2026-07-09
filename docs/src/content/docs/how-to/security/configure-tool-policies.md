@@ -104,6 +104,14 @@ spec:
 
 Required claims check for the presence of `X-Omnia-Claim-<Claim>` headers. These headers are populated by the AgentRuntime's external-auth claim mapping (see [Configure Agent Authentication](/how-to/security/configure-authentication/)), not by AgentPolicy — AgentPolicy governs only tool allow/deny.
 
+:::caution[Claim headers are canonical — match the exact casing]
+Claim headers reach the policy engine in **canonical HTTP form**: the prefix and each hyphen-separated segment is Title-cased. A claim named `team` arrives as `X-Omnia-Claim-Team`; `customer-id` arrives as `X-Omnia-Claim-Customer-Id`. Underscores are **not** segment separators, so `customer_id` arrives as `X-Omnia-Claim-Customer_id`.
+
+A CEL rule or header-injection expression that references a non-canonical key — `headers["X-Omnia-Claim-team"]` — **silently misses** and evaluates as absent. Always write the canonical Title-cased key. (`requiredClaims` is case-insensitive: the engine canonicalizes the lookup for you, so `claim: Team` and `claim: team` behave identically.)
+
+The operator flags this for you: a ToolPolicy whose CEL references a non-canonical header still compiles and activates, but the operator records a `Warning` event and sets a `HeaderRefsCanonical: False` status condition naming the offending key and the canonical form to use. Check `kubectl describe toolpolicy <name>` if a rule mysteriously never matches.
+:::
+
 ## Inject headers into upstream requests
 
 Add headers to the request after policy evaluation passes. Use static values or CEL expressions:
