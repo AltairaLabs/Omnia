@@ -192,16 +192,6 @@ Two rules follow:
    Skipping this leaves a new operator binary reconciling objects against an old
    CRD schema — the exact "created but never reconciles" trap above.
 
-## Known config gaps
-
-The deploy adapter is newer than the Helm-based deployment path, and several
-config gaps between the two are tracked as follow-ups (#1596–#1599). The
-LLM-only provider filter above closes #1596 — before it, the export over-included
-non-LLM Providers and the pack broke on open. The remaining gaps concern
-prompt-name handling, workload-identity service-account wiring, and telemetry
-delivery; if a deployed agent behaves differently from the equivalent Helm
-deployment, check those issues before assuming a pack problem.
-
 ## Related
 
 - [Deploy a PromptPack to Omnia](/tutorials/deploy-to-omnia/) — the walkthrough.
