@@ -55,6 +55,7 @@ type testOutcome struct {
 	result      json.RawMessage
 	handlerType string
 	handler     *omniav1alpha1.HandlerDefinition
+	warning     string
 }
 
 // Test executes a single tool call against the specified ToolRegistry handler.
@@ -72,6 +73,7 @@ func (t *Tester) Test(
 	}
 	if outcome != nil {
 		resp.HandlerType = outcome.handlerType
+		resp.Warning = outcome.warning
 	}
 
 	// Run schema validation regardless of execution success
@@ -160,6 +162,14 @@ func (t *Tester) executeTest(
 
 	// Build a single-handler config for the executor
 	handlerCfg := t.buildHandlerConfig(handler)
+
+	// Apply secret-backed auth for gRPC/MCP (HTTP/OpenAPI are handled above via
+	// resolveAuthSecrets) and warn for auth types the test path cannot replicate.
+	warning, err := t.applyEntryAuth(ctx, namespace, handler, &handlerCfg)
+	if err != nil {
+		return outcome, fmt.Errorf("failed to resolve auth: %w", err)
+	}
+	outcome.warning = warning
 
 	// Determine timeout
 	timeout := t.resolveTimeout(handler)
@@ -299,6 +309,82 @@ func (t *Tester) resolveEffectiveToolAuth(
 		return "", "", false, err
 	}
 	return auth.Type, tok, true, nil
+}
+
+// applyEntryAuth applies auth the tool-test path can honor and warns about auth
+// it cannot. Secret-backed bearer/basic auth for gRPC/MCP handlers is set on the
+// runtime entry (HTTP/OpenAPI inject it into headers via resolveAuthSecrets, so
+// those types are left untouched here). serviceAccount and workloadIdentity rely
+// on a projected token / ambient cloud identity the test process does not have,
+// so the call goes out unauthenticated and a warning is returned so the result
+// is not trusted blindly. Returns the warning (or "") and any secret-read error.
+func (t *Tester) applyEntryAuth(
+	ctx context.Context,
+	namespace string,
+	handler *omniav1alpha1.HandlerDefinition,
+	entry *tools.HandlerEntry,
+) (string, error) {
+	auth := handler.EffectiveAuth()
+	if auth == nil || auth.Type == omniav1alpha1.ToolAuthTypeNone || auth.Type == "" {
+		return "", nil
+	}
+
+	// A stdio MCP transport has no header channel, so any credential would be
+	// inert. The running agent rejects this combination at reconcile, so mirror
+	// that here with a warning rather than silently "applying" auth.
+	if handler.Type == omniav1alpha1.HandlerTypeMCP && handler.MCPConfig != nil &&
+		handler.MCPConfig.Transport == omniav1alpha1.MCPTransportStdio {
+		return "auth is not applied on a stdio MCP transport (no header channel); " +
+			"the running agent rejects this configuration.", nil
+	}
+
+	switch auth.Type {
+	case omniav1alpha1.ToolAuthTypeBearer, omniav1alpha1.ToolAuthTypeBasic:
+		return "", t.applySecretAuthToEntry(ctx, namespace, handler, auth, entry)
+	case omniav1alpha1.ToolAuthTypeServiceAccount, omniav1alpha1.ToolAuthTypeWorkloadIdentity:
+		return fmt.Sprintf(
+			"auth.type %q is not applied by the tool test: the running agent uses a projected ServiceAccount token or the pod's ambient identity, which this test process does not have. This call was made WITHOUT that credential, so its result may differ from production.",
+			auth.Type,
+		), nil
+	default:
+		return "", nil
+	}
+}
+
+// applySecretAuthToEntry resolves a secret-backed bearer/basic credential and
+// sets it on the runtime entry for gRPC/MCP handlers. HTTP/OpenAPI are handled
+// by resolveAuthSecrets (header injection), so they are a no-op here.
+func (t *Tester) applySecretAuthToEntry(
+	ctx context.Context,
+	namespace string,
+	handler *omniav1alpha1.HandlerDefinition,
+	auth *omniav1alpha1.ToolAuth,
+	entry *tools.HandlerEntry,
+) error {
+	if auth.SecretRef == nil {
+		return nil
+	}
+	switch handler.Type {
+	case omniav1alpha1.HandlerTypeGRPC:
+		if entry.GRPCConfig == nil {
+			return nil
+		}
+		tok, err := t.readSecretKey(ctx, namespace, auth.SecretRef.Name, auth.SecretRef.Key)
+		if err != nil {
+			return err
+		}
+		entry.GRPCConfig.AuthType, entry.GRPCConfig.AuthToken = auth.Type, tok
+	case omniav1alpha1.HandlerTypeMCP:
+		if entry.MCPConfig == nil {
+			return nil
+		}
+		tok, err := t.readSecretKey(ctx, namespace, auth.SecretRef.Name, auth.SecretRef.Key)
+		if err != nil {
+			return err
+		}
+		entry.MCPConfig.AuthType, entry.MCPConfig.AuthToken = auth.Type, tok
+	}
+	return nil
 }
 
 func (t *Tester) resolveHTTPAuth(
