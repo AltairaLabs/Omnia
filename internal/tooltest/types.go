@@ -43,6 +43,10 @@ type TestResponse struct {
 	DurationMs int64 `json:"durationMs"`
 	// HandlerType is the handler type that was used (http, mcp, grpc, openapi).
 	HandlerType string `json:"handlerType"`
+	// Warning is a non-fatal caveat about the test call — e.g. an auth type the
+	// tool-test path cannot replicate, so the call was made without that
+	// credential and the result may differ from a running agent.
+	Warning string `json:"warning,omitempty"`
 	// Validation contains schema validation results for both request and response.
 	Validation *ValidationResult `json:"validation,omitempty"`
 }
