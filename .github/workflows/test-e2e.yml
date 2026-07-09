@@ -31,6 +31,8 @@ on:
       - 'charts/**/crds/**'
       - 'scripts/setup-arena-e2e.sh'
       - '.github/workflows/test-e2e.yml'
+      - '!**/*.md'
+      - '!**/*.mdx'
   # No paths filter on pull_request: the workflow runs on EVERY PR so the
   # required "Core E2E" / "Arena E2E" status contexts always report. The
   # `changes` job below decides whether E2E-relevant files actually changed;
@@ -68,13 +70,16 @@ jobs:
               - '**.go'
               - 'go.mod'
               - 'go.sum'
-              - 'api/**'
-              - 'cmd/**'
-              - 'config/**'
-              - 'ee/**'
-              - 'internal/**'
-              - 'pkg/**'
-              - 'test/**'
+              # Directory globs exclude docs via extglob — dorny matches with OR
+              # (.some), so a trailing '!**/*.md' would NOT exclude cmd/SERVICE.md.
+              # Excluding docs lets docs-only PRs take the Core/Arena skip-shim.
+              - 'api/**/!(*.md|*.mdx)'
+              - 'cmd/**/!(*.md|*.mdx)'
+              - 'config/**/!(*.md|*.mdx)'
+              - 'ee/**/!(*.md|*.mdx)'
+              - 'internal/**/!(*.md|*.mdx)'
+              - 'pkg/**/!(*.md|*.mdx)'
+              - 'test/**/!(*.md|*.mdx)'
               - 'charts/**/templates/**/*.yaml'
               - 'charts/**/templates/**/*.tpl'
               - 'charts/**/crds/**'
