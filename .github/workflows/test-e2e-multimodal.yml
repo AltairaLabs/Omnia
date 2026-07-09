@@ -13,6 +13,8 @@ on:
       - 'internal/agent/**'
       - 'internal/facade/**'
       - '.github/workflows/test-e2e-multimodal.yml'
+      - '!**.md'
+      - '!**.mdx'
   pull_request:
     paths:
       - 'dashboard/**'
@@ -21,6 +23,8 @@ on:
       - 'internal/agent/**'
       - 'internal/facade/**'
       - '.github/workflows/test-e2e-multimodal.yml'
+      - '!**.md'
+      - '!**.mdx'
 
 permissions:
   contents: read

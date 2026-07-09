@@ -37,6 +37,7 @@
 - LLM conversation logic (Runtime's job)
 - WebSocket/HTTP protocol handling (Facade/Session API's job)
 - Tool execution (Runtime's job)
+- **AgentRuntime / PromptPack authoring** — the operator only *reconciles* these CRDs; it never constructs their specs. Objects are created by the dashboard's workspace CRD REST API (from the in-app deploy wizard **or** the external `promptarena-deploy-omnia` adapter), which writes to the Kubernetes API directly — not through the operator. The operator therefore has no say in the AgentRuntime schema an author emits; a schema-version mismatch surfaces only here, as a reconcile error. See `dashboard/SERVICE.md` → "Deploy / CRD REST API".
 - Authentication/authorization (external RBAC/Istio)
 
 ## Observability

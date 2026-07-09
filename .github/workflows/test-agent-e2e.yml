@@ -27,6 +27,8 @@ on:
       - 'pkg/**'
       - 'api/**'
       - '.github/workflows/test-agent-e2e.yml'
+      - '!**.md'
+      - '!**.mdx'
   pull_request:
     paths:
       - 'charts/**/templates/**/*.yaml'
@@ -38,6 +40,8 @@ on:
       - 'pkg/**'
       - 'api/**'
       - '.github/workflows/test-agent-e2e.yml'
+      - '!**.md'
+      - '!**.mdx'
   workflow_dispatch:  # Allow manual trigger for values-only PRs
 
 permissions:
