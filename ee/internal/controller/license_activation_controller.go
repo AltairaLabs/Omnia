@@ -14,6 +14,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -34,6 +35,26 @@ import (
 // Version is the current Omnia version, set at build time.
 var Version = "dev"
 
+// License-activation retry tuning. Activation is non-blocking (it fails soft),
+// so retries use capped exponential backoff and, after a bounded window, drop to
+// an infrequent heartbeat instead of retrying every few minutes forever.
+const (
+	activationBackoffBase  = 1 * time.Minute // first retry delay
+	activationBackoffCap   = 1 * time.Hour   // max delay during backoff
+	activationGiveUpAfter  = 24 * time.Hour  // switch to slow retries after this long failing
+	activationSlowInterval = 6 * time.Hour   // retry interval once we've given up on fast recovery
+	activationMaxShift     = 20              // guards the exponential shift against overflow
+)
+
+// activationBackoff tracks a license's consecutive activation failures so the
+// controller can compute exponential backoff and give up (in memory; a controller
+// restart simply resets the backoff, which at worst replays one round of retries).
+type activationBackoff struct {
+	firstFailure time.Time
+	attempts     int
+	slowNotified bool
+}
+
 // LicenseActivationReconciler reconciles license activation and heartbeats.
 type LicenseActivationReconciler struct {
 	client.Client
@@ -42,6 +63,9 @@ type LicenseActivationReconciler struct {
 	LicenseValidator *license.Validator
 	ActivationClient *license.ActivationClient
 	ClusterName      string
+
+	mu                 sync.Mutex
+	activationFailures map[string]*activationBackoff
 }
 
 // +kubebuilder:rbac:groups=core,resources=secrets,verbs=get;list;watch
@@ -94,9 +118,8 @@ func (r *LicenseActivationReconciler) initiateActivation(ctx context.Context, li
 	// Generate cluster fingerprint
 	fingerprint, err := license.ClusterFingerprint(ctx, r.Client)
 	if err != nil {
-		log.Error(err, "Failed to generate cluster fingerprint")
-		r.recordEvent(ctx, "Warning", "FingerprintFailed", fmt.Sprintf("Failed to generate cluster fingerprint: %v", err))
-		return ctrl.Result{RequeueAfter: 5 * time.Minute}, nil
+		return r.handleActivationFailure(ctx, lic.ID, "FingerprintFailed",
+			fmt.Sprintf("Failed to generate cluster fingerprint: %v", err)), nil
 	}
 
 	log.Info("Initiating license activation", "licenseID", lic.ID, "fingerprint", fingerprint)
@@ -109,10 +132,8 @@ func (r *LicenseActivationReconciler) initiateActivation(ctx context.Context, li
 		Version:            Version,
 	})
 	if err != nil {
-		log.Error(err, "License activation failed")
-		r.recordEvent(ctx, "Warning", "ActivationFailed", fmt.Sprintf("License activation failed: %v", err))
-		// Requeue with exponential backoff
-		return ctrl.Result{RequeueAfter: 5 * time.Minute}, nil
+		return r.handleActivationFailure(ctx, lic.ID, "ActivationFailed",
+			fmt.Sprintf("License activation failed: %v", err)), nil
 	}
 
 	if !resp.Activated {
@@ -140,11 +161,77 @@ func (r *LicenseActivationReconciler) initiateActivation(ctx context.Context, li
 		return ctrl.Result{}, err
 	}
 
+	r.resetActivationBackoff(lic.ID)
 	log.Info("License activated successfully", "activationID", resp.ActivationID)
 	r.recordEvent(ctx, "Normal", "Activated", fmt.Sprintf("License activated successfully (ID: %s)", resp.ActivationID))
 
 	// Requeue for heartbeat
 	return ctrl.Result{RequeueAfter: license.DefaultHeartbeatInterval}, nil
+}
+
+// handleActivationFailure records a soft activation failure and returns the
+// requeue result with capped exponential backoff. Activation is non-blocking, so
+// an unreachable license server (e.g. air-gapped/egress-restricted) is an
+// expected condition, not an operator error: it logs at Info once, then V(1) on
+// each quiet retry, and emits a single Warning event rather than one per cycle.
+func (r *LicenseActivationReconciler) handleActivationFailure(ctx context.Context, licenseID, reason, message string) ctrl.Result {
+	log := logf.FromContext(ctx)
+	delay, first, gaveUp := r.recordActivationFailure(licenseID)
+
+	switch {
+	case first:
+		log.Info("license activation failed; retrying with backoff",
+			"reason", reason, "message", message, "retryAfter", delay.String())
+		r.recordEvent(ctx, "Warning", reason, message)
+	case gaveUp:
+		log.Info("license activation still failing; switching to infrequent retries",
+			"reason", reason, "message", message, "retryAfter", delay.String())
+	default:
+		log.V(1).Info("license activation retry pending",
+			"reason", reason, "retryAfter", delay.String())
+	}
+	return ctrl.Result{RequeueAfter: delay}
+}
+
+// recordActivationFailure advances the in-memory backoff for a license and
+// returns the next retry delay, whether this is the first failure of a streak,
+// and whether this call is the transition into the slow-retry (given-up) state.
+func (r *LicenseActivationReconciler) recordActivationFailure(licenseID string) (delay time.Duration, first, gaveUp bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.activationFailures == nil {
+		r.activationFailures = make(map[string]*activationBackoff)
+	}
+	st := r.activationFailures[licenseID]
+	if st == nil {
+		st = &activationBackoff{firstFailure: time.Now()}
+		r.activationFailures[licenseID] = st
+	}
+	st.attempts++
+	first = st.attempts == 1
+
+	if time.Since(st.firstFailure) >= activationGiveUpAfter {
+		gaveUp = !st.slowNotified
+		st.slowNotified = true
+		return activationSlowInterval, first, gaveUp
+	}
+
+	shift := st.attempts - 1
+	if shift > activationMaxShift {
+		shift = activationMaxShift
+	}
+	delay = activationBackoffBase << shift
+	if delay > activationBackoffCap {
+		delay = activationBackoffCap
+	}
+	return delay, first, false
+}
+
+// resetActivationBackoff clears a license's failure streak after a success.
+func (r *LicenseActivationReconciler) resetActivationBackoff(licenseID string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.activationFailures, licenseID)
 }
 
 // handleHeartbeat sends a heartbeat to the license server if needed.
