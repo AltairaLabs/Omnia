@@ -21,6 +21,7 @@ config schema, and how a deployed pack becomes a running
 A pack on its own is inert. To run it in Omnia you need:
 
 - an **API endpoint** and **workspace** to deploy into,
+- the target workspace configured with a ready **[service group](/how-to/workspaces/configure-service-groups/)** (the session-api / memory-api backend agents persist to),
 - an **API credential** scoped to that workspace,
 - one or more **Providers** to back the LLM calls, and
 - optionally **SkillSources** for retrieval/tools.
@@ -29,6 +30,17 @@ Getting each of these names exactly right by hand is error-prone — a typo in a
 Provider name fails the deploy at plan time, and referencing a Provider that
 isn't `Ready` fails it at runtime. The deploy-profile export exists to hand the
 author a pre-filled, validated config block instead.
+
+:::caution[The workspace needs a service group, or sessions silently vanish]
+The deploy program creates a PromptPack and an AgentRuntime, but it does **not**
+configure the workspace's session/memory backend. If the target workspace has no
+ready service group, the deployed agent starts and chats but **silently falls back
+to an in-memory session store** — conversations, token usage, and cost are **not
+persisted**, dashboard session views stay empty, and memory is unavailable.
+Configure at least one service group (conventionally `default`) on the workspace
+**before** deploying — see
+[Configure workspace service groups](/how-to/workspaces/configure-service-groups/).
+:::
 
 ## The deploy profile
 

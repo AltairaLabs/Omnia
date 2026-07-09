@@ -44,6 +44,15 @@ The controller will:
 2. Create ServiceAccounts for each role (owner, editor, viewer)
 3. Set up RBAC bindings
 
+:::caution[A basic workspace persists nothing until you add a service group]
+The minimal workspace above creates the namespace and RBAC, but **no session or memory
+backend** — its `spec.services[]` is empty. Agents deployed into it start and chat, but
+**silently fall back to an in-memory session store**: conversations, token usage, and cost
+are **not persisted**, dashboard session views stay empty, and memory is unavailable. Before
+running real agents, add at least one service group (conventionally `default`) — see
+[Configure workspace service groups](/how-to/workspaces/configure-service-groups/).
+:::
+
 ### Verify workspace status
 
 ```bash
