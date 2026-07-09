@@ -193,6 +193,44 @@ after installing a license:
    kubectl logs -l app.kubernetes.io/name=omnia -n omnia-system | grep -i "license\|validation"
    ```
 
+### Enterprise CRDs missing after enabling on an existing install
+
+Omnia's Enterprise CRDs (Arena, `RolloutAnalysis`, `SessionPrivacyPolicy`,
+`ToolPolicy`) ship in a subchart that only installs when `enterprise.enabled=true`.
+Helm applies CRDs on **`helm install`** but never on **`helm upgrade`**, so
+switching an *existing* community release to Enterprise with
+`helm upgrade --set enterprise.enabled=true` can fail while Helm builds the
+release:
+
+```
+Error: unable to build kubernetes objects from release manifest:
+  resource mapping not found for name: "..." ...
+  no matches for kind "SessionPrivacyPolicy" ... ensure CRDs are installed first
+```
+
+Apply the Enterprise CRDs once, then upgrade:
+
+```bash
+# Pull and unpack the chart to get the Enterprise CRDs
+helm pull oci://ghcr.io/altairalabs/charts/omnia --devel --untar
+
+# Apply them server-side (they embed large schemas that exceed the
+# client-side apply annotation limit)
+kubectl apply --server-side --force-conflicts \
+  -f omnia/charts/omnia-ee-crds/crds/
+
+# Now enable Enterprise
+helm upgrade omnia oci://ghcr.io/altairalabs/charts/omnia --devel \
+  --namespace omnia-system \
+  --reuse-values \
+  --set enterprise.enabled=true
+```
+
+A **fresh** `helm install` with `enterprise.enabled=true` needs none of this —
+Helm applies the subchart's CRDs before the rest of the release. Likewise,
+`helm uninstall` never deletes these CRDs, so your Enterprise custom resources
+survive an uninstall/reinstall.
+
 ### License Expired
 
 If your license has expired:
