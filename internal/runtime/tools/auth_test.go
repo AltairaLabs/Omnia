@@ -17,6 +17,7 @@ limitations under the License.
 package tools
 
 import (
+	"os"
 	"strings"
 	"testing"
 )
@@ -103,5 +104,60 @@ func TestMergeAuthHeaders_CaseInsensitive(t *testing.T) {
 	}
 	if headers["Authorization"] != "Bearer tok" {
 		t.Errorf("expected Bearer tok, got %s", headers["Authorization"])
+	}
+}
+
+func TestFreshAuthToken_RereadsFileEachCall(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/token"
+	if err := os.WriteFile(path, []byte("token-A\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// First read picks up token-A (trailing newline trimmed).
+	got, err := freshAuthToken("bearer", "", path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "token-A" {
+		t.Fatalf("first read: expected token-A, got %q", got)
+	}
+	// Simulate kubelet rotating the projected token before expiry.
+	if err := os.WriteFile(path, []byte("token-B"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err = freshAuthToken("bearer", "", path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "token-B" {
+		t.Fatalf("second read: expected fresh token-B, got %q (stale)", got)
+	}
+}
+
+func TestFreshAuthToken_NoPathReturnsStaticToken(t *testing.T) {
+	got, err := freshAuthToken("bearer", "static", "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "static" {
+		t.Fatalf("expected static, got %q", got)
+	}
+}
+
+func TestFreshAuthToken_WorkloadIdentitySkipsFile(t *testing.T) {
+	// workloadIdentity resolves its own token elsewhere; even with a path set,
+	// freshAuthToken must not read a file.
+	got, err := freshAuthToken(authTypeWorkloadIdentity, "", "/nonexistent/token")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "" {
+		t.Fatalf("expected empty passthrough, got %q", got)
+	}
+}
+
+func TestFreshAuthToken_UnreadablePathErrors(t *testing.T) {
+	if _, err := freshAuthToken("bearer", "", "/nonexistent/token"); err == nil {
+		t.Fatal("expected error reading a missing token file")
 	}
 }

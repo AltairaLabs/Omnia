@@ -405,7 +405,7 @@ func TestInjectedHeaderTransport_RoundTrip(t *testing.T) {
 
 	t.Run("static tool credential is applied", func(t *testing.T) {
 		base := &recordingRoundTripper{}
-		rt := &injectedHeaderTransport{base: base, authHeader: "Bearer mcp-tok"}
+		rt := &injectedHeaderTransport{base: base, authType: "bearer", authToken: "mcp-tok"}
 
 		req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, "http://mcp.example.invalid", nil)
 		require.NoError(t, err)
@@ -417,7 +417,7 @@ func TestInjectedHeaderTransport_RoundTrip(t *testing.T) {
 
 	t.Run("broker-injected Authorization wins over the tool credential", func(t *testing.T) {
 		base := &recordingRoundTripper{}
-		rt := &injectedHeaderTransport{base: base, authHeader: "Bearer tool-tok"}
+		rt := &injectedHeaderTransport{base: base, authType: "bearer", authToken: "tool-tok"}
 
 		req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, "http://mcp.example.invalid", nil)
 		require.NoError(t, err)

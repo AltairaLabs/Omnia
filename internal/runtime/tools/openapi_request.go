@@ -142,17 +142,21 @@ func (a *OpenAPIAdapter) setAuth(req *http.Request) error {
 		req.Header.Set(name, val)
 		return nil
 	}
+	tok, err := freshAuthToken(a.config.AuthType, a.config.AuthToken, a.config.AuthTokenPath)
+	if err != nil {
+		return err
+	}
 	switch strings.ToLower(a.config.AuthType) {
 	case "bearer":
-		if a.config.AuthToken == "" {
+		if tok == "" {
 			return fmt.Errorf("bearer auth requires a token")
 		}
-		req.Header.Set("Authorization", "Bearer "+a.config.AuthToken)
+		req.Header.Set("Authorization", "Bearer "+tok)
 	case "basic":
-		if a.config.AuthToken == "" {
+		if tok == "" {
 			return fmt.Errorf("basic auth requires credentials")
 		}
-		parts := strings.SplitN(a.config.AuthToken, ":", 2)
+		parts := strings.SplitN(tok, ":", 2)
 		if len(parts) != 2 {
 			return fmt.Errorf("basic auth token must be 'username:password'")
 		}

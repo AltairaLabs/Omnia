@@ -18,6 +18,7 @@ package tools
 
 import (
 	"net/http"
+	"os"
 	"testing"
 
 	"github.com/go-logr/logr"
@@ -81,5 +82,43 @@ func TestSetAuth_None(t *testing.T) {
 	}
 	if req.Header.Get("Authorization") != "" {
 		t.Fatal("no Authorization header should be set when AuthType is empty")
+	}
+}
+
+// TestSetAuth_FileToken_Reread proves the OpenAPI auth path re-reads the token
+// file each call, so a rotated projected serviceAccount token is used rather
+// than a value cached at startup (#1797).
+func TestSetAuth_FileToken_Reread(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/token"
+	if err := os.WriteFile(path, []byte("tok-A"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	a := newTestAdapter(OpenAPIAdapterConfig{AuthType: "bearer", AuthTokenPath: path})
+
+	req, _ := http.NewRequest(http.MethodGet, "http://x", nil)
+	if err := a.setAuth(req); err != nil {
+		t.Fatalf("setAuth: %v", err)
+	}
+	if got := req.Header.Get("Authorization"); got != "Bearer tok-A" {
+		t.Fatalf("first: got %q, want Bearer tok-A", got)
+	}
+	if err := os.WriteFile(path, []byte("tok-B"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	req2, _ := http.NewRequest(http.MethodGet, "http://x", nil)
+	if err := a.setAuth(req2); err != nil {
+		t.Fatalf("setAuth: %v", err)
+	}
+	if got := req2.Header.Get("Authorization"); got != "Bearer tok-B" {
+		t.Fatalf("second: got %q, want fresh Bearer tok-B", got)
+	}
+}
+
+func TestSetAuth_FileToken_MissingFileErrors(t *testing.T) {
+	a := newTestAdapter(OpenAPIAdapterConfig{AuthType: "bearer", AuthTokenPath: "/nonexistent/token"})
+	req, _ := http.NewRequest(http.MethodGet, "http://x", nil)
+	if err := a.setAuth(req); err == nil {
+		t.Fatal("expected error when the token file is unreadable")
 	}
 }

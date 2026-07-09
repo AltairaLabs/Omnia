@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -77,16 +78,39 @@ func TestInjectedHeaderTransport_WIF_CustomHeader(t *testing.T) {
 	assert.Empty(t, base.lastReq.Header.Get("Authorization"))
 }
 
-// TestInjectedHeaderTransport_WIF_StaticPathStillWorks proves a transport
-// configured with only the static authHeader (no WIF fields) is unaffected by
-// the new WIF plumbing.
-func TestInjectedHeaderTransport_WIF_StaticPathStillWorks(t *testing.T) {
+// TestInjectedHeaderTransport_StaticTokenStillWorks proves a transport
+// configured with an inline bearer token (no path, no WIF) resolves to the
+// expected Authorization header.
+func TestInjectedHeaderTransport_StaticTokenStillWorks(t *testing.T) {
 	base := &recordingRoundTripper{}
-	rt := &injectedHeaderTransport{base: base, authHeader: "Bearer static-tok"}
+	rt := &injectedHeaderTransport{base: base, authType: "bearer", authToken: "static-tok"}
 
 	_, err := rt.RoundTrip(newMCPTestRequest(t))
 	require.NoError(t, err)
 	assert.Equal(t, "Bearer static-tok", base.lastReq.Header.Get("Authorization"))
+}
+
+// TestInjectedHeaderTransport_FileToken_RereadPerRequest proves a file-backed
+// tool credential (a mounted Secret or projected serviceAccount token) is
+// re-read on every RoundTrip, so a rotated/refreshed token is used rather than
+// a value cached when the long-lived transport was built (#1797).
+func TestInjectedHeaderTransport_FileToken_RereadPerRequest(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/token"
+	require.NoError(t, os.WriteFile(path, []byte("tok-A"), 0o600))
+
+	base := &recordingRoundTripper{}
+	rt := &injectedHeaderTransport{base: base, authType: "bearer", authTokenPath: path}
+
+	_, err := rt.RoundTrip(newMCPTestRequest(t))
+	require.NoError(t, err)
+	assert.Equal(t, "Bearer tok-A", base.lastReq.Header.Get("Authorization"))
+
+	require.NoError(t, os.WriteFile(path, []byte("tok-B"), 0o600))
+	_, err = rt.RoundTrip(newMCPTestRequest(t))
+	require.NoError(t, err)
+	assert.Equal(t, "Bearer tok-B", base.lastReq.Header.Get("Authorization"),
+		"the token file must be re-read per request, not cached at transport-build time")
 }
 
 // TestInjectedHeaderTransport_WIF_FailsLoudNonAzure proves an unsupported
@@ -128,4 +152,12 @@ func TestBuildMCPTransport_WorkloadIdentity(t *testing.T) {
 	transport, err := e.buildMCPTransport(cfg)
 	require.NoError(t, err)
 	require.NotNil(t, transport)
+}
+
+func TestInjectedHeaderTransport_FileToken_MissingFileErrors(t *testing.T) {
+	base := &recordingRoundTripper{}
+	rt := &injectedHeaderTransport{base: base, authType: "bearer", authTokenPath: "/nonexistent/token"}
+	if _, err := rt.RoundTrip(newMCPTestRequest(t)); err == nil {
+		t.Fatal("expected RoundTrip to fail when the token file is unreadable")
+	}
 }
