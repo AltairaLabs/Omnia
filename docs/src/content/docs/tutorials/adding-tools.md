@@ -284,7 +284,10 @@ spec:
 ## Next steps
 
 - Read the [ToolRegistry Reference](/reference/core/toolregistry/) for all configuration options
+- [Build a tool backend](/how-to/tools/build-a-tool-backend/) — the HTTP and gRPC contracts your own backend must implement
+- [Test a tool before wiring it to an agent](/how-to/tools/test-tools/) — exercise a handler from the dashboard before adding it to an AgentRuntime
 - [Authenticate tools](/how-to/tools/authenticate-tools/) — bearer/basic secrets, projected ServiceAccount tokens, and the secret-handling model
 - Build [advanced HTTP tools](/how-to/tools/advanced-http-tools/) — URL templates, static injection, request/response mapping, redaction, and retry policies
 - Add [client-side (browser) tools](/how-to/tools/client-tools/) with user consent
+- Learn the [tool execution model](/explanation/agents/tool-execution-model/) — where each tool type runs and why only client tools appear on the WebSocket
 - Explore [observability](/how-to/observability/setup-observability/) to monitor tool calls
