@@ -73,9 +73,15 @@ The following variables are available in CEL expressions:
 
 | Variable | Type | Description |
 |----------|------|-------------|
-| `headers` | `map<string, string>` | All HTTP request headers (first value only for multi-value headers). |
+| `headers` | `map<string, string>` | All HTTP request headers (first value only for multi-value headers). Keys are **canonical** — see the note below. |
 | `body` | `map<string, dyn>` | Parsed JSON request body. Empty map if body is not JSON. |
 | `identity` | `map<string, dyn>` | Structured caller identity (`origin`, `subject`, `endUser`, `workspace`, `agent`, `role`, `claims`) sent by the runtime alongside headers/body, so identity-aware rules don't depend on lossy header-flattening. |
+
+:::caution[`headers` keys are canonical — match the exact casing]
+The `headers` map is keyed by **canonical HTTP header names**: the prefix and each hyphen-separated segment is Title-cased. Claim `team` is `X-Omnia-Claim-Team`; `customer-id` is `X-Omnia-Claim-Customer-Id`. Underscores are not separators, so `customer_id` is `X-Omnia-Claim-Customer_id`.
+
+`headers["X-Omnia-Claim-team"]` **silently misses** the canonical `X-Omnia-Claim-Team` and reads as absent — no error is raised. Always reference the canonical Title-cased key, or read the claim through `identity.claims`, which is keyed by the raw claim name (`identity.claims["team"]`) and so sidesteps HTTP canonicalization entirely.
+:::
 
 #### CEL string extensions
 

@@ -19,6 +19,7 @@ package policy
 import (
 	"context"
 	"encoding/json"
+	"net/http"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -386,5 +387,47 @@ func TestToOutboundHeaders_OmitsEmptyConsentLayer(t *testing.T) {
 	headers := ToOutboundHeaders(context.Background())
 	if v, present := headers[HeaderConsentLayer]; present {
 		t.Errorf("HeaderConsentLayer present without value: %q", v)
+	}
+}
+
+func TestCanonicalClaimHeader(t *testing.T) {
+	cases := []struct {
+		name  string
+		claim string
+		want  string
+	}{
+		{"lowercase single segment", "tier", "X-Omnia-Claim-Tier"},
+		{"already title-cased", "Team", "X-Omnia-Claim-Team"},
+		{"hyphenated segments title-cased", "customer-id", "X-Omnia-Claim-Customer-Id"},
+		{"underscore is not a separator", "customer_id", "X-Omnia-Claim-Customer_id"},
+		{"upper input normalized", "TEAM", "X-Omnia-Claim-Team"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, CanonicalClaimHeader(tc.claim))
+		})
+	}
+}
+
+// TestCanonicalClaimHeader_MatchesWireCanonicalization is the regression guard
+// for #1766: the canonical key a read path looks up MUST equal the key a claim
+// header lands under once emitted through an http.Request. If the emit prefix
+// and the canonical helper ever diverge, this fails.
+func TestCanonicalClaimHeader_MatchesWireCanonicalization(t *testing.T) {
+	for _, claim := range []string{"tier", "Team", "customer-id", "customer_id"} {
+		ctx := WithClaims(context.Background(), map[string]string{claim: "v"})
+		emitted := ToOutboundHeaders(ctx)
+
+		req := &http.Request{Header: http.Header{}}
+		for k, v := range emitted {
+			req.Header.Set(k, v)
+		}
+
+		wireKey := ""
+		for k := range req.Header {
+			wireKey = k
+		}
+		assert.Equal(t, CanonicalClaimHeader(claim), wireKey,
+			"claim %q: helper key must match the on-wire canonical key", claim)
 	}
 }
