@@ -578,3 +578,131 @@ jobs:
           grep -q "^appVersion:" ./charts/omnia/Chart.yaml
 
           echo "Chart metadata validation passed"
+
+  # Runs in parallel with helm-e2e / helm-lint (own runner + kind cluster), so
+  # it does not extend the long-pole helm-e2e job. Enterprise CRDs ship in the
+  # omnia-ee-crds subchart's crds/ dir (not enterprise.enabled-gated templates).
+  # This drives the full #1796 lifecycle through the PACKAGED chart — the real
+  # distribution path. No cert-manager / Gateway API needed: the enterprise
+  # render produces neither Certificate nor Gateway kinds.
+  helm-ee-crds:
+    name: Enterprise CRD packaging & lifecycle (#1796)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup Helm
+        uses: azure/setup-helm@v5
+        with:
+          version: ${{ env.HELM_VERSION }}
+
+      - name: Install kind
+        run: |
+          curl --retry 3 --retry-delay 5 -Lo ./kind https://kind.sigs.k8s.io/dl/v0.20.0/kind-linux-amd64
+          chmod +x ./kind
+          sudo mv ./kind /usr/local/bin/kind
+          kind version
+
+      - name: Create kind cluster
+        run: |
+          kind create cluster --name $KIND_CLUSTER --wait 60s
+          kubectl cluster-info --context kind-$KIND_CLUSTER
+
+      - name: Add Helm repositories
+        run: |
+          helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+          helm repo add grafana https://grafana.github.io/helm-charts
+          helm repo add kedacore https://kedacore.github.io/charts
+          helm repo update
+
+      - name: Build chart dependencies
+        run: |
+          helm dependency build ./charts/omnia
+
+      - name: Test - Enterprise CRD packaging & lifecycle (#1796)
+        run: |
+          set -euo pipefail
+
+          # EE CRDs installed in the cluster right now (0 in a fresh cluster).
+          count_ee_crds() {
+            kubectl get crd -o name 2>/dev/null \
+              | grep -cE 'arena|rolloutanalyses|sessionprivacypolicies|toolpolicies' || true
+          }
+          # Enterprise install flags (test images never pull; --wait is off so
+          # helm returns once manifests are applied — CRD ordering is what we test).
+          EE_FLAGS=(
+            --set keda.enabled=false
+            --set 'workspaceContent.persistence.accessModes[0]=ReadWriteOnce'
+            --set enterprise.enabled=true
+            --set enterprise.arena.controller.image.repository=test
+            --set enterprise.arena.worker.image.repository=test
+            --set redis.enabled=true
+            --set enterprise.communityTemplates.enabled=true
+          )
+
+          echo "=== Package the chart (customer distribution path) ==="
+          helm package ./charts/omnia -d /tmp/pkg
+          PKG=$(ls /tmp/pkg/omnia-*.tgz | head -1)
+          echo "PKG=$PKG"
+
+          echo "=== Assert the tarball bundles exactly 7 EE subchart CRDs ==="
+          EE_IN_PKG=$(tar tzf "$PKG" | grep -cE 'omnia-ee-crds/crds/omnia\.altairalabs\.ai_.*\.yaml' || true)
+          echo "EE CRDs in tarball: $EE_IN_PKG (expect 7)"
+          if [ "$EE_IN_PKG" -ne 7 ]; then
+            echo "ERROR: expected 7 EE CRDs in package, got $EE_IN_PKG"
+            tar tzf "$PKG" | grep omnia-ee-crds || echo "(no omnia-ee-crds paths in tarball at all)"
+            exit 1
+          fi
+
+          echo "=== Community install (enterprise.enabled=false) → ZERO EE CRDs ==="
+          helm install omnia "$PKG" \
+            -f charts/omnia/values-chart-tests.yaml \
+            --namespace omnia-system --create-namespace \
+            --set keda.enabled=false \
+            --set 'workspaceContent.persistence.accessModes[0]=ReadWriteOnce' \
+            --timeout 2m
+          COMM=$(count_ee_crds)
+          echo "EE CRDs after community install: $COMM (expect 0)"
+          if [ "$COMM" -ne 0 ]; then
+            echo "ERROR: community install leaked $COMM EE CRDs"
+            kubectl get crd -o name | grep -E 'arena|rolloutanalyses|sessionprivacypolicies|toolpolicies' || true
+            exit 1
+          fi
+          helm uninstall omnia -n omnia-system
+
+          echo "=== Enterprise install → 7 EE CRDs AND in-release EE CRs map (#1796 bug) ==="
+          helm install omnia "$PKG" \
+            -f charts/omnia/values-chart-tests.yaml \
+            --namespace omnia-system --create-namespace \
+            "${EE_FLAGS[@]}" \
+            --timeout 3m
+          ENT=$(count_ee_crds)
+          echo "EE CRDs after enterprise install: $ENT (expect 7)"
+          [ "$ENT" -eq 7 ] || { echo "ERROR: enterprise install created $ENT EE CRDs, expected 7"; exit 1; }
+
+          # These CRs are rendered in the same release as their CRDs; pre-#1796
+          # they aborted the install with "no matches for kind ...".
+          kubectl get sessionprivacypolicy default -n omnia-system
+          kubectl get arenatemplatesource community-templates -n dev-agents
+
+          echo "=== Uninstall must PRESERVE EE CRDs (they live in crds/, not templates) ==="
+          helm uninstall omnia -n omnia-system
+          sleep 5
+          KEPT=$(count_ee_crds)
+          echo "EE CRDs after uninstall: $KEPT (expect 7 preserved)"
+          [ "$KEPT" -eq 7 ] || { echo "ERROR: uninstall deleted EE CRDs (got $KEPT, expected 7)"; exit 1; }
+
+          echo "=== Reinstall on surviving CRDs → no ownership conflict ==="
+          helm install omnia "$PKG" \
+            -f charts/omnia/values-chart-tests.yaml \
+            --namespace omnia-system --create-namespace \
+            "${EE_FLAGS[@]}" \
+            --timeout 3m
+
+          echo "Enterprise CRD packaging & lifecycle test passed (#1796)!"
+
+      - name: Cleanup
+        if: always()
+        run: |
+          kind delete cluster --name $KIND_CLUSTER || true
