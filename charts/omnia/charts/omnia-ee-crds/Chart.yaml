@@ -1,0 +1,12 @@
+apiVersion: v2
+name: omnia-ee-crds
+description: >-
+  Enterprise CustomResourceDefinitions for Omnia (Arena, RolloutAnalysis,
+  SessionPrivacyPolicy, ToolPolicy). Shipped as a subchart so the CRDs live in
+  crds/ (installed before templates, never deleted on uninstall) while the
+  parent's `enterprise.enabled` condition keeps them off community installs.
+type: application
+# Versioned independently of the parent chart: this subchart has no templates,
+# only crds/, so it carries no appVersion / image tags and the release bot's
+# parent-Chart.yaml bump never needs to touch it.
+version: 0.1.0

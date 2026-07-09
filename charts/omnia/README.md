@@ -221,9 +221,8 @@ CRD changes ship with new chart versions. Since Helm does **not** upgrade CRDs i
 
 ```bash
 kubectl apply --server-side --force-conflicts -f charts/omnia/crds/
-# Enterprise CRDs (if enterprise.enabled):
-helm template omnia <chart> -s templates/enterprise/omnia.altairalabs.ai_arenajobs.yaml | kubectl apply --server-side -f -
-# ...repeat for arenadevsessions, arenasources, arenatemplatesources, rolloutanalyses, sessionprivacypolicies
+# Enterprise CRDs (if enterprise.enabled) ship in the omnia-ee-crds subchart:
+kubectl apply --server-side --force-conflicts -f charts/omnia/charts/omnia-ee-crds/crds/
 ```
 
 `--server-side` is required because the CRDs embed `corev1.Volume`/`Affinity`/`Toleration` (via `PodOverrides`) and exceed the 262144-byte client-side `last-applied-configuration` annotation limit.
@@ -237,7 +236,7 @@ helm uninstall omnia
 ```
 
 This removes all resources **except**:
-- CRDs (by Helm default; if you want them gone: `kubectl delete -f charts/omnia/crds/`)
+- CRDs (by Helm default; if you want them gone: `kubectl delete -f charts/omnia/crds/` — plus `kubectl delete -f charts/omnia/charts/omnia-ee-crds/crds/` for enterprise)
 - PersistentVolumeClaims (keep data; delete manually if you're sure)
 - `omnia-system` namespace (if the chart created it)
 

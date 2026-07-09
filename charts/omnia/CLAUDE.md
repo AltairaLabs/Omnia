@@ -104,8 +104,9 @@ CI gates enforce these (`test-helm-e2e.yml`). E2E workflows **do NOT** fire on `
 | `examples/` | 8 worked values files for cloud deployments + observability + Istio ambient. See `examples/README.md`. |
 | `templates/_helpers.tpl` | Shared macros. `omnia.validateAuth` + name helpers live here. |
 | `templates/<component>/deployment.yaml` | Per-component Deployments. All wire `podOverrides`. |
-| `crds/` | Non-enterprise CRDs. Synced from `config/crd/bases/` via `make sync-chart-crds`. |
-| `templates/enterprise/*.yaml` | Enterprise CRDs gated by `enterprise.enabled`, synced by the same Makefile target. |
+| `crds/` | Core (non-enterprise) CRDs. Synced from `config/crd/bases/` via `make sync-chart-crds`. Never templated — installed before templates, never deleted on uninstall. |
+| `charts/omnia-ee-crds/crds/` | Enterprise CRDs (Arena, RolloutAnalysis, SessionPrivacyPolicy, ToolPolicy). In-tree subchart gated by `enterprise.enabled` (disabled subcharts are pruned before CRD collection, so community installs get none). Synced by the same `make sync-chart-crds` target. **EE CRDs are NOT Helm templates** — do not re-add `enterprise.enabled` guards or move them back to `templates/enterprise/` (that reintroduces #1796: CRD+CR-same-release install failure, uninstall deletion, reinstall ownership conflict). |
+| `templates/enterprise/*.yaml` | Enterprise **workloads and CR instances** gated by `enterprise.enabled` (arena-controller, default privacy policies, community-templates ArenaTemplateSource). CRD *definitions* live in the `omnia-ee-crds` subchart, not here. |
 | `tests/*_test.yaml` | `helm unittest` suites. Suite-level `values: [../values-chart-tests.yaml]` satisfies auth guardrails. |
 | `NOTES.txt` | Post-install guidance — includes a commented `podOverrides:` example on the sample AgentRuntime. |
 

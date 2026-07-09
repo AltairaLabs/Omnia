@@ -29,6 +29,13 @@ annotations:
   artifacthub.io/license: Apache-2.0
 # Optional observability stack dependencies
 dependencies:
+  # Enterprise CRDs (Arena, RolloutAnalysis, SessionPrivacyPolicy, ToolPolicy).
+  # In-tree subchart under charts/omnia-ee-crds so its CRDs install from crds/
+  # (before templates, never deleted on uninstall). The condition keeps EE CRDs
+  # off community installs — a disabled subchart is pruned before CRD collection.
+  - name: omnia-ee-crds
+    version: "0.1.0"
+    condition: enterprise.enabled
   - name: prometheus
     version: "~27.0"
     repository: https://prometheus-community.github.io/helm-charts
