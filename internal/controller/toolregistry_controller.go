@@ -24,9 +24,11 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 )
@@ -73,6 +75,10 @@ func (r *ToolRegistryReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	// Validate handlers and discover tools
 	discoveredTools, validationErrors := r.processHandlers(ctx, toolRegistry)
 
+	// Optionally probe endpoint reachability (off by default), which can flip a
+	// tool to Unavailable and drive the registry to Degraded/Failed.
+	r.probeTools(ctx, toolRegistry, discoveredTools)
+
 	// Update status with discovered tools
 	toolRegistry.Status.DiscoveredTools = discoveredTools
 	toolRegistry.Status.DiscoveredToolsCount = int32(len(discoveredTools))
@@ -100,6 +106,10 @@ func (r *ToolRegistryReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{}, err
 	}
 
+	// When probing is enabled, requeue to re-probe on the configured interval.
+	if requeue := probeRequeueAfter(toolRegistry.Spec.Probe); requeue > 0 {
+		return ctrl.Result{RequeueAfter: requeue}, nil
+	}
 	return ctrl.Result{}, nil
 }
 
@@ -339,7 +349,12 @@ func (r *ToolRegistryReconciler) determinePhase(discoveredTools []omniav1alpha1.
 func (r *ToolRegistryReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 3}).
-		For(&omniav1alpha1.ToolRegistry{}).
+		// Reconcile on spec changes only. The controller writes its own status
+		// (LastDiscoveryTime, and per-tool LastChecked when probing) every pass;
+		// without this predicate those status writes would re-enqueue Reconcile
+		// immediately, turning interval-paced probing into a continuous loop.
+		// Re-probing is instead driven by the RequeueAfter interval.
+		For(&omniav1alpha1.ToolRegistry{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
 		Named("toolregistry").
 		Complete(r)
 }
