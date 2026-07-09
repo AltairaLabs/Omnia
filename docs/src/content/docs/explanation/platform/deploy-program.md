@@ -144,6 +144,54 @@ The exact translation from adapter config to CRD fields lives in the external
 `promptarena-deploy-omnia` adapter; Omnia's side is the discovery profile it
 exports and the workspace REST API the adapter writes through.
 
+That workspace REST API — served by the dashboard at
+`POST /api/workspaces/{name}/agents` (and the matching PromptPack routes) — is a
+**verbatim passthrough**. It takes the AgentRuntime body the adapter sends and
+applies it to the Kubernetes API unchanged: no field translation, no
+schema-version adaptation, no server-side defaulting of the spec. The only
+validation is the AgentRuntime CRD's own OpenAPI/CEL schema, enforced by the
+apiserver. This keeps the platform decoupled from any one pack format — but it
+means **the adapter, not Omnia, owns the AgentRuntime schema it emits.**
+
+## Schema-version contract and upgrades
+
+Because the deploy path is a passthrough and the adapter lives in a separate repo
+on its own release train, **no single component owns the AgentRuntime schema
+contract at this boundary.** The adapter must emit the schema that matches the
+AgentRuntime **CRD + operator** version installed in the target cluster. When
+they drift, the failure mode is asymmetric and easy to misread:
+
+- **Adapter behind the cluster** (adapter emits an older shape the installed CRD
+  still accepts, but a newer operator can't reconcile): the deploy *succeeds*
+  (`201 Created`) but the agent **never comes up** — the AgentRuntime sits with an
+  empty `status` and no pods, and the only evidence is a repeating
+  `Reconciler error` in the operator log. Nothing fails at deploy time, so this
+  looks like a pack or cluster problem when it is really a version skew.
+- **Cluster ahead of the adapter** (CRD already upgraded, adapter still old): the
+  deploy **fails immediately** with the apiserver's validation error (e.g.
+  `422 spec.facades: Required value`), surfaced straight back to the adapter. This
+  is the loud, attributable failure — much easier to diagnose than the first case.
+
+Two rules follow:
+
+1. **Ship breaking CRD changes in lockstep.** A breaking AgentRuntime field change
+   (for example the `spec.facade` → `spec.facades[]` cutover) must land in the
+   in-app deploy wizard **and** the external `promptarena-deploy-omnia` adapter
+   together with the operator/CRD release — otherwise every adapter-deployed agent
+   silently stops reconciling on upgrade.
+2. **Upgrade the CRDs explicitly.** `helm upgrade` does **not** upgrade CRDs — Helm
+   installs the contents of `charts/omnia/crds/` only on first install and never
+   touches them again. After upgrading the operator you must apply the new CRDs
+   yourself (server-side, because they exceed the client-side apply annotation
+   limit):
+
+   ```bash
+   kubectl apply --server-side --force-conflicts -f charts/omnia/crds/
+   ```
+
+   Skipping this leaves a new operator binary reconciling objects against an old
+   CRD schema — the exact "created but never reconciles" trap above.
+
 ## Known config gaps
 
 The deploy adapter is newer than the Helm-based deployment path, and several

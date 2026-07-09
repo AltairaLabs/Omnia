@@ -166,9 +166,11 @@ Doctor read that status to dial the management plane. See
 | From | To | Protocol | Purpose |
 |------|----|----------|---------|
 | Dashboard | Facade | WebSocket | User chat messages, tool results; realtime reconnect includes `resume=<session_id>` query param for blip-resume |
-| Dashboard | Operator | HTTP | CRUD for K8s resources |
+| Dashboard | K8s API | K8s client | CRD CRUD (AgentRuntime, PromptPack, Provider, ToolRegistry, …) via a workspace-scoped client — **verbatim passthrough**, no server-side schema translation (`dashboard/src/lib/k8s/crd-operations.ts`, `crd-route-factory.ts`). NOT via the operator. |
+| Dashboard | Operator | HTTP | Proxied reads/writes to backend REST APIs (e.g. Session API) |
 | Dashboard | LSP | WebSocket | Code intelligence for Arena |
 | Dashboard | Dev Console | WebSocket | Interactive agent testing |
+| `promptarena-deploy-omnia` (external adapter) | Dashboard | HTTP | Deploy program: creates PromptPack + AgentRuntime through the workspace CRD REST API with a workspace-scoped `omnia_sk_` token. The adapter authors the AgentRuntime body — see the schema-version contract in [deploy-program.md](docs/src/content/docs/explanation/platform/deploy-program.md). |
 | Facade | Runtime | gRPC (bidirectional) | LLM conversation stream; duplex audio transport (persistent `Converse` stream opened per audio session, carrying `AudioInputChunk` inbound and `MediaChunk` outbound) |
 | Facade | Session API | HTTP | Session recording — conversation messages are captured off the gRPC bus by a protocol-agnostic RuntimeClient interceptor (#1630), then written via the session HTTP client |
 | Facade | Redis | Direct | Realtime session route table (`rt:route:<session_id>`→podIP, TTL=grace period) for reconnect routing in multi-replica deployments |
