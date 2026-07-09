@@ -2168,6 +2168,16 @@ export const crdConstraints: Record<string, Record<string, FieldConstraint>> =
         "client"
       ],
       "required": true
+    },
+    "spec.probe.enabled": {
+      "type": "boolean",
+      "required": true
+    },
+    "spec.probe.interval": {
+      "type": "string"
+    },
+    "spec.probe.timeout": {
+      "type": "string"
     }
   },
   "Provider": {

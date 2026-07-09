@@ -566,6 +566,30 @@ type ToolRegistrySpec struct {
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinItems=1
 	Handlers []HandlerDefinition `json:"handlers"`
+
+	// probe optionally enables periodic reachability probing of tool endpoints.
+	// When disabled (the default), a tool's status reflects configuration
+	// validity only. When enabled, the controller TCP-dials each tool's endpoint
+	// and marks it Available or Unavailable, which drives the registry phase
+	// (Ready / Degraded / Failed).
+	// +optional
+	Probe *ProbeConfig `json:"probe,omitempty"`
+}
+
+// ProbeConfig configures reachability probing of a ToolRegistry's tool endpoints.
+type ProbeConfig struct {
+	// enabled turns on reachability probing. Off by default.
+	Enabled bool `json:"enabled"`
+
+	// interval is how often endpoints are re-probed.
+	// +kubebuilder:default="60s"
+	// +optional
+	Interval *metav1.Duration `json:"interval,omitempty"`
+
+	// timeout bounds each endpoint's TCP dial.
+	// +kubebuilder:default="5s"
+	// +optional
+	Timeout *metav1.Duration `json:"timeout,omitempty"`
 }
 
 // DiscoveredTool represents a tool discovered from a handler

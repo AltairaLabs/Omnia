@@ -279,6 +279,19 @@ export interface ToolRegistrySpec {
     /** type specifies the handler protocol. */
     type: "http" | "openapi" | "grpc" | "mcp" | "client";
   }[];
+  /** probe optionally enables periodic reachability probing of tool endpoints.
+   * When disabled (the default), a tool's status reflects configuration
+   * validity only. When enabled, the controller TCP-dials each tool's endpoint
+   * and marks it Available or Unavailable, which drives the registry phase
+   * (Ready / Degraded / Failed). */
+  probe?: {
+    /** enabled turns on reachability probing. Off by default. */
+    enabled: boolean;
+    /** interval is how often endpoints are re-probed. */
+    interval?: string;
+    /** timeout bounds each endpoint's TCP dial. */
+    timeout?: string;
+  };
 }
 
 export interface ToolRegistryStatus {

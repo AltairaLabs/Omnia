@@ -651,6 +651,28 @@ spec:
                       && (has(self.openAPIConfig.authType) || has(self.openAPIConfig.authSecretRef)))))'
                 minItems: 1
                 type: array
+              probe:
+                description: |-
+                  probe optionally enables periodic reachability probing of tool endpoints.
+                  When disabled (the default), a tool's status reflects configuration
+                  validity only. When enabled, the controller TCP-dials each tool's endpoint
+                  and marks it Available or Unavailable, which drives the registry phase
+                  (Ready / Degraded / Failed).
+                properties:
+                  enabled:
+                    description: enabled turns on reachability probing. Off by default.
+                    type: boolean
+                  interval:
+                    default: 60s
+                    description: interval is how often endpoints are re-probed.
+                    type: string
+                  timeout:
+                    default: 5s
+                    description: timeout bounds each endpoint's TCP dial.
+                    type: string
+                required:
+                - enabled
+                type: object
             required:
             - handlers
             type: object

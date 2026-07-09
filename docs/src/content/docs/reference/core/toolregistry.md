@@ -407,17 +407,47 @@ Current phase of the ToolRegistry:
 |-------|-------------|
 | `Pending` | Initial state before the first reconcile completes |
 | `Ready` | Every discovered tool is `Available` |
-| `Degraded` | Some tools `Available`, some `Unavailable`. Reserved for backend health — **not currently emitted** (see note) |
+| `Degraded` | Some tools `Available`, some `Unavailable` (only when [probing](#probing) is enabled) |
 | `Failed` | A handler failed validation, or no tools were discovered |
 
-:::note[Status is config-level, not a live health check]
-The controller marks a tool `Available` when its handler config is valid and the
-endpoint resolves — it does **not** probe the backend for reachability. `phase:
-Ready` means "the configuration is valid", not "the backend is up". Because there
-is no reachability probe today, no tool is ever marked `Unavailable`, so
-`Degraded` is not currently emitted — it is reserved for a future probe-backed
-status.
+:::note[Status is config-level unless you enable probing]
+By default the controller marks a tool `Available` when its handler config is
+valid and the endpoint resolves — it does **not** contact the backend, so
+`phase: Ready` means "the configuration is valid", not "the backend is up", and
+`Degraded`/`Unavailable` are never emitted. Enable [`spec.probe`](#probing) to have
+the controller TCP-probe each endpoint's reachability and reflect it in status.
 :::
+
+## Probing
+
+By default a tool's status reflects **configuration validity** only. Set
+`spec.probe.enabled: true` to have the controller periodically **TCP-dial** each
+tool's resolved endpoint and mark it `Available` or `Unavailable`, which drives
+the registry `phase` (`Ready` when all reachable, `Degraded` when some are not,
+`Failed` when none are). It is a reachability check (a TCP connect), not a tool
+invocation, so it has no side effects on the backend.
+
+```yaml
+spec:
+  probe:
+    enabled: true
+    interval: "60s"   # how often to re-probe (default 60s)
+    timeout: "5s"     # per-endpoint dial timeout (default 5s)
+  handlers:
+    - name: order-lookup
+      # …
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | bool | `false` | Turn on reachability probing |
+| `interval` | string | `60s` | How often endpoints are re-probed |
+| `timeout` | string | `5s` | Per-endpoint TCP dial timeout |
+
+Client tools (`client://browser`) and `stdio` MCP handlers have no network
+address and are never probed (they stay `Available`). Probing checks that the
+port accepts a TCP connection — it does not verify the tool actually works;
+[Test a tool](/how-to/tools/test-tools/) exercises the real call.
 
 ### `discoveredToolsCount`
 

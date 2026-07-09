@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"net"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -91,13 +92,14 @@ var _ = Describe("ToolRegistry Controller", func() {
 				Scheme: k8sClient.Scheme(),
 			}
 
-			_, err := reconciler.Reconcile(ctx, reconcile.Request{
+			result, err := reconciler.Reconcile(ctx, reconcile.Request{
 				NamespacedName: types.NamespacedName{
 					Name:      registryName,
 					Namespace: registryNamespace,
 				},
 			})
 			Expect(err).NotTo(HaveOccurred())
+			Expect(result.RequeueAfter).To(BeZero(), "no probe configured should not requeue")
 
 			By("checking the updated status")
 			updatedTR := &omniav1alpha1.ToolRegistry{}
@@ -850,6 +852,89 @@ var _ = Describe("ToolRegistry Controller", func() {
 			}
 			tools := reconciler.discoverToolsFromHandler(handler, "client://browser")
 			Expect(tools).To(BeNil())
+		})
+	})
+
+	Context("When probing is enabled", func() {
+		var (
+			toolRegistry *omniav1alpha1.ToolRegistry
+			listener     net.Listener
+			closedAddr   string
+		)
+
+		BeforeEach(func() {
+			By("starting a reachable listener and reserving a closed port")
+			var err error
+			listener, err = net.Listen("tcp", "127.0.0.1:0")
+			Expect(err).NotTo(HaveOccurred())
+			go func() {
+				for {
+					c, aerr := listener.Accept()
+					if aerr != nil {
+						return
+					}
+					_ = c.Close()
+				}
+			}()
+			l2, err := net.Listen("tcp", "127.0.0.1:0")
+			Expect(err).NotTo(HaveOccurred())
+			closedAddr = l2.Addr().String()
+			Expect(l2.Close()).To(Succeed())
+
+			mkHandler := func(name, endpoint string) omniav1alpha1.HandlerDefinition {
+				return omniav1alpha1.HandlerDefinition{
+					Name:       name,
+					Type:       omniav1alpha1.HandlerTypeHTTP,
+					HTTPConfig: &omniav1alpha1.HTTPConfig{Endpoint: endpoint},
+					Tool: &omniav1alpha1.ToolDefinition{
+						Name: name + "_tool", Description: "d",
+						InputSchema: apiextensionsv1.JSON{Raw: []byte(`{"type":"object"}`)},
+					},
+				}
+			}
+			toolRegistry = &omniav1alpha1.ToolRegistry{
+				ObjectMeta: metav1.ObjectMeta{Name: "probe-registry", Namespace: registryNamespace},
+				Spec: omniav1alpha1.ToolRegistrySpec{
+					Probe: &omniav1alpha1.ProbeConfig{
+						Enabled:  true,
+						Interval: &metav1.Duration{Duration: 30 * 1000 * 1000 * 1000}, // 30s
+						Timeout:  &metav1.Duration{Duration: 1000 * 1000 * 1000},      // 1s
+					},
+					Handlers: []omniav1alpha1.HandlerDefinition{
+						mkHandler("reachable", "http://"+listener.Addr().String()+"/x"),
+						mkHandler("unreachable", "http://"+closedAddr+"/x"),
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, toolRegistry)).To(Succeed())
+		})
+
+		AfterEach(func() {
+			_ = listener.Close()
+			resource := &omniav1alpha1.ToolRegistry{}
+			if err := k8sClient.Get(ctx, types.NamespacedName{Name: "probe-registry", Namespace: registryNamespace}, resource); err == nil {
+				Expect(k8sClient.Delete(ctx, resource)).To(Succeed())
+			}
+		})
+
+		It("should mark endpoints Available/Unavailable, report Degraded, and requeue", func() {
+			reconciler := &ToolRegistryReconciler{Client: k8sClient, Scheme: k8sClient.Scheme()}
+			result, err := reconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: types.NamespacedName{Name: "probe-registry", Namespace: registryNamespace},
+			})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result.RequeueAfter).To(BeNumerically(">", 0), "probing enabled should requeue")
+
+			updated := &omniav1alpha1.ToolRegistry{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: "probe-registry", Namespace: registryNamespace}, updated)).To(Succeed())
+			Expect(updated.Status.Phase).To(Equal(omniav1alpha1.ToolRegistryPhaseDegraded))
+
+			byName := map[string]string{}
+			for _, dt := range updated.Status.DiscoveredTools {
+				byName[dt.HandlerName] = dt.Status
+			}
+			Expect(byName["reachable"]).To(Equal(omniav1alpha1.ToolStatusAvailable))
+			Expect(byName["unreachable"]).To(Equal(omniav1alpha1.ToolStatusUnavailable))
 		})
 	})
 })
