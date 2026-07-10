@@ -328,7 +328,7 @@ func TestBrokerHandler_IdentityRoleGate(t *testing.T) {
 				{
 					Name: "role-gate",
 					Deny: omniav1alpha1.PolicyRuleDeny{
-						CEL:     "identity.role != 'admin'",
+						CEL:     "identity.claims.role != 'admin'",
 						Message: "admin role required",
 					},
 				},
@@ -351,7 +351,7 @@ func TestBrokerHandler_IdentityRoleGate(t *testing.T) {
 	t.Run("viewer role denied", func(t *testing.T) {
 		req := newDecisionRequest(t, DecisionRequest{
 			Headers:  headers,
-			Identity: &IdentityPayload{Role: "viewer"},
+			Identity: &IdentityPayload{Claims: map[string]string{"role": "viewer"}},
 		})
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, req)
@@ -368,7 +368,7 @@ func TestBrokerHandler_IdentityRoleGate(t *testing.T) {
 	t.Run("admin role allowed", func(t *testing.T) {
 		req := newDecisionRequest(t, DecisionRequest{
 			Headers:  headers,
-			Identity: &IdentityPayload{Role: "admin"},
+			Identity: &IdentityPayload{Claims: map[string]string{"role": "admin"}},
 		})
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, req)

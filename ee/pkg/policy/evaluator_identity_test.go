@@ -86,17 +86,40 @@ func TestEvaluateWithContext_IdentityOrigin_NoIdentity(t *testing.T) {
 	}
 }
 
-// TestEvaluateWithContext_IdentityRole_Viewer verifies identity.role is
-// usable from CEL.
+// TestEvaluateWithContext_IdentityRole_Viewer verifies the caller's role is
+// reachable via identity.claims.role (the CEL activation no longer exposes a
+// dedicated identity.role key — see evaluator.go's identityActivation).
 func TestEvaluateWithContext_IdentityRole_Viewer(t *testing.T) {
 	identity := &omniapolicy.AuthenticatedIdentity{
 		Origin: omniapolicy.OriginOIDC,
-		Role:   omniapolicy.RoleViewer,
+		Claims: map[string]string{"role": omniapolicy.RoleViewer},
 	}
 
-	decision := evalIdentityRule(t, `identity.role == "viewer"`, identity)
+	decision := evalIdentityRule(t, `identity.claims.role == "viewer"`, identity)
 	if decision.Allowed {
-		t.Error("rule should have denied when identity.role == viewer")
+		t.Error("rule should have denied when identity.claims.role == viewer")
+	}
+	if decision.DeniedBy != "identity-rule" {
+		t.Errorf("DeniedBy = %q, want identity-rule", decision.DeniedBy)
+	}
+}
+
+// TestEvaluateWithContext_IdentityRole_NotExposedDirectly verifies
+// identity.role is no longer a valid CEL key on the identity map — rules
+// still referencing it must fail closed (eval error -> onFailure=deny by
+// default), not silently evaluate to a zero value.
+func TestEvaluateWithContext_IdentityRole_NotExposedDirectly(t *testing.T) {
+	identity := &omniapolicy.AuthenticatedIdentity{
+		Origin: omniapolicy.OriginOIDC,
+		Claims: map[string]string{"role": omniapolicy.RoleAdmin},
+	}
+
+	decision := evalIdentityRule(t, `identity.role == "admin"`, identity)
+	if decision.Allowed {
+		t.Error("rule referencing removed identity.role key should fail closed (deny), not allow")
+	}
+	if decision.Error == nil {
+		t.Error("expected a CEL evaluation error for the removed identity.role key")
 	}
 }
 

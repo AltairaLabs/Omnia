@@ -459,7 +459,6 @@ const (
 	identityFieldEndUser   = "endUser"
 	identityFieldWorkspace = "workspace"
 	identityFieldAgent     = "agent"
-	identityFieldRole      = "role"
 	identityFieldClaims    = "claims"
 )
 
@@ -476,7 +475,6 @@ func identityActivation(ctx context.Context) map[string]interface{} {
 			identityFieldEndUser:   "",
 			identityFieldWorkspace: "",
 			identityFieldAgent:     "",
-			identityFieldRole:      "",
 			identityFieldClaims:    map[string]string{},
 		}
 	}
@@ -490,7 +488,6 @@ func identityActivation(ctx context.Context) map[string]interface{} {
 		identityFieldEndUser:   id.EndUser,
 		identityFieldWorkspace: id.Workspace,
 		identityFieldAgent:     id.Agent,
-		identityFieldRole:      id.Role,
 		identityFieldClaims:    claims,
 	}
 }
