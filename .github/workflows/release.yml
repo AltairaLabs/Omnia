@@ -119,6 +119,9 @@ jobs:
           - image: omnia-policy-broker
             dockerfile: ee/Dockerfile.policy-broker
             context: .
+          - image: omnia-privacy-api
+            dockerfile: ee/Dockerfile.privacy-api
+            context: .
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -210,6 +213,7 @@ jobs:
           - omnia-eval-worker
           - omnia-promptkit-lsp
           - omnia-policy-broker
+          - omnia-privacy-api
     steps:
       - name: Compute image ref (GHCR requires lowercase)
         id: ref
@@ -588,6 +592,8 @@ jobs:
           - `ghcr.io/altairalabs/omnia-arena-dev-console:${{ needs.parse-version.outputs.version }}`
           - `ghcr.io/altairalabs/omnia-eval-worker:${{ needs.parse-version.outputs.version }}`
           - `ghcr.io/altairalabs/omnia-promptkit-lsp:${{ needs.parse-version.outputs.version }}`
+          - `ghcr.io/altairalabs/omnia-policy-broker:${{ needs.parse-version.outputs.version }}` (CEL tool-policy decision sidecar)
+          - `ghcr.io/altairalabs/omnia-privacy-api:${{ needs.parse-version.outputs.version }}` (consent/DSAR/audit hub)
 
           ## Documentation
 

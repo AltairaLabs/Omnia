@@ -5603,16 +5603,17 @@ spec:
             - message: spec.outputFormat is only valid when spec.mode is 'function'
               rule: self.mode == 'function' || !has(self.outputFormat)
             - message: spec.facades must not contain duplicate facade types
-              rule: self.facades.all(f, self.facades.exists_one(g, g.type == f.type))
+              rule: '!has(self.facades) || self.facades.all(f, self.facades.exists_one(g,
+                g.type == f.type))'
             - message: mode 'agent' allows only 'websocket' and 'a2a' facades
-              rule: self.mode != 'agent' || self.facades.all(f, f.type == 'websocket'
-                || f.type == 'a2a')
+              rule: '!has(self.facades) || self.mode != ''agent'' || self.facades.all(f,
+                f.type == ''websocket'' || f.type == ''a2a'')'
             - message: mode 'function' allows only 'rest' and 'mcp' facades
-              rule: self.mode != 'function' || self.facades.all(f, f.type == 'rest'
-                || f.type == 'mcp')
+              rule: '!has(self.facades) || self.mode != ''function'' || self.facades.all(f,
+                f.type == ''rest'' || f.type == ''mcp'')'
             - message: mode 'function' requires exactly one 'rest' facade
-              rule: self.mode != 'function' || self.facades.exists_one(f, f.type ==
-                'rest')
+              rule: '!has(self.facades) || self.mode != ''function'' || self.facades.exists_one(f,
+                f.type == ''rest'')'
           status:
             description: status defines the observed state of AgentRuntime
             properties:

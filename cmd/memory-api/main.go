@@ -938,9 +938,11 @@ func buildIngestOptions(f *flags, log logr.Logger) memoryapi.IngestOptions {
 // front; cross-namespace callers (dashboard) stay on the exact-subject list.
 //
 // The memory-api ServiceAccount must have RBAC to create TokenReviews
-// (`authentication.k8s.io/tokenreviews: create`). The Role/RoleBinding is wired
-// in the Helm chart (a later task); without it the reviewer's TokenReview calls
-// fail closed (401).
+// (`authentication.k8s.io/tokenreviews: create`). The ClusterRole ships in the
+// Helm chart (session-api-tokenreview-clusterrole.yaml) and the operator binds
+// each managed memory-api's effective ServiceAccount to it at reconcile time
+// (#1730, #1817); without that binding the reviewer's TokenReview calls fail
+// closed (401).
 func buildServiceAuth(f *flags, log logr.Logger) (serviceauth.TokenReviewer, []string, []string, error) {
 	if !f.authEnabled {
 		log.Info("WARNING: memory-api JSON API is UNAUTHENTICATED " +

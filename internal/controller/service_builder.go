@@ -619,6 +619,21 @@ func serviceAccountName(deploymentName string) string {
 	return deploymentName
 }
 
+// podServiceAccountName returns the ServiceAccount a per-workspace service pod
+// (session-api / memory-api) actually runs as: podOverrides.serviceAccountName
+// when set (mirroring podoverrides.ApplyPod, which replaces the operator default
+// only when the override is non-empty), otherwise the default per-deployment SA.
+// RBAC bindings (tokenreview, enterprise-reader) must target this effective SA —
+// binding the default SA leaves the pod's real SA (e.g. a Workload-Identity SA
+// used for keyless embeddings) without the grant, failing service auth and the
+// privacy-policy watcher closed (#1817).
+func podServiceAccountName(defaultName string, overrides *omniav1alpha1.PodOverrides) string {
+	if overrides != nil && overrides.ServiceAccountName != "" {
+		return overrides.ServiceAccountName
+	}
+	return defaultName
+}
+
 // ServiceURL returns the in-cluster HTTP URL for the given service.
 func ServiceURL(serviceName, namespace string) string {
 	return fmt.Sprintf("http://%s.%s:%d", serviceName, namespace, servicePort)

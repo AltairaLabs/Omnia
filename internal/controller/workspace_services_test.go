@@ -259,6 +259,73 @@ func TestReconcileServices_TokenReviewBindingsForBothSAs(t *testing.T) {
 	g.Expect(memoryCRB.Subjects[0].Namespace).To(Equal("myws-ns"))
 }
 
+// TestReconcileServices_BindingsTargetOverriddenServiceAccount verifies that
+// when a service group overrides its pod ServiceAccount (e.g. memory-api runs
+// as a Workload-Identity SA for keyless embeddings), the tokenreview and
+// enterprise-reader ClusterRoleBindings target the OVERRIDDEN SA the pod
+// actually runs as — not the default per-deployment SA, which the pod never
+// uses. Binding the default SA leaves the real SA without the grant, failing
+// service auth (TokenReview 401) and the privacy-policy watcher closed (#1817).
+func TestReconcileServices_BindingsTargetOverriddenServiceAccount(t *testing.T) {
+	g := NewWithT(t)
+	scheme := testScheme()
+
+	const wiSA = "omnia-runtime-wi"
+	ws := newTestWorkspace("myws", "myws-ns", []omniav1alpha1.WorkspaceServiceGroup{
+		{
+			Name: "primary",
+			Mode: omniav1alpha1.ServiceModeManaged,
+			Memory: &omniav1alpha1.MemoryServiceConfig{
+				Database: omniav1alpha1.DatabaseConfig{
+					SecretRef: corev1.LocalObjectReference{Name: "db-secret"},
+				},
+				PodOverrides: &omniav1alpha1.PodOverrides{ServiceAccountName: wiSA},
+			},
+			Session: &omniav1alpha1.SessionServiceConfig{
+				Database: omniav1alpha1.DatabaseConfig{
+					SecretRef: corev1.LocalObjectReference{Name: "db-secret"},
+				},
+			},
+		},
+	})
+
+	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "myws-ns"}}
+	r := newTestReconciler(scheme, ws, ns)
+	r.ServiceBuilder.ServiceAuth = ServiceAuthConfig{Enabled: true}
+	r.SessionAPITokenReviewClusterRole = "omnia-session-api-tokenreview"
+	r.MemoryEnterpriseReaderClusterRole = "omnia-memory-enterprise-reader"
+
+	ctx := context.Background()
+	err := r.reconcileServices(ctx, ws)
+	g.Expect(err).NotTo(HaveOccurred())
+
+	// memory-api's tokenreview binding must target the overridden WI SA, keyed
+	// by that SA name — NOT the default memory-myws-primary SA.
+	memoryTR := &rbacv1.ClusterRoleBinding{}
+	err = r.Get(ctx, types.NamespacedName{Name: "session-tokenreview-myws-ns-" + wiSA}, memoryTR)
+	g.Expect(err).NotTo(HaveOccurred(), "tokenreview binding must target the overridden memory-api SA")
+	g.Expect(memoryTR.Subjects).To(HaveLen(1))
+	g.Expect(memoryTR.Subjects[0].Name).To(Equal(wiSA))
+	g.Expect(memoryTR.Subjects[0].Namespace).To(Equal("myws-ns"))
+
+	// ...and its enterprise-reader binding likewise targets the WI SA.
+	memoryER := &rbacv1.ClusterRoleBinding{}
+	err = r.Get(ctx, types.NamespacedName{Name: "memory-enterprise-reader-myws-ns-" + wiSA}, memoryER)
+	g.Expect(err).NotTo(HaveOccurred(), "enterprise-reader binding must target the overridden memory-api SA")
+	g.Expect(memoryER.Subjects[0].Name).To(Equal(wiSA))
+
+	// No binding must be created against the unused default memory SA.
+	staleTR := &rbacv1.ClusterRoleBinding{}
+	err = r.Get(ctx, types.NamespacedName{Name: "session-tokenreview-myws-ns-memory-myws-primary"}, staleTR)
+	g.Expect(apierrors.IsNotFound(err)).To(BeTrue(), "no tokenreview binding against the unused default memory SA")
+
+	// session-api keeps its default SA (no override), so its binding is unchanged.
+	sessionTR := &rbacv1.ClusterRoleBinding{}
+	err = r.Get(ctx, types.NamespacedName{Name: "session-tokenreview-myws-ns-session-myws-primary"}, sessionTR)
+	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(sessionTR.Subjects[0].Name).To(Equal("session-myws-primary"))
+}
+
 // TestReconcileServices_MemoryTokenReviewBindingCreateError verifies that when
 // creating the memory-api ClusterRoleBinding fails (e.g. the API server
 // rejects it), reconcileManagedServiceGroup surfaces the error wrapped with
