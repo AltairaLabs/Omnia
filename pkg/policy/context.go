@@ -42,8 +42,6 @@ const (
 	ContextKeyRequestID contextKey = "omnia-request-id"
 	// ContextKeyUserID holds the authenticated user identity.
 	ContextKeyUserID contextKey = "omnia-user-id"
-	// ContextKeyUserRoles holds comma-separated user roles.
-	ContextKeyUserRoles contextKey = "omnia-user-roles"
 	// ContextKeyUserEmail holds the user email address.
 	ContextKeyUserEmail contextKey = "omnia-user-email"
 	// ContextKeyAuthorization holds the JWT token for passthrough.
@@ -62,9 +60,9 @@ const (
 	ContextKeyConsentLayer contextKey = "omnia-consent-layer"
 	// ContextKeyIdentity holds the AuthenticatedIdentity produced by the
 	// facade's auth chain. Not propagated on the wire — the flat UserID /
-	// UserRoles / UserEmail / Claims fields carry what downstream services
-	// need; Identity is retained in-process for the facade and for any
-	// handler that wants richer identity context.
+	// UserEmail / Claims fields carry what downstream services need;
+	// Identity is retained in-process for the facade and for any handler
+	// that wants richer identity context.
 	ContextKeyIdentity contextKey = "omnia-identity"
 	// ContextKeyOrigin holds the validator origin that admitted the request
 	// (one of the Origin* constants). Propagated to the runtime so
@@ -88,8 +86,6 @@ const (
 	HeaderRequestID = "x-omnia-request-id"
 	// HeaderUserID identifies the authenticated user.
 	HeaderUserID = "x-omnia-user-id"
-	// HeaderUserRoles holds the user's roles.
-	HeaderUserRoles = "x-omnia-user-roles"
 	// HeaderUserEmail holds the user's email.
 	HeaderUserEmail = "x-omnia-user-email"
 	// HeaderAuthorization holds the JWT token.
@@ -139,8 +135,6 @@ func CanonicalClaimHeader(claim string) string {
 const (
 	// IstioHeaderUserID is the Istio header for user identity.
 	IstioHeaderUserID = "x-user-id"
-	// IstioHeaderUserRoles is the Istio header for user roles.
-	IstioHeaderUserRoles = "x-user-roles"
 	// IstioHeaderUserEmail is the Istio header for user email.
 	IstioHeaderUserEmail = "x-user-email"
 )
@@ -160,7 +154,6 @@ type PropagationFields struct {
 	SessionID     string
 	RequestID     string
 	UserID        string
-	UserRoles     string
 	UserEmail     string
 	Authorization string
 	Provider      string
@@ -180,7 +173,7 @@ type PropagationFields struct {
 	ConsentLayer string
 	// Identity is the authenticated identity produced by the facade's auth
 	// chain. When non-nil, it is the source of truth for UserID /
-	// UserRoles / UserEmail / Claims — callers that build PropagationFields
+	// UserEmail / Claims — callers that build PropagationFields
 	// from an Identity should populate those flat fields from it so
 	// downstream consumers (gRPC headers, session logging) keep working
 	// unchanged.
@@ -213,11 +206,6 @@ func WithRequestID(ctx context.Context, id string) context.Context {
 // WithUserID returns a context with the user ID set.
 func WithUserID(ctx context.Context, id string) context.Context {
 	return context.WithValue(ctx, ContextKeyUserID, id)
-}
-
-// WithUserRoles returns a context with the user roles set.
-func WithUserRoles(ctx context.Context, roles string) context.Context {
-	return context.WithValue(ctx, ContextKeyUserRoles, roles)
 }
 
 // WithUserEmail returns a context with the user email set.
@@ -312,7 +300,6 @@ func WithPropagationFields(ctx context.Context, fields *PropagationFields) conte
 	ctx = setIfNonEmpty(ctx, ContextKeySessionID, fields.SessionID)
 	ctx = setIfNonEmpty(ctx, ContextKeyRequestID, fields.RequestID)
 	ctx = setIfNonEmpty(ctx, ContextKeyUserID, fields.UserID)
-	ctx = setIfNonEmpty(ctx, ContextKeyUserRoles, fields.UserRoles)
 	ctx = setIfNonEmpty(ctx, ContextKeyUserEmail, fields.UserEmail)
 	ctx = setIfNonEmpty(ctx, ContextKeyAuthorization, fields.Authorization)
 	ctx = setIfNonEmpty(ctx, ContextKeyProvider, fields.Provider)
@@ -350,7 +337,6 @@ func ExtractPropagationFields(ctx context.Context) PropagationFields {
 		SessionID:     getString(ctx, ContextKeySessionID),
 		RequestID:     getString(ctx, ContextKeyRequestID),
 		UserID:        getString(ctx, ContextKeyUserID),
-		UserRoles:     getString(ctx, ContextKeyUserRoles),
 		UserEmail:     getString(ctx, ContextKeyUserEmail),
 		Authorization: getString(ctx, ContextKeyAuthorization),
 		Provider:      getString(ctx, ContextKeyProvider),
@@ -399,9 +385,6 @@ func RequestID(ctx context.Context) string { return getString(ctx, ContextKeyReq
 // UserID extracts the user ID from context.
 func UserID(ctx context.Context) string { return getString(ctx, ContextKeyUserID) }
 
-// UserRoles extracts the user roles from context.
-func UserRoles(ctx context.Context) string { return getString(ctx, ContextKeyUserRoles) }
-
 // Authorization extracts the authorization token from context.
 func Authorization(ctx context.Context) string { return getString(ctx, ContextKeyAuthorization) }
 
@@ -430,7 +413,6 @@ var headerKeyMap = []struct {
 	{ContextKeySessionID, HeaderSessionID},
 	{ContextKeyRequestID, HeaderRequestID},
 	{ContextKeyUserID, HeaderUserID},
-	{ContextKeyUserRoles, HeaderUserRoles},
 	{ContextKeyUserEmail, HeaderUserEmail},
 	// ContextKeyAuthorization is deliberately NOT propagated outbound. The
 	// caller's inbound bearer token must never be re-emitted as the outbound

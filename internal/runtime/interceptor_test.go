@@ -34,7 +34,6 @@ func TestExtractPolicyFromMetadata(t *testing.T) {
 		policy.HeaderSessionID:     "sess-123",
 		policy.HeaderRequestID:     "req-456",
 		policy.HeaderUserID:        "user@example.com",
-		policy.HeaderUserRoles:     "admin,viewer",
 		policy.HeaderUserEmail:     "user@example.com",
 		policy.HeaderAuthorization: "Bearer token",
 		policy.HeaderProvider:      "claude",
@@ -54,7 +53,6 @@ func TestExtractPolicyFromMetadata(t *testing.T) {
 	assert.Equal(t, "sess-123", fields.SessionID)
 	assert.Equal(t, "req-456", fields.RequestID)
 	assert.Equal(t, "user@example.com", fields.UserID)
-	assert.Equal(t, "admin,viewer", fields.UserRoles)
 	assert.Equal(t, "user@example.com", fields.UserEmail)
 	assert.Equal(t, "Bearer token", fields.Authorization)
 	assert.Equal(t, "claude", fields.Provider)

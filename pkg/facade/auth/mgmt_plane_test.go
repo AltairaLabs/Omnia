@@ -182,9 +182,6 @@ func TestMgmtPlaneValidator_ValidToken(t *testing.T) {
 	if got, want := id.EndUser, id.Subject; got != want {
 		t.Errorf("EndUser = %q, want %q (same as Subject for mgmt-plane)", got, want)
 	}
-	if got, want := id.Role, policy.RoleAdmin; got != want {
-		t.Errorf("Role = %q, want %q", got, want)
-	}
 	if got, want := id.Agent, "test-agent"; got != want {
 		t.Errorf("Agent = %q, want %q", got, want)
 	}

@@ -182,9 +182,7 @@ func TestServerAuth_ValidToken_AttachesIdentity(t *testing.T) {
 		require.NotNil(t, fields.Identity, "expected Identity on PropagationFields")
 		assert.Equal(t, policy.OriginManagementPlane, fields.Identity.Origin)
 		assert.Equal(t, "admin@example.com", fields.Identity.Subject)
-		assert.Equal(t, policy.RoleAdmin, fields.Identity.Role)
 		assert.NotEmpty(t, fields.UserID, "UserID should be pseudonymised EndUser")
-		assert.Equal(t, policy.RoleAdmin, fields.UserRoles)
 	case <-time.After(2 * time.Second):
 		t.Fatal("handler did not run")
 	}
@@ -341,7 +339,6 @@ func TestServerAuth_IdentityClaims_PropagatedToHeaders(t *testing.T) {
 		Origin:  policy.OriginOIDC,
 		Subject: "alice@example.com",
 		EndUser: "alice@example.com",
-		Role:    policy.RoleEditor,
 		Claims: map[string]string{
 			"team":   "finance",
 			"region": "us-east",
@@ -463,7 +460,6 @@ func TestServerAuth_NonMgmtPlane_IgnoresUserIDHeader(t *testing.T) {
 		Origin:  policy.OriginOIDC,
 		Subject: realUser,
 		EndUser: realUser,
-		Role:    policy.RoleEditor,
 	}
 	chain := auth.Chain{&stubClaimValidator{id: want}}
 

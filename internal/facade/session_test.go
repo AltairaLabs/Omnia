@@ -449,7 +449,6 @@ func TestBuildSessionState_Full(t *testing.T) {
 	c := &Connection{
 		userID:    "alice",
 		userEmail: "alice@example.com",
-		userRoles: "admin,editor",
 	}
 	cfg := ServerConfig{
 		PromptPackName:    "my-pack",
@@ -461,9 +460,6 @@ func TestBuildSessionState_Full(t *testing.T) {
 	}
 	if _, ok := state["user.email"]; ok {
 		t.Error("user.email should not be persisted in session state")
-	}
-	if state["user.roles"] != "admin,editor" {
-		t.Errorf("user.roles = %q", state["user.roles"])
 	}
 	if state["promptpack.name"] != "my-pack" {
 		t.Errorf("promptpack.name = %q", state["promptpack.name"])

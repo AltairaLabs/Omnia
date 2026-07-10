@@ -44,7 +44,6 @@ type Connection struct {
 
 	// User identity fields extracted from Istio-injected headers on WebSocket upgrade.
 	userID        string
-	userRoles     string
 	userEmail     string
 	authorization string // Original JWT token for passthrough
 

@@ -108,7 +108,6 @@ func TestContextPropagationHeaders(t *testing.T) {
 		SessionID: "sess-123",
 		RequestID: "req-456",
 		UserID:    "user-789",
-		UserRoles: "admin,editor",
 		UserEmail: "user@example.com",
 		Provider:  "openai",
 		Model:     "gpt-4",
@@ -127,7 +126,6 @@ func TestContextPropagationHeaders(t *testing.T) {
 	assert.Equal(t, "sess-123", headers[policyctx.HeaderSessionID])
 	assert.Equal(t, "req-456", headers[policyctx.HeaderRequestID])
 	assert.Equal(t, "user-789", headers[policyctx.HeaderUserID])
-	assert.Equal(t, "admin,editor", headers[policyctx.HeaderUserRoles])
 	assert.Equal(t, "user@example.com", headers[policyctx.HeaderUserEmail])
 	assert.Equal(t, "openai", headers[policyctx.HeaderProvider])
 	assert.Equal(t, "gpt-4", headers[policyctx.HeaderModel])

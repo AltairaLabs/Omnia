@@ -80,7 +80,6 @@ func extractPolicyFromMetadata(ctx context.Context) context.Context {
 		SessionID:     firstValue(md, policy.HeaderSessionID),
 		RequestID:     firstValue(md, policy.HeaderRequestID),
 		UserID:        firstValue(md, policy.HeaderUserID),
-		UserRoles:     firstValue(md, policy.HeaderUserRoles),
 		UserEmail:     firstValue(md, policy.HeaderUserEmail),
 		Authorization: firstValue(md, policy.HeaderAuthorization),
 		Provider:      firstValue(md, policy.HeaderProvider),

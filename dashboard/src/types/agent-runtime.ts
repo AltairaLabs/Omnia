@@ -260,12 +260,13 @@ export interface ApiKeysAuth {
 export interface OidcAuth {
   issuer: string;
   audience: string;
-  claimMapping?: { subject?: string; role?: string; endUser?: string };
+  claimMapping?: { subject?: string; endUser?: string };
 }
 
-/** edgeTrust auth: edge-injected claim headers, no re-verification. */
+/** edgeTrust auth: edge-injected claim headers, no re-verification. The role
+ * header is always read into identity.claims.role and is not configurable. */
 export interface EdgeTrustAuth {
-  headerMapping?: { subject?: string; role?: string; endUser?: string; email?: string };
+  headerMapping?: { subject?: string; endUser?: string; email?: string };
   claimsFromHeaders?: Record<string, string>;
 }
 

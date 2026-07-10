@@ -87,9 +87,6 @@ func TestAPIKeyValidator_AdmitsKnownKey(t *testing.T) {
 	if got, want := id.Subject, "key-001"; got != want {
 		t.Errorf("Subject = %q, want %q (key ID)", got, want)
 	}
-	if got, want := id.Role, policy.RoleEditor; got != want {
-		t.Errorf("Role = %q, want %q", got, want)
-	}
 	if id.EndUser != id.Subject {
 		t.Errorf("EndUser = %q, want %q (no trustEndUserHeader)", id.EndUser, id.Subject)
 	}
@@ -196,8 +193,8 @@ func TestAPIKeyValidator_DefaultRoleAppliedWhenSecretMissingRole(t *testing.T) {
 	if err != nil {
 		t.Fatalf("err = %v", err)
 	}
-	if got, want := id.Role, policy.RoleViewer; got != want {
-		t.Errorf("Role = %q, want %q (default applied)", got, want)
+	if got, want := id.Claims["role"], policy.RoleViewer; got != want {
+		t.Errorf("Claims[role] = %q, want %q (default applied)", got, want)
 	}
 }
 
@@ -241,5 +238,19 @@ func TestStaticKeyStore_NilMapIsSafe(t *testing.T) {
 	s := auth.NewStaticKeyStore(nil)
 	if _, ok := s.Lookup("anything"); ok {
 		t.Error("expected miss on empty store")
+	}
+}
+
+func TestAPIKeyValidator_RoleSurfacesAsClaim(t *testing.T) {
+	t.Parallel()
+	store := newAPIKeyStore(t)
+	v := auth.NewAPIKeyValidator(store)
+
+	id, err := v.Validate(context.Background(), reqWithBearer(validAPIKey))
+	if err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	if got, want := id.Claims["role"], policy.RoleEditor; got != want {
+		t.Fatalf("Claims[role] = %q, want %q", got, want)
 	}
 }

@@ -70,8 +70,8 @@ func WithEdgeTrustSubjectHeader(name string) EdgeTrustOption {
 	}
 }
 
-// WithEdgeTrustRoleHeader overrides the inbound header read for
-// Identity.Role. Defaults to DefaultEdgeRoleHeader.
+// WithEdgeTrustRoleHeader overrides the inbound header read into
+// identity.claims.role. Defaults to DefaultEdgeRoleHeader.
 func WithEdgeTrustRoleHeader(name string) EdgeTrustOption {
 	return func(v *EdgeTrustValidator) {
 		if name != "" {
@@ -172,6 +172,9 @@ func (v *EdgeTrustValidator) Validate(_ context.Context, r *http.Request) (*poli
 	}
 
 	claims := map[string]string{}
+	if role != "" {
+		claims["role"] = role
+	}
 	if email := r.Header.Get(v.emailHeader); email != "" {
 		claims["email"] = email
 	}
@@ -185,7 +188,6 @@ func (v *EdgeTrustValidator) Validate(_ context.Context, r *http.Request) (*poli
 		Origin:  policy.OriginEdgeTrust,
 		Subject: subject,
 		EndUser: endUser,
-		Role:    role,
 	}
 	if len(claims) > 0 {
 		id.Claims = claims

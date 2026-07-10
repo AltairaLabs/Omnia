@@ -63,9 +63,6 @@ func TestSharedTokenValidator_AdmitsCorrectToken(t *testing.T) {
 	if got, want := id.Origin, policy.OriginSharedToken; got != want {
 		t.Errorf("Origin = %q, want %q", got, want)
 	}
-	if got, want := id.Role, policy.RoleEditor; got != want {
-		t.Errorf("Role = %q, want %q (default)", got, want)
-	}
 	if got, want := id.Subject, auth.DefaultSharedTokenSubject; got != want {
 		t.Errorf("Subject = %q, want %q (default)", got, want)
 	}
@@ -183,10 +180,11 @@ func TestSharedTokenValidator_TrustEndUserHeaderDefaultsOff(t *testing.T) {
 
 func TestSharedTokenValidator_OptionOverrides(t *testing.T) {
 	t.Parallel()
+	// shared-token callers are gated on identity.origin, not a structured
+	// role — there is no role option to override here anymore.
 	v, _ := auth.NewSharedTokenValidator(
 		validToken,
 		auth.WithSharedTokenSubject("custom-sub"),
-		auth.WithSharedTokenRole(policy.RoleAdmin),
 	)
 	id, err := v.Validate(context.Background(), newRequestWithBearer(validToken))
 	if err != nil {
@@ -194,8 +192,5 @@ func TestSharedTokenValidator_OptionOverrides(t *testing.T) {
 	}
 	if got, want := id.Subject, "custom-sub"; got != want {
 		t.Errorf("Subject override: got %q, want %q", got, want)
-	}
-	if got, want := id.Role, policy.RoleAdmin; got != want {
-		t.Errorf("Role override: got %q, want %q", got, want)
 	}
 }

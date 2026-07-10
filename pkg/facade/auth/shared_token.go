@@ -47,7 +47,6 @@ const DefaultSharedTokenSubject = "shared-token-holder"
 type SharedTokenValidator struct {
 	tokenHash          []byte
 	subject            string
-	role               string
 	trustEndUserHeader bool
 }
 
@@ -58,13 +57,6 @@ type SharedTokenOption func(*SharedTokenValidator)
 // validator emits on admit. Defaults to DefaultSharedTokenSubject.
 func WithSharedTokenSubject(sub string) SharedTokenOption {
 	return func(v *SharedTokenValidator) { v.subject = sub }
-}
-
-// WithSharedTokenRole overrides the Identity.Role value. Defaults to
-// policy.RoleEditor (a sensible middle-ground — sharedToken can't tell
-// callers apart, so admin would be too permissive and viewer too narrow).
-func WithSharedTokenRole(role string) SharedTokenOption {
-	return func(v *SharedTokenValidator) { v.role = role }
 }
 
 // WithSharedTokenTrustEndUserHeader makes the validator honour
@@ -91,7 +83,6 @@ func NewSharedTokenValidator(token string, opts ...SharedTokenOption) (*SharedTo
 		// subtle.ConstantTimeCompare without per-request allocation.
 		tokenHash: []byte(token),
 		subject:   DefaultSharedTokenSubject,
-		role:      policy.RoleEditor,
 	}
 	for _, opt := range opts {
 		opt(v)
@@ -126,10 +117,11 @@ func (v *SharedTokenValidator) Validate(_ context.Context, r *http.Request) (*po
 		}
 	}
 
+	// Shared-token callers carry no per-caller role — they are gated on
+	// identity.origin (OriginSharedToken), not on a structured role.
 	return &policy.AuthenticatedIdentity{
 		Origin:  policy.OriginSharedToken,
 		Subject: v.subject,
 		EndUser: endUser,
-		Role:    v.role,
 	}, nil
 }

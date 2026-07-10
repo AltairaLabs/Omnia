@@ -40,8 +40,8 @@ type Principal struct {
 	// identity.subject / identity.endUser and to downstream services as the
 	// x-omnia-user-id header.
 	UserID string
-	// Roles is the caller's role set. Emitted comma-joined as x-omnia-user-roles
-	// and surfaced to ToolPolicy CEL as identity.role.
+	// Roles is the caller's role set. Folded comma-joined into
+	// identity.claims.role (the structured role field was removed in #1775).
 	Roles []string
 	// Workspace is the workspace the caller targets. Emitted as x-omnia-workspace
 	// and surfaced to ToolPolicy CEL as identity.workspace.
@@ -61,13 +61,26 @@ type Principal struct {
 // translates its own identity model into what the runtime + policy-broker
 // consume. agentName is the agent this facade fronts (from OMNIA_AGENT_NAME).
 func (p *Principal) PropagationFields(agentName string) *policy.PropagationFields {
+	// Roles ride in identity.claims.role (the structured role field was removed
+	// in #1775). Fold them into the claim map without mutating p.Claims and
+	// without clobbering an explicit "role" claim.
+	claims := p.Claims
+	if len(p.Roles) > 0 {
+		merged := make(map[string]string, len(claims)+1)
+		for k, v := range claims {
+			merged[k] = v
+		}
+		if _, ok := merged["role"]; !ok {
+			merged["role"] = strings.Join(p.Roles, ",")
+		}
+		claims = merged
+	}
 	return &policy.PropagationFields{
 		AgentName: agentName,
 		UserID:    p.UserID,
-		UserRoles: strings.Join(p.Roles, ","),
 		Origin:    p.Origin,
 		Workspace: p.Workspace,
-		Claims:    p.Claims,
+		Claims:    claims,
 	}
 }
 

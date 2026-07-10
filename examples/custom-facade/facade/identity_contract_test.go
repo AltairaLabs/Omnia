@@ -110,9 +110,6 @@ func TestCustomFacade_RuntimeSeesIdentity(t *testing.T) {
 	if got.UserID != "user-42" {
 		t.Errorf("UserID = %q, want user-42", got.UserID)
 	}
-	if got.UserRoles != "admin,editor" {
-		t.Errorf("UserRoles = %q, want admin,editor", got.UserRoles)
-	}
 	if got.Origin != policy.OriginSharedToken {
 		t.Errorf("Origin = %q, want %q", got.Origin, policy.OriginSharedToken)
 	}
@@ -122,8 +119,9 @@ func TestCustomFacade_RuntimeSeesIdentity(t *testing.T) {
 	if got.AgentName != agentName {
 		t.Errorf("AgentName = %q, want %q", got.AgentName, agentName)
 	}
-	// Full claim map must arrive verbatim — not a subset.
-	wantClaims := map[string]string{"tier": "gold", "team": "finance", "region": "emea"}
+	// Full claim map must arrive verbatim — not a subset. Roles ride in the
+	// "role" claim (the structured role field was removed in #1775).
+	wantClaims := map[string]string{"tier": "gold", "team": "finance", "region": "emea", "role": "admin,editor"}
 	if len(got.Claims) != len(wantClaims) {
 		t.Fatalf("Claims = %#v, want %#v", got.Claims, wantClaims)
 	}
@@ -142,7 +140,7 @@ func TestCustomFacade_RuntimeSeesIdentity(t *testing.T) {
 func TestCustomFacade_AnonymousEmitsNoIdentity(t *testing.T) {
 	empty := &facade.Principal{}
 	md := empty.OutboundMetadata("")
-	for _, k := range []string{policy.HeaderUserID, policy.HeaderUserRoles, policy.HeaderOrigin, policy.HeaderWorkspace} {
+	for _, k := range []string{policy.HeaderUserID, policy.HeaderOrigin, policy.HeaderWorkspace} {
 		if v, ok := md[k]; ok {
 			t.Errorf("empty principal emitted %q=%q, want absent", k, v)
 		}

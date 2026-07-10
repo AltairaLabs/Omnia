@@ -51,7 +51,6 @@ type IdentityPayload struct {
 	EndUser   string            `json:"endUser"`
 	Workspace string            `json:"workspace"`
 	Agent     string            `json:"agent"`
-	Role      string            `json:"role"`
 	Claims    map[string]string `json:"claims"`
 }
 
@@ -78,7 +77,6 @@ func IdentityPayloadFromIdentity(id *AuthenticatedIdentity) *IdentityPayload {
 		EndUser:   id.EndUser,
 		Workspace: id.Workspace,
 		Agent:     id.Agent,
-		Role:      id.Role,
 		Claims:    id.Claims,
 	}
 }
@@ -97,10 +95,9 @@ func IdentityPayloadFromIdentity(id *AuthenticatedIdentity) *IdentityPayload {
 //     pseudonymised caller id; both AuthenticatedIdentity roles collapse
 //     onto it since there's no separate propagated "acting on behalf of"
 //     value.
-//   - Role   <- fields.UserRoles. AuthenticatedIdentity.Role is a single
-//     string in this codebase's identity model (see identity.go), so this
-//     is a direct, faithful copy — not a join.
-//   - Claims <- fields.Claims, verbatim.
+//   - Claims <- fields.Claims, verbatim. Role rides in Claims["role"] rather
+//     than a dedicated field — ToolPolicy rules gate on identity.claims.role,
+//     not a structured identity.role. See identity.go.
 //   - Agent  <- fields.AgentName, the agent this tool call is running
 //     under. Sourced from the request/env (not the auth token), but it is
 //     the same value ToolPolicy fixtures use for identity.agent and the
@@ -121,7 +118,7 @@ func IdentityPayloadFromPropagation(fields *PropagationFields) *IdentityPayload 
 	if fields == nil {
 		return nil
 	}
-	if fields.UserID == "" && fields.UserRoles == "" && fields.AgentName == "" &&
+	if fields.UserID == "" && fields.AgentName == "" &&
 		fields.Origin == "" && fields.Workspace == "" && len(fields.Claims) == 0 {
 		return nil
 	}
@@ -131,7 +128,6 @@ func IdentityPayloadFromPropagation(fields *PropagationFields) *IdentityPayload 
 		EndUser:   fields.UserID,
 		Workspace: fields.Workspace,
 		Agent:     fields.AgentName,
-		Role:      fields.UserRoles,
 		Claims:    fields.Claims,
 	}
 }

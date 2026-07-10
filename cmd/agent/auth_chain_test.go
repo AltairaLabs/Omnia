@@ -220,7 +220,6 @@ func TestBuildEdgeTrustValidator_HeaderMappingPropagates(t *testing.T) {
 				EdgeTrust: &omniav1alpha1.EdgeTrustAuth{
 					HeaderMapping: &omniav1alpha1.EdgeTrustHeaderMapping{
 						Subject: "X-Custom-Subject",
-						Role:    "X-Custom-Role",
 						EndUser: "X-Custom-EndUser",
 						Email:   "X-Custom-Email",
 					},
@@ -245,6 +244,39 @@ func TestBuildEdgeTrustValidator_HeaderMappingPropagates(t *testing.T) {
 	r2.Header.Set("X-Custom-Subject", "bob")
 	if _, err := v.Validate(context.Background(), r2); err != nil {
 		t.Errorf("custom header should admit: %v", err)
+	}
+}
+
+func TestBuildEdgeTrustValidator_NoHeaderMappingRoleFallsBackToDefault(t *testing.T) {
+	// The CRD no longer has a HeaderMapping.Role override field (removed
+	// alongside the dead Identity.Role plumbing). This proves edgeTrust
+	// still surfaces the role claim end-to-end via its own internal
+	// default header (DefaultEdgeRoleHeader = "x-user-roles") even with
+	// HeaderMapping entirely unset.
+	t.Parallel()
+	ar := &omniav1alpha1.AgentRuntime{
+		Spec: omniav1alpha1.AgentRuntimeSpec{
+			ExternalAuth: &omniav1alpha1.AgentExternalAuth{
+				EdgeTrust: &omniav1alpha1.EdgeTrustAuth{
+					// HeaderMapping intentionally unset.
+				},
+			},
+		},
+	}
+	v := buildEdgeTrustValidator(logr.Discard(), ar)
+	if v == nil {
+		t.Fatal("expected non-nil validator")
+	}
+
+	r := httptest.NewRequest(http.MethodGet, "/ws", nil)
+	r.Header.Set(auth.DefaultEdgeSubjectHeader, "alice")
+	r.Header.Set("x-user-roles", "admin,editor")
+	id, err := v.Validate(context.Background(), r)
+	if err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	if got, want := id.Claims["role"], "admin,editor"; got != want {
+		t.Errorf("Claims[role] = %q, want %q (edge must still surface role via its internal default header)", got, want)
 	}
 }
 

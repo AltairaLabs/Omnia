@@ -52,7 +52,7 @@ func TestOutboundMetadata_EmitsFlatContract(t *testing.T) {
 
 	cases := map[string]string{
 		policy.HeaderUserID:               "user-42",
-		policy.HeaderUserRoles:            "admin,editor",
+		policy.HeaderClaimPrefix + "role": "admin,editor",
 		policy.HeaderWorkspace:            "acme",
 		policy.HeaderOrigin:               policy.OriginSharedToken,
 		policy.HeaderAgentName:            "support-bot",
@@ -65,12 +65,12 @@ func TestOutboundMetadata_EmitsFlatContract(t *testing.T) {
 	}
 }
 
-// TestPropagationFields_JoinsRoles verifies the roles list is comma-joined for
-// the single-string UserRoles wire field.
+// TestPropagationFields_JoinsRoles verifies the roles list is comma-joined into
+// the identity.claims.role claim (the structured role field was removed in #1775).
 func TestPropagationFields_JoinsRoles(t *testing.T) {
 	f := demoPrincipal().PropagationFields("support-bot")
-	if f.UserRoles != "admin,editor" {
-		t.Errorf("UserRoles = %q, want admin,editor", f.UserRoles)
+	if f.Claims["role"] != "admin,editor" {
+		t.Errorf("Claims[role] = %q, want admin,editor", f.Claims["role"])
 	}
 	if f.AgentName != "support-bot" {
 		t.Errorf("AgentName = %q, want support-bot", f.AgentName)

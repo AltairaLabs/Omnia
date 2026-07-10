@@ -39,7 +39,6 @@ import (
 // defaults so operators who don't override them get sensible behaviour.
 const (
 	DefaultOIDCSubjectClaim = "sub"
-	DefaultOIDCRoleClaim    = "omnia.role"
 	DefaultOIDCEndUserClaim = "sub"
 )
 
@@ -173,7 +172,6 @@ type KeySupplier interface {
 // constants so tests don't have to fill every field.
 type OIDCClaimMapping struct {
 	Subject string
-	Role    string
 	EndUser string
 }
 
@@ -186,9 +184,6 @@ func WithOIDCClaimMapping(m OIDCClaimMapping) OIDCOption {
 	return func(v *OIDCValidator) {
 		if m.Subject != "" {
 			v.mapping.Subject = m.Subject
-		}
-		if m.Role != "" {
-			v.mapping.Role = m.Role
 		}
 		if m.EndUser != "" {
 			v.mapping.EndUser = m.EndUser
@@ -213,7 +208,6 @@ func NewOIDCValidator(issuer, audience string, keys KeySupplier, opts ...OIDCOpt
 		keys:     keys,
 		mapping: OIDCClaimMapping{
 			Subject: DefaultOIDCSubjectClaim,
-			Role:    DefaultOIDCRoleClaim,
 			EndUser: DefaultOIDCEndUserClaim,
 		},
 	}
@@ -289,12 +283,10 @@ func (v *OIDCValidator) identityFromClaims(claims jwt.MapClaims) *policy.Authent
 		// Design doc semantics: "Falls back to Subject if claim missing."
 		id.EndUser = id.Subject
 	}
-	if role, ok := stringClaim(claims, v.mapping.Role); ok {
-		id.Role = role
-	}
-	// No role claim is fine — ToolPolicy rules can still gate on
-	// identity.origin. Role stays empty intentionally.
-
+	// Role is intentionally left unset here: there is no dedicated
+	// Identity.Role field. Whatever claim the IdP uses for role/group
+	// flows through extractExtraClaims like any other claim, so
+	// ToolPolicy CEL reads it via identity.claims.<claim-name-in-token>.
 	id.Claims = extractExtraClaims(claims, v.mapping)
 
 	// Surface the token's validity window so identity consumers that
@@ -309,10 +301,12 @@ func (v *OIDCValidator) identityFromClaims(claims jwt.MapClaims) *policy.Authent
 }
 
 // extractExtraClaims flattens claims not already absorbed into
-// Identity.Subject / Role / EndUser so ToolPolicy CEL can reference
-// them via `identity.claims.<name>`. Returns nil when no extras are
-// present (keeps Identity.Claims nil rather than an empty map, which
-// the CEL evaluator handles via `has()`).
+// Identity.Subject / EndUser so ToolPolicy CEL can reference them via
+// `identity.claims.<name>`. This includes the mapped role claim — role
+// is not promoted to a dedicated Identity field, it passes through like
+// any other claim. Returns nil when no extras are present (keeps
+// Identity.Claims nil rather than an empty map, which the CEL evaluator
+// handles via `has()`).
 //
 // Value coercion rules (T4 — earlier revisions dropped non-string
 // claims silently, which broke array-claim CEL rules):
@@ -329,7 +323,7 @@ func (v *OIDCValidator) identityFromClaims(claims jwt.MapClaims) *policy.Authent
 func extractExtraClaims(claims jwt.MapClaims, mapping OIDCClaimMapping) map[string]string {
 	extra := map[string]string{}
 	for k, vv := range claims {
-		if k == mapping.Subject || k == mapping.Role || k == mapping.EndUser {
+		if k == mapping.Subject || k == mapping.EndUser {
 			continue
 		}
 		if s, ok := claimToString(vv); ok {

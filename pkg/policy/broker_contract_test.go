@@ -31,18 +31,17 @@ func TestIdentityPayloadFromIdentity_CopiesFields(t *testing.T) {
 		EndUser:   "user-1",
 		Workspace: "ws-1",
 		Agent:     "agent-1",
-		Role:      RoleEditor,
-		Claims:    map[string]string{"team": "eng"},
+		Claims:    map[string]string{"role": "editor", "team": "eng"},
 	}
 	got := IdentityPayloadFromIdentity(id)
 	if got == nil {
 		t.Fatal("IdentityPayloadFromIdentity returned nil for non-nil identity")
 	}
 	if got.Origin != id.Origin || got.Subject != id.Subject || got.EndUser != id.EndUser ||
-		got.Workspace != id.Workspace || got.Agent != id.Agent || got.Role != id.Role {
+		got.Workspace != id.Workspace || got.Agent != id.Agent {
 		t.Fatalf("IdentityPayloadFromIdentity = %+v, want fields copied from %+v", got, id)
 	}
-	if got.Claims["team"] != "eng" {
+	if got.Claims["role"] != "editor" || got.Claims["team"] != "eng" {
 		t.Fatalf("Claims not copied: %+v", got.Claims)
 	}
 }
@@ -67,9 +66,9 @@ func TestIdentityPayloadFromPropagation_EmptyFieldsReturnsNil(t *testing.T) {
 // its IdentityPayload from IdentityFromContext(ctx), which is always nil on
 // the runtime side (AuthenticatedIdentity never crosses the facade->runtime
 // gRPC hop). This asserts the reconstructed payload maps exactly the fields
-// that have a faithful propagated source (Subject/EndUser from UserID, Role
-// from UserRoles, Claims verbatim, Agent from AgentName). Origin/Workspace are
-// unset here because this fixture carries no Origin/Workspace field — the
+// that have a faithful propagated source (Subject/EndUser from UserID, Claims
+// verbatim — including a "role" claim, Agent from AgentName). Origin/Workspace
+// are unset here because this fixture carries no Origin/Workspace field — the
 // point is they are never fabricated from Namespace. (Their real propagation
 // path is covered by TestIdentityPayloadFromPropagation_MapsOriginAndWorkspace.)
 func TestIdentityPayloadFromPropagation_MapsFaithfulFieldsOnly(t *testing.T) {
@@ -77,8 +76,7 @@ func TestIdentityPayloadFromPropagation_MapsFaithfulFieldsOnly(t *testing.T) {
 		AgentName: "agent-1",
 		Namespace: "some-k8s-namespace", // must NOT leak into Workspace
 		UserID:    "user-1",
-		UserRoles: RoleEditor,
-		Claims:    map[string]string{"team": "eng"},
+		Claims:    map[string]string{"role": "editor", "team": "eng"},
 	}
 
 	got := IdentityPayloadFromPropagation(fields)
@@ -91,11 +89,11 @@ func TestIdentityPayloadFromPropagation_MapsFaithfulFieldsOnly(t *testing.T) {
 	if got.EndUser != "user-1" {
 		t.Errorf("EndUser = %q, want %q", got.EndUser, "user-1")
 	}
-	if got.Role != RoleEditor {
-		t.Errorf("Role = %q, want %q", got.Role, RoleEditor)
-	}
 	if got.Agent != "agent-1" {
 		t.Errorf("Agent = %q, want %q", got.Agent, "agent-1")
+	}
+	if got.Claims["role"] != "editor" {
+		t.Errorf("Claims[role] = %q, want %q", got.Claims["role"], "editor")
 	}
 	if got.Claims["team"] != "eng" {
 		t.Errorf("Claims[team] = %q, want %q", got.Claims["team"], "eng")
@@ -105,6 +103,22 @@ func TestIdentityPayloadFromPropagation_MapsFaithfulFieldsOnly(t *testing.T) {
 	}
 	if got.Workspace != "" {
 		t.Errorf("Workspace = %q, want empty (Namespace is a distinct concept)", got.Workspace)
+	}
+}
+
+// TestIdentityPayloadFromPropagation_RoleInClaims asserts the wire payload
+// carries role via Claims["role"], not a dedicated Role field (removed in
+// #1775 Task 5 — roles ride in identity.claims.role end-to-end).
+func TestIdentityPayloadFromPropagation_RoleInClaims(t *testing.T) {
+	p := IdentityPayloadFromPropagation(&PropagationFields{
+		UserID: "u1",
+		Claims: map[string]string{"role": "editor"},
+	})
+	if p == nil {
+		t.Fatal("nil payload")
+	}
+	if got, want := p.Claims["role"], "editor"; got != want {
+		t.Fatalf("Claims[role] = %q, want %q", got, want)
 	}
 }
 
@@ -118,7 +132,6 @@ func TestIdentityPayloadFromPropagation_MapsOriginAndWorkspace(t *testing.T) {
 		AgentName: "agent-1",
 		Namespace: "some-k8s-namespace", // must NOT leak into Workspace
 		UserID:    "user-1",
-		UserRoles: RoleEditor,
 		Origin:    OriginAPIKey,
 		Workspace: "acme",
 	}
@@ -151,7 +164,7 @@ func TestIdentityPayloadFromPropagation_OriginOrWorkspaceOnlyIsSufficient(t *tes
 }
 
 // TestIdentityPayloadFromPropagation_AgentOnlyIsSufficient asserts that
-// AgentName alone (no UserID/UserRoles/Claims) is enough to produce a
+// AgentName alone (no UserID/Claims) is enough to produce a
 // non-nil payload — an agent-scoped ToolPolicy rule (identity.agent) should
 // still be able to fire even for anonymous/unauthenticated tool calls.
 func TestIdentityPayloadFromPropagation_AgentOnlyIsSufficient(t *testing.T) {

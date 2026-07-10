@@ -201,8 +201,7 @@ func TestPolicyBrokerClient_RequestShape(t *testing.T) {
 	ctx := policy.WithPropagationFields(context.Background(), &policy.PropagationFields{
 		AgentName: "agent-1",
 		UserID:    "user-1",
-		UserRoles: policy.RoleEditor,
-		Claims:    map[string]string{"team": "eng"},
+		Claims:    map[string]string{"role": "editor", "team": "eng"},
 	})
 
 	decision := c.Decide(ctx, "my-tool", "my-registry", json.RawMessage(`{"customer_id":"cust-1"}`))
@@ -214,8 +213,8 @@ func TestPolicyBrokerClient_RequestShape(t *testing.T) {
 	require.NotNil(t, captured.Identity)
 	assert.Equal(t, "user-1", captured.Identity.Subject)
 	assert.Equal(t, "user-1", captured.Identity.EndUser)
-	assert.Equal(t, policy.RoleEditor, captured.Identity.Role)
 	assert.Equal(t, "agent-1", captured.Identity.Agent)
+	assert.Equal(t, "editor", captured.Identity.Claims["role"])
 	assert.Equal(t, "eng", captured.Identity.Claims["team"])
 	// Workspace/Origin have no faithful propagated source (see
 	// IdentityPayloadFromPropagation) and must not be fabricated.

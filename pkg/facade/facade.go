@@ -144,7 +144,7 @@ type IdentityScope struct {
 	Workspace     string // the agent's deployed workspace (identity workspace wins when set)
 	RequestID     string // per-request correlation id
 	UserID        string // resolved (pseudonymized) end-user id
-	UserRoles     string // end-user roles
+	UserRoles     string // end-user roles; folded into identity.claims.role
 	UserEmail     string // end-user email
 	Authorization string // inbound bearer, kept in-process (never emitted to tools)
 }
@@ -168,12 +168,24 @@ func PropagateIdentity(ctx context.Context, id *Identity, scope IdentityScope) c
 			claims = id.Claims
 		}
 	}
+	// Roles ride in identity.claims.role — the structured role field was removed
+	// in #1775. Fold the scope's roles into the claim map (without mutating the
+	// caller's map, and without clobbering an explicit "role" claim).
+	if scope.UserRoles != "" {
+		merged := make(map[string]string, len(claims)+1)
+		for k, v := range claims {
+			merged[k] = v
+		}
+		if _, ok := merged["role"]; !ok {
+			merged["role"] = scope.UserRoles
+		}
+		claims = merged
+	}
 	return policy.WithPropagationFields(ctx, &policy.PropagationFields{
 		AgentName:     scope.AgentName,
 		Namespace:     scope.Namespace,
 		RequestID:     scope.RequestID,
 		UserID:        scope.UserID,
-		UserRoles:     scope.UserRoles,
 		UserEmail:     scope.UserEmail,
 		Authorization: scope.Authorization,
 		Origin:        origin,

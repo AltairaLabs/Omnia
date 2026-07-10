@@ -251,8 +251,8 @@ func TestOIDCValidator_AdmitsValidToken(t *testing.T) {
 	if got, want := id.Subject, testAliceEmail; got != want {
 		t.Errorf("Subject = %q, want %q", got, want)
 	}
-	if got, want := id.Role, policy.RoleEditor; got != want {
-		t.Errorf("Role = %q, want %q", got, want)
+	if got, want := id.Claims["omnia.role"], policy.RoleEditor; got != want {
+		t.Errorf("Claims[omnia.role] = %q, want %q", got, want)
 	}
 	if got, want := id.EndUser, id.Subject; got != want {
 		t.Errorf("EndUser = %q, want %q (default mapping → Subject)", got, want)
@@ -433,7 +433,6 @@ func TestOIDCValidator_CustomClaimMapping(t *testing.T) {
 	t.Parallel()
 	mapping := auth.OIDCClaimMapping{
 		Subject: "user_id",
-		Role:    "tier",
 		EndUser: "actor",
 	}
 	v, key := newOIDCValidatorForTest(t, auth.WithOIDCClaimMapping(mapping))
@@ -459,8 +458,8 @@ func TestOIDCValidator_CustomClaimMapping(t *testing.T) {
 	if got, want := id.Subject, "svc-payroll"; got != want {
 		t.Errorf("Subject = %q, want %q (custom mapping user_id → Subject)", got, want)
 	}
-	if got, want := id.Role, policy.RoleAdmin; got != want {
-		t.Errorf("Role = %q, want %q", got, want)
+	if got, want := id.Claims["tier"], policy.RoleAdmin; got != want {
+		t.Errorf("Claims[tier] = %q, want %q", got, want)
 	}
 	if got, want := id.EndUser, testAliceEmail; got != want {
 		t.Errorf("EndUser = %q, want %q (service token → actor)", got, want)

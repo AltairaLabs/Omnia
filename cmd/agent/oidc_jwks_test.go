@@ -316,7 +316,6 @@ func TestBuildOIDCValidator_ClaimMappingPropagates(t *testing.T) {
 					Audience: "omnia",
 					ClaimMapping: &omniav1alpha1.OIDCClaimMapping{
 						Subject: "user_id",
-						Role:    "tier",
 						EndUser: "actor",
 					},
 				},

@@ -77,7 +77,7 @@ The following variables are available in CEL expressions:
 |----------|------|-------------|
 | `headers` | `map<string, string>` | All HTTP request headers (first value only for multi-value headers). Keys are **canonical** — see the note below. |
 | `body` | `map<string, dyn>` | Parsed JSON request body. Empty map if body is not JSON. |
-| `identity` | `map<string, dyn>` | Structured caller identity (`origin`, `subject`, `endUser`, `workspace`, `agent`, `role`, `claims`) sent by the runtime alongside headers/body, so identity-aware rules don't depend on lossy header-flattening. |
+| `identity` | `map<string, dyn>` | Structured caller identity (`origin`, `subject`, `endUser`, `workspace`, `agent`, `claims`) sent by the runtime alongside headers/body, so identity-aware rules don't depend on lossy header-flattening. Roles are an ordinary claim, not a separate field — reference `identity.claims.role`. |
 
 :::caution[`headers` keys are canonical — match the exact casing]
 The `headers` map is keyed by **canonical HTTP header names**: the prefix and each hyphen-separated segment is Title-cased. Claim `team` is `X-Omnia-Claim-Team`; `customer-id` is `X-Omnia-Claim-Customer-Id`. Underscores are not separators, so `customer_id` is `X-Omnia-Claim-Customer_id`.

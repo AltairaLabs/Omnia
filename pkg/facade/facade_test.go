@@ -130,6 +130,36 @@ func TestPropagateIdentity_FallsBackToScopeWorkspaceAndNilIdentity(t *testing.T)
 	}
 }
 
+func TestPropagateIdentity_FoldsScopeRolesIntoClaims(t *testing.T) {
+	// scope.UserRoles folds into identity.claims.role (the structured role
+	// field was removed in #1775), surfacing as the x-omnia-claim-role header.
+	scope := facade.IdentityScope{
+		AgentName: "agent-c",
+		UserID:    "user-3",
+		UserRoles: "admin,editor",
+	}
+	ctx := facade.PropagateIdentity(context.Background(), nil, scope)
+
+	if got := facade.OutboundMetadata(ctx)[policy.HeaderClaimPrefix+"role"]; got != "admin,editor" {
+		t.Fatalf("x-omnia-claim-role = %q, want admin,editor (scope roles fold into the role claim)", got)
+	}
+}
+
+func TestPropagateIdentity_ScopeRolesDoNotClobberExplicitRoleClaim(t *testing.T) {
+	// An explicit "role" claim on the admitting identity wins over the scope's
+	// coarse UserRoles fallback.
+	id := &facade.Identity{
+		Origin: policy.OriginAPIKey,
+		Claims: map[string]string{"role": "viewer"},
+	}
+	scope := facade.IdentityScope{AgentName: "agent-d", UserID: "user-4", UserRoles: "admin"}
+	ctx := facade.PropagateIdentity(context.Background(), id, scope)
+
+	if got := facade.OutboundMetadata(ctx)[policy.HeaderClaimPrefix+"role"]; got != "viewer" {
+		t.Fatalf("x-omnia-claim-role = %q, want the explicit id claim \"viewer\" to win over scope \"admin\"", got)
+	}
+}
+
 func TestNewMgmtPlaneValidator_RequiresJWKSURL(t *testing.T) {
 	if _, err := facade.NewMgmtPlaneValidator(""); err == nil {
 		t.Fatal("expected error for empty JWKS URL")
