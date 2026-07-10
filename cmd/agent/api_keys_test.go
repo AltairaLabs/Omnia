@@ -28,7 +28,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	"github.com/altairalabs/omnia/internal/facade/auth"
+	"github.com/altairalabs/omnia/pkg/facade/auth"
 )
 
 const testRawKey = "omk_some_random_value"

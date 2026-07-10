@@ -27,9 +27,9 @@ import (
 
 	"github.com/altairalabs/omnia/internal/agent"
 	"github.com/altairalabs/omnia/internal/facade"
-	"github.com/altairalabs/omnia/internal/facade/auth"
 	facademcp "github.com/altairalabs/omnia/internal/facade/mcp"
 	"github.com/altairalabs/omnia/internal/tracing"
+	"github.com/altairalabs/omnia/pkg/facade/auth"
 )
 
 // buildMCPHandler assembles the middleware stack for the MCP server.

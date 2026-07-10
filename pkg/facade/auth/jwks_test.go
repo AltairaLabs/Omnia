@@ -26,7 +26,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/altairalabs/omnia/internal/facade/auth"
+	"github.com/altairalabs/omnia/pkg/facade/auth"
 )
 
 // jwkFromKey returns a public JWK with kid = RFC 7638 thumbprint, in

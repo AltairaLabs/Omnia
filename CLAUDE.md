@@ -117,7 +117,7 @@ protocol table, tracing/span inventory. This is the condensed view.
 
 - **Facade container** (`cmd/agent/main.go`): serves the agent's facade surfaces. An `AgentRuntime` composes one or more single-protocol facades via `spec.facades[]` (`type: websocket | a2a | rest | mcp`). Each management-capable surface runs on **two listeners** — an external port (data-plane auth) and an internal **management-plane twin** (`facade-mgmt` 18080 / `a2a-mgmt` 19999 / `mcp-mgmt` 19998) that accepts only dashboard-minted mgmt JWTs, is ClusterIP-only, and fails closed. Gated per-facade by `spec.facades[].managementPlane`; enabled twins are advertised on `status.managementEndpoints{ws,a2a,mcp}`. Each agent pod runs facade + runtime as sidecars.
 - **Runtime container** (`cmd/runtime/main.go`): gRPC server that wraps the LLM provider (via PromptKit SDK). Called by facade over gRPC; calls Memory API over HTTP when memory is enabled.
-- **Session API** (`cmd/session-api/`): Standalone HTTP service for session CRUD. The facade records conversation off the gRPC bus (RuntimeClient interceptor, #1630) and writes via an HTTP client (`internal/session/httpclient/`), NOT directly to Postgres.
+- **Session API** (`cmd/session-api/`): Standalone HTTP service for session CRUD. The facade records conversation off the gRPC bus (RuntimeClient interceptor, #1630) and writes via an HTTP client (`pkg/session/httpclient/`), NOT directly to Postgres.
 - **Memory API** (`cmd/memory-api/`): Per-workspace HTTP service for cross-session agentic memory (Postgres + pgvector).
 - **Privacy API** (`ee/cmd/privacy-api/`, EE): Per-workspace owner of consent/opt-out, the central privacy/compliance **audit hub** (session-api + memory-api drain enforcement rows to it, #1673), and the **DSAR erasure lifecycle** (fans `delete-by-user` / batch-delete back to each service-group's session-api + memory-api, #1676).
 - **Policy Broker** (`ee/cmd/policy-broker/`, EE): operator-**injected sidecar** in the agent pod (not a standalone Deployment) — a CEL **decision** service, not a reverse proxy. The runtime's `OmniaExecutor.dispatch` calls it over `POLICY_BROKER_URL` (localhost `:8090`, `POST /v1/decision`) once per tool call and gets back allow/deny + injected headers; it fails closed by default. Watches ToolPolicy CRDs.
@@ -125,7 +125,7 @@ protocol table, tracing/span inventory. This is the condensed view.
 - **Dashboard** (`dashboard/`): Next.js frontend embedded in the operator binary via `dashboard/server.js`. Reads session data from session-api through proxy routes; dials the facade's internal mgmt twin for "Try this agent".
 
 ### Key data flow for sessions
-Browser → WebSocket → Facade → `internal/session/httpclient` → Session API HTTP → PostgreSQL.
+Browser → WebSocket → Facade → `pkg/session/httpclient` → Session API HTTP → PostgreSQL.
 Redis is a **warm cache within session-api**, not a separate path.
 
 ### Tool execution model
@@ -155,7 +155,7 @@ Enterprise features live under `ee/`. This includes Arena (prompt testing/evalua
 | `internal/tracing/` | Shared OpenTelemetry tracing (used by both facade and runtime) |
 | `internal/session/` | Session store interfaces and implementations |
 | `internal/session/api/` | Session API HTTP handlers |
-| `internal/session/httpclient/` | HTTP client for session-api |
+| `pkg/session/httpclient/` | HTTP client for session-api |
 | `internal/session/postgres/` | PostgreSQL session storage + migrations |
 | `internal/api/` | Operator REST API handlers |
 | `dashboard/` | Next.js dashboard application |

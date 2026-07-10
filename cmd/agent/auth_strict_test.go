@@ -24,7 +24,7 @@ import (
 	"github.com/go-logr/logr"
 
 	facadea2a "github.com/altairalabs/omnia/internal/facade/a2a"
-	"github.com/altairalabs/omnia/internal/facade/auth"
+	"github.com/altairalabs/omnia/pkg/facade/auth"
 )
 
 func TestAllowUnauthenticatedFallback_DefaultStrict(t *testing.T) {

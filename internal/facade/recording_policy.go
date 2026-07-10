@@ -23,7 +23,7 @@ import (
 
 	"github.com/go-logr/logr"
 
-	"github.com/altairalabs/omnia/internal/session/httpclient"
+	"github.com/altairalabs/omnia/pkg/session/httpclient"
 )
 
 // PolicyFetcher fetches the effective privacy policy for a namespace/agent.

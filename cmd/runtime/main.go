@@ -53,11 +53,11 @@ import (
 	"github.com/altairalabs/omnia/internal/runtime/tools"
 	"github.com/altairalabs/omnia/internal/schema"
 	"github.com/altairalabs/omnia/internal/session"
-	"github.com/altairalabs/omnia/internal/session/httpclient"
 	"github.com/altairalabs/omnia/internal/tracing"
 	"github.com/altairalabs/omnia/pkg/k8s"
 	"github.com/altairalabs/omnia/pkg/logging"
 	runtimev1 "github.com/altairalabs/omnia/pkg/runtime/v1"
+	"github.com/altairalabs/omnia/pkg/session/httpclient"
 )
 
 func main() {

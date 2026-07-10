@@ -38,10 +38,10 @@ import (
 	"github.com/altairalabs/omnia/internal/facade"
 	"github.com/altairalabs/omnia/internal/media"
 	"github.com/altairalabs/omnia/internal/session"
-	"github.com/altairalabs/omnia/internal/session/httpclient"
 	"github.com/altairalabs/omnia/internal/tracing"
 	"github.com/altairalabs/omnia/pkg/logging"
 	"github.com/altairalabs/omnia/pkg/servicediscovery"
+	"github.com/altairalabs/omnia/pkg/session/httpclient"
 )
 
 const (

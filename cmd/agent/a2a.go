@@ -23,8 +23,8 @@ import (
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 	"github.com/altairalabs/omnia/internal/agent"
 	facadea2a "github.com/altairalabs/omnia/internal/facade/a2a"
-	"github.com/altairalabs/omnia/internal/facade/auth"
 	"github.com/altairalabs/omnia/internal/tracing"
+	"github.com/altairalabs/omnia/pkg/facade/auth"
 
 	"github.com/AltairaLabs/PromptKit/sdk"
 	a2aserver "github.com/AltairaLabs/PromptKit/server/a2a"
