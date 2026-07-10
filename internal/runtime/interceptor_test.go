@@ -38,6 +38,8 @@ func TestExtractPolicyFromMetadata(t *testing.T) {
 		policy.HeaderAuthorization: "Bearer token",
 		policy.HeaderProvider:      "claude",
 		policy.HeaderModel:         "claude-sonnet-4-20250514",
+		policy.HeaderOrigin:        policy.OriginAPIKey,
+		policy.HeaderWorkspace:     "acme",
 		"x-omnia-claim-team":       "engineering",
 		"x-omnia-claim-region":     "us-east",
 	})
@@ -55,8 +57,38 @@ func TestExtractPolicyFromMetadata(t *testing.T) {
 	assert.Equal(t, "Bearer token", fields.Authorization)
 	assert.Equal(t, "claude", fields.Provider)
 	assert.Equal(t, "claude-sonnet-4-20250514", fields.Model)
+	assert.Equal(t, policy.OriginAPIKey, fields.Origin)
+	assert.Equal(t, "acme", fields.Workspace)
 	assert.Equal(t, "engineering", fields.Claims["team"])
 	assert.Equal(t, "us-east", fields.Claims["region"])
+}
+
+// TestExtractPolicyFromMetadata_OriginWorkspaceReachBroker is the runtime-side
+// half of the #1769 chain: it proves that origin/workspace arriving in gRPC
+// metadata are rehydrated into the context AND flow into the IdentityPayload
+// the runtime posts to the policy broker (Decide builds it via
+// ExtractPropagationFields -> IdentityPayloadFromPropagation). Before the fix
+// these were always empty at the broker, so identity.origin / identity.workspace
+// ToolPolicy rules never fired.
+func TestExtractPolicyFromMetadata_OriginWorkspaceReachBroker(t *testing.T) {
+	md := metadata.New(map[string]string{
+		policy.HeaderAgentName: "agent-1",
+		policy.HeaderOrigin:    policy.OriginManagementPlane,
+		policy.HeaderWorkspace: "acme",
+	})
+	ctx := metadata.NewIncomingContext(context.Background(), md)
+
+	enriched := extractPolicyFromMetadata(ctx)
+	fields := policy.ExtractPropagationFields(enriched)
+
+	// This is exactly what PolicyBrokerClient.Decide sends as DecisionRequest.Identity.
+	payload := policy.IdentityPayloadFromPropagation(&fields)
+	if assert.NotNil(t, payload, "broker identity payload must be non-nil") {
+		assert.Equal(t, policy.OriginManagementPlane, payload.Origin,
+			"identity.origin must be non-empty at the broker")
+		assert.Equal(t, "acme", payload.Workspace,
+			"identity.workspace must be non-empty at the broker")
+	}
 }
 
 func TestExtractPolicyFromMetadata_NoMetadata(t *testing.T) {

@@ -391,6 +391,92 @@ func TestBrokerHandler_IdentityRoleGate(t *testing.T) {
 	})
 }
 
+// TestBrokerHandler_IdentityWorkspaceGate is the broker-side end-to-end proof
+// for #1769: a ToolPolicy CEL rule keyed on identity.workspace must actually
+// evaluate against the propagated workspace. The broker rebuilds an
+// AuthenticatedIdentity from DecisionRequest.Identity (the IdentityPayload the
+// runtime posts) and exposes it to CEL as identity.workspace. Before #1769 the
+// workspace never crossed the facade->runtime hop, so this rule silently
+// no-oped (workspace was always "").
+func TestBrokerHandler_IdentityWorkspaceGate(t *testing.T) {
+	eval, err := NewEvaluator()
+	if err != nil {
+		t.Fatalf("NewEvaluator() error = %v", err)
+	}
+
+	toolPolicy := &omniav1alpha1.ToolPolicy{
+		ObjectMeta: metav1.ObjectMeta{Name: "workspace-gate-policy", Namespace: "default"},
+		Spec: omniav1alpha1.ToolPolicySpec{
+			Selector: omniav1alpha1.ToolPolicySelector{
+				Registry: "test-registry",
+				Tools:    []string{"scoped_tool"},
+			},
+			Rules: []omniav1alpha1.PolicyRule{
+				{
+					Name: "workspace-gate",
+					Deny: omniav1alpha1.PolicyRuleDeny{
+						CEL:     "identity.workspace != 'acme'",
+						Message: "acme workspace required",
+					},
+				},
+			},
+			Mode:      omniav1alpha1.PolicyModeEnforce,
+			OnFailure: omniav1alpha1.OnFailureDeny,
+		},
+	}
+	if err := eval.CompilePolicy(toolPolicy); err != nil {
+		t.Fatalf("CompilePolicy() error = %v", err)
+	}
+
+	handler := NewBrokerHandler(eval, testBrokerLogger())
+	headers := map[string]string{
+		HeaderToolName:     "scoped_tool",
+		HeaderToolRegistry: "test-registry",
+	}
+
+	t.Run("matching workspace allowed", func(t *testing.T) {
+		req := newDecisionRequest(t, DecisionRequest{
+			Headers:  headers,
+			Identity: &IdentityPayload{Origin: "api-key", Workspace: "acme"},
+		})
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		resp := decodeDecisionResponse(t, rec)
+		if !resp.Allow {
+			t.Errorf("Allow = false, want true for identity.workspace == 'acme' (deniedBy=%q)", resp.DeniedBy)
+		}
+	})
+
+	t.Run("wrong workspace denied", func(t *testing.T) {
+		req := newDecisionRequest(t, DecisionRequest{
+			Headers:  headers,
+			Identity: &IdentityPayload{Origin: "api-key", Workspace: "other"},
+		})
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		resp := decodeDecisionResponse(t, rec)
+		if resp.Allow {
+			t.Error("Allow = true, want false for identity.workspace == 'other'")
+		}
+		if resp.DeniedBy != "workspace-gate" {
+			t.Errorf("DeniedBy = %q, want %q", resp.DeniedBy, "workspace-gate")
+		}
+	})
+
+	t.Run("empty workspace denied (regression: pre-#1769 always-empty state)", func(t *testing.T) {
+		req := newDecisionRequest(t, DecisionRequest{Headers: headers})
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		resp := decodeDecisionResponse(t, rec)
+		if resp.Allow {
+			t.Error("Allow = true, want false when identity.workspace is empty")
+		}
+	})
+}
+
 func TestBrokerHandler_NoMatchingPolicyAllows(t *testing.T) {
 	eval, err := NewEvaluator()
 	if err != nil {

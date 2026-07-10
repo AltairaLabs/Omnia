@@ -25,7 +25,7 @@ import (
 	"github.com/altairalabs/omnia/ee/pkg/arena/fleet"
 	"github.com/altairalabs/omnia/ee/pkg/arena/queue"
 	"github.com/altairalabs/omnia/internal/session"
-	"github.com/altairalabs/omnia/internal/session/httpclient"
+	"github.com/altairalabs/omnia/pkg/session/httpclient"
 )
 
 // newArenaSessionMeta builds the arena context for a work item, shared by the

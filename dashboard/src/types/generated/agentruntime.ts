@@ -697,7 +697,7 @@ export interface AgentRuntimeSpec {
     /** port is the port number for the facade service. */
     port?: number;
     /** type specifies the facade protocol type. */
-    type: "websocket" | "a2a" | "rest" | "mcp";
+    type: "websocket" | "a2a" | "rest" | "mcp" | "custom";
   }[];
   /** framework specifies which agent framework to use.
    * Supports PromptKit, LangChain, AutoGen, or a custom image.

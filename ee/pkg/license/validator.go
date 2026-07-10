@@ -401,6 +401,23 @@ func (v *Validator) ValidateArenaJob(ctx context.Context, jobType string, replic
 	return nil
 }
 
+// ValidateCustomFacade validates that "custom" (bring-your-own-container)
+// facades are allowed by the license. Mirrors ValidateArenaJob: expired
+// enterprise licenses degrade to the restriction error.
+func (v *Validator) ValidateCustomFacade(ctx context.Context) error {
+	license := v.GetLicenseOrDefault(ctx)
+
+	if license.IsExpired() {
+		return NewLicenseExpiredError()
+	}
+
+	if !license.CanUseCustomFacade() {
+		return NewCustomFacadeError()
+	}
+
+	return nil
+}
+
 // ValidateScenarioCount validates that the scenario count is allowed by the license.
 func (v *Validator) ValidateScenarioCount(ctx context.Context, count int) error {
 	license := v.GetLicenseOrDefault(ctx)

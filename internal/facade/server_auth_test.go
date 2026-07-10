@@ -35,8 +35,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/altairalabs/omnia/internal/facade/auth"
 	"github.com/altairalabs/omnia/internal/session"
+	"github.com/altairalabs/omnia/pkg/facade/auth"
 	"github.com/altairalabs/omnia/pkg/identity"
 	"github.com/altairalabs/omnia/pkg/policy"
 )

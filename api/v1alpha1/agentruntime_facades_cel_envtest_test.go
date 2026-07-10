@@ -95,6 +95,9 @@ func mcp() corev1alpha1.FacadeConfig {
 func rest() corev1alpha1.FacadeConfig {
 	return corev1alpha1.FacadeConfig{Type: corev1alpha1.FacadeTypeREST}
 }
+func custom(image string) corev1alpha1.FacadeConfig {
+	return corev1alpha1.FacadeConfig{Type: corev1alpha1.FacadeTypeCustom, Image: image}
+}
 
 func TestFacadesCEL_RejectsEmpty(t *testing.T) {
 	c, stop := startCELEnv(t)
@@ -150,5 +153,38 @@ func TestFacadesCEL_AcceptsAgentWebSocketA2A(t *testing.T) {
 	ar := agentAR("agent-ws-a2a", ws(), a2a())
 	if err := c.Create(context.Background(), ar); err != nil {
 		t.Fatalf("expected a valid agent [websocket, a2a] to be admitted, got: %v", err)
+	}
+}
+
+func TestFacadesCEL_AcceptsAgentCustomWithImage(t *testing.T) {
+	c, stop := startCELEnv(t)
+	defer stop()
+
+	ar := agentAR("agent-custom", custom("registry.example.com/byo-facade:v1"))
+	if err := c.Create(context.Background(), ar); err != nil {
+		t.Fatalf("expected a valid agent [custom+image] to be admitted, got: %v", err)
+	}
+}
+
+func TestFacadesCEL_RejectsCustomWithoutImage(t *testing.T) {
+	c, stop := startCELEnv(t)
+	defer stop()
+
+	ar := agentAR("custom-no-image", custom(""))
+	err := c.Create(context.Background(), ar)
+	if err == nil || !strings.Contains(err.Error(), "image") {
+		t.Fatalf("expected mode=agent custom facade without image to be rejected, got: %v", err)
+	}
+}
+
+func TestFacadesCEL_RejectsFunctionWithCustom(t *testing.T) {
+	c, stop := startCELEnv(t)
+	defer stop()
+
+	ar := agentAR("fn-custom", rest(), custom("registry.example.com/byo-facade:v1"))
+	ar.Spec.Mode = corev1alpha1.AgentRuntimeModeFunction
+	err := c.Create(context.Background(), ar)
+	if err == nil {
+		t.Fatal("expected mode=function with a custom facade to be rejected")
 	}
 }

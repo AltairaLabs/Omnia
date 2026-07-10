@@ -29,7 +29,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 
 	"github.com/altairalabs/omnia/internal/api/authz"
-	"github.com/altairalabs/omnia/internal/facade/auth"
+	"github.com/altairalabs/omnia/pkg/facade/auth"
 	"github.com/altairalabs/omnia/pkg/workspaceauth"
 )
 

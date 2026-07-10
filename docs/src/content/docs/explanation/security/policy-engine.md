@@ -83,11 +83,10 @@ sequenceDiagram
     participant Tool as Tool Service
 
     Client->>Istio: WebSocket + JWT
-    Istio->>Istio: Validate JWT, extract claims
-    Istio->>Facade: Forward + x-user-id, x-user-roles (→ identity.claims.role), x-user-email
-    Facade->>Facade: Build PropagationFields from headers
-    Facade->>Runtime: gRPC + X-Omnia-* metadata
-    Runtime->>Broker: POST /v1/decision (headers + body + identity)
+    Istio->>Facade: Forward request (+ x-user-* fallback headers)
+    Facade->>Facade: Auth validator verifies JWT, builds AuthenticatedIdentity (origin, workspace, claims)
+    Facade->>Runtime: gRPC + x-omnia-* metadata (identity + claims; Authorization withheld)
+    Runtime->>Broker: POST /v1/decision (headers + body + reconstructed identity)
     Broker->>Broker: Evaluate CEL rules against headers + body + identity
     Broker->>Runtime: {allow, deniedBy, message, mode, wouldDeny, injectedHeaders}
     Runtime->>Tool: Forward (if allowed) + injected headers
@@ -103,8 +102,10 @@ The following headers are propagated across service boundaries:
 | `x-omnia-namespace` | Facade | Kubernetes namespace |
 | `x-omnia-session-id` | Facade | Current session identifier |
 | `x-omnia-request-id` | Facade | Per-request trace identifier |
-| `x-omnia-user-id` | Istio | Authenticated user identity |
-| `x-omnia-user-email` | Istio | User email address |
+| `x-omnia-user-id` | Facade | Authenticated user identity (the facade populates this from its auth chain — or, when the chart's authentication gate is off, from the Istio-injected `x-user-id` header) |
+| `x-omnia-user-email` | Facade | User email address |
+| `x-omnia-origin` | Facade | Validator that admitted the request — surfaces as `identity.origin` (#1769) |
+| `x-omnia-workspace` | Facade | Workspace the request targets — surfaces as `identity.workspace` (#1769) |
 | `x-omnia-provider` | Runtime | LLM provider type |
 | `x-omnia-model` | Runtime | LLM model name |
 | `x-omnia-tool-name` | Runtime | Tool being invoked |
@@ -112,7 +113,11 @@ The following headers are propagated across service boundaries:
 | `x-omnia-claim-*` | Facade | Mapped JWT claims (e.g., `x-omnia-claim-team`) |
 | `x-omnia-param-*` | Runtime | Promoted scalar tool parameters |
 
-In addition to these flattened headers, the runtime sends the caller's identity to the broker as a **structured JSON object** (`origin`, `subject`, `endUser`, `workspace`, `agent`, `claims`) on every decision request, so `identity.*` CEL expressions see the full identity rather than only the scalar claims that get promoted to headers. Roles are not a separate identity field — they arrive as an ordinary entry in `claims` (`identity.claims.role`), sourced from the edge's role header, the IdP's own role claim, or the API key's stamped role, depending on which validator admitted the request.
+> **The `x-omnia-user-*` headers are facade-populated, not Istio-injected.** The facade's auth validator produces an `AuthenticatedIdentity` and the facade emits `x-omnia-user-id` / `-email` from it (`pkg/policy/context.go`). Istio's own `x-user-id` header is only a *fallback source* the facade reads when the chart's `authentication.enabled` gate is off — the outbound `x-omnia-*` metadata always originates at the facade.
+
+> **The raw `Authorization` bearer token is withheld by design.** It is deliberately **not** propagated outbound: re-emitting the caller's inbound token as the outbound `Authorization` on a tool call would leak the user's credential to arbitrary upstreams and clobber a tool's own `authSecretRef` credential. The token stays in the facade's in-process context (for a future on-behalf-of exchange) but never crosses to a tool. User identity travels safely via the `x-omnia-claim-*` headers instead.
+
+In addition to these flattened headers, the runtime reconstructs the caller's identity as a **structured JSON object** (`origin`, `subject`, `endUser`, `workspace`, `agent`, `claims`) and sends it on every decision request, so `identity.*` CEL expressions can address identity directly. Roles are not a separate identity field — they arrive as an ordinary entry in `claims` (`identity.claims.role`), sourced from the edge's role header, the IdP's own role claim, or the API key's stamped role, depending on which validator admitted the request. The facade's in-process `AuthenticatedIdentity` does **not** cross the facade → runtime gRPC hop; instead the runtime rebuilds this object from the flat metadata above (`IdentityPayloadFromPropagation`). Post-#1769, `x-omnia-origin` and `x-omnia-workspace` are propagated as their own headers, so `identity.origin` and `identity.workspace` are now populated on the runtime side (before #1769 they were not carried across the hop and those two fields were always empty). See the [Facade ↔ runtime protocol reference](/reference/platform/facade-runtime-protocol/) for the full metadata contract.
 
 ### JWT claim extraction
 

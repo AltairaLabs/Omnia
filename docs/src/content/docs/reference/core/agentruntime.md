@@ -183,10 +183,10 @@ an `mcp` surface for a function. `facades` replaces the former single
 
 | Field | Type | Default | Required |
 |-------|------|---------|----------|
-| `facades[].type` | string (`websocket` \| `a2a` \| `rest` \| `mcp`) | websocket | Yes |
+| `facades[].type` | string (`websocket` \| `a2a` \| `rest` \| `mcp` \| `custom`) | websocket | Yes |
 | `facades[].port` | integer | 8080 | No |
 | `facades[].handler` | string | runtime | No |
-| `facades[].image` | string | - | No |
+| `facades[].image` | string | - | No (**required** for `type: custom`) |
 | `facades[].managementPlane` | boolean | true | No |
 | `facades[].a2a` | object | - | No (only for `type: a2a`) |
 | `facades[].mcp` | object | - | No (only for `type: mcp`) |
@@ -197,6 +197,12 @@ runtimes use `websocket` (or `a2a`); `mode: function` runtimes serve HTTP
 at `POST /functions/{name}` and must use `rest` (optionally alongside
 `a2a` for agent-to-agent invocation or `mcp` to expose the function as an
 MCP tool). `websocket` is rejected for function mode.
+
+`type: custom` is a bring-your-own facade container: it speaks the
+facade↔runtime gRPC contract inward and any protocol outward. It is a
+long-lived connection surface, valid only in `mode: agent` (like
+`websocket`), and **requires** `facades[].image` to point at your container.
+Custom facades are an enterprise-licensed capability, enforced at admission.
 
 > The legacy `type: grpc` facade no longer exists. Use `websocket`.
 

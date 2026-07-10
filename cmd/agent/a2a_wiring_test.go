@@ -21,8 +21,8 @@ import (
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 
 	facadea2a "github.com/altairalabs/omnia/internal/facade/a2a"
-	"github.com/altairalabs/omnia/internal/facade/auth"
 	"github.com/altairalabs/omnia/internal/tracing"
+	"github.com/altairalabs/omnia/pkg/facade/auth"
 	"github.com/altairalabs/omnia/pkg/policy"
 )
 

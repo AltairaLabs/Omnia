@@ -102,15 +102,14 @@ func IdentityPayloadFromIdentity(id *AuthenticatedIdentity) *IdentityPayload {
 //     under. Sourced from the request/env (not the auth token), but it is
 //     the same value ToolPolicy fixtures use for identity.agent and the
 //     only agent-identifying context the runtime has.
-//   - Origin / Workspace are left unset (zero value). Origin (which
-//     validator admitted the request) and Workspace (the auth token's
-//     workspace scope) live only on the facade's in-process
-//     AuthenticatedIdentity; PropagationFields.Namespace is a distinct
-//     concept (the K8s namespace, not a workspace claim) and there is no
-//     dedicated propagation header for either today. ToolPolicy rules keyed
-//     on identity.origin / identity.workspace will not match until a
-//     dedicated propagation path is added — do not fabricate values for
-//     them here.
+//   - Origin    <- fields.Origin, the validator that admitted the request.
+//     Carried over the wire via HeaderOrigin (#1769) — the facade populates
+//     it from the admitting validator's AuthenticatedIdentity.Origin.
+//   - Workspace <- fields.Workspace, the workspace the request targets.
+//     Carried over the wire via HeaderWorkspace (#1769) — the facade
+//     populates it from AuthenticatedIdentity.Workspace, falling back to the
+//     agent's deployed workspace. Note this is distinct from
+//     PropagationFields.Namespace (the K8s namespace, not a workspace claim).
 //
 // Returns nil when none of the reconstructible fields are set, so callers
 // that always invoke this don't send an empty-but-non-nil identity object
@@ -119,13 +118,16 @@ func IdentityPayloadFromPropagation(fields *PropagationFields) *IdentityPayload 
 	if fields == nil {
 		return nil
 	}
-	if fields.UserID == "" && fields.AgentName == "" && len(fields.Claims) == 0 {
+	if fields.UserID == "" && fields.AgentName == "" &&
+		fields.Origin == "" && fields.Workspace == "" && len(fields.Claims) == 0 {
 		return nil
 	}
 	return &IdentityPayload{
-		Subject: fields.UserID,
-		EndUser: fields.UserID,
-		Agent:   fields.AgentName,
-		Claims:  fields.Claims,
+		Origin:    fields.Origin,
+		Subject:   fields.UserID,
+		EndUser:   fields.UserID,
+		Workspace: fields.Workspace,
+		Agent:     fields.AgentName,
+		Claims:    fields.Claims,
 	}
 }

@@ -118,8 +118,8 @@ func (c *PolicyBrokerClient) Decide(
 		// The runtime only ever has the flat propagated fields, never the
 		// facade's in-process AuthenticatedIdentity (it doesn't cross the
 		// gRPC hop) — see IdentityPayloadFromPropagation's doc for the exact
-		// field mapping and which AuthenticatedIdentity fields cannot be
-		// reconstructed (Origin, Workspace).
+		// field mapping. Origin and Workspace now cross the hop via their own
+		// propagation headers (#1769).
 		Identity: policy.IdentityPayloadFromPropagation(&fields),
 	}
 

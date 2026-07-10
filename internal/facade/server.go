@@ -34,10 +34,10 @@ import (
 	"go.opentelemetry.io/otel/propagation"
 	"golang.org/x/time/rate"
 
-	"github.com/altairalabs/omnia/internal/facade/auth"
 	"github.com/altairalabs/omnia/internal/media"
 	"github.com/altairalabs/omnia/internal/session"
 	"github.com/altairalabs/omnia/internal/tracing"
+	"github.com/altairalabs/omnia/pkg/facade/auth"
 	"github.com/altairalabs/omnia/pkg/logctx"
 	"github.com/altairalabs/omnia/pkg/logging"
 	"github.com/altairalabs/omnia/pkg/policy"
@@ -678,6 +678,7 @@ func (s *Server) buildConnectionContext(
 	if authIdentity != nil && len(authIdentity.Claims) > 0 {
 		validatorClaims = authIdentity.Claims
 	}
+	origin, workspace := identityScope(authIdentity, agentCtx.workspaceName)
 	return policy.WithPropagationFields(connCtx, &policy.PropagationFields{
 		AgentName:     agentCtx.agentName,
 		Namespace:     agentCtx.namespace,
@@ -685,6 +686,8 @@ func (s *Server) buildConnectionContext(
 		UserID:        userCtx.userID,
 		UserEmail:     userCtx.userEmail,
 		Authorization: userCtx.authorization,
+		Origin:        origin,
+		Workspace:     workspace,
 		Claims:        validatorClaims,
 		Identity:      authIdentity,
 	})

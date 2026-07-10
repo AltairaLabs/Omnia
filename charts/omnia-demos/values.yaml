@@ -6,6 +6,20 @@ namespace: omnia-demo
 
 # -- Workspace configuration
 workspace:
+  # -- roleBindings map OIDC groups to workspace roles (viewer | editor | owner)
+  # and render into the demo Workspace's spec.roleBindings. Empty by default: a
+  # fresh demo Workspace then has NO owner grant, so every dashboard route
+  # wrapped in a required role (services list, Memory Galaxy, …) returns 403
+  # until a grant exists. Set this — or directGrants, or anonymousAccess — to
+  # grant access declaratively instead of a post-install kubectl patch, e.g.
+  #   --set 'workspace.roleBindings[0].groups[0]=<oidc-group>' \
+  #   --set 'workspace.roleBindings[0].role=owner'
+  # Shape matches the Workspace CRD's spec.roleBindings[].
+  roleBindings: []
+  # -- directGrants grant a workspace role to an individual user by OIDC email
+  # claim. Same shape as the Workspace CRD's spec.directGrants[]. Empty by
+  # default.
+  directGrants: []
   # -- Anonymous access configuration
   # Controls what access unauthenticated users have to this workspace
   anonymousAccess:
@@ -73,6 +87,22 @@ ollama:
         limits:
           cpu: "3"
           memory: "10Gi"
+
+# ============================================================================
+# Vision Demo Agent (Ollama / llava)
+# Demonstrates image understanding with a local multimodal model.
+# ============================================================================
+
+visionDemo:
+  # -- Enable the vision demo (its Ollama Provider + PromptPack + AgentRuntime,
+  # and the LangChain vision mirror). Default true to preserve behaviour.
+  # It is ollama/llava-backed, so it needs the `vision` ollama instance (a GPU
+  # or a capable CPU pool). On clusters without one the Provider stays
+  # Unavailable and the agent is permanently non-functional — set this to false
+  # to keep it off across `helm upgrade` / `make demo-content`. (To also skip
+  # the heavy vision model server, drop the `vision` entry from
+  # `ollama.instances` above.)
+  enabled: true
 
 # Vision demo agent configuration (uses Ollama/llava)
 agent:

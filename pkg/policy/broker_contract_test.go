@@ -66,9 +66,11 @@ func TestIdentityPayloadFromPropagation_EmptyFieldsReturnsNil(t *testing.T) {
 // its IdentityPayload from IdentityFromContext(ctx), which is always nil on
 // the runtime side (AuthenticatedIdentity never crosses the facade->runtime
 // gRPC hop). This asserts the reconstructed payload maps exactly the fields
-// that have a faithful propagated source (Subject/EndUser from UserID,
-// Claims verbatim — including a "role" claim, Agent from AgentName) and
-// leaves Origin/Workspace unset rather than fabricating them.
+// that have a faithful propagated source (Subject/EndUser from UserID, Claims
+// verbatim — including a "role" claim, Agent from AgentName). Origin/Workspace
+// are unset here because this fixture carries no Origin/Workspace field — the
+// point is they are never fabricated from Namespace. (Their real propagation
+// path is covered by TestIdentityPayloadFromPropagation_MapsOriginAndWorkspace.)
 func TestIdentityPayloadFromPropagation_MapsFaithfulFieldsOnly(t *testing.T) {
 	fields := &PropagationFields{
 		AgentName: "agent-1",
@@ -117,6 +119,47 @@ func TestIdentityPayloadFromPropagation_RoleInClaims(t *testing.T) {
 	}
 	if got, want := p.Claims["role"], "editor"; got != want {
 		t.Fatalf("Claims[role] = %q, want %q", got, want)
+	}
+}
+
+// TestIdentityPayloadFromPropagation_MapsOriginAndWorkspace is the #1769
+// regression test: Origin and Workspace now cross the facade->runtime hop via
+// their own propagation headers, so the reconstructed payload must carry them
+// (previously they were unconditionally left empty, so identity.origin /
+// identity.workspace ToolPolicy rules silently no-oped in production).
+func TestIdentityPayloadFromPropagation_MapsOriginAndWorkspace(t *testing.T) {
+	fields := &PropagationFields{
+		AgentName: "agent-1",
+		Namespace: "some-k8s-namespace", // must NOT leak into Workspace
+		UserID:    "user-1",
+		Origin:    OriginAPIKey,
+		Workspace: "acme",
+	}
+
+	got := IdentityPayloadFromPropagation(fields)
+	if got == nil {
+		t.Fatal("IdentityPayloadFromPropagation returned nil for non-empty fields")
+	}
+	if got.Origin != OriginAPIKey {
+		t.Errorf("Origin = %q, want %q", got.Origin, OriginAPIKey)
+	}
+	if got.Workspace != "acme" {
+		t.Errorf("Workspace = %q, want %q (must come from fields.Workspace, not Namespace)", got.Workspace, "acme")
+	}
+}
+
+// TestIdentityPayloadFromPropagation_OriginOrWorkspaceOnlyIsSufficient asserts
+// a request carrying only origin/workspace (no user id/roles/agent/claims)
+// still produces a non-nil payload, so an origin- or workspace-scoped
+// ToolPolicy rule can fire.
+func TestIdentityPayloadFromPropagation_OriginOrWorkspaceOnlyIsSufficient(t *testing.T) {
+	gotOrigin := IdentityPayloadFromPropagation(&PropagationFields{Origin: OriginEdgeTrust})
+	if gotOrigin == nil || gotOrigin.Origin != OriginEdgeTrust {
+		t.Fatalf("origin-only payload = %+v, want Origin %q", gotOrigin, OriginEdgeTrust)
+	}
+	gotWorkspace := IdentityPayloadFromPropagation(&PropagationFields{Workspace: "acme"})
+	if gotWorkspace == nil || gotWorkspace.Workspace != "acme" {
+		t.Fatalf("workspace-only payload = %+v, want Workspace %q", gotWorkspace, "acme")
 	}
 }
 

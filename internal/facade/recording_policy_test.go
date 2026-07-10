@@ -27,7 +27,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/altairalabs/omnia/internal/session/httpclient"
+	"github.com/altairalabs/omnia/pkg/session/httpclient"
 )
 
 type mockPolicyFetcher struct {

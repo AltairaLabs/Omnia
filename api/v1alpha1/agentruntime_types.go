@@ -55,7 +55,7 @@ type PromptPackRef struct {
 
 // FacadeType defines the protocol a single facade speaks. An AgentRuntime
 // composes one or more single-protocol facades via spec.facades.
-// +kubebuilder:validation:Enum=websocket;a2a;rest;mcp
+// +kubebuilder:validation:Enum=websocket;a2a;rest;mcp;custom
 type FacadeType string
 
 const (
@@ -70,6 +70,13 @@ const (
 	// FacadeTypeMCP serves the Model Context Protocol (Streamable HTTP) surface.
 	// Only valid alongside a rest facade in mode=function.
 	FacadeTypeMCP FacadeType = "mcp"
+	// FacadeTypeCustom is a third-party / bring-your-own-container facade
+	// surface. The operator does not know the protocol it speaks; it just runs
+	// the supplied image as the facade container. Requires spec.facades[].image
+	// (CEL-validated). Like websocket, it is a long-lived connection surface and
+	// is only valid in mode=agent. The port, expose, managementPlane, extraEnv,
+	// drainTimeout, and clientToolTimeout fields all apply unchanged.
+	FacadeTypeCustom FacadeType = "custom"
 )
 
 // HandlerMode defines the message handler mode for the facade.
@@ -1201,9 +1208,10 @@ type MemoryToolsConfig struct {
 // stuck Terminating. The guard lets deletion proceed; create-time validation is
 // unaffected because the field is Required there.
 // +kubebuilder:validation:XValidation:rule="!has(self.facades) || self.facades.all(f, self.facades.exists_one(g, g.type == f.type))",message="spec.facades must not contain duplicate facade types"
-// +kubebuilder:validation:XValidation:rule="!has(self.facades) || self.mode != 'agent' || self.facades.all(f, f.type == 'websocket' || f.type == 'a2a')",message="mode 'agent' allows only 'websocket' and 'a2a' facades"
+// +kubebuilder:validation:XValidation:rule="!has(self.facades) || self.mode != 'agent' || self.facades.all(f, f.type == 'websocket' || f.type == 'a2a' || f.type == 'custom')",message="mode 'agent' allows only 'websocket', 'a2a' and 'custom' facades"
 // +kubebuilder:validation:XValidation:rule="!has(self.facades) || self.mode != 'function' || self.facades.all(f, f.type == 'rest' || f.type == 'mcp')",message="mode 'function' allows only 'rest' and 'mcp' facades"
 // +kubebuilder:validation:XValidation:rule="!has(self.facades) || self.mode != 'function' || self.facades.exists_one(f, f.type == 'rest')",message="mode 'function' requires exactly one 'rest' facade"
+// +kubebuilder:validation:XValidation:rule="!has(self.facades) || self.facades.all(f, f.type != 'custom' || (has(f.image) && size(f.image) > 0))",message="facade type 'custom' requires spec.facades[].image"
 type AgentRuntimeSpec struct {
 	// mode controls how the AgentRuntime is invoked. "agent" (default) is
 	// the existing conversational runtime (websocket and/or a2a facades);

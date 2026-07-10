@@ -12,6 +12,9 @@ type: Opaque
 stringData:
   # Ollama doesn't require an API key, but Provider requires a secretRef
   api-key: "ollama-local"
+{{- /* ollama-credentials is shared with the tools-demo provider (ollama-tools),
+       so it stays ungated. Everything below is vision-specific. */ -}}
+{{- if .Values.visionDemo.enabled }}
 ---
 # Provider configuration for Ollama
 apiVersion: omnia.altairalabs.ai/v1alpha1
@@ -199,6 +202,7 @@ spec:
         compressionGuidance: {{ .image.compressionGuidance | quote }}
     {{- end }}
   {{- end }}
+{{- end }}
 {{- /* ============================================================================ */ -}}
 {{- /* Audio Demo Resources (Gemini-based) */ -}}
 {{- /* ============================================================================ */ -}}
@@ -879,9 +883,11 @@ spec:
 {{- /* Mirrors vision-demo and tools-demo using LangChain framework */ -}}
 {{- /* ============================================================================ */ -}}
 {{- if .Values.langchainDemo.enabled }}
+{{- if .Values.visionDemo.enabled }}
 ---
 # LangChain Vision Demo AgentRuntime
 # Uses the same PromptPack and Provider as vision-demo, but with LangChain framework
+# so it is gated on visionDemo.enabled (its promptPackRef/providerRef only exist then)
 apiVersion: omnia.altairalabs.ai/v1alpha1
 kind: AgentRuntime
 metadata:
@@ -938,6 +944,7 @@ spec:
         compressionGuidance: {{ .image.compressionGuidance | quote }}
     {{- end }}
   {{- end }}
+{{- end }}
 ---
 # LangChain Tools Demo AgentRuntime
 # Uses the same PromptPack and Provider as tools-demo, but with LangChain framework

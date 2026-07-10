@@ -30,8 +30,8 @@ import (
 
 	"github.com/altairalabs/omnia/internal/agent"
 	"github.com/altairalabs/omnia/internal/facade"
-	"github.com/altairalabs/omnia/internal/facade/auth"
 	"github.com/altairalabs/omnia/internal/tracing"
+	"github.com/altairalabs/omnia/pkg/facade/auth"
 )
 
 // runFunctionsFacade starts the HTTP facade for a function-mode

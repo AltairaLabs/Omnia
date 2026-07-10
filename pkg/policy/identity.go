@@ -24,7 +24,7 @@ import (
 
 // Origin strings identify which validator admitted a request. They flow
 // through PropagationFields and surface to ToolPolicy CEL as identity.origin.
-// Lives here (not in internal/facade/auth) so pkg/policy can refer to the
+// Lives here (not in pkg/facade/auth) so pkg/policy can refer to the
 // identity contract without importing downstream facade code.
 const (
 	OriginManagementPlane = "management-plane"
