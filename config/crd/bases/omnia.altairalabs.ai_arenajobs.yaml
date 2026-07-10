@@ -11,6 +11,8 @@ spec:
     kind: ArenaJob
     listKind: ArenaJobList
     plural: arenajobs
+    shortNames:
+    - aj
     singular: arenajob
   scope: Namespaced
   versions:

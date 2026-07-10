@@ -11,6 +11,8 @@ spec:
     kind: PromptPack
     listKind: PromptPackList
     plural: promptpacks
+    shortNames:
+    - pp
     singular: promptpack
   scope: Namespaced
   versions:

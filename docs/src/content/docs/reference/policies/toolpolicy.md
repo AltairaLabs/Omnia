@@ -18,6 +18,8 @@ apiVersion: omnia.altairalabs.ai/v1alpha1
 kind: ToolPolicy
 ```
 
+**Short name:** `tp` (e.g. `kubectl get tp`).
+
 ## Spec fields
 
 ### `selector`

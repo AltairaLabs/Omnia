@@ -692,7 +692,7 @@ type MemoryPolicyStatus struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:resource:scope=Cluster
+// +kubebuilder:resource:scope=Cluster,shortName=mp
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
 // +kubebuilder:printcolumn:name="Inst Mode",type=string,JSONPath=`.spec.tiers.institutional.mode`
 // +kubebuilder:printcolumn:name="Agent Mode",type=string,JSONPath=`.spec.tiers.agent.mode`

@@ -21,6 +21,8 @@ apiVersion: omnia.altairalabs.ai/v1alpha1
 kind: ArenaJob
 ```
 
+**Short name:** `aj` (e.g. `kubectl get aj`).
+
 ## Overview
 
 ArenaJob provides:

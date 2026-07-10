@@ -14,6 +14,8 @@ apiVersion: omnia.altairalabs.ai/v1alpha1
 kind: SessionRetentionPolicy
 ```
 
+**Short name:** `srp` (e.g. `kubectl get srp`).
+
 ## Resource Scope
 
 `SessionRetentionPolicy` is **cluster-scoped**. A single policy object can be referenced by workspaces in any namespace.

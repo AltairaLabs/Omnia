@@ -11,6 +11,8 @@ spec:
     kind: ArenaSource
     listKind: ArenaSourceList
     plural: arenasources
+    shortNames:
+    - as
     singular: arenasource
   scope: Namespaced
   versions:

@@ -11,6 +11,8 @@ spec:
     kind: SessionRetentionPolicy
     listKind: SessionRetentionPolicyList
     plural: sessionretentionpolicies
+    shortNames:
+    - srp
     singular: sessionretentionpolicy
   scope: Cluster
   versions:

@@ -11,6 +11,8 @@ spec:
     kind: SessionPrivacyPolicy
     listKind: SessionPrivacyPolicyList
     plural: sessionprivacypolicies
+    shortNames:
+    - spp
     singular: sessionprivacypolicy
   scope: Namespaced
   versions:

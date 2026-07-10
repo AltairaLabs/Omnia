@@ -15,6 +15,8 @@ apiVersion: omnia.altairalabs.ai/v1alpha1
 kind: Provider
 ```
 
+**Short name:** `prov` (e.g. `kubectl get prov`).
+
 ## Spec fields
 
 ### `type`

@@ -21,6 +21,8 @@ apiVersion: omnia.altairalabs.ai/v1alpha1
 kind: ArenaSource
 ```
 
+**Short name:** `as` (e.g. `kubectl get as`).
+
 ## Overview
 
 ArenaSource provides:

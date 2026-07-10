@@ -11,6 +11,8 @@ spec:
     kind: ToolRegistry
     listKind: ToolRegistryList
     plural: toolregistries
+    shortNames:
+    - tr
     singular: toolregistry
   scope: Namespaced
   versions:

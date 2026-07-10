@@ -17,6 +17,8 @@ apiVersion: omnia.altairalabs.ai/v1alpha1
 kind: PromptPack
 ```
 
+**Short name:** `pp` (e.g. `kubectl get pp`).
+
 ## Spec fields
 
 ### `source`

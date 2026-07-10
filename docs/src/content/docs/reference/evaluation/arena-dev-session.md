@@ -23,6 +23,8 @@ apiVersion: omnia.altairalabs.ai/v1alpha1
 kind: ArenaDevSession
 ```
 
+**Short name:** `ads` (e.g. `kubectl get ads`).
+
 ## Overview
 
 ArenaDevSession provides:
