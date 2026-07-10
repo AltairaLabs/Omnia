@@ -153,7 +153,6 @@ func buildOIDCValidator(
 	if oidc.ClaimMapping != nil {
 		opts = append(opts, auth.WithOIDCClaimMapping(auth.OIDCClaimMapping{
 			Subject: oidc.ClaimMapping.Subject,
-			Role:    oidc.ClaimMapping.Role,
 			EndUser: oidc.ClaimMapping.EndUser,
 		}))
 	}
@@ -223,7 +222,6 @@ func buildEdgeTrustValidator(log logr.Logger, ar *omniav1alpha1.AgentRuntime) au
 	if et.HeaderMapping != nil {
 		opts = append(opts,
 			auth.WithEdgeTrustSubjectHeader(et.HeaderMapping.Subject),
-			auth.WithEdgeTrustRoleHeader(et.HeaderMapping.Role),
 			auth.WithEdgeTrustEndUserHeader(et.HeaderMapping.EndUser),
 			auth.WithEdgeTrustEmailHeader(et.HeaderMapping.Email),
 		)

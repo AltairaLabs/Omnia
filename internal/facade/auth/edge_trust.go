@@ -70,8 +70,8 @@ func WithEdgeTrustSubjectHeader(name string) EdgeTrustOption {
 	}
 }
 
-// WithEdgeTrustRoleHeader overrides the inbound header read for
-// Identity.Role. Defaults to DefaultEdgeRoleHeader.
+// WithEdgeTrustRoleHeader overrides the inbound header read into
+// identity.claims.role. Defaults to DefaultEdgeRoleHeader.
 func WithEdgeTrustRoleHeader(name string) EdgeTrustOption {
 	return func(v *EdgeTrustValidator) {
 		if name != "" {

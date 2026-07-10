@@ -367,9 +367,12 @@ export interface AgentRuntimeSpec {
        * The defaults cover the chart's current authentication.enabled=true
        * layout (charts/omnia/templates/gateway/authentication.yaml):
        *   subject: "x-user-id"
-       *   role:    "x-user-roles"
        *   endUser: "x-user-id"
        *   email:   "x-user-email"
+       * 
+       * The role header (default "x-user-roles") is always read into
+       * identity.claims.role; it is not configurable here. Additional
+       * headers can be surfaced as claims via claimsFromHeaders.
        * 
        * Operators running a different edge (custom EnvoyFilter, API
        * gateway, service mesh other than Istio) override these to name the
@@ -377,7 +380,6 @@ export interface AgentRuntimeSpec {
       headerMapping?: {
         email?: string;
         endUser?: string;
-        role?: string;
         subject?: string;
       };
     };
@@ -389,7 +391,8 @@ export interface AgentRuntimeSpec {
       /** audience is the expected `aud` claim value. */
       audience: string;
       /** claimMapping maps JWT claim names to the internal identity fields.
-       * Defaults: sub→Subject, omnia.role→Role, sub→EndUser. */
+       * Defaults: sub→Subject, sub→EndUser. The IdP's role/group claims
+       * pass through to identity.claims.<name>. */
       claimMapping?: {
         /** endUser names the claim used to identify the end-user on whose
          * behalf this token was issued. Defaults to "sub" — correct for
@@ -401,9 +404,6 @@ export interface AgentRuntimeSpec {
          * If the named claim is missing from a given token, the validator
          * falls back to Subject. */
         endUser?: string;
-        /** role names the claim used to resolve the caller's role. Defaults
-         * to "omnia.role". The claim value must be one of viewer/editor/admin. */
-        role?: string;
         /** subject names the claim used as the caller's stable identifier
          * (the token-holder — app or user). Defaults to "sub". */
         subject?: string;

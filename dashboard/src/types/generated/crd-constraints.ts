@@ -274,9 +274,6 @@ export const crdConstraints: Record<string, Record<string, FieldConstraint>> =
     "spec.externalAuth.edgeTrust.headerMapping.endUser": {
       "type": "string"
     },
-    "spec.externalAuth.edgeTrust.headerMapping.role": {
-      "type": "string"
-    },
     "spec.externalAuth.edgeTrust.headerMapping.subject": {
       "type": "string"
     },
@@ -286,9 +283,6 @@ export const crdConstraints: Record<string, Record<string, FieldConstraint>> =
       "required": true
     },
     "spec.externalAuth.oidc.claimMapping.endUser": {
-      "type": "string"
-    },
-    "spec.externalAuth.oidc.claimMapping.role": {
       "type": "string"
     },
     "spec.externalAuth.oidc.claimMapping.subject": {

@@ -39,7 +39,6 @@ import (
 // defaults so operators who don't override them get sensible behaviour.
 const (
 	DefaultOIDCSubjectClaim = "sub"
-	DefaultOIDCRoleClaim    = "omnia.role"
 	DefaultOIDCEndUserClaim = "sub"
 )
 
@@ -173,7 +172,6 @@ type KeySupplier interface {
 // constants so tests don't have to fill every field.
 type OIDCClaimMapping struct {
 	Subject string
-	Role    string
 	EndUser string
 }
 
@@ -186,9 +184,6 @@ func WithOIDCClaimMapping(m OIDCClaimMapping) OIDCOption {
 	return func(v *OIDCValidator) {
 		if m.Subject != "" {
 			v.mapping.Subject = m.Subject
-		}
-		if m.Role != "" {
-			v.mapping.Role = m.Role
 		}
 		if m.EndUser != "" {
 			v.mapping.EndUser = m.EndUser
@@ -213,7 +208,6 @@ func NewOIDCValidator(issuer, audience string, keys KeySupplier, opts ...OIDCOpt
 		keys:     keys,
 		mapping: OIDCClaimMapping{
 			Subject: DefaultOIDCSubjectClaim,
-			Role:    DefaultOIDCRoleClaim,
 			EndUser: DefaultOIDCEndUserClaim,
 		},
 	}
@@ -289,10 +283,10 @@ func (v *OIDCValidator) identityFromClaims(claims jwt.MapClaims) *policy.Authent
 		// Design doc semantics: "Falls back to Subject if claim missing."
 		id.EndUser = id.Subject
 	}
-	// Role is intentionally left unset here: the IdP's role claim flows
-	// through extractExtraClaims like any other claim, so ToolPolicy CEL
-	// references it as identity.claims.<mapping.Role> rather than via a
-	// dedicated Identity.Role field.
+	// Role is intentionally left unset here: there is no dedicated
+	// Identity.Role field. Whatever claim the IdP uses for role/group
+	// flows through extractExtraClaims like any other claim, so
+	// ToolPolicy CEL reads it via identity.claims.<claim-name-in-token>.
 	id.Claims = extractExtraClaims(claims, v.mapping)
 
 	// Surface the token's validity window so identity consumers that

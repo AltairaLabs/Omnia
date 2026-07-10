@@ -118,7 +118,8 @@ type OIDCAuth struct {
 	Audience string `json:"audience"`
 
 	// claimMapping maps JWT claim names to the internal identity fields.
-	// Defaults: sub→Subject, omnia.role→Role, sub→EndUser.
+	// Defaults: sub→Subject, sub→EndUser. The IdP's role/group claims
+	// pass through to identity.claims.<name>.
 	// +optional
 	ClaimMapping *OIDCClaimMapping `json:"claimMapping,omitempty"`
 }
@@ -130,11 +131,6 @@ type OIDCClaimMapping struct {
 	// (the token-holder — app or user). Defaults to "sub".
 	// +optional
 	Subject string `json:"subject,omitempty"`
-
-	// role names the claim used to resolve the caller's role. Defaults
-	// to "omnia.role". The claim value must be one of viewer/editor/admin.
-	// +optional
-	Role string `json:"role,omitempty"`
 
 	// endUser names the claim used to identify the end-user on whose
 	// behalf this token was issued. Defaults to "sub" — correct for
@@ -159,9 +155,12 @@ type EdgeTrustAuth struct {
 	// The defaults cover the chart's current authentication.enabled=true
 	// layout (charts/omnia/templates/gateway/authentication.yaml):
 	//   subject: "x-user-id"
-	//   role:    "x-user-roles"
 	//   endUser: "x-user-id"
 	//   email:   "x-user-email"
+	//
+	// The role header (default "x-user-roles") is always read into
+	// identity.claims.role; it is not configurable here. Additional
+	// headers can be surfaced as claims via claimsFromHeaders.
 	//
 	// Operators running a different edge (custom EnvoyFilter, API
 	// gateway, service mesh other than Istio) override these to name the
@@ -182,12 +181,12 @@ type EdgeTrustAuth struct {
 
 // EdgeTrustHeaderMapping overrides the inbound header names the
 // edgeTrust validator reads when an upstream edge uses non-default
-// claim-header conventions.
+// claim-header conventions. The role header itself is not
+// configurable here — it is always read into identity.claims.role
+// using the validator's internal default header name.
 type EdgeTrustHeaderMapping struct {
 	// +optional
 	Subject string `json:"subject,omitempty"`
-	// +optional
-	Role string `json:"role,omitempty"`
 	// +optional
 	EndUser string `json:"endUser,omitempty"`
 	// +optional

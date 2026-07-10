@@ -433,7 +433,6 @@ func TestOIDCValidator_CustomClaimMapping(t *testing.T) {
 	t.Parallel()
 	mapping := auth.OIDCClaimMapping{
 		Subject: "user_id",
-		Role:    "tier",
 		EndUser: "actor",
 	}
 	v, key := newOIDCValidatorForTest(t, auth.WithOIDCClaimMapping(mapping))

@@ -767,9 +767,12 @@ spec:
                           The defaults cover the chart's current authentication.enabled=true
                           layout (charts/omnia/templates/gateway/authentication.yaml):
                             subject: "x-user-id"
-                            role:    "x-user-roles"
                             endUser: "x-user-id"
                             email:   "x-user-email"
+
+                          The role header (default "x-user-roles") is always read into
+                          identity.claims.role; it is not configurable here. Additional
+                          headers can be surfaced as claims via claimsFromHeaders.
 
                           Operators running a different edge (custom EnvoyFilter, API
                           gateway, service mesh other than Istio) override these to name the
@@ -778,8 +781,6 @@ spec:
                           email:
                             type: string
                           endUser:
-                            type: string
-                          role:
                             type: string
                           subject:
                             type: string
@@ -799,7 +800,8 @@ spec:
                       claimMapping:
                         description: |-
                           claimMapping maps JWT claim names to the internal identity fields.
-                          Defaults: sub→Subject, omnia.role→Role, sub→EndUser.
+                          Defaults: sub→Subject, sub→EndUser. The IdP's role/group claims
+                          pass through to identity.claims.<name>.
                         properties:
                           endUser:
                             description: |-
@@ -812,11 +814,6 @@ spec:
 
                               If the named claim is missing from a given token, the validator
                               falls back to Subject.
-                            type: string
-                          role:
-                            description: |-
-                              role names the claim used to resolve the caller's role. Defaults
-                              to "omnia.role". The claim value must be one of viewer/editor/admin.
                             type: string
                           subject:
                             description: |-
