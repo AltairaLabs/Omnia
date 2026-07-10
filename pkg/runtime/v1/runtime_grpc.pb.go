@@ -34,6 +34,11 @@ const (
 // RuntimeService defines the communication protocol between the facade and runtime containers.
 // The facade handles external protocol translation (WebSocket/REST/gRPC to internal gRPC),
 // while the runtime handles all business logic including sessions, LLM calls, and tool execution.
+//
+// Caller identity and JWT claims are NOT message fields — they travel as flat
+// x-omnia-* gRPC metadata attached by the facade (the raw Authorization bearer
+// token is deliberately withheld). See the facade↔runtime protocol reference:
+// docs/src/content/docs/reference/platform/facade-runtime-protocol.md
 type RuntimeServiceClient interface {
 	// Converse handles bidirectional streaming for agent conversations.
 	// The client sends messages and receives a stream of responses including
@@ -101,6 +106,11 @@ func (c *runtimeServiceClient) Health(ctx context.Context, in *HealthRequest, op
 // RuntimeService defines the communication protocol between the facade and runtime containers.
 // The facade handles external protocol translation (WebSocket/REST/gRPC to internal gRPC),
 // while the runtime handles all business logic including sessions, LLM calls, and tool execution.
+//
+// Caller identity and JWT claims are NOT message fields — they travel as flat
+// x-omnia-* gRPC metadata attached by the facade (the raw Authorization bearer
+// token is deliberately withheld). See the facade↔runtime protocol reference:
+// docs/src/content/docs/reference/platform/facade-runtime-protocol.md
 type RuntimeServiceServer interface {
 	// Converse handles bidirectional streaming for agent conversations.
 	// The client sends messages and receives a stream of responses including
