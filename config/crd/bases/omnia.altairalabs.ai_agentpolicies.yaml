@@ -11,6 +11,8 @@ spec:
     kind: AgentPolicy
     listKind: AgentPolicyList
     plural: agentpolicies
+    shortNames:
+    - ap
     singular: agentpolicy
   scope: Namespaced
   versions:

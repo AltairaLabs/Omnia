@@ -9,6 +9,8 @@ The `SkillSource` custom resource fetches [AgentSkills.io](https://agentskills.i
 
 A skill is a directory containing a `SKILL.md` file with YAML frontmatter (`name`, `description`, optional `allowed-tools`, `metadata`) and a Markdown body that PromptKit loads on demand.
 
+**Short name:** `skl` (e.g. `kubectl get skl`).
+
 ## Example
 
 ```yaml

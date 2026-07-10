@@ -3,9 +3,6 @@ title: "Arena Fleet: Run Your First Evaluation"
 description: "Get started with Arena Fleet by running your first prompt evaluation"
 sidebar:
   order: 4
-  badge:
-    text: Arena
-    variant: note
 ---
 
 This tutorial walks you through running your first prompt evaluation using Arena Fleet. By the end, you'll have a complete evaluation pipeline running in your cluster.

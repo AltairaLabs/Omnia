@@ -11,6 +11,8 @@ spec:
     kind: SkillSource
     listKind: SkillSourceList
     plural: skillsources
+    shortNames:
+    - skl
     singular: skillsource
   scope: Namespaced
   versions:

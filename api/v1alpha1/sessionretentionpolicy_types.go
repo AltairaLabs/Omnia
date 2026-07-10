@@ -143,7 +143,7 @@ type SessionRetentionPolicyStatus struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:resource:scope=Cluster
+// +kubebuilder:resource:scope=Cluster,shortName=srp
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
 // +kubebuilder:printcolumn:name="Hot Cache TTL",type=string,JSONPath=`.spec.hotCache.ttlAfterInactive`
 // +kubebuilder:printcolumn:name="Warm Days",type=integer,JSONPath=`.spec.warmStore.retentionDays`

@@ -26,6 +26,8 @@ apiVersion: omnia.altairalabs.ai/v1alpha1
 kind: ToolRegistry
 ```
 
+**Short name:** `tr` (e.g. `kubectl get tr`).
+
 ```mermaid
 graph TB
     TR[ToolRegistry] --> H1[HTTP Handler]

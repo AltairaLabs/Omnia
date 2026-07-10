@@ -25,6 +25,8 @@ apiVersion: omnia.altairalabs.ai/v1alpha1
 kind: MemoryPolicy
 ```
 
+**Short name:** `mp` (e.g. `kubectl get mp`).
+
 ## Resource Scope
 
 `MemoryPolicy` is **cluster-scoped**. There is no `metadata.namespace`.

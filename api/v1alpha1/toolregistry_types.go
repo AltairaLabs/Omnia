@@ -676,6 +676,7 @@ const (
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
+// +kubebuilder:resource:shortName=tr
 // +kubebuilder:printcolumn:name="Tools",type="integer",JSONPath=".status.discoveredToolsCount",description="Number of discovered tools"
 // +kubebuilder:printcolumn:name="Phase",type="string",JSONPath=".status.phase",description="Current phase"
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"

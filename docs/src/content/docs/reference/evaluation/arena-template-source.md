@@ -19,6 +19,8 @@ apiVersion: omnia.altairalabs.ai/v1alpha1
 kind: ArenaTemplateSource
 ```
 
+**Short name:** `ats` (e.g. `kubectl get ats`).
+
 ## Overview
 
 ArenaTemplateSource provides:

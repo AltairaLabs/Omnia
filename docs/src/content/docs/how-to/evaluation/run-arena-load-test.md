@@ -3,9 +3,6 @@ title: "Run an Arena Load Test"
 description: "Drive concurrent load at agents and providers with virtual users, ramps, budgets, and SLO gating"
 sidebar:
   order: 10
-  badge:
-    text: Arena
-    variant: note
 ---
 
 :::note[Enterprise Feature]
