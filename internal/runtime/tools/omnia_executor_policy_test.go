@@ -113,16 +113,16 @@ func TestDispatch_PolicyBrokerDeny_AbortsCall(t *testing.T) {
 }
 
 // roleGatedBrokerHandler simulates a ToolPolicy rule keyed on
-// `identity.role` (e.g. `identity.role != "admin"` denies): it decodes the
-// DecisionRequest identity payload and denies unless the propagated role
-// matches requiredRole.
+// `identity.claims.role` (e.g. `identity.claims.role != "admin"` denies): it
+// decodes the DecisionRequest identity payload and denies unless the
+// propagated role claim matches requiredRole.
 func roleGatedBrokerHandler(requiredRole string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req policy.DecisionRequest
 		_ = json.NewDecoder(r.Body).Decode(&req)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		if req.Identity != nil && req.Identity.Role == requiredRole {
+		if req.Identity != nil && req.Identity.Claims["role"] == requiredRole {
 			_, _ = w.Write([]byte(`{"allow":true}`))
 			return
 		}
@@ -131,8 +131,8 @@ func roleGatedBrokerHandler(requiredRole string) http.HandlerFunc {
 }
 
 // TestDispatch_PolicyBrokerDeny_IdentityRoleFromPropagation_AbortsCall proves
-// the CRITICAL fix: an identity.role-gated ToolPolicy rule actually denies
-// when the caller's role arrives via the runtime's propagated
+// the CRITICAL fix: an identity.claims.role-gated ToolPolicy rule actually
+// denies when the caller's role claim arrives via the runtime's propagated
 // PropagationFields (the real production path — extractPolicyFromMetadata
 // rehydrating gRPC metadata), not via policy.WithIdentity (which is
 // facade-only and never reaches the runtime). Before the fix, the broker
@@ -155,15 +155,15 @@ func TestDispatch_PolicyBrokerDeny_IdentityRoleFromPropagation_AbortsCall(t *tes
 	// does on every inbound gRPC call: rehydrate PropagationFields from
 	// metadata, not an in-process AuthenticatedIdentity.
 	ctx := policy.WithPropagationFields(context.Background(), &policy.PropagationFields{
-		UserID:    "user-1",
-		UserRoles: policy.RoleViewer,
+		UserID: "user-1",
+		Claims: map[string]string{"role": policy.RoleViewer},
 	})
 
 	_, err := e.ExecuteTool(ctx, "test-http-tool", json.RawMessage(`{}`))
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, errPolicyDenied), "expected errPolicyDenied, got %v", err)
 	assert.Contains(t, err.Error(), "role-gate")
-	assert.False(t, toolCalled, "tool backend must not be called when identity.role gates the call")
+	assert.False(t, toolCalled, "tool backend must not be called when identity.claims.role gates the call")
 }
 
 // TestDispatch_PolicyBrokerAllow_IdentityRoleFromPropagation_ProceedsWithCall
@@ -187,13 +187,13 @@ func TestDispatch_PolicyBrokerAllow_IdentityRoleFromPropagation_ProceedsWithCall
 	e := newHTTPToolExecutor(toolSrv)
 
 	ctx := policy.WithPropagationFields(context.Background(), &policy.PropagationFields{
-		UserID:    "user-1",
-		UserRoles: policy.RoleAdmin,
+		UserID: "user-1",
+		Claims: map[string]string{"role": policy.RoleAdmin},
 	})
 
 	_, err := e.ExecuteTool(ctx, "test-http-tool", json.RawMessage(`{}`))
 	require.NoError(t, err)
-	assert.True(t, toolCalled, "tool backend must be called when identity.role matches")
+	assert.True(t, toolCalled, "tool backend must be called when identity.claims.role matches")
 }
 
 func TestDispatch_PolicyBrokerAllowWithInjectedHeaders_ReachesOutboundRequest(t *testing.T) {

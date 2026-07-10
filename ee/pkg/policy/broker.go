@@ -217,7 +217,6 @@ func withIdentityFromPayload(ctx context.Context, payload *IdentityPayload) cont
 		EndUser:   payload.EndUser,
 		Workspace: payload.Workspace,
 		Agent:     payload.Agent,
-		Role:      payload.Role,
 		Claims:    payload.Claims,
 	}
 	return omniapolicy.WithIdentity(ctx, identity)
