@@ -143,7 +143,7 @@ func reconcileRoleAndGetSecretVerbs(t *testing.T, ar *omniav1alpha1.AgentRuntime
 }
 
 // TestReconcileRole_SecretsGetOnlyWithoutAPIKeys: with no externalAuth.apiKeys,
-// the facade only Gets a named Secret (sharedToken/oidc) — no list/watch.
+// the facade only Gets a named Secret (oidc) — no list/watch.
 func TestReconcileRole_SecretsGetOnlyWithoutAPIKeys(t *testing.T) {
 	ar := &omniav1alpha1.AgentRuntime{
 		ObjectMeta: metav1.ObjectMeta{Name: "no-apikeys", Namespace: "test-ns", UID: "u1"},

@@ -232,11 +232,10 @@ func buildWebSocketServer(
 		serverOpts = append(serverOpts, facade.WithRouteStore(agent.NewRedisRouteStore(redis.NewClient(ropts))))
 	}
 
-	// Build the auth chain: data-plane validators (sharedToken in PR 2b;
-	// apiKeys/oidc/edgeTrust in PRs 2c–2e) followed by the mgmt-plane
-	// validator. Loading failures (malformed PEM, missing Secret data
-	// key, empty shared token) are fatal — silent downgrade to no-auth
-	// would mask real operator misconfig.
+	// Build the auth chain: data-plane validators (apiKeys/oidc/edgeTrust,
+	// from PRs 2c–2e) followed by the mgmt-plane validator. Loading
+	// failures (malformed PEM, missing Secret data key) are fatal —
+	// silent downgrade to no-auth would mask real operator misconfig.
 	mgmtPlane, err := loadMgmtPlaneValidator(log, cfg.AgentName, cfg.WorkspaceName)
 	if err != nil {
 		return nil, fmt.Errorf("mgmt-plane validator load failed: %w", err)

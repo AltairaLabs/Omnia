@@ -152,8 +152,8 @@ func (r *AgentRuntimeReconciler) reconcileServiceAccount(
 	return nil
 }
 
-// facadeSecretVerbs returns the Secret verbs the facade Role needs. sharedToken
-// and oidc read a single named Secret (get), but externalAuth.apiKeys backs its
+// facadeSecretVerbs returns the Secret verbs the facade Role needs. oidc
+// reads a single named Secret (get), but externalAuth.apiKeys backs its
 // validator with a label-selected Secret List at startup — which needs
 // list/watch, or the facade crash-loops on RBAC once api-key auth is set
 // (#1591). RBAC can't scope a list by label, so this widens to a namespace-wide

@@ -16,8 +16,6 @@ limitations under the License.
 
 package v1alpha1
 
-import corev1 "k8s.io/api/core/v1"
-
 // AgentExternalAuth configures authentication for data-plane clients
 // (external apps streaming to this agent's facades).
 //
@@ -30,12 +28,6 @@ import corev1 "k8s.io/api/core/v1"
 // The management plane is gated per-facade by facades[].managementPlane,
 // not here.
 type AgentExternalAuth struct {
-	// sharedToken validates a single bearer token shared across all
-	// callers of this agent. Simplest partner integration; one token in
-	// a Kubernetes Secret, rotated by editing the Secret.
-	// +optional
-	SharedToken *SharedTokenAuth `json:"sharedToken,omitempty"`
-
 	// apiKeys configures per-caller API keys for this agent. Each key is
 	// stored as a Kubernetes Secret in the agent's namespace with a
 	// sha256 hash of the raw value, scopes, and expiry. Created via the
@@ -67,26 +59,6 @@ type AgentExternalAuth struct {
 	EdgeTrust *EdgeTrustAuth `json:"edgeTrust,omitempty"`
 }
 
-// SharedTokenAuth validates a single bearer token shared by all callers.
-type SharedTokenAuth struct {
-	// secretRef references a Secret with key "token" holding the bearer
-	// value.
-	// +kubebuilder:validation:Required
-	SecretRef corev1.LocalObjectReference `json:"secretRef"`
-
-	// trustEndUserHeader lets the caller forward the end-user identity
-	// via the X-End-User-Id request header. Off by default — when off,
-	// Identity.EndUser is set equal to Identity.Subject (the token
-	// itself), so per-user audit granularity is coarse.
-	//
-	// Turn on only when the calling app is trusted to faithfully forward
-	// user context. A malicious app holding a valid token can spoof
-	// arbitrary end-users, so ToolPolicy rules gating on identity.endUser
-	// must be paired with an app-level trust assessment.
-	// +optional
-	TrustEndUserHeader bool `json:"trustEndUserHeader,omitempty"`
-}
-
 // APIKeysAuth turns on per-caller API key validation for this agent.
 // The key list itself lives in Secrets (keyed by sha256 of the raw value),
 // not in the CR — this struct is a policy toggle.
@@ -97,8 +69,15 @@ type APIKeysAuth struct {
 	// +optional
 	DefaultRole string `json:"defaultRole,omitempty"`
 
-	// trustEndUserHeader — same semantics as SharedTokenAuth; see that
-	// field's doc comment for the security trade-off.
+	// trustEndUserHeader lets the caller forward the end-user identity
+	// via the X-End-User-Id request header. Off by default — when off,
+	// Identity.EndUser is set equal to Identity.Subject (the API key's
+	// own identity), so per-user audit granularity is coarse.
+	//
+	// Turn on only when the calling app is trusted to faithfully forward
+	// user context. A malicious app holding a valid key can spoof
+	// arbitrary end-users, so ToolPolicy rules gating on identity.endUser
+	// must be paired with an app-level trust assessment.
 	// +optional
 	TrustEndUserHeader bool `json:"trustEndUserHeader,omitempty"`
 }

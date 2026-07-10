@@ -37,9 +37,9 @@ import (
 // list-by-label without importing the controller package.
 const (
 	// LabelCredentialKind tags every agent-scoped credential Secret. Same
-	// label is used for sharedToken / oidc-jwks Secrets so a single
-	// list-by-label can find them all if needed later; we filter further
-	// by LabelCredentialKindValue.
+	// label is used for oidc-jwks Secrets so a single list-by-label can
+	// find them all if needed later; we filter further by
+	// LabelCredentialKindValue.
 	LabelCredentialKind = "omnia.altairalabs.ai/credential-kind"
 	// LabelCredentialKindAgentAPIKey identifies the api-keys flavour.
 	LabelCredentialKindAgentAPIKey = "agent-api-key"

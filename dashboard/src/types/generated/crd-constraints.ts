@@ -293,15 +293,6 @@ export const crdConstraints: Record<string, Record<string, FieldConstraint>> =
       "minLength": 1,
       "required": true
     },
-    "spec.externalAuth.sharedToken.secretRef": {
-      "required": true
-    },
-    "spec.externalAuth.sharedToken.secretRef.name": {
-      "type": "string"
-    },
-    "spec.externalAuth.sharedToken.trustEndUserHeader": {
-      "type": "boolean"
-    },
     "spec.facades": {
       "required": true
     },

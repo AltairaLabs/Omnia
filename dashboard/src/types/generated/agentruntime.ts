@@ -337,8 +337,15 @@ export interface AgentRuntimeSpec {
     apiKeys?: {
       /** defaultRole is applied to API keys that don't specify one. */
       defaultRole?: "viewer" | "editor" | "admin";
-      /** trustEndUserHeader — same semantics as SharedTokenAuth; see that
-       * field's doc comment for the security trade-off. */
+      /** trustEndUserHeader lets the caller forward the end-user identity
+       * via the X-End-User-Id request header. Off by default — when off,
+       * Identity.EndUser is set equal to Identity.Subject (the API key's
+       * own identity), so per-user audit granularity is coarse.
+       * 
+       * Turn on only when the calling app is trusted to faithfully forward
+       * user context. A malicious app holding a valid key can spoof
+       * arbitrary end-users, so ToolPolicy rules gating on identity.endUser
+       * must be paired with an app-level trust assessment. */
       trustEndUserHeader?: boolean;
     };
     /** edgeTrust consumes claim-headers injected by an upstream JWT
@@ -411,31 +418,6 @@ export interface AgentRuntimeSpec {
       /** issuer is the OIDC issuer URL (without trailing slash). Controller
        * fetches {issuer}/.well-known/openid-configuration. */
       issuer: string;
-    };
-    /** sharedToken validates a single bearer token shared across all
-     * callers of this agent. Simplest partner integration; one token in
-     * a Kubernetes Secret, rotated by editing the Secret. */
-    sharedToken?: {
-      /** secretRef references a Secret with key "token" holding the bearer
-       * value. */
-      secretRef: {
-        /** Name of the referent.
-         * This field is effectively required, but due to backwards compatibility is
-         * allowed to be empty. Instances of this type with an empty value here are
-         * almost certainly wrong.
-         * More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names */
-        name?: string;
-      };
-      /** trustEndUserHeader lets the caller forward the end-user identity
-       * via the X-End-User-Id request header. Off by default — when off,
-       * Identity.EndUser is set equal to Identity.Subject (the token
-       * itself), so per-user audit granularity is coarse.
-       * 
-       * Turn on only when the calling app is trusted to faithfully forward
-       * user context. A malicious app holding a valid token can spoof
-       * arbitrary end-users, so ToolPolicy rules gating on identity.endUser
-       * must be paired with an app-level trust assessment. */
-      trustEndUserHeader?: boolean;
     };
   };
   /** extraPodAnnotations defines additional annotations to add to the agent pods.

@@ -23,7 +23,6 @@ import (
 	"testing"
 
 	"github.com/go-logr/logr"
-	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -46,123 +45,40 @@ func newTestScheme(t *testing.T) *runtime.Scheme {
 	return scheme
 }
 
-func TestBuildExternalChain_SharedTokenAddsValidator(t *testing.T) {
+// TestBuildExternalChain_AgentRuntimeFoundBuildsValidators exercises the
+// "AgentRuntime found" branch of buildExternalChain end-to-end via
+// buildDataPlaneValidators (apiKeys/oidc unset, edgeTrust set — edgeTrust is
+// pure-Go so this needs no Secret fixture). No mgmt validator is present.
+func TestBuildExternalChain_AgentRuntimeFoundBuildsValidators(t *testing.T) {
 	t.Parallel()
 	scheme := newTestScheme(t)
-
-	secret := &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Name: "shared-token", Namespace: "ns"},
-		Data:       map[string][]byte{"token": []byte("opaque-bearer")},
-	}
 	ar := &omniav1alpha1.AgentRuntime{
 		ObjectMeta: metav1.ObjectMeta{Name: "agent", Namespace: "ns"},
 		Spec: omniav1alpha1.AgentRuntimeSpec{
 			ExternalAuth: &omniav1alpha1.AgentExternalAuth{
-				SharedToken: &omniav1alpha1.SharedTokenAuth{
-					SecretRef: corev1.LocalObjectReference{Name: "shared-token"},
-				},
+				EdgeTrust: &omniav1alpha1.EdgeTrustAuth{},
 			},
 		},
 	}
-	fc := fake.NewClientBuilder().WithScheme(scheme).WithObjects(ar, secret).Build()
+	fc := fake.NewClientBuilder().WithScheme(scheme).WithObjects(ar).Build()
 
 	chain, err := buildExternalChain(context.Background(), fc, logr.Discard(), "agent", "ns")
 	if err != nil {
 		t.Fatalf("err = %v", err)
 	}
 	if got, want := len(chain), 1; got != want {
-		t.Fatalf("chain length = %d, want %d (sharedToken only, no mgmt)", got, want)
+		t.Fatalf("chain length = %d, want %d (edgeTrust only, no mgmt)", got, want)
 	}
 
-	// Prove sharedToken really is wired by exercising the chain end-to-end:
-	// a request with the right Bearer should admit via shared-token.
+	// Prove the validator really is wired by exercising the chain end-to-end.
 	r := httptest.NewRequest(http.MethodGet, "/ws", nil)
-	r.Header.Set("Authorization", "Bearer opaque-bearer")
+	r.Header.Set(auth.DefaultEdgeSubjectHeader, "alice")
 	id, err := chain.Run(context.Background(), r)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if got, want := id.Origin, policy.OriginSharedToken; got != want {
-		t.Errorf("Origin = %q, want %q (sharedToken should admit)", got, want)
-	}
-}
-
-func TestBuildExternalChain_SharedTokenSecretMissingErrors(t *testing.T) {
-	t.Parallel()
-	scheme := newTestScheme(t)
-	ar := &omniav1alpha1.AgentRuntime{
-		ObjectMeta: metav1.ObjectMeta{Name: "agent", Namespace: "ns"},
-		Spec: omniav1alpha1.AgentRuntimeSpec{
-			ExternalAuth: &omniav1alpha1.AgentExternalAuth{
-				SharedToken: &omniav1alpha1.SharedTokenAuth{
-					SecretRef: corev1.LocalObjectReference{Name: "absent"},
-				},
-			},
-		},
-	}
-	fc := fake.NewClientBuilder().WithScheme(scheme).WithObjects(ar).Build()
-
-	if _, err := buildExternalChain(context.Background(), fc, logr.Discard(), "agent", "ns"); err == nil {
-		t.Error("expected error when sharedToken secret is missing")
-	}
-}
-
-func TestBuildExternalChain_SharedTokenSecretMissingTokenKeyErrors(t *testing.T) {
-	t.Parallel()
-	scheme := newTestScheme(t)
-	badSecret := &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Name: "wrong-keys", Namespace: "ns"},
-		Data:       map[string][]byte{"value": []byte("xx")},
-	}
-	ar := &omniav1alpha1.AgentRuntime{
-		ObjectMeta: metav1.ObjectMeta{Name: "agent", Namespace: "ns"},
-		Spec: omniav1alpha1.AgentRuntimeSpec{
-			ExternalAuth: &omniav1alpha1.AgentExternalAuth{
-				SharedToken: &omniav1alpha1.SharedTokenAuth{
-					SecretRef: corev1.LocalObjectReference{Name: "wrong-keys"},
-				},
-			},
-		},
-	}
-	fc := fake.NewClientBuilder().WithScheme(scheme).WithObjects(ar, badSecret).Build()
-	if _, err := buildExternalChain(context.Background(), fc, logr.Discard(), "agent", "ns"); err == nil {
-		t.Error("expected error when sharedToken secret missing the 'token' data key")
-	}
-}
-
-func TestBuildExternalChain_TrustEndUserHeaderPropagates(t *testing.T) {
-	t.Parallel()
-	scheme := newTestScheme(t)
-	secret := &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Name: "shared", Namespace: "ns"},
-		Data:       map[string][]byte{"token": []byte("tok")},
-	}
-	ar := &omniav1alpha1.AgentRuntime{
-		ObjectMeta: metav1.ObjectMeta{Name: "agent", Namespace: "ns"},
-		Spec: omniav1alpha1.AgentRuntimeSpec{
-			ExternalAuth: &omniav1alpha1.AgentExternalAuth{
-				SharedToken: &omniav1alpha1.SharedTokenAuth{
-					SecretRef:          corev1.LocalObjectReference{Name: "shared"},
-					TrustEndUserHeader: true,
-				},
-			},
-		},
-	}
-	fc := fake.NewClientBuilder().WithScheme(scheme).WithObjects(ar, secret).Build()
-	chain, err := buildExternalChain(context.Background(), fc, logr.Discard(), "agent", "ns")
-	if err != nil {
-		t.Fatalf("err = %v", err)
-	}
-
-	r := httptest.NewRequest(http.MethodGet, "/ws", nil)
-	r.Header.Set("Authorization", "Bearer tok")
-	r.Header.Set(auth.EndUserHeader, "alice@example.com")
-	id, err := chain.Run(context.Background(), r)
-	if err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-	if got, want := id.EndUser, "alice@example.com"; got != want {
-		t.Errorf("EndUser = %q, want %q (trustEndUserHeader=true should propagate)", got, want)
+	if got, want := id.Origin, policy.OriginEdgeTrust; got != want {
+		t.Errorf("Origin = %q, want %q (edgeTrust should admit)", got, want)
 	}
 }
 
@@ -310,61 +226,6 @@ func TestBuildEdgeTrustValidator_ClaimsFromHeadersPropagate(t *testing.T) {
 	}
 }
 
-func TestBuildExternalChain_EdgeTrustJoinsAfterSharedToken(t *testing.T) {
-	// End-to-end: buildExternalChain on an AgentRuntime with both
-	// sharedToken AND edgeTrust configured produces a chain where
-	// sharedToken comes first (matching request that presents a Bearer
-	// admits via sharedToken) and edgeTrust is present for requests
-	// carrying only an x-user-id header. No mgmt validator is present.
-	t.Parallel()
-	scheme := newTestScheme(t)
-	secret := &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Name: "shared", Namespace: "ns"},
-		Data:       map[string][]byte{"token": []byte("bearer-value")},
-	}
-	ar := &omniav1alpha1.AgentRuntime{
-		ObjectMeta: metav1.ObjectMeta{Name: "a", Namespace: "ns"},
-		Spec: omniav1alpha1.AgentRuntimeSpec{
-			ExternalAuth: &omniav1alpha1.AgentExternalAuth{
-				SharedToken: &omniav1alpha1.SharedTokenAuth{
-					SecretRef: corev1.LocalObjectReference{Name: "shared"},
-				},
-				EdgeTrust: &omniav1alpha1.EdgeTrustAuth{},
-			},
-		},
-	}
-	fc := fake.NewClientBuilder().WithScheme(scheme).WithObjects(ar, secret).Build()
-	chain, err := buildExternalChain(context.Background(), fc, logr.Discard(), "a", "ns")
-	if err != nil {
-		t.Fatalf("err = %v", err)
-	}
-	if got, want := len(chain), 2; got != want {
-		t.Fatalf("chain length = %d, want %d (sharedToken + edgeTrust)", got, want)
-	}
-
-	// Request with Bearer admits via sharedToken.
-	r1 := httptest.NewRequest(http.MethodGet, "/ws", nil)
-	r1.Header.Set("Authorization", "Bearer bearer-value")
-	id1, err := chain.Run(context.Background(), r1)
-	if err != nil {
-		t.Fatalf("Run (bearer): %v", err)
-	}
-	if got, want := id1.Origin, policy.OriginSharedToken; got != want {
-		t.Errorf("Origin = %q, want %q (Bearer must admit via sharedToken)", got, want)
-	}
-
-	// Request with just x-user-id admits via edgeTrust.
-	r2 := httptest.NewRequest(http.MethodGet, "/ws", nil)
-	r2.Header.Set(auth.DefaultEdgeSubjectHeader, "alice")
-	id2, err := chain.Run(context.Background(), r2)
-	if err != nil {
-		t.Fatalf("Run (edge): %v", err)
-	}
-	if got, want := id2.Origin, policy.OriginEdgeTrust; got != want {
-		t.Errorf("Origin = %q, want %q (edge header must admit via edgeTrust)", got, want)
-	}
-}
-
 // stubMgmtValidator is a minimal Validator for chain-composition tests.
 type stubMgmtValidator struct {
 	id *policy.AuthenticatedIdentity
@@ -395,40 +256,5 @@ func TestBuildExternalChain_NoK8sReturnsEmpty(t *testing.T) {
 	}
 	if len(chain) != 0 {
 		t.Errorf("chain length = %d, want 0 (no k8s, no validators)", len(chain))
-	}
-}
-
-func TestBuildExternalChain_SharedTokenOnlyNoMgmt(t *testing.T) {
-	t.Parallel()
-	scheme := newTestScheme(t)
-	secret := &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Name: "shared-token", Namespace: "ns"},
-		Data:       map[string][]byte{"token": []byte("opaque-bearer")},
-	}
-	ar := &omniav1alpha1.AgentRuntime{
-		ObjectMeta: metav1.ObjectMeta{Name: "agent", Namespace: "ns"},
-		Spec: omniav1alpha1.AgentRuntimeSpec{
-			ExternalAuth: &omniav1alpha1.AgentExternalAuth{
-				SharedToken: &omniav1alpha1.SharedTokenAuth{
-					SecretRef: corev1.LocalObjectReference{Name: "shared-token"},
-				},
-			},
-		},
-	}
-	fc := fake.NewClientBuilder().WithScheme(scheme).WithObjects(ar, secret).Build()
-
-	chain, err := buildExternalChain(context.Background(), fc, logr.Discard(), "agent", "ns")
-	if err != nil {
-		t.Fatalf("err = %v", err)
-	}
-	if got, want := len(chain), 1; got != want {
-		t.Fatalf("chain length = %d, want %d (sharedToken only, no mgmt)", got, want)
-	}
-	// The external chain must NOT admit a mgmt-plane token: there is no
-	// mgmt validator in it. A non-matching bearer falls through to nothing.
-	r := httptest.NewRequest(http.MethodGet, "/ws", nil)
-	r.Header.Set("Authorization", "Bearer a-mgmt-plane-jwt")
-	if _, err := chain.Run(context.Background(), r); err == nil {
-		t.Error("external chain admitted a non-shared-token bearer; want rejection (no mgmt validator present)")
 	}
 }

@@ -26,6 +26,7 @@ import (
 	"math/big"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -247,16 +248,39 @@ func TestServerAuth_NonBearerScheme_Rejects401(t *testing.T) {
 		"non-Bearer Authorization with chain configured must 401")
 }
 
-// TestServerAuth_SharedTokenChain_AdmitsBeforeMgmtPlane proves that PR
-// 2b's chain wiring works end-to-end through the facade — a sharedToken
+// testBearerValidator is a minimal auth.Validator test double: it admits a
+// request presenting the configured Bearer token and rejects (rather than
+// falls through on) any other Bearer value — the same opaque-bearer
+// contract the built-in facade's data-plane validators follow. Used here
+// purely to exercise internal/facade.Server's chain-composition/ordering
+// logic; it carries no relation to spec.externalAuth (#1775 removed the
+// CRD-configurable single-shared-secret mechanism).
+type testBearerValidator struct {
+	token string
+}
+
+const testBearerOrigin = "test-bearer"
+
+func (v *testBearerValidator) Validate(_ context.Context, r *http.Request) (*policy.AuthenticatedIdentity, error) {
+	const prefix = "Bearer "
+	h := r.Header.Get("Authorization")
+	if !strings.HasPrefix(h, prefix) {
+		return nil, auth.ErrNoCredential
+	}
+	if strings.TrimPrefix(h, prefix) != v.token {
+		return nil, auth.ErrInvalidCredential
+	}
+	return &policy.AuthenticatedIdentity{Origin: testBearerOrigin, Subject: "bearer-holder"}, nil
+}
+
+// TestServerAuth_BearerChain_AdmitsBeforeMgmtPlane proves that PR 2b's
+// chain wiring works end-to-end through the facade — a data-plane bearer
 // validator placed before the mgmt-plane validator admits a presented-
-// bearer request and tags the identity with origin=shared-token.
-func TestServerAuth_SharedTokenChain_AdmitsBeforeMgmtPlane(t *testing.T) {
+// bearer request and tags the identity with its own origin.
+func TestServerAuth_BearerChain_AdmitsBeforeMgmtPlane(t *testing.T) {
 	mgmt, _ := newAuthTestValidator(t)
-	const sharedToken = "shared-bearer-value"
-	stv, err := auth.NewSharedTokenValidator(sharedToken)
-	require.NoError(t, err)
-	chain := auth.Chain{stv, mgmt}
+	const token = "shared-bearer-value"
+	chain := auth.Chain{&testBearerValidator{token: token}, mgmt}
 
 	observed := make(chan policy.PropagationFields, 1)
 	handler := &mockHandler{
@@ -276,7 +300,7 @@ func TestServerAuth_SharedTokenChain_AdmitsBeforeMgmtPlane(t *testing.T) {
 	ts := httptest.NewServer(server)
 	t.Cleanup(func() { ts.Close(); _ = store.Close() })
 
-	header := http.Header{"Authorization": []string{"Bearer " + sharedToken}}
+	header := http.Header{"Authorization": []string{"Bearer " + token}}
 	ws, _, err := dialWS(t, ts, header)
 	require.NoError(t, err)
 	defer func() { _ = ws.Close() }()
@@ -286,22 +310,20 @@ func TestServerAuth_SharedTokenChain_AdmitsBeforeMgmtPlane(t *testing.T) {
 	select {
 	case fields := <-observed:
 		require.NotNil(t, fields.Identity)
-		assert.Equal(t, policy.OriginSharedToken, fields.Identity.Origin,
-			"sharedToken must win over mgmt-plane when both could admit")
+		assert.Equal(t, testBearerOrigin, fields.Identity.Origin,
+			"data-plane bearer validator must win over mgmt-plane when both could admit")
 	case <-time.After(2 * time.Second):
 		t.Fatal("handler did not run")
 	}
 }
 
-// TestServerAuth_SharedTokenChain_RejectsWrongToken proves that a
-// presented bearer that fails the sharedToken compare short-circuits
-// the chain — we must NOT fall through to mgmt-plane and accidentally
-// admit a data-plane token via a different validator.
-func TestServerAuth_SharedTokenChain_RejectsWrongToken(t *testing.T) {
+// TestServerAuth_BearerChain_RejectsWrongToken proves that a presented
+// bearer that fails the data-plane validator's compare short-circuits the
+// chain — we must NOT fall through to mgmt-plane and accidentally admit a
+// data-plane token via a different validator.
+func TestServerAuth_BearerChain_RejectsWrongToken(t *testing.T) {
 	mgmt, _ := newAuthTestValidator(t)
-	stv, err := auth.NewSharedTokenValidator("expected-token")
-	require.NoError(t, err)
-	chain := auth.Chain{stv, mgmt}
+	chain := auth.Chain{&testBearerValidator{token: "expected-token"}, mgmt}
 
 	cfg := DefaultServerConfig()
 	store := session.NewMemoryStore()
@@ -314,7 +336,7 @@ func TestServerAuth_SharedTokenChain_RejectsWrongToken(t *testing.T) {
 	require.Error(t, err)
 	require.NotNil(t, resp)
 	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode,
-		"sharedToken's ErrInvalidCredential must reject; mgmt-plane must NOT be reached")
+		"the data-plane validator's ErrInvalidCredential must reject; mgmt-plane must NOT be reached")
 }
 
 // stubClaimValidator is an auth.Validator that admits every request
