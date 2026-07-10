@@ -153,11 +153,12 @@ spec:
         x-user-groups: groups     # exposed to ToolPolicy as identity.claims.groups
 ```
 
-The inbound role header (default `x-user-roles`, matching the chart's
-Istio `outputClaimToHeaders` layout) is always read into
-`identity.claims.role` — it isn't configurable via `headerMapping`. To
-surface an edge role header under a different claim name, or additional
-role-like headers, list them in `claimsFromHeaders` instead.
+The inbound role header (default `x-user-roles` — the facade's built-in
+default, see `authentication.edgeTrust.defaultStripHeaders` in the chart's
+`values.yaml`) is always read into `identity.claims.role` — it isn't
+configurable via `headerMapping`. To surface an edge role header under a
+different claim name, or additional role-like headers, list them in
+`claimsFromHeaders` instead.
 
 :::danger[Security requirement]
 The edge **must** strip any inbound headers listed in `headerMapping` or

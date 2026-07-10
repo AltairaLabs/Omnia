@@ -19,11 +19,12 @@ or `api/proto/`, add an entry below with the date, affected API, and reason.
   through unmapped under its own claim name (e.g. `identity.claims["omnia.role"]`
   if that's what the IdP sets — there is no longer an Omnia-imposed default
   role claim name for OIDC). The edge-trust validator still reads the inbound
-  role header (default `x-user-roles`, matching the chart's Istio
-  `outputClaimToHeaders` layout) but always into `identity.claims.role`; the
-  header name is a fixed internal default, not configurable via
-  `headerMapping`. api-key roles (`defaultRole` / per-key `role` on the
-  Secret) are unaffected and also surface as `identity.claims.role`.
+  role header (default `x-user-roles`, the facade's built-in default —
+  see `DefaultEdgeRoleHeader` in `internal/facade/auth/edge_trust.go`) but
+  always into `identity.claims.role`; the header name is a fixed internal
+  default, not configurable via `headerMapping`. api-key roles
+  (`defaultRole` / per-key `role` on the Secret) are unaffected and also
+  surface as `identity.claims.role`.
 - **ToolPolicy CEL**: the structured `identity.role` field is gone from the
   `identity` object sent to the policy broker (now `origin`, `subject`,
   `endUser`, `workspace`, `agent`, `claims` — no `role`). Existing CEL rules
