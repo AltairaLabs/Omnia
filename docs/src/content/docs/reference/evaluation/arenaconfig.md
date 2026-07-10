@@ -3,9 +3,6 @@ title: "Arena Config File"
 description: "Reference for the config.arena.yaml file inside an ArenaSource bundle"
 sidebar:
   order: 11
-  badge:
-    text: Enterprise
-    variant: tip
 ---
 
 :::note[Enterprise Feature]

@@ -3,9 +3,6 @@ title: "Troubleshoot Arena Fleet"
 description: "Diagnose and resolve common Arena Fleet issues"
 sidebar:
   order: 13
-  badge:
-    text: Arena
-    variant: note
 ---
 
 This guide helps you diagnose and resolve common issues with Arena Fleet evaluations.

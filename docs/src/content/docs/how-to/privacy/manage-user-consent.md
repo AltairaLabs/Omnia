@@ -3,9 +3,6 @@ title: "Manage User Consent and Opt-Out"
 description: "Grant and revoke a user's consent categories, set opt-out preferences, and read consent and enforcement stats through the per-workspace privacy-api"
 sidebar:
   order: 15.5
-  badge:
-    text: Enterprise
-    variant: tip
 ---
 
 :::note[Enterprise Feature]

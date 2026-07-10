@@ -3,9 +3,6 @@ title: "ArenaJob CRD"
 description: "Complete reference for the ArenaJob custom resource"
 sidebar:
   order: 12
-  badge:
-    text: Enterprise
-    variant: tip
 ---
 
 :::note[Enterprise Feature]

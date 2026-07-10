@@ -3,9 +3,6 @@ title: "ArenaSource CRD"
 description: "Complete reference for the ArenaSource custom resource"
 sidebar:
   order: 10
-  badge:
-    text: Enterprise
-    variant: tip
 ---
 
 :::note[Enterprise Feature]
