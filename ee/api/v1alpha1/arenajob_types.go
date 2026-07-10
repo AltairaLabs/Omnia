@@ -488,6 +488,7 @@ type ArenaJobStatus struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
+// +kubebuilder:resource:shortName=aj
 // +kubebuilder:printcolumn:name="Source",type=string,JSONPath=`.spec.sourceRef.name`
 // +kubebuilder:printcolumn:name="Type",type=string,JSONPath=`.spec.type`
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`

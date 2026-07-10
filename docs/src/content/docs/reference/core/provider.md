@@ -15,6 +15,8 @@ apiVersion: omnia.altairalabs.ai/v1alpha1
 kind: Provider
 ```
 
+**Short name:** `prov` (e.g. `kubectl get prov`).
+
 ## Spec fields
 
 ### `type`
@@ -40,7 +42,11 @@ spec:
 
 ### `model`
 
-The model identifier to use. If not specified, the provider's default model is used.
+The model identifier to use. **Required for every provider type except `mock`.** Omnia
+applies no default — an empty model reaches the vendor API and is rejected at the first
+request. A model-less non-mock Provider is rejected at admission; if it predates that
+rule it reports `ModelValid=False` and `phase: Error` (so agents bound to it stay gated
+rather than failing mid-conversation).
 
 | Provider | Example Models |
 |----------|----------------|
@@ -334,8 +340,13 @@ spec:
 
 | Value | Description |
 |-------|-------------|
-| `Ready` | Provider is configured and credentials are valid |
-| `Error` | Configuration error or invalid credentials |
+| `Ready` | Provider is usable: credentials are valid **and** a model is set |
+| `Error` | Configuration error, invalid credentials, or a missing model |
+
+`Ready` means usable. A Provider with valid credentials but an empty `model`
+reports `Error` (condition `ModelValid=False`), because it would fail at the
+first request — so an AgentRuntime bound to it stays gated instead of appearing
+healthy and 400-ing mid-conversation.
 
 ### `conditions`
 
@@ -345,6 +356,7 @@ spec:
 | `SecretFound` | Referenced Secret exists and contains required key |
 | `CredentialConfigured` | Credential source is configured (secretRef, envVar, or filePath) |
 | `AuthConfigured` | Auth configuration is valid (hyperscaler providers only) |
+| `ModelValid` | `spec.model` is set for provider types that require one (all except `mock`). `False` with reason `ModelMissing` when empty, and the message suggests valid model IDs |
 
 ## Complete examples
 

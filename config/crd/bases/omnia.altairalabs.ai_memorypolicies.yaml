@@ -11,6 +11,8 @@ spec:
     kind: MemoryPolicy
     listKind: MemoryPolicyList
     plural: memorypolicies
+    shortNames:
+    - mp
     singular: memorypolicy
   scope: Cluster
   versions:

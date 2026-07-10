@@ -11,6 +11,8 @@ spec:
     kind: Provider
     listKind: ProviderList
     plural: providers
+    shortNames:
+    - prov
     singular: provider
   scope: Namespaced
   versions:
@@ -268,7 +270,10 @@ spec:
               model:
                 description: |-
                   model specifies the model identifier (e.g., "claude-sonnet-4-20250514", "gpt-4o").
-                  If not specified, the provider's default model is used.
+                  Required for every provider type except mock — Omnia applies no default, so
+                  an empty model reaches the vendor API and is rejected at the first request.
+                  A model-less non-mock Provider is admission-rejected and, if it predates that
+                  rule, reported ModelValid=False / phase!=Ready by the controller (see #1819).
                   When platform.type is bedrock, a claude release name is auto-mapped to the
                   corresponding Bedrock model ID by PromptKit.
                 type: string
@@ -496,6 +501,9 @@ spec:
                 host Gemini'
               rule: '!has(self.platform) || self.platform.type != ''azure'' || self.type
                 != ''gemini'''
+            - message: spec.model is required for all provider types except mock
+              rule: self.type == 'mock' || (has(self.model) && size(self.model) >
+                0)
           status:
             description: status defines the observed state of Provider
             properties:

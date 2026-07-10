@@ -11,6 +11,9 @@ spec:
     kind: AgentRuntime
     listKind: AgentRuntimeList
     plural: agentruntimes
+    shortNames:
+    - agent
+    - ar
     singular: agentruntime
   scope: Namespaced
   versions:

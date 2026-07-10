@@ -14,6 +14,8 @@ apiVersion: omnia.altairalabs.ai/v1alpha1
 kind: Workspace
 ```
 
+**Short name:** `ws` (e.g. `kubectl get ws`).
+
 ## Resource scope
 
 Workspace is a **cluster-scoped** resource. It creates and manages resources in its associated namespace.

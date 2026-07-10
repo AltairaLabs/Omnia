@@ -17,6 +17,8 @@ apiVersion: omnia.altairalabs.ai/v1alpha1
 kind: AgentPolicy
 ```
 
+**Short name:** `ap` (e.g. `kubectl get ap`).
+
 ## Spec fields
 
 ### `selector`

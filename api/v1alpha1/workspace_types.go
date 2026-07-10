@@ -584,7 +584,7 @@ type WorkspaceStatus struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:resource:scope=Cluster
+// +kubebuilder:resource:scope=Cluster,shortName=ws
 // +kubebuilder:printcolumn:name="Display Name",type=string,JSONPath=`.spec.displayName`
 // +kubebuilder:printcolumn:name="Environment",type=string,JSONPath=`.spec.environment`
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`

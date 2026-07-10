@@ -3,9 +3,6 @@ title: "ArenaSource CRD"
 description: "Complete reference for the ArenaSource custom resource"
 sidebar:
   order: 10
-  badge:
-    text: Enterprise
-    variant: tip
 ---
 
 :::note[Enterprise Feature]
@@ -20,6 +17,8 @@ The ArenaSource custom resource defines a source for fetching PromptKit bundles.
 apiVersion: omnia.altairalabs.ai/v1alpha1
 kind: ArenaSource
 ```
+
+**Short name:** `as` (e.g. `kubectl get as`).
 
 ## Overview
 

@@ -15,6 +15,8 @@ apiVersion: omnia.altairalabs.ai/v1alpha1
 kind: AgentRuntime
 ```
 
+**Short names:** `agent`, `ar` (e.g. `kubectl get agent`).
+
 ## Spec fields
 
 ### `mode`

@@ -11,6 +11,8 @@ spec:
     kind: ArenaTemplateSource
     listKind: ArenaTemplateSourceList
     plural: arenatemplatesources
+    shortNames:
+    - ats
     singular: arenatemplatesource
   scope: Namespaced
   versions:

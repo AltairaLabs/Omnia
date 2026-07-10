@@ -1511,6 +1511,7 @@ type FacadeEndpoint struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
+// +kubebuilder:resource:shortName=agent;ar
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
 // +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.replicas.ready`
 // +kubebuilder:printcolumn:name="Version",type=string,JSONPath=`.status.activeVersion`

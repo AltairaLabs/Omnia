@@ -104,6 +104,7 @@ type PromptPackStatus struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
+// +kubebuilder:resource:shortName=pp
 // +kubebuilder:printcolumn:name="Version",type="string",JSONPath=".spec.version",description="Prompt pack version"
 // +kubebuilder:printcolumn:name="Phase",type="string",JSONPath=".status.phase",description="Current phase"
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"

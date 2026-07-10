@@ -14,6 +14,8 @@ apiVersion: omnia.altairalabs.ai/v1alpha1
 kind: SessionPrivacyPolicy
 ```
 
+**Short name:** `spp` (e.g. `kubectl get spp`).
+
 ## Resource scope
 
 `SessionPrivacyPolicy` is **namespace-scoped**. Policies must live in the same namespace as the Workspace or AgentRuntime that references them, except for the global default, which lives in `omnia-system`.

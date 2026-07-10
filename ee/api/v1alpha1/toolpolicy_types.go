@@ -172,6 +172,7 @@ type ToolPolicyStatus struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
+// +kubebuilder:resource:shortName=tp
 // +kubebuilder:printcolumn:name="Registry",type=string,JSONPath=`.spec.selector.registry`
 // +kubebuilder:printcolumn:name="Mode",type=string,JSONPath=`.spec.mode`
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`

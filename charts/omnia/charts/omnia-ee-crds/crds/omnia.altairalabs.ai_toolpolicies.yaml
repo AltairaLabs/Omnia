@@ -11,6 +11,8 @@ spec:
     kind: ToolPolicy
     listKind: ToolPolicyList
     plural: toolpolicies
+    shortNames:
+    - tp
     singular: toolpolicy
   scope: Namespaced
   versions:

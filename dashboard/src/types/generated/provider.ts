@@ -113,7 +113,10 @@ export interface ProviderSpec {
    * Collisions with built-in provider headers are rejected by PromptKit. */
   headers?: Record<string, string>;
   /** model specifies the model identifier (e.g., "claude-sonnet-4-20250514", "gpt-4o").
-   * If not specified, the provider's default model is used.
+   * Required for every provider type except mock — Omnia applies no default, so
+   * an empty model reaches the vendor API and is rejected at the first request.
+   * A model-less non-mock Provider is admission-rejected and, if it predates that
+   * rule, reported ModelValid=False / phase!=Ready by the controller (see #1819).
    * When platform.type is bedrock, a claude release name is auto-mapped to the
    * corresponding Bedrock model ID by PromptKit. */
   model?: string;

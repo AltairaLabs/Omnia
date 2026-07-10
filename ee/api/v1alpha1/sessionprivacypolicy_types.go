@@ -279,6 +279,7 @@ type SessionPrivacyPolicyStatus struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
+// +kubebuilder:resource:shortName=spp
 // +kubebuilder:printcolumn:name="Recording",type=boolean,JSONPath=`.spec.recording.enabled`
 // +kubebuilder:printcolumn:name="PII Redact",type=boolean,JSONPath=`.spec.recording.pii.redact`
 // +kubebuilder:printcolumn:name="Encryption",type=boolean,JSONPath=`.spec.encryption.enabled`

@@ -77,7 +77,8 @@ var _ = Describe("AgentRuntime Controller", func() {
 					Namespace: providerKey.Namespace,
 				},
 				Spec: omniav1alpha1.ProviderSpec{
-					Type: omniav1alpha1.ProviderTypeClaude,
+					Type:  omniav1alpha1.ProviderTypeClaude,
+					Model: "claude-sonnet-4-20250514",
 					Credential: &omniav1alpha1.CredentialConfig{
 						SecretRef: &omniav1alpha1.SecretKeyRef{
 							Name: "test-secret",

@@ -3,9 +3,6 @@ title: "ArenaJob CRD"
 description: "Complete reference for the ArenaJob custom resource"
 sidebar:
   order: 12
-  badge:
-    text: Enterprise
-    variant: tip
 ---
 
 :::note[Enterprise Feature]
@@ -20,6 +17,8 @@ The ArenaJob custom resource defines a test execution that runs scenarios from a
 apiVersion: omnia.altairalabs.ai/v1alpha1
 kind: ArenaJob
 ```
+
+**Short name:** `aj` (e.g. `kubectl get aj`).
 
 ## Overview
 
