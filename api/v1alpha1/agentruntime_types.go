@@ -1211,7 +1211,7 @@ type MemoryToolsConfig struct {
 // +kubebuilder:validation:XValidation:rule="!has(self.facades) || self.mode != 'agent' || self.facades.all(f, f.type == 'websocket' || f.type == 'a2a' || f.type == 'custom')",message="mode 'agent' allows only 'websocket', 'a2a' and 'custom' facades"
 // +kubebuilder:validation:XValidation:rule="!has(self.facades) || self.mode != 'function' || self.facades.all(f, f.type == 'rest' || f.type == 'mcp')",message="mode 'function' allows only 'rest' and 'mcp' facades"
 // +kubebuilder:validation:XValidation:rule="!has(self.facades) || self.mode != 'function' || self.facades.exists_one(f, f.type == 'rest')",message="mode 'function' requires exactly one 'rest' facade"
-// +kubebuilder:validation:XValidation:rule="!has(self.facades) || self.facades.all(f, f.type != 'custom' || (has(f.image) && f.image != ”))",message="facade type 'custom' requires spec.facades[].image"
+// +kubebuilder:validation:XValidation:rule="!has(self.facades) || self.facades.all(f, f.type != 'custom' || (has(f.image) && size(f.image) > 0))",message="facade type 'custom' requires spec.facades[].image"
 type AgentRuntimeSpec struct {
 	// mode controls how the AgentRuntime is invoked. "agent" (default) is
 	// the existing conversational runtime (websocket and/or a2a facades);

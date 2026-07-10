@@ -5617,7 +5617,7 @@ spec:
                 f.type == ''rest'')'
             - message: facade type 'custom' requires spec.facades[].image
               rule: '!has(self.facades) || self.facades.all(f, f.type != ''custom''
-                || (has(f.image) && f.image != ”))'
+                || (has(f.image) && size(f.image) > 0))'
           status:
             description: status defines the observed state of AgentRuntime
             properties:
