@@ -126,10 +126,11 @@ func (v *SharedTokenValidator) Validate(_ context.Context, r *http.Request) (*po
 		}
 	}
 
+	// Shared-token callers carry no per-caller role — they are gated on
+	// identity.origin (OriginSharedToken), not on a structured role.
 	return &policy.AuthenticatedIdentity{
 		Origin:  policy.OriginSharedToken,
 		Subject: v.subject,
 		EndUser: endUser,
-		Role:    v.role,
 	}, nil
 }

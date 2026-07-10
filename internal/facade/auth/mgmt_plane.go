@@ -175,10 +175,9 @@ func (v *MgmtPlaneValidator) Validate(ctx context.Context, r *http.Request) (*po
 		EndUser:   claims.Subject,
 		Workspace: claims.Workspace,
 		Agent:     claims.Agent,
-		// Mgmt-plane tokens are minted only after dashboard auth admits
-		// the user; they always carry admin privileges for the agent they
-		// target. Per-user role mapping is a future extension.
-		Role: policy.RoleAdmin,
+		// Mgmt-plane tokens carry no per-caller role — mgmt-plane callers
+		// are gated on identity.origin (OriginManagementPlane), not on a
+		// structured role.
 	}
 	if claims.IssuedAt != nil {
 		id.IssuedAt = claims.IssuedAt.Time

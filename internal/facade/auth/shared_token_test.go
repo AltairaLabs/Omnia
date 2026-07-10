@@ -63,8 +63,8 @@ func TestSharedTokenValidator_AdmitsCorrectToken(t *testing.T) {
 	if got, want := id.Origin, policy.OriginSharedToken; got != want {
 		t.Errorf("Origin = %q, want %q", got, want)
 	}
-	if got, want := id.Role, policy.RoleEditor; got != want {
-		t.Errorf("Role = %q, want %q (default)", got, want)
+	if id.Role != "" {
+		t.Errorf("Role = %q, want empty (shared-token is origin-gated, role-less)", id.Role)
 	}
 	if got, want := id.Subject, auth.DefaultSharedTokenSubject; got != want {
 		t.Errorf("Subject = %q, want %q (default)", got, want)
@@ -183,6 +183,9 @@ func TestSharedTokenValidator_TrustEndUserHeaderDefaultsOff(t *testing.T) {
 
 func TestSharedTokenValidator_OptionOverrides(t *testing.T) {
 	t.Parallel()
+	// WithSharedTokenRole is retained for backward-compat wiring (removed in
+	// a later task) but no longer surfaces on the identity — shared-token
+	// callers are gated on identity.origin, not identity.role.
 	v, _ := auth.NewSharedTokenValidator(
 		validToken,
 		auth.WithSharedTokenSubject("custom-sub"),
@@ -195,7 +198,7 @@ func TestSharedTokenValidator_OptionOverrides(t *testing.T) {
 	if got, want := id.Subject, "custom-sub"; got != want {
 		t.Errorf("Subject override: got %q, want %q", got, want)
 	}
-	if got, want := id.Role, policy.RoleAdmin; got != want {
-		t.Errorf("Role override: got %q, want %q", got, want)
+	if id.Role != "" {
+		t.Errorf("Role = %q, want empty (WithSharedTokenRole no longer surfaces on identity)", id.Role)
 	}
 }
