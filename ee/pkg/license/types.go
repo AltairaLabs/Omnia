@@ -53,6 +53,11 @@ type Features struct {
 	// json tag stays "policyProxy" for signed-license wire compatibility; the
 	// feature is ToolPolicy/CEL enforcement (policy-proxy was retired).
 	ToolPolicy bool `json:"policyProxy"`
+	// CustomFacade licenses bring-your-own-container facades
+	// (spec.facades[].type == "custom") on AgentRuntimes. Enforced at admission
+	// by the EE validating webhook; core AgentRuntime reconciliation is not
+	// license-aware.
+	CustomFacade bool `json:"customFacade"`
 }
 
 // Limits defines the resource limits in the license.
@@ -111,6 +116,7 @@ func OpenCoreLicense() *License {
 			MemoryEnterprise:  false,
 			PrivacyEnterprise: false,
 			ToolPolicy:        false,
+			CustomFacade:      false,
 		},
 		Limits: Limits{
 			MaxScenarios:      10,
@@ -141,6 +147,7 @@ func DevLicense() *License {
 			MemoryEnterprise:   true,
 			PrivacyEnterprise:  true,
 			ToolPolicy:         true,
+			CustomFacade:       true,
 		},
 		Limits: Limits{
 			MaxScenarios:      0, // unlimited
@@ -228,6 +235,12 @@ func (l *License) CanUsePrivacyEnterprise() bool {
 // CanUseToolPolicy returns true if ToolPolicy CEL enforcement is licensed.
 func (l *License) CanUseToolPolicy() bool {
 	return l.Features.ToolPolicy || l.IsEnterprise()
+}
+
+// CanUseCustomFacade returns true if bring-your-own-container "custom" facades
+// (spec.facades[].type == "custom") are licensed.
+func (l *License) CanUseCustomFacade() bool {
+	return l.Features.CustomFacade || l.IsEnterprise()
 }
 
 // CanUseWorkerReplicas returns true if the given number of replicas is allowed.

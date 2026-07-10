@@ -78,7 +78,7 @@ tests:
           path: spec.issuerRef.kind
           value: Issuer
 
-  - it: enterprise VWC renders the three Arena webhooks with inject-ca-from
+  - it: enterprise VWC renders the Arena webhooks plus the custom-facade gate with inject-ca-from
     template: templates/enterprise/validatingwebhookconfiguration.yaml
     set:
       enterprise.enabled: true
@@ -93,10 +93,53 @@ tests:
           path: metadata.annotations["cert-manager.io/inject-ca-from"]
       - lengthEqual:
           path: webhooks
-          count: 3
+          count: 4
       - equal:
           path: webhooks[0].failurePolicy
           value: Fail
+
+  # --- AgentRuntime custom-facade license gate (#1774) ---
+
+  - it: enterprise VWC includes the AgentRuntime custom-facade webhook scoped and fail-closed
+    template: templates/enterprise/validatingwebhookconfiguration.yaml
+    set:
+      enterprise.enabled: true
+      enterprise.arena.queue.type: memory
+      webhook.enabled: true
+    asserts:
+      # Fail-closed: a matched (custom-facade) object is denied if the
+      # arena-controller is down, so the feature is UNAVAILABLE without EE.
+      - equal:
+          path: webhooks[?(@.name=='vagentruntimecustomfacade.kb.io')].failurePolicy
+          value: Fail
+      # Scoped to agentruntimes create+update only.
+      - equal:
+          path: webhooks[?(@.name=='vagentruntimecustomfacade.kb.io')].rules[0].resources[0]
+          value: agentruntimes
+      - contains:
+          path: webhooks[?(@.name=='vagentruntimecustomfacade.kb.io')].rules[0].operations
+          content: CREATE
+      - contains:
+          path: webhooks[?(@.name=='vagentruntimecustomfacade.kb.io')].rules[0].operations
+          content: UPDATE
+      # matchConditions restrict the webhook to custom-facade AgentRuntimes so an
+      # EE-operator outage never blocks ordinary AgentRuntime admissions.
+      - matchRegex:
+          path: webhooks[?(@.name=='vagentruntimecustomfacade.kb.io')].matchConditions[0].expression
+          pattern: "f.type == 'custom'"
+      # Points at the arena-controller webhook service, not the operator's.
+      - equal:
+          path: webhooks[?(@.name=='vagentruntimecustomfacade.kb.io')].clientConfig.service.path
+          value: /validate-ee-omnia-altairalabs-ai-v1alpha1-agentruntime
+
+  - it: enterprise VWC does not render the custom-facade webhook without webhook enabled
+    template: templates/enterprise/validatingwebhookconfiguration.yaml
+    set:
+      enterprise.enabled: true
+      enterprise.arena.queue.type: memory
+    asserts:
+      - hasDocuments:
+          count: 0
 
   # --- Operator VWC: SessionPrivacyPolicy entry is enterprise-gated ---
 
