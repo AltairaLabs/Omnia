@@ -14,14 +14,6 @@ export function facadeAuthHint(externalAuth: ExternalAuth | undefined): AuthHint
     return { label: "Management-plane only" };
   }
 
-  if (externalAuth.sharedToken) {
-    const secretName = externalAuth.sharedToken.secretRef.name;
-    return {
-      label: "Bearer token",
-      detail: secretName ? `Secret \`${secretName}\`` : undefined,
-    };
-  }
-
   if (externalAuth.apiKeys) {
     return { label: "API key (Bearer)" };
   }

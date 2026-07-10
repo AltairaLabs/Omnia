@@ -53,7 +53,6 @@ Available validators:
 | Validator | Purpose | Verification location |
 |-----------|---------|-----------------------|
 | management-plane | Dashboard "Try this agent" debug view | In-facade (dashboard-signed RS256) |
-| sharedToken | Single bearer for all callers | In-facade (constant-time compare) |
 | apiKeys | Per-caller keys with scopes, managed in UI | In-facade (sha256 lookup) |
 | oidc | Customer IdP JWTs — no service mesh required | In-facade (controller auto-fetches JWKS) |
 | edgeTrust | Upstream edge (Istio/gateway) already verified the JWT | Claim-headers trusted, never re-verified |

@@ -54,6 +54,16 @@ or `api/proto/`, add an entry below with the date, affected API, and reason.
   Management-plane and shared-token identities remain role-less — gate on
   `identity.origin` instead of a role claim for those callers.
 
+### Removed (AgentRuntime CRD: built-in sharedToken external auth, #1775)
+
+- **`spec.externalAuth.sharedToken`** is removed from the `AgentRuntime` CRD.
+  A single shared secret with one static identity is strictly worse than a
+  client-scoped API key, and there were no production users of external auth
+  to migrate. Use `apiKeys` instead — a single API key is the direct
+  simple-integration replacement for what sharedToken provided. This does not
+  affect `pkg/facade`'s `SharedTokenValidator`, which remains available as a
+  building block for third-party custom facades built on the SDK.
+
 ### Changed (memory-api: scope param `user_id` → `virtual_user_id`, #1280)
 
 - The memory per-subject scope is now named **`virtual_user_id`** on the wire, matching

@@ -244,12 +244,6 @@ export interface DuplexConfig {
 }
 
 // Spec
-/** sharedToken auth: bearer token stored in a Secret. */
-export interface SharedTokenAuth {
-  secretRef: { name?: string };
-  trustEndUserHeader?: boolean;
-}
-
 /** apiKeys auth: per-caller API keys stored as Secrets. */
 export interface ApiKeysAuth {
   defaultRole?: "viewer" | "editor" | "admin";
@@ -273,7 +267,6 @@ export interface EdgeTrustAuth {
 /** externalAuth configures data-plane authentication for the agent facades.
  * The management plane is gated per-facade via facades[].managementPlane. */
 export interface ExternalAuth {
-  sharedToken?: SharedTokenAuth;
   apiKeys?: ApiKeysAuth;
   oidc?: OidcAuth;
   edgeTrust?: EdgeTrustAuth;
