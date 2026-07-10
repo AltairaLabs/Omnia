@@ -15,6 +15,7 @@ on:
       #                                   workflow_dispatch.
       - 'charts/**/templates/**/*.yaml'
       - 'charts/**/templates/**/*.tpl'
+      - 'charts/**/tests/**/*.yaml'
       - 'charts/**/crds/**'
       - 'charts/**/Chart.yaml'
       - 'charts/**/Chart.lock'
@@ -23,6 +24,7 @@ on:
     paths:
       - 'charts/**/templates/**/*.yaml'
       - 'charts/**/templates/**/*.tpl'
+      - 'charts/**/tests/**/*.yaml'
       - 'charts/**/crds/**'
       - 'charts/**/Chart.yaml'
       - 'charts/**/Chart.lock'
@@ -549,6 +551,7 @@ jobs:
         run: |
           helm plugin install https://github.com/helm-unittest/helm-unittest --version v0.8.2 || true
           helm unittest ./charts/omnia
+          helm unittest ./charts/omnia-demos
 
       - name: Render every example file
         # Each file in charts/omnia/examples/ should render cleanly. Overlay

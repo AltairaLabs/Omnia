@@ -1,0 +1,99 @@
+suite: vision-demo gating (#1818)
+# The ollama/llava vision demo (Provider + PromptPack + AgentRuntime) was
+# ungated, so on GPU-less clusters it always deployed and sat permanently
+# Unavailable. It is now gated on visionDemo.enabled (default true). The shared
+# ollama-credentials Secret must stay ungated (the tools-demo provider uses it),
+# and the LangChain vision mirror (which reuses the vision Provider + PromptPack)
+# must be gated on the same toggle so it never dangles.
+#
+# NOTE on assertion style: resources.yaml is a multi-doc template. In this
+# helm-unittest version, containsDocument without a documentSelector applies
+# per-document (AND), so presence is asserted via a name documentSelector and
+# absence via the total document count (the vision block is exactly 4 docs:
+# Provider/ollama, ConfigMap + PromptPack demo-vision-prompts, AgentRuntime
+# vision-demo).
+templates:
+  - templates/resources.yaml
+tests:
+  # -- default (visionDemo.enabled=true) --------------------------------------
+  - it: renders the vision AgentRuntime by default
+    documentSelector:
+      path: metadata.name
+      value: vision-demo
+    asserts:
+      - isKind:
+          of: AgentRuntime
+
+  - it: renders the vision Provider (ollama → llava) by default
+    documentSelector:
+      path: metadata.name
+      value: ollama
+    asserts:
+      - isKind:
+          of: Provider
+
+  - it: baseline resources.yaml renders 11 docs (vision block = 4 of them)
+    asserts:
+      - hasDocuments:
+          count: 11
+
+  # -- visionDemo.enabled=false ----------------------------------------------
+  - it: drops exactly the 4 vision docs when visionDemo.enabled=false (11 → 7)
+    set:
+      visionDemo.enabled: false
+    asserts:
+      - hasDocuments:
+          count: 7
+
+  - it: keeps the shared ollama-credentials Secret when vision is off
+    set:
+      visionDemo.enabled: false
+    documentSelector:
+      path: metadata.name
+      value: ollama-credentials
+    asserts:
+      - isKind:
+          of: Secret
+
+  - it: keeps the tools-demo provider (ollama-tools) when vision is off
+    set:
+      visionDemo.enabled: false
+    documentSelector:
+      path: metadata.name
+      value: ollama-tools
+    asserts:
+      - isKind:
+          of: Provider
+
+  # -- LangChain vision mirror is gated on visionDemo, not just langchainDemo --
+  - it: renders both LangChain mirrors when vision + langchain are both on (11 → 13)
+    set:
+      langchainDemo.enabled: true
+    asserts:
+      - hasDocuments:
+          count: 13
+      - isKind:
+          of: AgentRuntime
+        documentSelector:
+          path: metadata.name
+          value: vision-demo-langchain
+      - isKind:
+          of: AgentRuntime
+        documentSelector:
+          path: metadata.name
+          value: tools-demo-langchain
+
+  - it: drops only the LangChain vision mirror when vision is off but langchain on (7 → 8)
+    set:
+      visionDemo.enabled: false
+      langchainDemo.enabled: true
+    asserts:
+      # 8 = vision-off baseline (7) + the one surviving langchain agent. The
+      # tools mirror is present; the vision mirror is gone (would make it 9).
+      - hasDocuments:
+          count: 8
+      - isKind:
+          of: AgentRuntime
+        documentSelector:
+          path: metadata.name
+          value: tools-demo-langchain

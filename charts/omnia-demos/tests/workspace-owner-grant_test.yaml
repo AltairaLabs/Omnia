@@ -1,0 +1,64 @@
+suite: demo Workspace owner grant (#1816)
+# The demo Workspace previously hardcoded roleBindings: [], so a fresh install
+# had no owner grant and every role-required dashboard route 403'd. roleBindings
+# and directGrants are now values-driven so an install can grant access
+# declaratively (rendered into the same spec the operator + dashboard authz read).
+templates:
+  - templates/workspace.yaml
+tests:
+  - it: defaults to an empty roleBindings (unchanged rendered output)
+    asserts:
+      - containsDocument:
+          kind: Workspace
+          apiVersion: omnia.altairalabs.ai/v1alpha1
+          name: demo
+      - equal:
+          path: spec.roleBindings
+          value: []
+        documentSelector:
+          path: kind
+          value: Workspace
+      - notExists:
+          path: spec.directGrants
+        documentSelector:
+          path: kind
+          value: Workspace
+
+  - it: renders a group→role owner grant into spec.roleBindings
+    set:
+      workspace.roleBindings:
+        - groups:
+            - omnia-admins
+          role: owner
+    asserts:
+      - equal:
+          path: spec.roleBindings
+          value:
+            - groups:
+                - omnia-admins
+              role: owner
+        documentSelector:
+          path: kind
+          value: Workspace
+
+  - it: renders an individual-user owner grant into spec.directGrants
+    set:
+      workspace.directGrants:
+        - user: alice@example.com
+          role: owner
+    asserts:
+      - equal:
+          path: spec.directGrants
+          value:
+            - user: alice@example.com
+              role: owner
+        documentSelector:
+          path: kind
+          value: Workspace
+      # roleBindings still defaults to [] independently
+      - equal:
+          path: spec.roleBindings
+          value: []
+        documentSelector:
+          path: kind
+          value: Workspace
