@@ -66,6 +66,13 @@ const (
 	// need; Identity is retained in-process for the facade and for any
 	// handler that wants richer identity context.
 	ContextKeyIdentity contextKey = "omnia-identity"
+	// ContextKeyOrigin holds the validator origin that admitted the request
+	// (one of the Origin* constants). Propagated to the runtime so
+	// identity.origin ToolPolicy rules fire.
+	ContextKeyOrigin contextKey = "omnia-origin"
+	// ContextKeyWorkspace holds the workspace the request targets. Propagated
+	// to the runtime so identity.workspace ToolPolicy rules fire.
+	ContextKeyWorkspace contextKey = "omnia-workspace"
 )
 
 // HTTP/gRPC header constants for context propagation.
@@ -109,6 +116,12 @@ const (
 	// (per-message, session, persistent). Used by memory-api for
 	// observability on suppressed writes.
 	HeaderConsentLayer = "x-omnia-consent-layer"
+	// HeaderOrigin carries the validator origin that admitted the request.
+	// Surfaces to ToolPolicy CEL as identity.origin.
+	HeaderOrigin = "x-omnia-origin"
+	// HeaderWorkspace carries the workspace the request targets. Surfaces to
+	// ToolPolicy CEL as identity.workspace.
+	HeaderWorkspace = "x-omnia-workspace"
 )
 
 // CanonicalClaimHeader returns the canonical (MIME-canonicalized) header key for
@@ -153,6 +166,13 @@ type PropagationFields struct {
 	Provider      string
 	Model         string
 	Claims        map[string]string
+	// Origin names the validator that admitted the request (one of the
+	// Origin* constants). Propagated so identity.origin ToolPolicy rules fire
+	// on the runtime side.
+	Origin string
+	// Workspace is the workspace the request targets. Propagated so
+	// identity.workspace ToolPolicy rules fire on the runtime side.
+	Workspace string
 	// ConsentGrants holds per-request consent category grants.
 	ConsentGrants []string
 	// ConsentLayer attributes ConsentGrants to a layer (per-message,
@@ -225,6 +245,16 @@ func WithClaims(ctx context.Context, claims map[string]string) context.Context {
 	return context.WithValue(ctx, ContextKeyClaims, claims)
 }
 
+// WithOrigin returns a context with the validator origin set.
+func WithOrigin(ctx context.Context, origin string) context.Context {
+	return context.WithValue(ctx, ContextKeyOrigin, origin)
+}
+
+// WithWorkspace returns a context with the target workspace set.
+func WithWorkspace(ctx context.Context, workspace string) context.Context {
+	return context.WithValue(ctx, ContextKeyWorkspace, workspace)
+}
+
 // WithConsentGrants returns a context with consent grants set.
 func WithConsentGrants(ctx context.Context, grants []string) context.Context {
 	return context.WithValue(ctx, ContextKeyConsentGrants, grants)
@@ -287,6 +317,8 @@ func WithPropagationFields(ctx context.Context, fields *PropagationFields) conte
 	ctx = setIfNonEmpty(ctx, ContextKeyAuthorization, fields.Authorization)
 	ctx = setIfNonEmpty(ctx, ContextKeyProvider, fields.Provider)
 	ctx = setIfNonEmpty(ctx, ContextKeyModel, fields.Model)
+	ctx = setIfNonEmpty(ctx, ContextKeyOrigin, fields.Origin)
+	ctx = setIfNonEmpty(ctx, ContextKeyWorkspace, fields.Workspace)
 	if len(fields.Claims) > 0 {
 		ctx = WithClaims(ctx, fields.Claims)
 	}
@@ -323,6 +355,8 @@ func ExtractPropagationFields(ctx context.Context) PropagationFields {
 		Authorization: getString(ctx, ContextKeyAuthorization),
 		Provider:      getString(ctx, ContextKeyProvider),
 		Model:         getString(ctx, ContextKeyModel),
+		Origin:        getString(ctx, ContextKeyOrigin),
+		Workspace:     getString(ctx, ContextKeyWorkspace),
 		Claims:        getClaims(ctx),
 		ConsentGrants: ConsentGrantsFromContext(ctx),
 		ConsentLayer:  ConsentLayerFromContext(ctx),
@@ -380,6 +414,12 @@ func Model(ctx context.Context) string { return getString(ctx, ContextKeyModel) 
 // Claims extracts the JWT claims from context.
 func Claims(ctx context.Context) map[string]string { return getClaims(ctx) }
 
+// Origin extracts the validator origin from context.
+func Origin(ctx context.Context) string { return getString(ctx, ContextKeyOrigin) }
+
+// Workspace extracts the target workspace from context.
+func Workspace(ctx context.Context) string { return getString(ctx, ContextKeyWorkspace) }
+
 // headerKeyMap maps context keys to their corresponding header names.
 var headerKeyMap = []struct {
 	key    contextKey
@@ -403,6 +443,8 @@ var headerKeyMap = []struct {
 	// token exchange — it is simply never sent to a tool.
 	{ContextKeyProvider, HeaderProvider},
 	{ContextKeyModel, HeaderModel},
+	{ContextKeyOrigin, HeaderOrigin},
+	{ContextKeyWorkspace, HeaderWorkspace},
 }
 
 // ToOutboundHeaders converts context propagation fields to a flat map of header key-value pairs.

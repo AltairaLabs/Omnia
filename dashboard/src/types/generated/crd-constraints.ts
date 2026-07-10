@@ -503,7 +503,8 @@ export const crdConstraints: Record<string, Record<string, FieldConstraint>> =
         "websocket",
         "a2a",
         "rest",
-        "mcp"
+        "mcp",
+        "custom"
       ],
       "required": true
     },

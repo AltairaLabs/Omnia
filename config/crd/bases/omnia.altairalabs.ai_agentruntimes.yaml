@@ -1372,6 +1372,7 @@ spec:
                       - a2a
                       - rest
                       - mcp
+                      - custom
                       type: string
                   required:
                   - type
@@ -5608,15 +5609,18 @@ spec:
             - message: spec.facades must not contain duplicate facade types
               rule: '!has(self.facades) || self.facades.all(f, self.facades.exists_one(g,
                 g.type == f.type))'
-            - message: mode 'agent' allows only 'websocket' and 'a2a' facades
+            - message: mode 'agent' allows only 'websocket', 'a2a' and 'custom' facades
               rule: '!has(self.facades) || self.mode != ''agent'' || self.facades.all(f,
-                f.type == ''websocket'' || f.type == ''a2a'')'
+                f.type == ''websocket'' || f.type == ''a2a'' || f.type == ''custom'')'
             - message: mode 'function' allows only 'rest' and 'mcp' facades
               rule: '!has(self.facades) || self.mode != ''function'' || self.facades.all(f,
                 f.type == ''rest'' || f.type == ''mcp'')'
             - message: mode 'function' requires exactly one 'rest' facade
               rule: '!has(self.facades) || self.mode != ''function'' || self.facades.exists_one(f,
                 f.type == ''rest'')'
+            - message: facade type 'custom' requires spec.facades[].image
+              rule: '!has(self.facades) || self.facades.all(f, f.type != ''custom''
+                || (has(f.image) && size(f.image) > 0))'
           status:
             description: status defines the observed state of AgentRuntime
             properties:
