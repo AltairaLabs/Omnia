@@ -2991,8 +2991,9 @@ var _ = Describe("Provider Controller", func() {
 					Namespace: "default",
 				},
 				Spec: omniav1alpha1.ProviderSpec{
-					Type: omniav1alpha1.ProviderTypeHuggingFace,
-					Role: omniav1alpha1.ProviderRoleInference,
+					Type:  omniav1alpha1.ProviderTypeHuggingFace,
+					Role:  omniav1alpha1.ProviderRoleInference,
+					Model: "meta-llama/Llama-3.1-8B-Instruct",
 				},
 			}
 			Expect(k8sClient.Create(ctx, p)).To(Succeed())

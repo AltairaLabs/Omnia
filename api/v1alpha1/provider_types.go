@@ -313,6 +313,12 @@ type AuthConfig struct {
 // +kubebuilder:validation:XValidation:rule="!has(self.platform) || self.platform.type != 'vertex' || self.type != 'openai'",message="openai on vertex is not supported: Vertex AI does not host OpenAI as a partner"
 // +kubebuilder:validation:XValidation:rule="!has(self.platform) || self.platform.type != 'bedrock' || self.type != 'gemini'",message="gemini on bedrock is not supported: AWS Bedrock does not host Gemini"
 // +kubebuilder:validation:XValidation:rule="!has(self.platform) || self.platform.type != 'azure' || self.type != 'gemini'",message="gemini on azure is not supported: Azure AI Foundry does not host Gemini"
+//
+// A usable provider needs a model to serve requests; only mock providers
+// (which reply from fixtures) may omit it. Enforced here at admission and
+// again as a ModelValid status condition in the controller, so Providers
+// created before this rule existed are still caught (see #1819).
+// +kubebuilder:validation:XValidation:rule="self.type == 'mock' || (has(self.model) && size(self.model) > 0)",message="spec.model is required for all provider types except mock"
 type ProviderSpec struct {
 	// type specifies the provider wire protocol / vendor.
 	// +kubebuilder:validation:Required
@@ -341,7 +347,10 @@ type ProviderSpec struct {
 	Embedding *EmbeddingConfig `json:"embedding,omitempty"`
 
 	// model specifies the model identifier (e.g., "claude-sonnet-4-20250514", "gpt-4o").
-	// If not specified, the provider's default model is used.
+	// Required for every provider type except mock — Omnia applies no default, so
+	// an empty model reaches the vendor API and is rejected at the first request.
+	// A model-less non-mock Provider is admission-rejected and, if it predates that
+	// rule, reported ModelValid=False / phase!=Ready by the controller (see #1819).
 	// When platform.type is bedrock, a claude release name is auto-mapped to the
 	// corresponding Bedrock model ID by PromptKit.
 	// +optional
