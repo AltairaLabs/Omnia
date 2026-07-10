@@ -198,17 +198,17 @@ func TestPolicyBroker_Pipeline_AllowPath(t *testing.T) {
 // --- identity: role + claims (the token-claims path) ------------------------
 
 func TestPolicyBroker_Pipeline_IdentityRoleEnforced(t *testing.T) {
-	// deny unless the caller's role is "premium" — proves identity.role
+	// deny unless the caller's role claim is "premium" — proves identity.claims.role
 	// propagates through the facade→runtime→broker hop and CEL evaluates it.
-	pol := amountPolicy(`identity.role != "premium"`)
+	pol := amountPolicy(`identity.claims.role != "premium"`)
 
 	t.Run("free_role_denied", func(t *testing.T) {
-		ctx := ompolicy.WithUserRoles(ompolicy.WithUserID(context.Background(), "u1"), "free")
+		ctx := ompolicy.WithClaims(context.Background(), map[string]string{"role": "free"})
 		require.False(t, drivePipeline(t, pol, 10, ctx),
-			"role=free must be denied — identity.role rule not enforced (claims not propagating?)")
+			"role=free must be denied — identity.claims.role rule not enforced (claims not propagating?)")
 	})
 	t.Run("premium_role_allowed", func(t *testing.T) {
-		ctx := ompolicy.WithUserRoles(ompolicy.WithUserID(context.Background(), "u1"), "premium")
+		ctx := ompolicy.WithClaims(context.Background(), map[string]string{"role": "premium"})
 		require.True(t, drivePipeline(t, pol, 10, ctx),
 			"role=premium must be allowed through to the upstream")
 	})
@@ -302,11 +302,12 @@ func TestPolicyBroker_Pipeline_NonBoolCELFailsClosed(t *testing.T) {
 }
 
 func TestPolicyBroker_Pipeline_AnonymousDeniedByIdentityRule(t *testing.T) {
-	// No identity propagated → identity.role == "" → role != "premium" → deny.
+	// No identity/claims propagated → identity.claims.role is absent → the rule
+	// errors at eval → fails closed (deny) under the default onFailure=deny.
 	// (Guards against an identity rule silently allowing unauthenticated calls.)
-	pol := amountPolicy(`identity.role != "premium"`)
+	pol := amountPolicy(`identity.claims.role != "premium"`)
 	require.False(t, drivePipeline(t, pol, 10, nil),
-		"an anonymous caller (no identity) must be denied by an identity.role rule")
+		"an anonymous caller (no identity) must be denied by an identity.claims.role rule")
 }
 
 // --- requiredClaims (a claim that must be present) --------------------------
