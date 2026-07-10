@@ -320,9 +320,6 @@ func buildSessionState(c *Connection, cfg ServerConfig) map[string]string {
 	if c.userID != "" {
 		state["user.id"] = c.userID
 	}
-	if c.userRoles != "" {
-		state["user.roles"] = c.userRoles
-	}
 	if cfg.PromptPackName != "" {
 		state["promptpack.name"] = cfg.PromptPackName
 	}
