@@ -23,10 +23,10 @@ import (
 	"github.com/altairalabs/omnia/internal/doctor/checks"
 	memoryhttpclient "github.com/altairalabs/omnia/internal/memory/httpclient"
 	"github.com/altairalabs/omnia/internal/mgmtplane"
-	"github.com/altairalabs/omnia/internal/session/httpclient"
 	"github.com/altairalabs/omnia/pkg/k8s"
 	"github.com/altairalabs/omnia/pkg/logging"
 	"github.com/altairalabs/omnia/pkg/servicediscovery"
+	"github.com/altairalabs/omnia/pkg/session/httpclient"
 )
 
 const (

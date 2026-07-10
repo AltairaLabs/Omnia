@@ -31,8 +31,8 @@ import (
 
 	"github.com/altairalabs/omnia/internal/session"
 	"github.com/altairalabs/omnia/internal/session/api"
-	"github.com/altairalabs/omnia/internal/session/httpclient"
 	"github.com/altairalabs/omnia/internal/session/providers"
+	"github.com/altairalabs/omnia/pkg/session/httpclient"
 )
 
 const testVirtualUserID = "vu-test"

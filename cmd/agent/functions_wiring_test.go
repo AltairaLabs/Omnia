@@ -35,7 +35,7 @@ import (
 	"github.com/go-logr/logr"
 
 	"github.com/altairalabs/omnia/internal/facade"
-	"github.com/altairalabs/omnia/internal/facade/auth"
+	"github.com/altairalabs/omnia/pkg/facade/auth"
 	"github.com/altairalabs/omnia/pkg/policy"
 )
 

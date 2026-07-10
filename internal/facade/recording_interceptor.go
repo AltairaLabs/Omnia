@@ -9,8 +9,8 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/altairalabs/omnia/internal/session"
-	"github.com/altairalabs/omnia/internal/session/httpclient"
 	runtimev1 "github.com/altairalabs/omnia/pkg/runtime/v1"
+	"github.com/altairalabs/omnia/pkg/session/httpclient"
 )
 
 // recordingPolicyGetter supplies the effective recording policy for the facade's

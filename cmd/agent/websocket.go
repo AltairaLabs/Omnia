@@ -33,10 +33,10 @@ import (
 	"github.com/altairalabs/omnia/internal/agent"
 	"github.com/altairalabs/omnia/internal/facade"
 	facadea2a "github.com/altairalabs/omnia/internal/facade/a2a"
-	"github.com/altairalabs/omnia/internal/facade/auth"
 	"github.com/altairalabs/omnia/internal/media"
 	"github.com/altairalabs/omnia/internal/session"
 	"github.com/altairalabs/omnia/internal/tracing"
+	"github.com/altairalabs/omnia/pkg/facade/auth"
 )
 
 // runWebSocketFacade starts the traditional WebSocket facade with a gRPC runtime sidecar.
