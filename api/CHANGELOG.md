@@ -10,6 +10,28 @@ or `api/proto/`, add an entry below with the date, affected API, and reason.
 
 ## Unreleased
 
+### Changed (policy: propagate `identity.origin` and `identity.workspace` end-to-end, #1769)
+
+- **BEHAVIOR CHANGE.** `identity.origin` and `identity.workspace` are now propagated
+  from the facade through the runtime to the policy broker and are populated when a
+  ToolPolicy CEL rule (or the `POST /v1/decision` broker) evaluates `identity.*`.
+  Previously both fields were declared and exposed to CEL but **never propagated** —
+  they were always empty at the broker, so any ToolPolicy rule keyed on
+  `identity.origin` or `identity.workspace` silently no-oped (always matched the empty
+  string). Such rules now see **real values** and will start denying/allowing as
+  written. Audit existing ToolPolicies that reference these fields before upgrading.
+- Wire additions: two new gRPC-metadata / HTTP propagation headers,
+  **`x-omnia-origin`** (the admitting validator: `management-plane` / `shared-token` /
+  `api-key` / `oidc` / `edge-trust`) and **`x-omnia-workspace`** (the target workspace).
+  These are added to the outbound header set (`ToOutboundHeaders` / `ToGRPCMetadata`)
+  and rehydrated by the runtime's policy interceptor. The broker's
+  `DecisionRequest.Identity` (`IdentityPayload`) `origin` / `workspace` JSON fields
+  already existed and are now populated on the production (flat-propagation) path.
+- `identity.workspace` prefers the token's own workspace scope (set by workspace-scoped
+  validators such as the management plane) and falls back to the agent's deployed
+  workspace, so the field is non-empty for every validator style. This is distinct from
+  the K8s `namespace` (`x-omnia-namespace`), which is unchanged.
+
 ### Changed (memory-api: scope param `user_id` → `virtual_user_id`, #1280)
 
 - The memory per-subject scope is now named **`virtual_user_id`** on the wire, matching

@@ -85,6 +85,8 @@ func extractPolicyFromMetadata(ctx context.Context) context.Context {
 		Authorization: firstValue(md, policy.HeaderAuthorization),
 		Provider:      firstValue(md, policy.HeaderProvider),
 		Model:         firstValue(md, policy.HeaderModel),
+		Origin:        firstValue(md, policy.HeaderOrigin),
+		Workspace:     firstValue(md, policy.HeaderWorkspace),
 		Claims:        extractClaims(md),
 	}
 	if grants := firstValue(md, policy.HeaderConsentGrants); grants != "" {

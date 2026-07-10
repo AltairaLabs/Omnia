@@ -685,6 +685,7 @@ func (s *Server) buildConnectionContext(
 	if authIdentity != nil && len(authIdentity.Claims) > 0 {
 		validatorClaims = authIdentity.Claims
 	}
+	origin, workspace := identityScope(authIdentity, agentCtx.workspaceName)
 	return policy.WithPropagationFields(connCtx, &policy.PropagationFields{
 		AgentName:     agentCtx.agentName,
 		Namespace:     agentCtx.namespace,
@@ -693,6 +694,8 @@ func (s *Server) buildConnectionContext(
 		UserRoles:     userCtx.userRoles,
 		UserEmail:     userCtx.userEmail,
 		Authorization: userCtx.authorization,
+		Origin:        origin,
+		Workspace:     workspace,
 		Claims:        validatorClaims,
 		Identity:      authIdentity,
 	})

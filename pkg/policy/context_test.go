@@ -39,6 +39,8 @@ func TestWithAndExtractPropagationFields(t *testing.T) {
 		Authorization: "Bearer token123",
 		Provider:      "claude",
 		Model:         "claude-sonnet-4-20250514",
+		Origin:        OriginAPIKey,
+		Workspace:     "acme",
 		Claims:        map[string]string{"team": "engineering", "region": "us-east"},
 	}
 
@@ -55,7 +57,26 @@ func TestWithAndExtractPropagationFields(t *testing.T) {
 	assert.Equal(t, fields.Authorization, extracted.Authorization)
 	assert.Equal(t, fields.Provider, extracted.Provider)
 	assert.Equal(t, fields.Model, extracted.Model)
+	assert.Equal(t, fields.Origin, extracted.Origin)
+	assert.Equal(t, fields.Workspace, extracted.Workspace)
 	assert.Equal(t, fields.Claims, extracted.Claims)
+}
+
+// TestOriginWorkspace_RoundTripThroughMetadata asserts identity.origin and
+// identity.workspace survive the context -> outbound gRPC metadata hop (#1769).
+// Before the fix these keys had no header mapping, so they were silently
+// dropped at the facade->runtime boundary and never reached the broker.
+func TestOriginWorkspace_RoundTripThroughMetadata(t *testing.T) {
+	ctx := WithPropagationFields(context.Background(), &PropagationFields{
+		Origin:    OriginManagementPlane,
+		Workspace: "acme",
+	})
+
+	md := ToGRPCMetadata(ctx)
+	assert.Equal(t, OriginManagementPlane, md[HeaderOrigin],
+		"origin must be emitted on the wire so the broker sees identity.origin")
+	assert.Equal(t, "acme", md[HeaderWorkspace],
+		"workspace must be emitted on the wire so the broker sees identity.workspace")
 }
 
 func TestPropagationFields_RoundTripsIdentity(t *testing.T) {
@@ -127,6 +148,8 @@ func TestIndividualGetters(t *testing.T) {
 	ctx = WithAuthorization(ctx, "Bearer abc")
 	ctx = WithProvider(ctx, "openai")
 	ctx = WithModel(ctx, "gpt-4o")
+	ctx = WithOrigin(ctx, OriginAPIKey)
+	ctx = WithWorkspace(ctx, "acme")
 	ctx = WithClaims(ctx, map[string]string{"key": "val"})
 
 	assert.Equal(t, "agent-1", AgentName(ctx))
@@ -138,6 +161,8 @@ func TestIndividualGetters(t *testing.T) {
 	assert.Equal(t, "Bearer abc", Authorization(ctx))
 	assert.Equal(t, "openai", Provider(ctx))
 	assert.Equal(t, "gpt-4o", Model(ctx))
+	assert.Equal(t, OriginAPIKey, Origin(ctx))
+	assert.Equal(t, "acme", Workspace(ctx))
 	assert.Equal(t, map[string]string{"key": "val"}, Claims(ctx))
 }
 
@@ -146,6 +171,8 @@ func TestGettersOnEmptyContext(t *testing.T) {
 	assert.Equal(t, "", AgentName(ctx))
 	assert.Equal(t, "", SessionID(ctx))
 	assert.Equal(t, "", UserID(ctx))
+	assert.Equal(t, "", Origin(ctx))
+	assert.Equal(t, "", Workspace(ctx))
 	assert.Nil(t, Claims(ctx))
 }
 
