@@ -32,8 +32,11 @@ func facadeOfType(ar *omniav1alpha1.AgentRuntime, t omniav1alpha1.FacadeType) *o
 }
 
 // primaryFacade returns the facade the agent pod dispatches to: websocket
-// (agent mode) > rest (function mode) > a2a (standalone agent mode). Returns nil
-// only when spec.facades is empty, which CEL forbids.
+// (agent mode) > rest (function mode) > a2a (standalone agent mode) > custom
+// (bring-your-own-container agent mode). A custom facade replaces the built-in
+// facade container with a third-party image, so it is the primary surface when
+// no built-in agent/function facade is present. Returns nil only when
+// spec.facades is empty, which CEL forbids.
 func primaryFacade(ar *omniav1alpha1.AgentRuntime) *omniav1alpha1.FacadeConfig {
 	if f := facadeOfType(ar, omniav1alpha1.FacadeTypeWebSocket); f != nil {
 		return f
@@ -41,7 +44,10 @@ func primaryFacade(ar *omniav1alpha1.AgentRuntime) *omniav1alpha1.FacadeConfig {
 	if f := facadeOfType(ar, omniav1alpha1.FacadeTypeREST); f != nil {
 		return f
 	}
-	return facadeOfType(ar, omniav1alpha1.FacadeTypeA2A)
+	if f := facadeOfType(ar, omniav1alpha1.FacadeTypeA2A); f != nil {
+		return f
+	}
+	return facadeOfType(ar, omniav1alpha1.FacadeTypeCustom)
 }
 
 // primaryFacadePort returns the primary facade's listen port, defaulting to
