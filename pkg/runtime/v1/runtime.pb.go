@@ -762,7 +762,10 @@ type MediaContent struct {
 	// url contains the media URL (for http:// and https:// URLs that are passed through)
 	Url string `protobuf:"bytes,2,opt,name=url,proto3" json:"url,omitempty"`
 	// mime_type indicates the media format (e.g., "image/png", "audio/mp3")
-	MimeType      string `protobuf:"bytes,3,opt,name=mime_type,json=mimeType,proto3" json:"mime_type,omitempty"`
+	MimeType string `protobuf:"bytes,3,opt,name=mime_type,json=mimeType,proto3" json:"mime_type,omitempty"`
+	// storage_ref is an opaque backend storage reference (e.g. "omnia://sessions/{id}/media/{mediaID}").
+	// When set, the runtime resolves it to media bytes at provider-call time via the injected media store.
+	StorageRef    string `protobuf:"bytes,4,opt,name=storage_ref,json=storageRef,proto3" json:"storage_ref,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -814,6 +817,13 @@ func (x *MediaContent) GetUrl() string {
 func (x *MediaContent) GetMimeType() string {
 	if x != nil {
 		return x.MimeType
+	}
+	return ""
+}
+
+func (x *MediaContent) GetStorageRef() string {
+	if x != nil {
+		return x.StorageRef
 	}
 	return ""
 }
@@ -1492,11 +1502,13 @@ const file_api_proto_runtime_v1_runtime_proto_rawDesc = "" +
 	"\vContentPart\x12\x12\n" +
 	"\x04type\x18\x01 \x01(\tR\x04type\x12\x12\n" +
 	"\x04text\x18\x02 \x01(\tR\x04text\x124\n" +
-	"\x05media\x18\x03 \x01(\v2\x1e.omnia.runtime.v1.MediaContentR\x05media\"Q\n" +
+	"\x05media\x18\x03 \x01(\v2\x1e.omnia.runtime.v1.MediaContentR\x05media\"r\n" +
 	"\fMediaContent\x12\x12\n" +
 	"\x04data\x18\x01 \x01(\tR\x04data\x12\x10\n" +
 	"\x03url\x18\x02 \x01(\tR\x03url\x12\x1b\n" +
-	"\tmime_type\x18\x03 \x01(\tR\bmimeType\"j\n" +
+	"\tmime_type\x18\x03 \x01(\tR\bmimeType\x12\x1f\n" +
+	"\vstorage_ref\x18\x04 \x01(\tR\n" +
+	"storageRef\"j\n" +
 	"\x05Usage\x12!\n" +
 	"\finput_tokens\x18\x01 \x01(\x05R\vinputTokens\x12#\n" +
 	"\routput_tokens\x18\x02 \x01(\x05R\foutputTokens\x12\x19\n" +
