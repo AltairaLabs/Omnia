@@ -56,9 +56,6 @@ func TestEdgeTrustValidator_AdmitsWithDefaultIstioHeaders(t *testing.T) {
 	if got, want := id.Subject, testAliceEmail; got != want {
 		t.Errorf("Subject = %q, want %q", got, want)
 	}
-	if got, want := id.Role, policy.RoleEditor; got != want {
-		t.Errorf("Role = %q, want %q", got, want)
-	}
 	if got, want := id.Claims["email"], testAliceEmail; got != want {
 		t.Errorf("Claims[email] = %q, want %q", got, want)
 	}
@@ -97,8 +94,8 @@ func TestEdgeTrustValidator_DefaultRoleAppliedWhenRoleHeaderAbsent(t *testing.T)
 	if err != nil {
 		t.Fatalf("err = %v", err)
 	}
-	if got, want := id.Role, policy.RoleViewer; got != want {
-		t.Errorf("Role = %q, want %q (default)", got, want)
+	if got, want := id.Claims["role"], policy.RoleViewer; got != want {
+		t.Errorf("Claims[role] = %q, want %q (default)", got, want)
 	}
 }
 
@@ -113,8 +110,8 @@ func TestEdgeTrustValidator_DefaultRoleOverride(t *testing.T) {
 	if err != nil {
 		t.Fatalf("err = %v", err)
 	}
-	if got, want := id.Role, policy.RoleAdmin; got != want {
-		t.Errorf("Role = %q, want %q", got, want)
+	if got, want := id.Claims["role"], policy.RoleAdmin; got != want {
+		t.Errorf("Claims[role] = %q, want %q", got, want)
 	}
 }
 
@@ -138,9 +135,6 @@ func TestEdgeTrustValidator_CustomHeaderMapping(t *testing.T) {
 	}
 	if got, want := id.Subject, "bob@example.com"; got != want {
 		t.Errorf("Subject = %q, want %q", got, want)
-	}
-	if got, want := id.Role, policy.RoleAdmin; got != want {
-		t.Errorf("Role = %q, want %q", got, want)
 	}
 
 	// Default headers must NOT be read once they're overridden.
@@ -276,8 +270,8 @@ func TestEdgeTrustValidator_EmptyOptionsIgnored(t *testing.T) {
 	if id.Subject != "alice" {
 		t.Errorf("Subject = %q, want %q (default header should still work)", id.Subject, "alice")
 	}
-	if id.Role != policy.RoleViewer {
-		t.Errorf("Role = %q, want %q (default role should still apply)", id.Role, policy.RoleViewer)
+	if id.Claims["role"] != policy.RoleViewer {
+		t.Errorf("Claims[role] = %q, want %q (default role should still apply)", id.Claims["role"], policy.RoleViewer)
 	}
 }
 

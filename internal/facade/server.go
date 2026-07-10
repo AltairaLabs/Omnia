@@ -184,7 +184,7 @@ type Server struct {
 	// authChain, when non-empty, runs every configured Validator against
 	// the upgrade request in order and admits on the first match. On
 	// admit the identity flows into PropagationFields.Identity and the
-	// flat UserID / UserRoles / UserEmail fields.
+	// flat UserID / UserEmail fields.
 	//
 	// PR 3 flipped the chain-wide ErrNoCredential behaviour from
 	// "proceed unauthenticated" (PR 1 default) to "return 401 before
@@ -575,7 +575,6 @@ type requestAgentContext struct {
 
 type requestUserContext struct {
 	userID        string
-	userRoles     string
 	userEmail     string
 	authorization string
 	cohortID      string
@@ -614,18 +613,13 @@ func (s *Server) resolveAgentContext(r *http.Request) (requestAgentContext, erro
 // resolveUserContext extracts the user identity for a request. The pseudonym
 // resolution (mgmt-plane header > device_id > subject, with Istio fallback)
 // lives in the shared ResolveUserPseudonym helper so the WS path and the
-// session-create path agree on a single stable id; roles/email stay inline
+// session-create path agree on a single stable id; email stays inline
 // (auth Identity is authoritative, else the Istio-injected headers).
 func (s *Server) resolveUserContext(r *http.Request, authIdentity *policy.AuthenticatedIdentity) requestUserContext {
-	var (
-		userRoles string
-		userEmail string
-	)
+	var userEmail string
 	if authIdentity != nil {
-		userRoles = authIdentity.Role
 		userEmail = authIdentity.Claims["email"]
 	} else {
-		userRoles = r.Header.Get(policy.IstioHeaderUserRoles)
 		userEmail = r.Header.Get(policy.IstioHeaderUserEmail)
 	}
 	userID := ResolveUserPseudonym(r, authIdentity)
@@ -637,7 +631,6 @@ func (s *Server) resolveUserContext(r *http.Request, authIdentity *policy.Authen
 
 	return requestUserContext{
 		userID:        userID,
-		userRoles:     userRoles,
 		userEmail:     userEmail,
 		authorization: r.Header.Get("Authorization"),
 		cohortID:      r.Header.Get(policy.HeaderCohortID),
@@ -675,7 +668,7 @@ func (s *Server) buildConnectionContext(
 	// Store policy propagation fields for gRPC metadata forwarding.
 	// When an auth validator admitted the request we attach the Identity
 	// too — downstream in-process code can inspect it, but it does not
-	// travel over gRPC (the flat UserID/UserRoles/UserEmail/Claims carry
+	// travel over gRPC (the flat UserID/UserEmail/Claims carry
 	// what runtime needs, via ToOutboundHeaders).
 	//
 	// Also propagate the validator's claim map so downstream HTTP tool
@@ -690,7 +683,6 @@ func (s *Server) buildConnectionContext(
 		Namespace:     agentCtx.namespace,
 		RequestID:     logctx.RequestID(connCtx),
 		UserID:        userCtx.userID,
-		UserRoles:     userCtx.userRoles,
 		UserEmail:     userCtx.userEmail,
 		Authorization: userCtx.authorization,
 		Claims:        validatorClaims,
@@ -761,7 +753,6 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		binaryCapable: agentCtx.binaryCapable,
 		resumeID:      agentCtx.resumeID,
 		userID:        userCtx.userID,
-		userRoles:     userCtx.userRoles,
 		userEmail:     userCtx.userEmail,
 		authorization: userCtx.authorization,
 		cohortID:      userCtx.cohortID,

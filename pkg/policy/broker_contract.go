@@ -97,8 +97,7 @@ func IdentityPayloadFromIdentity(id *AuthenticatedIdentity) *IdentityPayload {
 //     value.
 //   - Claims <- fields.Claims, verbatim. Role rides in Claims["role"] rather
 //     than a dedicated field — ToolPolicy rules gate on identity.claims.role,
-//     not a structured identity.role, so fields.UserRoles (the legacy
-//     structured-role propagation field) is not read here. See identity.go.
+//     not a structured identity.role. See identity.go.
 //   - Agent  <- fields.AgentName, the agent this tool call is running
 //     under. Sourced from the request/env (not the auth token), but it is
 //     the same value ToolPolicy fixtures use for identity.agent and the

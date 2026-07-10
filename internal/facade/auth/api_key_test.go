@@ -87,9 +87,6 @@ func TestAPIKeyValidator_AdmitsKnownKey(t *testing.T) {
 	if got, want := id.Subject, "key-001"; got != want {
 		t.Errorf("Subject = %q, want %q (key ID)", got, want)
 	}
-	if got, want := id.Role, policy.RoleEditor; got != want {
-		t.Errorf("Role = %q, want %q", got, want)
-	}
 	if id.EndUser != id.Subject {
 		t.Errorf("EndUser = %q, want %q (no trustEndUserHeader)", id.EndUser, id.Subject)
 	}
@@ -196,8 +193,8 @@ func TestAPIKeyValidator_DefaultRoleAppliedWhenSecretMissingRole(t *testing.T) {
 	if err != nil {
 		t.Fatalf("err = %v", err)
 	}
-	if got, want := id.Role, policy.RoleViewer; got != want {
-		t.Errorf("Role = %q, want %q (default applied)", got, want)
+	if got, want := id.Claims["role"], policy.RoleViewer; got != want {
+		t.Errorf("Claims[role] = %q, want %q (default applied)", got, want)
 	}
 }
 

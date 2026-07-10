@@ -167,7 +167,6 @@ func (v *APIKeyValidator) Validate(_ context.Context, r *http.Request) (*policy.
 		Origin:    policy.OriginAPIKey,
 		Subject:   subject,
 		EndUser:   endUser,
-		Role:      role, // dual-write; removed in Task 6
 		Claims:    map[string]string{"role": role},
 		ExpiresAt: key.ExpiresAt,
 	}, nil

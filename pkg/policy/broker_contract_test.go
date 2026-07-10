@@ -68,15 +68,12 @@ func TestIdentityPayloadFromPropagation_EmptyFieldsReturnsNil(t *testing.T) {
 // gRPC hop). This asserts the reconstructed payload maps exactly the fields
 // that have a faithful propagated source (Subject/EndUser from UserID,
 // Claims verbatim — including a "role" claim, Agent from AgentName) and
-// leaves Origin/Workspace unset rather than fabricating them. UserRoles (the
-// legacy structured-role propagation field) is deliberately set on the
-// fixture but must NOT leak into the payload: roles ride in Claims["role"].
+// leaves Origin/Workspace unset rather than fabricating them.
 func TestIdentityPayloadFromPropagation_MapsFaithfulFieldsOnly(t *testing.T) {
 	fields := &PropagationFields{
 		AgentName: "agent-1",
 		Namespace: "some-k8s-namespace", // must NOT leak into Workspace
 		UserID:    "user-1",
-		UserRoles: RoleEditor, // must NOT leak into the payload
 		Claims:    map[string]string{"role": "editor", "team": "eng"},
 	}
 
@@ -124,7 +121,7 @@ func TestIdentityPayloadFromPropagation_RoleInClaims(t *testing.T) {
 }
 
 // TestIdentityPayloadFromPropagation_AgentOnlyIsSufficient asserts that
-// AgentName alone (no UserID/UserRoles/Claims) is enough to produce a
+// AgentName alone (no UserID/Claims) is enough to produce a
 // non-nil payload — an agent-scoped ToolPolicy rule (identity.agent) should
 // still be able to fire even for anonymous/unauthenticated tool calls.
 func TestIdentityPayloadFromPropagation_AgentOnlyIsSufficient(t *testing.T) {

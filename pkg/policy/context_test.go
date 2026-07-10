@@ -34,7 +34,6 @@ func TestWithAndExtractPropagationFields(t *testing.T) {
 		SessionID:     "sess-123",
 		RequestID:     "req-456",
 		UserID:        "user@example.com",
-		UserRoles:     "admin,viewer",
 		UserEmail:     "user@example.com",
 		Authorization: "Bearer token123",
 		Provider:      "claude",
@@ -50,7 +49,6 @@ func TestWithAndExtractPropagationFields(t *testing.T) {
 	assert.Equal(t, fields.SessionID, extracted.SessionID)
 	assert.Equal(t, fields.RequestID, extracted.RequestID)
 	assert.Equal(t, fields.UserID, extracted.UserID)
-	assert.Equal(t, fields.UserRoles, extracted.UserRoles)
 	assert.Equal(t, fields.UserEmail, extracted.UserEmail)
 	assert.Equal(t, fields.Authorization, extracted.Authorization)
 	assert.Equal(t, fields.Provider, extracted.Provider)
@@ -66,7 +64,6 @@ func TestPropagationFields_RoundTripsIdentity(t *testing.T) {
 		EndUser:   "admin@example.com",
 		Workspace: "default",
 		Agent:     "test-agent",
-		Role:      RoleAdmin,
 		Claims:    map[string]string{"tier": "pro"},
 	}
 	fields := &PropagationFields{
@@ -79,7 +76,6 @@ func TestPropagationFields_RoundTripsIdentity(t *testing.T) {
 	extracted := ExtractPropagationFields(ctx)
 	require.NotNil(t, extracted.Identity)
 	assert.Equal(t, id.Subject, extracted.Identity.Subject)
-	assert.Equal(t, id.Role, extracted.Identity.Role)
 
 	// IdentityFromContext returns the same pointer (no cloning — Identity
 	// is immutable from the consumer's perspective, so aliasing is fine).
@@ -122,7 +118,6 @@ func TestIndividualGetters(t *testing.T) {
 	ctx = WithSessionID(ctx, "sess-1")
 	ctx = WithRequestID(ctx, "req-1")
 	ctx = WithUserID(ctx, "user-1")
-	ctx = WithUserRoles(ctx, "role-1")
 	ctx = WithUserEmail(ctx, "email@test.com")
 	ctx = WithAuthorization(ctx, "Bearer abc")
 	ctx = WithProvider(ctx, "openai")
@@ -134,7 +129,6 @@ func TestIndividualGetters(t *testing.T) {
 	assert.Equal(t, "sess-1", SessionID(ctx))
 	assert.Equal(t, "req-1", RequestID(ctx))
 	assert.Equal(t, "user-1", UserID(ctx))
-	assert.Equal(t, "role-1", UserRoles(ctx))
 	assert.Equal(t, "Bearer abc", Authorization(ctx))
 	assert.Equal(t, "openai", Provider(ctx))
 	assert.Equal(t, "gpt-4o", Model(ctx))
@@ -301,7 +295,6 @@ func TestHeaderConstants(t *testing.T) {
 	require.Equal(t, "x-omnia-session-id", HeaderSessionID)
 	require.Equal(t, "x-omnia-request-id", HeaderRequestID)
 	require.Equal(t, "x-omnia-user-id", HeaderUserID)
-	require.Equal(t, "x-omnia-user-roles", HeaderUserRoles)
 	require.Equal(t, "authorization", HeaderAuthorization)
 	require.Equal(t, "x-omnia-provider", HeaderProvider)
 	require.Equal(t, "x-omnia-model", HeaderModel)

@@ -182,9 +182,6 @@ func TestMgmtPlaneValidator_ValidToken(t *testing.T) {
 	if got, want := id.EndUser, id.Subject; got != want {
 		t.Errorf("EndUser = %q, want %q (same as Subject for mgmt-plane)", got, want)
 	}
-	if id.Role != "" {
-		t.Errorf("Role = %q, want empty (mgmt-plane is origin-gated, role-less)", id.Role)
-	}
 	if got, want := id.Agent, "test-agent"; got != want {
 		t.Errorf("Agent = %q, want %q", got, want)
 	}

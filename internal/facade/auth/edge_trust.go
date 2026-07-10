@@ -188,7 +188,6 @@ func (v *EdgeTrustValidator) Validate(_ context.Context, r *http.Request) (*poli
 		Origin:  policy.OriginEdgeTrust,
 		Subject: subject,
 		EndUser: endUser,
-		Role:    role, // dual-write; removed in Task 6
 	}
 	if len(claims) > 0 {
 		id.Claims = claims

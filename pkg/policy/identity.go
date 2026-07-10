@@ -34,7 +34,9 @@ const (
 	OriginEdgeTrust       = "edge-trust"
 )
 
-// Role strings identify the caller's role. Used by ToolPolicy rules.
+// Role strings are conventional example values for identity.claims.role,
+// NOT an enforced enum. They exist for consistent defaulting (api-key/edge
+// defaultRole) and as conventional claim values in tests.
 const (
 	RoleAdmin  = "admin"
 	RoleEditor = "editor"
@@ -78,9 +80,6 @@ type AuthenticatedIdentity struct {
 	// Agent is the agent the request targets (may be empty for validators
 	// that do not carry agent scope).
 	Agent string
-
-	// Role is the caller's role. One of RoleAdmin / RoleEditor / RoleViewer.
-	Role string
 
 	// Claims holds extra claim values the validator surfaced (OIDC claim
 	// map, edge-injected headers mapped into claims, etc.). Consumed by
