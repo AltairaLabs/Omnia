@@ -9,7 +9,8 @@ default, and wired into local dev through a matching `ENABLE_*` flag in the repo
 
 | Demo | values toggle | Tilt flag | Populates |
 |------|---------------|-----------|-----------|
-| Vision / Tools | (Tilt-managed agents) | `ENABLE_DEMO=true` | Vision + tool-calling chat agents (ollama llava / llama3.2) |
+| Vision | `visionDemo.enabled` (default true) | `ENABLE_DEMO=true` | Vision chat agent (ollama llava) — needs the `vision` ollama instance (GPU / capable CPU pool). Set `visionDemo.enabled=false` on clusters without one, otherwise the Provider stays Unavailable. |
+| Tools | `toolsDemo.enabled` (default true) | `ENABLE_DEMO=true` | Tool-calling chat agent (ollama llama3.2) |
 | Audio | `audioDemo.enabled` | `ENABLE_AUDIO_DEMO=true` | Gemini audio agent (needs `gemini-credentials`) |
 | LangChain | `langchainDemo.enabled` | `ENABLE_LANGCHAIN=true` | LangChain-runtime mirrors of vision/tools |
 | Arena | `arenaDemo.enabled` | — | Arena project + load-test sources |
@@ -19,6 +20,30 @@ default, and wired into local dev through a matching `ENABLE_*` flag in the repo
 `sharepointHero` and `memoryDemo` are **mutually exclusive** on the demo
 Workspace's memory service (one hero demo owns it) — sharepointHero wins if both
 are set.
+
+## Workspace access
+
+The demo `Workspace` ships with **no owner grant** by default
+(`workspace.roleBindings: []`), so every dashboard route that requires a role
+(the workspace services list, Memory Galaxy, …) returns 403 until access is
+granted. Grant it declaratively at install time — no post-install
+`kubectl patch` needed — via any of:
+
+```bash
+# OIDC group → owner
+--set 'workspace.roleBindings[0].groups[0]=<oidc-group>' \
+--set 'workspace.roleBindings[0].role=owner'
+
+# individual user → owner (OIDC email claim)
+--set 'workspace.directGrants[0].user=you@example.com' \
+--set 'workspace.directGrants[0].role=owner'
+
+# local dev only — anonymous owner (unauthenticated write access!)
+--set workspace.anonymousAccess.enabled=true \
+--set workspace.anonymousAccess.role=owner
+```
+
+Tilt's demo path already sets the anonymous-owner combo for local dev.
 
 ## Memory API demo
 

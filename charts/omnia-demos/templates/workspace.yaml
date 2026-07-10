@@ -40,7 +40,16 @@ spec:
     podLabels:
       azure.workload.identity/use: "true"
   {{- end }}
+  {{- with .Values.workspace.roleBindings }}
+  roleBindings:
+    {{- toYaml . | nindent 4 }}
+  {{- else }}
   roleBindings: []
+  {{- end }}
+  {{- with .Values.workspace.directGrants }}
+  directGrants:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
   {{- if .Values.workspace.anonymousAccess.enabled }}
   # Anonymous access configuration
   # WARNING: Granting editor/owner to anonymous users allows unauthenticated write access
