@@ -172,6 +172,9 @@ func (v *EdgeTrustValidator) Validate(_ context.Context, r *http.Request) (*poli
 	}
 
 	claims := map[string]string{}
+	if role != "" {
+		claims["role"] = role
+	}
 	if email := r.Header.Get(v.emailHeader); email != "" {
 		claims["email"] = email
 	}
@@ -185,7 +188,7 @@ func (v *EdgeTrustValidator) Validate(_ context.Context, r *http.Request) (*poli
 		Origin:  policy.OriginEdgeTrust,
 		Subject: subject,
 		EndUser: endUser,
-		Role:    role,
+		Role:    role, // dual-write; removed in Task 6
 	}
 	if len(claims) > 0 {
 		id.Claims = claims

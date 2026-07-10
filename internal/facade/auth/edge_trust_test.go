@@ -298,3 +298,20 @@ func TestEdgeTrustValidator_NoEmailHeaderOmitsClaim(t *testing.T) {
 		}
 	}
 }
+
+func TestEdgeTrustValidator_RoleSurfacesAsClaim(t *testing.T) {
+	t.Parallel()
+	v := auth.NewEdgeTrustValidator()
+	r := reqWithEdgeHeaders(map[string]string{
+		auth.DefaultEdgeSubjectHeader: "alice",
+		auth.DefaultEdgeRoleHeader:    "editor",
+	})
+
+	id, err := v.Validate(context.Background(), r)
+	if err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	if got, want := id.Claims["role"], "editor"; got != want {
+		t.Fatalf("Claims[role] = %q, want %q", got, want)
+	}
+}

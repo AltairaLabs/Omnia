@@ -243,3 +243,17 @@ func TestStaticKeyStore_NilMapIsSafe(t *testing.T) {
 		t.Error("expected miss on empty store")
 	}
 }
+
+func TestAPIKeyValidator_RoleSurfacesAsClaim(t *testing.T) {
+	t.Parallel()
+	store := newAPIKeyStore(t)
+	v := auth.NewAPIKeyValidator(store)
+
+	id, err := v.Validate(context.Background(), reqWithBearer(validAPIKey))
+	if err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	if got, want := id.Claims["role"], policy.RoleEditor; got != want {
+		t.Fatalf("Claims[role] = %q, want %q", got, want)
+	}
+}
