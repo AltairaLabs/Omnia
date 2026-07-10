@@ -1176,3 +1176,33 @@ func TestRuntimeHandler_ClientToolCall_ConcurrentSameSession(t *testing.T) {
 	assert.Contains(t, mock.received, tcA.ID)
 	assert.Contains(t, mock.received, tcB.ID)
 }
+
+func TestToGRPCContentParts_ForwardsStorageRef(t *testing.T) {
+	ref := "omnia://sessions/s1/media/m1"
+	parts := []facade.ContentPart{{
+		Type:  facade.ContentPartTypeImage,
+		Media: &facade.MediaContent{StorageRef: ref, MimeType: "image/png"},
+	}}
+	got := toGRPCContentParts(parts)
+	if len(got) != 1 || got[0].Media == nil {
+		t.Fatalf("expected one media part, got %+v", got)
+	}
+	if got[0].Media.StorageRef != ref {
+		t.Errorf("StorageRef = %q, want %q", got[0].Media.StorageRef, ref)
+	}
+}
+
+func TestFromGRPCContentParts_ForwardsStorageRef(t *testing.T) {
+	ref := "omnia://sessions/s1/media/m1"
+	parts := []*runtimev1.ContentPart{{
+		Type:  string(facade.ContentPartTypeImage),
+		Media: &runtimev1.MediaContent{StorageRef: ref, MimeType: "image/png"},
+	}}
+	got := fromGRPCContentParts(parts)
+	if len(got) != 1 || got[0].Media == nil {
+		t.Fatalf("expected one media part, got %+v", got)
+	}
+	if got[0].Media.StorageRef != ref {
+		t.Errorf("StorageRef = %q, want %q", got[0].Media.StorageRef, ref)
+	}
+}

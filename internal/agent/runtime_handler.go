@@ -474,9 +474,10 @@ func toGRPCContentParts(parts []facade.ContentPart) []*runtimev1.ContentPart {
 		}
 		if part.Media != nil {
 			grpcPart.Media = &runtimev1.MediaContent{
-				Data:     part.Media.Data,
-				Url:      part.Media.URL,
-				MimeType: part.Media.MimeType,
+				Data:       part.Media.Data,
+				Url:        part.Media.URL,
+				MimeType:   part.Media.MimeType,
+				StorageRef: part.Media.StorageRef,
 			}
 		}
 		grpcParts[i] = grpcPart
@@ -498,9 +499,10 @@ func fromGRPCContentParts(parts []*runtimev1.ContentPart) []facade.ContentPart {
 		}
 		if part.Media != nil {
 			facadePart.Media = &facade.MediaContent{
-				Data:     part.Media.Data,
-				URL:      part.Media.Url,
-				MimeType: part.Media.MimeType,
+				Data:       part.Media.Data,
+				URL:        part.Media.Url,
+				MimeType:   part.Media.MimeType,
+				StorageRef: part.Media.StorageRef,
 			}
 		}
 		facadeParts[i] = facadePart
