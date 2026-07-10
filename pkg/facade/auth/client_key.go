@@ -27,14 +27,14 @@ import (
 	"github.com/altairalabs/omnia/pkg/policy"
 )
 
-// APIKey is the in-memory representation of a single agent API key. The
-// value is a sha256 hash of the raw bearer token; the validator never
+// ClientKey is the in-memory representation of a single agent client key.
+// The value is a sha256 hash of the raw bearer token; the validator never
 // stores the raw value. Built by cmd/agent's KeyStore from the labelled
 // Secret data; defined here so the validator can be unit-tested against
-// a synthetic []APIKey slice.
-type APIKey struct {
+// a synthetic []ClientKey slice.
+type ClientKey struct {
 	// ID is a stable identifier for the key (the Secret name's suffix
-	// after `agent-<agent>-apikey-`). Surfaces as Identity.Subject so
+	// after `agent-<agent>-clientkey-`). Surfaces as Identity.Subject so
 	// audit and ToolPolicy rules can distinguish callers.
 	ID string
 
@@ -43,10 +43,11 @@ type APIKey struct {
 	// hash against this with a constant-time compare.
 	HashHex string
 
-	// Role is the caller's role for this key. One of policy.RoleAdmin /
-	// policy.RoleEditor / policy.RoleViewer. Falls back to APIKeysAuth's
-	// defaultRole at the cmd/agent layer if unset on the Secret.
-	Role string
+	// Claims are arbitrary per-key claims (e.g. "role", or any other
+	// caller-defined key) surfaced to ToolPolicy as identity.claims.*.
+	// When empty, the validator falls back to {"role": defaultRole} —
+	// ClientKeysAuth's defaultRole applied at the cmd/agent layer.
+	Claims map[string]string
 
 	// ExpiresAt is the absolute time after which the key is no longer
 	// valid. Zero value means "no expiry" — the operator opts in by
@@ -54,54 +55,55 @@ type APIKey struct {
 	ExpiresAt time.Time
 }
 
-// KeyStore is the lookup interface APIKeyValidator depends on. cmd/agent
-// supplies a Secret-backed implementation; tests can swap in a
+// KeyStore is the lookup interface ClientKeyValidator depends on.
+// cmd/agent supplies a Secret-backed implementation; tests can swap in a
 // hand-built map. Lookup by hex sha256 is O(1) — the common case after
 // a token presents.
 type KeyStore interface {
-	// Lookup returns the APIKey matching the supplied hex sha256, or
+	// Lookup returns the ClientKey matching the supplied hex sha256, or
 	// (zero, false) if none. Implementations are expected to be safe
 	// for concurrent use.
-	Lookup(hashHex string) (APIKey, bool)
+	Lookup(hashHex string) (ClientKey, bool)
 }
 
-// APIKeyValidator implements Validator for the per-caller API key
+// ClientKeyValidator implements Validator for the per-caller client key
 // pattern: each key is a Secret in the agent's namespace; the facade
 // hashes the incoming bearer and looks the hash up in a KeyStore. Hash
 // comparison is constant-time even though we're comparing hex strings —
 // timing attacks against hex compares are practical.
-type APIKeyValidator struct {
+type ClientKeyValidator struct {
 	store              KeyStore
 	defaultRole        string
 	trustEndUserHeader bool
 	now                func() time.Time // injectable for tests; defaults to time.Now
 }
 
-// APIKeyOption tunes an APIKeyValidator.
-type APIKeyOption func(*APIKeyValidator)
+// ClientKeyOption tunes a ClientKeyValidator.
+type ClientKeyOption func(*ClientKeyValidator)
 
-// WithAPIKeyDefaultRole sets the role applied to keys whose Secret data
-// does not carry one. Mirrors the CRD's APIKeysAuth.defaultRole field.
-func WithAPIKeyDefaultRole(role string) APIKeyOption {
-	return func(v *APIKeyValidator) { v.defaultRole = role }
+// WithClientKeyDefaultRole sets the role applied to keys whose Secret
+// data carries no claims. Mirrors the CRD's ClientKeysAuth.defaultRole
+// field.
+func WithClientKeyDefaultRole(role string) ClientKeyOption {
+	return func(v *ClientKeyValidator) { v.defaultRole = role }
 }
 
-// WithAPIKeyTrustEndUserHeader honours X-End-User-Id when populating
+// WithClientKeyTrustEndUserHeader honours X-End-User-Id when populating
 // Identity.EndUser. Same security trade-off as sharedToken — see the
 // design doc.
-func WithAPIKeyTrustEndUserHeader(trust bool) APIKeyOption {
-	return func(v *APIKeyValidator) { v.trustEndUserHeader = trust }
+func WithClientKeyTrustEndUserHeader(trust bool) ClientKeyOption {
+	return func(v *ClientKeyValidator) { v.trustEndUserHeader = trust }
 }
 
-// WithAPIKeyClock injects a clock for expiry tests.
-func WithAPIKeyClock(now func() time.Time) APIKeyOption {
-	return func(v *APIKeyValidator) { v.now = now }
+// WithClientKeyClock injects a clock for expiry tests.
+func WithClientKeyClock(now func() time.Time) ClientKeyOption {
+	return func(v *ClientKeyValidator) { v.now = now }
 }
 
-// NewAPIKeyValidator constructs a validator backed by the supplied
+// NewClientKeyValidator constructs a validator backed by the supplied
 // KeyStore.
-func NewAPIKeyValidator(store KeyStore, opts ...APIKeyOption) *APIKeyValidator {
-	v := &APIKeyValidator{
+func NewClientKeyValidator(store KeyStore, opts ...ClientKeyOption) *ClientKeyValidator {
+	v := &ClientKeyValidator{
 		store:       store,
 		defaultRole: policy.RoleViewer,
 		now:         time.Now,
@@ -122,10 +124,10 @@ func HashToken(raw string) string {
 }
 
 // Validate implements Validator. ErrNoCredential when no Bearer header, or
-// when the bearer isn't a known key (an unknown opaque bearer isn't an
-// api-key-style credential, so the chain falls through); ErrExpired when a
-// matching key has lapsed.
-func (v *APIKeyValidator) Validate(_ context.Context, r *http.Request) (*policy.AuthenticatedIdentity, error) {
+// when the bearer isn't a known key (an unknown opaque bearer isn't a
+// client-key-style credential, so the chain falls through); ErrExpired
+// when a matching key has lapsed.
+func (v *ClientKeyValidator) Validate(_ context.Context, r *http.Request) (*policy.AuthenticatedIdentity, error) {
 	tokenString, err := extractBearer(r)
 	if err != nil {
 		return nil, err
@@ -135,9 +137,10 @@ func (v *APIKeyValidator) Validate(_ context.Context, r *http.Request) (*policy.
 	key, found := v.store.Lookup(candidate)
 	if !found {
 		// Not one of our keys. An opaque-bearer validator can't tell a wrong
-		// API key from a credential of another style (e.g. a mgmt-plane JWT),
-		// so fall through rather than short-circuit the chain — otherwise a
-		// later validator (mgmt-plane) never gets a chance. See #1620.
+		// client key from a credential of another style (e.g. a mgmt-plane
+		// JWT), so fall through rather than short-circuit the chain —
+		// otherwise a later validator (mgmt-plane) never gets a chance. See
+		// #1620.
 		return nil, ErrNoCredential
 	}
 	// Hash collisions on sha256 are not a thing in practice; the
@@ -150,9 +153,9 @@ func (v *APIKeyValidator) Validate(_ context.Context, r *http.Request) (*policy.
 		return nil, ErrExpired
 	}
 
-	role := key.Role
-	if role == "" {
-		role = v.defaultRole
+	claims := key.Claims
+	if len(claims) == 0 {
+		claims = map[string]string{"role": v.defaultRole}
 	}
 
 	subject := key.ID
@@ -164,34 +167,34 @@ func (v *APIKeyValidator) Validate(_ context.Context, r *http.Request) (*policy.
 	}
 
 	return &policy.AuthenticatedIdentity{
-		Origin:    policy.OriginAPIKey,
+		Origin:    policy.OriginClientKey,
 		Subject:   subject,
 		EndUser:   endUser,
-		Claims:    map[string]string{"role": role},
+		Claims:    claims,
 		ExpiresAt: key.ExpiresAt,
 	}, nil
 }
 
 // StaticKeyStore is the in-memory KeyStore — what cmd/agent constructs
 // after listing the agent's labelled Secrets, and what tests use
-// directly. Maps hex sha256 → APIKey; safe for concurrent reads (no
+// directly. Maps hex sha256 → ClientKey; safe for concurrent reads (no
 // per-request mutation), but writers must replace the whole map atomically.
 type StaticKeyStore struct {
-	keys map[string]APIKey
+	keys map[string]ClientKey
 }
 
 // NewStaticKeyStore returns a KeyStore backed by the supplied map. The
 // caller passes ownership of the map — callers must not mutate it after
 // construction (use Replace on a future hot-reload-friendly impl).
-func NewStaticKeyStore(keys map[string]APIKey) *StaticKeyStore {
+func NewStaticKeyStore(keys map[string]ClientKey) *StaticKeyStore {
 	if keys == nil {
-		keys = map[string]APIKey{}
+		keys = map[string]ClientKey{}
 	}
 	return &StaticKeyStore{keys: keys}
 }
 
 // Lookup implements KeyStore.
-func (s *StaticKeyStore) Lookup(hashHex string) (APIKey, bool) {
+func (s *StaticKeyStore) Lookup(hashHex string) (ClientKey, bool) {
 	k, ok := s.keys[hashHex]
 	return k, ok
 }

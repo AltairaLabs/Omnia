@@ -27,7 +27,7 @@ import (
 
 // EndUserHeader is the inbound HTTP header callers MAY set to identify the
 // end-user on whose behalf they're acting. Honoured by the sharedToken /
-// apiKeys validators only when their `trustEndUserHeader` flag is true on
+// clientKeys validators only when their `trustEndUserHeader` flag is true on
 // the AgentRuntime CRD; the default is to ignore it (Identity.EndUser
 // equals Identity.Subject in that case). Documented in
 // docs/local-backlog/2026-04-21-agent-facade-auth-design.md.
@@ -105,7 +105,7 @@ func (v *SharedTokenValidator) Validate(_ context.Context, r *http.Request) (*po
 	if subtle.ConstantTimeCompare([]byte(tokenString), v.tokenHash) != 1 {
 		// Not our shared token. As an opaque-bearer validator we can't tell a
 		// wrong token from a credential of another style, so fall through and
-		// let a later validator (api-keys, or the mgmt-plane on its own
+		// let a later validator (client keys, or the mgmt-plane on its own
 		// listener) handle it rather than short-circuiting the chain. See #1620.
 		return nil, ErrNoCredential
 	}

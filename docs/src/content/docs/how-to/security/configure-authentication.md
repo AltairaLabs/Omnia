@@ -50,27 +50,30 @@ spec:
 The dashboard proxy mints a short-lived RS256 token per request and
 attaches it to the upstream WebSocket. External callers receive 401.
 
-### 2. Per-caller API keys (managed in the dashboard)
+### 2. Per-caller client keys (managed in the dashboard)
 
 Opt the agent in:
 
 ```yaml
 spec:
   externalAuth:
-    apiKeys:
-      defaultRole: viewer    # viewer | editor | admin
+    clientKeys:
+      defaultRole: premium   # any string; surfaces as identity.claims.role
       trustEndUserHeader: false
 ```
 
 Then create keys from the dashboard's **Credentials** page — each key is
-stored as a Secret keyed by its sha256 hash, with a scope and expiry.
-Clients present `Authorization: Bearer <key>`; the facade looks up the
-hash and admits the caller with the role stamped on the Secret.
+stored as a Secret keyed by its sha256 hash, with an expiry and an
+arbitrary claim map. Clients present `Authorization: Bearer <key>`; the
+facade looks up the hash and admits the caller with the key's claims
+surfaced to ToolPolicy as `identity.claims.*` (for example
+`identity.claims.tier == "premium"`), un-spoofable because they are bound
+to the key at creation rather than sent by the caller.
 
 No CRD edit is required when you add or revoke keys.
 
 For the simplest case of a single shared credential for all callers,
-create one API key and distribute it — that's the direct replacement
+create one client key and distribute it — that's the direct replacement
 for what used to be a dedicated shared-token mechanism.
 
 ### 3. OIDC (customer IdP — no Istio required)
@@ -158,7 +161,7 @@ spec:
     - type: websocket
       managementPlane: true   # dashboard debug view still works
   externalAuth:
-    apiKeys:    { defaultRole: viewer }
+    clientKeys:    { defaultRole: viewer }
     oidc:       { issuer: "https://auth.example.com", audience: "my-agent" }
 ```
 
@@ -238,6 +241,6 @@ missing:
 Older releases supported a shared bearer token, both as a per-facade
 `authentication.secretRef` on the A2A HTTP endpoint and later as
 `spec.externalAuth.sharedToken`. Both fields have been removed —
-create a single [API key](#2-per-caller-api-keys-managed-in-the-dashboard)
+create a single [client key](#2-per-caller-client-keys-managed-in-the-dashboard)
 and distribute it as the replacement; every facade in `spec.facades`
-(WebSocket, A2A, MCP, …) validates against `spec.externalAuth.apiKeys`.
+(WebSocket, A2A, MCP, …) validates against `spec.externalAuth.clientKeys`.

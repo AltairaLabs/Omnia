@@ -328,18 +328,20 @@ export interface AgentRuntimeSpec {
    * one validator is filled in. Applied to each facade's external auth
    * chain. */
   externalAuth?: {
-    /** apiKeys configures per-caller API keys for this agent. Each key is
-     * stored as a Kubernetes Secret in the agent's namespace with a
-     * sha256 hash of the raw value, scopes, and expiry. Created via the
+    /** clientKeys configures per-caller client keys for this agent. Each
+     * key is stored as a Kubernetes Secret in the agent's namespace with
+     * a sha256 hash of the raw value, claims, and expiry. Created via the
      * dashboard UI; never stored in the CR. The presence of this field
      * (even an empty struct) tells the facade to treat keys labelled for
      * this agent as valid. */
-    apiKeys?: {
-      /** defaultRole is applied to API keys that don't specify one. */
-      defaultRole?: "viewer" | "editor" | "admin";
+    clientKeys?: {
+      /** defaultRole is applied to client keys that don't specify their own
+       * claims. Roles are arbitrary claims, not a fixed set — any string is
+       * valid here. */
+      defaultRole?: string;
       /** trustEndUserHeader lets the caller forward the end-user identity
        * via the X-End-User-Id request header. Off by default — when off,
-       * Identity.EndUser is set equal to Identity.Subject (the API key's
+       * Identity.EndUser is set equal to Identity.Subject (the client key's
        * own identity), so per-user audit granularity is coarse.
        * 
        * Turn on only when the calling app is trusted to faithfully forward

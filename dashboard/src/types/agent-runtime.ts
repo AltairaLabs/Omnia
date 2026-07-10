@@ -244,9 +244,10 @@ export interface DuplexConfig {
 }
 
 // Spec
-/** apiKeys auth: per-caller API keys stored as Secrets. */
-export interface ApiKeysAuth {
-  defaultRole?: "viewer" | "editor" | "admin";
+/** clientKeys auth: per-caller client keys stored as Secrets, each carrying an
+ * arbitrary claim map surfaced to ToolPolicy as identity.claims.*. */
+export interface ClientKeysAuth {
+  defaultRole?: string;
   trustEndUserHeader?: boolean;
 }
 
@@ -267,7 +268,7 @@ export interface EdgeTrustAuth {
 /** externalAuth configures data-plane authentication for the agent facades.
  * The management plane is gated per-facade via facades[].managementPlane. */
 export interface ExternalAuth {
-  apiKeys?: ApiKeysAuth;
+  clientKeys?: ClientKeysAuth;
   oidc?: OidcAuth;
   edgeTrust?: EdgeTrustAuth;
 }

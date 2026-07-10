@@ -18,6 +18,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -47,7 +48,7 @@ func newTestScheme(t *testing.T) *runtime.Scheme {
 
 // TestBuildExternalChain_AgentRuntimeFoundBuildsValidators exercises the
 // "AgentRuntime found" branch of buildExternalChain end-to-end via
-// buildDataPlaneValidators (apiKeys/oidc unset, edgeTrust set — edgeTrust is
+// buildDataPlaneValidators (clientKeys/oidc unset, edgeTrust set — edgeTrust is
 // pure-Go so this needs no Secret fixture). No mgmt validator is present.
 func TestBuildExternalChain_AgentRuntimeFoundBuildsValidators(t *testing.T) {
 	t.Parallel()
@@ -79,6 +80,66 @@ func TestBuildExternalChain_AgentRuntimeFoundBuildsValidators(t *testing.T) {
 	}
 	if got, want := id.Origin, policy.OriginEdgeTrust; got != want {
 		t.Errorf("Origin = %q, want %q (edgeTrust should admit)", got, want)
+	}
+}
+
+// TestBuildExternalChain_ClientKeysBuildsValidator covers buildClientKeyValidator:
+// a spec with clientKeys (defaultRole + trustEndUserHeader set, to exercise both
+// option branches) builds a SecretBackedKeyStore-backed validator, and an unknown
+// bearer falls through it — proving the validator is wired into the chain.
+func TestBuildExternalChain_ClientKeysBuildsValidator(t *testing.T) {
+	t.Parallel()
+	scheme := newTestScheme(t)
+	ar := &omniav1alpha1.AgentRuntime{
+		ObjectMeta: metav1.ObjectMeta{Name: "agent", Namespace: "ns", UID: "agent-uid-1"},
+		Spec: omniav1alpha1.AgentRuntimeSpec{
+			ExternalAuth: &omniav1alpha1.AgentExternalAuth{
+				ClientKeys: &omniav1alpha1.ClientKeysAuth{
+					DefaultRole:        "viewer",
+					TrustEndUserHeader: true,
+				},
+			},
+		},
+	}
+	fc := fake.NewClientBuilder().WithScheme(scheme).WithObjects(ar).Build()
+
+	chain, err := buildExternalChain(context.Background(), fc, logr.Discard(), "agent", "ns")
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if got, want := len(chain), 1; got != want {
+		t.Fatalf("chain length = %d, want %d (clientKeys only)", got, want)
+	}
+
+	r := httptest.NewRequest(http.MethodGet, "/ws", nil)
+	r.Header.Set("Authorization", "Bearer not-a-known-key")
+	if _, err := chain.Run(context.Background(), r); !errors.Is(err, auth.ErrNoCredential) {
+		t.Fatalf("Run err = %v, want ErrNoCredential (unknown key falls through)", err)
+	}
+}
+
+// TestBuildExternalChain_ClientKeysStoreInitErrorPropagates covers the
+// error paths in buildClientKeyValidator and its caller: the scheme carries the
+// AgentRuntime kind (so the initial Get succeeds) but not core types, so the
+// client-key store's Secret List fails and the error must propagate out.
+func TestBuildExternalChain_ClientKeysStoreInitErrorPropagates(t *testing.T) {
+	t.Parallel()
+	scheme := runtime.NewScheme()
+	if err := omniav1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatalf("add omnia scheme: %v", err)
+	}
+	ar := &omniav1alpha1.AgentRuntime{
+		ObjectMeta: metav1.ObjectMeta{Name: "agent", Namespace: "ns", UID: "u1"},
+		Spec: omniav1alpha1.AgentRuntimeSpec{
+			ExternalAuth: &omniav1alpha1.AgentExternalAuth{
+				ClientKeys: &omniav1alpha1.ClientKeysAuth{},
+			},
+		},
+	}
+	fc := fake.NewClientBuilder().WithScheme(scheme).WithObjects(ar).Build()
+
+	if _, err := buildExternalChain(context.Background(), fc, logr.Discard(), "agent", "ns"); err == nil {
+		t.Fatal("expected error when the client-key store's Secret List fails")
 	}
 }
 

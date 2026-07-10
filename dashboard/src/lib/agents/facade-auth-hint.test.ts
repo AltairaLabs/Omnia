@@ -12,11 +12,11 @@ describe("facadeAuthHint", () => {
     expect(facadeAuthHint(auth)).toEqual({ label: "Management-plane only" });
   });
 
-  it("returns API key (Bearer) for apiKeys", () => {
+  it("returns Client key (Bearer) for clientKeys", () => {
     const auth: ExternalAuth = {
-      apiKeys: { defaultRole: "viewer" },
+      clientKeys: { defaultRole: "viewer" },
     };
-    expect(facadeAuthHint(auth)).toEqual({ label: "API key (Bearer)" });
+    expect(facadeAuthHint(auth)).toEqual({ label: "Client key (Bearer)" });
   });
 
   it("returns OIDC + issuer for oidc", () => {
@@ -36,12 +36,12 @@ describe("facadeAuthHint", () => {
     expect(facadeAuthHint(auth)).toEqual({ label: "Edge-trusted headers" });
   });
 
-  it("apiKeys takes precedence over oidc", () => {
+  it("clientKeys takes precedence over oidc", () => {
     const auth: ExternalAuth = {
-      apiKeys: {},
+      clientKeys: {},
       oidc: { issuer: "https://auth.example.com", audience: "x" },
     };
     const result = facadeAuthHint(auth);
-    expect(result.label).toBe("API key (Bearer)");
+    expect(result.label).toBe("Client key (Bearer)");
   });
 });

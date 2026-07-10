@@ -23,7 +23,7 @@ import (
 
 // AuthDiscoveryConfig parameterises the protected-resource metadata
 // endpoint. authorization_servers is intentionally absent — Omnia
-// accepts pre-issued tokens via APIKey / OIDC / EdgeTrust validators,
+// accepts pre-issued tokens via ClientKey / OIDC / EdgeTrust validators,
 // with no Omnia-side OAuth issuer to direct clients to.
 //
 // Customers running an OIDC issuer can later wire it via a CRD field;

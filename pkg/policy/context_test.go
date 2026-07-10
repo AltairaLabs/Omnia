@@ -38,7 +38,7 @@ func TestWithAndExtractPropagationFields(t *testing.T) {
 		Authorization: "Bearer token123",
 		Provider:      "claude",
 		Model:         "claude-sonnet-4-20250514",
-		Origin:        OriginAPIKey,
+		Origin:        OriginClientKey,
 		Workspace:     "acme",
 		Claims:        map[string]string{"team": "engineering", "region": "us-east"},
 	}
@@ -143,7 +143,7 @@ func TestIndividualGetters(t *testing.T) {
 	ctx = WithAuthorization(ctx, "Bearer abc")
 	ctx = WithProvider(ctx, "openai")
 	ctx = WithModel(ctx, "gpt-4o")
-	ctx = WithOrigin(ctx, OriginAPIKey)
+	ctx = WithOrigin(ctx, OriginClientKey)
 	ctx = WithWorkspace(ctx, "acme")
 	ctx = WithClaims(ctx, map[string]string{"key": "val"})
 
@@ -155,7 +155,7 @@ func TestIndividualGetters(t *testing.T) {
 	assert.Equal(t, "Bearer abc", Authorization(ctx))
 	assert.Equal(t, "openai", Provider(ctx))
 	assert.Equal(t, "gpt-4o", Model(ctx))
-	assert.Equal(t, OriginAPIKey, Origin(ctx))
+	assert.Equal(t, OriginClientKey, Origin(ctx))
 	assert.Equal(t, "acme", Workspace(ctx))
 	assert.Equal(t, map[string]string{"key": "val"}, Claims(ctx))
 }

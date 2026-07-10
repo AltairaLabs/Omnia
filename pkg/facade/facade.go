@@ -23,7 +23,7 @@ limitations under the License.
 // conformant facade must:
 //
 //   - Authenticate inbound requests with the platform's validator chain
-//     (sharedToken / apiKeys / oidc / edgeTrust) on its external listener,
+//     (sharedToken / clientKeys / oidc / edgeTrust) on its external listener,
 //     and — when it exposes a management-plane twin — accept only
 //     dashboard-minted JWTs on that internal listener.
 //   - Translate the admitted identity into the platform's propagation
@@ -48,7 +48,7 @@ limitations under the License.
 //
 // Minimal facade:
 //
-//	chain := facade.Chain{sharedToken, apiKeys} // from pkg/facade/auth
+//	chain := facade.Chain{sharedToken, clientKeys} // from pkg/facade/auth
 //	rec := facade.NewSessionRecorder("http://session-api:8080", log)
 //	scope := facade.IdentityScope{AgentName: "my-agent", Namespace: "ns", Workspace: "team"}
 //

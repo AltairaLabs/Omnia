@@ -232,7 +232,7 @@ func buildWebSocketServer(
 		serverOpts = append(serverOpts, facade.WithRouteStore(agent.NewRedisRouteStore(redis.NewClient(ropts))))
 	}
 
-	// Build the auth chain: data-plane validators (apiKeys/oidc/edgeTrust,
+	// Build the auth chain: data-plane validators (clientKeys/oidc/edgeTrust,
 	// from PRs 2c–2e) followed by the mgmt-plane validator. Loading
 	// failures (malformed PEM, missing Secret data key) are fatal —
 	// silent downgrade to no-auth would mask real operator misconfig.

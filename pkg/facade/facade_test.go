@@ -149,7 +149,7 @@ func TestPropagateIdentity_ScopeRolesDoNotClobberExplicitRoleClaim(t *testing.T)
 	// An explicit "role" claim on the admitting identity wins over the scope's
 	// coarse UserRoles fallback.
 	id := &facade.Identity{
-		Origin: policy.OriginAPIKey,
+		Origin: policy.OriginClientKey,
 		Claims: map[string]string{"role": "viewer"},
 	}
 	scope := facade.IdentityScope{AgentName: "agent-d", UserID: "user-4", UserRoles: "admin"}

@@ -31,7 +31,7 @@ func TestOriginConstants(t *testing.T) {
 	want := map[string]string{
 		OriginManagementPlane: "management-plane",
 		OriginSharedToken:     "shared-token",
-		OriginAPIKey:          "api-key",
+		OriginClientKey:       "client-key",
 		OriginOIDC:            "oidc",
 		OriginEdgeTrust:       "edge-trust",
 	}

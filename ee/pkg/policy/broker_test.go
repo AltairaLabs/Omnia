@@ -437,7 +437,7 @@ func TestBrokerHandler_IdentityWorkspaceGate(t *testing.T) {
 	t.Run("matching workspace allowed", func(t *testing.T) {
 		req := newDecisionRequest(t, DecisionRequest{
 			Headers:  headers,
-			Identity: &IdentityPayload{Origin: "api-key", Workspace: "acme"},
+			Identity: &IdentityPayload{Origin: "client-key", Workspace: "acme"},
 		})
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, req)
@@ -451,7 +451,7 @@ func TestBrokerHandler_IdentityWorkspaceGate(t *testing.T) {
 	t.Run("wrong workspace denied", func(t *testing.T) {
 		req := newDecisionRequest(t, DecisionRequest{
 			Headers:  headers,
-			Identity: &IdentityPayload{Origin: "api-key", Workspace: "other"},
+			Identity: &IdentityPayload{Origin: "client-key", Workspace: "other"},
 		})
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, req)

@@ -81,9 +81,9 @@ func TestEvaluateExternalAuthCondition_EmptyExternalAuth(t *testing.T) {
 func TestEvaluateExternalAuthCondition_DataPlaneConfigured(t *testing.T) {
 	t.Parallel()
 	cases := map[string]*omniav1alpha1.AgentExternalAuth{
-		"apiKeys":   {APIKeys: &omniav1alpha1.APIKeysAuth{}},
-		"oidc":      {OIDC: &omniav1alpha1.OIDCAuth{Issuer: "x", Audience: "y"}},
-		"edgeTrust": {EdgeTrust: &omniav1alpha1.EdgeTrustAuth{}},
+		"clientKeys": {ClientKeys: &omniav1alpha1.ClientKeysAuth{}},
+		"oidc":       {OIDC: &omniav1alpha1.OIDCAuth{Issuer: "x", Audience: "y"}},
+		"edgeTrust":  {EdgeTrust: &omniav1alpha1.EdgeTrustAuth{}},
 	}
 	for name, ext := range cases {
 		t.Run(name, func(t *testing.T) {

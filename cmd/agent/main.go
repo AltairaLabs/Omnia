@@ -201,7 +201,7 @@ func buildK8sClient() client.Client {
 
 // newFacadeScheme builds the scheme for the facade's k8s client. It MUST
 // register the client-go built-in types (core/v1 in particular) alongside the
-// omnia CRD types: the auth chain Lists *corev1.SecretList (api-key store) and
+// omnia CRD types: the auth chain Lists *corev1.SecretList (client-key store) and
 // Gets *corev1.Secret (oidc JWKS). Without core/v1 those calls
 // fail with "no kind is registered for the type v1.SecretList" and the facade
 // crash-loops whenever spec.externalAuth is set (#1571). Mirrors the operator's

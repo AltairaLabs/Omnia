@@ -203,19 +203,19 @@ describe("ConnectCard", () => {
   });
 
   describe("(d) auth hint rendering", () => {
-    it("renders API key (Bearer) hint when apiKeys is set", () => {
+    it("renders Client key (Bearer) hint when clientKeys is set", () => {
       const agent = makeAgent({
         spec: {
           promptPackRef: { name: "my-pack" },
           facades: [{ type: "websocket" }],
           externalAuth: {
-            apiKeys: { defaultRole: "viewer" },
+            clientKeys: { defaultRole: "viewer" },
           },
         },
         status: { facade: { endpoints: [validWssEndpoint] } },
       });
       render(<ConnectCard agent={agent} workspace="ws1" />);
-      expect(screen.getByText("API key (Bearer)")).toBeInTheDocument();
+      expect(screen.getByText("Client key (Bearer)")).toBeInTheDocument();
     });
 
     it("renders OIDC hint when oidc is set", () => {

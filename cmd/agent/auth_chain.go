@@ -30,7 +30,7 @@ import (
 )
 
 // buildExternalChain assembles only the data-plane (external) validators from
-// spec.externalAuth — apiKeys, oidc, edgeTrust — in order. It never
+// spec.externalAuth — clientKeys, oidc, edgeTrust — in order. It never
 // includes the mgmt-plane validator. May return an empty chain (no externalAuth
 // configured, or no k8s client); the caller decides what an empty external chain
 // means for its listener. This is the chain the external listeners run once the
@@ -97,7 +97,7 @@ func buildDataPlaneValidators(
 	}
 
 	var out []auth.Validator
-	if v, err := buildAPIKeyValidator(ctx, k8s, log, ar); err != nil {
+	if v, err := buildClientKeyValidator(ctx, k8s, log, ar); err != nil {
 		return nil, err
 	} else if v != nil {
 		out = append(out, v)
@@ -156,19 +156,19 @@ func buildOIDCValidator(
 	return v, nil
 }
 
-// buildAPIKeyValidator constructs the api-key validator when
-// spec.externalAuth.apiKeys is set. Returns nil when not configured.
+// buildClientKeyValidator constructs the client-key validator when
+// spec.externalAuth.clientKeys is set. Returns nil when not configured.
 // The KeyStore lifetime is tied to the validator's — it leaks for the
 // life of the process; that's fine because the facade only constructs
 // the chain once at startup.
-func buildAPIKeyValidator(
+func buildClientKeyValidator(
 	ctx context.Context,
 	k8s client.Client,
 	log logr.Logger,
 	ar *omniav1alpha1.AgentRuntime,
 ) (auth.Validator, error) {
-	ak := ar.Spec.ExternalAuth.APIKeys
-	if ak == nil {
+	ck := ar.Spec.ExternalAuth.ClientKeys
+	if ck == nil {
 		return nil, nil
 	}
 
@@ -178,20 +178,20 @@ func buildAPIKeyValidator(
 	store, err := NewSecretBackedKeyStore(ctx, k8s, ar.Namespace, ar.Name, log,
 		WithKeyStoreAgentUID(string(ar.UID)))
 	if err != nil {
-		return nil, fmt.Errorf("init api-key store: %w", err)
+		return nil, fmt.Errorf("init client-key store: %w", err)
 	}
 
-	opts := []auth.APIKeyOption{}
-	if ak.DefaultRole != "" {
-		opts = append(opts, auth.WithAPIKeyDefaultRole(ak.DefaultRole))
+	opts := []auth.ClientKeyOption{}
+	if ck.DefaultRole != "" {
+		opts = append(opts, auth.WithClientKeyDefaultRole(ck.DefaultRole))
 	}
-	if ak.TrustEndUserHeader {
-		opts = append(opts, auth.WithAPIKeyTrustEndUserHeader(true))
+	if ck.TrustEndUserHeader {
+		opts = append(opts, auth.WithClientKeyTrustEndUserHeader(true))
 	}
-	v := auth.NewAPIKeyValidator(store, opts...)
-	log.Info("api-key validator enabled",
-		"defaultRole", ak.DefaultRole,
-		"trustEndUserHeader", ak.TrustEndUserHeader)
+	v := auth.NewClientKeyValidator(store, opts...)
+	log.Info("client-key validator enabled",
+		"defaultRole", ck.DefaultRole,
+		"trustEndUserHeader", ck.TrustEndUserHeader)
 	return v, nil
 }
 

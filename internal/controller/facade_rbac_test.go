@@ -142,33 +142,33 @@ func reconcileRoleAndGetSecretVerbs(t *testing.T, ar *omniav1alpha1.AgentRuntime
 	return nil
 }
 
-// TestReconcileRole_SecretsGetOnlyWithoutAPIKeys: with no externalAuth.apiKeys,
+// TestReconcileRole_SecretsGetOnlyWithoutClientKeys: with no externalAuth.clientKeys,
 // the facade only Gets a named Secret (oidc) — no list/watch.
-func TestReconcileRole_SecretsGetOnlyWithoutAPIKeys(t *testing.T) {
+func TestReconcileRole_SecretsGetOnlyWithoutClientKeys(t *testing.T) {
 	ar := &omniav1alpha1.AgentRuntime{
-		ObjectMeta: metav1.ObjectMeta{Name: "no-apikeys", Namespace: "test-ns", UID: "u1"},
+		ObjectMeta: metav1.ObjectMeta{Name: "no-clientkeys", Namespace: "test-ns", UID: "u1"},
 	}
 	verbs := reconcileRoleAndGetSecretVerbs(t, ar)
 	assert.ElementsMatch(t, []string{"get"}, verbs,
-		"without apiKeys auth the facade should only get a named Secret")
+		"without clientKeys auth the facade should only get a named Secret")
 }
 
-// TestReconcileRole_SecretsListWatchWithAPIKeys is the #1591 regression: when
-// externalAuth.apiKeys is set, the api-key store Lists Secrets by label, so the
+// TestReconcileRole_SecretsListWatchWithClientKeys is the #1591 regression: when
+// externalAuth.clientKeys is set, the client-key store Lists Secrets by label, so the
 // Role must grant list+watch (not just get) — else the facade crash-loops on
-// RBAC once api-key auth is enabled.
-func TestReconcileRole_SecretsListWatchWithAPIKeys(t *testing.T) {
+// RBAC once client-key auth is enabled.
+func TestReconcileRole_SecretsListWatchWithClientKeys(t *testing.T) {
 	ar := &omniav1alpha1.AgentRuntime{
-		ObjectMeta: metav1.ObjectMeta{Name: "with-apikeys", Namespace: "test-ns", UID: "u2"},
+		ObjectMeta: metav1.ObjectMeta{Name: "with-clientkeys", Namespace: "test-ns", UID: "u2"},
 		Spec: omniav1alpha1.AgentRuntimeSpec{
 			ExternalAuth: &omniav1alpha1.AgentExternalAuth{
-				APIKeys: &omniav1alpha1.APIKeysAuth{},
+				ClientKeys: &omniav1alpha1.ClientKeysAuth{},
 			},
 		},
 	}
 	verbs := reconcileRoleAndGetSecretVerbs(t, ar)
 	assert.ElementsMatch(t, []string{"get", "list", "watch"}, verbs,
-		"apiKeys auth needs list+watch on Secrets for the label-selected store")
+		"clientKeys auth needs list+watch on Secrets for the label-selected store")
 }
 
 func TestReconcileWorkspaceReaderBinding_Creates(t *testing.T) {

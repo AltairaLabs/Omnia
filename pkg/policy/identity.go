@@ -29,13 +29,13 @@ import (
 const (
 	OriginManagementPlane = "management-plane"
 	OriginSharedToken     = "shared-token"
-	OriginAPIKey          = "api-key"
+	OriginClientKey       = "client-key"
 	OriginOIDC            = "oidc"
 	OriginEdgeTrust       = "edge-trust"
 )
 
 // Role strings are conventional example values for identity.claims.role,
-// NOT an enforced enum. They exist for consistent defaulting (api-key/edge
+// NOT an enforced enum. They exist for consistent defaulting (client-key/edge
 // defaultRole) and as conventional claim values in tests.
 const (
 	RoleAdmin  = "admin"
@@ -45,7 +45,7 @@ const (
 
 // AuthenticatedIdentity is the normalised result produced by a facade
 // Validator. It is the single contract runtime / ToolPolicy see regardless
-// of which credential style the caller presented (shared token, API key,
+// of which credential style the caller presented (shared token, client key,
 // OIDC JWT, edge-injected headers, management-plane JWT).
 //
 // # PII WARNING

@@ -153,13 +153,13 @@ func (r *AgentRuntimeReconciler) reconcileServiceAccount(
 }
 
 // facadeSecretVerbs returns the Secret verbs the facade Role needs. oidc
-// reads a single named Secret (get), but externalAuth.apiKeys backs its
+// reads a single named Secret (get), but externalAuth.clientKeys backs its
 // validator with a label-selected Secret List at startup — which needs
-// list/watch, or the facade crash-loops on RBAC once api-key auth is set
+// list/watch, or the facade crash-loops on RBAC once client-key auth is set
 // (#1591). RBAC can't scope a list by label, so this widens to a namespace-wide
-// secrets read, granted only when api-key auth is actually configured.
+// secrets read, granted only when client-key auth is actually configured.
 func facadeSecretVerbs(agentRuntime *omniav1alpha1.AgentRuntime) []string {
-	if ea := agentRuntime.Spec.ExternalAuth; ea != nil && ea.APIKeys != nil {
+	if ea := agentRuntime.Spec.ExternalAuth; ea != nil && ea.ClientKeys != nil {
 		return []string{verbGet, verbList, "watch"}
 	}
 	return []string{verbGet}
