@@ -33,6 +33,11 @@ const (
 	controllerArenaJob            = "ArenaJob"
 	controllerArenaDevSession     = "ArenaDevSession"
 	controllerKeyRotation         = "KeyRotation"
+	// webhookAgentRuntimeCustomFacade is the license webhook gating
+	// spec.facades[].type == "custom" on AgentRuntimes (#1774). Webhook-only —
+	// it has no reconciler; core AgentRuntime reconciliation is not
+	// license-aware.
+	webhookAgentRuntimeCustomFacade = "AgentRuntimeCustomFacade"
 )
 
 // registrationOptions bundles every flag-derived input registerArenaWorkloads
@@ -291,6 +296,12 @@ func buildWebhooks(opts webhookOptions) []namedWebhook {
 				Name: controllerArenaTemplateSource,
 				Setup: func(mgr ctrl.Manager) error {
 					return arenawebhook.SetupArenaTemplateSourceWebhookWithManager(mgr, opts.LicenseValidator)
+				},
+			},
+			namedWebhook{
+				Name: webhookAgentRuntimeCustomFacade,
+				Setup: func(mgr ctrl.Manager) error {
+					return arenawebhook.SetupAgentRuntimeCustomFacadeWebhookWithManager(mgr, opts.LicenseValidator)
 				},
 			},
 		)

@@ -26,4 +26,35 @@ webhooks:
         operations: ["CREATE", "UPDATE"]
         resources: ["{{ $w.resource }}"]
   {{- end }}
+  # AgentRuntime custom-facade license gate (#1774). Unlike the Arena webhooks
+  # above, this webhook targets the CORE agentruntimes resource, so it MUST NOT
+  # intercept every AgentRuntime admission. Two mechanisms keep the blast radius
+  # to custom-facade objects only:
+  #   1. matchConditions (evaluated server-side by the API server, independent of
+  #      whether the arena-controller is up): only AgentRuntimes that actually
+  #      declare a `type: custom` facade reach the webhook. Every other
+  #      AgentRuntime skips it entirely and is admitted normally.
+  #   2. failurePolicy: Fail — for a matched (custom-facade) object, an
+  #      unreachable arena-controller DENIES admission. So WITHOUT the EE
+  #      operator running the custom-facade feature is simply UNAVAILABLE (fails
+  #      closed for that feature), while ordinary AgentRuntime admissions are
+  #      never blocked by an EE-operator outage.
+  - name: vagentruntimecustomfacade.kb.io
+    admissionReviewVersions: ["v1"]
+    sideEffects: None
+    failurePolicy: Fail
+    matchPolicy: Equivalent
+    matchConditions:
+      - name: has-custom-facade
+        expression: "has(object.spec.facades) && object.spec.facades.exists(f, f.type == 'custom')"
+    clientConfig:
+      service:
+        name: {{ include "omnia.fullname" $ }}-arena-controller-webhook
+        namespace: {{ $.Release.Namespace }}
+        path: /validate-ee-omnia-altairalabs-ai-v1alpha1-agentruntime
+    rules:
+      - apiGroups: ["omnia.altairalabs.ai"]
+        apiVersions: ["v1alpha1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["agentruntimes"]
 {{- end }}

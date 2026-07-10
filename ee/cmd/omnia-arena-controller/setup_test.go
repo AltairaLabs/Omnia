@@ -85,7 +85,10 @@ func TestBuildWebhooks_WithoutLicenseHooks(t *testing.T) {
 // silently skips its admission validation.
 func TestBuildWebhooks_WithLicenseHooks(t *testing.T) {
 	got := buildWebhooks(webhookOptions{IncludeLicenseHooks: true})
-	want := []string{controllerArenaSource, controllerArenaJob, controllerArenaTemplateSource}
+	want := []string{
+		controllerArenaSource, controllerArenaJob,
+		controllerArenaTemplateSource, webhookAgentRuntimeCustomFacade,
+	}
 	assertWebhookNames(t, got, want)
 }
 
@@ -333,7 +336,10 @@ func TestSetupWebhooks_RegistersAllAgainstRealManager(t *testing.T) {
 	if err != nil {
 		t.Fatalf("setupWebhooks: %v (registered up to %v)", err, registered)
 	}
-	want := []string{controllerArenaSource, controllerArenaJob, controllerArenaTemplateSource}
+	want := []string{
+		controllerArenaSource, controllerArenaJob,
+		controllerArenaTemplateSource, webhookAgentRuntimeCustomFacade,
+	}
 	if len(registered) != len(want) {
 		t.Errorf("registered %d webhooks, want %d: %v", len(registered), len(want), registered)
 	}

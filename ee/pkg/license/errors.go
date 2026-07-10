@@ -100,6 +100,16 @@ func NewScenarioCountError(count, max int) *ValidationError {
 	}
 }
 
+// NewCustomFacadeError creates a validation error for the custom-facade
+// restriction (spec.facades[].type == "custom" without an Enterprise license).
+func NewCustomFacadeError() *ValidationError {
+	return &ValidationError{
+		Feature:    "custom_facade",
+		Message:    "Custom (bring-your-own-container) facades require an Enterprise license",
+		UpgradeURL: DefaultUpgradeURL,
+	}
+}
+
 // NewLicenseExpiredError creates a validation error for expired license.
 func NewLicenseExpiredError() *ValidationError {
 	return &ValidationError{
