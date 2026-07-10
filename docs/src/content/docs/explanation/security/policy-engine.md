@@ -84,7 +84,7 @@ sequenceDiagram
 
     Client->>Istio: WebSocket + JWT
     Istio->>Istio: Validate JWT, extract claims
-    Istio->>Facade: Forward + x-user-id, x-user-roles, x-user-email
+    Istio->>Facade: Forward + x-user-id, x-user-roles (→ identity.claims.role), x-user-email
     Facade->>Facade: Build PropagationFields from headers
     Facade->>Runtime: gRPC + X-Omnia-* metadata
     Runtime->>Broker: POST /v1/decision (headers + body + identity)
@@ -104,7 +104,6 @@ The following headers are propagated across service boundaries:
 | `x-omnia-session-id` | Facade | Current session identifier |
 | `x-omnia-request-id` | Facade | Per-request trace identifier |
 | `x-omnia-user-id` | Istio | Authenticated user identity |
-| `x-omnia-user-roles` | Istio | Comma-separated user roles |
 | `x-omnia-user-email` | Istio | User email address |
 | `x-omnia-provider` | Runtime | LLM provider type |
 | `x-omnia-model` | Runtime | LLM model name |
@@ -113,7 +112,7 @@ The following headers are propagated across service boundaries:
 | `x-omnia-claim-*` | Facade | Mapped JWT claims (e.g., `x-omnia-claim-team`) |
 | `x-omnia-param-*` | Runtime | Promoted scalar tool parameters |
 
-In addition to these flattened headers, the runtime sends the caller's identity to the broker as a **structured JSON object** (`origin`, `subject`, `endUser`, `workspace`, `agent`, `role`, `claims`) on every decision request, so `identity.*` CEL expressions see the full identity rather than only the scalar claims that get promoted to headers.
+In addition to these flattened headers, the runtime sends the caller's identity to the broker as a **structured JSON object** (`origin`, `subject`, `endUser`, `workspace`, `agent`, `claims`) on every decision request, so `identity.*` CEL expressions see the full identity rather than only the scalar claims that get promoted to headers. Roles are not a separate identity field — they arrive as an ordinary entry in `claims` (`identity.claims.role`), sourced from the edge's role header, the IdP's own role claim, or the API key's stamped role, depending on which validator admitted the request.
 
 ### JWT claim extraction
 

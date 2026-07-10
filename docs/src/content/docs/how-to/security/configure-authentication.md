@@ -106,9 +106,13 @@ spec:
       audience: "my-agent"
       claimMapping:                 # optional; shown with defaults
         subject: sub
-        role: omnia.role
         endUser: sub
 ```
+
+`claimMapping` only overrides `subject`/`endUser` — there's no `role`
+field. The IdP's role/group claims (e.g. `omnia.role`) pass through
+unmapped and land in ToolPolicy as `identity.claims.<name>`, keyed by
+whatever claim name the IdP actually uses.
 
 The facade terminates and verifies the JWT in-process — no service mesh
 is needed. A per-agent `agent-<name>-oidc-jwks` Secret appears in the
@@ -143,12 +147,17 @@ spec:
     edgeTrust:
       headerMapping:              # defaults match the chart's Istio layout
         subject: x-user-id
-        role: x-user-roles
         endUser: x-user-id
         email: x-user-email
       claimsFromHeaders:
         x-user-groups: groups     # exposed to ToolPolicy as identity.claims.groups
 ```
+
+The inbound role header (default `x-user-roles`, matching the chart's
+Istio `outputClaimToHeaders` layout) is always read into
+`identity.claims.role` — it isn't configurable via `headerMapping`. To
+surface an edge role header under a different claim name, or additional
+role-like headers, list them in `claimsFromHeaders` instead.
 
 :::danger[Security requirement]
 The edge **must** strip any inbound headers listed in `headerMapping` or
