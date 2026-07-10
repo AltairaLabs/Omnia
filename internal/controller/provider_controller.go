@@ -48,6 +48,7 @@ const (
 	ProviderConditionTypeCredentialValid      = "CredentialValid"
 	ProviderConditionTypeAuthConfigured       = "AuthConfigured"
 	ProviderConditionTypeEndpointReachable    = "EndpointReachable"
+	ProviderConditionTypeModelValid           = "ModelValid"
 	// secretKeyAPIKey is the common secret key name for API keys.
 	secretKeyAPIKey = "api-key"
 	// Error message formats (go:S1192 — extracted to avoid duplication).
@@ -67,6 +68,7 @@ const healthCheckRequeueInterval = 30 * time.Second
 const (
 	EventReasonCredentialInvalid   = "CredentialInvalid"
 	EventReasonMultipleCredentials = "MultipleCredentials"
+	EventReasonModelInvalid        = "ModelInvalid"
 )
 
 // envVarNameRegex validates environment variable names.
@@ -165,7 +167,12 @@ func (r *ProviderReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	// otherwise the first chat surfaces a raw INVALID_API_KEY mid-stream.
 	// Unknown leaves phase=Ready: a transient probe failure shouldn't
 	// fail closed.
-	provider.Status.Phase = derivePhaseFromCredentialConditions(provider)
+	// A provider with valid credentials but no model is not usable: Omnia
+	// applies no default, so an empty model reaches the vendor API and 400s at
+	// the first request. Record ModelValid so phase reflects it (#1819).
+	r.setModelValidCondition(provider)
+
+	provider.Status.Phase = derivePhaseFromConditions(provider)
 	provider.Status.ObservedGeneration = provider.Generation
 
 	if err := r.Status().Update(ctx, provider); err != nil {
@@ -377,17 +384,23 @@ func (r *ProviderReconciler) runCredentialValidation(ctx context.Context, provid
 	}
 }
 
-// derivePhaseFromCredentialConditions returns Error when the credential is
-// known-bad (CredentialValid=False from a probe rejection, or
-// CredentialConfigured=False from a placeholder / config defect).
+// derivePhaseFromConditions returns Error when a terminal condition is
+// definitively negative: the credential is known-bad (CredentialValid=False
+// from a probe rejection, or CredentialConfigured=False from a placeholder /
+// config defect), or the model is missing (ModelValid=False). "Ready" must
+// mean usable — a valid credential AND a real model (#1819).
 // Unknown / missing conditions don't downgrade the phase — we only fail
 // closed on a definitive negative signal.
-func derivePhaseFromCredentialConditions(provider *omniav1alpha1.Provider) omniav1alpha1.ProviderPhase {
-	if cond := meta.FindStatusCondition(provider.Status.Conditions, ProviderConditionTypeCredentialValid); cond != nil && cond.Status == metav1.ConditionFalse {
-		return omniav1alpha1.ProviderPhaseError
+func derivePhaseFromConditions(provider *omniav1alpha1.Provider) omniav1alpha1.ProviderPhase {
+	falseConditions := []string{
+		ProviderConditionTypeCredentialValid,
+		ProviderConditionTypeCredentialConfigured,
+		ProviderConditionTypeModelValid,
 	}
-	if cond := meta.FindStatusCondition(provider.Status.Conditions, ProviderConditionTypeCredentialConfigured); cond != nil && cond.Status == metav1.ConditionFalse {
-		return omniav1alpha1.ProviderPhaseError
+	for _, condType := range falseConditions {
+		if cond := meta.FindStatusCondition(provider.Status.Conditions, condType); cond != nil && cond.Status == metav1.ConditionFalse {
+			return omniav1alpha1.ProviderPhaseError
+		}
 	}
 	return omniav1alpha1.ProviderPhaseReady
 }
@@ -578,6 +591,64 @@ func providerRequiresCredentials(provider *omniav1alpha1.Provider) bool {
 	default:
 		return true
 	}
+}
+
+// providerRequiresModel reports whether the provider type needs a non-empty
+// spec.model to serve requests. Every real vendor does — Omnia applies no
+// default and the model flows straight through to the vendor API. Only mock
+// (which replies from fixtures) is exempt.
+func providerRequiresModel(provider *omniav1alpha1.Provider) bool {
+	return provider.Spec.Type != omniav1alpha1.ProviderTypeMock
+}
+
+// suggestedModelHints maps a provider type to short examples of valid model
+// IDs, surfaced in the ModelValid=False message so operators know what to set.
+// Advisory only — NOT an allowlist: any non-empty model is accepted. Kept
+// deliberately short (these go stale as vendors ship models; they are hints,
+// not law).
+var suggestedModelHints = map[omniav1alpha1.ProviderType]string{
+	omniav1alpha1.ProviderTypeClaude:      "claude-sonnet-4-20250514, claude-opus-4-20250514",
+	omniav1alpha1.ProviderTypeOpenAI:      "gpt-4o, gpt-4o-mini, text-embedding-3-small",
+	omniav1alpha1.ProviderTypeGemini:      "gemini-2.5-flash, gemini-2.5-pro",
+	omniav1alpha1.ProviderTypeOllama:      "llama3.1, qwen2.5",
+	omniav1alpha1.ProviderTypeVLLM:        "the model id your vLLM server serves",
+	omniav1alpha1.ProviderTypeVoyageAI:    "voyage-3, voyage-3-lite",
+	omniav1alpha1.ProviderTypeCartesia:    "sonic-2",
+	omniav1alpha1.ProviderTypeElevenLabs:  "eleven_turbo_v2_5",
+	omniav1alpha1.ProviderTypeImagen:      "imagen-3.0-generate-002",
+	omniav1alpha1.ProviderTypeHuggingFace: "a model repo id, e.g. meta-llama/Llama-3.1-8B-Instruct",
+}
+
+// modelSuggestion returns a human-readable hint of valid model IDs for the
+// provider type, or a generic fallback when the type has no curated hint.
+func modelSuggestion(providerType omniav1alpha1.ProviderType) string {
+	if hint, ok := suggestedModelHints[providerType]; ok {
+		return hint
+	}
+	return fmt.Sprintf("a valid %s model id", providerType)
+}
+
+// setModelValidCondition records ModelValid based on spec.model. A required-
+// but-empty model is a terminal not-ready signal (ModelValid=False → phase
+// Error via derivePhaseFromConditions). Types that don't need a model (mock)
+// report True with a "not required" reason so the condition is always present
+// and a previously-False condition clears once the model is set.
+func (r *ProviderReconciler) setModelValidCondition(provider *omniav1alpha1.Provider) {
+	if !providerRequiresModel(provider) {
+		SetCondition(&provider.Status.Conditions, provider.Generation, ProviderConditionTypeModelValid, metav1.ConditionTrue,
+			"ModelNotRequired", fmt.Sprintf("Provider type %q does not require a model", provider.Spec.Type))
+		return
+	}
+	if provider.Spec.Model == "" {
+		msg := fmt.Sprintf("spec.model is empty; provider type %q needs a model to serve requests (Omnia applies no default). Suggested: %s",
+			provider.Spec.Type, modelSuggestion(provider.Spec.Type))
+		SetCondition(&provider.Status.Conditions, provider.Generation, ProviderConditionTypeModelValid, metav1.ConditionFalse,
+			"ModelMissing", msg)
+		r.emitWarningEvent(provider, EventReasonModelInvalid, msg)
+		return
+	}
+	SetCondition(&provider.Status.Conditions, provider.Generation, ProviderConditionTypeModelValid, metav1.ConditionTrue,
+		"ModelSet", fmt.Sprintf("Model %q configured", provider.Spec.Model))
 }
 
 // providerRole returns the provider's declared role, defaulting to
