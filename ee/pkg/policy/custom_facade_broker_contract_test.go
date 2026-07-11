@@ -43,7 +43,7 @@ func customFacadePrincipal() *facade.Principal {
 func identityContractPolicy() *eeapi.ToolPolicy {
 	const expr = `identity.subject == "user-42" && ` +
 		`identity.endUser == "user-42" && ` +
-		`identity.role == "admin" && ` +
+		`has(identity.claims.role) && identity.claims.role == "admin" && ` +
 		`identity.origin == "shared-token" && ` +
 		`identity.workspace == "acme" && ` +
 		`has(identity.claims.tier) && identity.claims.tier == "gold" && ` +
@@ -134,5 +134,18 @@ func TestBroker_MissingClaimDoesNotMatch(t *testing.T) {
 	resp := decideForFields(t, p.PropagationFields("support-bot"))
 	if !resp.Allow {
 		t.Errorf("Allow = false; a missing claim must break the identity match (DeniedBy=%q)", resp.DeniedBy)
+	}
+}
+
+// TestBroker_MissingRoleDoesNotMatch proves the role dimension is genuinely
+// read (not fail-closed on a removed field): dropping the role — which the
+// facade folds into identity.claims.role — makes the all-dimensions rule stop
+// firing, so the broker allows.
+func TestBroker_MissingRoleDoesNotMatch(t *testing.T) {
+	p := customFacadePrincipal()
+	p.Roles = nil // no role folded → identity.claims.role absent
+	resp := decideForFields(t, p.PropagationFields("support-bot"))
+	if !resp.Allow {
+		t.Errorf("Allow = false; a missing role claim must break the identity match (DeniedBy=%q)", resp.DeniedBy)
 	}
 }

@@ -181,7 +181,6 @@ key **only when its value is non-empty**. gRPC metadata keys are lowercase.
 | `x-omnia-session-id` | Your conversation/session identifier |
 | `x-omnia-request-id` | Per-request trace identifier |
 | `x-omnia-user-id` | Authenticated (pseudonymised) caller identity |
-| `x-omnia-user-roles` | The caller's role — a **single** role string despite the plural name |
 | `x-omnia-user-email` | The caller's email, if known |
 | `x-omnia-origin` | A label naming your validator — surfaces as `identity.origin` |
 | `x-omnia-workspace` | Workspace the request targets — surfaces as `identity.workspace` |
@@ -203,8 +202,9 @@ never attach it to the runtime gRPC call.
 :::
 
 See [Facade ↔ runtime protocol](/reference/platform/facade-runtime-protocol/) for
-how each key surfaces into ToolPolicy CEL (`identity.subject`, `identity.role`,
-`identity.claims`, `identity.workspace`, `identity.origin`), and
+how each key surfaces into ToolPolicy CEL (`identity.subject`,
+`identity.claims` — including `identity.claims.role` if a `role` claim is
+mapped — `identity.workspace`, `identity.origin`), and
 [Configure tool policies](/how-to/security/configure-tool-policies/) for writing
 rules against them.
 

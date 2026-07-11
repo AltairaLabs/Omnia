@@ -396,7 +396,9 @@ func (c *listFailAfterFirst) List(ctx context.Context, list client.ObjectList, o
 
 func TestSecretBackedKeyStore_RefreshErrorKeepsSnapshot(t *testing.T) {
 	scheme := newTestScheme(t)
-	base := fake.NewClientBuilder().WithScheme(scheme).Build()
+	// Initial load succeeds and holds one key; later refreshes fail.
+	keySecret := newClientKeySecret("agent-a-clientkey-k1", "a", sha256Bytes(testRawKey), "viewer", "")
+	base := fake.NewClientBuilder().WithScheme(scheme).WithObjects(keySecret).Build()
 	fc := &listFailAfterFirst{Client: base}
 
 	store, err := NewSecretBackedKeyStore(context.Background(), fc, "ns", "a", logr.Discard(),
@@ -405,6 +407,10 @@ func TestSecretBackedKeyStore_RefreshErrorKeepsSnapshot(t *testing.T) {
 		t.Fatalf("init: %v", err)
 	}
 	defer store.Stop()
+
+	if _, ok := store.Lookup(auth.HashToken(testRawKey)); !ok {
+		t.Fatal("initial snapshot should contain the loaded key")
+	}
 
 	var gotErr error
 	for i := 0; i < 200 && gotErr == nil; i++ {
@@ -417,6 +423,10 @@ func TestSecretBackedKeyStore_RefreshErrorKeepsSnapshot(t *testing.T) {
 	}
 	if gotErr == nil {
 		t.Fatal("expected refreshError to be recorded after a failed refresh tick")
+	}
+	// The whole point: a failed refresh must KEEP the previous snapshot.
+	if _, ok := store.Lookup(auth.HashToken(testRawKey)); !ok {
+		t.Error("snapshot was cleared by a failed refresh; the previous key set must survive")
 	}
 }
 

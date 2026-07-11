@@ -84,9 +84,10 @@ func TestBuildExternalChain_AgentRuntimeFoundBuildsValidators(t *testing.T) {
 }
 
 // TestBuildExternalChain_ClientKeysBuildsValidator covers buildClientKeyValidator:
-// a spec with clientKeys (defaultRole + trustEndUserHeader set, to exercise both
-// option branches) builds a SecretBackedKeyStore-backed validator, and an unknown
-// bearer falls through it — proving the validator is wired into the chain.
+// a spec with clientKeys (defaultRole set) builds a SecretBackedKeyStore-backed
+// validator, an unknown bearer falls through it, AND a known key admits with the
+// configured defaultRole surfaced as identity.claims.role — proving the CRD's
+// defaultRole actually wires through to the validator, not just that a validator exists.
 func TestBuildExternalChain_ClientKeysBuildsValidator(t *testing.T) {
 	t.Parallel()
 	scheme := newTestScheme(t)
@@ -101,7 +102,14 @@ func TestBuildExternalChain_ClientKeysBuildsValidator(t *testing.T) {
 			},
 		},
 	}
-	fc := fake.NewClientBuilder().WithScheme(scheme).WithObjects(ar).Build()
+	// A known key with no scopes → the validator applies the configured defaultRole.
+	// Owned by the AgentRuntime so it passes the store's ownerRef gate.
+	const rawKey = "omk_wired_client_key"
+	keySecret := newClientKeySecret("agent-agent-clientkey-k1", "agent", sha256Bytes(rawKey), "", "")
+	keySecret.OwnerReferences = []metav1.OwnerReference{{
+		APIVersion: "omnia.altairalabs.ai/v1alpha1", Kind: "AgentRuntime", Name: "agent", UID: "agent-uid-1",
+	}}
+	fc := fake.NewClientBuilder().WithScheme(scheme).WithObjects(ar, keySecret).Build()
 
 	chain, err := buildExternalChain(context.Background(), fc, logr.Discard(), "agent", "ns")
 	if err != nil {
@@ -111,10 +119,25 @@ func TestBuildExternalChain_ClientKeysBuildsValidator(t *testing.T) {
 		t.Fatalf("chain length = %d, want %d (clientKeys only)", got, want)
 	}
 
+	// Unknown bearer falls through.
 	r := httptest.NewRequest(http.MethodGet, "/ws", nil)
 	r.Header.Set("Authorization", "Bearer not-a-known-key")
 	if _, err := chain.Run(context.Background(), r); !errors.Is(err, auth.ErrNoCredential) {
 		t.Fatalf("Run err = %v, want ErrNoCredential (unknown key falls through)", err)
+	}
+
+	// Known key admits, and the configured defaultRole surfaces as identity.claims.role.
+	r2 := httptest.NewRequest(http.MethodGet, "/ws", nil)
+	r2.Header.Set("Authorization", "Bearer "+rawKey)
+	id, err := chain.Run(context.Background(), r2)
+	if err != nil {
+		t.Fatalf("Run(known key) err = %v, want admit", err)
+	}
+	if got, want := id.Origin, policy.OriginClientKey; got != want {
+		t.Errorf("Origin = %q, want %q", got, want)
+	}
+	if got, want := id.Claims["role"], "viewer"; got != want {
+		t.Errorf("Claims[role] = %q, want %q (CRD defaultRole must wire through)", got, want)
 	}
 }
 

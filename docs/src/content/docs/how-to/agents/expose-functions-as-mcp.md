@@ -112,7 +112,7 @@ envelopes.
 
 ## Authentication
 
-MCP shares Omnia's existing four-validator auth chain (APIKey, OIDC,
+MCP shares Omnia's existing four-validator auth chain (ClientKey, OIDC,
 EdgeTrust, mgmt-plane). The same Bearer token that works
 for the HTTP function route works for `POST /mcp`. See
 [Configure Authentication](/how-to/security/configure-authentication/) for the

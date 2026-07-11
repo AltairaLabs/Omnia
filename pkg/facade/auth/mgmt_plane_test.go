@@ -191,6 +191,12 @@ func TestMgmtPlaneValidator_ValidToken(t *testing.T) {
 	if id.ExpiresAt.IsZero() {
 		t.Error("ExpiresAt should be populated from exp claim")
 	}
+	// mgmt-plane is role-less: it carries no "role" claim. ToolPolicy gates
+	// mgmt-plane traffic on identity.origin == "management-plane", not a role
+	// (#1775 removed the hardcoded admin role; per-user roles are future work).
+	if role, ok := id.Claims["role"]; ok {
+		t.Errorf("mgmt-plane identity must not carry a role claim, got %q", role)
+	}
 }
 
 func TestMgmtPlaneValidator_NoAuthorizationHeader(t *testing.T) {
