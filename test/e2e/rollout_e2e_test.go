@@ -217,12 +217,13 @@ metadata:
   name: %s
   namespace: %s
 spec:
+  packName: %s
   source:
     type: configmap
     configMapRef:
       name: %s-v1
   version: "1.0.0"
-`, promptPackName, rolloutNamespace, promptPackName))
+`, promptPackName, rolloutNamespace, promptPackName, promptPackName))
 
 			By("waiting for PromptPack to become Active")
 			Eventually(func(g Gomega) {
@@ -451,12 +452,13 @@ metadata:
   name: %s
   namespace: %s
 spec:
+  packName: %s
   source:
     type: configmap
     configMapRef:
       name: %s-v1
   version: "1.0.0"
-`, istioPromptPack, rolloutNamespace, istioPromptPack))
+`, istioPromptPack, rolloutNamespace, istioPromptPack, istioPromptPack))
 
 			Eventually(func(g Gomega) {
 				output, err := getRolloutJSONPath("promptpack", istioPromptPack, rolloutNamespace, "{.status.phase}")

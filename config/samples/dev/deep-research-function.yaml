@@ -6,6 +6,7 @@ metadata:
   name: deep-research
   namespace: dev-agents
 spec:
+  packName: deep-research
   # Source configuration - prompts stored in a ConfigMap
   source:
     type: configmap

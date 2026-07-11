@@ -242,6 +242,7 @@ jobs:
             name: e2e-demo-prompts
             namespace: omnia-demo
           spec:
+            packName: e2e-demo-prompts
             source:
               type: configmap
               configMapRef:

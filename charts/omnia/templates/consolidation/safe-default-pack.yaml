@@ -39,6 +39,7 @@ metadata:
     omnia.altairalabs.ai/pack-role: consolidation-safe-default
     omnia.altairalabs.ai/system-pack-version: "0.1.0"
 spec:
+  packName: safe-default-summarizer
   source:
     type: configmap
     configMapRef:

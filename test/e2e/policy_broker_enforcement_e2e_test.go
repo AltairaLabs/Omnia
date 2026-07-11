@@ -174,6 +174,7 @@ metadata:
   name: %[3]s
   namespace: %[2]s
 spec:
+  packName: %[3]s
   source:
     type: configmap
     configMapRef:

@@ -31,6 +31,7 @@ metadata:
   annotations:
     omnia.altairalabs.ai/pack-role: consolidation-demo-merge
 spec:
+  packName: demo-merge-entities
   source:
     type: configmap
     configMapRef:

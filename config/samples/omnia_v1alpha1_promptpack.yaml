@@ -6,6 +6,7 @@ metadata:
     app.kubernetes.io/managed-by: kustomize
   name: customer-support
 spec:
+  packName: customer-support
   # Source configuration - prompts stored in a ConfigMap
   source:
     type: configmap

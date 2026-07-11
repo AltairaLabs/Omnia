@@ -9,6 +9,7 @@ kind: PromptPack
 metadata:
   name: echo-pack
 spec:
+  packName: echo-pack
   source:
     type: configmap
     configMapRef:

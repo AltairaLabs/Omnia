@@ -6,6 +6,7 @@ metadata:
     app.kubernetes.io/managed-by: kustomize
   name: document-analysis
 spec:
+  packName: document-analysis
   # Prompts + composition stored in a ConfigMap (compiled pack.json).
   source:
     type: configmap

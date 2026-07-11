@@ -1831,6 +1831,11 @@ export const crdConstraints: Record<string, Record<string, FieldConstraint>> =
     }
   },
   "PromptPack": {
+    "spec.packName": {
+      "type": "string",
+      "minLength": 1,
+      "required": true
+    },
     "spec.skills[].include[]": {
       "type": "string"
     },
