@@ -156,6 +156,7 @@ metadata:
   name: customer-service
   namespace: agents
 spec:
+  packName: customer-service
   version: "2.0.0"
   source:
     type: configmap

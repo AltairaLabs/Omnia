@@ -119,6 +119,7 @@ metadata:
   name: test-prompts
   namespace: $NAMESPACE
 spec:
+  packName: test-prompts
   version: "1.0.0"
   source:
     type: configmap
@@ -191,6 +192,7 @@ metadata:
   name: test-prompts
   namespace: $NAMESPACE
 spec:
+  packName: test-prompts
   version: "1.0.0"
   source:
     type: configmap
