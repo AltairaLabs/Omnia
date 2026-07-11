@@ -99,7 +99,7 @@ func TestPromptPackCreation(t *testing.T) {
 			Namespace: testPromptPackNamespace,
 		},
 		Spec: PromptPackSpec{
-			Source: PromptPackSource{
+			Source: PromptPackContentSource{
 				Type: PromptPackSourceTypeConfigMap,
 				ConfigMapRef: &corev1.LocalObjectReference{
 					Name: testConfigMapName,
@@ -139,7 +139,7 @@ func TestPromptPackStatus(t *testing.T) {
 			Namespace: testPromptPackNamespace,
 		},
 		Spec: PromptPackSpec{
-			Source: PromptPackSource{
+			Source: PromptPackContentSource{
 				Type: PromptPackSourceTypeConfigMap,
 				ConfigMapRef: &corev1.LocalObjectReference{
 					Name: testConfigMapName,
@@ -193,7 +193,7 @@ func TestPromptPackDeepCopy(t *testing.T) {
 			Namespace: testPromptPackNamespace,
 		},
 		Spec: PromptPackSpec{
-			Source: PromptPackSource{
+			Source: PromptPackContentSource{
 				Type: PromptPackSourceTypeConfigMap,
 				ConfigMapRef: &corev1.LocalObjectReference{
 					Name: testConfigMapName,
@@ -255,7 +255,7 @@ func TestPromptPackListDeepCopy(t *testing.T) {
 					Namespace: testPromptPackNamespace,
 				},
 				Spec: PromptPackSpec{
-					Source: PromptPackSource{
+					Source: PromptPackContentSource{
 						Type: PromptPackSourceTypeConfigMap,
 					},
 					Version: testPromptPackVersion,
@@ -338,16 +338,16 @@ func TestPromptPackStatusPhases(t *testing.T) {
 
 func TestPromptPackSourceWithoutConfigMapRef(t *testing.T) {
 	// Test that source can be created without ConfigMapRef (for future source types)
-	source := PromptPackSource{
+	source := PromptPackContentSource{
 		Type: PromptPackSourceTypeConfigMap,
 	}
 
 	if source.Type != PromptPackSourceTypeConfigMap {
-		t.Errorf("PromptPackSource.Type = %v, want %v", source.Type, PromptPackSourceTypeConfigMap)
+		t.Errorf("PromptPackContentSource.Type = %v, want %v", source.Type, PromptPackSourceTypeConfigMap)
 	}
 
 	if source.ConfigMapRef != nil {
-		t.Error("PromptPackSource.ConfigMapRef should be nil when not set")
+		t.Error("PromptPackContentSource.ConfigMapRef should be nil when not set")
 	}
 }
 

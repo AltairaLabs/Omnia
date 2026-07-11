@@ -55,6 +55,12 @@ spec:
           spec:
             description: spec defines the desired state of PromptPack
             properties:
+              packName:
+                description: |-
+                  packName is the logical pack identity. Versions of the same pack share a
+                  packName; each version is a distinct, immutable object.
+                minLength: 1
+                type: string
               skills:
                 description: |-
                   skills selects content from SkillSources for the agents using this
@@ -145,9 +151,14 @@ spec:
                 pattern: ^v?(\d+)\.(\d+)\.(\d+)(-[a-zA-Z0-9]+(\.[a-zA-Z0-9]+)*)?(\+[a-zA-Z0-9]+(\.[a-zA-Z0-9]+)*)?$
                 type: string
             required:
+            - packName
             - source
             - version
             type: object
+            x-kubernetes-validations:
+            - message: a published PromptPack version is immutable; publish a new
+                version instead
+              rule: self == oldSelf
           status:
             description: status defines the observed state of PromptPack
             properties:

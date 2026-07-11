@@ -192,8 +192,9 @@ var _ = Describe("AgentRuntime Controller", func() {
 					Namespace: promptPackKey.Namespace,
 				},
 				Spec: omniav1alpha1.PromptPackSpec{
-					Version: "1.0.0",
-					Source: omniav1alpha1.PromptPackSource{
+					Version:  "1.0.0",
+					PackName: "test-pack",
+					Source: omniav1alpha1.PromptPackContentSource{
 						Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
 					},
 				},
@@ -300,8 +301,9 @@ var _ = Describe("AgentRuntime Controller", func() {
 					Namespace: promptPackKey.Namespace,
 				},
 				Spec: omniav1alpha1.PromptPackSpec{
-					Version: "1.0.0",
-					Source: omniav1alpha1.PromptPackSource{
+					Version:  "1.0.0",
+					PackName: "test-pack",
+					Source: omniav1alpha1.PromptPackContentSource{
 						Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
 					},
 				},
@@ -363,8 +365,9 @@ var _ = Describe("AgentRuntime Controller", func() {
 					Namespace: promptPackKey.Namespace,
 				},
 				Spec: omniav1alpha1.PromptPackSpec{
-					Version: "1.0.0",
-					Source: omniav1alpha1.PromptPackSource{
+					Version:  "1.0.0",
+					PackName: "test-pack",
+					Source: omniav1alpha1.PromptPackContentSource{
 						Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
 					},
 				},
@@ -425,8 +428,9 @@ var _ = Describe("AgentRuntime Controller", func() {
 					Namespace: promptPackKey.Namespace,
 				},
 				Spec: omniav1alpha1.PromptPackSpec{
-					Version: "1.0.0",
-					Source: omniav1alpha1.PromptPackSource{
+					Version:  "1.0.0",
+					PackName: "test-pack",
+					Source: omniav1alpha1.PromptPackContentSource{
 						Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
 					},
 				},
@@ -482,8 +486,9 @@ var _ = Describe("AgentRuntime Controller", func() {
 					Namespace: promptPackKey.Namespace,
 				},
 				Spec: omniav1alpha1.PromptPackSpec{
-					Version: "1.0.0",
-					Source: omniav1alpha1.PromptPackSource{
+					Version:  "1.0.0",
+					PackName: "test-pack",
+					Source: omniav1alpha1.PromptPackContentSource{
 						Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
 					},
 				},
@@ -534,8 +539,9 @@ var _ = Describe("AgentRuntime Controller", func() {
 					Namespace: promptPackKey.Namespace,
 				},
 				Spec: omniav1alpha1.PromptPackSpec{
-					Version: "2.1.0",
-					Source: omniav1alpha1.PromptPackSource{
+					Version:  "2.1.0",
+					PackName: "test-pack",
+					Source: omniav1alpha1.PromptPackContentSource{
 						Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
 					},
 				},
@@ -628,8 +634,9 @@ var _ = Describe("AgentRuntime Controller", func() {
 					Namespace: promptPackKey.Namespace,
 				},
 				Spec: omniav1alpha1.PromptPackSpec{
-					Version: "1.0.0",
-					Source: omniav1alpha1.PromptPackSource{
+					Version:  "1.0.0",
+					PackName: "test-pack",
+					Source: omniav1alpha1.PromptPackContentSource{
 						Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
 					},
 				},
@@ -699,8 +706,9 @@ var _ = Describe("AgentRuntime Controller", func() {
 					Namespace: promptPackKey.Namespace,
 				},
 				Spec: omniav1alpha1.PromptPackSpec{
-					Version: "1.0.0",
-					Source: omniav1alpha1.PromptPackSource{
+					Version:  "1.0.0",
+					PackName: "test-pack",
+					Source: omniav1alpha1.PromptPackContentSource{
 						Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
 					},
 				},
@@ -771,8 +779,9 @@ var _ = Describe("AgentRuntime Controller", func() {
 					Namespace: promptPackKey.Namespace,
 				},
 				Spec: omniav1alpha1.PromptPackSpec{
-					Version: "1.0.0",
-					Source: omniav1alpha1.PromptPackSource{
+					Version:  "1.0.0",
+					PackName: "test-pack",
+					Source: omniav1alpha1.PromptPackContentSource{
 						Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
 					},
 				},
@@ -852,8 +861,9 @@ var _ = Describe("AgentRuntime Controller", func() {
 					Namespace: promptPackKey.Namespace,
 				},
 				Spec: omniav1alpha1.PromptPackSpec{
-					Version: "1.0.0",
-					Source: omniav1alpha1.PromptPackSource{
+					Version:  "1.0.0",
+					PackName: "test-pack",
+					Source: omniav1alpha1.PromptPackContentSource{
 						Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
 					},
 				},
@@ -921,8 +931,9 @@ var _ = Describe("AgentRuntime Controller", func() {
 					Namespace: promptPackKey.Namespace,
 				},
 				Spec: omniav1alpha1.PromptPackSpec{
-					Version: "1.0.0",
-					Source: omniav1alpha1.PromptPackSource{
+					Version:  "1.0.0",
+					PackName: "test-pack",
+					Source: omniav1alpha1.PromptPackContentSource{
 						Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
 					},
 				},
@@ -1000,8 +1011,9 @@ var _ = Describe("AgentRuntime Controller", func() {
 					Namespace: promptPackKey.Namespace,
 				},
 				Spec: omniav1alpha1.PromptPackSpec{
-					Version: "1.0.0",
-					Source: omniav1alpha1.PromptPackSource{
+					Version:  "1.0.0",
+					PackName: "test-pack",
+					Source: omniav1alpha1.PromptPackContentSource{
 						Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
 					},
 				},
@@ -1075,8 +1087,9 @@ var _ = Describe("AgentRuntime Controller", func() {
 					Namespace: promptPackKey.Namespace,
 				},
 				Spec: omniav1alpha1.PromptPackSpec{
-					Version: "1.0.0",
-					Source: omniav1alpha1.PromptPackSource{
+					Version:  "1.0.0",
+					PackName: "test-pack",
+					Source: omniav1alpha1.PromptPackContentSource{
 						Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
 					},
 				},
@@ -1136,8 +1149,9 @@ var _ = Describe("AgentRuntime Controller", func() {
 					Namespace: promptPackKey.Namespace,
 				},
 				Spec: omniav1alpha1.PromptPackSpec{
-					Version: "1.0.0",
-					Source: omniav1alpha1.PromptPackSource{
+					Version:  "1.0.0",
+					PackName: "test-pack",
+					Source: omniav1alpha1.PromptPackContentSource{
 						Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
 					},
 				},
@@ -1246,8 +1260,9 @@ var _ = Describe("AgentRuntime Controller", func() {
 					Namespace: promptPackKey.Namespace,
 				},
 				Spec: omniav1alpha1.PromptPackSpec{
-					Version: "1.0.0",
-					Source: omniav1alpha1.PromptPackSource{
+					Version:  "1.0.0",
+					PackName: "test-pack",
+					Source: omniav1alpha1.PromptPackContentSource{
 						Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
 					},
 				},
@@ -1299,8 +1314,9 @@ var _ = Describe("AgentRuntime Controller", func() {
 					Namespace: promptPackKey.Namespace,
 				},
 				Spec: omniav1alpha1.PromptPackSpec{
-					Version: "1.0.0",
-					Source: omniav1alpha1.PromptPackSource{
+					Version:  "1.0.0",
+					PackName: "test-pack",
+					Source: omniav1alpha1.PromptPackContentSource{
 						Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
 					},
 				},
@@ -1366,8 +1382,9 @@ var _ = Describe("AgentRuntime Controller", func() {
 					Namespace: promptPackKey.Namespace,
 				},
 				Spec: omniav1alpha1.PromptPackSpec{
-					Version: "1.0.0",
-					Source: omniav1alpha1.PromptPackSource{
+					Version:  "1.0.0",
+					PackName: "test-pack",
+					Source: omniav1alpha1.PromptPackContentSource{
 						Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
 						ConfigMapRef: &corev1.LocalObjectReference{
 							Name: "prompts-config",
@@ -1445,8 +1462,9 @@ var _ = Describe("AgentRuntime Controller", func() {
 					Namespace: promptPackKey.Namespace,
 				},
 				Spec: omniav1alpha1.PromptPackSpec{
-					Version: "1.0.0",
-					Source: omniav1alpha1.PromptPackSource{
+					Version:  "1.0.0",
+					PackName: "test-pack",
+					Source: omniav1alpha1.PromptPackContentSource{
 						Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
 					},
 				},
@@ -1500,8 +1518,9 @@ var _ = Describe("AgentRuntime Controller", func() {
 					Namespace: promptPackKey.Namespace,
 				},
 				Spec: omniav1alpha1.PromptPackSpec{
-					Version: "1.0.0",
-					Source: omniav1alpha1.PromptPackSource{
+					Version:  "1.0.0",
+					PackName: "test-pack",
+					Source: omniav1alpha1.PromptPackContentSource{
 						Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
 					},
 				},
@@ -1578,8 +1597,9 @@ var _ = Describe("AgentRuntime Controller", func() {
 					Namespace: promptPackKey.Namespace,
 				},
 				Spec: omniav1alpha1.PromptPackSpec{
-					Version: "1.0.0",
-					Source: omniav1alpha1.PromptPackSource{
+					Version:  "1.0.0",
+					PackName: "test-pack",
+					Source: omniav1alpha1.PromptPackContentSource{
 						Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
 					},
 				},
@@ -1640,8 +1660,9 @@ var _ = Describe("AgentRuntime Controller", func() {
 					Namespace: promptPackKey.Namespace,
 				},
 				Spec: omniav1alpha1.PromptPackSpec{
-					Version: "1.0.0",
-					Source: omniav1alpha1.PromptPackSource{
+					Version:  "1.0.0",
+					PackName: "test-pack",
+					Source: omniav1alpha1.PromptPackContentSource{
 						Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
 					},
 				},
@@ -1710,8 +1731,9 @@ var _ = Describe("AgentRuntime Controller", func() {
 					Namespace: promptPackKey.Namespace,
 				},
 				Spec: omniav1alpha1.PromptPackSpec{
-					Version: "1.0.0",
-					Source: omniav1alpha1.PromptPackSource{
+					Version:  "1.0.0",
+					PackName: "test-pack",
+					Source: omniav1alpha1.PromptPackContentSource{
 						Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
 					},
 				},
@@ -1758,8 +1780,9 @@ var _ = Describe("AgentRuntime Controller", func() {
 					Namespace: promptPackKey.Namespace,
 				},
 				Spec: omniav1alpha1.PromptPackSpec{
-					Version: "1.0.0",
-					Source: omniav1alpha1.PromptPackSource{
+					Version:  "1.0.0",
+					PackName: "test-pack",
+					Source: omniav1alpha1.PromptPackContentSource{
 						Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
 					},
 				},
@@ -1834,8 +1857,9 @@ var _ = Describe("AgentRuntime Controller", func() {
 					Namespace: promptPackKey.Namespace,
 				},
 				Spec: omniav1alpha1.PromptPackSpec{
-					Version: "1.0.0",
-					Source: omniav1alpha1.PromptPackSource{
+					Version:  "1.0.0",
+					PackName: "test-pack",
+					Source: omniav1alpha1.PromptPackContentSource{
 						Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
 					},
 				},
@@ -1898,8 +1922,9 @@ var _ = Describe("AgentRuntime Controller", func() {
 					Namespace: promptPackKey.Namespace,
 				},
 				Spec: omniav1alpha1.PromptPackSpec{
-					Version: "1.0.0",
-					Source: omniav1alpha1.PromptPackSource{
+					Version:  "1.0.0",
+					PackName: "test-pack",
+					Source: omniav1alpha1.PromptPackContentSource{
 						Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
 					},
 				},
@@ -1967,8 +1992,9 @@ var _ = Describe("AgentRuntime Controller", func() {
 					Namespace: promptPackKey.Namespace,
 				},
 				Spec: omniav1alpha1.PromptPackSpec{
-					Version: "1.0.0",
-					Source: omniav1alpha1.PromptPackSource{
+					Version:  "1.0.0",
+					PackName: "test-pack",
+					Source: omniav1alpha1.PromptPackContentSource{
 						Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
 					},
 				},
@@ -2032,8 +2058,9 @@ var _ = Describe("AgentRuntime Controller", func() {
 					Namespace: promptPackKey.Namespace,
 				},
 				Spec: omniav1alpha1.PromptPackSpec{
-					Version: "1.0.0",
-					Source: omniav1alpha1.PromptPackSource{
+					Version:  "1.0.0",
+					PackName: "test-pack",
+					Source: omniav1alpha1.PromptPackContentSource{
 						Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
 					},
 				},
@@ -2091,8 +2118,9 @@ var _ = Describe("AgentRuntime Controller", func() {
 					Namespace: promptPackKey.Namespace,
 				},
 				Spec: omniav1alpha1.PromptPackSpec{
-					Version: "1.0.0",
-					Source: omniav1alpha1.PromptPackSource{
+					Version:  "1.0.0",
+					PackName: "test-pack",
+					Source: omniav1alpha1.PromptPackContentSource{
 						Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
 					},
 				},
@@ -2170,8 +2198,9 @@ var _ = Describe("AgentRuntime Controller", func() {
 					Namespace: promptPackKey.Namespace,
 				},
 				Spec: omniav1alpha1.PromptPackSpec{
-					Version: "1.0.0",
-					Source: omniav1alpha1.PromptPackSource{
+					Version:  "1.0.0",
+					PackName: "test-pack",
+					Source: omniav1alpha1.PromptPackContentSource{
 						Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
 					},
 				},
@@ -2237,8 +2266,9 @@ var _ = Describe("AgentRuntime Controller", func() {
 					Namespace: promptPackKey.Namespace,
 				},
 				Spec: omniav1alpha1.PromptPackSpec{
-					Version: "1.0.0",
-					Source: omniav1alpha1.PromptPackSource{
+					Version:  "1.0.0",
+					PackName: "test-pack",
+					Source: omniav1alpha1.PromptPackContentSource{
 						Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
 					},
 				},
@@ -2293,8 +2323,9 @@ var _ = Describe("AgentRuntime Controller", func() {
 					Namespace: promptPackKey.Namespace,
 				},
 				Spec: omniav1alpha1.PromptPackSpec{
-					Version: "1.0.0",
-					Source: omniav1alpha1.PromptPackSource{
+					Version:  "1.0.0",
+					PackName: "test-pack",
+					Source: omniav1alpha1.PromptPackContentSource{
 						Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
 					},
 				},
@@ -2362,8 +2393,9 @@ var _ = Describe("AgentRuntime Controller", func() {
 					Namespace: promptPackKey.Namespace,
 				},
 				Spec: omniav1alpha1.PromptPackSpec{
-					Version: "1.0.0",
-					Source: omniav1alpha1.PromptPackSource{
+					Version:  "1.0.0",
+					PackName: "test-pack",
+					Source: omniav1alpha1.PromptPackContentSource{
 						Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
 						ConfigMapRef: &corev1.LocalObjectReference{
 							Name: "prompts-config",
@@ -4006,8 +4038,9 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 						Namespace: "watch-provider-test",
 					},
 					Spec: omniav1alpha1.PromptPackSpec{
-						Version: "1.0.0",
-						Source: omniav1alpha1.PromptPackSource{
+						Version:  "1.0.0",
+						PackName: "test-pack",
+						Source: omniav1alpha1.PromptPackContentSource{
 							Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
 						},
 					},
@@ -4110,8 +4143,9 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 						Namespace: "watch-pack-test",
 					},
 					Spec: omniav1alpha1.PromptPackSpec{
-						Version: "1.0.0",
-						Source: omniav1alpha1.PromptPackSource{
+						Version:  "1.0.0",
+						PackName: "test-pack",
+						Source: omniav1alpha1.PromptPackContentSource{
 							Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
 						},
 					},
@@ -4169,8 +4203,9 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 						Namespace: "watch-pack-empty-test",
 					},
 					Spec: omniav1alpha1.PromptPackSpec{
-						Version: "1.0.0",
-						Source: omniav1alpha1.PromptPackSource{
+						Version:  "1.0.0",
+						PackName: "test-pack",
+						Source: omniav1alpha1.PromptPackContentSource{
 							Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
 						},
 					},

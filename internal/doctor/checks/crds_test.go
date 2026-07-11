@@ -58,7 +58,7 @@ func TestCRD_PromptPacks_Exist(t *testing.T) {
 		&omniav1alpha1.PromptPack{
 			ObjectMeta: metav1.ObjectMeta{Name: "pp-1", Namespace: "default"},
 			Spec: omniav1alpha1.PromptPackSpec{
-				Source:  omniav1alpha1.PromptPackSource{Type: omniav1alpha1.PromptPackSourceTypeConfigMap},
+				Source:  omniav1alpha1.PromptPackContentSource{Type: omniav1alpha1.PromptPackSourceTypeConfigMap},
 				Version: "1.0.0",
 			},
 			Status: omniav1alpha1.PromptPackStatus{Phase: omniav1alpha1.PromptPackPhaseActive},
@@ -66,7 +66,7 @@ func TestCRD_PromptPacks_Exist(t *testing.T) {
 		&omniav1alpha1.PromptPack{
 			ObjectMeta: metav1.ObjectMeta{Name: "pp-2", Namespace: "default"},
 			Spec: omniav1alpha1.PromptPackSpec{
-				Source:  omniav1alpha1.PromptPackSource{Type: omniav1alpha1.PromptPackSourceTypeConfigMap},
+				Source:  omniav1alpha1.PromptPackContentSource{Type: omniav1alpha1.PromptPackSourceTypeConfigMap},
 				Version: "2.0.0",
 			},
 			Status: omniav1alpha1.PromptPackStatus{Phase: omniav1alpha1.PromptPackPhasePending},

@@ -87,8 +87,9 @@ var _ = Describe("Eval Worker Reconciliation", func() {
 					Namespace: promptPackKey.Namespace,
 				},
 				Spec: omniav1alpha1.PromptPackSpec{
-					Version: "1.0.0",
-					Source: omniav1alpha1.PromptPackSource{
+					Version:  "1.0.0",
+					PackName: "test-pack",
+					Source: omniav1alpha1.PromptPackContentSource{
 						Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
 					},
 				},
