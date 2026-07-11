@@ -291,6 +291,7 @@ export const mockPromptPacks: PromptPack[] = [
       uid: "pack-001",
     },
     spec: {
+      packName: "support-prompts",
       source: { type: "configmap", configMapRef: { name: "support-prompts-v1.2.0" } },
       version: "1.2.0",
     },
@@ -310,6 +311,7 @@ export const mockPromptPacks: PromptPack[] = [
       uid: "pack-002",
     },
     spec: {
+      packName: "code-prompts",
       source: { type: "configmap", configMapRef: { name: "code-prompts-v2.1.0" } },
       version: "2.1.0",
     },
@@ -329,6 +331,7 @@ export const mockPromptPacks: PromptPack[] = [
       uid: "pack-003",
     },
     spec: {
+      packName: "analyst-prompts",
       source: { type: "configmap", configMapRef: { name: "analyst-prompts-v1.0.0" } },
       version: "1.0.0",
     },
@@ -348,6 +351,7 @@ export const mockPromptPacks: PromptPack[] = [
       uid: "pack-004",
     },
     spec: {
+      packName: "sales-prompts",
       source: { type: "configmap", configMapRef: { name: "sales-prompts-v1.2.0" } },
       version: "1.2.0",
     },
@@ -369,6 +373,7 @@ export const mockPromptPacks: PromptPack[] = [
       uid: "pack-wf-001",
     },
     spec: {
+      packName: "support-workflow",
       source: { type: "configmap", configMapRef: { name: "support-workflow-v1.2.0" } },
       version: "1.2.0",
     },
@@ -385,6 +390,7 @@ export const mockPromptPacks: PromptPack[] = [
       uid: "pack-comp-001",
     },
     spec: {
+      packName: "code-composition",
       source: { type: "configmap", configMapRef: { name: "code-composition-v2.1.0" } },
       version: "2.1.0",
     },
@@ -401,6 +407,7 @@ export const mockPromptPacks: PromptPack[] = [
       uid: "pack-e2e-001",
     },
     spec: {
+      packName: "e2e-test-prompts",
       source: { type: "configmap", configMapRef: { name: "e2e-test-prompts-v1.0.0" } },
       version: "1.0.0",
     },

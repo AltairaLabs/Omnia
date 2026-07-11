@@ -19,6 +19,7 @@ vi.mock("@/contexts/workspace-context", () => ({
 }));
 
 const mockSpec: PromptPackSpec = {
+  packName: "my-pack",
   source: { type: "configmap", configMapRef: { name: "my-configmap" } },
   version: "1.0.0",
 };

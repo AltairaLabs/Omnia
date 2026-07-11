@@ -6,7 +6,7 @@ import { ObjectMeta, Condition, LocalObjectReference } from "./common";
 export type PromptPackPhase = "Pending" | "Active" | "Superseded" | "Failed";
 export type PromptPackSourceType = "configmap";
 
-export interface PromptPackSource {
+export interface PromptPackContentSource {
   type: PromptPackSourceType;
   configMapRef?: LocalObjectReference;
 }
@@ -21,7 +21,8 @@ export interface SkillRef {
 
 // Spec
 export interface PromptPackSpec {
-  source: PromptPackSource;
+  packName: string;
+  source: PromptPackContentSource;
   version: string;
   skills?: SkillRef[];
 }
