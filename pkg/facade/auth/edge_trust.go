@@ -48,7 +48,10 @@ const (
 // guessing. Other fields (role, endUser, email, extra claims) are
 // optional and contribute to the Identity when present.
 type EdgeTrustValidator struct {
-	subjectHeader  string
+	subjectHeader string
+	// roleHeader is fixed to DefaultEdgeRoleHeader — the role header is not
+	// operator-configurable (it surfaces as identity.claims.role). Custom
+	// header→claim routing goes through extraClaims / claimsFromHeaders.
 	roleHeader     string
 	endUserHeader  string
 	emailHeader    string
@@ -66,16 +69,6 @@ func WithEdgeTrustSubjectHeader(name string) EdgeTrustOption {
 	return func(v *EdgeTrustValidator) {
 		if name != "" {
 			v.subjectHeader = name
-		}
-	}
-}
-
-// WithEdgeTrustRoleHeader overrides the inbound header read into
-// identity.claims.role. Defaults to DefaultEdgeRoleHeader.
-func WithEdgeTrustRoleHeader(name string) EdgeTrustOption {
-	return func(v *EdgeTrustValidator) {
-		if name != "" {
-			v.roleHeader = name
 		}
 	}
 }

@@ -22,7 +22,7 @@ By default the chain contains:
 1. **management-plane** — admits dashboard-minted JWTs used by the "Try
    this agent" debug view.
 2. Any data-plane validator configured on the AgentRuntime under
-   `spec.externalAuth` (API keys, OIDC, edge-trust).
+   `spec.externalAuth` (client keys, OIDC, edge-trust).
 
 With **no** `spec.externalAuth` configured, the agent is reachable only
 from the dashboard — there is no unauthenticated external path. This is
@@ -209,7 +209,7 @@ Common causes:
 - **`reason=no validator admitted`** — no `spec.externalAuth` validator
   is configured, or the caller presented no credential.
 - **`reason=invalid credential`** — the credential format/signature is
-  wrong (expired JWT, unknown API key hash).
+  wrong (expired JWT, unknown client key hash).
 
 ### OIDC tokens are rejected
 

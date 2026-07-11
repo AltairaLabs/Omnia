@@ -621,6 +621,11 @@ func (s *Server) resolveUserContext(r *http.Request, authIdentity *policy.Authen
 	} else {
 		userEmail = r.Header.Get(policy.IstioHeaderUserEmail)
 	}
+	// Note: roles are deliberately NOT read from a gate-off Istio header here.
+	// Roles reach ToolPolicy only as validator-produced identity.claims.role;
+	// a raw x-user-roles header on the unauthenticated (authentication.enabled=false)
+	// path is caller-controlled and must not be trusted as an identity claim. A
+	// role-gated rule fails closed for such traffic, which is the intended behaviour.
 	userID := ResolveUserPseudonym(r, authIdentity)
 	s.log.V(1).Info("user identity extracted",
 		"hasUserID", userID != "",

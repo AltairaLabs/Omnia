@@ -114,7 +114,6 @@ non-empty**.
 | `x-omnia-session-id` | Facade | Current session identifier |
 | `x-omnia-request-id` | Facade | Per-request trace identifier |
 | `x-omnia-user-id` | Facade | Authenticated caller identity (pseudonymised end-user id) |
-| `x-omnia-user-roles` | Facade | The caller's role (see [scalar role, plural header](#scalar-role-plural-header)) |
 | `x-omnia-user-email` | Facade | The caller's email address |
 | `x-omnia-provider` | Runtime | LLM provider type |
 | `x-omnia-model` | Runtime | LLM model name |
@@ -176,15 +175,15 @@ lowercase prefix silently misses. This is the #1766 canonical-header rule; see
 [Configure Tool Policies](/how-to/security/configure-tool-policies/) for how CEL
 rules reference claims.
 
-### Scalar role, plural header
+### Role as a claim
 
-The header is named `x-omnia-user-roles` (plural) but carries a **single** role
-string. In this codebase's identity model, `AuthenticatedIdentity.Role` is a
-single value (`admin`, `editor`, or `viewer`), copied directly to
-`PropagationFields.UserRoles` and emitted unchanged. When the runtime
-reconstructs identity for the broker, `IdentityPayload.Role` is a faithful copy
-of `x-omnia-user-roles` — not a join or a split. The plural header name is
-retained for backward compatibility; treat the value as one role.
+Roles are not a structured field. There is no dedicated role header or
+identity field — a role rides like any other claim, via
+`x-omnia-claim-role`, if the admitting validator's claim map includes a
+`role` entry. On the runtime/broker side it surfaces as
+`identity.claims.role`, not as a separate `identity.role` field. See
+[claim propagation](#claim-propagation) above for how claim headers are
+named and canonicalized.
 
 ### `identity.workspace` semantics
 
@@ -221,7 +220,6 @@ sends it as the `identity` object on the decision request
 | `identity.workspace` | `x-omnia-workspace` | Token scope else agent's deployed workspace (added in #1769) |
 | `identity.subject` | `x-omnia-user-id` | The wire carries a single pseudonymised caller id |
 | `identity.endUser` | `x-omnia-user-id` | Collapses onto the same id — there is no separate propagated actor value |
-| `identity.role` | `x-omnia-user-roles` | Single role string |
 | `identity.agent` | `x-omnia-agent-name` | The agent this tool call runs under |
 | `identity.claims` | `x-omnia-claim-*` | The claim map, verbatim |
 

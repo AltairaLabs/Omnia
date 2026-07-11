@@ -29,11 +29,10 @@ import (
 //
 // Order matters because the data-plane validators each look at the
 // Authorization header in slightly different ways and a token meant for
-// one validator can syntactically resemble another (e.g., a JWT also
-// looks like an opaque bearer to sharedToken). The conventional order
+// one validator can syntactically resemble another. The conventional order
 // shipped by cmd/agent is:
 //
-//	sharedToken → clientKeys → oidc → edgeTrust → mgmtPlane
+//	clientKeys → oidc → edgeTrust → mgmtPlane
 //
 // — narrowest match first, broadest last. ErrInvalidCredential from any
 // validator short-circuits the chain (a credential of that style was

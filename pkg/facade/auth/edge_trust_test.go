@@ -119,13 +119,11 @@ func TestEdgeTrustValidator_CustomHeaderMapping(t *testing.T) {
 	t.Parallel()
 	v := auth.NewEdgeTrustValidator(
 		auth.WithEdgeTrustSubjectHeader("X-Auth-Subject"),
-		auth.WithEdgeTrustRoleHeader("X-Auth-Role"),
 		auth.WithEdgeTrustEndUserHeader("X-Auth-Subject"),
 		auth.WithEdgeTrustEmailHeader("X-Auth-Email"),
 	)
 	r := reqWithEdgeHeaders(map[string]string{
 		"X-Auth-Subject": "bob@example.com",
-		"X-Auth-Role":    policy.RoleAdmin,
 		"X-Auth-Email":   "bob@example.com",
 	})
 
@@ -254,7 +252,6 @@ func TestEdgeTrustValidator_EmptyOptionsIgnored(t *testing.T) {
 	t.Parallel()
 	v := auth.NewEdgeTrustValidator(
 		auth.WithEdgeTrustSubjectHeader(""),
-		auth.WithEdgeTrustRoleHeader(""),
 		auth.WithEdgeTrustEndUserHeader(""),
 		auth.WithEdgeTrustEmailHeader(""),
 		auth.WithEdgeTrustDefaultRole(""),
