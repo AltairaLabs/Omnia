@@ -1004,6 +1004,45 @@ var _ = Describe("PromptPack Controller", func() {
 			p.Spec.Source.ConfigMapRef.Name = "cm2"
 			Expect(k8sClient.Update(ctx, p)).ToNot(Succeed())
 		})
+
+		It("sets the promptpack label from spec.packName", func() {
+			configMap := &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{Name: "pp-label-cm", Namespace: immutabilityNamespace},
+				Data:       map[string]string{"pack.json": validPackJSON},
+			}
+			Expect(k8sClient.Create(ctx, configMap)).To(Succeed())
+			defer func() {
+				Expect(k8sClient.Delete(ctx, configMap)).To(Succeed())
+			}()
+
+			p := &omniav1alpha1.PromptPack{
+				ObjectMeta: metav1.ObjectMeta{Name: "pp-label", Namespace: immutabilityNamespace},
+				Spec: omniav1alpha1.PromptPackSpec{
+					PackName: "mypack",
+					Version:  "1.0.0",
+					Source: omniav1alpha1.PromptPackContentSource{
+						Type:         omniav1alpha1.PromptPackSourceTypeConfigMap,
+						ConfigMapRef: &corev1.LocalObjectReference{Name: "pp-label-cm"},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, p)).To(Succeed())
+			defer cleanup(p.Name)
+
+			reconciler := &PromptPackReconciler{
+				Client:          k8sClient,
+				Scheme:          k8sClient.Scheme(),
+				SchemaValidator: schema.NewSchemaValidatorWithOptions(logr.Discard(), nil, time.Hour),
+			}
+			_, err := reconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: types.NamespacedName{Name: p.Name, Namespace: immutabilityNamespace},
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			got := &omniav1alpha1.PromptPack{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: p.Name, Namespace: immutabilityNamespace}, got)).To(Succeed())
+			Expect(got.Labels).To(HaveKeyWithValue("omnia.altairalabs.ai/promptpack", "mypack"))
+		})
 	})
 })
 

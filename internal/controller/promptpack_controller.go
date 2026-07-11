@@ -45,6 +45,9 @@ const (
 	PromptPackConditionTypeAgentsNotified = "AgentsNotified"
 )
 
+// LabelPromptPackName indexes a PromptPack version-object by its logical pack name.
+const LabelPromptPackName = "omnia.altairalabs.ai/promptpack"
+
 // Event reasons for PromptPack
 const (
 	EventReasonSourceValidationFailed = "SourceValidationFailed"
@@ -92,6 +95,22 @@ func (r *PromptPackReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	// Initialize status if needed
 	if promptPack.Status.Phase == "" {
 		promptPack.Status.Phase = omniav1alpha1.PromptPackPhasePending
+	}
+
+	// Ensure the resolution index label matches spec.packName. Labels are
+	// metadata (not covered by the spec freeze), so this is safe to patch.
+	// The Update call refreshes promptPack's ResourceVersion in place, so
+	// reconciliation continues below using the same object rather than
+	// requeuing for a second pass.
+	if promptPack.Labels[LabelPromptPackName] != promptPack.Spec.PackName {
+		if promptPack.Labels == nil {
+			promptPack.Labels = map[string]string{}
+		}
+		promptPack.Labels[LabelPromptPackName] = promptPack.Spec.PackName
+		if err := r.Update(ctx, promptPack); err != nil {
+			log.Error(err, "failed to set promptpack label")
+			return ctrl.Result{}, err
+		}
 	}
 
 	// Step 1: Validate the source configuration (ConfigMap exists, has pack.json)
