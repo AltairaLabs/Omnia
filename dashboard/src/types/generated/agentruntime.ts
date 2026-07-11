@@ -328,17 +328,26 @@ export interface AgentRuntimeSpec {
    * one validator is filled in. Applied to each facade's external auth
    * chain. */
   externalAuth?: {
-    /** apiKeys configures per-caller API keys for this agent. Each key is
-     * stored as a Kubernetes Secret in the agent's namespace with a
-     * sha256 hash of the raw value, scopes, and expiry. Created via the
+    /** clientKeys configures per-caller client keys for this agent. Each
+     * key is stored as a Kubernetes Secret in the agent's namespace with
+     * a sha256 hash of the raw value, claims, and expiry. Created via the
      * dashboard UI; never stored in the CR. The presence of this field
      * (even an empty struct) tells the facade to treat keys labelled for
      * this agent as valid. */
-    apiKeys?: {
-      /** defaultRole is applied to API keys that don't specify one. */
-      defaultRole?: "viewer" | "editor" | "admin";
-      /** trustEndUserHeader — same semantics as SharedTokenAuth; see that
-       * field's doc comment for the security trade-off. */
+    clientKeys?: {
+      /** defaultRole is applied to client keys that don't specify their own
+       * claims. Roles are arbitrary claims, not a fixed set — any string is
+       * valid here. */
+      defaultRole?: string;
+      /** trustEndUserHeader lets the caller forward the end-user identity
+       * via the X-End-User-Id request header. Off by default — when off,
+       * Identity.EndUser is set equal to Identity.Subject (the client key's
+       * own identity), so per-user audit granularity is coarse.
+       * 
+       * Turn on only when the calling app is trusted to faithfully forward
+       * user context. A malicious app holding a valid key can spoof
+       * arbitrary end-users, so ToolPolicy rules gating on identity.endUser
+       * must be paired with an app-level trust assessment. */
       trustEndUserHeader?: boolean;
     };
     /** edgeTrust consumes claim-headers injected by an upstream JWT
@@ -411,31 +420,6 @@ export interface AgentRuntimeSpec {
       /** issuer is the OIDC issuer URL (without trailing slash). Controller
        * fetches {issuer}/.well-known/openid-configuration. */
       issuer: string;
-    };
-    /** sharedToken validates a single bearer token shared across all
-     * callers of this agent. Simplest partner integration; one token in
-     * a Kubernetes Secret, rotated by editing the Secret. */
-    sharedToken?: {
-      /** secretRef references a Secret with key "token" holding the bearer
-       * value. */
-      secretRef: {
-        /** Name of the referent.
-         * This field is effectively required, but due to backwards compatibility is
-         * allowed to be empty. Instances of this type with an empty value here are
-         * almost certainly wrong.
-         * More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names */
-        name?: string;
-      };
-      /** trustEndUserHeader lets the caller forward the end-user identity
-       * via the X-End-User-Id request header. Off by default — when off,
-       * Identity.EndUser is set equal to Identity.Subject (the token
-       * itself), so per-user audit granularity is coarse.
-       * 
-       * Turn on only when the calling app is trusted to faithfully forward
-       * user context. A malicious app holding a valid token can spoof
-       * arbitrary end-users, so ToolPolicy rules gating on identity.endUser
-       * must be paired with an app-level trust assessment. */
-      trustEndUserHeader?: boolean;
     };
   };
   /** extraPodAnnotations defines additional annotations to add to the agent pods.

@@ -38,7 +38,7 @@ func TestExtractPolicyFromMetadata(t *testing.T) {
 		policy.HeaderAuthorization: "Bearer token",
 		policy.HeaderProvider:      "claude",
 		policy.HeaderModel:         "claude-sonnet-4-20250514",
-		policy.HeaderOrigin:        policy.OriginAPIKey,
+		policy.HeaderOrigin:        policy.OriginClientKey,
 		policy.HeaderWorkspace:     "acme",
 		"x-omnia-claim-team":       "engineering",
 		"x-omnia-claim-region":     "us-east",
@@ -57,7 +57,7 @@ func TestExtractPolicyFromMetadata(t *testing.T) {
 	assert.Equal(t, "Bearer token", fields.Authorization)
 	assert.Equal(t, "claude", fields.Provider)
 	assert.Equal(t, "claude-sonnet-4-20250514", fields.Model)
-	assert.Equal(t, policy.OriginAPIKey, fields.Origin)
+	assert.Equal(t, policy.OriginClientKey, fields.Origin)
 	assert.Equal(t, "acme", fields.Workspace)
 	assert.Equal(t, "engineering", fields.Claims["team"])
 	assert.Equal(t, "us-east", fields.Claims["region"])

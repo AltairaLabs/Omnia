@@ -132,7 +132,7 @@ func TestIdentityPayloadFromPropagation_MapsOriginAndWorkspace(t *testing.T) {
 		AgentName: "agent-1",
 		Namespace: "some-k8s-namespace", // must NOT leak into Workspace
 		UserID:    "user-1",
-		Origin:    OriginAPIKey,
+		Origin:    OriginClientKey,
 		Workspace: "acme",
 	}
 
@@ -140,8 +140,8 @@ func TestIdentityPayloadFromPropagation_MapsOriginAndWorkspace(t *testing.T) {
 	if got == nil {
 		t.Fatal("IdentityPayloadFromPropagation returned nil for non-empty fields")
 	}
-	if got.Origin != OriginAPIKey {
-		t.Errorf("Origin = %q, want %q", got.Origin, OriginAPIKey)
+	if got.Origin != OriginClientKey {
+		t.Errorf("Origin = %q, want %q", got.Origin, OriginClientKey)
 	}
 	if got.Workspace != "acme" {
 		t.Errorf("Workspace = %q, want %q (must come from fields.Workspace, not Namespace)", got.Workspace, "acme")

@@ -123,7 +123,7 @@ rules:
 
 ### Authentication
 
-External authentication is governed by the agent's `spec.externalAuth` setting (sharedToken, apiKeys, OIDC, or edge trust), not the dashboard's management-plane token. Configure external auth on the AgentRuntime to control how clients authenticate to the external endpoint.
+External authentication is governed by the agent's `spec.externalAuth` setting (clientKeys, OIDC, or edge trust), not the dashboard's management-plane token. Configure external auth on the AgentRuntime to control how clients authenticate to the external endpoint.
 
 ## Access your agent
 

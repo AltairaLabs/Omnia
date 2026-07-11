@@ -19,6 +19,8 @@ package main
 import (
 	"context"
 	"crypto/sha256"
+	"fmt"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -26,6 +28,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	"github.com/altairalabs/omnia/pkg/facade/auth"
@@ -38,22 +41,22 @@ func sha256Bytes(s string) []byte {
 	return sum[:]
 }
 
-func newAPIKeySecret(name, agent string, hash []byte, role string, expiresAt string) *corev1.Secret {
+func newClientKeySecret(name, agent string, hash []byte, role string, expiresAt string) *corev1.Secret {
 	data := map[string][]byte{
-		APIKeyDataKeyHash: hash,
+		ClientKeyDataKeyHash: hash,
 	}
 	if role != "" {
-		data[APIKeyDataKeyScopes] = []byte(`{"role":"` + role + `"}`)
+		data[ClientKeyDataKeyScopes] = []byte(`{"role":"` + role + `"}`)
 	}
 	if expiresAt != "" {
-		data[APIKeyDataKeyExpiresAt] = []byte(expiresAt)
+		data[ClientKeyDataKeyExpiresAt] = []byte(expiresAt)
 	}
 	return &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: "ns",
 			Labels: map[string]string{
-				LabelCredentialKind: LabelCredentialKindAgentAPIKey,
+				LabelCredentialKind: LabelCredentialKindAgentClientKey,
 				LabelAgent:          agent,
 			},
 		},
@@ -65,7 +68,7 @@ func TestSecretBackedKeyStore_LoadsMatchingSecrets(t *testing.T) {
 	t.Parallel()
 	scheme := newTestScheme(t)
 	hash := sha256Bytes(testRawKey)
-	secret := newAPIKeySecret("agent-myagent-apikey-001", "myagent", hash, "editor", "")
+	secret := newClientKeySecret("agent-myagent-clientkey-001", "myagent", hash, "editor", "")
 	fc := fake.NewClientBuilder().WithScheme(scheme).WithObjects(secret).Build()
 
 	store, err := NewSecretBackedKeyStore(context.Background(), fc, "ns", "myagent", logr.Discard(),
@@ -83,8 +86,8 @@ func TestSecretBackedKeyStore_LoadsMatchingSecrets(t *testing.T) {
 	if got, want := key.ID, "001"; got != want {
 		t.Errorf("ID = %q, want %q", got, want)
 	}
-	if got, want := key.Role, "editor"; got != want {
-		t.Errorf("Role = %q, want %q", got, want)
+	if got, want := key.Claims["role"], "editor"; got != want {
+		t.Errorf("Claims[role] = %q, want %q", got, want)
 	}
 }
 
@@ -95,7 +98,7 @@ func TestSecretBackedKeyStore_FiltersOtherAgents(t *testing.T) {
 	t.Parallel()
 	scheme := newTestScheme(t)
 	hash := sha256Bytes(testRawKey)
-	other := newAPIKeySecret("agent-other-apikey-001", "other-agent", hash, "editor", "")
+	other := newClientKeySecret("agent-other-clientkey-001", "other-agent", hash, "editor", "")
 	fc := fake.NewClientBuilder().WithScheme(scheme).WithObjects(other).Build()
 
 	store, err := NewSecretBackedKeyStore(context.Background(), fc, "ns", "myagent", logr.Discard(),
@@ -116,14 +119,14 @@ func TestSecretBackedKeyStore_FiltersOtherCredentialKinds(t *testing.T) {
 	hash := sha256Bytes(testRawKey)
 	wrong := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "agent-myagent-apikey-001",
+			Name:      "agent-myagent-clientkey-001",
 			Namespace: "ns",
 			Labels: map[string]string{
 				LabelCredentialKind: "agent-shared-token", // wrong kind
 				LabelAgent:          "myagent",
 			},
 		},
-		Data: map[string][]byte{APIKeyDataKeyHash: hash},
+		Data: map[string][]byte{ClientKeyDataKeyHash: hash},
 	}
 	fc := fake.NewClientBuilder().WithScheme(scheme).WithObjects(wrong).Build()
 
@@ -144,7 +147,7 @@ func TestSecretBackedKeyStore_ParsesExpiry(t *testing.T) {
 	scheme := newTestScheme(t)
 	hash := sha256Bytes(testRawKey)
 	expires := "2030-12-31T23:59:59Z"
-	secret := newAPIKeySecret("agent-myagent-apikey-x", "myagent", hash, "viewer", expires)
+	secret := newClientKeySecret("agent-myagent-clientkey-x", "myagent", hash, "viewer", expires)
 	fc := fake.NewClientBuilder().WithScheme(scheme).WithObjects(secret).Build()
 
 	store, err := NewSecretBackedKeyStore(context.Background(), fc, "ns", "myagent", logr.Discard(),
@@ -167,13 +170,13 @@ func TestSecretBackedKeyStore_ParsesExpiry(t *testing.T) {
 func TestSecretBackedKeyStore_SkipsMalformedSecrets(t *testing.T) {
 	t.Parallel()
 	scheme := newTestScheme(t)
-	good := newAPIKeySecret("agent-myagent-apikey-good", "myagent", sha256Bytes("good-key"), "editor", "")
+	good := newClientKeySecret("agent-myagent-clientkey-good", "myagent", sha256Bytes("good-key"), "editor", "")
 	missingHash := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "agent-myagent-apikey-bad",
+			Name:      "agent-myagent-clientkey-bad",
 			Namespace: "ns",
 			Labels: map[string]string{
-				LabelCredentialKind: LabelCredentialKindAgentAPIKey,
+				LabelCredentialKind: LabelCredentialKindAgentClientKey,
 				LabelAgent:          "myagent",
 			},
 		},
@@ -194,7 +197,7 @@ func TestSecretBackedKeyStore_SkipsMalformedSecrets(t *testing.T) {
 }
 
 func TestSecretBackedKeyStore_NoMatchingSecretsIsValid(t *testing.T) {
-	// An agent with apiKeys configured but no Secrets yet should still
+	// An agent with clientKeys configured but no Secrets yet should still
 	// init successfully — operators may enable the feature before
 	// minting any keys via the dashboard.
 	t.Parallel()
@@ -213,19 +216,19 @@ func TestSecretBackedKeyStore_NoMatchingSecretsIsValid(t *testing.T) {
 	}
 }
 
-func TestParseAPIKeySecret_EmptyDataErrors(t *testing.T) {
+func TestParseClientKeySecret_EmptyDataErrors(t *testing.T) {
 	t.Parallel()
 	secret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: "agent-x-apikey-y",
+			Name: "agent-x-clientkey-y",
 			Labels: map[string]string{
-				LabelCredentialKind: LabelCredentialKindAgentAPIKey,
+				LabelCredentialKind: LabelCredentialKindAgentClientKey,
 				LabelAgent:          "x",
 			},
 		},
 		// No Data at all — should reject rather than panic.
 	}
-	if _, err := parseAPIKeySecret(secret); err == nil {
+	if _, err := parseClientKeySecret(secret); err == nil {
 		t.Error("expected error on empty secret data")
 	}
 }
@@ -240,7 +243,7 @@ func TestSecretBackedKeyStore_RejectsUnownedSecretsWhenUIDSet(t *testing.T) {
 	t.Parallel()
 	scheme := newTestScheme(t)
 	hash := sha256Bytes(testRawKey)
-	unowned := newAPIKeySecret("agent-myagent-apikey-planted", "myagent", hash, "admin", "")
+	unowned := newClientKeySecret("agent-myagent-clientkey-planted", "myagent", hash, "admin", "")
 
 	fc := fake.NewClientBuilder().WithScheme(scheme).WithObjects(unowned).Build()
 	store, err := NewSecretBackedKeyStore(context.Background(), fc, "ns", "myagent", logr.Discard(),
@@ -263,7 +266,7 @@ func TestSecretBackedKeyStore_AcceptsCorrectlyOwnedSecret(t *testing.T) {
 	t.Parallel()
 	scheme := newTestScheme(t)
 	hash := sha256Bytes(testRawKey)
-	owned := newAPIKeySecret("agent-myagent-apikey-legit", "myagent", hash, "editor", "")
+	owned := newClientKeySecret("agent-myagent-clientkey-legit", "myagent", hash, "editor", "")
 	owned.OwnerReferences = []metav1.OwnerReference{
 		{APIVersion: "omnia.altairalabs.ai/v1alpha1", Kind: "AgentRuntime",
 			Name: "myagent", UID: "agent-uid-123"},
@@ -290,7 +293,7 @@ func TestSecretBackedKeyStore_EmptyUIDDisablesOwnerCheck(t *testing.T) {
 	t.Parallel()
 	scheme := newTestScheme(t)
 	hash := sha256Bytes(testRawKey)
-	unowned := newAPIKeySecret("agent-myagent-apikey-001", "myagent", hash, "editor", "")
+	unowned := newClientKeySecret("agent-myagent-clientkey-001", "myagent", hash, "editor", "")
 
 	fc := fake.NewClientBuilder().WithScheme(scheme).WithObjects(unowned).Build()
 	store, err := NewSecretBackedKeyStore(context.Background(), fc, "ns", "myagent", logr.Discard(),
@@ -305,11 +308,11 @@ func TestSecretBackedKeyStore_EmptyUIDDisablesOwnerCheck(t *testing.T) {
 	}
 }
 
-// TestParseAPIKeySecret_WrongHashLengthRejects proves T5 is fixed:
+// TestParseClientKeySecret_WrongHashLengthRejects proves T5 is fixed:
 // writers that accidentally store a hex-encoded sha256 (64 bytes) or
 // a truncated digest fail loud at load time rather than silently never
 // matching at auth time. The hash must be exactly 32 raw bytes.
-func TestParseAPIKeySecret_WrongHashLengthRejects(t *testing.T) {
+func TestParseClientKeySecret_WrongHashLengthRejects(t *testing.T) {
 	t.Parallel()
 	cases := map[string][]byte{
 		"too-short (16 bytes)":               make([]byte, 16),
@@ -321,23 +324,23 @@ func TestParseAPIKeySecret_WrongHashLengthRejects(t *testing.T) {
 			t.Parallel()
 			secret := &corev1.Secret{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: "agent-x-apikey-y",
+					Name: "agent-x-clientkey-y",
 					Labels: map[string]string{
-						LabelCredentialKind: LabelCredentialKindAgentAPIKey,
+						LabelCredentialKind: LabelCredentialKindAgentClientKey,
 						LabelAgent:          "x",
 					},
 				},
-				Data: map[string][]byte{APIKeyDataKeyHash: hash},
+				Data: map[string][]byte{ClientKeyDataKeyHash: hash},
 			}
-			if _, err := parseAPIKeySecret(secret); err == nil {
+			if _, err := parseClientKeySecret(secret); err == nil {
 				t.Errorf("expected length-check failure for %s", name)
 			}
 		})
 	}
 }
 
-func TestParseAPIKeySecret_NameNotMatchingPatternFallsBackToFullName(t *testing.T) {
-	// A hand-edited Secret without the expected `agent-<agent>-apikey-<id>`
+func TestParseClientKeySecret_NameNotMatchingPatternFallsBackToFullName(t *testing.T) {
+	// A hand-edited Secret without the expected `agent-<agent>-clientkey-<id>`
 	// prefix should still load — its ID falls back to the full Secret name
 	// so ToolPolicy can still distinguish callers by identity.subject.
 	t.Parallel()
@@ -345,13 +348,13 @@ func TestParseAPIKeySecret_NameNotMatchingPatternFallsBackToFullName(t *testing.
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "custom-key-naming",
 			Labels: map[string]string{
-				LabelCredentialKind: LabelCredentialKindAgentAPIKey,
+				LabelCredentialKind: LabelCredentialKindAgentClientKey,
 				LabelAgent:          "x",
 			},
 		},
-		Data: map[string][]byte{APIKeyDataKeyHash: sha256Bytes("k")},
+		Data: map[string][]byte{ClientKeyDataKeyHash: sha256Bytes("k")},
 	}
-	key, err := parseAPIKeySecret(secret)
+	key, err := parseClientKeySecret(secret)
 	if err != nil {
 		t.Fatalf("err = %v, want nil", err)
 	}
@@ -372,6 +375,59 @@ func TestNewSecretBackedKeyStore_InitialLoadListErrorPropagates(t *testing.T) {
 		WithKeyStoreRefreshInterval(time.Hour))
 	if err == nil {
 		t.Error("expected error when the scheme lacks Secret kind")
+	}
+}
+
+// listFailAfterFirst wraps a client so the first List (the constructor's
+// initial load) succeeds and every later List (a background refresh tick)
+// fails — exercising refreshLoop's error branch: record refreshError and keep
+// the previous snapshot rather than crashing the store.
+type listFailAfterFirst struct {
+	client.Client
+	calls atomic.Int32
+}
+
+func (c *listFailAfterFirst) List(ctx context.Context, list client.ObjectList, opts ...client.ListOption) error {
+	if c.calls.Add(1) > 1 {
+		return fmt.Errorf("simulated refresh List failure")
+	}
+	return c.Client.List(ctx, list, opts...)
+}
+
+func TestSecretBackedKeyStore_RefreshErrorKeepsSnapshot(t *testing.T) {
+	scheme := newTestScheme(t)
+	base := fake.NewClientBuilder().WithScheme(scheme).Build()
+	fc := &listFailAfterFirst{Client: base}
+
+	store, err := NewSecretBackedKeyStore(context.Background(), fc, "ns", "a", logr.Discard(),
+		WithKeyStoreRefreshInterval(2*time.Millisecond))
+	if err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	defer store.Stop()
+
+	var gotErr error
+	for i := 0; i < 200 && gotErr == nil; i++ {
+		store.mu.RLock()
+		gotErr = store.refreshError
+		store.mu.RUnlock()
+		if gotErr == nil {
+			time.Sleep(2 * time.Millisecond)
+		}
+	}
+	if gotErr == nil {
+		t.Fatal("expected refreshError to be recorded after a failed refresh tick")
+	}
+}
+
+func TestParseClientKeySecret_MissingHashErrors(t *testing.T) {
+	t.Parallel()
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "agent-a-clientkey-x", Namespace: "ns"},
+		Data:       map[string][]byte{ClientKeyDataKeyScopes: []byte(`{"role":"viewer"}`)},
+	}
+	if _, err := parseClientKeySecret(secret); err == nil {
+		t.Fatal("expected error when the keyHash data key is missing")
 	}
 }
 
@@ -401,42 +457,75 @@ func TestSecretBackedKeyStore_ClockOption(t *testing.T) {
 	}
 }
 
-func TestParseAPIKeySecret_MalformedScopesErrors(t *testing.T) {
+func TestParseClientKeySecret_MalformedScopesErrors(t *testing.T) {
 	t.Parallel()
 	secret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: "agent-x-apikey-y",
+			Name: "agent-x-clientkey-y",
 			Labels: map[string]string{
-				LabelCredentialKind: LabelCredentialKindAgentAPIKey,
+				LabelCredentialKind: LabelCredentialKindAgentClientKey,
 				LabelAgent:          "x",
 			},
 		},
 		Data: map[string][]byte{
-			APIKeyDataKeyHash:   sha256Bytes("k"),
-			APIKeyDataKeyScopes: []byte("not-json"),
+			ClientKeyDataKeyHash:   sha256Bytes("k"),
+			ClientKeyDataKeyScopes: []byte("not-json"),
 		},
 	}
-	if _, err := parseAPIKeySecret(secret); err == nil {
+	if _, err := parseClientKeySecret(secret); err == nil {
 		t.Error("expected error on malformed scopes JSON")
 	}
 }
 
-func TestParseAPIKeySecret_MalformedExpiresAtErrors(t *testing.T) {
+func TestParseClientKeySecret_MalformedExpiresAtErrors(t *testing.T) {
 	t.Parallel()
 	secret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: "agent-x-apikey-y",
+			Name: "agent-x-clientkey-y",
 			Labels: map[string]string{
-				LabelCredentialKind: LabelCredentialKindAgentAPIKey,
+				LabelCredentialKind: LabelCredentialKindAgentClientKey,
 				LabelAgent:          "x",
 			},
 		},
 		Data: map[string][]byte{
-			APIKeyDataKeyHash:      sha256Bytes("k"),
-			APIKeyDataKeyExpiresAt: []byte("yesterday"),
+			ClientKeyDataKeyHash:      sha256Bytes("k"),
+			ClientKeyDataKeyExpiresAt: []byte("yesterday"),
 		},
 	}
-	if _, err := parseAPIKeySecret(secret); err == nil {
+	if _, err := parseClientKeySecret(secret); err == nil {
 		t.Error("expected error on malformed expiresAt")
+	}
+}
+
+// TestParseClientKeySecret_ArbitraryClaimsParsed proves the widened
+// claims model: the scopes JSON blob is not limited to a "role" key —
+// any caller-defined claim set round-trips into ClientKey.Claims.
+func TestParseClientKeySecret_ArbitraryClaimsParsed(t *testing.T) {
+	t.Parallel()
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "agent-x-clientkey-y",
+			Labels: map[string]string{
+				LabelCredentialKind: LabelCredentialKindAgentClientKey,
+				LabelAgent:          "x",
+			},
+		},
+		Data: map[string][]byte{
+			ClientKeyDataKeyHash:   sha256Bytes("k"),
+			ClientKeyDataKeyScopes: []byte(`{"role":"admin","team":"growth","region":"eu"}`),
+		},
+	}
+	key, err := parseClientKeySecret(secret)
+	if err != nil {
+		t.Fatalf("err = %v, want nil", err)
+	}
+	if got, want := key.Claims["role"], "admin"; got != want {
+		t.Errorf("Claims[role] = %q, want %q", got, want)
+	}
+	if got, want := key.Claims["team"], "growth"; got != want {
+		t.Errorf("Claims[team] = %q, want %q", got, want)
+	}
+	if got, want := key.Claims["region"], "eu"; got != want {
+		t.Errorf("Claims[region] = %q, want %q", got, want)
 	}
 }

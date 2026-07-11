@@ -48,9 +48,9 @@ func buildOutboundMetadata(
 func TestBuildConnectionContext_PropagatesOriginFromValidator(t *testing.T) {
 	md := buildOutboundMetadata(t,
 		requestAgentContext{agentName: "agent-1", namespace: "ns-1", workspaceName: "acme"},
-		&policy.AuthenticatedIdentity{Origin: policy.OriginAPIKey},
+		&policy.AuthenticatedIdentity{Origin: policy.OriginClientKey},
 	)
-	assert.Equal(t, policy.OriginAPIKey, md[policy.HeaderOrigin])
+	assert.Equal(t, policy.OriginClientKey, md[policy.HeaderOrigin])
 }
 
 // TestBuildConnectionContext_WorkspaceFromTokenWins proves a workspace-scoped
@@ -65,7 +65,7 @@ func TestBuildConnectionContext_WorkspaceFromTokenWins(t *testing.T) {
 }
 
 // TestBuildConnectionContext_WorkspaceFallsBackToAgent proves that when the
-// validator carries no workspace scope (shared-token, api-key, oidc, edge),
+// validator carries no workspace scope (shared-token, client-key, oidc, edge),
 // identity.workspace falls back to the agent's deployed workspace so the field
 // is non-empty for every validator style (the #1769 acceptance criterion).
 func TestBuildConnectionContext_WorkspaceFallsBackToAgent(t *testing.T) {

@@ -304,8 +304,7 @@ func WithMgmtPlaneValidator(v auth.Validator) ServerOption {
 //
 // Validator order matters — the first validator that admits wins, so
 // list the most specific credential style first. The conventional order
-// shipped by cmd/agent is sharedToken → apiKeys → oidc → edgeTrust →
-// mgmt-plane.
+// shipped by cmd/agent is clientKeys → oidc → edgeTrust → mgmt-plane.
 //
 // Empty chain still proceeds unauthenticated to keep the dev/test path
 // working when no validator can be constructed (no mgmt-plane key, no

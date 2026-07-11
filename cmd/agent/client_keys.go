@@ -32,59 +32,58 @@ import (
 	"github.com/altairalabs/omnia/pkg/facade/auth"
 )
 
-// Secret labels + data keys for agent-scoped API keys. Mirrored on the
+// Secret labels + data keys for agent-scoped client keys. Mirrored on the
 // dashboard side when the CRUD UI lands; defined here so cmd/agent can
 // list-by-label without importing the controller package.
 const (
 	// LabelCredentialKind tags every agent-scoped credential Secret. Same
-	// label is used for sharedToken / oidc-jwks Secrets so a single
-	// list-by-label can find them all if needed later; we filter further
-	// by LabelCredentialKindValue.
+	// label is used for oidc-jwks Secrets so a single list-by-label can
+	// find them all if needed later; we filter further by
+	// LabelCredentialKindValue.
 	LabelCredentialKind = "omnia.altairalabs.ai/credential-kind"
-	// LabelCredentialKindAgentAPIKey identifies the api-keys flavour.
-	LabelCredentialKindAgentAPIKey = "agent-api-key"
+	// LabelCredentialKindAgentClientKey identifies the clientKeys flavour.
+	LabelCredentialKindAgentClientKey = "agent-client-key"
 	// LabelAgent narrows the list to keys for THIS agent only — many
 	// agents may share a namespace, but each pod must only see its own
 	// keys.
 	LabelAgent = "omnia.altairalabs.ai/agent"
 
-	// Data keys inside the API-key Secret. The hash and scope formats
+	// Data keys inside the client-key Secret. The hash and scope formats
 	// are stable contracts shared between the dashboard CRUD endpoint
 	// and the facade KeyStore.
 	//
-	// APIKeyDataKeyHash stores the raw 32-byte sha256 digest of the
+	// ClientKeyDataKeyHash stores the raw 32-byte sha256 digest of the
 	// caller-facing bearer value — NOT hex-encoded. k8s Secret data is
 	// transported as base64 in YAML but resolves to raw bytes in Go, so
 	// writers (dashboard, seed jobs) must pass the 32-byte digest
-	// directly. parseAPIKeySecret re-encodes it as lowercase hex for the
-	// in-memory lookup map.
-	APIKeyDataKeyHash      = "keyHash"
-	APIKeyDataKeyScopes    = "scopes"
-	APIKeyDataKeyExpiresAt = "expiresAt"
+	// directly. parseClientKeySecret re-encodes it as lowercase hex for
+	// the in-memory lookup map.
+	ClientKeyDataKeyHash      = "keyHash"
+	ClientKeyDataKeyScopes    = "scopes"
+	ClientKeyDataKeyExpiresAt = "expiresAt"
 
-	// apiKeyHashLen is the expected sha256 digest length in bytes.
-	// parseAPIKeySecret rejects Secrets with a non-matching length so
+	// clientKeyHashLen is the expected sha256 digest length in bytes.
+	// parseClientKeySecret rejects Secrets with a non-matching length so
 	// accidental hex-encoded payloads (which would be 64 bytes) fail
 	// loud at load time rather than silently never matching at lookup.
-	apiKeyHashLen = 32
+	clientKeyHashLen = 32
 )
 
-// apiKeySecretSuffix is the prefix the dashboard CRUD endpoint uses when
-// minting a new key Secret (`agent-<agent>-apikey-<id>`). The KeyStore
-// derives APIKey.ID from the suffix after the second `-apikey-`. Stable
-// and parsed by both sides, so the dashboard can list-by-label and link
-// the rendered key list back to the Secret.
-const apiKeySecretPrefix = "-apikey-"
+// clientKeySecretPrefix is the prefix the dashboard CRUD endpoint uses
+// when minting a new key Secret (`agent-<agent>-clientkey-<id>`). The
+// KeyStore derives ClientKey.ID from the suffix after the second
+// `-clientkey-`. Stable and parsed by both sides, so the dashboard can
+// list-by-label and link the rendered key list back to the Secret.
+const clientKeySecretPrefix = "-clientkey-"
 
-// apiKeyScopes is the JSON shape stored under data.scopes. Kept tight —
-// per-tool scopes land in a future iteration of the design.
-type apiKeyScopes struct {
-	Role string `json:"role,omitempty"`
-}
+// clientKeyScopes is the JSON shape stored under data.scopes: an
+// arbitrary set of caller-defined claims (role is just a conventional
+// key, not special-cased here). Parsed directly into ClientKey.Claims.
+type clientKeyScopes map[string]string
 
 // SecretBackedKeyStore is the cmd/agent implementation of
 // auth.KeyStore. It maintains an atomically-swapped map keyed by
-// hex(sha256(rawKey)) → APIKey, refreshed from the labelled Secrets in
+// hex(sha256(rawKey)) → ClientKey, refreshed from the labelled Secrets in
 // the agent's namespace on a configurable interval.
 //
 // Refresh strategy: list-by-label (Get by selector), parse each Secret,
@@ -106,7 +105,7 @@ type SecretBackedKeyStore struct {
 	log          logr.Logger
 	now          func() time.Time
 	mu           sync.RWMutex
-	keys         map[string]auth.APIKey
+	keys         map[string]auth.ClientKey
 	stopCh       chan struct{}
 	stopOnce     sync.Once
 	lastRefresh  time.Time
@@ -133,7 +132,7 @@ func WithKeyStoreClock(now func() time.Time) SecretBackedKeyStoreOption {
 // Secret must carry an ownerReferences entry whose UID matches the
 // passed value; otherwise it is skipped + logged. Defence against a
 // compromised namespace-admin planting a label-matching Secret to gain
-// API-key admission (T6 finding).
+// client-key admission (T6 finding).
 func WithKeyStoreAgentUID(uid string) SecretBackedKeyStoreOption {
 	return func(s *SecretBackedKeyStore) { s.agentUID = uid }
 }
@@ -155,23 +154,23 @@ func NewSecretBackedKeyStore(
 		namespace: namespace,
 		agentName: agentName,
 		refresh:   30 * time.Second,
-		log:       log.WithName("apikey-store"),
+		log:       log.WithName("clientkey-store"),
 		now:       time.Now,
 		stopCh:    make(chan struct{}),
-		keys:      map[string]auth.APIKey{},
+		keys:      map[string]auth.ClientKey{},
 	}
 	for _, opt := range opts {
 		opt(s)
 	}
 	if err := s.loadOnce(ctx); err != nil {
-		return nil, fmt.Errorf("initial api-key load: %w", err)
+		return nil, fmt.Errorf("initial client-key load: %w", err)
 	}
 	go s.refreshLoop()
 	return s, nil
 }
 
 // Lookup implements auth.KeyStore.
-func (s *SecretBackedKeyStore) Lookup(hashHex string) (auth.APIKey, bool) {
+func (s *SecretBackedKeyStore) Lookup(hashHex string) (auth.ClientKey, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	k, ok := s.keys[hashHex]
@@ -190,15 +189,15 @@ func (s *SecretBackedKeyStore) loadOnce(ctx context.Context) error {
 	err := s.client.List(ctx, list,
 		client.InNamespace(s.namespace),
 		client.MatchingLabels{
-			LabelCredentialKind: LabelCredentialKindAgentAPIKey,
+			LabelCredentialKind: LabelCredentialKindAgentClientKey,
 			LabelAgent:          s.agentName,
 		},
 	)
 	if err != nil {
-		return fmt.Errorf("list api-key secrets: %w", err)
+		return fmt.Errorf("list client-key secrets: %w", err)
 	}
 
-	next := make(map[string]auth.APIKey, len(list.Items))
+	next := make(map[string]auth.ClientKey, len(list.Items))
 	for i := range list.Items {
 		secret := &list.Items[i]
 		// T6 — defence in depth against a namespace-admin planting a
@@ -208,15 +207,15 @@ func (s *SecretBackedKeyStore) loadOnce(ctx context.Context) error {
 		// (the only sanctioned creation path) always set this; hand-
 		// applied bypasses do not.
 		if s.agentUID != "" && !secretOwnedByAgent(secret, s.agentUID) {
-			s.log.Info("skipping api-key secret — missing matching ownerRef",
+			s.log.Info("skipping client-key secret — missing matching ownerRef",
 				"secret", secret.Name,
 				"expectedAgentUID", s.agentUID,
 				"hint", "if this is legitimate, have the dashboard CRUD path re-mint the key so ownerRef is set")
 			continue
 		}
-		key, err := parseAPIKeySecret(secret)
+		key, err := parseClientKeySecret(secret)
 		if err != nil {
-			s.log.V(1).Info("skipping malformed api-key secret",
+			s.log.V(1).Info("skipping malformed client-key secret",
 				"secret", secret.Name, "reason", err.Error())
 			continue
 		}
@@ -228,7 +227,7 @@ func (s *SecretBackedKeyStore) loadOnce(ctx context.Context) error {
 	s.lastRefresh = s.now()
 	s.refreshError = nil
 	s.mu.Unlock()
-	s.log.V(1).Info("api-key store refreshed", "count", len(next))
+	s.log.V(1).Info("client-key store refreshed", "count", len(next))
 	return nil
 }
 
@@ -248,16 +247,16 @@ func (s *SecretBackedKeyStore) refreshLoop() {
 				s.mu.Lock()
 				s.refreshError = err
 				s.mu.Unlock()
-				s.log.Error(err, "api-key refresh failed; keeping previous snapshot")
+				s.log.Error(err, "client-key refresh failed; keeping previous snapshot")
 			}
 			cancel()
 		}
 	}
 }
 
-// parseAPIKeySecret converts a labelled Secret into an APIKey. Returns
-// an error (caller skips + logs) when required fields are missing or
-// malformed — never panics on bad input.
+// parseClientKeySecret converts a labelled Secret into a ClientKey.
+// Returns an error (caller skips + logs) when required fields are missing
+// or malformed — never panics on bad input.
 // secretOwnedByAgent returns true when secret carries an ownerReferences
 // entry whose UID matches the agent's UID. Used by the ownerRef-gated
 // loadOnce path (WithKeyStoreAgentUID) to reject Secrets that didn't go
@@ -271,32 +270,32 @@ func secretOwnedByAgent(secret *corev1.Secret, agentUID string) bool {
 	return false
 }
 
-func parseAPIKeySecret(secret *corev1.Secret) (auth.APIKey, error) {
+func parseClientKeySecret(secret *corev1.Secret) (auth.ClientKey, error) {
 	if len(secret.Data) == 0 {
-		return auth.APIKey{}, fmt.Errorf("empty data")
+		return auth.ClientKey{}, fmt.Errorf("empty data")
 	}
 
-	hashRaw, ok := secret.Data[APIKeyDataKeyHash]
+	hashRaw, ok := secret.Data[ClientKeyDataKeyHash]
 	if !ok || len(hashRaw) == 0 {
-		return auth.APIKey{}, fmt.Errorf("missing %q data key", APIKeyDataKeyHash)
+		return auth.ClientKey{}, fmt.Errorf("missing %q data key", ClientKeyDataKeyHash)
 	}
 	// Guard against the most common writer mistake: storing a 64-byte
 	// hex-encoded digest instead of the raw 32-byte digest. Either would
 	// "work" as bytes but only the raw form round-trips to
 	// HashToken(plaintext). Fail loud on the wrong length so the
 	// misconfig surfaces at load time, not at auth time.
-	if len(hashRaw) != apiKeyHashLen {
-		return auth.APIKey{}, fmt.Errorf("%q data key must be %d raw bytes (got %d) — "+
+	if len(hashRaw) != clientKeyHashLen {
+		return auth.ClientKey{}, fmt.Errorf("%q data key must be %d raw bytes (got %d) — "+
 			"writers must pass the raw sha256 digest, not a hex-encoded string",
-			APIKeyDataKeyHash, apiKeyHashLen, len(hashRaw))
+			ClientKeyDataKeyHash, clientKeyHashLen, len(hashRaw))
 	}
 	// The dashboard endpoint stores the binary sha256; we keep the in-
-	// memory representation as lowercase hex so APIKeyValidator's
+	// memory representation as lowercase hex so ClientKeyValidator's
 	// constant-time compare aligns with HashToken's output.
 	hashHex := hex.EncodeToString(hashRaw)
 
 	id := strings.TrimPrefix(secret.Name, fmt.Sprintf("agent-%s%s",
-		secret.Labels[LabelAgent], apiKeySecretPrefix))
+		secret.Labels[LabelAgent], clientKeySecretPrefix))
 	if id == secret.Name {
 		// Name didn't match the expected pattern — fall back to the full
 		// Secret name as a last resort. ToolPolicy can still distinguish
@@ -304,23 +303,23 @@ func parseAPIKeySecret(secret *corev1.Secret) (auth.APIKey, error) {
 		id = secret.Name
 	}
 
-	key := auth.APIKey{
+	key := auth.ClientKey{
 		ID:      id,
 		HashHex: hashHex,
 	}
 
-	if scopesRaw, ok := secret.Data[APIKeyDataKeyScopes]; ok && len(scopesRaw) > 0 {
-		var scopes apiKeyScopes
+	if scopesRaw, ok := secret.Data[ClientKeyDataKeyScopes]; ok && len(scopesRaw) > 0 {
+		var scopes clientKeyScopes
 		if err := json.Unmarshal(scopesRaw, &scopes); err != nil {
-			return auth.APIKey{}, fmt.Errorf("parse scopes: %w", err)
+			return auth.ClientKey{}, fmt.Errorf("parse scopes: %w", err)
 		}
-		key.Role = scopes.Role
+		key.Claims = scopes
 	}
 
-	if expRaw, ok := secret.Data[APIKeyDataKeyExpiresAt]; ok && len(expRaw) > 0 {
+	if expRaw, ok := secret.Data[ClientKeyDataKeyExpiresAt]; ok && len(expRaw) > 0 {
 		t, err := time.Parse(time.RFC3339, string(expRaw))
 		if err != nil {
-			return auth.APIKey{}, fmt.Errorf("parse expiresAt: %w", err)
+			return auth.ClientKey{}, fmt.Errorf("parse expiresAt: %w", err)
 		}
 		key.ExpiresAt = t
 	}

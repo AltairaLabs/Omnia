@@ -44,8 +44,7 @@ func evaluateExternalAuthCondition(ar *omniav1alpha1.AgentRuntime) metav1.Condit
 		}
 	}
 
-	hasDataPlane := ext.SharedToken != nil ||
-		ext.APIKeys != nil ||
+	hasDataPlane := ext.ClientKeys != nil ||
 		ext.OIDC != nil ||
 		ext.EdgeTrust != nil
 
@@ -68,7 +67,7 @@ func evaluateExternalAuthCondition(ar *omniav1alpha1.AgentRuntime) metav1.Condit
 			Status: metav1.ConditionFalse,
 			Reason: "Unreachable",
 			Message: "no facade has managementPlane enabled and no data-plane validator " +
-				"(sharedToken / apiKeys / oidc / edgeTrust) is configured — the facade will reject every request",
+				"(clientKeys / oidc / edgeTrust) is configured — the facade will reject every request",
 		}
 	}
 
@@ -87,11 +86,8 @@ func evaluateExternalAuthCondition(ar *omniav1alpha1.AgentRuntime) metav1.Condit
 // configured. Short and grep-friendly — structured-logging friendly.
 func externalAuthConfiguredMessage(ext *omniav1alpha1.AgentExternalAuth, mgmtPlaneAllowed bool) string {
 	parts := []string{}
-	if ext.SharedToken != nil {
-		parts = append(parts, "sharedToken")
-	}
-	if ext.APIKeys != nil {
-		parts = append(parts, "apiKeys")
+	if ext.ClientKeys != nil {
+		parts = append(parts, "clientKeys")
 	}
 	if ext.OIDC != nil {
 		parts = append(parts, "oidc")

@@ -257,15 +257,10 @@ export const crdConstraints: Record<string, Record<string, FieldConstraint>> =
     "spec.evals.worker.groups[]": {
       "type": "string"
     },
-    "spec.externalAuth.apiKeys.defaultRole": {
-      "type": "string",
-      "enum": [
-        "viewer",
-        "editor",
-        "admin"
-      ]
+    "spec.externalAuth.clientKeys.defaultRole": {
+      "type": "string"
     },
-    "spec.externalAuth.apiKeys.trustEndUserHeader": {
+    "spec.externalAuth.clientKeys.trustEndUserHeader": {
       "type": "boolean"
     },
     "spec.externalAuth.edgeTrust.headerMapping.email": {
@@ -292,15 +287,6 @@ export const crdConstraints: Record<string, Record<string, FieldConstraint>> =
       "type": "string",
       "minLength": 1,
       "required": true
-    },
-    "spec.externalAuth.sharedToken.secretRef": {
-      "required": true
-    },
-    "spec.externalAuth.sharedToken.secretRef.name": {
-      "type": "string"
-    },
-    "spec.externalAuth.sharedToken.trustEndUserHeader": {
-      "type": "boolean"
     },
     "spec.facades": {
       "required": true

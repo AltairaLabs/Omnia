@@ -91,21 +91,25 @@ func TestSharedTokenValidator_LengthMismatchFallsThrough(t *testing.T) {
 	}
 }
 
-func TestSharedTokenThenAPIKey_ValidAPIKeyAdmitted(t *testing.T) {
+func TestSharedTokenThenClientKey_ValidClientKeyAdmitted(t *testing.T) {
 	t.Parallel()
-	const rawKey = "valid-api-key-value"
-	store := auth.NewStaticKeyStore(map[string]auth.APIKey{
-		auth.HashToken(rawKey): {ID: "k1", HashHex: auth.HashToken(rawKey), Role: policy.RoleViewer},
+	const rawKey = "valid-client-key-value"
+	store := auth.NewStaticKeyStore(map[string]auth.ClientKey{
+		auth.HashToken(rawKey): {
+			ID:      "k1",
+			HashHex: auth.HashToken(rawKey),
+			Claims:  map[string]string{"role": policy.RoleViewer},
+		},
 	})
 	shared, _ := auth.NewSharedTokenValidator(validToken) // a different secret
-	chain := auth.Chain{shared, auth.NewAPIKeyValidator(store)}
+	chain := auth.Chain{shared, auth.NewClientKeyValidator(store)}
 
 	id, err := chain.Run(context.Background(), newRequestWithBearer(rawKey))
 	if err != nil {
-		t.Fatalf("Run err = %v, want nil (sharedToken must fall through to api-keys)", err)
+		t.Fatalf("Run err = %v, want nil (sharedToken must fall through to clientKeys)", err)
 	}
 	if id == nil || id.Subject != "k1" {
-		t.Errorf("identity = %+v, want admitted by api-keys", id)
+		t.Errorf("identity = %+v, want admitted by clientKeys", id)
 	}
 }
 

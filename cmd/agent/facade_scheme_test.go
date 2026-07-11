@@ -29,16 +29,16 @@ import (
 
 // TestNewFacadeScheme_RegistersCoreV1 guards issue #1571: the facade's k8s
 // client must register core/v1 so the auth chain can List/Get Secrets. The
-// api-key store Lists *corev1.SecretList and the sharedToken/oidc validators
-// Get *corev1.Secret; if the scheme only carries the omnia CRD types those
+// client-key store Lists *corev1.SecretList and the oidc validator Gets
+// *corev1.Secret; if the scheme only carries the omnia CRD types those
 // calls fail at startup with "no kind is registered for the type v1.SecretList"
 // and the facade crash-loops whenever spec.externalAuth is set.
 func TestNewFacadeScheme_RegistersCoreV1(t *testing.T) {
 	scheme := newFacadeScheme()
 
 	for _, obj := range []runtime.Object{
-		&corev1.SecretList{}, // api-key store loadOnce List
-		&corev1.Secret{},     // sharedToken / oidc JWKS Get
+		&corev1.SecretList{}, // client-key store loadOnce List
+		&corev1.Secret{},     // oidc JWKS Get
 	} {
 		if gvks, _, err := scheme.ObjectKinds(obj); err != nil || len(gvks) == 0 {
 			t.Errorf("facade scheme does not recognize %T: err=%v gvks=%v", obj, err, gvks)

@@ -33,7 +33,7 @@ import (
 // looks like an opaque bearer to sharedToken). The conventional order
 // shipped by cmd/agent is:
 //
-//	sharedToken → apiKeys → oidc → edgeTrust → mgmtPlane
+//	sharedToken → clientKeys → oidc → edgeTrust → mgmtPlane
 //
 // — narrowest match first, broadest last. ErrInvalidCredential from any
 // validator short-circuits the chain (a credential of that style was

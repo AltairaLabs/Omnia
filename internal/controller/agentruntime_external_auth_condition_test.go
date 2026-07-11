@@ -20,7 +20,6 @@ import (
 	"strings"
 	"testing"
 
-	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
@@ -82,10 +81,9 @@ func TestEvaluateExternalAuthCondition_EmptyExternalAuth(t *testing.T) {
 func TestEvaluateExternalAuthCondition_DataPlaneConfigured(t *testing.T) {
 	t.Parallel()
 	cases := map[string]*omniav1alpha1.AgentExternalAuth{
-		"sharedToken": {SharedToken: &omniav1alpha1.SharedTokenAuth{SecretRef: corev1.LocalObjectReference{Name: "t"}}},
-		"apiKeys":     {APIKeys: &omniav1alpha1.APIKeysAuth{}},
-		"oidc":        {OIDC: &omniav1alpha1.OIDCAuth{Issuer: "x", Audience: "y"}},
-		"edgeTrust":   {EdgeTrust: &omniav1alpha1.EdgeTrustAuth{}},
+		"clientKeys": {ClientKeys: &omniav1alpha1.ClientKeysAuth{}},
+		"oidc":       {OIDC: &omniav1alpha1.OIDCAuth{Issuer: "x", Audience: "y"}},
+		"edgeTrust":  {EdgeTrust: &omniav1alpha1.EdgeTrustAuth{}},
 	}
 	for name, ext := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -140,9 +138,7 @@ func TestEvaluateExternalAuthCondition_AllowManagementPlaneExplicitFalseWithData
 	// must NOT include managementPlane since that path is disabled.
 	t.Parallel()
 	ext := &omniav1alpha1.AgentExternalAuth{
-		SharedToken: &omniav1alpha1.SharedTokenAuth{
-			SecretRef: corev1.LocalObjectReference{Name: "t"},
-		},
+		EdgeTrust: &omniav1alpha1.EdgeTrustAuth{},
 	}
 	cond := evaluateExternalAuthCondition(arWithExternalAuthNoMgmt(ext))
 	if cond.Status != metav1.ConditionTrue {
@@ -151,8 +147,8 @@ func TestEvaluateExternalAuthCondition_AllowManagementPlaneExplicitFalseWithData
 	if strings.Contains(cond.Message, "managementPlane") {
 		t.Errorf("message must not advertise managementPlane when disabled: %q", cond.Message)
 	}
-	if !strings.Contains(cond.Message, "sharedToken") {
-		t.Errorf("message should mention sharedToken: %q", cond.Message)
+	if !strings.Contains(cond.Message, "edgeTrust") {
+		t.Errorf("message should mention edgeTrust: %q", cond.Message)
 	}
 }
 

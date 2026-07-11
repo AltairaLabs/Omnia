@@ -22,7 +22,7 @@ By default the chain contains:
 1. **management-plane** — admits dashboard-minted JWTs used by the "Try
    this agent" debug view.
 2. Any data-plane validator configured on the AgentRuntime under
-   `spec.externalAuth` (shared token, API keys, OIDC, edge-trust).
+   `spec.externalAuth` (API keys, OIDC, edge-trust).
 
 With **no** `spec.externalAuth` configured, the agent is reachable only
 from the dashboard — there is no unauthenticated external path. This is
@@ -50,50 +50,33 @@ spec:
 The dashboard proxy mints a short-lived RS256 token per request and
 attaches it to the upstream WebSocket. External callers receive 401.
 
-### 2. Shared bearer token (simplest external access)
-
-Create a Secret holding the token:
-
-```bash
-kubectl create secret generic partner-agent-token \
-  --namespace=my-workspace \
-  --from-literal=token=$(openssl rand -hex 32)
-```
-
-Reference it on the AgentRuntime:
-
-```yaml
-spec:
-  externalAuth:
-    sharedToken:
-      secretRef:
-        name: partner-agent-token
-      trustEndUserHeader: false  # flip to true only if the calling app is trusted
-```
-
-All callers share one token. Rotate by editing the Secret — the facade
-reloads within 30s.
-
-### 3. Per-caller API keys (managed in the dashboard)
+### 2. Per-caller client keys (managed in the dashboard)
 
 Opt the agent in:
 
 ```yaml
 spec:
   externalAuth:
-    apiKeys:
-      defaultRole: viewer    # viewer | editor | admin
+    clientKeys:
+      defaultRole: premium   # any string; surfaces as identity.claims.role
       trustEndUserHeader: false
 ```
 
 Then create keys from the dashboard's **Credentials** page — each key is
-stored as a Secret keyed by its sha256 hash, with a scope and expiry.
-Clients present `Authorization: Bearer <key>`; the facade looks up the
-hash and admits the caller with the role stamped on the Secret.
+stored as a Secret keyed by its sha256 hash, with an expiry and an
+arbitrary claim map. Clients present `Authorization: Bearer <key>`; the
+facade looks up the hash and admits the caller with the key's claims
+surfaced to ToolPolicy as `identity.claims.*` (for example
+`identity.claims.tier == "premium"`), un-spoofable because they are bound
+to the key at creation rather than sent by the caller.
 
 No CRD edit is required when you add or revoke keys.
 
-### 4. OIDC (customer IdP — no Istio required)
+For the simplest case of a single shared credential for all callers,
+create one client key and distribute it — that's the direct replacement
+for what used to be a dedicated shared-token mechanism.
+
+### 3. OIDC (customer IdP — no Istio required)
 
 Point the facade at your IdP's issuer. The controller auto-fetches the
 JWKS from the discovery document and refreshes every 6 hours:
@@ -134,7 +117,7 @@ Provider-specific issuer values:
 | Keycloak | `https://<host>/realms/<realm>` |
 | Azure AD | `https://login.microsoftonline.com/<tenant-id>/v2.0` |
 
-### 5. Edge-trust (Istio or API gateway terminates the JWT)
+### 4. Edge-trust (Istio or API gateway terminates the JWT)
 
 When an upstream edge (Istio `RequestAuthentication` with
 `outputClaimToHeaders`, Envoy, or a commercial API gateway) already
@@ -178,8 +161,7 @@ spec:
     - type: websocket
       managementPlane: true   # dashboard debug view still works
   externalAuth:
-    sharedToken: { secretRef: { name: partner-token } }
-    apiKeys:    { defaultRole: viewer }
+    clientKeys:    { defaultRole: viewer }
     oidc:       { issuer: "https://auth.example.com", audience: "my-agent" }
 ```
 
@@ -227,7 +209,7 @@ Common causes:
 - **`reason=no validator admitted`** — no `spec.externalAuth` validator
   is configured, or the caller presented no credential.
 - **`reason=invalid credential`** — the credential format/signature is
-  wrong (expired JWT, wrong shared-token, unknown API key hash).
+  wrong (expired JWT, unknown API key hash).
 
 ### OIDC tokens are rejected
 
@@ -254,10 +236,11 @@ missing:
    inbound header names exactly as the edge emits them (header names
    are case-insensitive).
 
-## Migrating from legacy A2A shared-token
+## Migrating from legacy shared-token auth
 
-Older releases set a shared bearer on the A2A HTTP endpoint only, via a
-per-facade `authentication.secretRef`. That field has been removed —
-configure the shared bearer once on `spec.externalAuth.sharedToken.secretRef`
-and every facade in `spec.facades` (WebSocket, A2A, MCP, …) validates
-against it.
+Older releases supported a shared bearer token, both as a per-facade
+`authentication.secretRef` on the A2A HTTP endpoint and later as
+`spec.externalAuth.sharedToken`. Both fields have been removed —
+create a single [client key](#2-per-caller-client-keys-managed-in-the-dashboard)
+and distribute it as the replacement; every facade in `spec.facades`
+(WebSocket, A2A, MCP, …) validates against `spec.externalAuth.clientKeys`.

@@ -173,7 +173,7 @@ func TestEvaluateWithContext_IdentityClaim_MissingViaHas(t *testing.T) {
 // identity fields (workspace, agent) in a single rule.
 func TestEvaluateWithContext_IdentityWorkspaceAgent(t *testing.T) {
 	identity := &omniapolicy.AuthenticatedIdentity{
-		Origin:    omniapolicy.OriginAPIKey,
+		Origin:    omniapolicy.OriginClientKey,
 		Workspace: "ws-finance",
 		Agent:     "support-bot",
 	}
@@ -199,7 +199,7 @@ func TestEvaluateWithContext_NoIdentity_ClaimsEmpty(t *testing.T) {
 // still yields a non-nil CEL map so `has(...)` works without erroring.
 func TestEvaluateWithContext_NilClaimsMap(t *testing.T) {
 	identity := &omniapolicy.AuthenticatedIdentity{
-		Origin: omniapolicy.OriginAPIKey,
+		Origin: omniapolicy.OriginClientKey,
 		// Claims left nil on purpose.
 	}
 

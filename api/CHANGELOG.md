@@ -10,6 +10,12 @@ or `api/proto/`, add an entry below with the date, affected API, and reason.
 
 ## Unreleased
 
+### Changed (auth: rename `apiKeys` → `clientKeys` + arbitrary per-key claims, #1775)
+
+- **BREAKING (CRD + `pkg/facade` SDK).** The facade external-auth **`spec.externalAuth.apiKeys`** field is renamed to **`clientKeys`** (`APIKeysAuth` → `ClientKeysAuth`), disambiguating it from LLM-provider api-keys and the dashboard's own user api-keys. The origin surfaced to ToolPolicy is renamed `identity.origin == "api-key"` → **`"client-key"`** (`policy.OriginAPIKey` → `OriginClientKey`). In the public `pkg/facade/auth` SDK: `APIKey`/`APIKeyValidator`/`NewAPIKeyValidator`/`WithAPIKey*` → `ClientKey`/`ClientKeyValidator`/`NewClientKeyValidator`/`WithClientKey*`.
+- **New:** each client key now carries an **arbitrary claim map** (not just a role). A key's stored claims surface to ToolPolicy as `identity.claims.*` (e.g. `identity.claims.tier == "premium"`), un-spoofable because they are bound to the key at creation. `defaultRole` is retained as a convenience that seeds `identity.claims.role` when a key sets no claims; its value is now free-form (the `viewer;editor;admin` enum is relaxed — roles are ordinary claims).
+- The key Secret naming changed accordingly: label `agent-api-key` → `agent-client-key`, name suffix `-apikey-` → `-clientkey-`. Unrelated: LLM-provider `api-key` secrets and the dashboard's user api-keys are untouched.
+
 ### Changed (policy: propagate `identity.origin` and `identity.workspace` end-to-end, #1769)
 
 - **BEHAVIOR CHANGE.** `identity.origin` and `identity.workspace` are now propagated
@@ -53,6 +59,16 @@ or `api/proto/`, add an entry below with the date, affected API, and reason.
   referencing `identity.role` must be rewritten as `identity.claims.role`.
   Management-plane and shared-token identities remain role-less — gate on
   `identity.origin` instead of a role claim for those callers.
+
+### Removed (AgentRuntime CRD: built-in sharedToken external auth, #1775)
+
+- **`spec.externalAuth.sharedToken`** is removed from the `AgentRuntime` CRD.
+  A single shared secret with one static identity is strictly worse than a
+  client-scoped API key, and there were no production users of external auth
+  to migrate. Use `apiKeys` instead — a single API key is the direct
+  simple-integration replacement for what sharedToken provided. This does not
+  affect `pkg/facade`'s `SharedTokenValidator`, which remains available as a
+  building block for third-party custom facades built on the SDK.
 
 ### Changed (memory-api: scope param `user_id` → `virtual_user_id`, #1280)
 
