@@ -824,7 +824,7 @@ func TestBuildRuntimeEnvVars_MemoryNoEnvVars(t *testing.T) {
 		Enabled: true,
 	}
 
-	envVars := r.buildRuntimeEnvVars(ar, nil)
+	envVars := r.buildRuntimeEnvVars(ar, nil, nil)
 
 	for _, ev := range envVars {
 		if strings.HasPrefix(ev.Name, "OMNIA_MEMORY_") {
@@ -856,7 +856,7 @@ func TestBuildRuntimeEnvVars_MemoryWithWorkspaceUID(t *testing.T) {
 	ar.Namespace = "omnia-demo"
 	ar.Spec.Memory = &omniav1alpha1.MemoryConfig{Enabled: true}
 
-	envVars := r.buildRuntimeEnvVars(ar, nil)
+	envVars := r.buildRuntimeEnvVars(ar, nil, nil)
 
 	var workspaceUID string
 	for _, ev := range envVars {
@@ -875,7 +875,7 @@ func TestBuildRuntimeEnvVars_MemoryDisabled(t *testing.T) {
 	ar.Namespace = "default"
 	// Memory is nil — no memory config.
 
-	envVars := r.buildRuntimeEnvVars(ar, nil)
+	envVars := r.buildRuntimeEnvVars(ar, nil, nil)
 
 	for _, ev := range envVars {
 		if strings.HasPrefix(ev.Name, "OMNIA_MEMORY_") {
@@ -900,7 +900,7 @@ func TestRuntimeEnv_ContextURLFromStoreRef(t *testing.T) {
 			},
 		},
 	}
-	env := r.buildRuntimeEnvVars(ar, nil)
+	env := r.buildRuntimeEnvVars(ar, nil, nil)
 
 	e := findEnvVar(env, "OMNIA_CONTEXT_URL")
 	if e == nil || e.ValueFrom == nil || e.ValueFrom.SecretKeyRef == nil {
@@ -927,10 +927,55 @@ func TestRuntimeEnv_NoContextURLForMemory(t *testing.T) {
 			},
 		},
 	}
-	env := r.buildRuntimeEnvVars(ar, nil)
+	env := r.buildRuntimeEnvVars(ar, nil, nil)
 	if findEnvVar(env, "OMNIA_CONTEXT_URL") != nil {
 		t.Fatal("OMNIA_CONTEXT_URL must not be set for memory store")
 	}
+}
+
+// TestBuildRuntimeEnvVars_SkillManifestPathKeyedOnResolvedPack is the #1837
+// Task 5 regression: OMNIA_PROMPTPACK_MANIFEST_PATH must be keyed on the
+// RESOLVED PromptPack's object name, not agentRuntime.Spec.PromptPackRef.Name
+// (the logical packName/label value). PromptPackReconciler.reconcileSkills
+// writes the manifest to <root>/manifests/<pack.Name>.json using the
+// resolved object's own name — if the runtime asked for a path keyed on the
+// ref name instead, the two would permanently disagree once PromptPacks are
+// label-keyed multi-version objects (ref.Name != resolved object's Name).
+func TestBuildRuntimeEnvVars_SkillManifestPathKeyedOnResolvedPack(t *testing.T) {
+	r := &AgentRuntimeReconciler{WorkspaceContentPath: "/workspace-content"}
+	ar := &omniav1alpha1.AgentRuntime{
+		Spec: omniav1alpha1.AgentRuntimeSpec{
+			PromptPackRef: omniav1alpha1.PromptPackRef{Name: "mypack"},
+		},
+	}
+	promptPack := &omniav1alpha1.PromptPack{}
+	promptPack.Name = "pp-deadbeef01234567"
+
+	env := r.buildRuntimeEnvVars(ar, promptPack, nil)
+
+	e := findEnvVar(env, "OMNIA_PROMPTPACK_MANIFEST_PATH")
+	require.NotNil(t, e, "OMNIA_PROMPTPACK_MANIFEST_PATH must be set when WorkspaceContentPath is configured")
+	assert.Equal(t, "/workspace-content/manifests/pp-deadbeef01234567.json", e.Value,
+		"manifest path must be keyed on the resolved pack's object name, not the ref name %q", ar.Spec.PromptPackRef.Name)
+}
+
+// TestBuildRuntimeEnvVars_NoSkillManifestPathWithoutResolvedPack guards the
+// nil-safety of the change above: buildRuntimeEnvVars is called with a nil
+// promptPack in several existing unit tests, and reconcileReferences can
+// return before a pack is resolved — the env var must simply be omitted
+// rather than panicking on a nil dereference.
+func TestBuildRuntimeEnvVars_NoSkillManifestPathWithoutResolvedPack(t *testing.T) {
+	r := &AgentRuntimeReconciler{WorkspaceContentPath: "/workspace-content"}
+	ar := &omniav1alpha1.AgentRuntime{
+		Spec: omniav1alpha1.AgentRuntimeSpec{
+			PromptPackRef: omniav1alpha1.PromptPackRef{Name: "mypack"},
+		},
+	}
+
+	env := r.buildRuntimeEnvVars(ar, nil, nil)
+
+	assert.Nil(t, findEnvVar(env, "OMNIA_PROMPTPACK_MANIFEST_PATH"),
+		"manifest path env var must be omitted, not panic, when no PromptPack has been resolved")
 }
 
 func TestResolveSessionURLForWorkspace(t *testing.T) {
@@ -1311,6 +1356,39 @@ func TestGetConfigHash_RollsOnPackOrRegistryChange(t *testing.T) {
 	packBumped := &omniav1alpha1.PromptPack{ObjectMeta: metav1.ObjectMeta{Name: "p", Generation: 2}}
 	assert.NotEqual(t, base, r.getConfigHash(ctx, nil, packBumped, reg),
 		"a PromptPack change must change the config hash")
+}
+
+// TestGetConfigHash_DiffersAcrossResolvedPackVersions is the #1837 Task 5
+// regression: forward resolution now returns a PromptPack whose
+// metadata.name is a deterministic pp-<hash> that CHANGES per version, so
+// channel-max re-selecting a newer version hands getConfigHash a *different*
+// resolved object (a new pp-<hash> name) even when Generation on that fresh
+// object is 1, same as the one it replaced. getConfigHash must already be
+// hashing the resolved pack's Name (not the ref/logical packName, which is
+// stable across versions) for the pod to roll when channel-max re-selects.
+func TestGetConfigHash_DiffersAcrossResolvedPackVersions(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = corev1.AddToScheme(scheme)
+	_ = omniav1alpha1.AddToScheme(scheme)
+	r := &AgentRuntimeReconciler{Client: fake.NewClientBuilder().WithScheme(scheme).Build(), Scheme: scheme}
+	ctx := context.Background()
+
+	// Same logical pack (Spec.PackName), same Generation — only the resolved
+	// object identity differs, exactly as channel-max re-selection produces:
+	// a brand new pp-<hash> object for the newly-selected version.
+	v1 := &omniav1alpha1.PromptPack{
+		ObjectMeta: metav1.ObjectMeta{Name: "pp-aaaaaaaa", Generation: 1},
+		Spec:       omniav1alpha1.PromptPackSpec{PackName: "mypack", Version: "1.0.0"},
+	}
+	v2 := &omniav1alpha1.PromptPack{
+		ObjectMeta: metav1.ObjectMeta{Name: "pp-bbbbbbbb", Generation: 1},
+		Spec:       omniav1alpha1.PromptPackSpec{PackName: "mypack", Version: "1.1.0"},
+	}
+
+	hashV1 := r.getConfigHash(ctx, nil, v1, nil)
+	hashV2 := r.getConfigHash(ctx, nil, v2, nil)
+	assert.NotEqual(t, hashV1, hashV2,
+		"channel-max re-selecting a newer version must change the config hash so candidate/stable pods roll, even at identical Generation")
 }
 
 func TestBuildDeploymentSpec_SelectorExcludesMutableModeLabel(t *testing.T) {

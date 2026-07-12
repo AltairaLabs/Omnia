@@ -187,7 +187,7 @@ func TestReconcileCandidateDeployment_MountsCandidatePromptPack(t *testing.T) {
 	candidatePack.Spec.Source.Type = omniav1alpha1.PromptPackSourceTypeConfigMap
 	candidatePack.Spec.Source.ConfigMapRef = &corev1.LocalObjectReference{Name: "candidate-pack-config"}
 
-	// The operator resolves the candidate's pack by name from the cluster.
+	// The operator resolves the candidate's pack by label + version/track from the cluster.
 	fakeClient := fake.NewClientBuilder().
 		WithScheme(scheme).
 		WithObjects(candidatePack).

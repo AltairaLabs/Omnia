@@ -212,7 +212,7 @@ func (r *AgentRuntimeReconciler) buildRuntimeContainer(
 				Protocol:      corev1.ProtocolTCP,
 			},
 		},
-		Env:          r.buildRuntimeEnvVars(agentRuntime, toolRegistry),
+		Env:          r.buildRuntimeEnvVars(agentRuntime, promptPack, toolRegistry),
 		VolumeMounts: r.buildRuntimeVolumeMounts(agentRuntime, promptPack, toolRegistry),
 		ReadinessProbe: &corev1.Probe{
 			ProbeHandler: corev1.ProbeHandler{

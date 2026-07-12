@@ -3682,7 +3682,7 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 				},
 			}
 
-			envVars := reconciler.buildRuntimeEnvVars(agentRuntime, nil)
+			envVars := reconciler.buildRuntimeEnvVars(agentRuntime, nil, nil)
 
 			// Find the mock provider env var
 			var found bool
@@ -3708,7 +3708,7 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 				},
 			}
 
-			envVars := reconciler.buildRuntimeEnvVars(agentRuntime, nil)
+			envVars := reconciler.buildRuntimeEnvVars(agentRuntime, nil, nil)
 
 			// Ensure mock provider env var is NOT set
 			for _, env := range envVars {
@@ -3729,7 +3729,7 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 				},
 			}
 
-			envVars := reconciler.buildRuntimeEnvVars(agentRuntime, nil)
+			envVars := reconciler.buildRuntimeEnvVars(agentRuntime, nil, nil)
 
 			// Verify OMNIA_AGENT_NAME uses Downward API
 			var agentNameEnv *corev1.EnvVar
@@ -3760,7 +3760,7 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 				},
 			}
 
-			envVars := reconciler.buildRuntimeEnvVars(agentRuntime, nil)
+			envVars := reconciler.buildRuntimeEnvVars(agentRuntime, nil, nil)
 
 			// Ensure mock provider env var is NOT set
 			for _, env := range envVars {

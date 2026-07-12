@@ -76,17 +76,24 @@ func applyCandidateOverrides(ar *omniav1alpha1.AgentRuntime) candidateOverrideRe
 // reconcileCandidateDeployment creates or updates the candidate Deployment.
 // It builds the same spec as the stable Deployment but applies candidate
 // overrides and sets the track label to "canary".
+//
+// The stable PromptPack argument is intentionally unread (blank identifier):
+// the candidate always resolves its own PromptPack fresh (candidatePromptPack
+// below), independent of stable. Reading the stable pack here — e.g. for the
+// pod config hash — would silently tie the candidate's config hash to the
+// stable pack's identity, so a candidate-only PromptPack version change would
+// never roll the candidate pods. Kept as a parameter (rather than dropped)
+// only to avoid reshaping the wider reconcileRollout call chain in this pass.
 func (r *AgentRuntimeReconciler) reconcileCandidateDeployment(
 	ctx context.Context,
 	ar *omniav1alpha1.AgentRuntime,
-	promptPack *omniav1alpha1.PromptPack,
+	_ *omniav1alpha1.PromptPack,
 	toolRegistry *omniav1alpha1.ToolRegistry,
 	providers map[string]*omniav1alpha1.Provider,
 ) (*appsv1.Deployment, error) {
 	log := logf.FromContext(ctx)
 	deployName := candidateDeploymentName(ar.Name)
 
-	configHash := r.getConfigHash(ctx, providers, promptPack, toolRegistry)
 	resolvedClients, _ := r.resolveA2AClients(ctx, log, ar)
 
 	overrides := applyCandidateOverrides(ar)
@@ -100,6 +107,13 @@ func (r *AgentRuntimeReconciler) reconcileCandidateDeployment(
 	if err != nil {
 		return nil, fmt.Errorf("resolve candidate PromptPack %q: %w", overrides.PromptPackRef.Name, err)
 	}
+
+	// Hash the CANDIDATE's own resolved pack, not the stable one passed in.
+	// Each resolved PromptPack version is a distinct object (deterministic
+	// pp-<hash> name), so a channel-max/version-pin re-selection changes
+	// candidatePromptPack.Name even when the stable pack is untouched — the
+	// candidate Deployment must roll on that alone, independent of stable.
+	configHash := r.getConfigHash(ctx, providers, candidatePromptPack, toolRegistry)
 
 	// Deliver the candidate's provider refs to its pods via a mounted CM so the
 	// runtime resolves the candidate's providers, not the shared stable spec

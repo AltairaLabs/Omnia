@@ -241,4 +241,57 @@ var _ = Describe("AgentRuntime forward PromptPack resolution (envtest)", func() 
 			Expect(found).To(BeTrue(), "PromptPackReady condition should be present")
 		})
 	})
+
+	Context("invalid ref: both version and track set", func() {
+		It("leaves PromptPackReady=False with a distinct PromptPackRefInvalid reason", func() {
+			providerName := nextName("provider")
+			Expect(k8sClient.Create(ctx, newProvider(providerName))).To(Succeed())
+
+			packName := "mypack"
+			p1 := newLabeledPack(nextName("mypack-100"), packName, "1.0.0")
+			Expect(k8sClient.Create(ctx, p1)).To(Succeed())
+
+			arName := nextName("ar")
+			// Both version and track set: selectPromptPack rejects this before
+			// ever attempting to match a candidate, so it must be reported as a
+			// ref-validation error, not "no matching pack".
+			ar := newAgentRuntime(arName, providerName, omniav1alpha1.PromptPackRef{
+				Name:    packName,
+				Version: ptr.To("1.0.0"),
+				Track:   ptr.To("stable"),
+			})
+			Expect(k8sClient.Create(ctx, ar)).To(Succeed())
+
+			reconciler := &AgentRuntimeReconciler{
+				Client:          k8sClient,
+				Scheme:          k8sClient.Scheme(),
+				FacadeImage:     testFacadeImage,
+				FrameworkImages: promptkitImage("test-runtime:v1.0.0"),
+			}
+			key := types.NamespacedName{Name: arName, Namespace: namespace}
+
+			_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: key})
+			Expect(err).NotTo(HaveOccurred())
+			_, err = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: key})
+			Expect(err).To(HaveOccurred())
+			Expect(stderrors.Is(err, errNoMatchingPromptPack)).To(BeFalse(),
+				"a both-version-and-track ref is a validation error, not errNoMatchingPromptPack: %v", err)
+
+			updated := &omniav1alpha1.AgentRuntime{}
+			Expect(k8sClient.Get(ctx, key, updated)).To(Succeed())
+			Expect(updated.Status.Phase).To(Equal(omniav1alpha1.AgentRuntimePhaseFailed))
+
+			found := false
+			for _, c := range updated.Status.Conditions {
+				if c.Type == ConditionTypePromptPackReady {
+					found = true
+					Expect(c.Status).To(Equal(metav1.ConditionFalse))
+					Expect(c.Reason).To(Equal("PromptPackRefInvalid"))
+					Expect(c.Message).To(ContainSubstring(packName),
+						"message should name the packName so an operator can find the offending ref")
+				}
+			}
+			Expect(found).To(BeTrue(), "PromptPackReady condition should be present")
+		})
+	})
 })

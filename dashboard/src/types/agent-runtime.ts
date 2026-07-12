@@ -11,10 +11,16 @@ export type ProviderType = "claude" | "openai" | "gemini" | "ollama" | "mock";
 export type AutoscalerType = "hpa" | "keda";
 export type FrameworkType = "promptkit" | "langchain" | "autogen" | "custom";
 
+// Enums
+export type PromptPackTrack = "stable" | "prerelease";
+
 // Nested types
 export interface PromptPackRef {
   name: string;
+  /** version pins an exact PromptPack version. Mutually exclusive with track. */
   version?: string;
+  /** track follows a release channel instead of pinning a version. Mutually exclusive with version. */
+  track?: PromptPackTrack;
 }
 
 export interface MCPConfig {

@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
@@ -204,10 +205,18 @@ func (r *AgentRuntimeReconciler) reconcileReferences(
 	log logr.Logger,
 	agentRuntime *omniav1alpha1.AgentRuntime,
 ) (*omniav1alpha1.PromptPack, *omniav1alpha1.ToolRegistry, map[string]*omniav1alpha1.Provider, ctrl.Result, error) {
-	// Fetch required PromptPack
+	// Fetch required PromptPack. resolvePromptPack fails two distinct ways:
+	// errNoMatchingPromptPack (no PromptPack matches packName+version/track —
+	// the ref points nowhere) or a ref validation error (both version and
+	// track set). Surface these under different reasons so an operator can
+	// tell "fix the ref" apart from "the pack doesn't exist yet".
 	promptPack, err := r.resolvePromptPack(ctx, agentRuntime.Namespace, agentRuntime.Spec.PromptPackRef)
 	if err != nil {
-		r.handleRefError(ctx, log, agentRuntime, ConditionTypePromptPackReady, "PromptPackNotFound", err)
+		reason := "PromptPackRefInvalid"
+		if errors.Is(err, errNoMatchingPromptPack) {
+			reason = "PromptPackNotFound"
+		}
+		r.handleRefError(ctx, log, agentRuntime, ConditionTypePromptPackReady, reason, err)
 		return nil, nil, nil, ctrl.Result{}, err
 	}
 	// Gate readiness on the PromptPack's schema validity. A pack that failed

@@ -163,6 +163,7 @@ func (r *AgentRuntimeReconciler) buildFacadeEnvVars(
 // Only identity, mount paths, ports, tools, tracing, and mock annotation are injected here.
 func (r *AgentRuntimeReconciler) buildRuntimeEnvVars(
 	agentRuntime *omniav1alpha1.AgentRuntime,
+	promptPack *omniav1alpha1.PromptPack,
 	toolRegistry *omniav1alpha1.ToolRegistry,
 ) []corev1.EnvVar {
 	envVars := []corev1.EnvVar{
@@ -260,15 +261,7 @@ func (r *AgentRuntimeReconciler) buildRuntimeEnvVars(
 		)
 	}
 
-	// Skill manifest path. The runtime reads this on startup, parses the
-	// manifest, and registers each entry via sdk.WithSkillsDir. Empty
-	// when WorkspaceContentPath isn't configured on the reconciler.
-	if path := r.skillManifestPath(agentRuntime.Spec.PromptPackRef.Name); path != "" {
-		envVars = append(envVars, corev1.EnvVar{
-			Name:  "OMNIA_PROMPTPACK_MANIFEST_PATH",
-			Value: path,
-		})
-	}
+	envVars = r.appendSkillManifestPathEnv(envVars, promptPack)
 
 	// OMNIA_CONTEXT_URL — the Redis URL used by the runtime's durable context
 	// store (statestore.NewRedisStore). Sourced from the storeRef secret when a
@@ -314,6 +307,36 @@ func (r *AgentRuntimeReconciler) buildRuntimeEnvVars(
 	}
 
 	return envVars
+}
+
+// appendSkillManifestPathEnv appends OMNIA_PROMPTPACK_MANIFEST_PATH when
+// skills are enabled (WorkspaceContentPath configured) and a PromptPack has
+// actually been resolved. The runtime reads this on startup, parses the
+// manifest, and registers each entry via sdk.WithSkillsDir.
+//
+// Keyed on the RESOLVED PromptPack's object name (promptPack.Name), not
+// agentRuntime.Spec.PromptPackRef.Name (the logical packName / label value).
+// PromptPackReconciler.reconcileSkills writes the manifest to
+// <root>/manifests/<pack.Name>.json using that same resolved object's name
+// (see the WriteSkillManifest call site in promptpack_controller.go) —
+// reader and writer must agree on the same key, or a channel-max
+// re-selection (a new pp-<hash> object) leaves the runtime pointed at a
+// manifest path that was never written for the newly selected version.
+func (r *AgentRuntimeReconciler) appendSkillManifestPathEnv(
+	envVars []corev1.EnvVar,
+	promptPack *omniav1alpha1.PromptPack,
+) []corev1.EnvVar {
+	if promptPack == nil {
+		return envVars
+	}
+	path := r.skillManifestPath(promptPack.Name)
+	if path == "" {
+		return envVars
+	}
+	return append(envVars, corev1.EnvVar{
+		Name:  "OMNIA_PROMPTPACK_MANIFEST_PATH",
+		Value: path,
+	})
 }
 
 // defaultImageForFramework returns the default container image for a framework type.
