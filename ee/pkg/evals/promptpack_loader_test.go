@@ -19,13 +19,17 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
-// stubResolver is a packResolver test double returning canned bytes or an error.
+// stubResolver is a packResolver test double returning canned bytes or an
+// error. It captures the version it was last called with so tests can assert
+// the caller's packVersion is passed through to resolver.Load, not dropped.
 type stubResolver struct {
-	data map[string][]byte
-	err  error
+	data        map[string][]byte
+	err         error
+	lastVersion string
 }
 
-func (s *stubResolver) Load(_ context.Context, namespace, name, _ string) ([]byte, error) {
+func (s *stubResolver) Load(_ context.Context, namespace, name, version string) ([]byte, error) {
+	s.lastVersion = version
 	if s.err != nil {
 		return nil, s.err
 	}
@@ -83,9 +87,10 @@ func TestLoadEvals_CacheHit(t *testing.T) {
 }
 
 func TestLoadEvals_CacheMissOnVersionChange(t *testing.T) {
-	loader := newStubLoader(&stubResolver{data: map[string][]byte{
+	resolver := &stubResolver{data: map[string][]byte{
 		"ns/pack1": []byte(`{"id":"p1","version":"v2"}`),
-	}})
+	}}
+	loader := newStubLoader(resolver)
 
 	// Pre-populate cache with v1.
 	loader.cache[cacheKey("ns", "pack1")] = &CachedPack{
@@ -99,6 +104,22 @@ func TestLoadEvals_CacheMissOnVersionChange(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "v2", result.PackVersion)
 	assert.NotEqual(t, "old", string(result.PackData))
+	assert.Equal(t, "v2", resolver.lastVersion)
+}
+
+// TestLoadEvals_PassesVersionToResolver is a wiring regression for the exact
+// bug Task 6 fixed: LoadEvals must pass the caller's packVersion through to
+// resolver.Load verbatim, not drop it (e.g. by always requesting "" and
+// relying on the stable-channel default).
+func TestLoadEvals_PassesVersionToResolver(t *testing.T) {
+	resolver := &stubResolver{data: map[string][]byte{
+		"ns/pack1": []byte(`{"id":"p1","version":"v5"}`),
+	}}
+	loader := newStubLoader(resolver)
+
+	_, err := loader.LoadEvals(context.Background(), "ns", "pack1", "v5")
+	require.NoError(t, err)
+	assert.Equal(t, "v5", resolver.lastVersion)
 }
 
 func TestLoadEvals_ResolverError(t *testing.T) {

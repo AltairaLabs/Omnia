@@ -108,6 +108,42 @@ func TestLoad_EmptyVersionDefaultsToStableMax(t *testing.T) {
 	assert.JSONEq(t, `{"id":"mypack","version":"1.3.0"}`, string(raw))
 }
 
+// TestLoad_EmptyVersionSkipsPrerelease proves the empty-version (stable
+// channel) default skips prerelease versions even when a prerelease is
+// numerically higher than the stable candidate — stableChannelMax must guard
+// on v.Prerelease() != "", not just semver ordering.
+func TestLoad_EmptyVersionSkipsPrerelease(t *testing.T) {
+	stable := configmapPack("pp-stable123", "mypack", "1.2.0", "mypack-cm-stable")
+	prerelease := configmapPack("pp-rc456", "mypack", "2.0.0-rc1", "mypack-cm-rc")
+	cmStable := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Name: "mypack-cm-stable", Namespace: "ns"},
+		Data:       map[string]string{packJSONKey: `{"id":"mypack","version":"1.2.0"}`},
+	}
+	cmRC := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Name: "mypack-cm-rc", Namespace: "ns"},
+		Data:       map[string]string{packJSONKey: `{"id":"mypack","version":"2.0.0-rc1"}`},
+	}
+	c := fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(stable, prerelease, cmStable, cmRC).Build()
+
+	raw, err := NewResolver(c).Load(context.Background(), "ns", "mypack", "")
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"id":"mypack","version":"1.2.0"}`, string(raw))
+}
+
+// TestLoad_EmptyVersionAllPrereleaseErrors proves that when every candidate is
+// a prerelease, the empty-version (stable channel) default errors rather than
+// silently falling back to the highest prerelease.
+func TestLoad_EmptyVersionAllPrereleaseErrors(t *testing.T) {
+	rc1 := configmapPack("pp-rc1", "mypack", "1.0.0-rc1", "mypack-cm-rc1")
+	rc2 := configmapPack("pp-rc2", "mypack", "1.0.0-rc2", "mypack-cm-rc2")
+	c := fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(rc1, rc2).Build()
+
+	_, err := NewResolver(c).Load(context.Background(), "ns", "mypack", "")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no stable PromptPack version found")
+	assert.Contains(t, err.Error(), "mypack")
+}
+
 // TestLoad_VPrefixVersionMatches proves a v-prefixed spec.version ("v1.2.0")
 // still matches a caller-supplied unprefixed version ("1.2.0"), mirroring the
 // operator's strip-"v"-then-strict-semver comparison rule.
