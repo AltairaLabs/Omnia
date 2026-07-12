@@ -470,17 +470,23 @@ func TestFindAgentRuntimesForSecret_NamedProviders(t *testing.T) {
 	assert.Equal(t, "agent-with-judge", requests[0].Name)
 }
 
+// TestFindAgentRuntimesForPromptPack exercises the unindexed fallback path
+// (list-all + local filter). The PromptPack's object name is deliberately a
+// hash that differs from spec.packName (matching Phase 1's deterministic
+// pp-<hash> naming) to prove matching is keyed on packName, not the object
+// name — a ref pointing at the old-style object name must NOT match (#1837).
 func TestFindAgentRuntimesForPromptPack(t *testing.T) {
 	scheme := runtime.NewScheme()
 	_ = omniav1alpha1.AddToScheme(scheme)
 
 	promptPack := &omniav1alpha1.PromptPack{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test-pack",
+			Name:      "pp-a1b2c3d4e5f6",
 			Namespace: "default",
 		},
 		Spec: omniav1alpha1.PromptPackSpec{
-			Version: "1.0.0",
+			PackName: "test-pack",
+			Version:  "1.0.0",
 		},
 	}
 
@@ -501,6 +507,17 @@ func TestFindAgentRuntimesForPromptPack(t *testing.T) {
 			},
 			Spec: omniav1alpha1.AgentRuntimeSpec{
 				PromptPackRef: omniav1alpha1.PromptPackRef{Name: "other-pack"},
+			},
+		},
+		{
+			// Old (pre-#1837) behavior matched on the PromptPack's metadata.name.
+			// A ref pointing at the hashed object name must NOT match anymore.
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "agent-using-object-name",
+				Namespace: "default",
+			},
+			Spec: omniav1alpha1.AgentRuntimeSpec{
+				PromptPackRef: omniav1alpha1.PromptPackRef{Name: "pp-a1b2c3d4e5f6"},
 			},
 		},
 	}
@@ -526,6 +543,10 @@ func TestFindAgentRuntimesForPromptPack(t *testing.T) {
 	assert.Equal(t, "agent-using-pack", requests[0].Name)
 }
 
+// TestFindAgentRuntimesForPromptPack_Indexed exercises the indexed path
+// (client.MatchingFields). As above, the PromptPack's object name is a hash
+// distinct from spec.packName, and a ref keyed on the old object name must
+// not match via the index either (#1837).
 func TestFindAgentRuntimesForPromptPack_Indexed(t *testing.T) {
 	scheme := runtime.NewScheme()
 	_ = omniav1alpha1.AddToScheme(scheme)
@@ -538,10 +559,15 @@ func TestFindAgentRuntimesForPromptPack_Indexed(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "other", Namespace: "default"},
 		Spec:       omniav1alpha1.AgentRuntimeSpec{PromptPackRef: omniav1alpha1.PromptPackRef{Name: "other-pack"}},
 	}
+	oldStyle := &omniav1alpha1.AgentRuntime{
+		// References the PromptPack's hashed object name, not its packName; must not match.
+		ObjectMeta: metav1.ObjectMeta{Name: "old-style", Namespace: "default"},
+		Spec:       omniav1alpha1.AgentRuntimeSpec{PromptPackRef: omniav1alpha1.PromptPackRef{Name: "pp-deadbeef0001"}},
+	}
 
 	indexedClient := fake.NewClientBuilder().
 		WithScheme(scheme).
-		WithObjects(matching, other).
+		WithObjects(matching, other, oldStyle).
 		WithIndex(&omniav1alpha1.AgentRuntime{}, IndexAgentRuntimeByPromptPack,
 			func(obj client.Object) []string {
 				return extractPromptPackRef(obj.(*omniav1alpha1.AgentRuntime))
@@ -551,7 +577,8 @@ func TestFindAgentRuntimesForPromptPack_Indexed(t *testing.T) {
 	r := &AgentRuntimeReconciler{Client: indexedClient, Scheme: scheme}
 
 	promptPack := &omniav1alpha1.PromptPack{
-		ObjectMeta: metav1.ObjectMeta{Name: "target-pack", Namespace: "default"},
+		ObjectMeta: metav1.ObjectMeta{Name: "pp-deadbeef0001", Namespace: "default"},
+		Spec:       omniav1alpha1.PromptPackSpec{PackName: "target-pack"},
 	}
 
 	requests := r.findAgentRuntimesForPromptPack(context.Background(), promptPack)

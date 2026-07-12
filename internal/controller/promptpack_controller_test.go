@@ -364,7 +364,10 @@ var _ = Describe("PromptPack Controller", func() {
 				},
 				Spec: omniav1alpha1.AgentRuntimeSpec{
 					PromptPackRef: omniav1alpha1.PromptPackRef{
-						Name: "referenced-pack",
+						// References the pack's logical packName, NOT its
+						// metadata.name ("referenced-pack") — proves matching
+						// is keyed on spec.packName (#1837).
+						Name: "test-pack",
 					},
 					Facades: []omniav1alpha1.FacadeConfig{{
 						Type: omniav1alpha1.FacadeTypeWebSocket,
@@ -436,6 +439,134 @@ var _ = Describe("PromptPack Controller", func() {
 			Expect(condition.Status).To(Equal(metav1.ConditionTrue))
 			Expect(condition.Reason).To(Equal("AgentsNotified"))
 			Expect(condition.Message).To(ContainSubstring("1 AgentRuntime"))
+		})
+	})
+
+	Context("When the PromptPack's object name is a hash distinct from spec.packName", func() {
+		// Phase 1 makes metadata.name a deterministic pp-<hash>, no longer
+		// equal to spec.packName. findReferencingAgentRuntimes must match
+		// AgentRuntimes by spec.packName; a ref that (incorrectly) points
+		// at the hashed object name must NOT match (#1837).
+		var (
+			hashedPack *omniav1alpha1.PromptPack
+			matchingAR *omniav1alpha1.AgentRuntime
+			oldStyleAR *omniav1alpha1.AgentRuntime
+			hashedCM   *corev1.ConfigMap
+		)
+
+		BeforeEach(func() {
+			By("creating the ConfigMap")
+			hashedCM = &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "hashed-prompts",
+					Namespace: promptPackNamespace,
+				},
+				Data: map[string]string{
+					"pack.json": validPackJSON,
+				},
+			}
+			Expect(k8sClient.Create(ctx, hashedCM)).To(Succeed())
+
+			By("creating a PromptPack whose object name is a hash, not the packName")
+			hashedPack = &omniav1alpha1.PromptPack{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "pp-9f8e7d6c5b4a",
+					Namespace: promptPackNamespace,
+				},
+				Spec: omniav1alpha1.PromptPackSpec{
+					PackName: "hashed-pack",
+					Source: omniav1alpha1.PromptPackContentSource{
+						Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
+						ConfigMapRef: &corev1.LocalObjectReference{
+							Name: "hashed-prompts",
+						},
+					},
+					Version: "1.0.0",
+				},
+			}
+			Expect(k8sClient.Create(ctx, hashedPack)).To(Succeed())
+
+			By("creating an AgentRuntime that references the pack by packName")
+			matchingAR = &omniav1alpha1.AgentRuntime{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "matching-agent",
+					Namespace: promptPackNamespace,
+				},
+				Spec: omniav1alpha1.AgentRuntimeSpec{
+					PromptPackRef: omniav1alpha1.PromptPackRef{
+						Name: "hashed-pack",
+					},
+					Facades: []omniav1alpha1.FacadeConfig{{
+						Type: omniav1alpha1.FacadeTypeWebSocket,
+					}},
+					Providers: []omniav1alpha1.NamedProviderRef{
+						{Name: "default", ProviderRef: omniav1alpha1.ProviderRef{Name: "test-provider"}},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, matchingAR)).To(Succeed())
+
+			By("creating an AgentRuntime that references the pack's object name (old, no-longer-valid behavior)")
+			oldStyleAR = &omniav1alpha1.AgentRuntime{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "old-style-agent",
+					Namespace: promptPackNamespace,
+				},
+				Spec: omniav1alpha1.AgentRuntimeSpec{
+					PromptPackRef: omniav1alpha1.PromptPackRef{
+						Name: "pp-9f8e7d6c5b4a",
+					},
+					Facades: []omniav1alpha1.FacadeConfig{{
+						Type: omniav1alpha1.FacadeTypeWebSocket,
+					}},
+					Providers: []omniav1alpha1.NamedProviderRef{
+						{Name: "default", ProviderRef: omniav1alpha1.ProviderRef{Name: "test-provider"}},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, oldStyleAR)).To(Succeed())
+		})
+
+		AfterEach(func() {
+			By("cleaning up resources")
+			for _, name := range []string{"matching-agent", "old-style-agent"} {
+				ar := &omniav1alpha1.AgentRuntime{}
+				err := k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: promptPackNamespace}, ar)
+				if err == nil {
+					Expect(k8sClient.Delete(ctx, ar)).To(Succeed())
+				}
+			}
+
+			pp := &omniav1alpha1.PromptPack{}
+			err := k8sClient.Get(ctx, types.NamespacedName{
+				Name:      "pp-9f8e7d6c5b4a",
+				Namespace: promptPackNamespace,
+			}, pp)
+			if err == nil {
+				Expect(k8sClient.Delete(ctx, pp)).To(Succeed())
+			}
+
+			cm := &corev1.ConfigMap{}
+			err = k8sClient.Get(ctx, types.NamespacedName{
+				Name:      "hashed-prompts",
+				Namespace: promptPackNamespace,
+			}, cm)
+			if err == nil {
+				Expect(k8sClient.Delete(ctx, cm)).To(Succeed())
+			}
+		})
+
+		It("matches AgentRuntimes by spec.packName, not the PromptPack's object name", func() {
+			reconciler := &PromptPackReconciler{
+				Client:          k8sClient,
+				Scheme:          k8sClient.Scheme(),
+				SchemaValidator: schema.NewSchemaValidatorWithOptions(logr.Discard(), nil, time.Hour),
+			}
+
+			referencing, err := reconciler.findReferencingAgentRuntimes(ctx, hashedPack)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(referencing).To(HaveLen(1))
+			Expect(referencing[0].Name).To(Equal("matching-agent"))
 		})
 	})
 

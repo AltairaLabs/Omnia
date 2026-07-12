@@ -93,20 +93,24 @@ func (r *AgentRuntimeReconciler) filterAgentRuntimesByProvider(list *omniav1alph
 // scoped by index. Otherwise falls back to list-all + local filter (envtest).
 func (r *AgentRuntimeReconciler) findAgentRuntimesForPromptPack(ctx context.Context, obj client.Object) []reconcile.Request {
 	promptPack := obj.(*omniav1alpha1.PromptPack)
-	log := logf.FromContext(ctx).WithValues("promptpack", promptPack.Name, "namespace", promptPack.Namespace)
+	log := logf.FromContext(ctx).WithValues(
+		"promptpack", promptPack.Name, "packName", promptPack.Spec.PackName, "namespace", promptPack.Namespace)
 
+	// Key on the logical packName, not the PromptPack's object name: since
+	// #1837 metadata.name is a deterministic pp-<hash> distinct from
+	// spec.packName, and AgentRuntimes reference the packName.
 	// Try indexed list first; fall back to unscoped list if no index is registered.
 	var agentRuntimes omniav1alpha1.AgentRuntimeList
 	if err := r.List(ctx, &agentRuntimes,
 		client.InNamespace(promptPack.Namespace),
-		client.MatchingFields{IndexAgentRuntimeByPromptPack: promptPack.Name},
+		client.MatchingFields{IndexAgentRuntimeByPromptPack: promptPack.Spec.PackName},
 	); err != nil {
 		// MatchingFields fails with a raw client (no index). Fall back to list+filter.
 		if err2 := r.List(ctx, &agentRuntimes, client.InNamespace(promptPack.Namespace)); err2 != nil {
 			log.Error(err2, "failed to list AgentRuntimes for PromptPack watch")
 			return nil
 		}
-		return r.filterAgentRuntimesByPromptPack(&agentRuntimes, promptPack.Name, log)
+		return r.filterAgentRuntimesByPromptPack(&agentRuntimes, promptPack.Spec.PackName, log)
 	}
 
 	requests := make([]reconcile.Request, 0, len(agentRuntimes.Items))
@@ -178,8 +182,9 @@ func (r *AgentRuntimeReconciler) filterAgentRuntimesByToolRegistry(list *omniav1
 	return requests
 }
 
-// filterAgentRuntimesByPromptPack filters a list of AgentRuntimes to those that
-// reference the given PromptPack name.
+// filterAgentRuntimesByPromptPack filters a list of AgentRuntimes to those
+// that reference the given PromptPack packName (name is promptPack.Spec.PackName,
+// not a PromptPack object's metadata.name).
 func (r *AgentRuntimeReconciler) filterAgentRuntimesByPromptPack(list *omniav1alpha1.AgentRuntimeList, name string, log logr.Logger) []reconcile.Request {
 	var requests []reconcile.Request
 	for _, ar := range list.Items {

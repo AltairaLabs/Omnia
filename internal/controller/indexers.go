@@ -31,7 +31,11 @@ const (
 	// Values are "namespace/name" of referenced Provider resources.
 	IndexAgentRuntimeByProvider = ".spec.providerRefs"
 
-	// IndexAgentRuntimeByPromptPack indexes AgentRuntimes by the PromptPack name they reference.
+	// IndexAgentRuntimeByPromptPack indexes AgentRuntimes by the logical
+	// PromptPack packName they reference (ar.Spec.PromptPackRef.Name).
+	// Since #1837, a PromptPack's metadata.name is a deterministic pp-<hash>
+	// distinct from its spec.packName, so the reverse lookup (watch_handlers.go)
+	// MUST query this index with promptPack.Spec.PackName, never promptPack.Name.
 	IndexAgentRuntimeByPromptPack = ".spec.promptPackRef"
 
 	// IndexAgentRuntimeByToolRegistry indexes AgentRuntimes by the ToolRegistry they reference.
@@ -95,7 +99,11 @@ func providerRefKey(ref omniav1alpha1.ProviderRef, defaultNS string) string {
 	return ns + "/" + ref.Name
 }
 
-// extractPromptPackRef returns the PromptPack name referenced by an AgentRuntime.
+// extractPromptPackRef returns the logical PromptPack packName referenced by
+// an AgentRuntime (ar.Spec.PromptPackRef.Name). This is already the logical
+// name, not a PromptPack object's metadata.name — no change needed here for
+// #1837, the reverse query side (watch_handlers.go) is what must key on
+// promptPack.Spec.PackName instead of promptPack.Name.
 func extractPromptPackRef(obj client.Object) []string {
 	ar := obj.(*omniav1alpha1.AgentRuntime)
 	if ar.Spec.PromptPackRef.Name == "" {

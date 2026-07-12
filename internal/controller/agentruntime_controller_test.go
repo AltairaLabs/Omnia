@@ -4223,7 +4223,10 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 					_ = k8sClient.Delete(ctx, promptPack)
 				}()
 
-				// Create an AgentRuntime that references the PromptPack
+				// Create an AgentRuntime that references the PromptPack by its
+				// logical packName ("test-pack"), NOT the PromptPack object's
+				// metadata.name ("watched-pack") — proves the watch handler
+				// keys on spec.packName (#1837).
 				ar := &omniav1alpha1.AgentRuntime{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      "test-ar-with-pack",
@@ -4231,7 +4234,7 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 					},
 					Spec: omniav1alpha1.AgentRuntimeSpec{
 						PromptPackRef: omniav1alpha1.PromptPackRef{
-							Name: "watched-pack",
+							Name: "test-pack",
 						},
 						Facades: []omniav1alpha1.FacadeConfig{{
 							Type: omniav1alpha1.FacadeTypeWebSocket,
@@ -4243,10 +4246,33 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 					_ = k8sClient.Delete(ctx, ar)
 				}()
 
+				// Create a second AgentRuntime that (incorrectly) references
+				// the PromptPack's object name — the pre-#1837 behavior —
+				// which must NOT match anymore.
+				oldStyleAR := &omniav1alpha1.AgentRuntime{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-ar-old-style",
+						Namespace: "watch-pack-test",
+					},
+					Spec: omniav1alpha1.AgentRuntimeSpec{
+						PromptPackRef: omniav1alpha1.PromptPackRef{
+							Name: "watched-pack",
+						},
+						Facades: []omniav1alpha1.FacadeConfig{{
+							Type: omniav1alpha1.FacadeTypeWebSocket,
+						}},
+					},
+				}
+				Expect(k8sClient.Create(ctx, oldStyleAR)).To(Succeed())
+				defer func() {
+					_ = k8sClient.Delete(ctx, oldStyleAR)
+				}()
+
 				// Call findAgentRuntimesForPromptPack
 				requests := reconciler.findAgentRuntimesForPromptPack(ctx, promptPack)
 
-				// Should return a request for the AgentRuntime
+				// Should return a request only for the AgentRuntime referencing
+				// the packName, not the one referencing the object name.
 				Expect(requests).To(HaveLen(1))
 				Expect(requests[0].Name).To(Equal("test-ar-with-pack"))
 				Expect(requests[0].Namespace).To(Equal("watch-pack-test"))

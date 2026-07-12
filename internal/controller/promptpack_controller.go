@@ -333,14 +333,19 @@ func (r *PromptPackReconciler) findReferencingAgentRuntimes(ctx context.Context,
 
 	var referencingRuntimes []omniav1alpha1.AgentRuntime
 	for _, ar := range agentRuntimeList.Items {
-		if ar.Spec.PromptPackRef.Name == promptPack.Name {
-			// Check version matching if specified
+		// AgentRuntimes reference a PromptPack by its logical packName
+		// (spec.packName), NOT its object name (metadata.name is now a
+		// deterministic pp-<hash>, per Phase 1 of #1837).
+		if ar.Spec.PromptPackRef.Name == promptPack.Spec.PackName {
+			// Exact version pin: only the matching version-object references it.
+			// Otherwise (track set, or neither set -> defaults to the stable
+			// channel): the AR tracks the packName as a whole, so every
+			// version-object of that packName "references" it.
 			if ar.Spec.PromptPackRef.Version != nil {
 				if *ar.Spec.PromptPackRef.Version == promptPack.Spec.Version {
 					referencingRuntimes = append(referencingRuntimes, ar)
 				}
 			} else {
-				// No specific version, matches by name only
 				referencingRuntimes = append(referencingRuntimes, ar)
 			}
 		}
