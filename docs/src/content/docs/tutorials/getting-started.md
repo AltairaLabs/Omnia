@@ -125,6 +125,7 @@ metadata:
   name: assistant-pack
   namespace: default
 spec:
+  packName: assistant-pack
   version: "1.0.0"
   source:
     type: configmap

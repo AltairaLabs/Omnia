@@ -329,6 +329,7 @@ metadata:
   name: demo-prompts
   namespace: dev-agents
 spec:
+  packName: demo-prompts
   source:
     type: configmap
     configMapRef:

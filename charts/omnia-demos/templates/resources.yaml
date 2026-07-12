@@ -140,6 +140,7 @@ metadata:
     app.kubernetes.io/name: omnia-demos
     app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
 spec:
+  packName: demo-vision-prompts
   source:
     type: configmap
     configMapRef:
@@ -333,6 +334,7 @@ metadata:
     app.kubernetes.io/name: omnia-audio-demo
     app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
 spec:
+  packName: demo-audio-prompts
   source:
     type: configmap
     configMapRef:
@@ -675,6 +677,7 @@ metadata:
     app.kubernetes.io/name: omnia-tools-demo
     app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
 spec:
+  packName: demo-tools-prompts
   source:
     type: configmap
     configMapRef:

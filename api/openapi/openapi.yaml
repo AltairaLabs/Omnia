@@ -1115,13 +1115,16 @@ components:
     PromptPackSpec:
       type: object
       properties:
+        packName:
+          type: string
+          description: Logical pack identity; immutable. Versions of a pack share a packName.
         version:
           type: string
           description: Semantic version of the prompt pack (e.g., "2.1.0")
         source:
-          $ref: '#/components/schemas/PromptPackSource'
+          $ref: '#/components/schemas/PromptPackContentSource'
 
-    PromptPackSource:
+    PromptPackContentSource:
       type: object
       properties:
         type:

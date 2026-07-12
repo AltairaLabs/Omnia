@@ -635,11 +635,13 @@ export interface components {
             status?: components["schemas"]["PromptPackStatus"];
         };
         PromptPackSpec: {
+            /** @description Logical pack identity; immutable. Versions of a pack share a packName. */
+            packName?: string;
             /** @description Semantic version of the prompt pack (e.g., "2.1.0") */
             version?: string;
-            source?: components["schemas"]["PromptPackSource"];
+            source?: components["schemas"]["PromptPackContentSource"];
         };
-        PromptPackSource: {
+        PromptPackContentSource: {
             /** @enum {string} */
             type?: "configmap" | "git";
             configMapRef?: components["schemas"]["LocalObjectReference"];

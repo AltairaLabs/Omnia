@@ -62,6 +62,7 @@ metadata:
     app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
     app.kubernetes.io/component: memory-consolidation
 spec:
+  packName: memory-demo-summarizer
   source:
     type: configmap
     configMapRef:

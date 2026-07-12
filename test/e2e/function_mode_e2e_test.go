@@ -148,6 +148,7 @@ metadata:
   name: test-fn-prompts
   namespace: test-functions
 spec:
+  packName: test-fn-prompts
   source:
     type: configmap
     configMapRef:

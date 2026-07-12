@@ -79,6 +79,7 @@ kind: PromptPack
 metadata:
   name: my-pack
 spec:
+  packName: my-pack
   version: "1.0.0"
   source:
     type: configmap

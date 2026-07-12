@@ -30,7 +30,8 @@ func minimalPromptPack() *omniav1alpha1.PromptPack {
 	return &omniav1alpha1.PromptPack{
 		ObjectMeta: metav1.ObjectMeta{Name: "support-pack", Namespace: "tenant-a"},
 		Spec: omniav1alpha1.PromptPackSpec{
-			Source: omniav1alpha1.PromptPackSource{
+			PackName: "test-pack",
+			Source: omniav1alpha1.PromptPackContentSource{
 				Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
 				ConfigMapRef: &corev1.LocalObjectReference{
 					Name: "support-pack-cm",

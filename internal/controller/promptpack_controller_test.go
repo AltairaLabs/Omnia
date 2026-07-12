@@ -88,7 +88,8 @@ var _ = Describe("PromptPack Controller", func() {
 					Namespace: promptPackNamespace,
 				},
 				Spec: omniav1alpha1.PromptPackSpec{
-					Source: omniav1alpha1.PromptPackSource{
+					PackName: "test-pack",
+					Source: omniav1alpha1.PromptPackContentSource{
 						Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
 						ConfigMapRef: &corev1.LocalObjectReference{
 							Name: configMapName,
@@ -168,7 +169,8 @@ var _ = Describe("PromptPack Controller", func() {
 					Namespace: promptPackNamespace,
 				},
 				Spec: omniav1alpha1.PromptPackSpec{
-					Source: omniav1alpha1.PromptPackSource{
+					PackName: "test-pack",
+					Source: omniav1alpha1.PromptPackContentSource{
 						Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
 						ConfigMapRef: &corev1.LocalObjectReference{
 							Name: "nonexistent-configmap",
@@ -251,7 +253,8 @@ var _ = Describe("PromptPack Controller", func() {
 					Namespace: promptPackNamespace,
 				},
 				Spec: omniav1alpha1.PromptPackSpec{
-					Source: omniav1alpha1.PromptPackSource{
+					PackName: "test-pack",
+					Source: omniav1alpha1.PromptPackContentSource{
 						Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
 						ConfigMapRef: &corev1.LocalObjectReference{
 							Name: "canary-prompts",
@@ -341,7 +344,8 @@ var _ = Describe("PromptPack Controller", func() {
 					Namespace: promptPackNamespace,
 				},
 				Spec: omniav1alpha1.PromptPackSpec{
-					Source: omniav1alpha1.PromptPackSource{
+					PackName: "test-pack",
+					Source: omniav1alpha1.PromptPackContentSource{
 						Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
 						ConfigMapRef: &corev1.LocalObjectReference{
 							Name: "ref-prompts",
@@ -464,7 +468,8 @@ var _ = Describe("PromptPack Controller", func() {
 					Namespace: promptPackNamespace,
 				},
 				Spec: omniav1alpha1.PromptPackSpec{
-					Source: omniav1alpha1.PromptPackSource{
+					PackName: "test-pack",
+					Source: omniav1alpha1.PromptPackContentSource{
 						Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
 						// ConfigMapRef is nil
 					},
@@ -539,7 +544,8 @@ var _ = Describe("PromptPack Controller", func() {
 					Namespace: promptPackNamespace,
 				},
 				Spec: omniav1alpha1.PromptPackSpec{
-					Source: omniav1alpha1.PromptPackSource{
+					PackName: "test-pack",
+					Source: omniav1alpha1.PromptPackContentSource{
 						Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
 						ConfigMapRef: &corev1.LocalObjectReference{
 							Name: "full-canary-prompts",
@@ -625,7 +631,8 @@ var _ = Describe("PromptPack Controller", func() {
 					Namespace: promptPackNamespace,
 				},
 				Spec: omniav1alpha1.PromptPackSpec{
-					Source: omniav1alpha1.PromptPackSource{
+					PackName: "test-pack",
+					Source: omniav1alpha1.PromptPackContentSource{
 						Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
 						ConfigMapRef: &corev1.LocalObjectReference{
 							Name: "empty-configmap",
@@ -712,7 +719,8 @@ var _ = Describe("PromptPack Controller", func() {
 					Namespace: promptPackNamespace,
 				},
 				Spec: omniav1alpha1.PromptPackSpec{
-					Source: omniav1alpha1.PromptPackSource{
+					PackName: "test-pack",
+					Source: omniav1alpha1.PromptPackContentSource{
 						Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
 						ConfigMapRef: &corev1.LocalObjectReference{
 							Name: "watch-test-configmap",
@@ -786,7 +794,8 @@ var _ = Describe("PromptPack Controller", func() {
 					Namespace: promptPackNamespace,
 				},
 				Spec: omniav1alpha1.PromptPackSpec{
-					Source: omniav1alpha1.PromptPackSource{
+					PackName: "test-pack",
+					Source: omniav1alpha1.PromptPackContentSource{
 						Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
 						ConfigMapRef: &corev1.LocalObjectReference{
 							Name: "no-packjson-configmap",
@@ -874,7 +883,8 @@ var _ = Describe("PromptPack Controller", func() {
 					Namespace: promptPackNamespace,
 				},
 				Spec: omniav1alpha1.PromptPackSpec{
-					Source: omniav1alpha1.PromptPackSource{
+					PackName: "test-pack",
+					Source: omniav1alpha1.PromptPackContentSource{
 						Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
 						ConfigMapRef: &corev1.LocalObjectReference{
 							Name: "invalid-schema-configmap",
@@ -938,6 +948,100 @@ var _ = Describe("PromptPack Controller", func() {
 			Expect(schemaCondition).NotTo(BeNil())
 			Expect(schemaCondition.Status).To(Equal(metav1.ConditionFalse))
 			Expect(schemaCondition.Reason).To(Equal("SchemaValidationFailed"))
+		})
+	})
+
+	Describe("PromptPack identity and immutability", func() {
+		const immutabilityNamespace = "default"
+
+		newPack := func(name, packName, version string) *omniav1alpha1.PromptPack {
+			return &omniav1alpha1.PromptPack{
+				ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: immutabilityNamespace},
+				Spec: omniav1alpha1.PromptPackSpec{
+					PackName: packName,
+					Version:  version,
+					Source: omniav1alpha1.PromptPackContentSource{
+						Type:         omniav1alpha1.PromptPackSourceTypeConfigMap,
+						ConfigMapRef: &corev1.LocalObjectReference{Name: "cm"},
+					},
+				},
+			}
+		}
+
+		cleanup := func(name string) {
+			p := &omniav1alpha1.PromptPack{}
+			err := k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: immutabilityNamespace}, p)
+			if err == nil {
+				Expect(k8sClient.Delete(ctx, p)).To(Succeed())
+			}
+		}
+
+		It("requires spec.packName", func() {
+			p := newPack("pp-req", "", "1.0.0")
+			Expect(k8sClient.Create(ctx, p)).ToNot(Succeed())
+		})
+
+		It("rejects mutating spec.version after create", func() {
+			p := newPack("pp-imm-ver", "mypack", "1.0.0")
+			defer cleanup(p.Name)
+			Expect(k8sClient.Create(ctx, p)).To(Succeed())
+			p.Spec.Version = "1.0.1"
+			Expect(k8sClient.Update(ctx, p)).ToNot(Succeed())
+		})
+
+		It("rejects mutating spec.packName after create", func() {
+			p := newPack("pp-imm-name", "mypack", "2.0.0")
+			defer cleanup(p.Name)
+			Expect(k8sClient.Create(ctx, p)).To(Succeed())
+			p.Spec.PackName = "other"
+			Expect(k8sClient.Update(ctx, p)).ToNot(Succeed())
+		})
+
+		It("rejects mutating spec.source after create (whole-spec freeze)", func() {
+			p := newPack("pp-imm-src", "mypack", "1.2.3")
+			defer cleanup(p.Name)
+			Expect(k8sClient.Create(ctx, p)).To(Succeed())
+			p.Spec.Source.ConfigMapRef.Name = "cm2"
+			Expect(k8sClient.Update(ctx, p)).ToNot(Succeed())
+		})
+
+		It("sets the promptpack label from spec.packName", func() {
+			configMap := &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{Name: "pp-label-cm", Namespace: immutabilityNamespace},
+				Data:       map[string]string{"pack.json": validPackJSON},
+			}
+			Expect(k8sClient.Create(ctx, configMap)).To(Succeed())
+			defer func() {
+				Expect(k8sClient.Delete(ctx, configMap)).To(Succeed())
+			}()
+
+			p := &omniav1alpha1.PromptPack{
+				ObjectMeta: metav1.ObjectMeta{Name: "pp-label", Namespace: immutabilityNamespace},
+				Spec: omniav1alpha1.PromptPackSpec{
+					PackName: "mypack",
+					Version:  "1.0.0",
+					Source: omniav1alpha1.PromptPackContentSource{
+						Type:         omniav1alpha1.PromptPackSourceTypeConfigMap,
+						ConfigMapRef: &corev1.LocalObjectReference{Name: "pp-label-cm"},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, p)).To(Succeed())
+			defer cleanup(p.Name)
+
+			reconciler := &PromptPackReconciler{
+				Client:          k8sClient,
+				Scheme:          k8sClient.Scheme(),
+				SchemaValidator: schema.NewSchemaValidatorWithOptions(logr.Discard(), nil, time.Hour),
+			}
+			_, err := reconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: types.NamespacedName{Name: p.Name, Namespace: immutabilityNamespace},
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			got := &omniav1alpha1.PromptPack{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: p.Name, Namespace: immutabilityNamespace}, got)).To(Succeed())
+			Expect(got.Labels).To(HaveKeyWithValue("omnia.altairalabs.ai/promptpack", "mypack"))
 		})
 	})
 })

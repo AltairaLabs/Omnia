@@ -304,6 +304,7 @@ metadata:
   name: %s
   namespace: %s
 spec:
+  packName: %s
   source:
     type: configmap
     configMapRef:
@@ -313,7 +314,7 @@ spec:
     - source: %s
   skillsConfig:
     maxActive: 2
-`, skillPromptPack, agentsNamespace, skillConfigMap, skillSourceName)
+`, skillPromptPack, agentsNamespace, skillPromptPack, skillConfigMap, skillSourceName)
 		cmd = exec.Command("kubectl", "apply", "-f", "-")
 		cmd.Stdin = strings.NewReader(ppYAML)
 		_, err = utils.Run(cmd)
@@ -470,6 +471,7 @@ metadata:
   name: %s
   namespace: %s
 spec:
+  packName: %s
   source:
     type: configmap
     configMapRef:
@@ -477,7 +479,7 @@ spec:
   version: "1.0.0"
   skills:
     - source: %s
-`, packName, agentsNamespace, packCMName, ssName)
+`, packName, agentsNamespace, packName, packCMName, ssName)
 		cmd = exec.Command("kubectl", "apply", "-f", "-")
 		cmd.Stdin = strings.NewReader(ppYAML)
 		_, err = utils.Run(cmd)
@@ -683,6 +685,7 @@ metadata:
   name: missing-skill-pack
   namespace: %s
 spec:
+  packName: missing-skill-pack
   source:
     type: configmap
     configMapRef:

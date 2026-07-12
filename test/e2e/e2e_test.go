@@ -804,6 +804,7 @@ metadata:
   name: test-prompts
   namespace: test-agents
 spec:
+  packName: test-prompts
   source:
     type: configmap
     configMapRef:
@@ -2310,6 +2311,7 @@ metadata:
   name: client-tool-prompts
   namespace: test-agents
 spec:
+  packName: client-tool-prompts
   version: "1.0.0"
   source:
     type: configmap

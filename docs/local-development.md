@@ -329,6 +329,7 @@ kind: PromptPack
 metadata:
   name: demo-assistant
 spec:
+  packName: demo-assistant
   source:
     type: configmap
     configMapRef:

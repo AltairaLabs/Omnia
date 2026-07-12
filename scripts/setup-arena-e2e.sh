@@ -480,6 +480,7 @@ metadata:
   name: eval-e2e-pack
   namespace: dev-agents
 spec:
+  packName: eval-e2e-pack
   source:
     type: configmap
     configMapRef:

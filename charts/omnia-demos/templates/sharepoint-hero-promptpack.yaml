@@ -8,6 +8,7 @@ metadata:
   labels:
     app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
 spec:
+  packName: rag-hero-pack
   source:
     type: configmap
     configMapRef:
@@ -73,6 +74,7 @@ metadata:
   labels:
     app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
 spec:
+  packName: rag-hero-pack
   source:
     type: configmap
     configMapRef:

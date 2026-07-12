@@ -185,6 +185,7 @@ metadata:
     app.kubernetes.io/name: omnia-composition-demo
     app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
 spec:
+  packName: demo-composition
   source:
     type: configmap
     configMapRef:

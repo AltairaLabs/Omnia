@@ -35,6 +35,7 @@ const INITIAL_FORM: FormState = {
 
 function buildSpec(form: FormState): PromptPackSpec {
   return {
+    packName: form.name,
     source: {
       type: "configmap",
       configMapRef: { name: form.configMapName },

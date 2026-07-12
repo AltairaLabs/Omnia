@@ -42,7 +42,7 @@ func configmapPack(name, cmName string) *omniav1alpha1.PromptPack {
 	return &omniav1alpha1.PromptPack{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "ns"},
 		Spec: omniav1alpha1.PromptPackSpec{
-			Source: omniav1alpha1.PromptPackSource{
+			Source: omniav1alpha1.PromptPackContentSource{
 				Type:         omniav1alpha1.PromptPackSourceTypeConfigMap,
 				ConfigMapRef: &corev1.LocalObjectReference{Name: cmName},
 			},
@@ -85,7 +85,7 @@ func TestLoad_MissingConfigMapRef(t *testing.T) {
 	pp := &omniav1alpha1.PromptPack{
 		ObjectMeta: metav1.ObjectMeta{Name: "p", Namespace: "ns"},
 		Spec: omniav1alpha1.PromptPackSpec{
-			Source: omniav1alpha1.PromptPackSource{Type: omniav1alpha1.PromptPackSourceTypeConfigMap},
+			Source: omniav1alpha1.PromptPackContentSource{Type: omniav1alpha1.PromptPackSourceTypeConfigMap},
 		},
 	}
 	c := fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(pp).Build()
@@ -110,7 +110,7 @@ func TestLoad_UnsupportedSourceType(t *testing.T) {
 	pp := &omniav1alpha1.PromptPack{
 		ObjectMeta: metav1.ObjectMeta{Name: "p", Namespace: "ns"},
 		Spec: omniav1alpha1.PromptPackSpec{
-			Source: omniav1alpha1.PromptPackSource{Type: "git"},
+			Source: omniav1alpha1.PromptPackContentSource{Type: "git"},
 		},
 	}
 	c := fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(pp).Build()

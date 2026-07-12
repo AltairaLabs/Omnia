@@ -55,7 +55,8 @@ var _ = Describe("AgentRuntime Rollout Auto-Rollback (envtest)", func() {
 		return &omniav1alpha1.PromptPack{
 			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
 			Spec: omniav1alpha1.PromptPackSpec{
-				Source: omniav1alpha1.PromptPackSource{
+				PackName: "test-pack",
+				Source: omniav1alpha1.PromptPackContentSource{
 					Type:         omniav1alpha1.PromptPackSourceTypeConfigMap,
 					ConfigMapRef: &corev1.LocalObjectReference{Name: name + "-config"},
 				},

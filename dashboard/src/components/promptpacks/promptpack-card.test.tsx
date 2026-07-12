@@ -28,6 +28,7 @@ const mockPromptPack: PromptPack = {
     uid: "pack-001",
   },
   spec: {
+    packName: "test-pack",
     source: { type: "configmap", configMapRef: { name: "test-pack-configmap" } },
     version: "1.0.0",
   },
@@ -72,6 +73,7 @@ describe("PromptPackCard", () => {
     const pack: PromptPack = {
       ...mockPromptPack,
       spec: {
+        packName: "test-pack",
         source: { type: "configmap" },
         version: "1.0.0",
       },

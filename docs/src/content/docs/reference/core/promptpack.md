@@ -21,6 +21,16 @@ kind: PromptPack
 
 ## Spec fields
 
+### `packName`
+
+Logical pack identity. Required, and **immutable after create** — versions of the
+same pack share a `packName`.
+
+```yaml
+spec:
+  packName: customer-service
+```
+
 ### `source`
 
 Source of the compiled PromptPack content.
@@ -156,6 +166,7 @@ metadata:
   name: customer-service
   namespace: agents
 spec:
+  packName: customer-service
   version: "2.0.0"
   source:
     type: configmap

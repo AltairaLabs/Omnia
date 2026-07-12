@@ -4,6 +4,9 @@
 import type { ObjectMeta } from "../common";
 
 export interface PromptPackSpec {
+  /** packName is the logical pack identity. Versions of the same pack share a
+   * packName; each version is a distinct, immutable object. */
+  packName: string;
   /** skills selects content from SkillSources for the agents using this
    * pack. All entries go through a SkillSource — the CRD layer does not
    * accept inline skill content. */

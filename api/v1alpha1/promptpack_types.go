@@ -30,8 +30,9 @@ const (
 	PromptPackSourceTypeConfigMap PromptPackSourceType = "configmap"
 )
 
-// PromptPackSource defines the source configuration for prompts
-type PromptPackSource struct {
+// PromptPackContentSource defines the source configuration for prompts.
+// (Renamed from PromptPackSource to free that name for the PromptPackSource CRD.)
+type PromptPackContentSource struct {
 	// type specifies the type of source for the prompt configuration.
 	// Currently only "configmap" is supported.
 	// +kubebuilder:validation:Required
@@ -43,11 +44,19 @@ type PromptPackSource struct {
 	ConfigMapRef *corev1.LocalObjectReference `json:"configMapRef,omitempty"`
 }
 
-// PromptPackSpec defines the desired state of PromptPack
+// PromptPackSpec defines the desired state of PromptPack.
+// A published version is an immutable release: the whole spec is frozen after create.
+// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="a published PromptPack version is immutable; publish a new version instead"
 type PromptPackSpec struct {
+	// packName is the logical pack identity. Versions of the same pack share a
+	// packName; each version is a distinct, immutable object.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	PackName string `json:"packName"`
+
 	// source specifies where the prompt configuration is stored.
 	// +kubebuilder:validation:Required
-	Source PromptPackSource `json:"source"`
+	Source PromptPackContentSource `json:"source"`
 
 	// version specifies the semantic version of this prompt pack.
 	// Must follow semver format (e.g., "1.0.0", "2.1.0-beta.1").

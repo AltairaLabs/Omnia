@@ -31,6 +31,7 @@ metadata:
   annotations:
     omnia.altairalabs.ai/pack-role: consolidation-demo-rescope
 spec:
+  packName: demo-rescope
   source:
     type: configmap
     configMapRef:
