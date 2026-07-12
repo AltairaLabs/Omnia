@@ -23,6 +23,8 @@ import (
 	"os"
 	"strconv"
 	"time"
+
+	"github.com/altairalabs/omnia/internal/media"
 )
 
 // Environment variable names.
@@ -36,26 +38,31 @@ const (
 	EnvRuntimeAddress      = "OMNIA_RUNTIME_ADDRESS"
 	EnvPromptPackMountPath = "OMNIA_PROMPTPACK_PATH"
 	EnvHealthPort          = "OMNIA_HEALTH_PORT"
-	EnvMediaStorageType    = "OMNIA_MEDIA_STORAGE_TYPE"
-	EnvMediaStoragePath    = "OMNIA_MEDIA_STORAGE_PATH"
-	EnvMediaMaxFileSize    = "OMNIA_MEDIA_MAX_FILE_SIZE"
-	EnvMediaDefaultTTL     = "OMNIA_MEDIA_DEFAULT_TTL"
+	// The Env* / Default* media constants alias internal/media's shared
+	// OMNIA_MEDIA_* contract (internal/media/env.go) so the facade
+	// (cmd/agent) and runtime (cmd/runtime) binaries read the identical env
+	// vars when each builds a media.BuilderConfig for media.Build. See
+	// cmd/runtime/media.go for the runtime side of this contract.
+	EnvMediaStorageType = media.EnvStorageType
+	EnvMediaStoragePath = media.EnvStoragePath
+	EnvMediaMaxFileSize = media.EnvMaxFileSize
+	EnvMediaDefaultTTL  = media.EnvDefaultTTL
 
 	// S3 storage configuration.
-	EnvMediaS3Bucket   = "OMNIA_MEDIA_S3_BUCKET"
-	EnvMediaS3Region   = "OMNIA_MEDIA_S3_REGION"
-	EnvMediaS3Prefix   = "OMNIA_MEDIA_S3_PREFIX"
-	EnvMediaS3Endpoint = "OMNIA_MEDIA_S3_ENDPOINT" // Optional, for S3-compatible services (MinIO, LocalStack)
+	EnvMediaS3Bucket   = media.EnvS3Bucket
+	EnvMediaS3Region   = media.EnvS3Region
+	EnvMediaS3Prefix   = media.EnvS3Prefix
+	EnvMediaS3Endpoint = media.EnvS3Endpoint // Optional, for S3-compatible services (MinIO, LocalStack)
 
 	// GCS storage configuration.
-	EnvMediaGCSBucket = "OMNIA_MEDIA_GCS_BUCKET"
-	EnvMediaGCSPrefix = "OMNIA_MEDIA_GCS_PREFIX"
+	EnvMediaGCSBucket = media.EnvGCSBucket
+	EnvMediaGCSPrefix = media.EnvGCSPrefix
 
 	// Azure Blob Storage configuration.
-	EnvMediaAzureAccount   = "OMNIA_MEDIA_AZURE_ACCOUNT"
-	EnvMediaAzureContainer = "OMNIA_MEDIA_AZURE_CONTAINER"
-	EnvMediaAzurePrefix    = "OMNIA_MEDIA_AZURE_PREFIX"
-	EnvMediaAzureKey       = "OMNIA_MEDIA_AZURE_KEY" // Optional, for cross-cloud or explicit credentials
+	EnvMediaAzureAccount   = media.EnvAzureAccount
+	EnvMediaAzureContainer = media.EnvAzureContainer
+	EnvMediaAzurePrefix    = media.EnvAzurePrefix
+	EnvMediaAzureKey       = media.EnvAzureKey // Optional, for cross-cloud or explicit credentials
 
 	// Tracing configuration.
 	EnvTracingEnabled    = "OMNIA_TRACING_ENABLED"
@@ -93,13 +100,15 @@ const (
 	DefaultRuntimeAddress      = "localhost:9000"
 	DefaultSessionTTL          = 24 * time.Hour
 	DefaultPromptPackMountPath = "/etc/omnia/pack"
-	DefaultMediaStoragePath    = "/var/lib/omnia/media"
-	DefaultMediaMaxFileSize    = 100 * 1024 * 1024 // 100MB
-	DefaultMediaDefaultTTL     = 24 * time.Hour
-	DefaultA2ATaskTTL          = 1 * time.Hour
-	DefaultA2AConversationTTL  = 30 * time.Minute
-	DefaultA2APort             = 9999
-	DefaultMCPPort             = 9998
+	// DefaultMediaStoragePath / DefaultMediaMaxFileSize / DefaultMediaDefaultTTL
+	// alias internal/media's shared defaults (see EnvMediaStorageType above).
+	DefaultMediaStoragePath   = media.DefaultStoragePath
+	DefaultMediaMaxFileSize   = media.DefaultMaxFileSize
+	DefaultMediaDefaultTTL    = media.DefaultDefaultTTL
+	DefaultA2ATaskTTL         = 1 * time.Hour
+	DefaultA2AConversationTTL = 30 * time.Minute
+	DefaultA2APort            = 9999
+	DefaultMCPPort            = 9998
 
 	// Internal management-plane twin-listener port defaults. Independently
 	// declared (not derived from the external port by an offset). Used per

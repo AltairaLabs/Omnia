@@ -393,44 +393,70 @@ func dialRuntimeWithRetry(runtimeCfg facade.RuntimeClientConfig, log logr.Logger
 	return nil
 }
 
-// initMediaStorage creates the appropriate media storage backend based on configuration.
-// Returns the storage and an optional cleanup function.
+// initMediaStorage creates the appropriate media storage backend based on
+// configuration. Returns the storage and an optional cleanup function.
 //
-//nolint:gocognit // switch over storage backends
+// The actual per-backend construction (local/S3/GCS/Azure) lives in
+// media.Build — internal/media/builder.go — shared with cmd/runtime's
+// initMediaStorage (cmd/runtime/media.go) so the four backend-construction
+// paths aren't duplicated per binary. This function's job is just mapping
+// the facade's CRD/env-derived agent.Config onto a media.BuilderConfig and
+// keeping the facade's existing per-type Info logging.
 func initMediaStorage(cfg *agent.Config, log logr.Logger) (media.Storage, func()) {
-	ctx := context.Background()
-
-	switch cfg.MediaStorageType {
-	case agent.MediaStorageTypeNone:
+	if cfg.MediaStorageType == agent.MediaStorageTypeNone {
 		log.Info("media storage disabled")
 		return nil, nil
+	}
 
+	logMediaStorageInit(cfg, log)
+
+	bcfg := media.BuilderConfig{
+		Type:           media.BackendType(cfg.MediaStorageType),
+		DefaultTTL:     cfg.MediaDefaultTTL,
+		MaxFileSize:    cfg.MediaMaxFileSize,
+		UploadURLTTL:   15 * time.Minute,
+		DownloadURLTTL: 1 * time.Hour,
+		LocalPath:      cfg.MediaStoragePath,
+		LocalBaseURL:   fmt.Sprintf("http://localhost:%d", cfg.FacadePort),
+		S3Bucket:       cfg.MediaS3Bucket,
+		S3Region:       cfg.MediaS3Region,
+		S3Prefix:       cfg.MediaS3Prefix,
+		S3Endpoint:     cfg.MediaS3Endpoint,
+		GCSBucket:      cfg.MediaGCSBucket,
+		GCSPrefix:      cfg.MediaGCSPrefix,
+		AzureAccount:   cfg.MediaAzureAccount,
+		AzureContainer: cfg.MediaAzureContainer,
+		AzurePrefix:    cfg.MediaAzurePrefix,
+		AzureKey:       cfg.MediaAzureKey,
+	}
+
+	// cfg.MediaStorageType != None was already checked above, so media.Build
+	// here only ever returns (non-nil store, nil error) for a recognized
+	// backend or (nil store, non-nil error) for an unrecognized one — never
+	// (nil, nil).
+	store, err := media.Build(context.Background(), bcfg)
+	if err != nil {
+		log.Error(err, "failed to initialize media storage", "type", cfg.MediaStorageType)
+		return nil, nil
+	}
+
+	return store, func() {
+		if closeErr := store.Close(); closeErr != nil {
+			log.Error(closeErr, "error closing media storage")
+		}
+	}
+}
+
+// logMediaStorageInit emits the facade's pre-construction Info log for the
+// configured backend, preserving the per-type log fields the previous
+// inline-switch implementation had (bucket/region/account/etc.). An
+// unrecognized MediaStorageType is intentionally not logged here — media.Build
+// rejects it and initMediaStorage logs that failure once, so callers don't see
+// the "unknown type" condition reported twice.
+func logMediaStorageInit(cfg *agent.Config, log logr.Logger) {
+	switch cfg.MediaStorageType {
 	case agent.MediaStorageTypeLocal:
 		log.Info("using local filesystem media storage", "path", cfg.MediaStoragePath)
-
-		// Build base URL from the facade port
-		baseURL := fmt.Sprintf("http://localhost:%d", cfg.FacadePort)
-
-		storageCfg := media.LocalStorageConfig{
-			BasePath:     cfg.MediaStoragePath,
-			BaseURL:      baseURL,
-			DefaultTTL:   cfg.MediaDefaultTTL,
-			UploadURLTTL: 15 * time.Minute,
-			MaxFileSize:  cfg.MediaMaxFileSize,
-		}
-
-		storage, err := media.NewLocalStorage(storageCfg)
-		if err != nil {
-			log.Error(err, "failed to initialize local media storage")
-			return nil, nil
-		}
-
-		return storage, func() {
-			if err := storage.Close(); err != nil {
-				log.Error(err, "error closing media storage")
-			}
-		}
-
 	case agent.MediaStorageTypeS3:
 		log.Info("using S3 media storage",
 			"bucket", cfg.MediaS3Bucket,
@@ -438,90 +464,16 @@ func initMediaStorage(cfg *agent.Config, log logr.Logger) (media.Storage, func()
 			"prefix", cfg.MediaS3Prefix,
 			"endpoint", cfg.MediaS3Endpoint,
 		)
-
-		storageCfg := media.S3Config{
-			Bucket:         cfg.MediaS3Bucket,
-			Region:         cfg.MediaS3Region,
-			Prefix:         cfg.MediaS3Prefix,
-			Endpoint:       cfg.MediaS3Endpoint,
-			UsePathStyle:   cfg.MediaS3Endpoint != "", // Use path style for custom endpoints (MinIO)
-			UploadURLTTL:   15 * time.Minute,
-			DownloadURLTTL: 1 * time.Hour,
-			DefaultTTL:     cfg.MediaDefaultTTL,
-			MaxFileSize:    cfg.MediaMaxFileSize,
-		}
-
-		storage, err := media.NewS3Storage(ctx, storageCfg)
-		if err != nil {
-			log.Error(err, "failed to initialize S3 media storage")
-			return nil, nil
-		}
-
-		return storage, func() {
-			if err := storage.Close(); err != nil {
-				log.Error(err, "error closing S3 storage")
-			}
-		}
-
 	case agent.MediaStorageTypeGCS:
 		log.Info("using GCS media storage",
 			"bucket", cfg.MediaGCSBucket,
 			"prefix", cfg.MediaGCSPrefix,
 		)
-
-		storageCfg := media.GCSConfig{
-			Bucket:         cfg.MediaGCSBucket,
-			Prefix:         cfg.MediaGCSPrefix,
-			UploadURLTTL:   15 * time.Minute,
-			DownloadURLTTL: 1 * time.Hour,
-			DefaultTTL:     cfg.MediaDefaultTTL,
-			MaxFileSize:    cfg.MediaMaxFileSize,
-		}
-
-		storage, err := media.NewGCSStorage(ctx, storageCfg)
-		if err != nil {
-			log.Error(err, "failed to initialize GCS media storage")
-			return nil, nil
-		}
-
-		return storage, func() {
-			if err := storage.Close(); err != nil {
-				log.Error(err, "error closing GCS storage")
-			}
-		}
-
 	case agent.MediaStorageTypeAzure:
 		log.Info("using Azure Blob storage",
 			"account", cfg.MediaAzureAccount,
 			"container", cfg.MediaAzureContainer,
 			"prefix", cfg.MediaAzurePrefix,
 		)
-
-		storageCfg := media.AzureConfig{
-			AccountName:    cfg.MediaAzureAccount,
-			ContainerName:  cfg.MediaAzureContainer,
-			Prefix:         cfg.MediaAzurePrefix,
-			AccountKey:     cfg.MediaAzureKey, // Optional - uses DefaultAzureCredential if empty
-			UploadURLTTL:   15 * time.Minute,
-			DownloadURLTTL: 1 * time.Hour,
-			DefaultTTL:     cfg.MediaDefaultTTL,
-			MaxFileSize:    cfg.MediaMaxFileSize,
-		}
-
-		storage, err := media.NewAzureStorage(ctx, storageCfg)
-		if err != nil {
-			log.Error(err, "failed to initialize Azure media storage")
-			return nil, nil
-		}
-
-		return storage, func() {
-			if err := storage.Close(); err != nil {
-				log.Error(err, "error closing Azure storage")
-			}
-		}
-
-	default:
-		log.Info("unknown media storage type, disabling", "type", cfg.MediaStorageType)
-		return nil, nil
 	}
 }

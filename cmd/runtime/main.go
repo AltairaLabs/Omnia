@@ -263,6 +263,16 @@ func main() {
 		log.Info("session recording enabled", "sessionAPIURL", cfg.SessionAPIURL)
 	}
 
+	// Wire the media storage backend so storage_ref attachments resolve at
+	// provider-call time. See mediaStorageServerOpts (cmd/runtime/media.go)
+	// for why this reads OMNIA_MEDIA_* directly from the environment instead
+	// of going through cfg.
+	mediaOpts, mediaCleanup := mediaStorageServerOpts(log)
+	if mediaCleanup != nil {
+		defer mediaCleanup()
+	}
+	serverOpts = append(serverOpts, mediaOpts...)
+
 	// Wire memory store for cross-session memory via memory-api HTTP
 	if cfg.MemoryEnabled && cfg.MemoryAPIURL != "" {
 		memStore := memoryhttpclient.NewStore(cfg.MemoryAPIURL, log)

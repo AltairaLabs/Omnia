@@ -62,6 +62,16 @@ func (m *omniaMediaStore) RetrieveMedia(ctx context.Context, ref storage.Referen
 	}
 	encoded := base64.StdEncoding.EncodeToString(data)
 	mimeType := resp.Header.Get("Content-Type")
+	if mimeType == "" {
+		// Some backends/proxies don't set Content-Type on the presigned
+		// download response. Fall back to the MIME type recorded at upload
+		// time rather than handing the model an empty MIMEType. Best-effort:
+		// a GetMediaInfo failure here just leaves mimeType empty, same as
+		// before this fallback existed.
+		if info, infoErr := m.storage.GetMediaInfo(ctx, string(ref)); infoErr == nil && info != nil {
+			mimeType = info.MIMEType
+		}
+	}
 	return &types.MediaContent{Data: &encoded, MIMEType: mimeType}, nil
 }
 
