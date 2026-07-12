@@ -155,7 +155,20 @@ func (r *AgentRuntimeReconciler) buildFacadeEnvVars(
 		envVars = append(envVars, f.ExtraEnv...)
 	}
 
+	if mc := mediaStorageConfigOf(agentRuntime); mc != nil {
+		envVars = append(envVars, mediaStorageEnvVars(mc)...)
+	}
+
 	return envVars
+}
+
+// mediaStorageConfigOf returns the AgentRuntime's media storage config, or nil
+// when media (or media.storage) is not configured.
+func mediaStorageConfigOf(ar *omniav1alpha1.AgentRuntime) *omniav1alpha1.MediaStorageConfig {
+	if ar == nil || ar.Spec.Media == nil {
+		return nil
+	}
+	return ar.Spec.Media.Storage
 }
 
 // buildRuntimeEnvVars creates environment variables for the runtime container.
@@ -306,6 +319,25 @@ func (r *AgentRuntimeReconciler) buildRuntimeEnvVars(
 		envVars = append(envVars, agentRuntime.Spec.Runtime.ExtraEnv...)
 	}
 
+	envVars = append(envVars, runtimeMediaEnvVars(agentRuntime)...)
+
+	return envVars
+}
+
+// runtimeMediaEnvVars returns the runtime container's media-related env vars:
+// OMNIA_FACADE_PORT (the runtime's local media backend needs this to build
+// download URLs pointing at the co-located facade container — uses the same
+// resolved port as buildFacadeEnvVars's primaryFacadePort, not just the
+// DefaultFacadePort fallback, so a customised facade port stays in sync) plus
+// the OMNIA_MEDIA_STORAGE_* contract rendered from spec.media.storage.
+func runtimeMediaEnvVars(agentRuntime *omniav1alpha1.AgentRuntime) []corev1.EnvVar {
+	envVars := []corev1.EnvVar{{
+		Name:  "OMNIA_FACADE_PORT",
+		Value: fmt.Sprintf("%d", primaryFacadePort(agentRuntime)),
+	}}
+	if mc := mediaStorageConfigOf(agentRuntime); mc != nil {
+		envVars = append(envVars, mediaStorageEnvVars(mc)...)
+	}
 	return envVars
 }
 
