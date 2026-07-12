@@ -656,6 +656,13 @@ export const crdConstraints: Record<string, Record<string, FieldConstraint>> =
       "minLength": 1,
       "required": true
     },
+    "spec.promptPackRef.track": {
+      "type": "string",
+      "enum": [
+        "stable",
+        "prerelease"
+      ]
+    },
     "spec.promptPackRef.version": {
       "type": "string"
     },
@@ -705,6 +712,13 @@ export const crdConstraints: Record<string, Record<string, FieldConstraint>> =
       "type": "string",
       "minLength": 1,
       "required": true
+    },
+    "spec.rollout.candidate.promptPackRef.track": {
+      "type": "string",
+      "enum": [
+        "stable",
+        "prerelease"
+      ]
     },
     "spec.rollout.candidate.promptPackRef.version": {
       "type": "string"

@@ -704,3 +704,121 @@ func TestPromptPackRefDiffers_NilCandidateVersion(t *testing.T) {
 	c := &omniav1alpha1.CandidateOverrides{}
 	assert.False(t, promptPackRefDiffers(c, ar))
 }
+
+// --- promptPackRefDiffers: Track awareness (#1837) ---
+
+func TestPromptPackRefDiffers_TrackDiffers(t *testing.T) {
+	ar := newRolloutTestAR()
+	ar.Spec.PromptPackRef.Version = nil
+	ar.Spec.PromptPackRef.Track = ptr.To("stable")
+	c := &omniav1alpha1.CandidateOverrides{
+		PromptPackRef: &omniav1alpha1.PromptPackRef{Name: testStablePackName, Track: ptr.To("prerelease")},
+	}
+	assert.True(t, promptPackRefDiffers(c, ar),
+		"a candidate that changes only the Track must be detected as differing")
+}
+
+func TestPromptPackRefDiffers_SameTrack(t *testing.T) {
+	ar := newRolloutTestAR()
+	ar.Spec.PromptPackRef.Version = nil
+	ar.Spec.PromptPackRef.Track = ptr.To("stable")
+	c := &omniav1alpha1.CandidateOverrides{
+		PromptPackRef: &omniav1alpha1.PromptPackRef{Name: testStablePackName, Track: ptr.To("stable")},
+	}
+	assert.False(t, promptPackRefDiffers(c, ar))
+}
+
+// TestPromptPackRefDiffers_ExplicitStableEqualsUnsetTrack is the regression
+// for a spurious active rollout: an explicit `track: "stable"` on one side and
+// no track set at all on the other both resolve to the stable channel, so
+// they must compare equal rather than "stable" != "".
+func TestPromptPackRefDiffers_ExplicitStableEqualsUnsetTrack(t *testing.T) {
+	ar := newRolloutTestAR()
+	ar.Spec.PromptPackRef.Version = nil
+	ar.Spec.PromptPackRef.Track = nil
+	c := &omniav1alpha1.CandidateOverrides{
+		PromptPackRef: &omniav1alpha1.PromptPackRef{Name: testStablePackName, Track: ptr.To("stable")},
+	}
+	assert.False(t, promptPackRefDiffers(c, ar),
+		"explicit stable track vs unset track (both default to stable) must not differ")
+}
+
+// --- promptPackRefDiffers: semver-aware version comparison (#1837) ---
+
+func TestPromptPackRefDiffers_SemverEqualVersionsDoNotDiffer(t *testing.T) {
+	ar := newRolloutTestAR()
+	ar.Spec.PromptPackRef.Version = ptr.To("1.2.0")
+	c := &omniav1alpha1.CandidateOverrides{
+		PromptPackRef: &omniav1alpha1.PromptPackRef{Name: testStablePackName, Version: ptr.To("1.2.0")},
+	}
+	assert.False(t, promptPackRefDiffers(c, ar))
+}
+
+func TestPromptPackRefDiffers_SemverBuildMetadataInsensitive(t *testing.T) {
+	ar := newRolloutTestAR()
+	ar.Spec.PromptPackRef.Version = ptr.To("1.2.0+build.1")
+	c := &omniav1alpha1.CandidateOverrides{
+		PromptPackRef: &omniav1alpha1.PromptPackRef{Name: testStablePackName, Version: ptr.To("1.2.0+build.99")},
+	}
+	assert.False(t, promptPackRefDiffers(c, ar),
+		"semver build metadata must not affect equality")
+}
+
+func TestPromptPackRefDiffers_SemverDifferentVersionsDiffer(t *testing.T) {
+	ar := newRolloutTestAR()
+	ar.Spec.PromptPackRef.Version = ptr.To("1.2.0")
+	c := &omniav1alpha1.CandidateOverrides{
+		PromptPackRef: &omniav1alpha1.PromptPackRef{Name: testStablePackName, Version: ptr.To("1.3.0")},
+	}
+	assert.True(t, promptPackRefDiffers(c, ar))
+}
+
+// --- versionsEqual: v-prefix handling (#1837 fix pass) ---
+//
+// The PromptPack CRD's spec.version pattern allows an optional leading "v"
+// (^v?(\d+)\.(\d+)\.(\d+)...), so "v1.5.0" is a CRD-valid value equal to
+// "1.5.0". versionsEqual must treat them as equal rather than rejecting the
+// v-prefixed form outright (which previously forced a string-equality
+// fallback and false-positived promptPackRefDiffers / false-negatived
+// version-pin matches).
+
+func TestVersionsEqual_VPrefixEitherSide(t *testing.T) {
+	assert.True(t, versionsEqual("1.5.0", "v1.5.0"))
+	assert.True(t, versionsEqual("v2.0.0", "2.0.0"))
+}
+
+func TestVersionsEqual_IncompleteVPrefixDoesNotCoerce(t *testing.T) {
+	// "v1" must NOT coerce to "1.0.0" (that was channelMax's old lenient-parse
+	// bug); it should fail to parse and fall back to string inequality.
+	assert.False(t, versionsEqual("v1", "1.0.0"))
+}
+
+func TestPromptPackRefDiffers_UnparseableVersionFallsBackToStringEquality(t *testing.T) {
+	ar := newRolloutTestAR()
+	ar.Spec.PromptPackRef.Version = ptr.To("not-a-version")
+	c := &omniav1alpha1.CandidateOverrides{
+		PromptPackRef: &omniav1alpha1.PromptPackRef{Name: testStablePackName, Version: ptr.To("not-a-version")},
+	}
+	assert.False(t, promptPackRefDiffers(c, ar),
+		"identical unparseable version strings must still compare equal via string fallback")
+}
+
+// --- resolveRolloutCandidateVersion: Track fallback (#1837) ---
+
+func TestResolveRolloutCandidateVersion_FromCandidateTrack(t *testing.T) {
+	ar := newRolloutTestAR()
+	ar.Spec.Rollout = &omniav1alpha1.RolloutConfig{
+		Candidate: &omniav1alpha1.CandidateOverrides{
+			PromptPackRef: &omniav1alpha1.PromptPackRef{Name: testStablePackName, Track: ptr.To("prerelease")},
+		},
+	}
+	assert.Equal(t, "prerelease", resolveRolloutCandidateVersion(ar),
+		"a track-based candidate with no pinned version should report the track name")
+}
+
+func TestResolveRolloutCandidateVersion_SpecTrackFallback(t *testing.T) {
+	ar := newRolloutTestAR()
+	ar.Spec.PromptPackRef.Version = nil
+	ar.Spec.PromptPackRef.Track = ptr.To("stable")
+	assert.Equal(t, "stable", resolveRolloutCandidateVersion(ar))
+}

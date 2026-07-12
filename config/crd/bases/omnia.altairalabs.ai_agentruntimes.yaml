@@ -1833,13 +1833,26 @@ spec:
                     description: name is the name of the PromptPack resource.
                     minLength: 1
                     type: string
+                  track:
+                    description: |-
+                      track follows a release channel instead of pinning a version:
+                      "stable" selects the highest non-prerelease version; "prerelease" selects
+                      the highest version overall. Mutually exclusive with version.
+                    enum:
+                    - stable
+                    - prerelease
+                    type: string
                   version:
-                    description: version specifies a specific version of the PromptPack
-                      to use.
+                    description: version pins an exact PromptPack version. Mutually
+                      exclusive with track.
                     type: string
                 required:
                 - name
                 type: object
+                x-kubernetes-validations:
+                - message: promptPackRef.version and promptPackRef.track are mutually
+                    exclusive
+                  rule: '!(has(self.version) && has(self.track))'
               providers:
                 description: |-
                   providers is a list of named provider references.
@@ -1943,13 +1956,26 @@ spec:
                             description: name is the name of the PromptPack resource.
                             minLength: 1
                             type: string
+                          track:
+                            description: |-
+                              track follows a release channel instead of pinning a version:
+                              "stable" selects the highest non-prerelease version; "prerelease" selects
+                              the highest version overall. Mutually exclusive with version.
+                            enum:
+                            - stable
+                            - prerelease
+                            type: string
                           version:
-                            description: version specifies a specific version of the
-                              PromptPack to use.
+                            description: version pins an exact PromptPack version.
+                              Mutually exclusive with track.
                             type: string
                         required:
                         - name
                         type: object
+                        x-kubernetes-validations:
+                        - message: promptPackRef.version and promptPackRef.track are
+                            mutually exclusive
+                          rule: '!(has(self.version) && has(self.track))'
                       providerRefs:
                         description: |-
                           providerRefs overrides the provider list for the candidate.

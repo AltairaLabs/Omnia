@@ -37,7 +37,7 @@ type packIdentity struct {
 // packResolver loads raw pack.json bytes for a PromptPack. Satisfied by
 // *promptpack.Resolver; an interface so tests can stub it.
 type packResolver interface {
-	Load(ctx context.Context, namespace, name string) ([]byte, error)
+	Load(ctx context.Context, namespace, name, version string) ([]byte, error)
 }
 
 // PromptPackLoader loads and caches raw pack data. It resolves content through
@@ -76,7 +76,7 @@ func (l *PromptPackLoader) LoadEvals(
 		return cached, nil
 	}
 
-	raw, err := l.resolver.Load(ctx, namespace, packName)
+	raw, err := l.resolver.Load(ctx, namespace, packName, packVersion)
 	if err != nil {
 		return nil, err
 	}

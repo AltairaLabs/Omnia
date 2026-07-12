@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	stderrors "errors"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -152,7 +153,8 @@ var _ = Describe("AgentRuntime Controller", func() {
 				},
 				Spec: omniav1alpha1.AgentRuntimeSpec{
 					PromptPackRef: omniav1alpha1.PromptPackRef{
-						Name: "nonexistent-promptpack",
+						Name:  "nonexistent-promptpack",
+						Track: ptr.To("stable"),
 					},
 					Facades: []omniav1alpha1.FacadeConfig{{
 						Type: omniav1alpha1.FacadeTypeWebSocket,
@@ -173,6 +175,8 @@ var _ = Describe("AgentRuntime Controller", func() {
 			_, err = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: agentRuntimeKey})
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("PromptPack"))
+			Expect(stderrors.Is(err, errNoMatchingPromptPack)).To(BeTrue(),
+				"no PromptPack shares the label, so resolution must fail with errNoMatchingPromptPack: %v", err)
 
 			By("checking the status is set to Failed")
 			Eventually(func() omniav1alpha1.AgentRuntimePhase {
@@ -190,6 +194,7 @@ var _ = Describe("AgentRuntime Controller", func() {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      promptPackKey.Name,
 					Namespace: promptPackKey.Namespace,
+					Labels:    map[string]string{LabelPromptPackName: promptPackKey.Name},
 				},
 				Spec: omniav1alpha1.PromptPackSpec{
 					Version:  "1.0.0",
@@ -209,7 +214,8 @@ var _ = Describe("AgentRuntime Controller", func() {
 				},
 				Spec: omniav1alpha1.AgentRuntimeSpec{
 					PromptPackRef: omniav1alpha1.PromptPackRef{
-						Name: promptPackKey.Name,
+						Name:  promptPackKey.Name,
+						Track: ptr.To("stable"),
 					},
 					Facades: []omniav1alpha1.FacadeConfig{{
 						Type: omniav1alpha1.FacadeTypeWebSocket,
@@ -299,6 +305,7 @@ var _ = Describe("AgentRuntime Controller", func() {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      promptPackKey.Name,
 					Namespace: promptPackKey.Namespace,
+					Labels:    map[string]string{LabelPromptPackName: promptPackKey.Name},
 				},
 				Spec: omniav1alpha1.PromptPackSpec{
 					Version:  "1.0.0",
@@ -318,7 +325,8 @@ var _ = Describe("AgentRuntime Controller", func() {
 				},
 				Spec: omniav1alpha1.AgentRuntimeSpec{
 					PromptPackRef: omniav1alpha1.PromptPackRef{
-						Name: promptPackKey.Name,
+						Name:  promptPackKey.Name,
+						Track: ptr.To("stable"),
 					},
 					Facades: []omniav1alpha1.FacadeConfig{{
 						Type: omniav1alpha1.FacadeTypeWebSocket,
@@ -363,6 +371,7 @@ var _ = Describe("AgentRuntime Controller", func() {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      promptPackKey.Name,
 					Namespace: promptPackKey.Namespace,
+					Labels:    map[string]string{LabelPromptPackName: promptPackKey.Name},
 				},
 				Spec: omniav1alpha1.PromptPackSpec{
 					Version:  "1.0.0",
@@ -382,7 +391,8 @@ var _ = Describe("AgentRuntime Controller", func() {
 				},
 				Spec: omniav1alpha1.AgentRuntimeSpec{
 					PromptPackRef: omniav1alpha1.PromptPackRef{
-						Name: promptPackKey.Name,
+						Name:  promptPackKey.Name,
+						Track: ptr.To("stable"),
 					},
 					Facades: []omniav1alpha1.FacadeConfig{{
 						Type: omniav1alpha1.FacadeTypeWebSocket,
@@ -426,6 +436,7 @@ var _ = Describe("AgentRuntime Controller", func() {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      promptPackKey.Name,
 					Namespace: promptPackKey.Namespace,
+					Labels:    map[string]string{LabelPromptPackName: promptPackKey.Name},
 				},
 				Spec: omniav1alpha1.PromptPackSpec{
 					Version:  "1.0.0",
@@ -446,7 +457,8 @@ var _ = Describe("AgentRuntime Controller", func() {
 				},
 				Spec: omniav1alpha1.AgentRuntimeSpec{
 					PromptPackRef: omniav1alpha1.PromptPackRef{
-						Name: promptPackKey.Name,
+						Name:  promptPackKey.Name,
+						Track: ptr.To("stable"),
 					},
 					Facades: []omniav1alpha1.FacadeConfig{{
 						Type: omniav1alpha1.FacadeTypeWebSocket,
@@ -484,6 +496,7 @@ var _ = Describe("AgentRuntime Controller", func() {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      promptPackKey.Name,
 					Namespace: promptPackKey.Namespace,
+					Labels:    map[string]string{LabelPromptPackName: promptPackKey.Name},
 				},
 				Spec: omniav1alpha1.PromptPackSpec{
 					Version:  "1.0.0",
@@ -504,7 +517,8 @@ var _ = Describe("AgentRuntime Controller", func() {
 				},
 				Spec: omniav1alpha1.AgentRuntimeSpec{
 					PromptPackRef: omniav1alpha1.PromptPackRef{
-						Name: promptPackKey.Name,
+						Name:  promptPackKey.Name,
+						Track: ptr.To("stable"),
 					},
 					Facades: []omniav1alpha1.FacadeConfig{{
 						Type: omniav1alpha1.FacadeTypeWebSocket,
@@ -537,6 +551,7 @@ var _ = Describe("AgentRuntime Controller", func() {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      promptPackKey.Name,
 					Namespace: promptPackKey.Namespace,
+					Labels:    map[string]string{LabelPromptPackName: promptPackKey.Name},
 				},
 				Spec: omniav1alpha1.PromptPackSpec{
 					Version:  "2.1.0",
@@ -556,7 +571,8 @@ var _ = Describe("AgentRuntime Controller", func() {
 				},
 				Spec: omniav1alpha1.AgentRuntimeSpec{
 					PromptPackRef: omniav1alpha1.PromptPackRef{
-						Name: promptPackKey.Name,
+						Name:  promptPackKey.Name,
+						Track: ptr.To("stable"),
 					},
 					Facades: []omniav1alpha1.FacadeConfig{{
 						Type: omniav1alpha1.FacadeTypeWebSocket,
@@ -632,6 +648,7 @@ var _ = Describe("AgentRuntime Controller", func() {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      promptPackKey.Name,
 					Namespace: promptPackKey.Namespace,
+					Labels:    map[string]string{LabelPromptPackName: promptPackKey.Name},
 				},
 				Spec: omniav1alpha1.PromptPackSpec{
 					Version:  "1.0.0",
@@ -652,7 +669,8 @@ var _ = Describe("AgentRuntime Controller", func() {
 				},
 				Spec: omniav1alpha1.AgentRuntimeSpec{
 					PromptPackRef: omniav1alpha1.PromptPackRef{
-						Name: promptPackKey.Name,
+						Name:  promptPackKey.Name,
+						Track: ptr.To("stable"),
 					},
 					Facades: []omniav1alpha1.FacadeConfig{{
 						Type:    omniav1alpha1.FacadeTypeWebSocket,
@@ -704,6 +722,7 @@ var _ = Describe("AgentRuntime Controller", func() {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      promptPackKey.Name,
 					Namespace: promptPackKey.Namespace,
+					Labels:    map[string]string{LabelPromptPackName: promptPackKey.Name},
 				},
 				Spec: omniav1alpha1.PromptPackSpec{
 					Version:  "1.0.0",
@@ -723,7 +742,8 @@ var _ = Describe("AgentRuntime Controller", func() {
 				},
 				Spec: omniav1alpha1.AgentRuntimeSpec{
 					PromptPackRef: omniav1alpha1.PromptPackRef{
-						Name: promptPackKey.Name,
+						Name:  promptPackKey.Name,
+						Track: ptr.To("stable"),
 					},
 					Facades: []omniav1alpha1.FacadeConfig{{
 						Type: omniav1alpha1.FacadeTypeWebSocket,
@@ -777,6 +797,7 @@ var _ = Describe("AgentRuntime Controller", func() {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      promptPackKey.Name,
 					Namespace: promptPackKey.Namespace,
+					Labels:    map[string]string{LabelPromptPackName: promptPackKey.Name},
 				},
 				Spec: omniav1alpha1.PromptPackSpec{
 					Version:  "1.0.0",
@@ -796,7 +817,8 @@ var _ = Describe("AgentRuntime Controller", func() {
 				},
 				Spec: omniav1alpha1.AgentRuntimeSpec{
 					PromptPackRef: omniav1alpha1.PromptPackRef{
-						Name: promptPackKey.Name,
+						Name:  promptPackKey.Name,
+						Track: ptr.To("stable"),
 					},
 					Facades: []omniav1alpha1.FacadeConfig{{
 						Type: omniav1alpha1.FacadeTypeWebSocket,
@@ -859,6 +881,7 @@ var _ = Describe("AgentRuntime Controller", func() {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      promptPackKey.Name,
 					Namespace: promptPackKey.Namespace,
+					Labels:    map[string]string{LabelPromptPackName: promptPackKey.Name},
 				},
 				Spec: omniav1alpha1.PromptPackSpec{
 					Version:  "1.0.0",
@@ -884,7 +907,8 @@ var _ = Describe("AgentRuntime Controller", func() {
 				},
 				Spec: omniav1alpha1.AgentRuntimeSpec{
 					PromptPackRef: omniav1alpha1.PromptPackRef{
-						Name: promptPackKey.Name,
+						Name:  promptPackKey.Name,
+						Track: ptr.To("stable"),
 					},
 					Facades: []omniav1alpha1.FacadeConfig{{
 						Type: omniav1alpha1.FacadeTypeWebSocket,
@@ -929,6 +953,7 @@ var _ = Describe("AgentRuntime Controller", func() {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      promptPackKey.Name,
 					Namespace: promptPackKey.Namespace,
+					Labels:    map[string]string{LabelPromptPackName: promptPackKey.Name},
 				},
 				Spec: omniav1alpha1.PromptPackSpec{
 					Version:  "1.0.0",
@@ -959,7 +984,8 @@ var _ = Describe("AgentRuntime Controller", func() {
 				},
 				Spec: omniav1alpha1.AgentRuntimeSpec{
 					PromptPackRef: omniav1alpha1.PromptPackRef{
-						Name: promptPackKey.Name,
+						Name:  promptPackKey.Name,
+						Track: ptr.To("stable"),
 					},
 					Facades: []omniav1alpha1.FacadeConfig{{
 						Type:  omniav1alpha1.FacadeTypeWebSocket,
@@ -1009,6 +1035,7 @@ var _ = Describe("AgentRuntime Controller", func() {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      promptPackKey.Name,
 					Namespace: promptPackKey.Namespace,
+					Labels:    map[string]string{LabelPromptPackName: promptPackKey.Name},
 				},
 				Spec: omniav1alpha1.PromptPackSpec{
 					Version:  "1.0.0",
@@ -1038,7 +1065,8 @@ var _ = Describe("AgentRuntime Controller", func() {
 				},
 				Spec: omniav1alpha1.AgentRuntimeSpec{
 					PromptPackRef: omniav1alpha1.PromptPackRef{
-						Name: promptPackKey.Name,
+						Name:  promptPackKey.Name,
+						Track: ptr.To("stable"),
 					},
 					Facades: []omniav1alpha1.FacadeConfig{{
 						Type:  omniav1alpha1.FacadeTypeWebSocket,
@@ -1085,6 +1113,7 @@ var _ = Describe("AgentRuntime Controller", func() {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      promptPackKey.Name,
 					Namespace: promptPackKey.Namespace,
+					Labels:    map[string]string{LabelPromptPackName: promptPackKey.Name},
 				},
 				Spec: omniav1alpha1.PromptPackSpec{
 					Version:  "1.0.0",
@@ -1104,7 +1133,8 @@ var _ = Describe("AgentRuntime Controller", func() {
 				},
 				Spec: omniav1alpha1.AgentRuntimeSpec{
 					PromptPackRef: omniav1alpha1.PromptPackRef{
-						Name: promptPackKey.Name,
+						Name:  promptPackKey.Name,
+						Track: ptr.To("stable"),
 					},
 					Facades: []omniav1alpha1.FacadeConfig{{
 						Type: omniav1alpha1.FacadeTypeWebSocket,
@@ -1147,6 +1177,7 @@ var _ = Describe("AgentRuntime Controller", func() {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      promptPackKey.Name,
 					Namespace: promptPackKey.Namespace,
+					Labels:    map[string]string{LabelPromptPackName: promptPackKey.Name},
 				},
 				Spec: omniav1alpha1.PromptPackSpec{
 					Version:  "1.0.0",
@@ -1198,7 +1229,8 @@ var _ = Describe("AgentRuntime Controller", func() {
 				},
 				Spec: omniav1alpha1.AgentRuntimeSpec{
 					PromptPackRef: omniav1alpha1.PromptPackRef{
-						Name: promptPackKey.Name,
+						Name:  promptPackKey.Name,
+						Track: ptr.To("stable"),
 					},
 					Facades: []omniav1alpha1.FacadeConfig{{
 						Type: omniav1alpha1.FacadeTypeWebSocket,
@@ -1258,6 +1290,7 @@ var _ = Describe("AgentRuntime Controller", func() {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      promptPackKey.Name,
 					Namespace: promptPackKey.Namespace,
+					Labels:    map[string]string{LabelPromptPackName: promptPackKey.Name},
 				},
 				Spec: omniav1alpha1.PromptPackSpec{
 					Version:  "1.0.0",
@@ -1277,7 +1310,8 @@ var _ = Describe("AgentRuntime Controller", func() {
 				},
 				Spec: omniav1alpha1.AgentRuntimeSpec{
 					PromptPackRef: omniav1alpha1.PromptPackRef{
-						Name: promptPackKey.Name,
+						Name:  promptPackKey.Name,
+						Track: ptr.To("stable"),
 					},
 					Facades: []omniav1alpha1.FacadeConfig{{
 						Type: omniav1alpha1.FacadeTypeWebSocket,
@@ -1312,6 +1346,7 @@ var _ = Describe("AgentRuntime Controller", func() {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      promptPackKey.Name,
 					Namespace: promptPackKey.Namespace,
+					Labels:    map[string]string{LabelPromptPackName: promptPackKey.Name},
 				},
 				Spec: omniav1alpha1.PromptPackSpec{
 					Version:  "1.0.0",
@@ -1332,7 +1367,8 @@ var _ = Describe("AgentRuntime Controller", func() {
 				},
 				Spec: omniav1alpha1.AgentRuntimeSpec{
 					PromptPackRef: omniav1alpha1.PromptPackRef{
-						Name: promptPackKey.Name,
+						Name:  promptPackKey.Name,
+						Track: ptr.To("stable"),
 					},
 					Facades: []omniav1alpha1.FacadeConfig{{
 						Type: omniav1alpha1.FacadeTypeWebSocket,
@@ -1380,6 +1416,7 @@ var _ = Describe("AgentRuntime Controller", func() {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      promptPackKey.Name,
 					Namespace: promptPackKey.Namespace,
+					Labels:    map[string]string{LabelPromptPackName: promptPackKey.Name},
 				},
 				Spec: omniav1alpha1.PromptPackSpec{
 					Version:  "1.0.0",
@@ -1402,7 +1439,8 @@ var _ = Describe("AgentRuntime Controller", func() {
 				},
 				Spec: omniav1alpha1.AgentRuntimeSpec{
 					PromptPackRef: omniav1alpha1.PromptPackRef{
-						Name: promptPackKey.Name,
+						Name:  promptPackKey.Name,
+						Track: ptr.To("stable"),
 					},
 					Facades: []omniav1alpha1.FacadeConfig{{
 						Type: omniav1alpha1.FacadeTypeWebSocket,
@@ -1460,6 +1498,7 @@ var _ = Describe("AgentRuntime Controller", func() {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      promptPackKey.Name,
 					Namespace: promptPackKey.Namespace,
+					Labels:    map[string]string{LabelPromptPackName: promptPackKey.Name},
 				},
 				Spec: omniav1alpha1.PromptPackSpec{
 					Version:  "1.0.0",
@@ -1480,7 +1519,8 @@ var _ = Describe("AgentRuntime Controller", func() {
 				},
 				Spec: omniav1alpha1.AgentRuntimeSpec{
 					PromptPackRef: omniav1alpha1.PromptPackRef{
-						Name: promptPackKey.Name,
+						Name:  promptPackKey.Name,
+						Track: ptr.To("stable"),
 					},
 					Facades: []omniav1alpha1.FacadeConfig{{
 						Type: omniav1alpha1.FacadeTypeWebSocket,
@@ -1516,6 +1556,7 @@ var _ = Describe("AgentRuntime Controller", func() {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      promptPackKey.Name,
 					Namespace: promptPackKey.Namespace,
+					Labels:    map[string]string{LabelPromptPackName: promptPackKey.Name},
 				},
 				Spec: omniav1alpha1.PromptPackSpec{
 					Version:  "1.0.0",
@@ -1541,7 +1582,8 @@ var _ = Describe("AgentRuntime Controller", func() {
 				},
 				Spec: omniav1alpha1.AgentRuntimeSpec{
 					PromptPackRef: omniav1alpha1.PromptPackRef{
-						Name: promptPackKey.Name,
+						Name:  promptPackKey.Name,
+						Track: ptr.To("stable"),
 					},
 					Facades: []omniav1alpha1.FacadeConfig{{
 						Type: omniav1alpha1.FacadeTypeWebSocket,
@@ -1595,6 +1637,7 @@ var _ = Describe("AgentRuntime Controller", func() {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      promptPackKey.Name,
 					Namespace: promptPackKey.Namespace,
+					Labels:    map[string]string{LabelPromptPackName: promptPackKey.Name},
 				},
 				Spec: omniav1alpha1.PromptPackSpec{
 					Version:  "1.0.0",
@@ -1614,7 +1657,8 @@ var _ = Describe("AgentRuntime Controller", func() {
 				},
 				Spec: omniav1alpha1.AgentRuntimeSpec{
 					PromptPackRef: omniav1alpha1.PromptPackRef{
-						Name: promptPackKey.Name,
+						Name:  promptPackKey.Name,
+						Track: ptr.To("stable"),
 					},
 					Facades: []omniav1alpha1.FacadeConfig{{
 						Type: omniav1alpha1.FacadeTypeWebSocket,
@@ -1658,6 +1702,7 @@ var _ = Describe("AgentRuntime Controller", func() {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      promptPackKey.Name,
 					Namespace: promptPackKey.Namespace,
+					Labels:    map[string]string{LabelPromptPackName: promptPackKey.Name},
 				},
 				Spec: omniav1alpha1.PromptPackSpec{
 					Version:  "1.0.0",
@@ -1677,7 +1722,8 @@ var _ = Describe("AgentRuntime Controller", func() {
 				},
 				Spec: omniav1alpha1.AgentRuntimeSpec{
 					PromptPackRef: omniav1alpha1.PromptPackRef{
-						Name: promptPackKey.Name,
+						Name:  promptPackKey.Name,
+						Track: ptr.To("stable"),
 					},
 					Facades: []omniav1alpha1.FacadeConfig{{
 						Type: omniav1alpha1.FacadeTypeWebSocket,
@@ -1729,6 +1775,7 @@ var _ = Describe("AgentRuntime Controller", func() {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      promptPackKey.Name,
 					Namespace: promptPackKey.Namespace,
+					Labels:    map[string]string{LabelPromptPackName: promptPackKey.Name},
 				},
 				Spec: omniav1alpha1.PromptPackSpec{
 					Version:  "1.0.0",
@@ -1748,7 +1795,8 @@ var _ = Describe("AgentRuntime Controller", func() {
 				},
 				Spec: omniav1alpha1.AgentRuntimeSpec{
 					PromptPackRef: omniav1alpha1.PromptPackRef{
-						Name: promptPackKey.Name,
+						Name:  promptPackKey.Name,
+						Track: ptr.To("stable"),
 					},
 					Facades: []omniav1alpha1.FacadeConfig{{
 						Type: omniav1alpha1.FacadeTypeWebSocket,
@@ -1778,6 +1826,7 @@ var _ = Describe("AgentRuntime Controller", func() {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      promptPackKey.Name,
 					Namespace: promptPackKey.Namespace,
+					Labels:    map[string]string{LabelPromptPackName: promptPackKey.Name},
 				},
 				Spec: omniav1alpha1.PromptPackSpec{
 					Version:  "1.0.0",
@@ -1802,7 +1851,8 @@ var _ = Describe("AgentRuntime Controller", func() {
 				},
 				Spec: omniav1alpha1.AgentRuntimeSpec{
 					PromptPackRef: omniav1alpha1.PromptPackRef{
-						Name: promptPackKey.Name,
+						Name:  promptPackKey.Name,
+						Track: ptr.To("stable"),
 					},
 					Facades: []omniav1alpha1.FacadeConfig{{
 						Type: omniav1alpha1.FacadeTypeWebSocket,
@@ -1855,6 +1905,7 @@ var _ = Describe("AgentRuntime Controller", func() {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      promptPackKey.Name,
 					Namespace: promptPackKey.Namespace,
+					Labels:    map[string]string{LabelPromptPackName: promptPackKey.Name},
 				},
 				Spec: omniav1alpha1.PromptPackSpec{
 					Version:  "1.0.0",
@@ -1874,7 +1925,8 @@ var _ = Describe("AgentRuntime Controller", func() {
 				},
 				Spec: omniav1alpha1.AgentRuntimeSpec{
 					PromptPackRef: omniav1alpha1.PromptPackRef{
-						Name: promptPackKey.Name,
+						Name:  promptPackKey.Name,
+						Track: ptr.To("stable"),
 					},
 					Facades: []omniav1alpha1.FacadeConfig{{
 						Type: omniav1alpha1.FacadeTypeWebSocket,
@@ -1920,6 +1972,7 @@ var _ = Describe("AgentRuntime Controller", func() {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      promptPackKey.Name,
 					Namespace: promptPackKey.Namespace,
+					Labels:    map[string]string{LabelPromptPackName: promptPackKey.Name},
 				},
 				Spec: omniav1alpha1.PromptPackSpec{
 					Version:  "1.0.0",
@@ -1940,7 +1993,8 @@ var _ = Describe("AgentRuntime Controller", func() {
 				},
 				Spec: omniav1alpha1.AgentRuntimeSpec{
 					PromptPackRef: omniav1alpha1.PromptPackRef{
-						Name: promptPackKey.Name,
+						Name:  promptPackKey.Name,
+						Track: ptr.To("stable"),
 					},
 					Facades: []omniav1alpha1.FacadeConfig{{
 						Type: omniav1alpha1.FacadeTypeWebSocket,
@@ -1990,6 +2044,7 @@ var _ = Describe("AgentRuntime Controller", func() {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      promptPackKey.Name,
 					Namespace: promptPackKey.Namespace,
+					Labels:    map[string]string{LabelPromptPackName: promptPackKey.Name},
 				},
 				Spec: omniav1alpha1.PromptPackSpec{
 					Version:  "1.0.0",
@@ -2009,7 +2064,8 @@ var _ = Describe("AgentRuntime Controller", func() {
 				},
 				Spec: omniav1alpha1.AgentRuntimeSpec{
 					PromptPackRef: omniav1alpha1.PromptPackRef{
-						Name: promptPackKey.Name,
+						Name:  promptPackKey.Name,
+						Track: ptr.To("stable"),
 					},
 					Facades: []omniav1alpha1.FacadeConfig{{
 						Type: omniav1alpha1.FacadeTypeWebSocket,
@@ -2056,6 +2112,7 @@ var _ = Describe("AgentRuntime Controller", func() {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      promptPackKey.Name,
 					Namespace: promptPackKey.Namespace,
+					Labels:    map[string]string{LabelPromptPackName: promptPackKey.Name},
 				},
 				Spec: omniav1alpha1.PromptPackSpec{
 					Version:  "1.0.0",
@@ -2075,7 +2132,8 @@ var _ = Describe("AgentRuntime Controller", func() {
 				},
 				Spec: omniav1alpha1.AgentRuntimeSpec{
 					PromptPackRef: omniav1alpha1.PromptPackRef{
-						Name: promptPackKey.Name,
+						Name:  promptPackKey.Name,
+						Track: ptr.To("stable"),
 					},
 					Facades: []omniav1alpha1.FacadeConfig{{
 						Type: omniav1alpha1.FacadeTypeWebSocket,
@@ -2116,6 +2174,7 @@ var _ = Describe("AgentRuntime Controller", func() {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      promptPackKey.Name,
 					Namespace: promptPackKey.Namespace,
+					Labels:    map[string]string{LabelPromptPackName: promptPackKey.Name},
 				},
 				Spec: omniav1alpha1.PromptPackSpec{
 					Version:  "1.0.0",
@@ -2137,7 +2196,8 @@ var _ = Describe("AgentRuntime Controller", func() {
 				},
 				Spec: omniav1alpha1.AgentRuntimeSpec{
 					PromptPackRef: omniav1alpha1.PromptPackRef{
-						Name: promptPackKey.Name,
+						Name:  promptPackKey.Name,
+						Track: ptr.To("stable"),
 					},
 					Facades: []omniav1alpha1.FacadeConfig{{
 						Type: omniav1alpha1.FacadeTypeWebSocket,
@@ -2196,6 +2256,7 @@ var _ = Describe("AgentRuntime Controller", func() {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      promptPackKey.Name,
 					Namespace: promptPackKey.Namespace,
+					Labels:    map[string]string{LabelPromptPackName: promptPackKey.Name},
 				},
 				Spec: omniav1alpha1.PromptPackSpec{
 					Version:  "1.0.0",
@@ -2215,7 +2276,8 @@ var _ = Describe("AgentRuntime Controller", func() {
 				},
 				Spec: omniav1alpha1.AgentRuntimeSpec{
 					PromptPackRef: omniav1alpha1.PromptPackRef{
-						Name: promptPackKey.Name,
+						Name:  promptPackKey.Name,
+						Track: ptr.To("stable"),
 					},
 					Facades: []omniav1alpha1.FacadeConfig{{
 						Type: omniav1alpha1.FacadeTypeWebSocket,
@@ -2264,6 +2326,7 @@ var _ = Describe("AgentRuntime Controller", func() {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      promptPackKey.Name,
 					Namespace: promptPackKey.Namespace,
+					Labels:    map[string]string{LabelPromptPackName: promptPackKey.Name},
 				},
 				Spec: omniav1alpha1.PromptPackSpec{
 					Version:  "1.0.0",
@@ -2283,7 +2346,8 @@ var _ = Describe("AgentRuntime Controller", func() {
 				},
 				Spec: omniav1alpha1.AgentRuntimeSpec{
 					PromptPackRef: omniav1alpha1.PromptPackRef{
-						Name: promptPackKey.Name,
+						Name:  promptPackKey.Name,
+						Track: ptr.To("stable"),
 					},
 					Facades: []omniav1alpha1.FacadeConfig{{
 						Type: omniav1alpha1.FacadeTypeA2A,
@@ -2321,6 +2385,7 @@ var _ = Describe("AgentRuntime Controller", func() {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      promptPackKey.Name,
 					Namespace: promptPackKey.Namespace,
+					Labels:    map[string]string{LabelPromptPackName: promptPackKey.Name},
 				},
 				Spec: omniav1alpha1.PromptPackSpec{
 					Version:  "1.0.0",
@@ -2340,7 +2405,8 @@ var _ = Describe("AgentRuntime Controller", func() {
 				},
 				Spec: omniav1alpha1.AgentRuntimeSpec{
 					PromptPackRef: omniav1alpha1.PromptPackRef{
-						Name: promptPackKey.Name,
+						Name:  promptPackKey.Name,
+						Track: ptr.To("stable"),
 					},
 					Facades: []omniav1alpha1.FacadeConfig{
 						{Type: omniav1alpha1.FacadeTypeWebSocket},
@@ -2391,6 +2457,7 @@ var _ = Describe("AgentRuntime Controller", func() {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      promptPackKey.Name,
 					Namespace: promptPackKey.Namespace,
+					Labels:    map[string]string{LabelPromptPackName: promptPackKey.Name},
 				},
 				Spec: omniav1alpha1.PromptPackSpec{
 					Version:  "1.0.0",
@@ -2413,7 +2480,8 @@ var _ = Describe("AgentRuntime Controller", func() {
 				},
 				Spec: omniav1alpha1.AgentRuntimeSpec{
 					PromptPackRef: omniav1alpha1.PromptPackRef{
-						Name: promptPackKey.Name,
+						Name:  promptPackKey.Name,
+						Track: ptr.To("stable"),
 					},
 					Facades: []omniav1alpha1.FacadeConfig{{
 						Type: omniav1alpha1.FacadeTypeWebSocket,
@@ -3614,7 +3682,7 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 				},
 			}
 
-			envVars := reconciler.buildRuntimeEnvVars(agentRuntime, nil)
+			envVars := reconciler.buildRuntimeEnvVars(agentRuntime, nil, nil)
 
 			// Find the mock provider env var
 			var found bool
@@ -3640,7 +3708,7 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 				},
 			}
 
-			envVars := reconciler.buildRuntimeEnvVars(agentRuntime, nil)
+			envVars := reconciler.buildRuntimeEnvVars(agentRuntime, nil, nil)
 
 			// Ensure mock provider env var is NOT set
 			for _, env := range envVars {
@@ -3661,7 +3729,7 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 				},
 			}
 
-			envVars := reconciler.buildRuntimeEnvVars(agentRuntime, nil)
+			envVars := reconciler.buildRuntimeEnvVars(agentRuntime, nil, nil)
 
 			// Verify OMNIA_AGENT_NAME uses Downward API
 			var agentNameEnv *corev1.EnvVar
@@ -3692,7 +3760,7 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 				},
 			}
 
-			envVars := reconciler.buildRuntimeEnvVars(agentRuntime, nil)
+			envVars := reconciler.buildRuntimeEnvVars(agentRuntime, nil, nil)
 
 			// Ensure mock provider env var is NOT set
 			for _, env := range envVars {
@@ -4155,7 +4223,10 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 					_ = k8sClient.Delete(ctx, promptPack)
 				}()
 
-				// Create an AgentRuntime that references the PromptPack
+				// Create an AgentRuntime that references the PromptPack by its
+				// logical packName ("test-pack"), NOT the PromptPack object's
+				// metadata.name ("watched-pack") — proves the watch handler
+				// keys on spec.packName (#1837).
 				ar := &omniav1alpha1.AgentRuntime{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      "test-ar-with-pack",
@@ -4163,7 +4234,7 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 					},
 					Spec: omniav1alpha1.AgentRuntimeSpec{
 						PromptPackRef: omniav1alpha1.PromptPackRef{
-							Name: "watched-pack",
+							Name: "test-pack",
 						},
 						Facades: []omniav1alpha1.FacadeConfig{{
 							Type: omniav1alpha1.FacadeTypeWebSocket,
@@ -4175,10 +4246,33 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 					_ = k8sClient.Delete(ctx, ar)
 				}()
 
+				// Create a second AgentRuntime that (incorrectly) references
+				// the PromptPack's object name — the pre-#1837 behavior —
+				// which must NOT match anymore.
+				oldStyleAR := &omniav1alpha1.AgentRuntime{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-ar-old-style",
+						Namespace: "watch-pack-test",
+					},
+					Spec: omniav1alpha1.AgentRuntimeSpec{
+						PromptPackRef: omniav1alpha1.PromptPackRef{
+							Name: "watched-pack",
+						},
+						Facades: []omniav1alpha1.FacadeConfig{{
+							Type: omniav1alpha1.FacadeTypeWebSocket,
+						}},
+					},
+				}
+				Expect(k8sClient.Create(ctx, oldStyleAR)).To(Succeed())
+				defer func() {
+					_ = k8sClient.Delete(ctx, oldStyleAR)
+				}()
+
 				// Call findAgentRuntimesForPromptPack
 				requests := reconciler.findAgentRuntimesForPromptPack(ctx, promptPack)
 
-				// Should return a request for the AgentRuntime
+				// Should return a request only for the AgentRuntime referencing
+				// the packName, not the one referencing the object name.
 				Expect(requests).To(HaveLen(1))
 				Expect(requests[0].Name).To(Equal("test-ar-with-pack"))
 				Expect(requests[0].Namespace).To(Equal("watch-pack-test"))
@@ -4419,6 +4513,83 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 				}
 				Expect(k8sClient.Create(contextCtx, ar)).To(Succeed())
 				defer func() { _ = k8sClient.Delete(contextCtx, ar) }()
+			})
+		})
+
+		Context("promptPackRef version/track validation (API server enforcement)", func() {
+			var pprCtx context.Context
+
+			BeforeEach(func() {
+				pprCtx = context.Background()
+			})
+
+			It("rejects a promptPackRef with both version and track set", func() {
+				ar := &omniav1alpha1.AgentRuntime{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "promptpackref-version-and-track",
+						Namespace: "default",
+					},
+					Spec: omniav1alpha1.AgentRuntimeSpec{
+						PromptPackRef: omniav1alpha1.PromptPackRef{
+							Name:    "dummy",
+							Version: ptr.To("1.0.0"),
+							Track:   ptr.To("stable"),
+						},
+						Facades: []omniav1alpha1.FacadeConfig{{Type: omniav1alpha1.FacadeTypeWebSocket}},
+					},
+				}
+				Expect(k8sClient.Create(pprCtx, ar)).To(MatchError(ContainSubstring("mutually exclusive")))
+			})
+
+			It("accepts a promptPackRef with only version set", func() {
+				ar := &omniav1alpha1.AgentRuntime{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "promptpackref-version-only",
+						Namespace: "default",
+					},
+					Spec: omniav1alpha1.AgentRuntimeSpec{
+						PromptPackRef: omniav1alpha1.PromptPackRef{
+							Name:    "dummy",
+							Version: ptr.To("1.0.0"),
+						},
+						Facades: []omniav1alpha1.FacadeConfig{{Type: omniav1alpha1.FacadeTypeWebSocket}},
+					},
+				}
+				Expect(k8sClient.Create(pprCtx, ar)).To(Succeed())
+				defer func() { _ = k8sClient.Delete(pprCtx, ar) }()
+			})
+
+			It("accepts a promptPackRef with only track set", func() {
+				ar := &omniav1alpha1.AgentRuntime{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "promptpackref-track-only",
+						Namespace: "default",
+					},
+					Spec: omniav1alpha1.AgentRuntimeSpec{
+						PromptPackRef: omniav1alpha1.PromptPackRef{
+							Name:  "dummy",
+							Track: ptr.To("stable"),
+						},
+						Facades: []omniav1alpha1.FacadeConfig{{Type: omniav1alpha1.FacadeTypeWebSocket}},
+					},
+				}
+				Expect(k8sClient.Create(pprCtx, ar)).To(Succeed())
+				defer func() { _ = k8sClient.Delete(pprCtx, ar) }()
+			})
+
+			It("accepts a promptPackRef with neither version nor track set", func() {
+				ar := &omniav1alpha1.AgentRuntime{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "promptpackref-neither",
+						Namespace: "default",
+					},
+					Spec: omniav1alpha1.AgentRuntimeSpec{
+						PromptPackRef: omniav1alpha1.PromptPackRef{Name: "dummy"},
+						Facades:       []omniav1alpha1.FacadeConfig{{Type: omniav1alpha1.FacadeTypeWebSocket}},
+					},
+				}
+				Expect(k8sClient.Create(pprCtx, ar)).To(Succeed())
+				defer func() { _ = k8sClient.Delete(pprCtx, ar) }()
 			})
 		})
 	})

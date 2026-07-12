@@ -26,6 +26,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
@@ -85,6 +86,7 @@ var _ = Describe("Eval Worker Reconciliation", func() {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      promptPackKey.Name,
 					Namespace: promptPackKey.Namespace,
+					Labels:    map[string]string{LabelPromptPackName: promptPackKey.Name},
 				},
 				Spec: omniav1alpha1.PromptPackSpec{
 					Version:  "1.0.0",
@@ -318,7 +320,8 @@ func newTestAgentRuntime(
 		},
 		Spec: omniav1alpha1.AgentRuntimeSpec{
 			PromptPackRef: omniav1alpha1.PromptPackRef{
-				Name: promptPackName,
+				Name:  promptPackName,
+				Track: ptr.To("stable"),
 			},
 			Facades: []omniav1alpha1.FacadeConfig{{
 				Type: omniav1alpha1.FacadeTypeWebSocket,

@@ -39,6 +39,30 @@ import (
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 )
 
+// newCandidatePromptPackObject returns a real, labeled PromptPack matching
+// the candidate override used throughout this file (testStablePackName,
+// "v2"). resolvePromptPack now always resolves the candidate independently
+// via a label+version List — even when reconcileCandidateDeployment /
+// reconcileRollout is called directly against a fake client that never ran
+// the PromptPack controller — so every fake client exercising the candidate
+// path needs this object registered.
+func newCandidatePromptPackObject() *omniav1alpha1.PromptPack {
+	return &omniav1alpha1.PromptPack{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "support-pack-v2",
+			Namespace: "default",
+			Labels:    map[string]string{LabelPromptPackName: testStablePackName},
+		},
+		Spec: omniav1alpha1.PromptPackSpec{
+			PackName: testStablePackName,
+			Version:  "v2",
+			Source: omniav1alpha1.PromptPackContentSource{
+				Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
+			},
+		},
+	}
+}
+
 func TestReconcileRollout_Active_CreatesCandidateDeployment(t *testing.T) {
 	scheme := newTestScheme(t)
 	require.NoError(t, appsv1.AddToScheme(scheme))
@@ -60,6 +84,7 @@ func TestReconcileRollout_Active_CreatesCandidateDeployment(t *testing.T) {
 
 	fakeClient := fake.NewClientBuilder().
 		WithScheme(scheme).
+		WithObjects(newCandidatePromptPackObject()).
 		Build()
 
 	r := &AgentRuntimeReconciler{
@@ -164,7 +189,7 @@ func TestReconcileRollout_Promotion(t *testing.T) {
 
 	fakeClient := fake.NewClientBuilder().
 		WithScheme(scheme).
-		WithObjects(ar).
+		WithObjects(ar, newCandidatePromptPackObject()).
 		WithStatusSubresource(ar).
 		Build()
 
@@ -260,7 +285,7 @@ func TestReconcileRollout_PauseStep_RequeuesAfterDuration(t *testing.T) {
 
 	fakeClient := fake.NewClientBuilder().
 		WithScheme(scheme).
-		WithObjects(ar).
+		WithObjects(ar, newCandidatePromptPackObject()).
 		WithStatusSubresource(ar).
 		Build()
 
@@ -321,7 +346,7 @@ func TestReconcileRollout_Promotion_PersistsSpec(t *testing.T) {
 
 	fakeClient := fake.NewClientBuilder().
 		WithScheme(scheme).
-		WithObjects(ar).
+		WithObjects(ar, newCandidatePromptPackObject()).
 		WithStatusSubresource(ar).
 		Build()
 
@@ -382,6 +407,7 @@ func TestCandidateDeployment_SelectorIncludesTrack(t *testing.T) {
 
 	fakeClient := fake.NewClientBuilder().
 		WithScheme(scheme).
+		WithObjects(newCandidatePromptPackObject()).
 		Build()
 
 	r := &AgentRuntimeReconciler{
@@ -423,7 +449,7 @@ func TestReconcileRollout_MetricsRecorded(t *testing.T) {
 
 	fakeClient := fake.NewClientBuilder().
 		WithScheme(scheme).
-		WithObjects(ar).
+		WithObjects(ar, newCandidatePromptPackObject()).
 		WithStatusSubresource(ar).
 		Build()
 
@@ -498,7 +524,7 @@ func TestReconcileRollout_AutoRollback_UnhealthyCandidate(t *testing.T) {
 
 	fakeClient := fake.NewClientBuilder().
 		WithScheme(scheme).
-		WithObjects(ar, candidateDeploy).
+		WithObjects(ar, candidateDeploy, newCandidatePromptPackObject()).
 		WithStatusSubresource(ar).
 		Build()
 
@@ -580,7 +606,7 @@ func TestReconcileRollout_AutoRollback_HealthyCandidate_Continues(t *testing.T) 
 
 	fakeClient := fake.NewClientBuilder().
 		WithScheme(scheme).
-		WithObjects(ar, candidateDeploy).
+		WithObjects(ar, candidateDeploy, newCandidatePromptPackObject()).
 		WithStatusSubresource(ar).
 		Build()
 
@@ -661,6 +687,7 @@ func TestReconcileRolloutUpdateStatus_NilActiveVersion(t *testing.T) {
 
 	fakeClient := fake.NewClientBuilder().
 		WithScheme(scheme).
+		WithObjects(newCandidatePromptPackObject()).
 		Build()
 
 	r := &AgentRuntimeReconciler{
@@ -723,7 +750,7 @@ func TestReconcileRollout_Active_WithIstioTrafficRouting(t *testing.T) {
 
 	fakeClient := fake.NewClientBuilder().
 		WithScheme(scheme).
-		WithObjects(vs).
+		WithObjects(vs, newCandidatePromptPackObject()).
 		Build()
 
 	reg := prometheus.NewRegistry()
@@ -881,7 +908,7 @@ func TestReconcileRollout_StickySession_PatchesDR(t *testing.T) {
 
 	fakeClient := fake.NewClientBuilder().
 		WithScheme(scheme).
-		WithObjects(vs, dr).
+		WithObjects(vs, dr, newCandidatePromptPackObject()).
 		Build()
 
 	r := &AgentRuntimeReconciler{Client: fakeClient, Scheme: scheme}
@@ -973,7 +1000,7 @@ func TestReconcileRollout_Promotion_RemovesDRConsistentHash(t *testing.T) {
 
 	fakeClient := fake.NewClientBuilder().
 		WithScheme(scheme).
-		WithObjects(ar, vs, dr).
+		WithObjects(ar, vs, dr, newCandidatePromptPackObject()).
 		WithStatusSubresource(ar).
 		Build()
 

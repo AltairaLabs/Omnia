@@ -954,7 +954,11 @@ export interface AgentRuntimeSpec {
   promptPackRef: {
     /** name is the name of the PromptPack resource. */
     name: string;
-    /** version specifies a specific version of the PromptPack to use. */
+    /** track follows a release channel instead of pinning a version:
+     * "stable" selects the highest non-prerelease version; "prerelease" selects
+     * the highest version overall. Mutually exclusive with version. */
+    track?: "stable" | "prerelease";
+    /** version pins an exact PromptPack version. Mutually exclusive with track. */
     version?: string;
   };
   /** providers is a list of named provider references.
@@ -1002,7 +1006,11 @@ export interface AgentRuntimeSpec {
       promptPackRef?: {
         /** name is the name of the PromptPack resource. */
         name: string;
-        /** version specifies a specific version of the PromptPack to use. */
+        /** track follows a release channel instead of pinning a version:
+         * "stable" selects the highest non-prerelease version; "prerelease" selects
+         * the highest version overall. Mutually exclusive with version. */
+        track?: "stable" | "prerelease";
+        /** version pins an exact PromptPack version. Mutually exclusive with track. */
         version?: string;
       };
       /** providerRefs overrides the provider list for the candidate.

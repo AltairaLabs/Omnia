@@ -489,10 +489,16 @@ func resolveRolloutCandidateVersion(ar *omniav1alpha1.AgentRuntime) string {
 		if ref.Version != nil {
 			return *ref.Version
 		}
+		if ref.Track != nil {
+			return *ref.Track
+		}
 		return ref.Name
 	}
 	if ar.Spec.PromptPackRef.Version != nil {
 		return *ar.Spec.PromptPackRef.Version
+	}
+	if ar.Spec.PromptPackRef.Track != nil {
+		return *ar.Spec.PromptPackRef.Track
 	}
 	return ""
 }
@@ -539,7 +545,10 @@ func candidateDiffers(ar *omniav1alpha1.AgentRuntime) bool {
 }
 
 // promptPackRefDiffers checks if the candidate overrides the prompt pack to a
-// different name or version than stable.
+// different name, track, or (semver-equivalent) version than stable. A
+// candidate that changes only the release Track — e.g. stable to prerelease,
+// with no explicit version pin on either side — must still be detected as an
+// active rollout (#1837).
 func promptPackRefDiffers(c *omniav1alpha1.CandidateOverrides, ar *omniav1alpha1.AgentRuntime) bool {
 	if c.PromptPackRef == nil {
 		return false
@@ -547,7 +556,10 @@ func promptPackRefDiffers(c *omniav1alpha1.CandidateOverrides, ar *omniav1alpha1
 	if c.PromptPackRef.Name != ar.Spec.PromptPackRef.Name {
 		return true
 	}
-	return derefStr(c.PromptPackRef.Version) != derefStr(ar.Spec.PromptPackRef.Version)
+	if normalizeTrack(derefStr(c.PromptPackRef.Track)) != normalizeTrack(derefStr(ar.Spec.PromptPackRef.Track)) {
+		return true
+	}
+	return !versionsEqual(derefStr(c.PromptPackRef.Version), derefStr(ar.Spec.PromptPackRef.Version))
 }
 
 // derefStr returns the pointed-to string, or "" for a nil pointer.
@@ -556,6 +568,39 @@ func derefStr(s *string) string {
 		return ""
 	}
 	return *s
+}
+
+// normalizeTrack maps an unset track to its resolved default ("stable") so
+// comparisons treat an explicit "stable" and an omitted track as identical —
+// both resolve to the same channel, so neither should trigger a spurious
+// rollout (#1837).
+func normalizeTrack(t string) string {
+	if t == "" {
+		return promptPackTrackStable
+	}
+	return t
+}
+
+// versionsEqual reports whether two version strings are semantically equal.
+// Both are parsed with parsePackVersion (strict major.minor.patch, tolerating
+// an optional leading "v" per the PromptPack CRD's spec.version pattern, and
+// ignoring build metadata per semver semantics); if either fails to parse, it
+// falls back to raw string equality — defensive, since these values aren't
+// guaranteed to be strict semver at this layer (e.g. free-form placeholder
+// version strings). Deliberately strict rather than semver.NewVersion's
+// lenient/coercing parse: the latter treats a bare "v1" as equivalent to
+// "1.0.0", which would silently conflate distinct informal version labels
+// used elsewhere in this codebase.
+func versionsEqual(a, b string) bool {
+	if a == b {
+		return true
+	}
+	av, aErr := parsePackVersion(a)
+	bv, bErr := parsePackVersion(b)
+	if aErr != nil || bErr != nil {
+		return false
+	}
+	return av.Equal(bv)
 }
 
 // providerRefsDiffer checks if the candidate overrides the provider refs.

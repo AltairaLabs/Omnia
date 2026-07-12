@@ -182,11 +182,19 @@ var _ = Describe("AgentRuntime Rollout (envtest)", func() {
 		// newPromptPack creates a minimal PromptPack suitable for
 		// buildDeploymentSpec to reference. The rollout reconcile path needs
 		// one non-nil for candidate deployment construction.
+		// newPromptPack creates a real PromptPack labeled with its own name as
+		// the logical packName, so an AgentRuntime referencing PromptPackRef{
+		// Name: name, Version: "1.0.0"} resolves it via resolvePromptPack
+		// (label + version/track), not by object identity.
 		newPromptPack := func(name string) *omniav1alpha1.PromptPack {
 			return &omniav1alpha1.PromptPack{
-				ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      name,
+					Namespace: namespace,
+					Labels:    map[string]string{LabelPromptPackName: name},
+				},
 				Spec: omniav1alpha1.PromptPackSpec{
-					PackName: "test-pack",
+					PackName: name,
 					Source: omniav1alpha1.PromptPackContentSource{
 						Type:         omniav1alpha1.PromptPackSourceTypeConfigMap,
 						ConfigMapRef: &corev1.LocalObjectReference{Name: name + "-config"},
@@ -207,7 +215,11 @@ var _ = Describe("AgentRuntime Rollout (envtest)", func() {
 			ar.Spec.PromptPackRef.Name = packName
 			ar.Spec.Rollout = &omniav1alpha1.RolloutConfig{
 				Candidate: &omniav1alpha1.CandidateOverrides{
-					PromptPackRef: &omniav1alpha1.PromptPackRef{Name: packName, Version: ptr.To("v2")},
+					// Candidate ref must resolve to a real, labeled PromptPack
+					// (resolvePromptPack now resolves the candidate independently
+					// of stable); reuse pp's own version ("1.0.0") since it's the
+					// only PromptPack seeded, still distinct from stable's "v1".
+					PromptPackRef: &omniav1alpha1.PromptPackRef{Name: packName, Version: ptr.To("1.0.0")},
 				},
 				Steps: []omniav1alpha1.RolloutStep{
 					{SetWeight: ptr.To[int32](25)},
@@ -246,7 +258,7 @@ var _ = Describe("AgentRuntime Rollout (envtest)", func() {
 			ar.Spec.PromptPackRef.Name = packName
 			ar.Spec.Rollout = &omniav1alpha1.RolloutConfig{
 				Candidate: &omniav1alpha1.CandidateOverrides{
-					PromptPackRef: &omniav1alpha1.PromptPackRef{Name: packName, Version: ptr.To("v2")},
+					PromptPackRef: &omniav1alpha1.PromptPackRef{Name: packName, Version: ptr.To("1.0.0")},
 				},
 				Steps: []omniav1alpha1.RolloutStep{
 					{SetWeight: ptr.To[int32](25)},
@@ -277,7 +289,7 @@ var _ = Describe("AgentRuntime Rollout (envtest)", func() {
 			entered := &omniav1alpha1.AgentRuntime{}
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: arName, Namespace: namespace}, entered)).To(Succeed())
 			Expect(entered.Spec.PromptPackRef.Version).NotTo(BeNil())
-			Expect(*entered.Spec.PromptPackRef.Version).To(Equal("v2"),
+			Expect(*entered.Spec.PromptPackRef.Version).To(Equal("1.0.0"),
 				"spec advances to candidate version on promote")
 			Expect(entered.Status.Rollout).NotTo(BeNil())
 			Expect(entered.Status.Rollout.Promoting).To(BeTrue(), "should be promoting")
@@ -344,7 +356,7 @@ var _ = Describe("AgentRuntime Rollout (envtest)", func() {
 			ar.Spec.Runtime = &omniav1alpha1.RuntimeConfig{Replicas: ptr.To[int32](4)}
 			ar.Spec.Rollout = &omniav1alpha1.RolloutConfig{
 				Candidate: &omniav1alpha1.CandidateOverrides{
-					PromptPackRef: &omniav1alpha1.PromptPackRef{Name: packName, Version: ptr.To("v2")},
+					PromptPackRef: &omniav1alpha1.PromptPackRef{Name: packName, Version: ptr.To("1.0.0")},
 				},
 				// setWeight 50 then an indefinite pause — the canary spends ~all
 				// its life in the pause, which is exactly where the builder used

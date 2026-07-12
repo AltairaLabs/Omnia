@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
@@ -82,13 +83,20 @@ func TestReconcileReferences_PromptPackGate(t *testing.T) {
 	newAR := func() *omniav1alpha1.AgentRuntime {
 		return &omniav1alpha1.AgentRuntime{
 			ObjectMeta: metav1.ObjectMeta{Name: testEvalAgentName, Namespace: gateTestNamespace},
-			Spec:       omniav1alpha1.AgentRuntimeSpec{PromptPackRef: omniav1alpha1.PromptPackRef{Name: "pack"}},
+			Spec: omniav1alpha1.AgentRuntimeSpec{
+				PromptPackRef: omniav1alpha1.PromptPackRef{Name: "pack", Track: ptr.To("stable")},
+			},
 		}
 	}
 
 	t.Run("failed pack gates the agent to Failed", func(t *testing.T) {
 		pp := &omniav1alpha1.PromptPack{
-			ObjectMeta: metav1.ObjectMeta{Name: "pack", Namespace: gateTestNamespace},
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "pack",
+				Namespace: gateTestNamespace,
+				Labels:    map[string]string{LabelPromptPackName: "pack"},
+			},
+			Spec: omniav1alpha1.PromptPackSpec{Version: "1.0.0"},
 			Status: omniav1alpha1.PromptPackStatus{
 				Phase: omniav1alpha1.PromptPackPhaseFailed,
 				Conditions: []metav1.Condition{{
@@ -125,7 +133,12 @@ func TestReconcileReferences_PromptPackGate(t *testing.T) {
 
 	t.Run("active schema-valid pack passes the gate", func(t *testing.T) {
 		pp := &omniav1alpha1.PromptPack{
-			ObjectMeta: metav1.ObjectMeta{Name: "pack", Namespace: gateTestNamespace},
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "pack",
+				Namespace: gateTestNamespace,
+				Labels:    map[string]string{LabelPromptPackName: "pack"},
+			},
+			Spec: omniav1alpha1.PromptPackSpec{Version: "1.0.0"},
 			Status: omniav1alpha1.PromptPackStatus{
 				Phase:      omniav1alpha1.PromptPackPhaseActive,
 				Conditions: []metav1.Condition{{Type: PromptPackConditionTypeSchemaValid, Status: metav1.ConditionTrue}},

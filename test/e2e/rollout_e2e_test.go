@@ -232,6 +232,53 @@ spec:
 				g.Expect(output).To(Equal("Active"))
 			}, 60*time.Second, 2*time.Second).Should(Succeed())
 
+			By("creating a candidate (2.0.0) PromptPack version for rollout tests")
+			applyRolloutManifest(fmt.Sprintf(`
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: %s-v2
+  namespace: %s
+data:
+  pack.json: |
+    {
+      "id": "%s",
+      "name": "%s",
+      "version": "2.0.0",
+      "template_engine": {"version": "v1", "syntax": "{{variable}}"},
+      "prompts": {
+        "default": {
+          "id": "default",
+          "name": "default",
+          "version": "2.0.0",
+          "system_template": "You are the candidate version."
+        }
+      }
+    }
+`, promptPackName, rolloutNamespace, promptPackName, promptPackName))
+
+			applyRolloutManifest(fmt.Sprintf(`
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: PromptPack
+metadata:
+  name: %s-v2
+  namespace: %s
+spec:
+  packName: %s
+  source:
+    type: configmap
+    configMapRef:
+      name: %s-v2
+  version: "2.0.0"
+`, promptPackName, rolloutNamespace, promptPackName, promptPackName))
+
+			By("waiting for the candidate PromptPack to become Active")
+			Eventually(func(g Gomega) {
+				output, err := getRolloutJSONPath("promptpack", promptPackName+"-v2", rolloutNamespace, "{.status.phase}")
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(Equal("Active"))
+			}, 60*time.Second, 2*time.Second).Should(Succeed())
+
 			By("creating provider secret and Provider for rollout tests")
 			cmd = exec.Command("kubectl", "create", "secret", "generic", "rollout-provider",
 				"-n", rolloutNamespace,
@@ -267,8 +314,10 @@ spec:
 			By("cleaning up rollout test resources")
 			deleteRolloutResource("agentruntime", rolloutAgentName, rolloutNamespace)
 			deleteRolloutResource("promptpack", promptPackName, rolloutNamespace)
+			deleteRolloutResource("promptpack", promptPackName+"-v2", rolloutNamespace)
 			deleteRolloutResource("provider", "rollout-provider", rolloutNamespace)
 			deleteRolloutResource("configmap", promptPackName+"-v1", rolloutNamespace)
+			deleteRolloutResource("configmap", promptPackName+"-v2", rolloutNamespace)
 			deleteRolloutResource("secret", "rollout-provider", rolloutNamespace)
 		})
 
@@ -286,6 +335,7 @@ metadata:
 spec:
   promptPackRef:
     name: %s
+    version: "1.0.0"
   facades:
     - type: websocket
       port: 8080
@@ -466,6 +516,53 @@ spec:
 				g.Expect(output).To(Equal("Active"))
 			}, 60*time.Second, 2*time.Second).Should(Succeed())
 
+			By("creating a candidate (2.0.0) PromptPack version for Istio rollout tests")
+			applyRolloutManifest(fmt.Sprintf(`
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: %s-v2
+  namespace: %s
+data:
+  pack.json: |
+    {
+      "id": "%s",
+      "name": "%s",
+      "version": "2.0.0",
+      "template_engine": {"version": "v1", "syntax": "{{variable}}"},
+      "prompts": {
+        "default": {
+          "id": "default",
+          "name": "default",
+          "version": "2.0.0",
+          "system_template": "Istio rollout candidate version."
+        }
+      }
+    }
+`, istioPromptPack, rolloutNamespace, istioPromptPack, istioPromptPack))
+
+			applyRolloutManifest(fmt.Sprintf(`
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: PromptPack
+metadata:
+  name: %s-v2
+  namespace: %s
+spec:
+  packName: %s
+  source:
+    type: configmap
+    configMapRef:
+      name: %s-v2
+  version: "2.0.0"
+`, istioPromptPack, rolloutNamespace, istioPromptPack, istioPromptPack))
+
+			By("waiting for the candidate PromptPack to become Active")
+			Eventually(func(g Gomega) {
+				output, err := getRolloutJSONPath("promptpack", istioPromptPack+"-v2", rolloutNamespace, "{.status.phase}")
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(Equal("Active"))
+			}, 60*time.Second, 2*time.Second).Should(Succeed())
+
 			By("creating provider for Istio rollout tests")
 			cmd = exec.Command("kubectl", "create", "secret", "generic", "rollout-istio-provider",
 				"-n", rolloutNamespace,
@@ -554,7 +651,9 @@ spec:
 			deleteRolloutResource("virtualservice", vsName, rolloutNamespace)
 			deleteRolloutResource("destinationrule", drName, rolloutNamespace)
 			deleteRolloutResource("promptpack", istioPromptPack, rolloutNamespace)
+			deleteRolloutResource("promptpack", istioPromptPack+"-v2", rolloutNamespace)
 			deleteRolloutResource("configmap", istioPromptPack+"-v1", rolloutNamespace)
+			deleteRolloutResource("configmap", istioPromptPack+"-v2", rolloutNamespace)
 			deleteRolloutResource("provider", "rollout-istio-provider", rolloutNamespace)
 			deleteRolloutResource("secret", "rollout-istio-provider", rolloutNamespace)
 		})
@@ -573,6 +672,7 @@ metadata:
 spec:
   promptPackRef:
     name: %s
+    version: "1.0.0"
   facades:
     - type: websocket
       port: 8080

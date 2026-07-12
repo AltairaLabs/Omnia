@@ -125,8 +125,18 @@ func TestReconcileCandidateDeployment_CreatesWithCanaryLabel(t *testing.T) {
 
 	pp := newTestPromptPack()
 
+	// The candidate resolves its own PromptPack independently (by label +
+	// version/track), even though its packName here happens to match stable's
+	// — so a real, labeled candidate version must exist in the fake client.
+	candidatePP := newTestPromptPack()
+	candidatePP.Namespace = ar.Namespace
+	candidatePP.Spec.PackName = "test-pack"
+	candidatePP.Spec.Version = "v2"
+	candidatePP.Labels = map[string]string{LabelPromptPackName: "test-pack"}
+
 	fakeClient := fake.NewClientBuilder().
 		WithScheme(scheme).
+		WithObjects(candidatePP).
 		Build()
 
 	r := &AgentRuntimeReconciler{
@@ -157,7 +167,7 @@ func TestReconcileCandidateDeployment_MountsCandidatePromptPack(t *testing.T) {
 	ar.Spec.PromptPackRef.Name = "stable-pack"
 	ar.Spec.Rollout = &omniav1alpha1.RolloutConfig{
 		Candidate: &omniav1alpha1.CandidateOverrides{
-			PromptPackRef: &omniav1alpha1.PromptPackRef{Name: "candidate-pack"},
+			PromptPackRef: &omniav1alpha1.PromptPackRef{Name: "candidate-pack", Version: ptr.To("1.0.0")},
 		},
 		Steps: []omniav1alpha1.RolloutStep{{SetWeight: ptr.To[int32](10)}},
 	}
@@ -171,10 +181,13 @@ func TestReconcileCandidateDeployment_MountsCandidatePromptPack(t *testing.T) {
 	candidatePack := &omniav1alpha1.PromptPack{}
 	candidatePack.Name = "candidate-pack"
 	candidatePack.Namespace = ar.Namespace
+	candidatePack.Spec.PackName = "candidate-pack"
+	candidatePack.Spec.Version = "1.0.0"
+	candidatePack.Labels = map[string]string{LabelPromptPackName: "candidate-pack"}
 	candidatePack.Spec.Source.Type = omniav1alpha1.PromptPackSourceTypeConfigMap
 	candidatePack.Spec.Source.ConfigMapRef = &corev1.LocalObjectReference{Name: "candidate-pack-config"}
 
-	// The operator resolves the candidate's pack by name from the cluster.
+	// The operator resolves the candidate's pack by label + version/track from the cluster.
 	fakeClient := fake.NewClientBuilder().
 		WithScheme(scheme).
 		WithObjects(candidatePack).
@@ -195,6 +208,65 @@ func TestReconcileCandidateDeployment_MountsCandidatePromptPack(t *testing.T) {
 	}
 	assert.Equal(t, "candidate-pack-config", mounted,
 		"candidate must mount its own pack's ConfigMap, not the stable pack's")
+}
+
+// TestReconcileCandidateDeployment_ConfigHashUsesCandidatePack is the
+// regression for T5: the candidate Deployment's config-hash annotation must
+// be computed from the CANDIDATE's own resolved PromptPack (different
+// Generation here), not the stable pack passed in as the (intentionally
+// unread) stable-pack argument. Before the fix, hashing the stable pack meant
+// a candidate-only PromptPack change never rolled the candidate pods.
+func TestReconcileCandidateDeployment_ConfigHashUsesCandidatePack(t *testing.T) {
+	scheme := newTestScheme(t)
+	require.NoError(t, appsv1.AddToScheme(scheme))
+	require.NoError(t, corev1.AddToScheme(scheme))
+
+	ar := newRolloutTestAR()
+	ar.Spec.Facades = []omniav1alpha1.FacadeConfig{{Type: omniav1alpha1.FacadeTypeWebSocket}}
+	ar.Spec.PromptPackRef.Name = "stable-pack"
+	ar.Spec.Rollout = &omniav1alpha1.RolloutConfig{
+		Candidate: &omniav1alpha1.CandidateOverrides{
+			PromptPackRef: &omniav1alpha1.PromptPackRef{Name: "candidate-pack", Version: ptr.To("1.0.0")},
+		},
+		Steps: []omniav1alpha1.RolloutStep{{SetWeight: ptr.To[int32](10)}},
+	}
+
+	stablePack := &omniav1alpha1.PromptPack{}
+	stablePack.Name = "stable-pack"
+	stablePack.Namespace = ar.Namespace
+	stablePack.Generation = 1
+	stablePack.Spec.Source.Type = omniav1alpha1.PromptPackSourceTypeConfigMap
+	stablePack.Spec.Source.ConfigMapRef = &corev1.LocalObjectReference{Name: "stable-pack-config"}
+
+	candidatePack := &omniav1alpha1.PromptPack{}
+	candidatePack.Name = "candidate-pack"
+	candidatePack.Namespace = ar.Namespace
+	candidatePack.Generation = 7 // deliberately different from stablePack's, so the hashes diverge
+	candidatePack.Spec.PackName = "candidate-pack"
+	candidatePack.Spec.Version = "1.0.0"
+	candidatePack.Labels = map[string]string{LabelPromptPackName: "candidate-pack"}
+	candidatePack.Spec.Source.Type = omniav1alpha1.PromptPackSourceTypeConfigMap
+	candidatePack.Spec.Source.ConfigMapRef = &corev1.LocalObjectReference{Name: "candidate-pack-config"}
+
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(candidatePack).
+		Build()
+
+	r := &AgentRuntimeReconciler{Client: fakeClient, Scheme: scheme}
+
+	// Pass the stable pack as the reconciler would; the candidate's config
+	// hash must NOT be derived from it.
+	deploy, err := r.reconcileCandidateDeployment(context.Background(), ar, stablePack, nil, nil)
+	require.NoError(t, err)
+	require.NotNil(t, deploy)
+
+	candidateHash := deploy.Spec.Template.Annotations[annotationConfigHash]
+	require.NotEmpty(t, candidateHash, "candidate deployment must carry a config-hash annotation")
+
+	stableHash := r.getConfigHash(context.Background(), nil, stablePack, nil)
+	assert.NotEqual(t, stableHash, candidateHash,
+		"candidate config-hash must be computed from the candidate's own resolved pack, not the stable pack")
 }
 
 func TestDeleteCandidateDeployment_NotFound(t *testing.T) {
