@@ -758,6 +758,26 @@ func TestPromptPackRefDiffers_SemverDifferentVersionsDiffer(t *testing.T) {
 	assert.True(t, promptPackRefDiffers(c, ar))
 }
 
+// --- versionsEqual: v-prefix handling (#1837 fix pass) ---
+//
+// The PromptPack CRD's spec.version pattern allows an optional leading "v"
+// (^v?(\d+)\.(\d+)\.(\d+)...), so "v1.5.0" is a CRD-valid value equal to
+// "1.5.0". versionsEqual must treat them as equal rather than rejecting the
+// v-prefixed form outright (which previously forced a string-equality
+// fallback and false-positived promptPackRefDiffers / false-negatived
+// version-pin matches).
+
+func TestVersionsEqual_VPrefixEitherSide(t *testing.T) {
+	assert.True(t, versionsEqual("1.5.0", "v1.5.0"))
+	assert.True(t, versionsEqual("v2.0.0", "2.0.0"))
+}
+
+func TestVersionsEqual_IncompleteVPrefixDoesNotCoerce(t *testing.T) {
+	// "v1" must NOT coerce to "1.0.0" (that was channelMax's old lenient-parse
+	// bug); it should fail to parse and fall back to string inequality.
+	assert.False(t, versionsEqual("v1", "1.0.0"))
+}
+
 func TestPromptPackRefDiffers_UnparseableVersionFallsBackToStringEquality(t *testing.T) {
 	ar := newRolloutTestAR()
 	ar.Spec.PromptPackRef.Version = ptr.To("not-a-version")

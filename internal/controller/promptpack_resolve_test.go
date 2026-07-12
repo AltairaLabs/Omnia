@@ -52,6 +52,21 @@ func TestSelectPromptPack(t *testing.T) {
 	}
 }
 
+// TestSelectPromptPack_ExactPin_VPrefix proves the exact-version match is
+// semver-aware (not raw string ==): the CRD's spec.version pattern allows an
+// optional leading "v", so a pack stored as "v1.5.0" must match a pin of
+// "1.5.0" (#1837 fix pass).
+func TestSelectPromptPack_ExactPin_VPrefix(t *testing.T) {
+	set := []omniav1alpha1.PromptPack{pack("a", "v1.5.0")}
+	got, err := selectPromptPack(set, strptr("1.5.0"), nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.Spec.Version != "v1.5.0" {
+		t.Fatalf("got %s want v1.5.0", got.Spec.Version)
+	}
+}
+
 func TestSelectPromptPack_prereleaseOnlySet(t *testing.T) {
 	// stable channel with only prereleases available -> no match (error), not a prerelease.
 	set := []omniav1alpha1.PromptPack{pack("a", "1.0.0-rc.1"), pack("b", "1.0.0-rc.2")}

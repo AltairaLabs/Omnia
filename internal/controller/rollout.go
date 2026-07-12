@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/Masterminds/semver/v3"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -572,7 +571,8 @@ func derefStr(s *string) string {
 }
 
 // versionsEqual reports whether two version strings are semantically equal.
-// Both are parsed with semver.StrictNewVersion (full major.minor.patch,
+// Both are parsed with parsePackVersion (strict major.minor.patch, tolerating
+// an optional leading "v" per the PromptPack CRD's spec.version pattern, and
 // ignoring build metadata per semver semantics); if either fails to parse, it
 // falls back to raw string equality — defensive, since these values aren't
 // guaranteed to be strict semver at this layer (e.g. free-form placeholder
@@ -584,8 +584,8 @@ func versionsEqual(a, b string) bool {
 	if a == b {
 		return true
 	}
-	av, aErr := semver.StrictNewVersion(a)
-	bv, bErr := semver.StrictNewVersion(b)
+	av, aErr := parsePackVersion(a)
+	bv, bErr := parsePackVersion(b)
 	if aErr != nil || bErr != nil {
 		return false
 	}

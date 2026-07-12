@@ -3,6 +3,7 @@ package controller
 import (
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/Masterminds/semver/v3"
 
@@ -27,7 +28,7 @@ func selectPromptPack(candidates []omniav1alpha1.PromptPack, version, track *str
 	}
 	if hasVersion {
 		for i := range candidates {
-			if candidates[i].Spec.Version == *version {
+			if versionsEqual(candidates[i].Spec.Version, *version) {
 				return &candidates[i], nil
 			}
 		}
@@ -40,11 +41,19 @@ func selectPromptPack(candidates []omniav1alpha1.PromptPack, version, track *str
 	return channelMax(candidates, promptPackTrackStable)
 }
 
+// parsePackVersion parses a PromptPack spec.version (CRD pattern allows a leading
+// "v"). Stripping the "v" before StrictNewVersion accepts full v-prefixed semver
+// (v1.5.0 == 1.5.0) while still rejecting incomplete values like "v1"/"1" (which
+// then fall back to string equality at call sites) — avoiding lenient coercion.
+func parsePackVersion(s string) (*semver.Version, error) {
+	return semver.StrictNewVersion(strings.TrimPrefix(s, "v"))
+}
+
 func channelMax(candidates []omniav1alpha1.PromptPack, track string) (*omniav1alpha1.PromptPack, error) {
 	var best *omniav1alpha1.PromptPack
 	var bestV *semver.Version
 	for i := range candidates {
-		v, err := semver.NewVersion(candidates[i].Spec.Version)
+		v, err := parsePackVersion(candidates[i].Spec.Version)
 		if err != nil {
 			continue // skip unparseable; spec.version is semver-validated at the CRD, defensive here
 		}
