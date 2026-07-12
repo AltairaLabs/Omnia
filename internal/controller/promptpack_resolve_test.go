@@ -31,7 +31,7 @@ func TestSelectPromptPack(t *testing.T) {
 		{"exact pin", strptr("1.2.5"), nil, "1.2.5", false},
 		{"exact pin miss -> error", strptr("9.9.9"), nil, "", true},
 		{"both set -> error", strptr("1.2.5"), strptr("stable"), "", true},
-		{"neither set -> error", nil, nil, "", true},
+		{"neither set -> defaults to stable channel", nil, nil, "1.3.0", false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

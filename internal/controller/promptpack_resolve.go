@@ -17,11 +17,12 @@ const (
 var errNoMatchingPromptPack = errors.New("no PromptPack matches the ref")
 
 // selectPromptPack picks one PromptPack from candidates (all sharing a packName)
-// by exact version pin or by channel-max. Exactly one of version/track must be set.
+// by exact version pin or by channel-max. At most one of version/track may be set;
+// if neither is set, defaults to the stable channel.
 func selectPromptPack(candidates []omniav1alpha1.PromptPack, version, track *string) (*omniav1alpha1.PromptPack, error) {
 	hasVersion := version != nil && *version != ""
 	hasTrack := track != nil && *track != ""
-	if hasVersion == hasTrack { // both or neither
+	if hasVersion && hasTrack { // both set is an error
 		return nil, fmt.Errorf("exactly one of promptPackRef.version or promptPackRef.track must be set")
 	}
 	if hasVersion {
@@ -32,7 +33,11 @@ func selectPromptPack(candidates []omniav1alpha1.PromptPack, version, track *str
 		}
 		return nil, fmt.Errorf("%w: version %q", errNoMatchingPromptPack, *version)
 	}
-	return channelMax(candidates, *track)
+	// track is set, or neither is set (default to stable)
+	if hasTrack {
+		return channelMax(candidates, *track)
+	}
+	return channelMax(candidates, promptPackTrackStable)
 }
 
 func channelMax(candidates []omniav1alpha1.PromptPack, track string) (*omniav1alpha1.PromptPack, error) {
