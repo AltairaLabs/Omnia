@@ -25,7 +25,7 @@ type stubResolver struct {
 	err  error
 }
 
-func (s *stubResolver) Load(_ context.Context, namespace, name string) ([]byte, error) {
+func (s *stubResolver) Load(_ context.Context, namespace, name, _ string) ([]byte, error) {
 	if s.err != nil {
 		return nil, s.err
 	}
