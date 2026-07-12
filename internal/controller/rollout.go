@@ -556,7 +556,7 @@ func promptPackRefDiffers(c *omniav1alpha1.CandidateOverrides, ar *omniav1alpha1
 	if c.PromptPackRef.Name != ar.Spec.PromptPackRef.Name {
 		return true
 	}
-	if derefStr(c.PromptPackRef.Track) != derefStr(ar.Spec.PromptPackRef.Track) {
+	if normalizeTrack(derefStr(c.PromptPackRef.Track)) != normalizeTrack(derefStr(ar.Spec.PromptPackRef.Track)) {
 		return true
 	}
 	return !versionsEqual(derefStr(c.PromptPackRef.Version), derefStr(ar.Spec.PromptPackRef.Version))
@@ -568,6 +568,17 @@ func derefStr(s *string) string {
 		return ""
 	}
 	return *s
+}
+
+// normalizeTrack maps an unset track to its resolved default ("stable") so
+// comparisons treat an explicit "stable" and an omitted track as identical —
+// both resolve to the same channel, so neither should trigger a spurious
+// rollout (#1837).
+func normalizeTrack(t string) string {
+	if t == "" {
+		return promptPackTrackStable
+	}
+	return t
 }
 
 // versionsEqual reports whether two version strings are semantically equal.

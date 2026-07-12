@@ -42,6 +42,7 @@ const (
 )
 
 // PromptPackRef references a PromptPack to use for this agent runtime.
+// +kubebuilder:validation:XValidation:rule="!(has(self.version) && has(self.track))",message="promptPackRef.version and promptPackRef.track are mutually exclusive"
 type PromptPackRef struct {
 	// name is the name of the PromptPack resource.
 	// +kubebuilder:validation:Required

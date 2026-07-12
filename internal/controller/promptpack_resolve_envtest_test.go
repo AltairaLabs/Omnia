@@ -243,7 +243,15 @@ var _ = Describe("AgentRuntime forward PromptPack resolution (envtest)", func() 
 	})
 
 	Context("invalid ref: both version and track set", func() {
-		It("leaves PromptPackReady=False with a distinct PromptPackRefInvalid reason", func() {
+		// A CEL XValidation rule on PromptPackRef (#1837 review) now rejects
+		// version+track at the apiserver, before this object can ever reach
+		// the reconciler — so the object can no longer be Created via the real
+		// API to reach the reconcile-time defensive check below. That
+		// reconcile-time check (selectPromptPack's both-set rejection,
+		// reported as PromptPackRefInvalid) is retained as defense-in-depth
+		// for objects persisted before this CRD validation existed; this spec
+		// now asserts the earlier, apiserver-level rejection instead.
+		It("rejects the AgentRuntime at admission with a mutual-exclusion CEL error", func() {
 			providerName := nextName("provider")
 			Expect(k8sClient.Create(ctx, newProvider(providerName))).To(Succeed())
 
@@ -252,46 +260,12 @@ var _ = Describe("AgentRuntime forward PromptPack resolution (envtest)", func() 
 			Expect(k8sClient.Create(ctx, p1)).To(Succeed())
 
 			arName := nextName("ar")
-			// Both version and track set: selectPromptPack rejects this before
-			// ever attempting to match a candidate, so it must be reported as a
-			// ref-validation error, not "no matching pack".
 			ar := newAgentRuntime(arName, providerName, omniav1alpha1.PromptPackRef{
 				Name:    packName,
 				Version: ptr.To("1.0.0"),
 				Track:   ptr.To("stable"),
 			})
-			Expect(k8sClient.Create(ctx, ar)).To(Succeed())
-
-			reconciler := &AgentRuntimeReconciler{
-				Client:          k8sClient,
-				Scheme:          k8sClient.Scheme(),
-				FacadeImage:     testFacadeImage,
-				FrameworkImages: promptkitImage("test-runtime:v1.0.0"),
-			}
-			key := types.NamespacedName{Name: arName, Namespace: namespace}
-
-			_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: key})
-			Expect(err).NotTo(HaveOccurred())
-			_, err = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: key})
-			Expect(err).To(HaveOccurred())
-			Expect(stderrors.Is(err, errNoMatchingPromptPack)).To(BeFalse(),
-				"a both-version-and-track ref is a validation error, not errNoMatchingPromptPack: %v", err)
-
-			updated := &omniav1alpha1.AgentRuntime{}
-			Expect(k8sClient.Get(ctx, key, updated)).To(Succeed())
-			Expect(updated.Status.Phase).To(Equal(omniav1alpha1.AgentRuntimePhaseFailed))
-
-			found := false
-			for _, c := range updated.Status.Conditions {
-				if c.Type == ConditionTypePromptPackReady {
-					found = true
-					Expect(c.Status).To(Equal(metav1.ConditionFalse))
-					Expect(c.Reason).To(Equal("PromptPackRefInvalid"))
-					Expect(c.Message).To(ContainSubstring(packName),
-						"message should name the packName so an operator can find the offending ref")
-				}
-			}
-			Expect(found).To(BeTrue(), "PromptPackReady condition should be present")
+			Expect(k8sClient.Create(ctx, ar)).To(MatchError(ContainSubstring("mutually exclusive")))
 		})
 	})
 })

@@ -4515,5 +4515,82 @@ var _ = Describe("AgentRuntime Controller Unit Tests", func() {
 				defer func() { _ = k8sClient.Delete(contextCtx, ar) }()
 			})
 		})
+
+		Context("promptPackRef version/track validation (API server enforcement)", func() {
+			var pprCtx context.Context
+
+			BeforeEach(func() {
+				pprCtx = context.Background()
+			})
+
+			It("rejects a promptPackRef with both version and track set", func() {
+				ar := &omniav1alpha1.AgentRuntime{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "promptpackref-version-and-track",
+						Namespace: "default",
+					},
+					Spec: omniav1alpha1.AgentRuntimeSpec{
+						PromptPackRef: omniav1alpha1.PromptPackRef{
+							Name:    "dummy",
+							Version: ptr.To("1.0.0"),
+							Track:   ptr.To("stable"),
+						},
+						Facades: []omniav1alpha1.FacadeConfig{{Type: omniav1alpha1.FacadeTypeWebSocket}},
+					},
+				}
+				Expect(k8sClient.Create(pprCtx, ar)).To(MatchError(ContainSubstring("mutually exclusive")))
+			})
+
+			It("accepts a promptPackRef with only version set", func() {
+				ar := &omniav1alpha1.AgentRuntime{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "promptpackref-version-only",
+						Namespace: "default",
+					},
+					Spec: omniav1alpha1.AgentRuntimeSpec{
+						PromptPackRef: omniav1alpha1.PromptPackRef{
+							Name:    "dummy",
+							Version: ptr.To("1.0.0"),
+						},
+						Facades: []omniav1alpha1.FacadeConfig{{Type: omniav1alpha1.FacadeTypeWebSocket}},
+					},
+				}
+				Expect(k8sClient.Create(pprCtx, ar)).To(Succeed())
+				defer func() { _ = k8sClient.Delete(pprCtx, ar) }()
+			})
+
+			It("accepts a promptPackRef with only track set", func() {
+				ar := &omniav1alpha1.AgentRuntime{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "promptpackref-track-only",
+						Namespace: "default",
+					},
+					Spec: omniav1alpha1.AgentRuntimeSpec{
+						PromptPackRef: omniav1alpha1.PromptPackRef{
+							Name:  "dummy",
+							Track: ptr.To("stable"),
+						},
+						Facades: []omniav1alpha1.FacadeConfig{{Type: omniav1alpha1.FacadeTypeWebSocket}},
+					},
+				}
+				Expect(k8sClient.Create(pprCtx, ar)).To(Succeed())
+				defer func() { _ = k8sClient.Delete(pprCtx, ar) }()
+			})
+
+			It("accepts a promptPackRef with neither version nor track set", func() {
+				ar := &omniav1alpha1.AgentRuntime{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "promptpackref-neither",
+						Namespace: "default",
+					},
+					Spec: omniav1alpha1.AgentRuntimeSpec{
+						PromptPackRef: omniav1alpha1.PromptPackRef{Name: "dummy"},
+						Facades:       []omniav1alpha1.FacadeConfig{{Type: omniav1alpha1.FacadeTypeWebSocket}},
+					},
+				}
+				Expect(k8sClient.Create(pprCtx, ar)).To(Succeed())
+				defer func() { _ = k8sClient.Delete(pprCtx, ar) }()
+			})
+		})
 	})
 })

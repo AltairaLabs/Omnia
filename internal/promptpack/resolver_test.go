@@ -144,6 +144,22 @@ func TestLoad_EmptyVersionAllPrereleaseErrors(t *testing.T) {
 	assert.Contains(t, err.Error(), "mypack")
 }
 
+// TestLoad_EmptyVersionSingleCandidatePrereleaseErrors is the regression for
+// the single-candidate shortcut bypassing the stable-channel guard: when
+// there is exactly ONE PromptPack for packName and it is a prerelease, the
+// empty-version (stable channel) default must still error rather than
+// returning that sole prerelease candidate — consistent with the multi-
+// candidate case and the operator's own stable-channel default (#1837 review).
+func TestLoad_EmptyVersionSingleCandidatePrereleaseErrors(t *testing.T) {
+	rc := configmapPack("pp-rc-only", "mypack", "1.0.0-rc1", "mypack-cm-rc")
+	c := fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(rc).Build()
+
+	_, err := NewResolver(c).Load(context.Background(), "ns", "mypack", "")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no stable PromptPack version found")
+	assert.Contains(t, err.Error(), "mypack")
+}
+
 // TestLoad_VPrefixVersionMatches proves a v-prefixed spec.version ("v1.2.0")
 // still matches a caller-supplied unprefixed version ("1.2.0"), mirroring the
 // operator's strip-"v"-then-strict-semver comparison rule.

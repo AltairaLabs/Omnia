@@ -728,6 +728,21 @@ func TestPromptPackRefDiffers_SameTrack(t *testing.T) {
 	assert.False(t, promptPackRefDiffers(c, ar))
 }
 
+// TestPromptPackRefDiffers_ExplicitStableEqualsUnsetTrack is the regression
+// for a spurious active rollout: an explicit `track: "stable"` on one side and
+// no track set at all on the other both resolve to the stable channel, so
+// they must compare equal rather than "stable" != "".
+func TestPromptPackRefDiffers_ExplicitStableEqualsUnsetTrack(t *testing.T) {
+	ar := newRolloutTestAR()
+	ar.Spec.PromptPackRef.Version = nil
+	ar.Spec.PromptPackRef.Track = nil
+	c := &omniav1alpha1.CandidateOverrides{
+		PromptPackRef: &omniav1alpha1.PromptPackRef{Name: testStablePackName, Track: ptr.To("stable")},
+	}
+	assert.False(t, promptPackRefDiffers(c, ar),
+		"explicit stable track vs unset track (both default to stable) must not differ")
+}
+
 // --- promptPackRefDiffers: semver-aware version comparison (#1837) ---
 
 func TestPromptPackRefDiffers_SemverEqualVersionsDoNotDiffer(t *testing.T) {

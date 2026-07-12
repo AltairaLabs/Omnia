@@ -95,8 +95,10 @@ func (r *Resolver) Load(ctx context.Context, namespace, packName, version string
 
 // selectPromptPack picks one PromptPack from candidates (all sharing packName,
 // already filtered by the packNameLabel List call) by exact version match, or
-// — when version is empty — the single candidate, or the highest stable
-// (non-prerelease) semver among several.
+// — when version is empty — the highest stable (non-prerelease) semver, via
+// stableChannelMax. This applies even when there is exactly one candidate: a
+// lone prerelease-only pack must NOT be returned as the implicit default,
+// consistent with the operator's stable-channel default (#1837 review).
 func selectPromptPack(candidates []omniav1alpha1.PromptPack, packName, version string) (*omniav1alpha1.PromptPack, error) {
 	if len(candidates) == 0 {
 		return nil, fmt.Errorf("no PromptPack found for packName %q", packName)
@@ -108,9 +110,6 @@ func selectPromptPack(candidates []omniav1alpha1.PromptPack, packName, version s
 			}
 		}
 		return nil, fmt.Errorf("no PromptPack matches packName %q version %q", packName, version)
-	}
-	if len(candidates) == 1 {
-		return &candidates[0], nil
 	}
 	return stableChannelMax(candidates, packName)
 }

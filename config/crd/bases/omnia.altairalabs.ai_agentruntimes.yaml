@@ -1849,6 +1849,10 @@ spec:
                 required:
                 - name
                 type: object
+                x-kubernetes-validations:
+                - message: promptPackRef.version and promptPackRef.track are mutually
+                    exclusive
+                  rule: '!(has(self.version) && has(self.track))'
               providers:
                 description: |-
                   providers is a list of named provider references.
@@ -1968,6 +1972,10 @@ spec:
                         required:
                         - name
                         type: object
+                        x-kubernetes-validations:
+                        - message: promptPackRef.version and promptPackRef.track are
+                            mutually exclusive
+                          rule: '!(has(self.version) && has(self.track))'
                       providerRefs:
                         description: |-
                           providerRefs overrides the provider list for the candidate.
