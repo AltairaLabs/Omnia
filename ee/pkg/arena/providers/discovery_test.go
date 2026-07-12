@@ -17,6 +17,7 @@ import (
 	"testing"
 
 	"github.com/AltairaLabs/PromptKit/pkg/config"
+	"github.com/AltairaLabs/promptarena/arena/arenaconfig"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
@@ -176,7 +177,7 @@ func TestDiscoverAvailableProviders(t *testing.T) {
 
 	discovery := NewDiscovery(fakeClient, "test-ns")
 
-	cfg := &config.Config{
+	cfg := &arenaconfig.Config{
 		LoadedProviders: map[string]*config.Provider{
 			"gpt-4": {
 				ID:   "gpt-4",
@@ -228,7 +229,7 @@ func TestDiscoverAvailableProviders_TreatsClientErrorsAsUnavailable(t *testing.T
 		Build()
 
 	discovery := NewDiscovery(fakeClient, "test-ns")
-	cfg := &config.Config{
+	cfg := &arenaconfig.Config{
 		LoadedProviders: map[string]*config.Provider{
 			"gpt-4": {
 				ID:   "gpt-4",
@@ -260,7 +261,7 @@ func TestGetMissingCredentials(t *testing.T) {
 
 	discovery := NewDiscovery(fakeClient, "test-ns")
 
-	cfg := &config.Config{
+	cfg := &arenaconfig.Config{
 		LoadedProviders: map[string]*config.Provider{
 			"gpt-4": {
 				ID:   "gpt-4",
@@ -302,7 +303,7 @@ func TestGetMissingCredentials_TreatsClientErrorsAsMissing(t *testing.T) {
 		Build()
 
 	discovery := NewDiscovery(fakeClient, "test-ns")
-	cfg := &config.Config{
+	cfg := &arenaconfig.Config{
 		LoadedProviders: map[string]*config.Provider{
 			"gpt-4": {
 				ID:   "gpt-4",
@@ -317,7 +318,7 @@ func TestGetMissingCredentials_TreatsClientErrorsAsMissing(t *testing.T) {
 }
 
 func TestValidateProviderCredentials(t *testing.T) {
-	cfg := &config.Config{
+	cfg := &arenaconfig.Config{
 		LoadedProviders: map[string]*config.Provider{
 			"test-openai": {
 				ID:   "test-openai",
@@ -359,7 +360,7 @@ func TestValidateProviderCredentials(t *testing.T) {
 
 	t.Run("explicit CredentialEnv set and present", func(t *testing.T) {
 		t.Setenv("CUSTOM_API_KEY", "my-key")
-		explicitCfg := &config.Config{
+		explicitCfg := &arenaconfig.Config{
 			LoadedProviders: map[string]*config.Provider{
 				"custom-provider": {
 					ID:   "custom-provider",
@@ -376,7 +377,7 @@ func TestValidateProviderCredentials(t *testing.T) {
 
 	t.Run("explicit CredentialEnv set but missing", func(t *testing.T) {
 		_ = os.Unsetenv("CUSTOM_API_KEY_MISSING")
-		explicitCfg := &config.Config{
+		explicitCfg := &arenaconfig.Config{
 			LoadedProviders: map[string]*config.Provider{
 				"custom-provider": {
 					ID:   "custom-provider",
@@ -398,7 +399,7 @@ func TestValidateProviderCredentials(t *testing.T) {
 		defer os.Remove(tmpFile.Name()) //nolint:errcheck
 		require.NoError(t, tmpFile.Close())
 
-		explicitCfg := &config.Config{
+		explicitCfg := &arenaconfig.Config{
 			LoadedProviders: map[string]*config.Provider{
 				"file-provider": {
 					ID:   "file-provider",
@@ -414,7 +415,7 @@ func TestValidateProviderCredentials(t *testing.T) {
 	})
 
 	t.Run("explicit CredentialFile set but missing", func(t *testing.T) {
-		explicitCfg := &config.Config{
+		explicitCfg := &arenaconfig.Config{
 			LoadedProviders: map[string]*config.Provider{
 				"file-provider": {
 					ID:   "file-provider",
@@ -431,7 +432,7 @@ func TestValidateProviderCredentials(t *testing.T) {
 	})
 
 	t.Run("explicit APIKey set", func(t *testing.T) {
-		explicitCfg := &config.Config{
+		explicitCfg := &arenaconfig.Config{
 			LoadedProviders: map[string]*config.Provider{
 				"apikey-provider": {
 					ID:   "apikey-provider",
@@ -448,7 +449,7 @@ func TestValidateProviderCredentials(t *testing.T) {
 
 	t.Run("no credential config falls back to legacy", func(t *testing.T) {
 		_ = os.Unsetenv("OPENAI_API_KEY")
-		legacyCfg := &config.Config{
+		legacyCfg := &arenaconfig.Config{
 			LoadedProviders: map[string]*config.Provider{
 				"legacy-provider": {
 					ID:   "legacy-provider",

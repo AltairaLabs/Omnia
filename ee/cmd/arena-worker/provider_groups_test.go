@@ -19,6 +19,7 @@ import (
 	pkproviders "github.com/AltairaLabs/PromptKit/runtime/providers"
 	"github.com/AltairaLabs/PromptKit/runtime/providers/base"
 	"github.com/AltairaLabs/PromptKit/runtime/types"
+	"github.com/AltairaLabs/promptarena/arena/arenaconfig"
 	"github.com/go-logr/logr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -47,7 +48,7 @@ func testRC(
 	c client.Client,
 	ns string,
 	wsURLs map[string]string,
-	arenaCfg *config.Config,
+	arenaCfg *arenaconfig.Config,
 ) *resolveContext {
 	return &resolveContext{
 		ctx:         ctx,
@@ -615,7 +616,7 @@ func TestResolveProviderRefEntry(t *testing.T) {
 			WithObjects(provider).
 			Build()
 
-		arenaCfg := &config.Config{
+		arenaCfg := &arenaconfig.Config{
 			LoadedProviders: make(map[string]*config.Provider),
 			ProviderGroups:  make(map[string]string),
 		}
@@ -649,7 +650,7 @@ func TestResolveProviderRefEntry(t *testing.T) {
 			WithObjects(provider).
 			Build()
 
-		arenaCfg := &config.Config{
+		arenaCfg := &arenaconfig.Config{
 			LoadedProviders: make(map[string]*config.Provider),
 			ProviderGroups:  make(map[string]string),
 		}
@@ -684,7 +685,7 @@ func TestResolveProviderRefEntry(t *testing.T) {
 			WithObjects(provider).
 			Build()
 
-		arenaCfg := &config.Config{
+		arenaCfg := &arenaconfig.Config{
 			LoadedProviders: make(map[string]*config.Provider),
 			ProviderGroups:  make(map[string]string),
 		}
@@ -702,7 +703,7 @@ func TestResolveProviderRefEntry(t *testing.T) {
 	t.Run("returns error when provider not found", func(t *testing.T) {
 		c := fake.NewClientBuilder().WithScheme(k8s.Scheme()).Build()
 
-		arenaCfg := &config.Config{
+		arenaCfg := &arenaconfig.Config{
 			LoadedProviders: make(map[string]*config.Provider),
 			ProviderGroups:  make(map[string]string),
 		}
@@ -729,7 +730,7 @@ func TestResolveProviderRefEntry(t *testing.T) {
 			WithObjects(provider).
 			Build()
 
-		arenaCfg := &config.Config{
+		arenaCfg := &arenaconfig.Config{
 			LoadedProviders: make(map[string]*config.Provider),
 			ProviderGroups:  make(map[string]string),
 		}
@@ -761,7 +762,7 @@ func TestResolveProviderRefEntry(t *testing.T) {
 			WithObjects(provider).
 			Build()
 
-		arenaCfg := &config.Config{
+		arenaCfg := &arenaconfig.Config{
 			LoadedProviders: make(map[string]*config.Provider),
 			ProviderGroups:  make(map[string]string),
 		}
@@ -789,7 +790,7 @@ func TestResolveProviderRefEntry(t *testing.T) {
 			WithObjects(provider).
 			Build()
 
-		arenaCfg := &config.Config{
+		arenaCfg := &arenaconfig.Config{
 			LoadedProviders: make(map[string]*config.Provider),
 			ProviderGroups:  make(map[string]string),
 		}
@@ -819,7 +820,7 @@ func TestResolveProviderRefEntry(t *testing.T) {
 			WithObjects(provider).
 			Build()
 
-		arenaCfg := &config.Config{
+		arenaCfg := &arenaconfig.Config{
 			LoadedProviders: make(map[string]*config.Provider),
 			ProviderGroups:  make(map[string]string),
 		}
@@ -853,7 +854,7 @@ func TestResolveProviderRefEntry(t *testing.T) {
 			WithObjects(provider).
 			Build()
 
-		arenaCfg := &config.Config{
+		arenaCfg := &arenaconfig.Config{
 			LoadedProviders: make(map[string]*config.Provider),
 			ProviderGroups:  make(map[string]string),
 		}
@@ -892,7 +893,7 @@ func TestResolveProviderRefEntry(t *testing.T) {
 			WithObjects(provider).
 			Build()
 
-		arenaCfg := &config.Config{
+		arenaCfg := &arenaconfig.Config{
 			LoadedProviders: make(map[string]*config.Provider),
 			ProviderGroups:  make(map[string]string),
 		}
@@ -922,7 +923,7 @@ func TestResolveProviderRefEntry(t *testing.T) {
 			WithObjects(provider).
 			Build()
 
-		arenaCfg := &config.Config{
+		arenaCfg := &arenaconfig.Config{
 			LoadedProviders: make(map[string]*config.Provider),
 			ProviderGroups:  make(map[string]string),
 		}
@@ -948,7 +949,7 @@ func TestResolveAgentRefEntry(t *testing.T) {
 	log := testLog()
 
 	t.Run("returns error when agent not in WS URL map", func(t *testing.T) {
-		arenaCfg := &config.Config{
+		arenaCfg := &arenaconfig.Config{
 			LoadedProviders: make(map[string]*config.Provider),
 			ProviderGroups:  make(map[string]string),
 		}
@@ -963,7 +964,7 @@ func TestResolveAgentRefEntry(t *testing.T) {
 	})
 
 	t.Run("returns error when WS URL map is nil", func(t *testing.T) {
-		arenaCfg := &config.Config{
+		arenaCfg := &arenaconfig.Config{
 			LoadedProviders: make(map[string]*config.Provider),
 			ProviderGroups:  make(map[string]string),
 		}
@@ -974,7 +975,7 @@ func TestResolveAgentRefEntry(t *testing.T) {
 	})
 
 	t.Run("group name included in missing URL error", func(t *testing.T) {
-		arenaCfg := &config.Config{
+		arenaCfg := &arenaconfig.Config{
 			LoadedProviders: make(map[string]*config.Provider),
 			ProviderGroups:  make(map[string]string),
 		}
@@ -985,7 +986,7 @@ func TestResolveAgentRefEntry(t *testing.T) {
 	})
 
 	t.Run("success populates LoadedProviders and returns fleet provider", func(t *testing.T) {
-		arenaCfg := &config.Config{
+		arenaCfg := &arenaconfig.Config{
 			LoadedProviders: make(map[string]*config.Provider),
 			ProviderGroups:  make(map[string]string),
 		}
@@ -1018,7 +1019,7 @@ func TestResolveAgentRefEntryWithID(t *testing.T) {
 	log := testLog()
 
 	t.Run("returns error when agent not in WS URL map", func(t *testing.T) {
-		arenaCfg := &config.Config{
+		arenaCfg := &arenaconfig.Config{
 			LoadedProviders: make(map[string]*config.Provider),
 			ProviderGroups:  make(map[string]string),
 		}
@@ -1031,7 +1032,7 @@ func TestResolveAgentRefEntryWithID(t *testing.T) {
 	})
 
 	t.Run("success uses configID as provider ID", func(t *testing.T) {
-		arenaCfg := &config.Config{
+		arenaCfg := &arenaconfig.Config{
 			LoadedProviders: make(map[string]*config.Provider),
 			ProviderGroups:  make(map[string]string),
 		}
@@ -1066,7 +1067,7 @@ func TestResolveProviderRefEntryWithID(t *testing.T) {
 
 	t.Run("returns error when provider not found", func(t *testing.T) {
 		c := fake.NewClientBuilder().WithScheme(k8s.Scheme()).Build()
-		arenaCfg := &config.Config{
+		arenaCfg := &arenaconfig.Config{
 			LoadedProviders: make(map[string]*config.Provider),
 			ProviderGroups:  make(map[string]string),
 		}
@@ -1100,7 +1101,7 @@ func TestResolveProviderRefEntryWithID(t *testing.T) {
 			WithObjects(provider).
 			Build()
 
-		arenaCfg := &config.Config{
+		arenaCfg := &arenaconfig.Config{
 			LoadedProviders: make(map[string]*config.Provider),
 			ProviderGroups:  make(map[string]string),
 		}
@@ -1139,7 +1140,7 @@ func TestResolveProviderRefEntryWithID(t *testing.T) {
 			WithObjects(provider).
 			Build()
 
-		arenaCfg := &config.Config{
+		arenaCfg := &arenaconfig.Config{
 			LoadedProviders: make(map[string]*config.Provider),
 			ProviderGroups:  make(map[string]string),
 		}
@@ -1166,7 +1167,7 @@ func TestResolveEntry(t *testing.T) {
 	log := testLog()
 
 	t.Run("returns nil for entry with neither providerRef nor agentRef", func(t *testing.T) {
-		arenaCfg := &config.Config{
+		arenaCfg := &arenaconfig.Config{
 			LoadedProviders: make(map[string]*config.Provider),
 			ProviderGroups:  make(map[string]string),
 		}
@@ -1178,7 +1179,7 @@ func TestResolveEntry(t *testing.T) {
 	})
 
 	t.Run("agentRef with configID delegates to resolveAgentRefEntryWithID", func(t *testing.T) {
-		arenaCfg := &config.Config{
+		arenaCfg := &arenaconfig.Config{
 			LoadedProviders: make(map[string]*config.Provider),
 			ProviderGroups:  make(map[string]string),
 		}
@@ -1196,7 +1197,7 @@ func TestResolveEntry(t *testing.T) {
 	})
 
 	t.Run("agentRef without configID delegates to resolveAgentRefEntry", func(t *testing.T) {
-		arenaCfg := &config.Config{
+		arenaCfg := &arenaconfig.Config{
 			LoadedProviders: make(map[string]*config.Provider),
 			ProviderGroups:  make(map[string]string),
 		}
@@ -1225,7 +1226,7 @@ func TestResolveProvidersFromCRD(t *testing.T) {
 	t.Run("returns error when ArenaJob not found", func(t *testing.T) {
 		c := fake.NewClientBuilder().WithScheme(k8s.Scheme()).Build()
 		cfg := &Config{JobName: "missing", JobNamespace: testNamespace}
-		arenaCfg := &config.Config{}
+		arenaCfg := &arenaconfig.Config{}
 
 		_, _, err := resolveProvidersFromCRD(ctx, log, c, cfg, arenaCfg)
 		require.Error(t, err)
@@ -1237,7 +1238,7 @@ func TestResolveProvidersFromCRD(t *testing.T) {
 		c := fake.NewClientBuilder().WithScheme(k8s.Scheme()).WithObjects(u).Build()
 
 		cfg := &Config{JobName: "empty-job", JobNamespace: testNamespace}
-		arenaCfg := &config.Config{}
+		arenaCfg := &arenaconfig.Config{}
 
 		_, _, err := resolveProvidersFromCRD(ctx, log, c, cfg, arenaCfg)
 		require.Error(t, err)
@@ -1274,8 +1275,8 @@ func TestResolveProvidersFromCRD(t *testing.T) {
 			Build()
 
 		cfg := &Config{JobName: "test-job", JobNamespace: testNamespace}
-		// Pre-populate with arena config file providers (simulating config.LoadConfig)
-		arenaCfg := &config.Config{
+		// Pre-populate with arena config file providers (simulating arenaconfig.LoadConfig)
+		arenaCfg := &arenaconfig.Config{
 			LoadedProviders: map[string]*config.Provider{
 				"gemini-from-config": {ID: "gemini-from-config", Type: "gemini", Model: "gemini-2.0-flash"},
 				"mock-from-config":   {ID: "mock-from-config", Type: "mock"},
@@ -1327,7 +1328,7 @@ func TestResolveProvidersFromCRD(t *testing.T) {
 			Build()
 
 		cfg := &Config{JobName: "test-job", JobNamespace: testNamespace}
-		arenaCfg := &config.Config{}
+		arenaCfg := &arenaconfig.Config{}
 
 		fps, _, err := resolveProvidersFromCRD(ctx, log, c, cfg, arenaCfg)
 		require.NoError(t, err)
@@ -1355,7 +1356,7 @@ func TestResolveProvidersFromCRD(t *testing.T) {
 		c := fake.NewClientBuilder().WithScheme(k8s.Scheme()).WithObjects(u).Build()
 
 		cfg := &Config{JobName: "test-job", JobNamespace: testNamespace}
-		arenaCfg := &config.Config{}
+		arenaCfg := &arenaconfig.Config{}
 
 		_, _, err := resolveProvidersFromCRD(ctx, log, c, cfg, arenaCfg)
 		require.Error(t, err)
@@ -1380,7 +1381,7 @@ func TestResolveProvidersFromCRD(t *testing.T) {
 		c := fake.NewClientBuilder().WithScheme(k8s.Scheme()).WithObjects(u).Build()
 
 		cfg := &Config{JobName: "agent-job", JobNamespace: testNamespace}
-		arenaCfg := &config.Config{}
+		arenaCfg := &arenaconfig.Config{}
 
 		fps, _, err := resolveProvidersFromCRD(ctx, log, c, cfg, arenaCfg)
 		require.NoError(t, err)
@@ -1411,7 +1412,7 @@ func TestResolveProvidersFromCRD(t *testing.T) {
 		c := fake.NewClientBuilder().WithScheme(k8s.Scheme()).WithObjects(u).Build()
 
 		cfg := &Config{JobName: "agent-job", JobNamespace: testNamespace}
-		arenaCfg := &config.Config{}
+		arenaCfg := &arenaconfig.Config{}
 
 		_, _, err := resolveProvidersFromCRD(ctx, log, c, cfg, arenaCfg)
 		require.Error(t, err)
@@ -1448,7 +1449,7 @@ func TestResolveProvidersFromCRD(t *testing.T) {
 
 		cfg := &Config{JobName: "init-job", JobNamespace: testNamespace}
 		// arenaCfg has nil maps — function should initialise them
-		arenaCfg := &config.Config{}
+		arenaCfg := &arenaconfig.Config{}
 
 		_, _, err := resolveProvidersFromCRD(ctx, log, c, cfg, arenaCfg)
 		require.NoError(t, err)
@@ -1649,7 +1650,7 @@ func TestResolveArenaJobToolCache(t *testing.T) {
 
 		c := &countingClient{Client: baseClient, targetName: "shared-job"}
 		cfg := &Config{JobName: "shared-job", JobNamespace: testNamespace}
-		arenaCfg := &config.Config{}
+		arenaCfg := &arenaconfig.Config{}
 
 		_, _, err := resolveProvidersFromCRD(ctx, log, c, cfg, arenaCfg)
 		require.NoError(t, err)
@@ -1686,7 +1687,7 @@ func TestRemapProviderIDs(t *testing.T) {
       - id: user-sim
         provider: selfplay`)
 
-		arenaCfg := &config.Config{
+		arenaCfg := &arenaconfig.Config{
 			LoadedProviders: map[string]*config.Provider{
 				"ollama-tools": {ID: "ollama-tools", Type: "ollama", Model: "llama3"},
 			},
@@ -1712,7 +1713,7 @@ func TestRemapProviderIDs(t *testing.T) {
     - name: quality
       provider: quality-judge`)
 
-		arenaCfg := &config.Config{
+		arenaCfg := &arenaconfig.Config{
 			LoadedProviders: map[string]*config.Provider{
 				"gpt-4o-judge": {ID: "gpt-4o-judge", Type: "openai", Model: "gpt-4o"},
 			},
@@ -1736,7 +1737,7 @@ func TestRemapProviderIDs(t *testing.T) {
     safety:
       provider: safety-judge`)
 
-		arenaCfg := &config.Config{
+		arenaCfg := &arenaconfig.Config{
 			LoadedProviders: map[string]*config.Provider{
 				"claude-judge": {ID: "claude-judge", Type: "claude", Model: "claude-3-haiku"},
 			},
@@ -1759,7 +1760,7 @@ func TestRemapProviderIDs(t *testing.T) {
   scenarios:
     - file: scenarios/test.yaml`)
 
-		arenaCfg := &config.Config{
+		arenaCfg := &arenaconfig.Config{
 			LoadedProviders: map[string]*config.Provider{
 				"my-provider": {ID: "my-provider", Type: "mock"},
 			},
@@ -1787,7 +1788,7 @@ func TestRemapProviderIDs(t *testing.T) {
       - id: sim
         provider: selfplay`)
 
-		arenaCfg := &config.Config{
+		arenaCfg := &arenaconfig.Config{
 			LoadedProviders: map[string]*config.Provider{
 				"selfplay": {ID: "selfplay", Type: "mock"},
 			},
@@ -1814,7 +1815,7 @@ func TestRemapProviderIDs(t *testing.T) {
       - id: sim
         provider: selfplay`)
 
-		arenaCfg := &config.Config{
+		arenaCfg := &arenaconfig.Config{
 			LoadedProviders: map[string]*config.Provider{
 				"some-provider": {ID: "some-provider", Type: "mock"},
 			},
@@ -1839,7 +1840,7 @@ func TestRemapProviderIDs(t *testing.T) {
       - id: sim
         provider: selfplay`)
 
-		arenaCfg := &config.Config{
+		arenaCfg := &arenaconfig.Config{
 			LoadedProviders: map[string]*config.Provider{
 				"provider-a": {ID: "provider-a", Type: "mock", Model: "model-a"},
 				"provider-b": {ID: "provider-b", Type: "mock", Model: "model-b"},
@@ -1871,7 +1872,7 @@ func TestRemapProviderIDs(t *testing.T) {
       - id: user-sim
         provider: selfplay`)
 
-		arenaCfg := &config.Config{
+		arenaCfg := &arenaconfig.Config{
 			LoadedProviders: map[string]*config.Provider{
 				"agent-my-agent": {ID: "agent-my-agent", Type: "fleet"},
 			},
@@ -1900,7 +1901,7 @@ func TestRemapProviderIDs(t *testing.T) {
     - name: classifier
       provider: hf-judge`)
 
-		arenaCfg := &config.Config{
+		arenaCfg := &arenaconfig.Config{
 			// Inference provider lives ONLY in the non-llm map, not LoadedProviders.
 			LoadedProviders: map[string]*config.Provider{},
 			LoadedInferenceProviders: map[string]*config.Provider{
@@ -1935,7 +1936,7 @@ func TestRemapProviderIDs(t *testing.T) {
       - id: sim
         provider: selfplay`)
 
-		arenaCfg := &config.Config{
+		arenaCfg := &arenaconfig.Config{
 			LoadedProviders: map[string]*config.Provider{
 				"ollama-tools": {ID: "ollama-tools", Type: "ollama"},
 			},
@@ -2211,7 +2212,7 @@ func TestExtractProviderIDRefs_InvalidYAML(t *testing.T) {
 
 func TestRemapProviderIDs_ConfigReadError(t *testing.T) {
 	t.Run("returns error when config file does not exist", func(t *testing.T) {
-		arenaCfg := &config.Config{
+		arenaCfg := &arenaconfig.Config{
 			LoadedProviders: map[string]*config.Provider{},
 			ProviderGroups:  map[string]string{},
 		}
@@ -2252,7 +2253,7 @@ func TestResolveProvidersFromCRD_MapMode(t *testing.T) {
 			Build()
 
 		cfg := &Config{JobName: "map-agent-job", JobNamespace: testNamespace}
-		arenaCfg := &config.Config{}
+		arenaCfg := &arenaconfig.Config{}
 
 		fps, _, err := resolveProvidersFromCRD(ctx, log, c, cfg, arenaCfg)
 		require.NoError(t, err)
@@ -2296,7 +2297,7 @@ func TestResolveProvidersFromCRD_MapMode(t *testing.T) {
 			Build()
 
 		cfg := &Config{JobName: "map-job", JobNamespace: testNamespace}
-		arenaCfg := &config.Config{}
+		arenaCfg := &arenaconfig.Config{}
 
 		fps, _, err := resolveProvidersFromCRD(ctx, log, c, cfg, arenaCfg)
 		require.NoError(t, err)
@@ -2339,7 +2340,7 @@ func TestRemapProviderIDs_SkippedForMapMode(t *testing.T) {
 
 		// Simulate map-mode resolution: the provider is already keyed as "selfplay"
 		// (the config provider ID), so remapProviderIDs should be a no-op.
-		arenaCfg := &config.Config{
+		arenaCfg := &arenaconfig.Config{
 			LoadedProviders: map[string]*config.Provider{
 				"selfplay": {ID: "selfplay", Type: "openai", Model: "gpt-4o"},
 			},

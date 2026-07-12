@@ -12,7 +12,7 @@ Functional Source License. See ee/LICENSE for details.
 package template
 
 import (
-	promptkitTemplates "github.com/AltairaLabs/PromptKit/tools/arena/templates"
+	promptkitTemplates "github.com/AltairaLabs/promptarena/arena/templates"
 )
 
 // Re-export PromptKit binding types for convenience

@@ -16,6 +16,7 @@ import (
 	"testing"
 
 	"github.com/AltairaLabs/PromptKit/pkg/config"
+	"github.com/AltairaLabs/promptarena/arena/arenaconfig"
 	"github.com/altairalabs/omnia/ee/pkg/arena/overrides"
 )
 
@@ -40,8 +41,8 @@ spec:
 			t.Fatal(err)
 		}
 
-		cfg := &config.Config{
-			Providers: []config.ProviderRef{
+		cfg := &arenaconfig.Config{
+			Providers: []arenaconfig.ProviderRef{
 				{File: "gpt4.provider.yaml"},
 			},
 		}
@@ -81,8 +82,8 @@ spec:
 			t.Fatal(err)
 		}
 
-		cfg := &config.Config{
-			Providers: []config.ProviderRef{
+		cfg := &arenaconfig.Config{
+			Providers: []arenaconfig.ProviderRef{
 				{File: "local.provider.yaml"},
 			},
 		}
@@ -114,8 +115,8 @@ spec:
 			t.Fatal(err)
 		}
 
-		cfg := &config.Config{
-			Providers: []config.ProviderRef{
+		cfg := &arenaconfig.Config{
+			Providers: []arenaconfig.ProviderRef{
 				{File: "partial.provider.yaml"},
 			},
 		}
@@ -137,8 +138,8 @@ spec:
 			t.Fatal(err)
 		}
 
-		cfg := &config.Config{
-			Providers: []config.ProviderRef{
+		cfg := &arenaconfig.Config{
+			Providers: []arenaconfig.ProviderRef{
 				{File: "bad.provider.yaml"},
 			},
 		}
@@ -156,8 +157,8 @@ spec:
 	t.Run("missing file", func(t *testing.T) {
 		dir := t.TempDir()
 
-		cfg := &config.Config{
-			Providers: []config.ProviderRef{
+		cfg := &arenaconfig.Config{
+			Providers: []arenaconfig.ProviderRef{
 				{File: "missing.provider.yaml"},
 			},
 		}
@@ -173,7 +174,7 @@ spec:
 	})
 
 	t.Run("empty providers", func(t *testing.T) {
-		cfg := &config.Config{}
+		cfg := &arenaconfig.Config{}
 		bindings, err := ParseProviderAnnotations(cfg, "/some/path/config.yaml")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -186,7 +187,7 @@ spec:
 
 func TestApplyBindings(t *testing.T) {
 	t.Run("match found", func(t *testing.T) {
-		cfg := &config.Config{
+		cfg := &arenaconfig.Config{
 			LoadedProviders: map[string]*config.Provider{
 				"workspace-default-gpt4": {
 					ID:   "workspace-default-gpt4",
@@ -226,7 +227,7 @@ func TestApplyBindings(t *testing.T) {
 	})
 
 	t.Run("already has credentials", func(t *testing.T) {
-		cfg := &config.Config{
+		cfg := &arenaconfig.Config{
 			LoadedProviders: map[string]*config.Provider{
 				"workspace-default-gpt4": {
 					ID:   "workspace-default-gpt4",
@@ -266,7 +267,7 @@ func TestApplyBindings(t *testing.T) {
 	})
 
 	t.Run("key not found in registry", func(t *testing.T) {
-		cfg := &config.Config{
+		cfg := &arenaconfig.Config{
 			LoadedProviders: map[string]*config.Provider{
 				"workspace-default-gpt4": {
 					ID:   "workspace-default-gpt4",
@@ -297,7 +298,7 @@ func TestApplyBindings(t *testing.T) {
 	})
 
 	t.Run("empty bindings", func(t *testing.T) {
-		cfg := &config.Config{
+		cfg := &arenaconfig.Config{
 			LoadedProviders: map[string]*config.Provider{
 				"test": {ID: "test", Type: "openai"},
 			},
@@ -313,7 +314,7 @@ func TestApplyBindings(t *testing.T) {
 	})
 
 	t.Run("empty registry", func(t *testing.T) {
-		cfg := &config.Config{
+		cfg := &arenaconfig.Config{
 			LoadedProviders: map[string]*config.Provider{
 				"test": {ID: "test", Type: "openai"},
 			},
@@ -329,7 +330,7 @@ func TestApplyBindings(t *testing.T) {
 	})
 
 	t.Run("platform injection", func(t *testing.T) {
-		cfg := &config.Config{
+		cfg := &arenaconfig.Config{
 			LoadedProviders: map[string]*config.Provider{
 				"workspace-default-bedrock": {
 					ID:   "workspace-default-bedrock",
@@ -376,7 +377,7 @@ func TestApplyBindings(t *testing.T) {
 	})
 
 	t.Run("credential file binding", func(t *testing.T) {
-		cfg := &config.Config{
+		cfg := &arenaconfig.Config{
 			LoadedProviders: map[string]*config.Provider{
 				"workspace-default-vertex": {
 					ID:   "workspace-default-vertex",
@@ -418,7 +419,7 @@ func TestApplyBindings(t *testing.T) {
 
 func TestApplyNameMatching(t *testing.T) {
 	t.Run("match found", func(t *testing.T) {
-		cfg := &config.Config{
+		cfg := &arenaconfig.Config{
 			LoadedProviders: map[string]*config.Provider{
 				"workspace-default-gpt4": {
 					ID:   "workspace-default-gpt4",
@@ -450,7 +451,7 @@ func TestApplyNameMatching(t *testing.T) {
 	})
 
 	t.Run("no match", func(t *testing.T) {
-		cfg := &config.Config{
+		cfg := &arenaconfig.Config{
 			LoadedProviders: map[string]*config.Provider{
 				"unrelated-provider": {
 					ID:   "unrelated-provider",
@@ -473,7 +474,7 @@ func TestApplyNameMatching(t *testing.T) {
 	})
 
 	t.Run("skip mock and ollama", func(t *testing.T) {
-		cfg := &config.Config{
+		cfg := &arenaconfig.Config{
 			LoadedProviders: map[string]*config.Provider{
 				"workspace-default-mock": {
 					ID:   "workspace-default-mock",
@@ -504,7 +505,7 @@ func TestApplyNameMatching(t *testing.T) {
 	})
 
 	t.Run("skip already credentialed", func(t *testing.T) {
-		cfg := &config.Config{
+		cfg := &arenaconfig.Config{
 			LoadedProviders: map[string]*config.Provider{
 				"workspace-default-gpt4": {
 					ID:   "workspace-default-gpt4",
@@ -530,7 +531,7 @@ func TestApplyNameMatching(t *testing.T) {
 	})
 
 	t.Run("empty registry", func(t *testing.T) {
-		cfg := &config.Config{
+		cfg := &arenaconfig.Config{
 			LoadedProviders: map[string]*config.Provider{
 				"test": {ID: "test", Type: "openai"},
 			},
@@ -542,7 +543,7 @@ func TestApplyNameMatching(t *testing.T) {
 	})
 
 	t.Run("empty loaded providers", func(t *testing.T) {
-		cfg := &config.Config{}
+		cfg := &arenaconfig.Config{}
 		registry := map[string]overrides.ProviderOverride{
 			"ns/test": {ID: "test", SecretEnvVar: "KEY"},
 		}

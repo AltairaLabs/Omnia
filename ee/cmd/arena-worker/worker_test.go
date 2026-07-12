@@ -16,6 +16,7 @@ import (
 
 	"github.com/AltairaLabs/PromptKit/pkg/config"
 	"github.com/AltairaLabs/PromptKit/runtime/events"
+	"github.com/AltairaLabs/promptarena/arena/arenaconfig"
 	"github.com/go-logr/logr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -26,7 +27,7 @@ import (
 
 func TestApplyToolOverrides(t *testing.T) {
 	t.Run("empty overrides is no-op", func(t *testing.T) {
-		cfg := &config.Config{
+		cfg := &arenaconfig.Config{
 			LoadedTools: []config.ToolData{
 				{
 					FilePath: "tools/weather.tool.yaml",
@@ -55,7 +56,7 @@ spec:
 	})
 
 	t.Run("nil overrides is no-op", func(t *testing.T) {
-		cfg := &config.Config{
+		cfg := &arenaconfig.Config{
 			LoadedTools: []config.ToolData{
 				{
 					FilePath: "tools/weather.tool.yaml",
@@ -81,7 +82,7 @@ spec:
 	})
 
 	t.Run("applies override to matching tool by spec.name", func(t *testing.T) {
-		cfg := &config.Config{
+		cfg := &arenaconfig.Config{
 			LoadedTools: []config.ToolData{
 				{
 					FilePath: "tools/weather.tool.yaml",
@@ -125,7 +126,7 @@ spec:
 	})
 
 	t.Run("applies override to matching tool by metadata.name when spec.name is empty", func(t *testing.T) {
-		cfg := &config.Config{
+		cfg := &arenaconfig.Config{
 			LoadedTools: []config.ToolData{
 				{
 					FilePath: "tools/calculate.tool.yaml",
@@ -162,7 +163,7 @@ spec:
 	})
 
 	t.Run("override with description updates tool description", func(t *testing.T) {
-		cfg := &config.Config{
+		cfg := &arenaconfig.Config{
 			LoadedTools: []config.ToolData{
 				{
 					FilePath: "tools/search.tool.yaml",
@@ -198,7 +199,7 @@ spec:
 	})
 
 	t.Run("preserves existing HTTP config when applying override", func(t *testing.T) {
-		cfg := &config.Config{
+		cfg := &arenaconfig.Config{
 			LoadedTools: []config.ToolData{
 				{
 					FilePath: "tools/api.tool.yaml",
@@ -253,7 +254,7 @@ spec:
   mode: mock
   mock_result: "result"
 `
-		cfg := &config.Config{
+		cfg := &arenaconfig.Config{
 			LoadedTools: []config.ToolData{
 				{
 					FilePath: "tools/unrelated.tool.yaml",
@@ -281,7 +282,7 @@ spec:
 	})
 
 	t.Run("multiple tools with some overrides", func(t *testing.T) {
-		cfg := &config.Config{
+		cfg := &arenaconfig.Config{
 			LoadedTools: []config.ToolData{
 				{
 					FilePath: "tools/weather.tool.yaml",
@@ -350,7 +351,7 @@ spec:
 	})
 
 	t.Run("invalid YAML tool is skipped", func(t *testing.T) {
-		cfg := &config.Config{
+		cfg := &arenaconfig.Config{
 			LoadedTools: []config.ToolData{
 				{
 					FilePath: "tools/invalid.tool.yaml",
@@ -389,7 +390,7 @@ spec:
 	})
 
 	t.Run("preserves input_schema and other fields", func(t *testing.T) {
-		cfg := &config.Config{
+		cfg := &arenaconfig.Config{
 			LoadedTools: []config.ToolData{
 				{
 					FilePath: "tools/weather.tool.yaml",
@@ -458,7 +459,7 @@ spec:
 	})
 
 	t.Run("verbose mode logs applied overrides", func(t *testing.T) {
-		cfg := &config.Config{
+		cfg := &arenaconfig.Config{
 			LoadedTools: []config.ToolData{
 				{
 					FilePath: "tools/weather.tool.yaml",

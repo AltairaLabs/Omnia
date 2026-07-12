@@ -19,9 +19,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/AltairaLabs/PromptKit/pkg/config"
 	"github.com/AltairaLabs/PromptKit/runtime/statestore"
-	arenastatestore "github.com/AltairaLabs/PromptKit/tools/arena/statestore"
+	"github.com/AltairaLabs/promptarena/arena/arenaconfig"
+	arenastatestore "github.com/AltairaLabs/promptarena/arena/statestore"
 	"github.com/go-logr/logr"
 	"gopkg.in/yaml.v3"
 
@@ -292,7 +292,7 @@ func recordDetailedMetrics(
 
 // applyToolOverrides modifies LoadedTools in the config to apply overrides from ToolRegistry CRDs.
 // For each tool that has an override, it changes the mode to "http" and sets the endpoint URL.
-func applyToolOverrides(log logr.Logger, cfg *config.Config, toolOverrides map[string]ToolOverrideConfig) error {
+func applyToolOverrides(log logr.Logger, cfg *arenaconfig.Config, toolOverrides map[string]ToolOverrideConfig) error {
 	if len(toolOverrides) == 0 {
 		return nil
 	}
@@ -319,7 +319,7 @@ func applyToolOverrides(log logr.Logger, cfg *config.Config, toolOverrides map[s
 // in cfg.LoadedTools, rewriting it to an HTTP executor. Returns whether an override
 // was applied. Tools that don't parse or have no override are left untouched.
 func applyToolOverride(
-	log logr.Logger, cfg *config.Config, i int, toolOverrides map[string]ToolOverrideConfig,
+	log logr.Logger, cfg *arenaconfig.Config, i int, toolOverrides map[string]ToolOverrideConfig,
 ) (bool, error) {
 	// Parse the tool YAML
 	var wrapper toolConfigWrapper

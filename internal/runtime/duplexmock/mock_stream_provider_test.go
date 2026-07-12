@@ -116,6 +116,21 @@ func TestMockStreamSession_DoneAndError(t *testing.T) {
 	}
 }
 
+func TestMockStreamSession_BargeInNeverFires(t *testing.T) {
+	p := New()
+	sess, err := p.CreateStreamSession(context.Background(), &providers.StreamingInputConfig{})
+	if err != nil {
+		t.Fatalf("CreateStreamSession: %v", err)
+	}
+	defer func() { _ = sess.Close() }()
+
+	// The echo mock cannot detect barge-in, so per the StreamInputSession
+	// contract BargeIn() returns a nil channel that never fires.
+	if ch := sess.BargeIn(); ch != nil {
+		t.Fatalf("BargeIn() = %v, want nil channel", ch)
+	}
+}
+
 func TestMockStreamSession_SendSystemContext(t *testing.T) {
 	p := New()
 	sess, err := p.CreateStreamSession(context.Background(), &providers.StreamingInputConfig{})

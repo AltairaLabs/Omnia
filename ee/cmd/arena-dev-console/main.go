@@ -34,6 +34,7 @@ import (
 	"time"
 
 	"github.com/AltairaLabs/PromptKit/pkg/config"
+	"github.com/AltairaLabs/promptarena/arena/arenaconfig"
 	"github.com/altairalabs/omnia/ee/cmd/arena-dev-console/server"
 	"github.com/altairalabs/omnia/internal/facade"
 	"github.com/altairalabs/omnia/pkg/facade/auth"
@@ -233,10 +234,10 @@ func main() {
 // from Provider CRDs in the namespace specified in the WebSocket connection.
 func createHandler(log logr.Logger, configFile string) (*server.PromptKitHandler, func(), error) {
 	// Load initial configuration if provided
-	var cfg *config.Config
+	var cfg *arenaconfig.Config
 	if configFile != "" {
 		var err error
-		cfg, err = config.LoadConfig(configFile)
+		cfg, err = arenaconfig.LoadConfig(configFile)
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to load config from %s: %w", configFile, err)
 		}

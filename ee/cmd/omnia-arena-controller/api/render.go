@@ -16,7 +16,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	templates "github.com/AltairaLabs/PromptKit/tools/arena/templates"
+	templates "github.com/AltairaLabs/promptarena/arena/templates"
 )
 
 // ErrInvalidPath is returned when a path contains path traversal sequences.

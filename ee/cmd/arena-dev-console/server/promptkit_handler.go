@@ -18,10 +18,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/AltairaLabs/PromptKit/pkg/config"
 	"github.com/AltairaLabs/PromptKit/runtime/providers"
 	"github.com/AltairaLabs/PromptKit/runtime/types"
-	"github.com/AltairaLabs/PromptKit/tools/arena/engine"
+	"github.com/AltairaLabs/promptarena/arena/arenaconfig"
+	"github.com/AltairaLabs/promptarena/arena/engine"
 
 	"github.com/altairalabs/omnia/internal/facade"
 	"github.com/altairalabs/omnia/pkg/logctx"
@@ -38,7 +38,7 @@ const defaultReloadBasePath = "/workspace-content"
 // It supports dynamic reload of the configuration without dropping the WebSocket connection.
 type PromptKitHandler struct {
 	mu               sync.RWMutex
-	config           *config.Config
+	config           *arenaconfig.Config
 	providerRegistry *providers.Registry
 	log              logr.Logger
 	reloadBasePath   string
@@ -60,7 +60,7 @@ type SessionState struct {
 }
 
 // NewPromptKitHandler creates a new handler with the given configuration.
-func NewPromptKitHandler(cfg *config.Config, log logr.Logger) (*PromptKitHandler, error) {
+func NewPromptKitHandler(cfg *arenaconfig.Config, log logr.Logger) (*PromptKitHandler, error) {
 	h := &PromptKitHandler{
 		config:         cfg,
 		log:            log.WithName("promptkit-handler"),
@@ -130,7 +130,7 @@ func (h *PromptKitHandler) handleMetadataCommand(
 // selectProvider determines which provider to use for the request.
 func (h *PromptKitHandler) selectProvider(
 	providerID string,
-	cfg *config.Config,
+	cfg *arenaconfig.Config,
 	registry *providers.Registry,
 ) (providers.Provider, string, error) {
 	if providerID == "" {
@@ -217,7 +217,7 @@ func (h *PromptKitHandler) HandleMessage(
 func (h *PromptKitHandler) buildPredictionRequest(
 	messages []types.Message,
 	providerID string,
-	cfg *config.Config,
+	cfg *arenaconfig.Config,
 ) providers.PredictionRequest {
 	req := providers.PredictionRequest{
 		Messages:    messages,
@@ -393,7 +393,7 @@ func (h *PromptKitHandler) handleReload(
 	// Dashboard/dev-console UIs send a filesystem path in message content.
 	// Keep JSON reload support for backward compatibility.
 	if strings.HasPrefix(content, "{") {
-		var newConfig config.Config
+		var newConfig arenaconfig.Config
 		if err := json.Unmarshal([]byte(content), &newConfig); err != nil {
 			return writer.WriteError("INVALID_CONFIG", fmt.Sprintf("failed to parse config: %v", err))
 		}
@@ -422,7 +422,7 @@ func (h *PromptKitHandler) handleReload(
 
 // Reload updates the configuration and rebuilds components.
 // This is called externally (e.g., from file watcher).
-func (h *PromptKitHandler) Reload(cfg *config.Config) error {
+func (h *PromptKitHandler) Reload(cfg *arenaconfig.Config) error {
 	h.mu.Lock()
 	h.config = cfg
 	h.mu.Unlock()
@@ -436,7 +436,7 @@ func (h *PromptKitHandler) ReloadFromPath(configPath string) error {
 	if err != nil {
 		return err
 	}
-	cfg, err := config.LoadConfig(safePath)
+	cfg, err := arenaconfig.LoadConfig(safePath)
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
@@ -494,7 +494,7 @@ func pathWithinBase(basePath, targetPath string) bool {
 func (h *PromptKitHandler) getRegistryAndConfig(
 	ctx context.Context,
 	_ string,
-) (*providers.Registry, *config.Config, error) {
+) (*providers.Registry, *arenaconfig.Config, error) {
 	// If K8s loading is enabled, use dynamic loading from the pod's namespace
 	if h.k8sLoader != nil {
 		return h.getOrLoadK8sRegistry(ctx)
@@ -511,7 +511,7 @@ func (h *PromptKitHandler) getRegistryAndConfig(
 
 // getOrLoadK8sRegistry returns a cached registry or loads providers from K8s.
 // The dev console only accesses providers in its own namespace for security.
-func (h *PromptKitHandler) getOrLoadK8sRegistry(ctx context.Context) (*providers.Registry, *config.Config, error) {
+func (h *PromptKitHandler) getOrLoadK8sRegistry(ctx context.Context) (*providers.Registry, *arenaconfig.Config, error) {
 	namespace := h.k8sLoader.Namespace()
 
 	h.mu.RLock()
