@@ -205,7 +205,7 @@ func (r *AgentRuntimeReconciler) reconcileReferences(
 	agentRuntime *omniav1alpha1.AgentRuntime,
 ) (*omniav1alpha1.PromptPack, *omniav1alpha1.ToolRegistry, map[string]*omniav1alpha1.Provider, ctrl.Result, error) {
 	// Fetch required PromptPack
-	promptPack, err := r.fetchPromptPack(ctx, agentRuntime)
+	promptPack, err := r.resolvePromptPack(ctx, agentRuntime.Namespace, agentRuntime.Spec.PromptPackRef)
 	if err != nil {
 		r.handleRefError(ctx, log, agentRuntime, ConditionTypePromptPackReady, "PromptPackNotFound", err)
 		return nil, nil, nil, ctrl.Result{}, err
@@ -634,18 +634,24 @@ func promptPackInvalidReason(pp *omniav1alpha1.PromptPack) string {
 	return ""
 }
 
-func (r *AgentRuntimeReconciler) fetchPromptPack(ctx context.Context, agentRuntime *omniav1alpha1.AgentRuntime) (*omniav1alpha1.PromptPack, error) {
-	return r.fetchPromptPackByName(ctx, agentRuntime.Namespace, agentRuntime.Spec.PromptPackRef.Name)
-}
-
-// fetchPromptPackByName resolves a PromptPack by name. PromptPacks are
-// name-keyed (each version is its own resource), so the name alone identifies
-// the content to mount — used both for the stable ref and a candidate override.
-func (r *AgentRuntimeReconciler) fetchPromptPackByName(ctx context.Context, namespace, name string) (*omniav1alpha1.PromptPack, error) {
-	promptPack := &omniav1alpha1.PromptPack{}
-	key := types.NamespacedName{Name: name, Namespace: namespace}
-	if err := r.Get(ctx, key, promptPack); err != nil {
-		return nil, fmt.Errorf("failed to get PromptPack %s: %w", key, err)
+// resolvePromptPack resolves a PromptPackRef to a single PromptPack object.
+// PromptPacks are label-keyed, not name-keyed: every version of a logical
+// pack is its own resource sharing the label LabelPromptPackName=ref.Name, so
+// resolution lists the candidates sharing that label and then picks one by
+// exact version pin or channel (track) via selectPromptPack. Used for both
+// the stable ref and a candidate override — each resolves independently since
+// version/track (not just name) can differ between them.
+func (r *AgentRuntimeReconciler) resolvePromptPack(ctx context.Context, namespace string, ref omniav1alpha1.PromptPackRef) (*omniav1alpha1.PromptPack, error) {
+	var list omniav1alpha1.PromptPackList
+	if err := r.List(ctx, &list,
+		client.InNamespace(namespace),
+		client.MatchingLabels{LabelPromptPackName: ref.Name},
+	); err != nil {
+		return nil, fmt.Errorf("failed to list PromptPacks for %q: %w", ref.Name, err)
+	}
+	promptPack, err := selectPromptPack(list.Items, ref.Version, ref.Track)
+	if err != nil {
+		return nil, fmt.Errorf("resolve PromptPack %q: %w", ref.Name, err)
 	}
 	return promptPack, nil
 }

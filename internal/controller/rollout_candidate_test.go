@@ -125,8 +125,18 @@ func TestReconcileCandidateDeployment_CreatesWithCanaryLabel(t *testing.T) {
 
 	pp := newTestPromptPack()
 
+	// The candidate resolves its own PromptPack independently (by label +
+	// version/track), even though its packName here happens to match stable's
+	// — so a real, labeled candidate version must exist in the fake client.
+	candidatePP := newTestPromptPack()
+	candidatePP.Namespace = ar.Namespace
+	candidatePP.Spec.PackName = "test-pack"
+	candidatePP.Spec.Version = "v2"
+	candidatePP.Labels = map[string]string{LabelPromptPackName: "test-pack"}
+
 	fakeClient := fake.NewClientBuilder().
 		WithScheme(scheme).
+		WithObjects(candidatePP).
 		Build()
 
 	r := &AgentRuntimeReconciler{
@@ -157,7 +167,7 @@ func TestReconcileCandidateDeployment_MountsCandidatePromptPack(t *testing.T) {
 	ar.Spec.PromptPackRef.Name = "stable-pack"
 	ar.Spec.Rollout = &omniav1alpha1.RolloutConfig{
 		Candidate: &omniav1alpha1.CandidateOverrides{
-			PromptPackRef: &omniav1alpha1.PromptPackRef{Name: "candidate-pack"},
+			PromptPackRef: &omniav1alpha1.PromptPackRef{Name: "candidate-pack", Version: ptr.To("1.0.0")},
 		},
 		Steps: []omniav1alpha1.RolloutStep{{SetWeight: ptr.To[int32](10)}},
 	}
@@ -171,6 +181,9 @@ func TestReconcileCandidateDeployment_MountsCandidatePromptPack(t *testing.T) {
 	candidatePack := &omniav1alpha1.PromptPack{}
 	candidatePack.Name = "candidate-pack"
 	candidatePack.Namespace = ar.Namespace
+	candidatePack.Spec.PackName = "candidate-pack"
+	candidatePack.Spec.Version = "1.0.0"
+	candidatePack.Labels = map[string]string{LabelPromptPackName: "candidate-pack"}
 	candidatePack.Spec.Source.Type = omniav1alpha1.PromptPackSourceTypeConfigMap
 	candidatePack.Spec.Source.ConfigMapRef = &corev1.LocalObjectReference{Name: "candidate-pack-config"}
 

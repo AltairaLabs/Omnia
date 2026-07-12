@@ -91,17 +91,14 @@ func (r *AgentRuntimeReconciler) reconcileCandidateDeployment(
 
 	overrides := applyCandidateOverrides(ar)
 
-	// Resolve the candidate's PromptPack content. When the candidate overrides
-	// the PromptPackRef to a different pack, the candidate pods must mount THAT
-	// pack's ConfigMap — reusing the stable promptPack would silently run the
-	// stable prompts under the candidate label, defeating the rollout.
-	candidatePromptPack := promptPack
-	if overrides.PromptPackRef.Name != ar.Spec.PromptPackRef.Name {
-		resolved, err := r.fetchPromptPackByName(ctx, ar.Namespace, overrides.PromptPackRef.Name)
-		if err != nil {
-			return nil, fmt.Errorf("resolve candidate PromptPack %q: %w", overrides.PromptPackRef.Name, err)
-		}
-		candidatePromptPack = resolved
+	// Resolve the candidate's PromptPack content independently of the stable
+	// pack. The candidate's ref can differ from stable's on packName, version,
+	// or track — reusing the stable promptPack whenever the packName happened
+	// to match would silently skip a version/track change, defeating the
+	// rollout, so always resolve fresh via label+version/track.
+	candidatePromptPack, err := r.resolvePromptPack(ctx, ar.Namespace, overrides.PromptPackRef)
+	if err != nil {
+		return nil, fmt.Errorf("resolve candidate PromptPack %q: %w", overrides.PromptPackRef.Name, err)
 	}
 
 	// Deliver the candidate's provider refs to its pods via a mounted CM so the
