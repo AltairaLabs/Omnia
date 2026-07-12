@@ -48,9 +48,16 @@ type PromptPackRef struct {
 	// +kubebuilder:validation:MinLength=1
 	Name string `json:"name"`
 
-	// version specifies a specific version of the PromptPack to use.
+	// version pins an exact PromptPack version. Mutually exclusive with track.
 	// +optional
 	Version *string `json:"version,omitempty"`
+
+	// track follows a release channel instead of pinning a version:
+	// "stable" selects the highest non-prerelease version; "prerelease" selects
+	// the highest version overall. Mutually exclusive with version.
+	// +kubebuilder:validation:Enum=stable;prerelease
+	// +optional
+	Track *string `json:"track,omitempty"`
 }
 
 // FacadeType defines the protocol a single facade speaks. An AgentRuntime
