@@ -28,6 +28,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
@@ -567,6 +568,136 @@ var _ = Describe("PromptPack Controller", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(referencing).To(HaveLen(1))
 			Expect(referencing[0].Name).To(Equal("matching-agent"))
+		})
+	})
+
+	Context("When an AgentRuntime pins an exact PromptPack version", func() {
+		// #1837 Task 4 carried finding: the exact-Version-pin branch of
+		// findReferencingAgentRuntimes had zero coverage. Verify both the hit
+		// (pinned version matches the reconciling PromptPack object's version)
+		// and the miss (pinned version does not match) cases.
+		var (
+			pinnedPack *omniav1alpha1.PromptPack
+			hitAR      *omniav1alpha1.AgentRuntime
+			missAR     *omniav1alpha1.AgentRuntime
+			pinnedCM   *corev1.ConfigMap
+		)
+
+		BeforeEach(func() {
+			By("creating the ConfigMap")
+			pinnedCM = &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "pinned-prompts",
+					Namespace: promptPackNamespace,
+				},
+				Data: map[string]string{
+					"pack.json": validPackJSON,
+				},
+			}
+			Expect(k8sClient.Create(ctx, pinnedCM)).To(Succeed())
+
+			By("creating a PromptPack at version 1.0.0")
+			pinnedPack = &omniav1alpha1.PromptPack{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "pp-pinned-version",
+					Namespace: promptPackNamespace,
+				},
+				Spec: omniav1alpha1.PromptPackSpec{
+					PackName: "pinned-pack",
+					Source: omniav1alpha1.PromptPackContentSource{
+						Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
+						ConfigMapRef: &corev1.LocalObjectReference{
+							Name: "pinned-prompts",
+						},
+					},
+					Version: "1.0.0",
+				},
+			}
+			Expect(k8sClient.Create(ctx, pinnedPack)).To(Succeed())
+
+			By("creating an AgentRuntime that pins the matching version")
+			hitAR = &omniav1alpha1.AgentRuntime{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "pinned-hit-agent",
+					Namespace: promptPackNamespace,
+				},
+				Spec: omniav1alpha1.AgentRuntimeSpec{
+					PromptPackRef: omniav1alpha1.PromptPackRef{
+						Name:    "pinned-pack",
+						Version: ptr.To("1.0.0"),
+					},
+					Facades: []omniav1alpha1.FacadeConfig{{
+						Type: omniav1alpha1.FacadeTypeWebSocket,
+					}},
+					Providers: []omniav1alpha1.NamedProviderRef{
+						{Name: "default", ProviderRef: omniav1alpha1.ProviderRef{Name: "test-provider"}},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, hitAR)).To(Succeed())
+
+			By("creating an AgentRuntime that pins a different version")
+			missAR = &omniav1alpha1.AgentRuntime{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "pinned-miss-agent",
+					Namespace: promptPackNamespace,
+				},
+				Spec: omniav1alpha1.AgentRuntimeSpec{
+					PromptPackRef: omniav1alpha1.PromptPackRef{
+						Name:    "pinned-pack",
+						Version: ptr.To("2.0.0"),
+					},
+					Facades: []omniav1alpha1.FacadeConfig{{
+						Type: omniav1alpha1.FacadeTypeWebSocket,
+					}},
+					Providers: []omniav1alpha1.NamedProviderRef{
+						{Name: "default", ProviderRef: omniav1alpha1.ProviderRef{Name: "test-provider"}},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, missAR)).To(Succeed())
+		})
+
+		AfterEach(func() {
+			By("cleaning up resources")
+			for _, name := range []string{"pinned-hit-agent", "pinned-miss-agent"} {
+				ar := &omniav1alpha1.AgentRuntime{}
+				err := k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: promptPackNamespace}, ar)
+				if err == nil {
+					Expect(k8sClient.Delete(ctx, ar)).To(Succeed())
+				}
+			}
+
+			pp := &omniav1alpha1.PromptPack{}
+			err := k8sClient.Get(ctx, types.NamespacedName{
+				Name:      "pp-pinned-version",
+				Namespace: promptPackNamespace,
+			}, pp)
+			if err == nil {
+				Expect(k8sClient.Delete(ctx, pp)).To(Succeed())
+			}
+
+			cm := &corev1.ConfigMap{}
+			err = k8sClient.Get(ctx, types.NamespacedName{
+				Name:      "pinned-prompts",
+				Namespace: promptPackNamespace,
+			}, cm)
+			if err == nil {
+				Expect(k8sClient.Delete(ctx, cm)).To(Succeed())
+			}
+		})
+
+		It("matches only the AgentRuntime whose pinned version equals the PromptPack's version", func() {
+			reconciler := &PromptPackReconciler{
+				Client:          k8sClient,
+				Scheme:          k8sClient.Scheme(),
+				SchemaValidator: schema.NewSchemaValidatorWithOptions(logr.Discard(), nil, time.Hour),
+			}
+
+			referencing, err := reconciler.findReferencingAgentRuntimes(ctx, pinnedPack)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(referencing).To(HaveLen(1))
+			Expect(referencing[0].Name).To(Equal("pinned-hit-agent"))
 		})
 	})
 
