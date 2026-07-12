@@ -571,6 +571,87 @@ type MediaConfig struct {
 	// +optional
 	// +kubebuilder:default="/etc/omnia/media"
 	BasePath string `json:"basePath,omitempty"`
+
+	// storage configures the media-storage backend the operator provisions
+	// into the facade (uploads) and runtime (attachment-reference resolution)
+	// containers. When unset, media storage is disabled.
+	// +optional
+	Storage *MediaStorageConfig `json:"storage,omitempty"`
+}
+
+// MediaStorageConfig selects and configures the media-storage backend.
+type MediaStorageConfig struct {
+	// type selects the storage backend.
+	// +kubebuilder:validation:Enum=none;local;s3;gcs;azure
+	// +kubebuilder:default=none
+	Type string `json:"type"`
+
+	// +optional
+	Local *LocalMediaBackend `json:"local,omitempty"`
+	// +optional
+	S3 *S3MediaBackend `json:"s3,omitempty"`
+	// +optional
+	GCS *GCSMediaBackend `json:"gcs,omitempty"`
+	// +optional
+	Azure *AzureMediaBackend `json:"azure,omitempty"`
+
+	// defaultTTL is the retention TTL for stored media (Go duration).
+	// +optional
+	DefaultTTL *metav1.Duration `json:"defaultTTL,omitempty"`
+	// uploadURLTTL bounds presigned upload URLs.
+	// +optional
+	UploadURLTTL *metav1.Duration `json:"uploadURLTTL,omitempty"`
+	// downloadURLTTL bounds presigned download URLs.
+	// +optional
+	DownloadURLTTL *metav1.Duration `json:"downloadURLTTL,omitempty"`
+	// maxFileSizeBytes caps a single stored object.
+	// +kubebuilder:validation:Minimum=1
+	// +optional
+	MaxFileSizeBytes *int64 `json:"maxFileSizeBytes,omitempty"`
+
+	// secretRef supplies explicit credentials (S3 AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY,
+	// Azure account key). Omit for keyless workload-identity access. GCS uses
+	// workload identity only.
+	// +optional
+	SecretRef *corev1.LocalObjectReference `json:"secretRef,omitempty"`
+}
+
+// LocalMediaBackend stores media on a facade-served local path.
+type LocalMediaBackend struct {
+	// basePath is the on-disk directory the facade serves media from.
+	// +kubebuilder:validation:MinLength=1
+	BasePath string `json:"basePath"`
+}
+
+// S3MediaBackend configures S3 / S3-compatible (MinIO) storage.
+type S3MediaBackend struct {
+	// +kubebuilder:validation:MinLength=1
+	Bucket string `json:"bucket"`
+	// +optional
+	Region string `json:"region,omitempty"`
+	// +optional
+	Prefix string `json:"prefix,omitempty"`
+	// endpoint, when set (e.g. MinIO), forces path-style addressing.
+	// +optional
+	Endpoint string `json:"endpoint,omitempty"`
+}
+
+// GCSMediaBackend configures Google Cloud Storage (workload identity / ADC).
+type GCSMediaBackend struct {
+	// +kubebuilder:validation:MinLength=1
+	Bucket string `json:"bucket"`
+	// +optional
+	Prefix string `json:"prefix,omitempty"`
+}
+
+// AzureMediaBackend configures Azure Blob Storage.
+type AzureMediaBackend struct {
+	// +kubebuilder:validation:MinLength=1
+	Account string `json:"account"`
+	// +kubebuilder:validation:MinLength=1
+	Container string `json:"container"`
+	// +optional
+	Prefix string `json:"prefix,omitempty"`
 }
 
 // ConsoleConfig defines configuration for the dashboard console UI.

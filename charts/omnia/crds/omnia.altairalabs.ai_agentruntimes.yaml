@@ -1393,6 +1393,114 @@ spec:
                       basePath is the base directory for resolving mock:// URLs.
                       Defaults to /etc/omnia/media if not specified.
                     type: string
+                  storage:
+                    description: |-
+                      storage configures the media-storage backend the operator provisions
+                      into the facade (uploads) and runtime (attachment-reference resolution)
+                      containers. When unset, media storage is disabled.
+                    properties:
+                      azure:
+                        description: AzureMediaBackend configures Azure Blob Storage.
+                        properties:
+                          account:
+                            minLength: 1
+                            type: string
+                          container:
+                            minLength: 1
+                            type: string
+                          prefix:
+                            type: string
+                        required:
+                        - account
+                        - container
+                        type: object
+                      defaultTTL:
+                        description: defaultTTL is the retention TTL for stored media
+                          (Go duration).
+                        type: string
+                      downloadURLTTL:
+                        description: downloadURLTTL bounds presigned download URLs.
+                        type: string
+                      gcs:
+                        description: GCSMediaBackend configures Google Cloud Storage
+                          (workload identity / ADC).
+                        properties:
+                          bucket:
+                            minLength: 1
+                            type: string
+                          prefix:
+                            type: string
+                        required:
+                        - bucket
+                        type: object
+                      local:
+                        description: LocalMediaBackend stores media on a facade-served
+                          local path.
+                        properties:
+                          basePath:
+                            description: basePath is the on-disk directory the facade
+                              serves media from.
+                            minLength: 1
+                            type: string
+                        required:
+                        - basePath
+                        type: object
+                      maxFileSizeBytes:
+                        description: maxFileSizeBytes caps a single stored object.
+                        format: int64
+                        minimum: 1
+                        type: integer
+                      s3:
+                        description: S3MediaBackend configures S3 / S3-compatible
+                          (MinIO) storage.
+                        properties:
+                          bucket:
+                            minLength: 1
+                            type: string
+                          endpoint:
+                            description: endpoint, when set (e.g. MinIO), forces path-style
+                              addressing.
+                            type: string
+                          prefix:
+                            type: string
+                          region:
+                            type: string
+                        required:
+                        - bucket
+                        type: object
+                      secretRef:
+                        description: |-
+                          secretRef supplies explicit credentials (S3 AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY,
+                          Azure account key). Omit for keyless workload-identity access. GCS uses
+                          workload identity only.
+                        properties:
+                          name:
+                            default: ""
+                            description: |-
+                              Name of the referent.
+                              This field is effectively required, but due to backwards compatibility is
+                              allowed to be empty. Instances of this type with an empty value here are
+                              almost certainly wrong.
+                              More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                            type: string
+                        type: object
+                        x-kubernetes-map-type: atomic
+                      type:
+                        default: none
+                        description: type selects the storage backend.
+                        enum:
+                        - none
+                        - local
+                        - s3
+                        - gcs
+                        - azure
+                        type: string
+                      uploadURLTTL:
+                        description: uploadURLTTL bounds presigned upload URLs.
+                        type: string
+                    required:
+                    - type
+                    type: object
                 type: object
               memory:
                 description: memory configures cross-session memory for this agent.
