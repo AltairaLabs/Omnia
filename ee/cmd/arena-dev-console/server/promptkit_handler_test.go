@@ -18,7 +18,8 @@ import (
 	"github.com/AltairaLabs/PromptKit/runtime/providers"
 	"github.com/AltairaLabs/PromptKit/runtime/providers/base"
 	"github.com/AltairaLabs/PromptKit/runtime/types"
-	"github.com/AltairaLabs/PromptKit/tools/arena/engine"
+	"github.com/AltairaLabs/promptarena/arena/arenaconfig"
+	"github.com/AltairaLabs/promptarena/arena/engine"
 	corev1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 	"github.com/altairalabs/omnia/internal/facade"
 	"github.com/go-logr/logr"
@@ -48,9 +49,9 @@ func TestBuildEngineComponentsOutputDirectory(t *testing.T) {
 	outputDir := filepath.Join(tmpDir, "output")
 
 	// Create a minimal config with output directory set
-	cfg := &config.Config{
-		Defaults: config.Defaults{
-			Output: config.OutputConfig{
+	cfg := &arenaconfig.Config{
+		Defaults: arenaconfig.Defaults{
+			Output: arenaconfig.OutputConfig{
 				Dir: outputDir,
 			},
 			OutDir:    outputDir,
@@ -99,8 +100,8 @@ func TestBuildEngineComponentsWithWorkdirChange(t *testing.T) {
 	require.NoError(t, err)
 
 	// Create config with empty output directory (will use default "out")
-	cfg := &config.Config{
-		Defaults: config.Defaults{
+	cfg := &arenaconfig.Config{
+		Defaults: arenaconfig.Defaults{
 			ConfigDir: tmpDir,
 		},
 		LoadedProviders: map[string]*config.Provider{
@@ -158,8 +159,8 @@ func TestBuildEngineComponentsFailsWithReadOnlyDir(t *testing.T) {
 	require.NoError(t, err)
 
 	// Create config with empty output directory
-	cfg := &config.Config{
-		Defaults: config.Defaults{
+	cfg := &arenaconfig.Config{
+		Defaults: arenaconfig.Defaults{
 			ConfigDir: readOnlyDir,
 		},
 		LoadedProviders: map[string]*config.Provider{
@@ -188,9 +189,9 @@ func TestPromptKitHandlerBuildComponents(t *testing.T) {
 	tmpDir := t.TempDir()
 	outputDir := filepath.Join(tmpDir, "output")
 
-	cfg := &config.Config{
-		Defaults: config.Defaults{
-			Output: config.OutputConfig{
+	cfg := &arenaconfig.Config{
+		Defaults: arenaconfig.Defaults{
+			Output: arenaconfig.OutputConfig{
 				Dir: outputDir,
 			},
 			OutDir:    outputDir,
@@ -240,8 +241,8 @@ func TestPromptKitHandlerBuildComponentsWithEmptyOutputDir(t *testing.T) {
 	err = os.Chdir(tmpDir)
 	require.NoError(t, err)
 
-	cfg := &config.Config{
-		Defaults: config.Defaults{
+	cfg := &arenaconfig.Config{
+		Defaults: arenaconfig.Defaults{
 			// Empty Output.Dir - handler should set a default
 			ConfigDir: tmpDir,
 		},
@@ -348,7 +349,7 @@ func TestNewPromptKitHandlerWithNilConfig(t *testing.T) {
 
 // TestNewPromptKitHandlerWithEmptyProviders tests creating handler with empty providers.
 func TestNewPromptKitHandlerWithEmptyProviders(t *testing.T) {
-	cfg := &config.Config{
+	cfg := &arenaconfig.Config{
 		LoadedProviders: map[string]*config.Provider{},
 	}
 	handler, err := NewPromptKitHandler(cfg, logr.Discard())
@@ -483,9 +484,9 @@ func TestPromptKitHandlerReload(t *testing.T) {
 		nsRegistries: make(map[string]*providers.Registry),
 	}
 
-	newConfig := &config.Config{
-		Defaults: config.Defaults{
-			Output: config.OutputConfig{
+	newConfig := &arenaconfig.Config{
+		Defaults: arenaconfig.Defaults{
+			Output: arenaconfig.OutputConfig{
 				Dir: outputDir,
 			},
 			OutDir:    outputDir,
@@ -785,9 +786,9 @@ func TestHandleMessageReset(t *testing.T) {
 	tmpDir := t.TempDir()
 	outputDir := filepath.Join(tmpDir, "output")
 
-	cfg := &config.Config{
-		Defaults: config.Defaults{
-			Output: config.OutputConfig{
+	cfg := &arenaconfig.Config{
+		Defaults: arenaconfig.Defaults{
+			Output: arenaconfig.OutputConfig{
 				Dir: outputDir,
 			},
 			OutDir:    outputDir,
@@ -843,9 +844,9 @@ func TestHandleMessageSetProvider(t *testing.T) {
 	tmpDir := t.TempDir()
 	outputDir := filepath.Join(tmpDir, "output")
 
-	cfg := &config.Config{
-		Defaults: config.Defaults{
-			Output: config.OutputConfig{
+	cfg := &arenaconfig.Config{
+		Defaults: arenaconfig.Defaults{
+			Output: arenaconfig.OutputConfig{
 				Dir: outputDir,
 			},
 			OutDir:    outputDir,
@@ -903,9 +904,9 @@ func TestHandleMessageProviderNotFound(t *testing.T) {
 	tmpDir := t.TempDir()
 	outputDir := filepath.Join(tmpDir, "output")
 
-	cfg := &config.Config{
-		Defaults: config.Defaults{
-			Output: config.OutputConfig{
+	cfg := &arenaconfig.Config{
+		Defaults: arenaconfig.Defaults{
+			Output: arenaconfig.OutputConfig{
 				Dir: outputDir,
 			},
 			OutDir:    outputDir,
@@ -968,9 +969,9 @@ func TestGetRegistryAndConfigNoK8sLoader(t *testing.T) {
 	tmpDir := t.TempDir()
 	outputDir := filepath.Join(tmpDir, "output")
 
-	cfg := &config.Config{
-		Defaults: config.Defaults{
-			Output: config.OutputConfig{
+	cfg := &arenaconfig.Config{
+		Defaults: arenaconfig.Defaults{
+			Output: arenaconfig.OutputConfig{
 				Dir: outputDir,
 			},
 			OutDir:    outputDir,
@@ -1045,9 +1046,9 @@ func TestHandleMessageWithMultimodalParts(t *testing.T) {
 	tmpDir := t.TempDir()
 	outputDir := filepath.Join(tmpDir, "output")
 
-	cfg := &config.Config{
-		Defaults: config.Defaults{
-			Output: config.OutputConfig{
+	cfg := &arenaconfig.Config{
+		Defaults: arenaconfig.Defaults{
+			Output: arenaconfig.OutputConfig{
 				Dir: outputDir,
 			},
 			OutDir:    outputDir,
@@ -1161,9 +1162,9 @@ func TestHandleMessageNoProviderConfigured(t *testing.T) {
 	outputDir := filepath.Join(tmpDir, "output")
 
 	// Config with empty providers - after building, no providers will be available
-	cfg := &config.Config{
-		Defaults: config.Defaults{
-			Output: config.OutputConfig{
+	cfg := &arenaconfig.Config{
+		Defaults: arenaconfig.Defaults{
+			Output: arenaconfig.OutputConfig{
 				Dir: outputDir,
 			},
 			OutDir:    outputDir,
@@ -1196,9 +1197,9 @@ func TestCloseWithNsRegistries(t *testing.T) {
 	tmpDir := t.TempDir()
 	outputDir := filepath.Join(tmpDir, "output")
 
-	cfg := &config.Config{
-		Defaults: config.Defaults{
-			Output: config.OutputConfig{
+	cfg := &arenaconfig.Config{
+		Defaults: arenaconfig.Defaults{
+			Output: arenaconfig.OutputConfig{
 				Dir: outputDir,
 			},
 			OutDir:    outputDir,
@@ -1234,9 +1235,9 @@ func TestCloseWithMainRegistry(t *testing.T) {
 	tmpDir := t.TempDir()
 	outputDir := filepath.Join(tmpDir, "output")
 
-	cfg := &config.Config{
-		Defaults: config.Defaults{
-			Output: config.OutputConfig{
+	cfg := &arenaconfig.Config{
+		Defaults: arenaconfig.Defaults{
+			Output: arenaconfig.OutputConfig{
 				Dir: outputDir,
 			},
 			OutDir:    outputDir,
@@ -1272,9 +1273,9 @@ func TestListProvidersWithRegistry(t *testing.T) {
 	tmpDir := t.TempDir()
 	outputDir := filepath.Join(tmpDir, "output")
 
-	cfg := &config.Config{
-		Defaults: config.Defaults{
-			Output: config.OutputConfig{
+	cfg := &arenaconfig.Config{
+		Defaults: arenaconfig.Defaults{
+			Output: arenaconfig.OutputConfig{
 				Dir: outputDir,
 			},
 			OutDir:    outputDir,
@@ -1314,9 +1315,9 @@ func TestHandleMessageWithProviderDefaults(t *testing.T) {
 	tmpDir := t.TempDir()
 	outputDir := filepath.Join(tmpDir, "output")
 
-	cfg := &config.Config{
-		Defaults: config.Defaults{
-			Output: config.OutputConfig{
+	cfg := &arenaconfig.Config{
+		Defaults: arenaconfig.Defaults{
+			Output: arenaconfig.OutputConfig{
 				Dir: outputDir,
 			},
 			OutDir:    outputDir,
@@ -1370,8 +1371,8 @@ func TestHandleMessageWithProviderDefaults(t *testing.T) {
 func TestBuildComponentsSetsDefaultOutputDir(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	cfg := &config.Config{
-		Defaults: config.Defaults{
+	cfg := &arenaconfig.Config{
+		Defaults: arenaconfig.Defaults{
 			// Leave Output.Dir empty
 			ConfigDir: tmpDir,
 		},
@@ -1418,9 +1419,9 @@ func TestNewPromptKitHandlerWithValidConfig(t *testing.T) {
 	tmpDir := t.TempDir()
 	outputDir := filepath.Join(tmpDir, "output")
 
-	cfg := &config.Config{
-		Defaults: config.Defaults{
-			Output: config.OutputConfig{
+	cfg := &arenaconfig.Config{
+		Defaults: arenaconfig.Defaults{
+			Output: arenaconfig.OutputConfig{
 				Dir: outputDir,
 			},
 			OutDir:    outputDir,
@@ -1451,9 +1452,9 @@ func TestInvalidateProviderCacheWithK8sLoader(t *testing.T) {
 	tmpDir := t.TempDir()
 	outputDir := filepath.Join(tmpDir, "output")
 
-	cfg := &config.Config{
-		Defaults: config.Defaults{
-			Output: config.OutputConfig{
+	cfg := &arenaconfig.Config{
+		Defaults: arenaconfig.Defaults{
+			Output: arenaconfig.OutputConfig{
 				Dir: outputDir,
 			},
 			OutDir:    outputDir,
@@ -1500,9 +1501,9 @@ func TestGetRegistryAndConfigWithK8sLoader(t *testing.T) {
 	tmpDir := t.TempDir()
 	outputDir := filepath.Join(tmpDir, "output")
 
-	cfg := &config.Config{
-		Defaults: config.Defaults{
-			Output: config.OutputConfig{
+	cfg := &arenaconfig.Config{
+		Defaults: arenaconfig.Defaults{
+			Output: arenaconfig.OutputConfig{
 				Dir: outputDir,
 			},
 			OutDir:    outputDir,
@@ -1565,9 +1566,9 @@ func TestHandleMessageReloadMetadata(t *testing.T) {
 	tmpDir := t.TempDir()
 	outputDir := filepath.Join(tmpDir, "output")
 
-	cfg := &config.Config{
-		Defaults: config.Defaults{
-			Output: config.OutputConfig{
+	cfg := &arenaconfig.Config{
+		Defaults: arenaconfig.Defaults{
+			Output: arenaconfig.OutputConfig{
 				Dir: outputDir,
 			},
 			OutDir:    outputDir,
@@ -1672,9 +1673,9 @@ func TestPromptKitHandlerCloseWithRegistry(t *testing.T) {
 	tmpDir := t.TempDir()
 	outputDir := filepath.Join(tmpDir, "output")
 
-	cfg := &config.Config{
-		Defaults: config.Defaults{
-			Output: config.OutputConfig{
+	cfg := &arenaconfig.Config{
+		Defaults: arenaconfig.Defaults{
+			Output: arenaconfig.OutputConfig{
 				Dir: outputDir,
 			},
 			OutDir:    outputDir,
@@ -1715,9 +1716,9 @@ func TestPromptKitHandlerCloseWithNamespaceRegistries(t *testing.T) {
 	outputDir := filepath.Join(tmpDir, "output")
 	outputDir2 := filepath.Join(tmpDir, "output2")
 
-	cfg := &config.Config{
-		Defaults: config.Defaults{
-			Output: config.OutputConfig{
+	cfg := &arenaconfig.Config{
+		Defaults: arenaconfig.Defaults{
+			Output: arenaconfig.OutputConfig{
 				Dir: outputDir,
 			},
 			OutDir:    outputDir,
@@ -1733,9 +1734,9 @@ func TestPromptKitHandlerCloseWithNamespaceRegistries(t *testing.T) {
 	}
 
 	// Create a second config for namespace registry
-	cfg2 := &config.Config{
-		Defaults: config.Defaults{
-			Output: config.OutputConfig{
+	cfg2 := &arenaconfig.Config{
+		Defaults: arenaconfig.Defaults{
+			Output: arenaconfig.OutputConfig{
 				Dir: outputDir2,
 			},
 			OutDir:    outputDir2,
@@ -1785,9 +1786,9 @@ func TestPromptKitHandlerCloseWithNamespaceRegistries(t *testing.T) {
 // buildComponents fails (invalid config).
 func TestNewPromptKitHandlerBuildComponentsError(t *testing.T) {
 	// Create a config with providers but invalid output directory that can't be created
-	cfg := &config.Config{
-		Defaults: config.Defaults{
-			Output: config.OutputConfig{
+	cfg := &arenaconfig.Config{
+		Defaults: arenaconfig.Defaults{
+			Output: arenaconfig.OutputConfig{
 				Dir: "/nonexistent/readonly/path",
 			},
 			OutDir:    "/nonexistent/readonly/path",
@@ -2032,9 +2033,9 @@ func TestGetOrLoadK8sRegistryWithProviders(t *testing.T) {
 	tmpDir := t.TempDir()
 	outputDir := filepath.Join(tmpDir, "output")
 
-	cfg := &config.Config{
-		Defaults: config.Defaults{
-			Output: config.OutputConfig{
+	cfg := &arenaconfig.Config{
+		Defaults: arenaconfig.Defaults{
+			Output: arenaconfig.OutputConfig{
 				Dir: outputDir,
 			},
 			OutDir:    outputDir,
@@ -2096,9 +2097,9 @@ func TestGetOrLoadK8sRegistryCached(t *testing.T) {
 	tmpDir := t.TempDir()
 	outputDir := filepath.Join(tmpDir, "output")
 
-	cfg := &config.Config{
-		Defaults: config.Defaults{
-			Output: config.OutputConfig{
+	cfg := &arenaconfig.Config{
+		Defaults: arenaconfig.Defaults{
+			Output: arenaconfig.OutputConfig{
 				Dir: outputDir,
 			},
 			OutDir:    outputDir,
@@ -2144,7 +2145,7 @@ func TestBuildPredictionRequest(t *testing.T) {
 	handler := &PromptKitHandler{log: logr.Discard()}
 	msgs := []types.Message{types.NewUserMessage("test")}
 
-	cfg := &config.Config{
+	cfg := &arenaconfig.Config{
 		LoadedProviders: map[string]*config.Provider{
 			"mock": {
 				ID:    "mock",
@@ -2169,7 +2170,7 @@ func TestBuildPredictionRequestDefaults(t *testing.T) {
 	handler := &PromptKitHandler{log: logr.Discard()}
 	msgs := []types.Message{types.NewUserMessage("test")}
 
-	cfg := &config.Config{
+	cfg := &arenaconfig.Config{
 		LoadedProviders: map[string]*config.Provider{},
 	}
 
@@ -2216,9 +2217,9 @@ func TestGetOrLoadK8sRegistryNoProviders(t *testing.T) {
 	tmpDir := t.TempDir()
 	outputDir := filepath.Join(tmpDir, "output")
 
-	cfg := &config.Config{
-		Defaults: config.Defaults{
-			Output: config.OutputConfig{
+	cfg := &arenaconfig.Config{
+		Defaults: arenaconfig.Defaults{
+			Output: arenaconfig.OutputConfig{
 				Dir: outputDir,
 			},
 			OutDir:    outputDir,
@@ -2266,9 +2267,9 @@ func TestHandleMessageWithMockProvider(t *testing.T) {
 	tmpDir := t.TempDir()
 	outputDir := filepath.Join(tmpDir, "output")
 
-	cfg := &config.Config{
-		Defaults: config.Defaults{
-			Output:    config.OutputConfig{Dir: outputDir},
+	cfg := &arenaconfig.Config{
+		Defaults: arenaconfig.Defaults{
+			Output:    arenaconfig.OutputConfig{Dir: outputDir},
 			OutDir:    outputDir,
 			ConfigDir: tmpDir,
 		},

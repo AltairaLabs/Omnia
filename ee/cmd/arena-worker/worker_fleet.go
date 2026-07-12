@@ -17,8 +17,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/AltairaLabs/PromptKit/pkg/config"
 	pkproviders "github.com/AltairaLabs/PromptKit/runtime/providers"
+	"github.com/AltairaLabs/promptarena/arena/arenaconfig"
 	"github.com/go-logr/logr"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/ee/api/v1alpha1"
@@ -51,7 +51,7 @@ func isLoadTestFleet(cfg *Config, fleetProviders []*resolvedFleetProvider) bool 
 
 // loadedPersonaIDs returns the self-play persona IDs from the loaded arena config,
 // sorted for deterministic labelling. Empty when self-play is not configured.
-func loadedPersonaIDs(cfg *config.Config) []string {
+func loadedPersonaIDs(cfg *arenaconfig.Config) []string {
 	if cfg == nil || len(cfg.LoadedPersonas) == 0 {
 		return nil
 	}

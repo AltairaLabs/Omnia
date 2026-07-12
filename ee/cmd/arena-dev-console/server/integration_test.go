@@ -26,6 +26,7 @@ import (
 
 	"github.com/AltairaLabs/PromptKit/pkg/config"
 	"github.com/AltairaLabs/PromptKit/runtime/providers"
+	"github.com/AltairaLabs/promptarena/arena/arenaconfig"
 	"github.com/go-logr/logr"
 	"github.com/gorilla/websocket"
 	"github.com/stretchr/testify/assert"
@@ -38,9 +39,9 @@ func TestServerStartupWithMockProvider(t *testing.T) {
 	tmpDir := t.TempDir()
 	outputDir := filepath.Join(tmpDir, "output")
 
-	cfg := &config.Config{
-		Defaults: config.Defaults{
-			Output: config.OutputConfig{
+	cfg := &arenaconfig.Config{
+		Defaults: arenaconfig.Defaults{
+			Output: arenaconfig.OutputConfig{
 				Dir: outputDir,
 			},
 			OutDir:    outputDir,
@@ -71,8 +72,8 @@ func TestServerStartupWithEmptyOutputDir(t *testing.T) {
 	defer func() { _ = os.Chdir(origDir) }()
 	_ = os.Chdir(tmpDir)
 
-	cfg := &config.Config{
-		Defaults: config.Defaults{
+	cfg := &arenaconfig.Config{
+		Defaults: arenaconfig.Defaults{
 			// Empty Output.Dir
 			ConfigDir: tmpDir,
 		},
@@ -111,8 +112,8 @@ func TestServerStartupInReadOnlyDirectory(t *testing.T) {
 	defer func() { _ = os.Chdir(origDir) }()
 	_ = os.Chdir(readOnlyDir)
 
-	cfg := &config.Config{
-		Defaults: config.Defaults{
+	cfg := &arenaconfig.Config{
+		Defaults: arenaconfig.Defaults{
 			// Empty Output.Dir - would try to create "out" in read-only dir
 			ConfigDir: readOnlyDir,
 		},
@@ -145,9 +146,9 @@ func TestWebSocketMessageHandling(t *testing.T) {
 	tmpDir := t.TempDir()
 	outputDir := filepath.Join(tmpDir, "output")
 
-	cfg := &config.Config{
-		Defaults: config.Defaults{
-			Output: config.OutputConfig{
+	cfg := &arenaconfig.Config{
+		Defaults: arenaconfig.Defaults{
+			Output: arenaconfig.OutputConfig{
 				Dir: outputDir,
 			},
 			OutDir:    outputDir,
@@ -263,8 +264,8 @@ func TestBuildEngineComponentsPermissionDenied(t *testing.T) {
 	t.Run("fails in read-only directory", func(t *testing.T) {
 		_ = os.Chdir(readOnlyRoot)
 
-		cfg := &config.Config{
-			Defaults: config.Defaults{
+		cfg := &arenaconfig.Config{
+			Defaults: arenaconfig.Defaults{
 				// Empty - will try to use default "out" path
 			},
 			LoadedProviders: map[string]*config.Provider{
@@ -298,9 +299,9 @@ func TestBuildEngineComponentsPermissionDenied(t *testing.T) {
 	t.Run("succeeds with explicit writable output dir", func(t *testing.T) {
 		_ = os.Chdir(readOnlyRoot)
 
-		cfg := &config.Config{
-			Defaults: config.Defaults{
-				Output: config.OutputConfig{
+		cfg := &arenaconfig.Config{
+			Defaults: arenaconfig.Defaults{
+				Output: arenaconfig.OutputConfig{
 					Dir: writableTmp,
 				},
 				OutDir:    writableTmp,
@@ -334,8 +335,8 @@ func TestBuildEngineComponentsPermissionDenied(t *testing.T) {
 		// Change to writable directory (this is what buildComponents does)
 		_ = os.Chdir(writableTmp)
 
-		cfg := &config.Config{
-			Defaults: config.Defaults{
+		cfg := &arenaconfig.Config{
+			Defaults: arenaconfig.Defaults{
 				// Empty - will use default "out" which is now relative to writableTmp
 				ConfigDir: writableTmp,
 			},
@@ -377,9 +378,9 @@ func TestGetOrLoadK8sRegistryLogging(t *testing.T) {
 
 	tmpDir := t.TempDir()
 
-	cfg := &config.Config{
-		Defaults: config.Defaults{
-			Output: config.OutputConfig{
+	cfg := &arenaconfig.Config{
+		Defaults: arenaconfig.Defaults{
+			Output: arenaconfig.OutputConfig{
 				Dir: tmpDir,
 			},
 			OutDir:    tmpDir,

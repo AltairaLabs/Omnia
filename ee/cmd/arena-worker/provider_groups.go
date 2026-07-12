@@ -19,6 +19,7 @@ import (
 
 	"github.com/AltairaLabs/PromptKit/pkg/config"
 	pkproviders "github.com/AltairaLabs/PromptKit/runtime/providers"
+	"github.com/AltairaLabs/promptarena/arena/arenaconfig"
 	"github.com/go-logr/logr"
 	"gopkg.in/yaml.v3"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -65,7 +66,7 @@ type resolveContext struct {
 	c           client.Client
 	namespace   string
 	agentWSURLs map[string]string
-	arenaCfg    *config.Config
+	arenaCfg    *arenaconfig.Config
 }
 
 // resolveProvidersFromCRD resolves providers from CRD refs when ARENA_PROVIDER_GROUPS is set.
@@ -77,7 +78,7 @@ func resolveProvidersFromCRD(
 	log logr.Logger,
 	c client.Client,
 	cfg *Config,
-	arenaCfg *config.Config,
+	arenaCfg *arenaconfig.Config,
 ) ([]*resolvedFleetProvider, map[string]*providerPricing, error) {
 	jobName := cfg.JobName
 	jobNamespace := cfg.JobNamespace
@@ -96,7 +97,7 @@ func resolveProvidersForArenaJob(
 	log logr.Logger,
 	c client.Client,
 	cfg *Config,
-	arenaCfg *config.Config,
+	arenaCfg *arenaconfig.Config,
 	arenaJob *eev1alpha1.ArenaJobSpec,
 ) ([]*resolvedFleetProvider, map[string]*providerPricing, error) {
 	jobNamespace := cfg.JobNamespace
@@ -302,7 +303,7 @@ func buildProviderConfig(provider *v1alpha1.Provider, id string) *config.Provide
 
 // routeProviderByRole places a built provider config into the arena config map
 // matching its role. Maps are lazily initialized.
-func routeProviderByRole(arenaCfg *config.Config, role v1alpha1.ProviderRole, id string, p *config.Provider) {
+func routeProviderByRole(arenaCfg *arenaconfig.Config, role v1alpha1.ProviderRole, id string, p *config.Provider) {
 	switch role {
 	case v1alpha1.ProviderRoleInference:
 		ensureProviderMap(&arenaCfg.LoadedInferenceProviders)[id] = p
@@ -668,7 +669,7 @@ func convertProviderDefaults(d *v1alpha1.ProviderDefaults) config.ProviderDefaul
 // the arena config's self-play roles and judges. When CRD resolution creates a provider
 // with key "ollama-tools" in group "selfplay", but the config references provider "selfplay",
 // PromptKit's engine fails with "unknown provider". This function bridges that gap.
-func remapProviderIDs(log logr.Logger, arenaCfg *config.Config, configPath string) error {
+func remapProviderIDs(log logr.Logger, arenaCfg *arenaconfig.Config, configPath string) error {
 	expectedIDs, err := extractProviderIDRefs(configPath)
 	if err != nil {
 		return fmt.Errorf("extract provider ID refs from config: %w", err)

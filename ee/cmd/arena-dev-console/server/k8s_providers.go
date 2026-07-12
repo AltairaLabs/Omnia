@@ -23,6 +23,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/AltairaLabs/PromptKit/pkg/config"
+	"github.com/AltairaLabs/promptarena/arena/arenaconfig"
 	corev1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 	"github.com/altairalabs/omnia/ee/pkg/arena/providers"
 	omniaprovider "github.com/altairalabs/omnia/pkg/provider"
@@ -250,18 +251,18 @@ func (l *K8sProviderLoader) resolveEnvVarCredential(
 	}
 }
 
-// BuildConfigByRole creates a PromptKit config.Config, routing each role's
+// BuildConfigByRole creates a PromptKit arenaconfig.Config, routing each role's
 // provider map into the matching Loaded*Providers field (llm→LoadedProviders,
 // inference→LoadedInferenceProviders, embedding→LoadedEmbeddingProviders, etc.).
 // Sets the output directory to a writable location since the container's working
 // directory may be read-only.
-func BuildConfigByRole(byRole map[corev1alpha1.ProviderRole]map[string]*config.Provider) *config.Config {
-	cfg := &config.Config{
+func BuildConfigByRole(byRole map[corev1alpha1.ProviderRole]map[string]*config.Provider) *arenaconfig.Config {
+	cfg := &arenaconfig.Config{
 		// Set ConfigDir to a writable location for any file operations
 		ConfigDir: devConsoleConfigDir,
-		Defaults: config.Defaults{
+		Defaults: arenaconfig.Defaults{
 			// Set both Output.Dir and the deprecated OutDir for compatibility
-			Output: config.OutputConfig{
+			Output: arenaconfig.OutputConfig{
 				Dir: devConsoleOutputDir,
 			},
 			OutDir:    devConsoleOutputDir,

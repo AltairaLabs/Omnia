@@ -21,6 +21,7 @@ import (
 	"strings"
 
 	"github.com/AltairaLabs/PromptKit/pkg/config"
+	"github.com/AltairaLabs/promptarena/arena/arenaconfig"
 	"github.com/altairalabs/omnia/ee/pkg/arena/overrides"
 	"gopkg.in/yaml.v3"
 )
@@ -46,12 +47,12 @@ type ProviderBinding struct {
 // ParseProviderAnnotations reads provider YAML files referenced by the config
 // and extracts binding annotations. Files that are unreadable or unparseable
 // are skipped gracefully.
-func ParseProviderAnnotations(cfg *config.Config, configPath string) ([]ProviderBinding, error) {
+func ParseProviderAnnotations(cfg *arenaconfig.Config, configPath string) ([]ProviderBinding, error) {
 	if len(cfg.Providers) == 0 {
 		return nil, nil
 	}
 
-	configDir := config.ResolveConfigDir(cfg, configPath)
+	configDir := arenaconfig.ResolveConfigDir(cfg, configPath)
 	bindings := make([]ProviderBinding, 0, len(cfg.Providers))
 
 	for _, ref := range cfg.Providers {
@@ -93,7 +94,7 @@ func ParseProviderAnnotations(cfg *config.Config, configPath string) ([]Provider
 // credentials into providers that don't already have them. Returns the number
 // of providers that were successfully bound.
 func ApplyBindings(
-	cfg *config.Config, bindings []ProviderBinding,
+	cfg *arenaconfig.Config, bindings []ProviderBinding,
 	registry map[string]overrides.ProviderOverride, verbose bool,
 ) int {
 	if len(bindings) == 0 || len(registry) == 0 {
@@ -136,40 +137,47 @@ func ApplyBindings(
 // ApplyNameMatching tries to match providers that still lack credentials by
 // comparing their provider ID against the "{namespace}-{name}" format used by
 // the dashboard's import converter. Returns the number of matched providers.
-func ApplyNameMatching(cfg *config.Config, registry map[string]overrides.ProviderOverride, verbose bool) int {
+func ApplyNameMatching(cfg *arenaconfig.Config, registry map[string]overrides.ProviderOverride, verbose bool) int {
 	if len(registry) == 0 || len(cfg.LoadedProviders) == 0 {
 		return 0
 	}
 
 	matchedCount := 0
 	for id, provider := range cfg.LoadedProviders {
-		if hasCredentials(provider) {
+		if hasCredentials(provider) || !requiresCredentials(provider.Type) {
 			continue
 		}
-		if !requiresCredentials(provider.Type) {
-			continue
-		}
-
-		// Try matching provider ID against "{namespace}-{name}" from registry keys
-		for key, override := range registry {
-			parts := strings.SplitN(key, "/", 2)
-			if len(parts) != 2 {
-				continue
-			}
-			namespace, name := parts[0], parts[1]
-			expectedID := namespace + "-" + name
-			if id == expectedID {
-				injectCredentials(provider, &override)
-				matchedCount++
-				if verbose {
-					fmt.Printf("  Name match: %s -> %s\n", id, key)
-				}
-				break
-			}
+		if matchProviderByName(id, provider, registry, verbose) {
+			matchedCount++
 		}
 	}
 
 	return matchedCount
+}
+
+// matchProviderByName tries to match a provider ID against the "{namespace}-{name}"
+// form derived from registry keys, injecting credentials on the first match.
+// Returns true when a match was found and credentials were injected.
+func matchProviderByName(
+	id string, provider *config.Provider,
+	registry map[string]overrides.ProviderOverride, verbose bool,
+) bool {
+	for key, override := range registry {
+		parts := strings.SplitN(key, "/", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		namespace, name := parts[0], parts[1]
+		if id != namespace+"-"+name {
+			continue
+		}
+		injectCredentials(provider, &override)
+		if verbose {
+			fmt.Printf("  Name match: %s -> %s\n", id, key)
+		}
+		return true
+	}
+	return false
 }
 
 // hasCredentials checks whether a provider already has credentials configured.

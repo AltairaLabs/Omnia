@@ -16,10 +16,10 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/AltairaLabs/PromptKit/pkg/config"
 	"github.com/AltairaLabs/PromptKit/runtime/events"
 	pkproviders "github.com/AltairaLabs/PromptKit/runtime/providers"
-	"github.com/AltairaLabs/PromptKit/tools/arena/engine"
+	"github.com/AltairaLabs/promptarena/arena/arenaconfig"
+	"github.com/AltairaLabs/promptarena/arena/engine"
 	"github.com/go-logr/logr"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -442,7 +442,7 @@ func executeWorkItem(
 // It applies verbose mode and the resolved output directory before the engine is
 // built (media storage is created during engine init). Returns the config and the
 // resolved config-file path.
-func loadArenaConfig(log logr.Logger, cfg *Config, bundlePath string) (*config.Config, string, error) {
+func loadArenaConfig(log logr.Logger, cfg *Config, bundlePath string) (*arenaconfig.Config, string, error) {
 	configPath := findArenaConfigFile(bundlePath, cfg.ConfigFile)
 	if configPath == "" {
 		return nil, "", fmt.Errorf("arena config file not found in bundle: %s", bundlePath)
@@ -451,7 +451,7 @@ func loadArenaConfig(log logr.Logger, cfg *Config, bundlePath string) (*config.C
 	log.Info("loading arena config", "configPath", configPath)
 
 	// Load configuration from file BEFORE creating engine so we can modify it
-	arenaCfg, err := config.LoadConfig(configPath)
+	arenaCfg, err := arenaconfig.LoadConfig(configPath)
 	if err != nil {
 		return nil, "", fmt.Errorf("failed to load configuration: %w", err)
 	}
@@ -540,7 +540,7 @@ func workItemFilters(item *queue.WorkItem) (scenarioFilter, providerFilter []str
 // self-play/judge references match resolved keys, and applies tool overrides to the
 // arena config. Returns the resolved fleet providers and per-provider pricing map.
 func resolveCRDConfig(
-	ctx context.Context, log logr.Logger, cfg *Config, arenaCfg *config.Config, configPath string,
+	ctx context.Context, log logr.Logger, cfg *Config, arenaCfg *arenaconfig.Config, configPath string,
 ) ([]*resolvedFleetProvider, map[string]*providerPricing, error) {
 	k8sClient, err := resolveK8sClient(cfg)
 	if err != nil {

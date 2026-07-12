@@ -156,6 +156,11 @@ func (s *session) Response() <-chan providers.StreamChunk { return s.resp }
 // Done returns a channel that is closed when the session ends.
 func (s *session) Done() <-chan struct{} { return s.done }
 
+// BargeIn returns a nil channel: the echo mock has no wire protocol and cannot
+// detect user interruption, so per the StreamInputSession contract it never
+// fires. Consumers select on Done() for termination.
+func (s *session) BargeIn() <-chan struct{} { return nil }
+
 // Error always returns nil for the mock.
 func (s *session) Error() error { return nil }
 

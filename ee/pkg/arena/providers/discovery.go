@@ -19,6 +19,7 @@ import (
 	"strings"
 
 	"github.com/AltairaLabs/PromptKit/pkg/config"
+	"github.com/AltairaLabs/promptarena/arena/arenaconfig"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -64,7 +65,7 @@ func NewDiscovery(c client.Client, namespace string) *Discovery {
 
 // DiscoverAvailableProviders checks which providers from the config have
 // available credentials in the namespace and returns their IDs.
-func (d *Discovery) DiscoverAvailableProviders(ctx context.Context, cfg *config.Config) ([]string, error) {
+func (d *Discovery) DiscoverAvailableProviders(ctx context.Context, cfg *arenaconfig.Config) ([]string, error) {
 	available := []string{}
 
 	for providerID, provider := range cfg.LoadedProviders {
@@ -90,7 +91,7 @@ func (d *Discovery) DiscoverAvailableProviders(ctx context.Context, cfg *config.
 }
 
 // GetMissingCredentials returns a list of providers that are missing credentials.
-func (d *Discovery) GetMissingCredentials(ctx context.Context, cfg *config.Config) (map[string][]string, error) {
+func (d *Discovery) GetMissingCredentials(ctx context.Context, cfg *arenaconfig.Config) (map[string][]string, error) {
 	missing := make(map[string][]string)
 
 	for providerID, provider := range cfg.LoadedProviders {
@@ -173,30 +174,18 @@ func GetSecretRefsForProvider(providerType string) []SecretRef {
 // ValidateProviderCredentials checks if credentials are available for a provider.
 // It first checks the provider's explicit Credential config (APIKey, CredentialEnv,
 // CredentialFile), then falls back to the legacy default env var lookup.
-func ValidateProviderCredentials(cfg *config.Config, providerID string) error {
+func ValidateProviderCredentials(cfg *arenaconfig.Config, providerID string) error {
 	provider := cfg.LoadedProviders[providerID]
 	if provider == nil {
 		return fmt.Errorf("provider %s not found in config", providerID)
 	}
 
-	// If the provider has an explicit credential config, validate that
+	// If the provider has an explicit credential config, validate that. A
+	// conclusive result (done) short-circuits; otherwise fall through to the
+	// legacy default-env-var check below.
 	if provider.Credential != nil {
-		if provider.Credential.APIKey != "" {
-			return nil
-		}
-		if provider.Credential.CredentialEnv != "" {
-			if os.Getenv(provider.Credential.CredentialEnv) != "" {
-				return nil
-			}
-			return fmt.Errorf("missing credentials for provider %s: env var %s is not set",
-				providerID, provider.Credential.CredentialEnv)
-		}
-		if provider.Credential.CredentialFile != "" {
-			if _, err := os.Stat(provider.Credential.CredentialFile); err == nil {
-				return nil
-			}
-			return fmt.Errorf("missing credentials for provider %s: credential file %s not found",
-				providerID, provider.Credential.CredentialFile)
+		if done, err := validateExplicitCredential(providerID, provider.Credential); done {
+			return err
 		}
 	}
 
@@ -206,16 +195,47 @@ func ValidateProviderCredentials(cfg *config.Config, providerID string) error {
 		// Provider doesn't require credentials
 		return nil
 	}
-
-	// Check if any of the required env vars are set
-	for _, envVar := range envVars {
-		if os.Getenv(envVar) != "" {
-			return nil
-		}
+	if anyEnvSet(envVars) {
+		return nil
 	}
 
 	return fmt.Errorf("missing credentials for provider %s (type: %s, required env: %v)",
 		providerID, provider.Type, envVars)
+}
+
+// validateExplicitCredential validates an explicit credential config. It returns
+// done=true when the config is conclusive (err nil means valid, non-nil means
+// invalid), or done=false when no explicit source is set and the caller should
+// fall back to the default env vars.
+func validateExplicitCredential(providerID string, cred *config.CredentialConfig) (bool, error) {
+	switch {
+	case cred.APIKey != "":
+		return true, nil
+	case cred.CredentialEnv != "":
+		if os.Getenv(cred.CredentialEnv) != "" {
+			return true, nil
+		}
+		return true, fmt.Errorf("missing credentials for provider %s: env var %s is not set",
+			providerID, cred.CredentialEnv)
+	case cred.CredentialFile != "":
+		if _, err := os.Stat(cred.CredentialFile); err == nil {
+			return true, nil
+		}
+		return true, fmt.Errorf("missing credentials for provider %s: credential file %s not found",
+			providerID, cred.CredentialFile)
+	default:
+		return false, nil
+	}
+}
+
+// anyEnvSet reports whether any of the given environment variables is set.
+func anyEnvSet(envVars []string) bool {
+	for _, envVar := range envVars {
+		if os.Getenv(envVar) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // ValidateProviderCredentialsByType checks if the required environment variables
@@ -225,11 +245,8 @@ func ValidateProviderCredentialsByType(providerType string) error {
 	if len(envVars) == 0 {
 		return nil
 	}
-
-	for _, envVar := range envVars {
-		if os.Getenv(envVar) != "" {
-			return nil
-		}
+	if anyEnvSet(envVars) {
+		return nil
 	}
 
 	return fmt.Errorf("missing credentials for provider type %s (required env: %v)",

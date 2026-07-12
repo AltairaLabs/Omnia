@@ -15,7 +15,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/AltairaLabs/PromptKit/tools/arena/generate"
+	"github.com/AltairaLabs/promptarena/arena/generate"
 	"github.com/altairalabs/omnia/ee/pkg/evals"
 	"github.com/altairalabs/omnia/internal/session/api"
 )
