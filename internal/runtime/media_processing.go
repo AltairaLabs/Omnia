@@ -166,7 +166,12 @@ func processMediaPart(media *runtimev1.MediaContent, log logr.Logger) sdk.SendOp
 	}
 }
 
-// processImageMedia handles image content (base64 data or URL).
+// processImageMedia handles image content. Priority order is Data >
+// StorageRef > URL: inline data always wins if present (even if it later
+// fails to decode — see decodeMediaData's error path below), otherwise a
+// durable storage_ref is preferred over a plain URL so the SDK resolves it
+// fresh via the injected MediaStorageService at provider-call time (#1817),
+// rather than trusting a caller-supplied URL that may already be stale.
 func processImageMedia(media *runtimev1.MediaContent, log logr.Logger) sdk.SendOption {
 	if media.Data != "" {
 		data, err := decodeMediaData(media.Data)
@@ -177,6 +182,10 @@ func processImageMedia(media *runtimev1.MediaContent, log logr.Logger) sdk.SendO
 		log.V(1).Info("adding image from data", "mimeType", media.MimeType, "size", len(data))
 		return sdk.WithImageData(data, media.MimeType)
 	}
+	if media.StorageRef != "" {
+		log.V(1).Info("adding image from storage ref", "storageRefHash", logging.HashID(media.StorageRef), "mimeType", media.MimeType)
+		return sdk.WithImageStorageRef(media.StorageRef, media.MimeType)
+	}
 	if media.Url != "" {
 		log.V(1).Info("adding image from URL", "urlHash", logging.HashID(media.Url))
 		return sdk.WithImageURL(media.Url)
@@ -184,7 +193,8 @@ func processImageMedia(media *runtimev1.MediaContent, log logr.Logger) sdk.SendO
 	return nil
 }
 
-// processAudioMedia handles audio content (base64 data or URL).
+// processAudioMedia handles audio content. Priority order is Data >
+// StorageRef > URL (see processImageMedia).
 func processAudioMedia(media *runtimev1.MediaContent, log logr.Logger) sdk.SendOption {
 	if media.Data != "" {
 		data, err := decodeMediaData(media.Data)
@@ -195,6 +205,10 @@ func processAudioMedia(media *runtimev1.MediaContent, log logr.Logger) sdk.SendO
 		log.V(1).Info("adding audio from data", "mimeType", media.MimeType, "size", len(data))
 		return sdk.WithAudioData(data, media.MimeType)
 	}
+	if media.StorageRef != "" {
+		log.V(1).Info("adding audio from storage ref", "storageRefHash", logging.HashID(media.StorageRef), "mimeType", media.MimeType)
+		return sdk.WithAudioStorageRef(media.StorageRef, media.MimeType)
+	}
 	if media.Url != "" {
 		log.V(1).Info("adding audio from URL", "urlHash", logging.HashID(media.Url))
 		return sdk.WithAudioFile(media.Url)
@@ -202,7 +216,11 @@ func processAudioMedia(media *runtimev1.MediaContent, log logr.Logger) sdk.SendO
 	return nil
 }
 
-// processFileMedia handles generic file content.
+// processFileMedia handles generic file content. Priority order is Data >
+// StorageRef (see processImageMedia); there is no URL fallback for files.
+// MediaContent has no dedicated filename field, so MimeType doubles as the
+// caption/name argument — consistent with the pre-existing Data-path call
+// below, which does the same for sdk.WithFile.
 func processFileMedia(media *runtimev1.MediaContent, log logr.Logger) sdk.SendOption {
 	if media.Data != "" {
 		data, err := decodeMediaData(media.Data)
@@ -212,6 +230,10 @@ func processFileMedia(media *runtimev1.MediaContent, log logr.Logger) sdk.SendOp
 		}
 		log.V(1).Info("adding file from data", "mimeType", media.MimeType, "size", len(data))
 		return sdk.WithFile(media.MimeType, data)
+	}
+	if media.StorageRef != "" {
+		log.V(1).Info("adding file from storage ref", "storageRefHash", logging.HashID(media.StorageRef), "mimeType", media.MimeType)
+		return sdk.WithFileStorageRef(media.MimeType, media.StorageRef, media.MimeType)
 	}
 	return nil
 }

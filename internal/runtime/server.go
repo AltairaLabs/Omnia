@@ -44,6 +44,7 @@ import (
 	pkmemory "github.com/AltairaLabs/PromptKit/runtime/memory"
 	pkskills "github.com/AltairaLabs/PromptKit/runtime/skills"
 
+	"github.com/altairalabs/omnia/internal/media"
 	"github.com/altairalabs/omnia/internal/runtime/skills"
 	"github.com/altairalabs/omnia/internal/runtime/tools"
 	"github.com/altairalabs/omnia/internal/session"
@@ -135,6 +136,12 @@ type Server struct {
 
 	// Media resolution for mock provider
 	mediaResolver *MediaResolver
+
+	// mediaStorage is Omnia's media storage backend, injected into the
+	// PromptKit SDK (via sdk.WithMediaStorage in WithMediaStorage below) so
+	// storage_ref attachments resolve to a model-fetchable URL or bytes at
+	// provider-call time, every turn (#1817).
+	mediaStorage media.Storage
 }
 
 // ServerOption configures the server.
@@ -240,6 +247,29 @@ func WithStateStore(store statestore.Store) ServerOption {
 		s.stateStore = store
 		s.sdkOptions = append(s.sdkOptions, sdk.WithStateStore(store))
 	}
+}
+
+// WithMediaStorage sets Omnia's media storage backend and injects it into the
+// PromptKit SDK (via sdk.WithMediaStorage) so every provider's MediaLoader
+// resolves storage_ref attachments (built via sdk.WithImageStorageRef et al.
+// in media_processing.go) to a model-fetchable URL or bytes at provider-call
+// time. Because resolution happens fresh on every call (a new MediaLoader per
+// provider call — see PromptKit runtime/providers/base_provider.go), a
+// storage_ref stays resolvable indefinitely across conversation turns, unlike
+// a presigned URL minted once and frozen into conversation history, which
+// would eventually expire (#1817).
+func WithMediaStorage(store media.Storage) ServerOption {
+	return func(s *Server) {
+		s.mediaStorage = store
+		s.sdkOptions = append(s.sdkOptions, sdk.WithMediaStorage(newOmniaMediaStore(store, nil)))
+	}
+}
+
+// HasMediaStorage reports whether a media storage backend is configured.
+// Exposed for wiring tests under cmd/runtime; production code should not
+// depend on this accessor.
+func (s *Server) HasMediaStorage() bool {
+	return s.mediaStorage != nil
 }
 
 // WithSDKOptions adds additional SDK options.

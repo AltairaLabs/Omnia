@@ -205,6 +205,10 @@ message MediaContent {
 
   // mime_type indicates the media format (e.g., "image/png", "audio/mp3")
   string mime_type = 3;
+
+  // storage_ref is an opaque backend storage reference (e.g. "omnia://sessions/{id}/media/{mediaID}").
+  // When set, the runtime resolves it to media bytes at provider-call time via the injected media store.
+  string storage_ref = 4;
 }
 
 // Usage contains token usage and cost information.

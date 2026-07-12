@@ -636,3 +636,65 @@ func TestProcessFileMedia_EmptyData(t *testing.T) {
 	// Empty string means Data == "" so returns nil
 	assert.Nil(t, opt)
 }
+
+// --- StorageRef branch tests (#1817 Task 4b) ---
+//
+// Priority order is Data > StorageRef > URL. The Data-priority tests below
+// rely on invalid base64 to distinguish "attempted the Data path and failed"
+// from "fell through to StorageRef" — WithImageStorageRef/WithAudioStorageRef/
+// WithFileStorageRef never fail to construct (they just wrap the ref string),
+// so a nil result can only mean the function short-circuited on the (broken)
+// Data branch instead of falling through.
+
+func TestProcessImageMedia_UsesStorageRef(t *testing.T) {
+	media := &runtimev1.MediaContent{StorageRef: "omnia://sessions/s1/media/m1", MimeType: "image/png"}
+	opt := processImageMedia(media, logr.Discard())
+	assert.NotNil(t, opt)
+}
+
+func TestProcessImageMedia_DataTakesPriorityOverStorageRef(t *testing.T) {
+	media := &runtimev1.MediaContent{Data: "not-valid-base64!!!", StorageRef: "omnia://ref", MimeType: "image/png"}
+	opt := processImageMedia(media, logr.Discard())
+	assert.Nil(t, opt, "Data path must be attempted (and fail) rather than falling through to StorageRef")
+}
+
+// TestProcessImageMedia_StorageRefWithURL_ReturnsOption only proves that
+// processImageMedia returns a non-nil option when both StorageRef and Url
+// are set (no Data) — it does NOT prove that the StorageRef branch (rather
+// than the URL branch) is the one that fired. sdk.WithImageStorageRef and
+// sdk.WithImageURL both always construct a non-nil, opaque sdk.SendOption
+// (a func closing over an unexported sendConfig), so nil-checking the
+// returned option can never distinguish which of the two ran. StorageRef-
+// over-URL priority is enforced purely by branch order in processImageMedia
+// (Data > StorageRef > URL) and is proven end-to-end, by inspecting the
+// materialized types.MediaContent the provider actually receives, in
+// TestConverse_ImageStorageRefWinsOverURL (media_storage_ref_durability_test.go).
+func TestProcessImageMedia_StorageRefWithURL_ReturnsOption(t *testing.T) {
+	media := &runtimev1.MediaContent{StorageRef: "omnia://ref", Url: "https://example.com/img.png", MimeType: "image/png"}
+	opt := processImageMedia(media, logr.Discard())
+	assert.NotNil(t, opt)
+}
+
+func TestProcessAudioMedia_UsesStorageRef(t *testing.T) {
+	media := &runtimev1.MediaContent{StorageRef: "omnia://sessions/s1/media/m2", MimeType: "audio/mpeg"}
+	opt := processAudioMedia(media, logr.Discard())
+	assert.NotNil(t, opt)
+}
+
+func TestProcessAudioMedia_DataTakesPriorityOverStorageRef(t *testing.T) {
+	media := &runtimev1.MediaContent{Data: "not-valid-base64!!!", StorageRef: "omnia://ref", MimeType: "audio/mpeg"}
+	opt := processAudioMedia(media, logr.Discard())
+	assert.Nil(t, opt, "Data path must be attempted (and fail) rather than falling through to StorageRef")
+}
+
+func TestProcessFileMedia_UsesStorageRef(t *testing.T) {
+	media := &runtimev1.MediaContent{StorageRef: "omnia://sessions/s1/media/m3", MimeType: "application/pdf"}
+	opt := processFileMedia(media, logr.Discard())
+	assert.NotNil(t, opt)
+}
+
+func TestProcessFileMedia_DataTakesPriorityOverStorageRef(t *testing.T) {
+	media := &runtimev1.MediaContent{Data: "not-valid-base64!!!", StorageRef: "omnia://ref", MimeType: "application/pdf"}
+	opt := processFileMedia(media, logr.Discard())
+	assert.Nil(t, opt, "Data path must be attempted (and fail) rather than falling through to StorageRef")
+}

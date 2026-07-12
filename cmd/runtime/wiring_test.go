@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-logr/logr"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
@@ -333,5 +334,65 @@ func TestConfigDerivedServerOpts_WiresOutputFormat(t *testing.T) {
 	if gotFormat != "json_schema" {
 		t.Errorf("OutputFormat not propagated: got %q, want %q — "+
 			"WithFunctionOutputFormat is missing from configDerivedServerOpts", gotFormat, "json_schema")
+	}
+}
+
+// TestMediaStorageServerOpts_WiresLocalBackend is the wiring test for #1817
+// Task 4-5's critical gap: internal/runtime.WithMediaStorage /
+// HasMediaStorage were defined and unit-tested, but cmd/runtime/main.go never
+// called WithMediaStorage — the runtime built its serverOpts slice without
+// ever constructing a media.Storage, so the whole storage_ref attachment
+// feature was inert in production even though it worked in every
+// internal/runtime unit test.
+//
+// This test calls mediaStorageServerOpts — the exact helper main() calls —
+// with OMNIA_MEDIA_STORAGE_TYPE=local pointed at a temp dir, applies the
+// resulting options to a real pkruntime.Server, and asserts
+// HasMediaStorage() is true. Deleting the `serverOpts = append(serverOpts,
+// mediaOpts...)` line from main(), or the WithMediaStorage call inside
+// mediaStorageServerOpts/initMediaStorage, makes this test fail.
+func TestMediaStorageServerOpts_WiresLocalBackend(t *testing.T) {
+	t.Setenv("OMNIA_MEDIA_STORAGE_TYPE", "local")
+	t.Setenv("OMNIA_MEDIA_STORAGE_PATH", t.TempDir())
+
+	opts, cleanup := mediaStorageServerOpts(logr.Discard())
+	if cleanup != nil {
+		t.Cleanup(cleanup)
+	}
+	if len(opts) == 0 {
+		t.Fatal("mediaStorageServerOpts returned no options for a configured local media backend")
+	}
+
+	srv := pkruntime.NewServer(opts...)
+	t.Cleanup(func() { _ = srv.Close() })
+
+	if !srv.HasMediaStorage() {
+		t.Error("HasMediaStorage() is false after mediaStorageServerOpts — " +
+			"cmd/runtime is not calling WithMediaStorage, so storage_ref " +
+			"attachments are inert in production (#1817)")
+	}
+}
+
+// TestMediaStorageServerOpts_DisabledWhenUnset is the negative counterpart:
+// with OMNIA_MEDIA_STORAGE_TYPE unset (defaults to "none"), mediaStorageServerOpts
+// must return no options and the resulting server must report
+// HasMediaStorage() == false. Guards against a future change that always
+// wires a store regardless of configuration.
+func TestMediaStorageServerOpts_DisabledWhenUnset(t *testing.T) {
+	t.Setenv("OMNIA_MEDIA_STORAGE_TYPE", "")
+
+	opts, cleanup := mediaStorageServerOpts(logr.Discard())
+	if cleanup != nil {
+		t.Cleanup(cleanup)
+	}
+	if len(opts) != 0 {
+		t.Fatalf("mediaStorageServerOpts returned %d options when media storage is unset, want 0", len(opts))
+	}
+
+	srv := pkruntime.NewServer(opts...)
+	t.Cleanup(func() { _ = srv.Close() })
+
+	if srv.HasMediaStorage() {
+		t.Error("HasMediaStorage() is true even though media storage was never configured")
 	}
 }

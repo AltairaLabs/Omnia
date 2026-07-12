@@ -247,6 +247,19 @@ func TestServerOptions(t *testing.T) {
 		assert.Len(t, server.sdkOptions, 1)
 	})
 
+	t.Run("WithMediaStorage", func(t *testing.T) {
+		srv := NewServer()
+		assert.False(t, srv.HasMediaStorage(), "no media storage configured by default")
+
+		store := &fakeStorage{downloadURL: "https://example/x"}
+		server := NewServer(WithMediaStorage(store))
+		assert.True(t, server.HasMediaStorage())
+		// The option should have appended an sdk.WithMediaStorage SDK option
+		// alongside whatever else is already wired, so the injected store
+		// reaches the SDK's provider pool (#1817).
+		assert.Len(t, server.sdkOptions, 1)
+	})
+
 	t.Run("WithSDKOptions", func(t *testing.T) {
 		server := NewServer(
 			WithSDKOptions(), // Empty options
