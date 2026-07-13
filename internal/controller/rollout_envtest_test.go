@@ -79,6 +79,38 @@ var _ = Describe("AgentRuntime Rollout (envtest)", func() {
 	}
 
 	Context("CEL + field validation (API server enforcement)", func() {
+		triggerRollout := func() *omniav1alpha1.RolloutConfig {
+			return &omniav1alpha1.RolloutConfig{
+				Steps:   []omniav1alpha1.RolloutStep{{SetWeight: ptr.To[int32](20)}},
+				Trigger: &omniav1alpha1.RolloutTrigger{PromptPackChannel: "stable"},
+			}
+		}
+
+		It("rejects rollout.trigger when promptPackRef uses track (mode conflict)", func() {
+			ar := baseAR(nextName("ar"))
+			ar.Spec.PromptPackRef.Version = nil
+			ar.Spec.PromptPackRef.Track = ptr.To("stable")
+			ar.Spec.Rollout = triggerRollout()
+			err := k8sClient.Create(ctx, ar)
+			Expect(err).To(HaveOccurred())
+			Expect(apierrors.IsInvalid(err)).To(BeTrue(), "expected Invalid, got: %v", err)
+		})
+
+		It("rejects rollout.trigger when promptPackRef has no pinned version", func() {
+			ar := baseAR(nextName("ar"))
+			ar.Spec.PromptPackRef.Version = nil
+			ar.Spec.Rollout = triggerRollout()
+			err := k8sClient.Create(ctx, ar)
+			Expect(err).To(HaveOccurred())
+			Expect(apierrors.IsInvalid(err)).To(BeTrue(), "expected Invalid, got: %v", err)
+		})
+
+		It("accepts rollout.trigger with a version-pinned promptPackRef", func() {
+			ar := baseAR(nextName("ar"))
+			ar.Spec.Rollout = triggerRollout()
+			Expect(k8sClient.Create(ctx, ar)).To(Succeed())
+		})
+
 		It("rejects an empty rollout step list", func() {
 			ar := baseAR(nextName("ar"))
 			ar.Spec.Rollout = &omniav1alpha1.RolloutConfig{

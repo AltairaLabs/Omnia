@@ -862,6 +862,14 @@ export const crdConstraints: Record<string, Record<string, FieldConstraint>> =
         "external"
       ]
     },
+    "spec.rollout.trigger.promptPackChannel": {
+      "type": "string",
+      "enum": [
+        "stable",
+        "prerelease"
+      ],
+      "required": true
+    },
     "spec.runtime.affinity.nodeAffinity.preferredDuringSchedulingIgnoredDuringExecution[].preference": {
       "required": true
     },
