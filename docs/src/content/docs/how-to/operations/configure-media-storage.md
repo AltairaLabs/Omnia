@@ -16,6 +16,12 @@ When enabled, the facade container provides HTTP endpoints for:
 - **File downloads** - Retrieve uploaded files
 - **Media info** - Get metadata about uploaded files
 
+Configure a backend declaratively on `spec.media.storage` (see
+[AgentRuntime configuration](#agentruntime-configuration) below) — the operator
+translates it into the `OMNIA_MEDIA_STORAGE_*` environment variables shown in
+the per-backend sections that follow and injects them into both the facade and
+runtime containers.
+
 ## Storage backends
 
 Omnia supports four storage backends:
@@ -189,13 +195,9 @@ metadata:
 
 #### Cross-cloud / explicit credentials
 
-For cross-cloud scenarios or when workload identity isn't available:
-
-```yaml
-OMNIA_MEDIA_AZURE_KEY: <storage-account-key>
-```
-
-Store the key in a Kubernetes Secret:
+For cross-cloud scenarios or when workload identity isn't available, store the
+account key in a Kubernetes Secret and reference it via `spec.media.storage.secretRef`.
+The Secret's key must be named `AZURE_ACCOUNT_KEY`:
 
 ```yaml
 apiVersion: v1
@@ -204,16 +206,22 @@ metadata:
   name: azure-storage-key
 type: Opaque
 stringData:
-  account-key: <your-storage-account-key>
+  AZURE_ACCOUNT_KEY: <your-storage-account-key>
 ---
 # Reference in AgentRuntime
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: AgentRuntime
+metadata:
+  name: my-agent
 spec:
-  env:
-    - name: OMNIA_MEDIA_AZURE_KEY
-      valueFrom:
-        secretKeyRef:
-          name: azure-storage-key
-          key: account-key
+  media:
+    storage:
+      type: azure
+      azure:
+        account: mystorageaccount
+        container: media
+      secretRef:
+        name: azure-storage-key
 ```
 
 ## Upload flow
@@ -266,38 +274,66 @@ Media storage exposes the following metrics:
 
 All metrics include `agent` and `namespace` labels.
 
-## Helm configuration
+## AgentRuntime configuration
 
-Configure media storage in your values.yaml:
+Configure media storage declaratively on `spec.media.storage`. The operator
+injects the equivalent `OMNIA_MEDIA_STORAGE_*` environment variables (shown
+above, per-backend) into both the facade and runtime containers — you no
+longer need to set them by hand.
 
-```yaml
-# Coming in a future release - currently configured via environment variables
-# facade:
-#   media:
-#     storage:
-#       type: s3
-#       s3:
-#         bucket: my-bucket
-#         region: us-west-2
-```
-
-For now, configure via environment variables in the AgentRuntime spec:
+### Keyless S3 (recommended for AWS)
 
 ```yaml
-apiVersion: omnia.altairalabs.dev/v1alpha1
+apiVersion: omnia.altairalabs.ai/v1alpha1
 kind: AgentRuntime
 metadata:
   name: my-agent
 spec:
-  facades:
-    - type: websocket
-      env:
-        - name: OMNIA_MEDIA_STORAGE_TYPE
-          value: s3
-        - name: OMNIA_MEDIA_S3_BUCKET
-          value: my-media-bucket
-        - name: OMNIA_MEDIA_S3_REGION
-          value: us-west-2
+  media:
+    storage:
+      type: s3
+      s3:
+        bucket: my-media-bucket
+        region: us-west-2
+        # prefix: omnia/media/    # optional
+      # No secretRef — credentials come from IRSA / workload identity.
+      # maxFileSizeBytes: 104857600   # optional, 100MB
+      # defaultTTL: 24h               # optional
+```
+
+### Local storage (dev / single-replica)
+
+```yaml
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: AgentRuntime
+metadata:
+  name: my-agent
+spec:
+  media:
+    storage:
+      type: local
+      local:
+        basePath: /var/lib/omnia/media
+```
+
+### Explicit credentials (S3 / Azure)
+
+Omit `secretRef` for keyless access (S3 IRSA, Azure workload identity — GCS is
+always keyless via Application Default Credentials). To use explicit
+credentials instead, reference a Secret. The Secret must contain the keys
+`AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` (S3) or `AZURE_ACCOUNT_KEY`
+(Azure):
+
+```yaml
+spec:
+  media:
+    storage:
+      type: s3
+      s3:
+        bucket: my-media-bucket
+        region: us-west-2
+      secretRef:
+        name: my-s3-credentials   # must have AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY keys
 ```
 
 ## Troubleshooting

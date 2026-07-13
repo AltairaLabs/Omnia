@@ -707,6 +707,56 @@ export interface AgentRuntimeSpec {
     /** basePath is the base directory for resolving mock:// URLs.
      * Defaults to /etc/omnia/media if not specified. */
     basePath?: string;
+    /** storage configures the media-storage backend the operator provisions
+     * into the facade (uploads) and runtime (attachment-reference resolution)
+     * containers. When unset, media storage is disabled. */
+    storage?: {
+      /** AzureMediaBackend configures Azure Blob Storage. */
+      azure?: {
+        account: string;
+        container: string;
+        prefix?: string;
+      };
+      /** defaultTTL is the retention TTL for stored media (Go duration). */
+      defaultTTL?: string;
+      /** downloadURLTTL bounds presigned download URLs. */
+      downloadURLTTL?: string;
+      /** GCSMediaBackend configures Google Cloud Storage (workload identity / ADC). */
+      gcs?: {
+        bucket: string;
+        prefix?: string;
+      };
+      /** LocalMediaBackend stores media on a facade-served local path. */
+      local?: {
+        /** basePath is the on-disk directory the facade serves media from. */
+        basePath: string;
+      };
+      /** maxFileSizeBytes caps a single stored object. */
+      maxFileSizeBytes?: number;
+      /** S3MediaBackend configures S3 / S3-compatible (MinIO) storage. */
+      s3?: {
+        bucket: string;
+        /** endpoint, when set (e.g. MinIO), forces path-style addressing. */
+        endpoint?: string;
+        prefix?: string;
+        region?: string;
+      };
+      /** secretRef supplies explicit credentials (S3 AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY,
+       * Azure account key). Omit for keyless workload-identity access. GCS uses
+       * workload identity only. */
+      secretRef?: {
+        /** Name of the referent.
+         * This field is effectively required, but due to backwards compatibility is
+         * allowed to be empty. Instances of this type with an empty value here are
+         * almost certainly wrong.
+         * More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names */
+        name?: string;
+      };
+      /** type selects the storage backend. */
+      type: "none" | "local" | "s3" | "gcs" | "azure";
+      /** uploadURLTTL bounds presigned upload URLs. */
+      uploadURLTTL?: string;
+    };
   };
   /** memory configures cross-session memory for this agent. */
   memory?: {

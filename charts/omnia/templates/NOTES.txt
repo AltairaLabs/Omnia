@@ -109,6 +109,19 @@ To deploy your first agent, create an AgentRuntime resource:
     #   serviceAccountName: my-workload-identity-sa
     #   nodeSelector:
     #     nvidia.com/gpu.product: A100
+    # Optional: enable media storage so the facade/runtime can handle file
+    # uploads. Disabled by default (type: none). Pick ONE backend below.
+    # Full reference: https://omnia.altairalabs.ai/docs/how-to/operations/configure-media-storage
+    # media:
+    #   storage:
+    #     type: s3                 # keyless — uses IRSA/workload identity, no secretRef
+    #     s3:
+    #       bucket: my-media-bucket
+    #       region: us-west-2
+    #     # --- or, single-replica / dev only ---
+    #     # type: local
+    #     # local:
+    #     #   basePath: /var/lib/omnia/media
   EOF
 
 {{- if .Values.grafana.enabled }}
