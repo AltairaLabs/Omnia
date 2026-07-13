@@ -1501,6 +1501,15 @@ spec:
                     required:
                     - type
                     type: object
+                    x-kubernetes-validations:
+                    - message: type s3 requires spec.media.storage.s3
+                      rule: self.type != 's3' || has(self.s3)
+                    - message: type gcs requires spec.media.storage.gcs
+                      rule: self.type != 'gcs' || has(self.gcs)
+                    - message: type azure requires spec.media.storage.azure
+                      rule: self.type != 'azure' || has(self.azure)
+                    - message: type local requires spec.media.storage.local
+                      rule: self.type != 'local' || has(self.local)
                 type: object
               memory:
                 description: memory configures cross-session memory for this agent.

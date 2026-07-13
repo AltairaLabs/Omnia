@@ -580,6 +580,10 @@ type MediaConfig struct {
 }
 
 // MediaStorageConfig selects and configures the media-storage backend.
+// +kubebuilder:validation:XValidation:rule="self.type != 's3' || has(self.s3)",message="type s3 requires spec.media.storage.s3"
+// +kubebuilder:validation:XValidation:rule="self.type != 'gcs' || has(self.gcs)",message="type gcs requires spec.media.storage.gcs"
+// +kubebuilder:validation:XValidation:rule="self.type != 'azure' || has(self.azure)",message="type azure requires spec.media.storage.azure"
+// +kubebuilder:validation:XValidation:rule="self.type != 'local' || has(self.local)",message="type local requires spec.media.storage.local"
 type MediaStorageConfig struct {
 	// type selects the storage backend.
 	// +kubebuilder:validation:Enum=none;local;s3;gcs;azure
