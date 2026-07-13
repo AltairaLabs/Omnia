@@ -38,6 +38,7 @@ import (
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 	eev1alpha1 "github.com/altairalabs/omnia/ee/api/v1alpha1"
+	"github.com/altairalabs/omnia/internal/media"
 )
 
 var _ = Describe("AgentRuntime Controller", func() {
@@ -2318,6 +2319,91 @@ var _ = Describe("AgentRuntime Controller", func() {
 				envMap[env.Name] = env
 			}
 			Expect(envMap).NotTo(HaveKey("OMNIA_MEDIA_BASE_PATH"))
+		})
+
+		It("should render media storage env into both facade and runtime containers", func() {
+			By("creating a PromptPack")
+			promptPack := &omniav1alpha1.PromptPack{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      promptPackKey.Name,
+					Namespace: promptPackKey.Namespace,
+				},
+				Spec: omniav1alpha1.PromptPackSpec{
+					Version:  "1.0.0",
+					PackName: "test-pack",
+					Source: omniav1alpha1.PromptPackContentSource{
+						Type: omniav1alpha1.PromptPackSourceTypeConfigMap,
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, promptPack)).To(Succeed())
+
+			const (
+				mediaBucket = "test-media-bucket"
+				mediaRegion = "us-west-2"
+			)
+
+			By("creating an AgentRuntime with spec.media.storage.type=s3")
+			agentRuntime := &omniav1alpha1.AgentRuntime{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      agentRuntimeKey.Name,
+					Namespace: agentRuntimeKey.Namespace,
+				},
+				Spec: omniav1alpha1.AgentRuntimeSpec{
+					PromptPackRef: omniav1alpha1.PromptPackRef{
+						Name: promptPackKey.Name,
+					},
+					Facades: []omniav1alpha1.FacadeConfig{{
+						Type: omniav1alpha1.FacadeTypeWebSocket,
+					}},
+					Providers: []omniav1alpha1.NamedProviderRef{
+						{Name: "default", ProviderRef: omniav1alpha1.ProviderRef{Name: providerKey.Name}},
+					},
+					Media: &omniav1alpha1.MediaConfig{
+						Storage: &omniav1alpha1.MediaStorageConfig{
+							Type: "s3",
+							S3: &omniav1alpha1.S3MediaBackend{
+								Bucket: mediaBucket,
+								Region: mediaRegion,
+							},
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, agentRuntime)).To(Succeed())
+
+			By("reconciling the AgentRuntime")
+			_, _ = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: agentRuntimeKey})
+			_, _ = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: agentRuntimeKey})
+
+			By("fetching the produced Deployment")
+			deployment := &appsv1.Deployment{}
+			Eventually(func() error {
+				return k8sClient.Get(ctx, agentRuntimeKey, deployment)
+			}, timeout, interval).Should(Succeed())
+
+			var facadeContainer, runtimeContainer *corev1.Container
+			for i := range deployment.Spec.Template.Spec.Containers {
+				c := &deployment.Spec.Template.Spec.Containers[i]
+				switch c.Name {
+				case FacadeContainerName:
+					facadeContainer = c
+				case RuntimeContainerName:
+					runtimeContainer = c
+				}
+			}
+			Expect(facadeContainer).NotTo(BeNil())
+			Expect(runtimeContainer).NotTo(BeNil())
+
+			By("verifying the facade container has media storage env")
+			facadeEnv := envMap(facadeContainer.Env)
+			Expect(facadeEnv).To(HaveKeyWithValue(media.EnvStorageType, "s3"))
+			Expect(facadeEnv).To(HaveKeyWithValue(media.EnvS3Bucket, mediaBucket))
+
+			By("verifying the runtime container has media storage env")
+			runtimeEnv := envMap(runtimeContainer.Env)
+			Expect(runtimeEnv).To(HaveKeyWithValue(media.EnvStorageType, "s3"))
+			Expect(runtimeEnv).To(HaveKeyWithValue(media.EnvS3Bucket, mediaBucket))
 		})
 
 		It("should populate A2A status for A2A-type agent", func() {
