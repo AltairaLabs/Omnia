@@ -41,12 +41,13 @@ const reasonProgressDeadlineExceeded = "ProgressDeadlineExceeded"
 // progression is visible as a chronological history (kubectl describe /
 // dashboard timeline) — status conditions only hold current state.
 const (
-	eventReasonRolloutStep    = "RolloutStep"
-	eventReasonPromoting      = "RolloutPromoting"
-	eventReasonPromoted       = "RolloutPromoted"
-	eventReasonRolledBack     = "RolloutRolledBack"
-	eventReasonAnalysisPassed = "RolloutAnalysisPassed"
-	eventReasonAnalysisFailed = "RolloutAnalysisFailed"
+	eventReasonRolloutStep      = "RolloutStep"
+	eventReasonPromoting        = "RolloutPromoting"
+	eventReasonPromoted         = "RolloutPromoted"
+	eventReasonRolledBack       = "RolloutRolledBack"
+	eventReasonAnalysisPassed   = "RolloutAnalysisPassed"
+	eventReasonAnalysisFailed   = "RolloutAnalysisFailed"
+	eventReasonRolloutTriggered = "RolloutTriggered"
 )
 
 // recordRolloutNormal emits a Normal rollout Event (nil-safe for tests without

@@ -89,3 +89,21 @@ func channelMax(candidates []omniav1alpha1.PromptPack, track string) (*omniav1al
 	}
 	return best, nil
 }
+
+// resolvePromptPack resolves an AgentRuntime's PromptPack reference to a concrete
+// PromptPack object: it lists the version-objects labelled with the ref's logical
+// packName and selects by exact version or channel (via selectPromptPack).
+func (r *AgentRuntimeReconciler) resolvePromptPack(ctx context.Context, namespace string, ref omniav1alpha1.PromptPackRef) (*omniav1alpha1.PromptPack, error) {
+	var list omniav1alpha1.PromptPackList
+	if err := r.List(ctx, &list,
+		client.InNamespace(namespace),
+		client.MatchingLabels{LabelPromptPackName: ref.Name},
+	); err != nil {
+		return nil, fmt.Errorf("failed to list PromptPacks for %q: %w", ref.Name, err)
+	}
+	promptPack, err := selectPromptPack(list.Items, ref.Version, ref.Track)
+	if err != nil {
+		return nil, fmt.Errorf("resolve PromptPack %q: %w", ref.Name, err)
+	}
+	return promptPack, nil
+}
