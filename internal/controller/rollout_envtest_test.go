@@ -374,6 +374,15 @@ var _ = Describe("AgentRuntime Rollout (envtest)", func() {
 			Expect(afterPromote.Status.Rollout.Active).To(BeFalse())
 			Expect(afterPromote.Status.Rollout.Promoting).To(BeFalse())
 			Expect(afterPromote.Status.Rollout.Message).To(Equal("promoted"))
+
+			// #1838: the pin (spec.promptPackRef.version) stays advanced to the
+			// promoted candidate version, and the candidate is cleared — so a
+			// version-triggered rollout's next reconcile compares the channel's
+			// latest against a clean baseline instead of a stale candidate.
+			Expect(afterPromote.Spec.PromptPackRef.Version).NotTo(BeNil())
+			Expect(*afterPromote.Spec.PromptPackRef.Version).To(Equal("1.0.0"))
+			Expect(afterPromote.Spec.Rollout.Candidate).To(BeNil(),
+				"candidate must be cleared once promotion finishes")
 		})
 
 		It("holds the replica-weighted split across pause reconciles (does not re-inflate)", func() {
