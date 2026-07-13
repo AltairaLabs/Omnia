@@ -2,8 +2,10 @@ package controller
 
 import (
 	"testing"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 	"github.com/altairalabs/omnia/internal/media"
@@ -47,15 +49,148 @@ func TestMediaStorageEnvVars_S3(t *testing.T) {
 func TestMediaStorageEnvVars_SecretRef_AzureKey(t *testing.T) {
 	cfg := &omniav1alpha1.MediaStorageConfig{
 		Type:      "azure",
-		Azure:     &omniav1alpha1.AzureMediaBackend{Account: "acct", Container: "c"},
+		Azure:     &omniav1alpha1.AzureMediaBackend{Account: "acct", Container: "c", Prefix: "prefix"},
 		SecretRef: &corev1.LocalObjectReference{Name: "media-creds"},
 	}
 	m := mediaEnvMap(mediaStorageEnvVars(cfg))
+	if m[media.EnvAzurePrefix].Value != "prefix" {
+		t.Errorf("%s = %q, want prefix", media.EnvAzurePrefix, m[media.EnvAzurePrefix].Value)
+	}
 	key := m[media.EnvAzureKey]
 	if key.ValueFrom == nil || key.ValueFrom.SecretKeyRef == nil {
 		t.Fatalf("%s should be a SecretKeyRef", media.EnvAzureKey)
 	}
 	if key.ValueFrom.SecretKeyRef.Name != "media-creds" {
 		t.Errorf("secret name = %q, want media-creds", key.ValueFrom.SecretKeyRef.Name)
+	}
+	if key.ValueFrom.SecretKeyRef.Key != mediaSecretKeyAzureAccountKey {
+		t.Errorf("secret key = %q, want %q", key.ValueFrom.SecretKeyRef.Key, mediaSecretKeyAzureAccountKey)
+	}
+}
+
+func TestMediaStorageEnvVars_Local(t *testing.T) {
+	cfg := &omniav1alpha1.MediaStorageConfig{
+		Type:  "local",
+		Local: &omniav1alpha1.LocalMediaBackend{BasePath: "/data/media"},
+	}
+	m := mediaEnvMap(mediaStorageEnvVars(cfg))
+	if m[media.EnvStorageType].Value != "local" {
+		t.Errorf("%s = %q, want local", media.EnvStorageType, m[media.EnvStorageType].Value)
+	}
+	if m[media.EnvStoragePath].Value != "/data/media" {
+		t.Errorf("%s = %q, want /data/media", media.EnvStoragePath, m[media.EnvStoragePath].Value)
+	}
+}
+
+// TestMediaStorageEnvVars_GCS_IgnoresSecretRef is the important negative case:
+// GCS is workload-identity only, so a SecretRef on the config must not cause
+// any secret-backed env var (nor any AWS_*/AZURE_* key) to be emitted.
+func TestMediaStorageEnvVars_GCS_IgnoresSecretRef(t *testing.T) {
+	cfg := &omniav1alpha1.MediaStorageConfig{
+		Type:      "gcs",
+		GCS:       &omniav1alpha1.GCSMediaBackend{Bucket: "b", Prefix: "media"},
+		SecretRef: &corev1.LocalObjectReference{Name: "media-creds"},
+	}
+	vars := mediaStorageEnvVars(cfg)
+	m := mediaEnvMap(vars)
+	if m[media.EnvGCSBucket].Value != "b" {
+		t.Errorf("%s = %q, want b", media.EnvGCSBucket, m[media.EnvGCSBucket].Value)
+	}
+	if m[media.EnvGCSPrefix].Value != "media" {
+		t.Errorf("%s = %q, want media", media.EnvGCSPrefix, m[media.EnvGCSPrefix].Value)
+	}
+	for _, v := range vars {
+		if v.ValueFrom != nil && v.ValueFrom.SecretKeyRef != nil {
+			t.Errorf("unexpected secret-backed env var %s for GCS backend (workload-identity only)", v.Name)
+		}
+		switch v.Name {
+		case mediaSecretKeyS3AccessKeyID, mediaSecretKeyS3SecretAccessKey, media.EnvAzureKey:
+			t.Errorf("unexpected credential env var %s for GCS backend", v.Name)
+		}
+	}
+}
+
+func TestMediaStorageEnvVars_S3_SecretRef(t *testing.T) {
+	cfg := &omniav1alpha1.MediaStorageConfig{
+		Type:      "s3",
+		S3:        &omniav1alpha1.S3MediaBackend{Bucket: "b"},
+		SecretRef: &corev1.LocalObjectReference{Name: "media-creds"},
+	}
+	vars := mediaStorageEnvVars(cfg)
+
+	accessKey := findEnvVar(vars, mediaSecretKeyS3AccessKeyID)
+	if accessKey == nil || accessKey.ValueFrom == nil || accessKey.ValueFrom.SecretKeyRef == nil {
+		t.Fatalf("%s should be a SecretKeyRef", mediaSecretKeyS3AccessKeyID)
+	}
+	if accessKey.ValueFrom.SecretKeyRef.Name != "media-creds" {
+		t.Errorf("secret name = %q, want media-creds", accessKey.ValueFrom.SecretKeyRef.Name)
+	}
+	if accessKey.ValueFrom.SecretKeyRef.Key != mediaSecretKeyS3AccessKeyID {
+		t.Errorf("secret key = %q, want %q", accessKey.ValueFrom.SecretKeyRef.Key, mediaSecretKeyS3AccessKeyID)
+	}
+
+	secretKey := findEnvVar(vars, mediaSecretKeyS3SecretAccessKey)
+	if secretKey == nil || secretKey.ValueFrom == nil || secretKey.ValueFrom.SecretKeyRef == nil {
+		t.Fatalf("%s should be a SecretKeyRef", mediaSecretKeyS3SecretAccessKey)
+	}
+	if secretKey.ValueFrom.SecretKeyRef.Name != "media-creds" {
+		t.Errorf("secret name = %q, want media-creds", secretKey.ValueFrom.SecretKeyRef.Name)
+	}
+	if secretKey.ValueFrom.SecretKeyRef.Key != mediaSecretKeyS3SecretAccessKey {
+		t.Errorf("secret key = %q, want %q", secretKey.ValueFrom.SecretKeyRef.Key, mediaSecretKeyS3SecretAccessKey)
+	}
+}
+
+func TestMediaStorageEnvVars_Limits(t *testing.T) {
+	maxSize := int64(5242880)
+	cfg := &omniav1alpha1.MediaStorageConfig{
+		Type:             "s3",
+		S3:               &omniav1alpha1.S3MediaBackend{Bucket: "b"},
+		MaxFileSizeBytes: &maxSize,
+		DefaultTTL:       &metav1.Duration{Duration: time.Hour},
+	}
+	m := mediaEnvMap(mediaStorageEnvVars(cfg))
+	if m[media.EnvMaxFileSize].Value != "5242880" {
+		t.Errorf("%s = %q, want 5242880", media.EnvMaxFileSize, m[media.EnvMaxFileSize].Value)
+	}
+	if m[media.EnvDefaultTTL].Value != "1h0m0s" {
+		t.Errorf("%s = %q, want 1h0m0s", media.EnvDefaultTTL, m[media.EnvDefaultTTL].Value)
+	}
+}
+
+// TestMediaEnvVars_WiredIntoBuilders is the gap-closer: it exercises
+// mediaStorageEnvVars via the real production call sites
+// (buildFacadeEnvVars/buildRuntimeEnvVars) rather than calling it directly,
+// proving spec.media.storage actually reaches both container env slices.
+func TestMediaEnvVars_WiredIntoBuilders(t *testing.T) {
+	r := &AgentRuntimeReconciler{}
+	ar := &omniav1alpha1.AgentRuntime{
+		Spec: omniav1alpha1.AgentRuntimeSpec{
+			Media: &omniav1alpha1.MediaConfig{
+				Storage: &omniav1alpha1.MediaStorageConfig{
+					Type: "s3",
+					S3:   &omniav1alpha1.S3MediaBackend{Bucket: "b", Region: "us-east-1"},
+				},
+			},
+		},
+	}
+
+	facadeEnv := envMap(r.buildFacadeEnvVars(ar))
+	if facadeEnv["OMNIA_MEDIA_STORAGE_TYPE"] != "s3" {
+		t.Errorf("facade OMNIA_MEDIA_STORAGE_TYPE = %q, want s3", facadeEnv["OMNIA_MEDIA_STORAGE_TYPE"])
+	}
+	if facadeEnv["OMNIA_MEDIA_S3_BUCKET"] != "b" {
+		t.Errorf("facade OMNIA_MEDIA_S3_BUCKET = %q, want b", facadeEnv["OMNIA_MEDIA_S3_BUCKET"])
+	}
+
+	runtimeEnv := envMap(r.buildRuntimeEnvVars(ar, nil))
+	if runtimeEnv["OMNIA_MEDIA_STORAGE_TYPE"] != "s3" {
+		t.Errorf("runtime OMNIA_MEDIA_STORAGE_TYPE = %q, want s3", runtimeEnv["OMNIA_MEDIA_STORAGE_TYPE"])
+	}
+	if runtimeEnv["OMNIA_MEDIA_S3_BUCKET"] != "b" {
+		t.Errorf("runtime OMNIA_MEDIA_S3_BUCKET = %q, want b", runtimeEnv["OMNIA_MEDIA_S3_BUCKET"])
+	}
+	if _, ok := runtimeEnv["OMNIA_FACADE_PORT"]; !ok {
+		t.Errorf("runtime env vars missing OMNIA_FACADE_PORT")
 	}
 }
