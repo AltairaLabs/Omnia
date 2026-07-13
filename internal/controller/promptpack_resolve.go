@@ -1,11 +1,13 @@
 package controller
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/Masterminds/semver/v3"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 )
@@ -47,6 +49,24 @@ func selectPromptPack(candidates []omniav1alpha1.PromptPack, version, track *str
 // then fall back to string equality at call sites) — avoiding lenient coercion.
 func parsePackVersion(s string) (*semver.Version, error) {
 	return semver.StrictNewVersion(strings.TrimPrefix(s, "v"))
+}
+
+// latestPackForChannel resolves the highest version of packName published on
+// channel (stable/prerelease), in namespace. PromptPacks are label-keyed
+// (LabelPromptPackName=packName, one object per version, per
+// resolvePromptPack) rather than name-keyed, so this lists the candidates
+// sharing that label and delegates to channelMax for the version comparison.
+// Used by the version-triggered rollout (maybeTriggerVersionRollout) to watch
+// a channel independently of the agent's pinned stable ref.
+func (r *AgentRuntimeReconciler) latestPackForChannel(ctx context.Context, namespace, packName, channel string) (*omniav1alpha1.PromptPack, error) {
+	var list omniav1alpha1.PromptPackList
+	if err := r.List(ctx, &list,
+		client.InNamespace(namespace),
+		client.MatchingLabels{LabelPromptPackName: packName},
+	); err != nil {
+		return nil, fmt.Errorf("failed to list PromptPacks for %q: %w", packName, err)
+	}
+	return channelMax(list.Items, channel)
 }
 
 func channelMax(candidates []omniav1alpha1.PromptPack, track string) (*omniav1alpha1.PromptPack, error) {

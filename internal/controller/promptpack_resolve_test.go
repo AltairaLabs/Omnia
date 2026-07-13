@@ -1,9 +1,13 @@
 package controller
 
 import (
+	"context"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 )
@@ -77,4 +81,68 @@ func TestSelectPromptPack_prereleaseOnlySet(t *testing.T) {
 	if err != nil || got.Spec.Version != "1.0.0-rc.2" {
 		t.Fatalf("got %v err %v", got, err)
 	}
+}
+
+// labeledPack builds a PromptPack version-object labeled LabelPromptPackName
+// so it is discoverable by latestPackForChannel's List+label-selector, as real
+// PromptPack version-objects are (promptpack_controller.go's label reconcile).
+func labeledPack(objName, packName, version string, namespace string) *omniav1alpha1.PromptPack {
+	return &omniav1alpha1.PromptPack{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      objName,
+			Namespace: namespace,
+			Labels:    map[string]string{LabelPromptPackName: packName},
+		},
+		Spec: omniav1alpha1.PromptPackSpec{PackName: packName, Version: version},
+	}
+}
+
+// TestLatestPackForChannel_StableSkipsPrerelease seeds two stable versions of
+// the same pack (labeled, distinct object names+namespace-scoped like real
+// version-objects) and asserts the stable channel resolves the highest
+// version, not the first- or last-created object.
+func TestLatestPackForChannel_StableSkipsPrerelease(t *testing.T) {
+	scheme := newTestScheme(t)
+	ns := "default"
+	p1 := labeledPack("mypack-100", "mypack", "1.0.0", ns)
+	p2 := labeledPack("mypack-110", "mypack", "1.1.0", ns)
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(p1, p2).Build()
+	r := &AgentRuntimeReconciler{Client: c, Scheme: scheme}
+
+	got, err := r.latestPackForChannel(context.Background(), ns, "mypack", "stable")
+	require.NoError(t, err)
+	assert.Equal(t, "1.1.0", got.Spec.Version)
+}
+
+// TestLatestPackForChannel_MixedTracks seeds a stable and a newer prerelease
+// version of the same pack: the stable channel must skip the prerelease and
+// resolve the stable, while the prerelease channel resolves the overall
+// newest (matching channelMax semantics, #1837).
+func TestLatestPackForChannel_MixedTracks(t *testing.T) {
+	scheme := newTestScheme(t)
+	ns := "default"
+	stable := labeledPack("mypack-100", "mypack", "1.0.0", ns)
+	pre := labeledPack("mypack-110-beta", "mypack", "1.1.0-beta.1", ns)
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(stable, pre).Build()
+	r := &AgentRuntimeReconciler{Client: c, Scheme: scheme}
+
+	gotStable, err := r.latestPackForChannel(context.Background(), ns, "mypack", "stable")
+	require.NoError(t, err)
+	assert.Equal(t, "1.0.0", gotStable.Spec.Version)
+
+	gotPre, err := r.latestPackForChannel(context.Background(), ns, "mypack", "prerelease")
+	require.NoError(t, err)
+	assert.Equal(t, "1.1.0-beta.1", gotPre.Spec.Version)
+}
+
+// TestLatestPackForChannel_NoMatch wraps errNoMatchingPromptPack when the
+// channel is empty (no candidates for the packName at all).
+func TestLatestPackForChannel_NoMatch(t *testing.T) {
+	scheme := newTestScheme(t)
+	c := fake.NewClientBuilder().WithScheme(scheme).Build()
+	r := &AgentRuntimeReconciler{Client: c, Scheme: scheme}
+
+	_, err := r.latestPackForChannel(context.Background(), "default", "mypack", "stable")
+	require.Error(t, err)
+	assert.ErrorIs(t, err, errNoMatchingPromptPack)
 }
