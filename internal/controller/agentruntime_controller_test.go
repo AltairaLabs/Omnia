@@ -2327,6 +2327,7 @@ var _ = Describe("AgentRuntime Controller", func() {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      promptPackKey.Name,
 					Namespace: promptPackKey.Namespace,
+					Labels:    map[string]string{LabelPromptPackName: promptPackKey.Name},
 				},
 				Spec: omniav1alpha1.PromptPackSpec{
 					Version:  "1.0.0",
@@ -2351,7 +2352,8 @@ var _ = Describe("AgentRuntime Controller", func() {
 				},
 				Spec: omniav1alpha1.AgentRuntimeSpec{
 					PromptPackRef: omniav1alpha1.PromptPackRef{
-						Name: promptPackKey.Name,
+						Name:  promptPackKey.Name,
+						Track: ptr.To("stable"),
 					},
 					Facades: []omniav1alpha1.FacadeConfig{{
 						Type: omniav1alpha1.FacadeTypeWebSocket,

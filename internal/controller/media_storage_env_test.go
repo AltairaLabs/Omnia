@@ -210,7 +210,7 @@ func TestMediaEnvVars_WiredIntoBuilders(t *testing.T) {
 		t.Errorf("facade OMNIA_MEDIA_S3_BUCKET = %q, want b", facadeEnv["OMNIA_MEDIA_S3_BUCKET"])
 	}
 
-	runtimeEnv := envMap(r.buildRuntimeEnvVars(ar, nil))
+	runtimeEnv := envMap(r.buildRuntimeEnvVars(ar, nil, nil))
 	if runtimeEnv["OMNIA_MEDIA_STORAGE_TYPE"] != "s3" {
 		t.Errorf("runtime OMNIA_MEDIA_STORAGE_TYPE = %q, want s3", runtimeEnv["OMNIA_MEDIA_STORAGE_TYPE"])
 	}
