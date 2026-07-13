@@ -11,10 +11,13 @@ You may obtain a copy of the License at
 package main
 
 import (
+	"context"
 	"testing"
 	"time"
 
 	"github.com/go-logr/logr"
+
+	"github.com/altairalabs/omnia/internal/media"
 )
 
 func TestInitMediaStorage_Disabled(t *testing.T) {
@@ -53,6 +56,38 @@ func TestInitMediaStorage_Local(t *testing.T) {
 		t.Fatal("cleanup is nil, want a Close-wrapping func for a constructed backend")
 	}
 	cleanup() // exercises the Close() success path
+}
+
+// TestInitMediaStorage_UploadURLTTLFromEnv is the wiring test for the
+// previously-dead spec.media.storage.uploadURLTTL/downloadURLTTL CRD fields
+// (#1817 Task 5 follow-up): the controller renders OMNIA_MEDIA_UPLOAD_URL_TTL
+// onto the runtime container, and initMediaStorage must actually honor it
+// instead of the hardcoded 15m default.
+func TestInitMediaStorage_UploadURLTTLFromEnv(t *testing.T) {
+	t.Setenv("OMNIA_MEDIA_STORAGE_TYPE", "local")
+	t.Setenv("OMNIA_MEDIA_STORAGE_PATH", t.TempDir())
+	t.Setenv("OMNIA_MEDIA_UPLOAD_URL_TTL", "30m")
+
+	store, cleanup := initMediaStorage(logr.Discard())
+	if store == nil {
+		t.Fatal("store is nil, want a constructed local backend")
+	}
+	defer cleanup()
+
+	creds, err := store.GetUploadURL(context.Background(), media.UploadRequest{
+		SessionID: "sess",
+		Filename:  "f.txt",
+		MIMEType:  "text/plain",
+		SizeBytes: 10,
+	})
+	if err != nil {
+		t.Fatalf("GetUploadURL() error = %v", err)
+	}
+
+	wantExpiry := time.Now().Add(30 * time.Minute)
+	if diff := creds.ExpiresAt.Sub(wantExpiry); diff < -5*time.Second || diff > 5*time.Second {
+		t.Errorf("ExpiresAt = %v, want ~%v (30m TTL from env, not the 15m hardcoded default)", creds.ExpiresAt, wantExpiry)
+	}
 }
 
 func TestInitMediaStorage_UnknownType(t *testing.T) {

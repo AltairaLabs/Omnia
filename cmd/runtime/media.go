@@ -87,8 +87,8 @@ func initMediaStorage(log logr.Logger) (media.Storage, func()) {
 		Type:           storageType,
 		DefaultTTL:     getEnvDuration(media.EnvDefaultTTL, media.DefaultDefaultTTL),
 		MaxFileSize:    getEnvInt64(media.EnvMaxFileSize, media.DefaultMaxFileSize),
-		UploadURLTTL:   15 * time.Minute,
-		DownloadURLTTL: 1 * time.Hour,
+		UploadURLTTL:   getEnvDuration(media.EnvUploadURLTTL, media.DefaultUploadURLTTL),
+		DownloadURLTTL: getEnvDuration(media.EnvDownloadURLTTL, media.DefaultDownloadURLTTL),
 		LocalPath:      getEnvOrDefault(media.EnvStoragePath, media.DefaultStoragePath),
 		S3Bucket:       os.Getenv(media.EnvS3Bucket),
 		S3Region:       os.Getenv(media.EnvS3Region),
@@ -126,11 +126,13 @@ func initMediaStorage(log logr.Logger) (media.Storage, func()) {
 // runtime can fetch from anywhere, so they need no special handling. The
 // local backend's download URL is facade-relative
 // (http://localhost:<facadePort>) — reachable from the runtime container
-// because both run as sidecars in the same pod network namespace, but the
-// runtime has no guaranteed way to learn the facade's actual port:
-// OMNIA_FACADE_PORT is only ever set on the facade container
-// (buildFacadeEnvVars in internal/controller/deployment_builder_env.go), not
-// the runtime's.
+// because both run as sidecars in the same pod network namespace.
+// OMNIA_FACADE_PORT is now always set on the runtime container too (the
+// controller mirrors it onto both containers — buildRuntimeEnvVars in
+// internal/controller/deployment_builder_env.go), so this is normally a
+// direct read rather than a guess; the fallback below only matters when the
+// binary runs outside the operator's control (demo mode, E2E, manual
+// podOverrides that omit it).
 //
 // Resolution order: an explicit override, then a same-named env var in case
 // an operator has mirrored it onto this container, then the facade's

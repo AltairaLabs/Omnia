@@ -322,6 +322,63 @@ func TestLoadFromCRD_MediaFromEnvFallback(t *testing.T) {
 	if cfg.MediaDefaultTTL != DefaultMediaDefaultTTL {
 		t.Errorf("MediaDefaultTTL = %v, want %v", cfg.MediaDefaultTTL, DefaultMediaDefaultTTL)
 	}
+	if cfg.MediaUploadURLTTL != DefaultMediaUploadURLTTL {
+		t.Errorf("MediaUploadURLTTL = %v, want %v", cfg.MediaUploadURLTTL, DefaultMediaUploadURLTTL)
+	}
+	if cfg.MediaDownloadURLTTL != DefaultMediaDownloadURLTTL {
+		t.Errorf("MediaDownloadURLTTL = %v, want %v", cfg.MediaDownloadURLTTL, DefaultMediaDownloadURLTTL)
+	}
+}
+
+// TestLoadFromCRD_MediaURLTTLsFromEnv is the wiring test proving the
+// previously-dead spec.media.storage.uploadURLTTL/downloadURLTTL CRD fields
+// reach agent.Config via the OMNIA_MEDIA_UPLOAD_URL_TTL /
+// OMNIA_MEDIA_DOWNLOAD_URL_TTL env vars the controller renders (#1817 Task 5
+// follow-up).
+func TestLoadFromCRD_MediaURLTTLsFromEnv(t *testing.T) {
+	t.Setenv(EnvMediaUploadURLTTL, "45m")
+	t.Setenv(EnvMediaDownloadURLTTL, "2h")
+
+	ar := newFakeAgentRuntime("agent", "ns", v1alpha1.AgentRuntimeSpec{
+		PromptPackRef: v1alpha1.PromptPackRef{Name: "pack"},
+		Facades:       []v1alpha1.FacadeConfig{{Type: v1alpha1.FacadeTypeWebSocket}},
+	})
+
+	c := fake.NewClientBuilder().WithScheme(k8s.Scheme()).WithRuntimeObjects(ar, testNamespace(ar.Namespace)).Build()
+
+	cfg, err := LoadFromCRD(context.Background(), c, "agent", "ns")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.MediaUploadURLTTL != 45*time.Minute {
+		t.Errorf("MediaUploadURLTTL = %v, want 45m", cfg.MediaUploadURLTTL)
+	}
+	if cfg.MediaDownloadURLTTL != 2*time.Hour {
+		t.Errorf("MediaDownloadURLTTL = %v, want 2h", cfg.MediaDownloadURLTTL)
+	}
+}
+
+// TestLoadFromCRD_MediaURLTTLsInvalidEnvFallsBackToDefault asserts an
+// unparseable TTL env var doesn't error the whole config load — it falls
+// back to the default, mirroring getEnvDuration's silent-fallback contract
+// (matches cmd/runtime's getEnvDuration behavior).
+func TestLoadFromCRD_MediaURLTTLsInvalidEnvFallsBackToDefault(t *testing.T) {
+	t.Setenv(EnvMediaUploadURLTTL, "not-a-duration")
+
+	ar := newFakeAgentRuntime("agent", "ns", v1alpha1.AgentRuntimeSpec{
+		PromptPackRef: v1alpha1.PromptPackRef{Name: "pack"},
+		Facades:       []v1alpha1.FacadeConfig{{Type: v1alpha1.FacadeTypeWebSocket}},
+	})
+
+	c := fake.NewClientBuilder().WithScheme(k8s.Scheme()).WithRuntimeObjects(ar, testNamespace(ar.Namespace)).Build()
+
+	cfg, err := LoadFromCRD(context.Background(), c, "agent", "ns")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.MediaUploadURLTTL != DefaultMediaUploadURLTTL {
+		t.Errorf("MediaUploadURLTTL = %v, want default %v for an unparseable env var", cfg.MediaUploadURLTTL, DefaultMediaUploadURLTTL)
+	}
 }
 
 func TestLoadFromCRD_MediaEmptyBasePath(t *testing.T) {
@@ -527,6 +584,31 @@ func TestLoadFromEnvFallback_Defaults(t *testing.T) {
 	}
 	if cfg.MediaStorageType != MediaStorageTypeNone {
 		t.Errorf("MediaStorageType = %q, want %q", cfg.MediaStorageType, MediaStorageTypeNone)
+	}
+	if cfg.MediaUploadURLTTL != DefaultMediaUploadURLTTL {
+		t.Errorf("MediaUploadURLTTL = %v, want %v", cfg.MediaUploadURLTTL, DefaultMediaUploadURLTTL)
+	}
+	if cfg.MediaDownloadURLTTL != DefaultMediaDownloadURLTTL {
+		t.Errorf("MediaDownloadURLTTL = %v, want %v", cfg.MediaDownloadURLTTL, DefaultMediaDownloadURLTTL)
+	}
+}
+
+// TestLoadFromEnvFallback_MediaURLTTLsFromEnv covers the demo/E2E fallback
+// path (no in-cluster CRD access) for the same OMNIA_MEDIA_UPLOAD_URL_TTL /
+// OMNIA_MEDIA_DOWNLOAD_URL_TTL env vars wired in loadMediaConfigFromCRD.
+func TestLoadFromEnvFallback_MediaURLTTLsFromEnv(t *testing.T) {
+	t.Setenv(EnvMediaUploadURLTTL, "45m")
+	t.Setenv(EnvMediaDownloadURLTTL, "2h")
+
+	cfg, err := loadFromEnvFallback("agent-1", "ns-1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.MediaUploadURLTTL != 45*time.Minute {
+		t.Errorf("MediaUploadURLTTL = %v, want 45m", cfg.MediaUploadURLTTL)
+	}
+	if cfg.MediaDownloadURLTTL != 2*time.Hour {
+		t.Errorf("MediaDownloadURLTTL = %v, want 2h", cfg.MediaDownloadURLTTL)
 	}
 }
 

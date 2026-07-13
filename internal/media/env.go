@@ -20,16 +20,25 @@ import "time"
 
 // Environment variable names for the OMNIA_MEDIA_* backend-selection
 // contract. Both the facade (cmd/agent) and runtime (cmd/runtime) binaries
-// read these to build a BuilderConfig for Build. There is no CRD field for
-// backend selection today (AgentRuntime's spec.media only carries BasePath,
-// used for mock:// resolution, a different concern) — these are pod-env-only
-// on whichever container needs media storage, typically set via
-// spec.podOverrides.
+// read these to build a BuilderConfig for Build. spec.media.storage (the
+// AgentRuntime CRD) is the source of truth for these settings: the operator
+// (internal/controller/media_storage_env.go) renders the CRD fields into this
+// exact env contract on both containers. They remain pod-env rather than a
+// direct CRD read in each binary so the same contract also works when a
+// binary runs outside the operator's control (demo mode, E2E, manually via
+// spec.podOverrides).
 const (
 	EnvStorageType = "OMNIA_MEDIA_STORAGE_TYPE"
 	EnvStoragePath = "OMNIA_MEDIA_STORAGE_PATH"
 	EnvMaxFileSize = "OMNIA_MEDIA_MAX_FILE_SIZE"
 	EnvDefaultTTL  = "OMNIA_MEDIA_DEFAULT_TTL"
+
+	// EnvUploadURLTTL / EnvDownloadURLTTL configure how long presigned
+	// upload/download URLs remain valid. Rendered from
+	// spec.media.storage.uploadURLTTL / downloadURLTTL by
+	// appendMediaLimits (internal/controller/media_storage_env.go).
+	EnvUploadURLTTL   = "OMNIA_MEDIA_UPLOAD_URL_TTL"
+	EnvDownloadURLTTL = "OMNIA_MEDIA_DOWNLOAD_URL_TTL"
 
 	// S3 storage configuration.
 	EnvS3Bucket   = "OMNIA_MEDIA_S3_BUCKET"
@@ -50,7 +59,9 @@ const (
 
 // Default values shared by both binaries' env-var loading.
 const (
-	DefaultStoragePath = "/var/lib/omnia/media"
-	DefaultMaxFileSize = 100 * 1024 * 1024 // 100MB
-	DefaultDefaultTTL  = 24 * time.Hour
+	DefaultStoragePath    = "/var/lib/omnia/media"
+	DefaultMaxFileSize    = 100 * 1024 * 1024 // 100MB
+	DefaultDefaultTTL     = 24 * time.Hour
+	DefaultUploadURLTTL   = 15 * time.Minute
+	DefaultDownloadURLTTL = 1 * time.Hour
 )

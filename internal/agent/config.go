@@ -43,10 +43,12 @@ const (
 	// (cmd/agent) and runtime (cmd/runtime) binaries read the identical env
 	// vars when each builds a media.BuilderConfig for media.Build. See
 	// cmd/runtime/media.go for the runtime side of this contract.
-	EnvMediaStorageType = media.EnvStorageType
-	EnvMediaStoragePath = media.EnvStoragePath
-	EnvMediaMaxFileSize = media.EnvMaxFileSize
-	EnvMediaDefaultTTL  = media.EnvDefaultTTL
+	EnvMediaStorageType    = media.EnvStorageType
+	EnvMediaStoragePath    = media.EnvStoragePath
+	EnvMediaMaxFileSize    = media.EnvMaxFileSize
+	EnvMediaDefaultTTL     = media.EnvDefaultTTL
+	EnvMediaUploadURLTTL   = media.EnvUploadURLTTL
+	EnvMediaDownloadURLTTL = media.EnvDownloadURLTTL
 
 	// S3 storage configuration.
 	EnvMediaS3Bucket   = media.EnvS3Bucket
@@ -100,15 +102,18 @@ const (
 	DefaultRuntimeAddress      = "localhost:9000"
 	DefaultSessionTTL          = 24 * time.Hour
 	DefaultPromptPackMountPath = "/etc/omnia/pack"
-	// DefaultMediaStoragePath / DefaultMediaMaxFileSize / DefaultMediaDefaultTTL
-	// alias internal/media's shared defaults (see EnvMediaStorageType above).
-	DefaultMediaStoragePath   = media.DefaultStoragePath
-	DefaultMediaMaxFileSize   = media.DefaultMaxFileSize
-	DefaultMediaDefaultTTL    = media.DefaultDefaultTTL
-	DefaultA2ATaskTTL         = 1 * time.Hour
-	DefaultA2AConversationTTL = 30 * time.Minute
-	DefaultA2APort            = 9999
-	DefaultMCPPort            = 9998
+	// DefaultMediaStoragePath / DefaultMediaMaxFileSize / DefaultMediaDefaultTTL /
+	// DefaultMediaUploadURLTTL / DefaultMediaDownloadURLTTL alias internal/media's
+	// shared defaults (see EnvMediaStorageType above).
+	DefaultMediaStoragePath    = media.DefaultStoragePath
+	DefaultMediaMaxFileSize    = media.DefaultMaxFileSize
+	DefaultMediaDefaultTTL     = media.DefaultDefaultTTL
+	DefaultMediaUploadURLTTL   = media.DefaultUploadURLTTL
+	DefaultMediaDownloadURLTTL = media.DefaultDownloadURLTTL
+	DefaultA2ATaskTTL          = 1 * time.Hour
+	DefaultA2AConversationTTL  = 30 * time.Minute
+	DefaultA2APort             = 9999
+	DefaultMCPPort             = 9998
 
 	// Internal management-plane twin-listener port defaults. Independently
 	// declared (not derived from the external port by an offset). Used per
@@ -224,10 +229,12 @@ type Config struct {
 	DrainTimeout time.Duration
 
 	// Media storage configuration.
-	MediaStorageType MediaStorageType
-	MediaStoragePath string
-	MediaMaxFileSize int64
-	MediaDefaultTTL  time.Duration
+	MediaStorageType    MediaStorageType
+	MediaStoragePath    string
+	MediaMaxFileSize    int64
+	MediaDefaultTTL     time.Duration
+	MediaUploadURLTTL   time.Duration
+	MediaDownloadURLTTL time.Duration
 
 	// S3 storage configuration.
 	MediaS3Bucket   string
@@ -395,4 +402,20 @@ func getEnvAsFloat64(key string, defaultValue float64) (float64, error) {
 		return defaultValue, nil
 	}
 	return strconv.ParseFloat(valueStr, 64)
+}
+
+// getEnvDuration parses the env var as a time.Duration, returning def when
+// unset or unparseable. Mirrors cmd/runtime/media.go's getEnvDuration; the
+// facade doesn't import the runtime binary's package, so this is
+// intentionally a separate copy of the same tiny helper.
+func getEnvDuration(key string, def time.Duration) time.Duration {
+	v := os.Getenv(key)
+	if v == "" {
+		return def
+	}
+	parsed, err := time.ParseDuration(v)
+	if err != nil {
+		return def
+	}
+	return parsed
 }

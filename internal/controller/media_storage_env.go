@@ -72,6 +72,12 @@ func appendMediaLimits(env []corev1.EnvVar, cfg *omniav1alpha1.MediaStorageConfi
 	if cfg.DefaultTTL != nil {
 		env = append(env, plain(media.EnvDefaultTTL, cfg.DefaultTTL.Duration.String()))
 	}
+	if cfg.UploadURLTTL != nil {
+		env = append(env, plain(media.EnvUploadURLTTL, cfg.UploadURLTTL.Duration.String()))
+	}
+	if cfg.DownloadURLTTL != nil {
+		env = append(env, plain(media.EnvDownloadURLTTL, cfg.DownloadURLTTL.Duration.String()))
+	}
 	return env
 }
 

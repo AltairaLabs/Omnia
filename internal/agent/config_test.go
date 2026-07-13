@@ -18,6 +18,7 @@ package agent
 
 import (
 	"testing"
+	"time"
 )
 
 func TestConfigValidate(t *testing.T) {
@@ -296,6 +297,23 @@ func TestConfigValidate(t *testing.T) {
 				t.Errorf("Validate() error = %v, want %v", err, tt.wantErr)
 			}
 		})
+	}
+}
+
+func TestGetEnvDuration(t *testing.T) {
+	t.Setenv("OMNIA_TEST_ENV_DURATION", "")
+	if got := getEnvDuration("OMNIA_TEST_ENV_DURATION", time.Hour); got != time.Hour {
+		t.Errorf("getEnvDuration() = %v, want 1h for an unset var", got)
+	}
+
+	t.Setenv("OMNIA_TEST_ENV_DURATION", "not-a-duration")
+	if got := getEnvDuration("OMNIA_TEST_ENV_DURATION", time.Hour); got != time.Hour {
+		t.Errorf("getEnvDuration() = %v, want 1h for an unparseable var", got)
+	}
+
+	t.Setenv("OMNIA_TEST_ENV_DURATION", "30m")
+	if got := getEnvDuration("OMNIA_TEST_ENV_DURATION", time.Hour); got != 30*time.Minute {
+		t.Errorf("getEnvDuration() = %v, want 30m", got)
 	}
 }
 

@@ -148,6 +148,8 @@ func TestMediaStorageEnvVars_Limits(t *testing.T) {
 		S3:               &omniav1alpha1.S3MediaBackend{Bucket: "b"},
 		MaxFileSizeBytes: &maxSize,
 		DefaultTTL:       &metav1.Duration{Duration: time.Hour},
+		UploadURLTTL:     &metav1.Duration{Duration: 30 * time.Minute},
+		DownloadURLTTL:   &metav1.Duration{Duration: 2 * time.Hour},
 	}
 	m := mediaEnvMap(mediaStorageEnvVars(cfg))
 	if m[media.EnvMaxFileSize].Value != "5242880" {
@@ -155,6 +157,31 @@ func TestMediaStorageEnvVars_Limits(t *testing.T) {
 	}
 	if m[media.EnvDefaultTTL].Value != "1h0m0s" {
 		t.Errorf("%s = %q, want 1h0m0s", media.EnvDefaultTTL, m[media.EnvDefaultTTL].Value)
+	}
+	if m[media.EnvUploadURLTTL].Value != "30m0s" {
+		t.Errorf("%s = %q, want 30m0s", media.EnvUploadURLTTL, m[media.EnvUploadURLTTL].Value)
+	}
+	if m[media.EnvDownloadURLTTL].Value != "2h0m0s" {
+		t.Errorf("%s = %q, want 2h0m0s", media.EnvDownloadURLTTL, m[media.EnvDownloadURLTTL].Value)
+	}
+}
+
+// TestMediaStorageEnvVars_LimitsOmittedWhenUnset asserts the upload/download
+// TTL env vars are absent (not rendered as empty strings) when the CRD
+// doesn't set them — the facade/runtime binaries fall back to their own
+// hardcoded defaults (media.DefaultUploadURLTTL / DefaultDownloadURLTTL) in
+// that case, which only works if the env var is fully absent.
+func TestMediaStorageEnvVars_LimitsOmittedWhenUnset(t *testing.T) {
+	cfg := &omniav1alpha1.MediaStorageConfig{
+		Type: "s3",
+		S3:   &omniav1alpha1.S3MediaBackend{Bucket: "b"},
+	}
+	m := mediaEnvMap(mediaStorageEnvVars(cfg))
+	if _, ok := m[media.EnvUploadURLTTL]; ok {
+		t.Errorf("%s should be omitted when uploadURLTTL is unset", media.EnvUploadURLTTL)
+	}
+	if _, ok := m[media.EnvDownloadURLTTL]; ok {
+		t.Errorf("%s should be omitted when downloadURLTTL is unset", media.EnvDownloadURLTTL)
 	}
 }
 

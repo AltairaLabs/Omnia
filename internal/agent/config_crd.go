@@ -350,6 +350,8 @@ func loadMediaConfigFromCRD(cfg *Config, ar *v1alpha1.AgentRuntime) {
 	}
 	cfg.MediaMaxFileSize = DefaultMediaMaxFileSize
 	cfg.MediaDefaultTTL = DefaultMediaDefaultTTL
+	cfg.MediaUploadURLTTL = getEnvDuration(EnvMediaUploadURLTTL, DefaultMediaUploadURLTTL)
+	cfg.MediaDownloadURLTTL = getEnvDuration(EnvMediaDownloadURLTTL, DefaultMediaDownloadURLTTL)
 }
 
 // loadTracingConfigFromEnv populates tracing-related config fields from environment variables.
@@ -423,6 +425,8 @@ func loadFromEnvFallback(name, namespace string) (*Config, error) {
 	cfg.MediaStoragePath = getEnvOrDefault(EnvMediaStoragePath, DefaultMediaStoragePath)
 	cfg.MediaMaxFileSize = DefaultMediaMaxFileSize
 	cfg.MediaDefaultTTL = DefaultMediaDefaultTTL
+	cfg.MediaUploadURLTTL = getEnvDuration(EnvMediaUploadURLTTL, DefaultMediaUploadURLTTL)
+	cfg.MediaDownloadURLTTL = getEnvDuration(EnvMediaDownloadURLTTL, DefaultMediaDownloadURLTTL)
 
 	if err := loadTracingConfigFromEnv(cfg); err != nil {
 		return nil, err
