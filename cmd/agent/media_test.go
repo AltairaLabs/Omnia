@@ -11,12 +11,14 @@ You may obtain a copy of the License at
 package main
 
 import (
+	"context"
 	"testing"
 	"time"
 
 	"github.com/go-logr/logr"
 
 	"github.com/altairalabs/omnia/internal/agent"
+	"github.com/altairalabs/omnia/internal/media"
 )
 
 func TestInitMediaStorage_None(t *testing.T) {
@@ -48,6 +50,41 @@ func TestInitMediaStorage_Local(t *testing.T) {
 		t.Fatal("cleanup is nil, want a Close-wrapping func for a constructed backend")
 	}
 	cleanup() // exercises the Close() success path
+}
+
+// TestInitMediaStorage_UploadURLTTLFromConfig is the wiring test for the
+// previously-dead spec.media.storage.uploadURLTTL CRD field (#1817 Task 5
+// follow-up): agent.Config.MediaUploadURLTTL (loaded from
+// OMNIA_MEDIA_UPLOAD_URL_TTL by internal/agent) must actually reach the
+// constructed media.Storage instead of the hardcoded 15m default.
+func TestInitMediaStorage_UploadURLTTLFromConfig(t *testing.T) {
+	cfg := &agent.Config{
+		MediaStorageType:  agent.MediaStorageTypeLocal,
+		MediaStoragePath:  t.TempDir(),
+		MediaUploadURLTTL: 30 * time.Minute,
+		FacadePort:        8080,
+	}
+
+	store, cleanup := initMediaStorage(cfg, logr.Discard())
+	if store == nil {
+		t.Fatal("store is nil, want a constructed local backend")
+	}
+	defer cleanup()
+
+	creds, err := store.GetUploadURL(context.Background(), media.UploadRequest{
+		SessionID: "sess",
+		Filename:  "f.txt",
+		MIMEType:  "text/plain",
+		SizeBytes: 10,
+	})
+	if err != nil {
+		t.Fatalf("GetUploadURL() error = %v", err)
+	}
+
+	wantExpiry := time.Now().Add(30 * time.Minute)
+	if diff := creds.ExpiresAt.Sub(wantExpiry); diff < -5*time.Second || diff > 5*time.Second {
+		t.Errorf("ExpiresAt = %v, want ~%v (30m TTL from config, not the 15m hardcoded default)", creds.ExpiresAt, wantExpiry)
+	}
 }
 
 func TestInitMediaStorage_S3(t *testing.T) {

@@ -507,6 +507,73 @@ export const crdConstraints: Record<string, Record<string, FieldConstraint>> =
     "spec.media.basePath": {
       "type": "string"
     },
+    "spec.media.storage.azure.account": {
+      "type": "string",
+      "minLength": 1,
+      "required": true
+    },
+    "spec.media.storage.azure.container": {
+      "type": "string",
+      "minLength": 1,
+      "required": true
+    },
+    "spec.media.storage.azure.prefix": {
+      "type": "string"
+    },
+    "spec.media.storage.defaultTTL": {
+      "type": "string"
+    },
+    "spec.media.storage.downloadURLTTL": {
+      "type": "string"
+    },
+    "spec.media.storage.gcs.bucket": {
+      "type": "string",
+      "minLength": 1,
+      "required": true
+    },
+    "spec.media.storage.gcs.prefix": {
+      "type": "string"
+    },
+    "spec.media.storage.local.basePath": {
+      "type": "string",
+      "minLength": 1,
+      "required": true
+    },
+    "spec.media.storage.maxFileSizeBytes": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "spec.media.storage.s3.bucket": {
+      "type": "string",
+      "minLength": 1,
+      "required": true
+    },
+    "spec.media.storage.s3.endpoint": {
+      "type": "string"
+    },
+    "spec.media.storage.s3.prefix": {
+      "type": "string"
+    },
+    "spec.media.storage.s3.region": {
+      "type": "string"
+    },
+    "spec.media.storage.secretRef.name": {
+      "type": "string"
+    },
+    "spec.media.storage.type": {
+      "type": "string",
+      "enum": [
+        "none",
+        "local",
+        "s3",
+        "gcs",
+        "azure"
+      ],
+      "required": true
+    },
+    "spec.media.storage.uploadURLTTL": {
+      "type": "string"
+    },
     "spec.memory.enabled": {
       "type": "boolean"
     },
