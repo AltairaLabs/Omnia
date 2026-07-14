@@ -306,6 +306,38 @@ var _ = Describe("AgentRuntime version-triggered rollout (envtest)", func() {
 			Expect(*ar.Spec.Rollout.Candidate.PromptPackRef.Version).To(Equal("1.1.0"))
 		})
 
+		It("does not re-canary a just-rolled-back version, but canaries a newer one", func() {
+			providerName := nextName("provider")
+			Expect(k8sClient.Create(ctx, newProvider(providerName))).To(Succeed())
+
+			packName := nextName("pack")
+			Expect(k8sClient.Create(ctx, newLabeledPack(nextName(packName+"-100"), packName, "1.0.0"))).To(Succeed())
+			Expect(k8sClient.Create(ctx, newLabeledPack(nextName(packName+"-200"), packName, "2.0.0"))).To(Succeed())
+
+			ar := newTriggerAR(nextName("ar"), providerName, packName)
+			Expect(k8sClient.Create(ctx, ar)).To(Succeed())
+			setActiveVersion(ar, "1.0.0")
+
+			// Post-rollback state: 2.0.0 was canaried and rolled back, so it is
+			// stamped as the last rolled-back version and the candidate is back
+			// to stable while activeVersion stays 1.0.0.
+			ar.Annotations = map[string]string{lastRolledBackVersionAnnotation: "2.0.0"}
+			ar.Spec.Rollout.Candidate = nil
+
+			reconciler := newReconciler()
+			triggered, err := reconciler.maybeTriggerVersionRollout(ctx, ar)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(triggered).To(BeFalse(), "must not re-canary the just-rolled-back 2.0.0")
+			Expect(ar.Spec.Rollout.Candidate).To(BeNil())
+
+			// A newer version (3.0.0) appears -> the trigger fires again.
+			Expect(k8sClient.Create(ctx, newLabeledPack(nextName(packName+"-300"), packName, "3.0.0"))).To(Succeed())
+			triggered, err = reconciler.maybeTriggerVersionRollout(ctx, ar)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(triggered).To(BeTrue())
+			Expect(*ar.Spec.Rollout.Candidate.PromptPackRef.Version).To(Equal("3.0.0"))
+		})
+
 		It("does not error when nothing has been published on the channel yet", func() {
 			providerName := nextName("provider")
 			Expect(k8sClient.Create(ctx, newProvider(providerName))).To(Succeed())

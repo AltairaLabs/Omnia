@@ -107,6 +107,7 @@ func (r *AgentRuntimeReconciler) reconcileRollout(
 		log.Info("rollout auto-rollback triggered",
 			"agentRuntime", ar.Name,
 			"reason", "pod_unhealthy")
+		recordRolledBackVersion(ar)
 		rollback(ar)
 		if err := r.Update(ctx, ar); err != nil {
 			return ctrl.Result{}, fmt.Errorf("persist auto-rollback spec: %w", err)
@@ -426,6 +427,7 @@ func (r *AgentRuntimeReconciler) handleAnalysisAutoRollback(
 ) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
 
+	recordRolledBackVersion(ar)
 	rollback(ar)
 	if err := r.Update(ctx, ar); err != nil {
 		return ctrl.Result{}, fmt.Errorf("persist analysis rollback spec: %w", err)

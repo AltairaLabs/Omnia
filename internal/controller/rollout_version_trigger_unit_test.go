@@ -10,6 +10,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+
+	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 )
 
 // TestVersionsNewer covers versionsNewer's comparison + parse-failure
@@ -33,4 +35,42 @@ func TestVersionsNewer(t *testing.T) {
 			assert.Equal(t, tc.want, versionsNewer(tc.a, tc.b))
 		})
 	}
+}
+
+// TestRecordRolledBackVersion verifies the rolled-back version is stamped as an
+// annotation for a version-pinned candidate, and is a no-op otherwise (so the
+// version-trigger's re-canary guard only engages for real version rollbacks).
+func TestRecordRolledBackVersion(t *testing.T) {
+	v := "2.0.0"
+	ar := &omniav1alpha1.AgentRuntime{
+		Spec: omniav1alpha1.AgentRuntimeSpec{
+			Rollout: &omniav1alpha1.RolloutConfig{
+				Candidate: &omniav1alpha1.CandidateOverrides{
+					PromptPackRef: &omniav1alpha1.PromptPackRef{Name: "p", Version: &v},
+				},
+			},
+		},
+	}
+	recordRolledBackVersion(ar)
+	assert.Equal(t, "2.0.0", ar.Annotations[lastRolledBackVersionAnnotation])
+
+	// No candidate -> no stamp.
+	bare := &omniav1alpha1.AgentRuntime{}
+	recordRolledBackVersion(bare)
+	_, ok := bare.Annotations[lastRolledBackVersionAnnotation]
+	assert.False(t, ok)
+
+	// Candidate without a pinned version -> no stamp.
+	noVer := &omniav1alpha1.AgentRuntime{
+		Spec: omniav1alpha1.AgentRuntimeSpec{
+			Rollout: &omniav1alpha1.RolloutConfig{
+				Candidate: &omniav1alpha1.CandidateOverrides{
+					PromptPackRef: &omniav1alpha1.PromptPackRef{Name: "p"},
+				},
+			},
+		},
+	}
+	recordRolledBackVersion(noVer)
+	_, ok = noVer.Annotations[lastRolledBackVersionAnnotation]
+	assert.False(t, ok)
 }
