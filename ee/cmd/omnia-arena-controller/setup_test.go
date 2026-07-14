@@ -42,6 +42,7 @@ var expectedReconcilers = []string{
 	controllerArenaJob,
 	controllerArenaDevSession,
 	controllerKeyRotation,
+	controllerPromptPackSource,
 }
 
 // TestBuildReconcilers_RegistersAllExpected asserts that buildReconcilers
@@ -88,6 +89,7 @@ func TestBuildWebhooks_WithLicenseHooks(t *testing.T) {
 	want := []string{
 		controllerArenaSource, controllerArenaJob,
 		controllerArenaTemplateSource, webhookAgentRuntimeCustomFacade,
+		controllerPromptPackSource,
 	}
 	assertWebhookNames(t, got, want)
 }
@@ -339,6 +341,7 @@ func TestSetupWebhooks_RegistersAllAgainstRealManager(t *testing.T) {
 	want := []string{
 		controllerArenaSource, controllerArenaJob,
 		controllerArenaTemplateSource, webhookAgentRuntimeCustomFacade,
+		controllerPromptPackSource,
 	}
 	if len(registered) != len(want) {
 		t.Errorf("registered %d webhooks, want %d: %v", len(registered), len(want), registered)

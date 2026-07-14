@@ -10,6 +10,7 @@ package main
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
@@ -33,6 +34,7 @@ const (
 	controllerArenaJob            = "ArenaJob"
 	controllerArenaDevSession     = "ArenaDevSession"
 	controllerKeyRotation         = "KeyRotation"
+	controllerPromptPackSource    = "PromptPackSource"
 	// webhookAgentRuntimeCustomFacade is the license webhook gating
 	// spec.facades[].type == "custom" on AgentRuntimes (#1774). Webhook-only —
 	// it has no reconciler; core AgentRuntime reconciliation is not
@@ -211,6 +213,19 @@ func buildReconcilers(opts setupOptions) []namedReconciler {
 				}).SetupWithManager(mgr)
 			},
 		},
+		{
+			Name: controllerPromptPackSource,
+			Setup: func(mgr ctrl.Manager) error {
+				return (&controller.PromptPackSourceReconciler{
+					Client:               mgr.GetClient(),
+					Scheme:               mgr.GetScheme(),
+					Recorder:             mgr.GetEventRecorderFor("promptpacksource-controller"),
+					LicenseValidator:     opts.LicenseValidator,
+					MaxVersionsPerSource: 10,
+					MinRetentionAge:      24 * time.Hour,
+				}).SetupWithManager(mgr)
+			},
+		},
 	}
 }
 
@@ -302,6 +317,12 @@ func buildWebhooks(opts webhookOptions) []namedWebhook {
 				Name: webhookAgentRuntimeCustomFacade,
 				Setup: func(mgr ctrl.Manager) error {
 					return arenawebhook.SetupAgentRuntimeCustomFacadeWebhookWithManager(mgr, opts.LicenseValidator)
+				},
+			},
+			namedWebhook{
+				Name: controllerPromptPackSource,
+				Setup: func(mgr ctrl.Manager) error {
+					return arenawebhook.SetupPromptPackSourceWebhookWithManager(mgr, opts.LicenseValidator)
 				},
 			},
 		)
