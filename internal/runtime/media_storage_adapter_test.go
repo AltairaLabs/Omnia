@@ -25,6 +25,7 @@ func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { retu
 // fakeStorage implements media.Storage for adapter tests.
 type fakeStorage struct {
 	downloadURL string
+	downloadErr error
 	deleted     string
 
 	// mediaInfo / mediaInfoErr control GetMediaInfo's return, so tests can
@@ -37,7 +38,7 @@ func (f *fakeStorage) GetUploadURL(context.Context, media.UploadRequest) (*media
 	return nil, nil
 }
 func (f *fakeStorage) GetDownloadURL(_ context.Context, _ string) (string, error) {
-	return f.downloadURL, nil
+	return f.downloadURL, f.downloadErr
 }
 func (f *fakeStorage) GetMediaInfo(context.Context, string) (*media.MediaInfo, error) {
 	return f.mediaInfo, f.mediaInfoErr
@@ -124,6 +125,27 @@ func TestOmniaMediaStore_GetURL_DelegatesToStorage(t *testing.T) {
 	url, err := store.GetURL(context.Background(), storage.Reference("omnia://r"), 0)
 	if err != nil || url != "https://example/x" {
 		t.Fatalf("GetURL = %q, %v", url, err)
+	}
+}
+
+// A local backend returns an in-cluster http:// download URL that the model
+// cannot fetch (Anthropic rejects non-HTTPS). GetURL must return "" so the
+// loader falls back to inline base64 via RetrieveMedia.
+func TestOmniaMediaStore_GetURL_NonHTTPSReturnsEmpty(t *testing.T) {
+	store := newOmniaMediaStore(&fakeStorage{downloadURL: "http://localhost:8080/media/download/s/m"}, nil)
+	url, err := store.GetURL(context.Background(), storage.Reference("omnia://r"), 0)
+	if err != nil {
+		t.Fatalf("GetURL error: %v", err)
+	}
+	if url != "" {
+		t.Fatalf("GetURL = %q, want \"\" for a non-HTTPS backend URL", url)
+	}
+}
+
+func TestOmniaMediaStore_GetURL_PropagatesError(t *testing.T) {
+	store := newOmniaMediaStore(&fakeStorage{downloadErr: errors.New("boom")}, nil)
+	if _, err := store.GetURL(context.Background(), storage.Reference("omnia://r"), 0); err == nil {
+		t.Fatal("GetURL: expected error, got nil")
 	}
 }
 
