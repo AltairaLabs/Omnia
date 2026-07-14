@@ -728,8 +728,18 @@ export interface AgentRuntimeSpec {
       };
       /** LocalMediaBackend stores media on a facade-served local path. */
       local?: {
-        /** basePath is the on-disk directory the facade serves media from. */
+        /** basePath is the on-disk directory the facade serves media from and the
+         * runtime resolves references against. When volumeClaim is set it is the
+         * mount path for that PVC. */
         basePath: string;
+        /** volumeClaim names an existing PersistentVolumeClaim to mount at basePath
+         * in both the facade and runtime containers. Use a ReadWriteMany PVC so
+         * uploads written by the facade are durable and readable by the runtime
+         * across pods. When empty, no volume is provisioned — the local backend
+         * then requires a writable basePath (the agent containers have a read-only
+         * root filesystem), so an explicit volumeClaim (or podOverrides volume) is
+         * needed for local storage to function. */
+        volumeClaim?: string;
       };
       /** maxFileSizeBytes caps a single stored object. */
       maxFileSizeBytes?: number;
