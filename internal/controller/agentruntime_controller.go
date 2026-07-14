@@ -520,6 +520,16 @@ func (r *AgentRuntimeReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return result, err
 	}
 
+	// Version-triggered rollout (#1838): if a newer PromptPack version has
+	// appeared on the watched channel, set it as the rollout candidate and
+	// requeue so the next pass runs the rollout engine cleanly (avoids a
+	// resourceVersion conflict with the rollout's own Status write below).
+	if triggered, triggerErr := r.maybeTriggerVersionRollout(ctx, agentRuntime); triggerErr != nil {
+		return ctrl.Result{}, triggerErr
+	} else if triggered {
+		return ctrl.Result{Requeue: true}, nil
+	}
+
 	// Reconcile resources
 	deployment, err := r.reconcileResources(ctx, log, agentRuntime, promptPack, toolRegistry, providers)
 	if err != nil {
@@ -650,21 +660,6 @@ func promptPackInvalidReason(pp *omniav1alpha1.PromptPack) string {
 // exact version pin or channel (track) via selectPromptPack. Used for both
 // the stable ref and a candidate override — each resolves independently since
 // version/track (not just name) can differ between them.
-func (r *AgentRuntimeReconciler) resolvePromptPack(ctx context.Context, namespace string, ref omniav1alpha1.PromptPackRef) (*omniav1alpha1.PromptPack, error) {
-	var list omniav1alpha1.PromptPackList
-	if err := r.List(ctx, &list,
-		client.InNamespace(namespace),
-		client.MatchingLabels{LabelPromptPackName: ref.Name},
-	); err != nil {
-		return nil, fmt.Errorf("failed to list PromptPacks for %q: %w", ref.Name, err)
-	}
-	promptPack, err := selectPromptPack(list.Items, ref.Version, ref.Track)
-	if err != nil {
-		return nil, fmt.Errorf("resolve PromptPack %q: %w", ref.Name, err)
-	}
-	return promptPack, nil
-}
-
 func (r *AgentRuntimeReconciler) fetchToolRegistry(ctx context.Context, agentRuntime *omniav1alpha1.AgentRuntime) (*omniav1alpha1.ToolRegistry, error) {
 	ref := agentRuntime.Spec.ToolRegistryRef
 	toolRegistry := &omniav1alpha1.ToolRegistry{}

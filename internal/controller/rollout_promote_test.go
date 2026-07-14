@@ -136,3 +136,38 @@ func TestAdvanceOrFinishPromotion_MissingStableErrors(t *testing.T) {
 	_, err := r.advanceOrFinishPromotion(context.Background(), ar)
 	require.Error(t, err)
 }
+
+// finishPromotion must clear spec.rollout.candidate once stable has fully
+// rolled to the promoted config (#1838): otherwise a version-triggered
+// rollout's candidate lingers, matching the (already-promoted) stable spec
+// forever, instead of giving the next trigger reconcile a clean baseline to
+// compare the channel-latest against.
+func TestFinishPromotion_ClearsCandidate(t *testing.T) {
+	scheme := newTestScheme(t)
+	require.NoError(t, appsv1.AddToScheme(scheme))
+	require.NoError(t, corev1.AddToScheme(scheme))
+
+	ar := newRolloutTestAR()
+	// enterPromotion already advanced spec.promptPackRef to the candidate
+	// version by the time finishPromotion runs; model that precondition.
+	ar.Spec.PromptPackRef.Version = ptr.To("v2")
+	ar.Spec.Rollout = &omniav1alpha1.RolloutConfig{
+		Candidate: &omniav1alpha1.CandidateOverrides{
+			PromptPackRef: &omniav1alpha1.PromptPackRef{Name: testStablePackName, Version: ptr.To("v2")},
+		},
+		Steps: []omniav1alpha1.RolloutStep{{SetWeight: ptr.To[int32](100)}},
+	}
+	ar.Status.Rollout = &omniav1alpha1.RolloutStatus{Active: true, Promoting: true}
+
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(scheme).WithObjects(ar).WithStatusSubresource(ar).Build()
+	r := &AgentRuntimeReconciler{Client: fakeClient, Scheme: scheme}
+
+	result, err := r.finishPromotion(context.Background(), ar)
+	require.NoError(t, err)
+	assert.Zero(t, result.RequeueAfter)
+	assert.Equal(t, "v2", *ar.Spec.PromptPackRef.Version, "the pin stays advanced to the promoted version")
+	assert.Nil(t, ar.Spec.Rollout.Candidate,
+		"candidate must be cleared so the next version-trigger reconcile compares against a clean baseline")
+	assert.False(t, isRolloutActive(ar), "rollout must be idle once the candidate is cleared")
+}

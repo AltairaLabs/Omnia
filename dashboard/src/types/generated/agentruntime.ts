@@ -1190,6 +1190,13 @@ export interface AgentRuntimeSpec {
        * `istio` without `mode` resolves to "external". */
       mode?: "mesh" | "replicaWeighted" | "external";
     };
+    /** trigger opts this agent into version-triggered canary rollouts: when a
+     * newer PromptPack version appears on the named channel, the controller
+     * sets it as the rollout candidate and the steps above canary it. */
+    trigger?: {
+      /** promptPackChannel is the release channel to watch for newer versions. */
+      promptPackChannel: "stable" | "prerelease";
+    };
   };
   /** runtime configures deployment settings like replicas and resources. */
   runtime?: {

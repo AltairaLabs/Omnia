@@ -41,12 +41,13 @@ const reasonProgressDeadlineExceeded = "ProgressDeadlineExceeded"
 // progression is visible as a chronological history (kubectl describe /
 // dashboard timeline) — status conditions only hold current state.
 const (
-	eventReasonRolloutStep    = "RolloutStep"
-	eventReasonPromoting      = "RolloutPromoting"
-	eventReasonPromoted       = "RolloutPromoted"
-	eventReasonRolledBack     = "RolloutRolledBack"
-	eventReasonAnalysisPassed = "RolloutAnalysisPassed"
-	eventReasonAnalysisFailed = "RolloutAnalysisFailed"
+	eventReasonRolloutStep      = "RolloutStep"
+	eventReasonPromoting        = "RolloutPromoting"
+	eventReasonPromoted         = "RolloutPromoted"
+	eventReasonRolledBack       = "RolloutRolledBack"
+	eventReasonAnalysisPassed   = "RolloutAnalysisPassed"
+	eventReasonAnalysisFailed   = "RolloutAnalysisFailed"
+	eventReasonRolloutTriggered = "RolloutTriggered"
 )
 
 // recordRolloutNormal emits a Normal rollout Event (nil-safe for tests without
@@ -106,6 +107,7 @@ func (r *AgentRuntimeReconciler) reconcileRollout(
 		log.Info("rollout auto-rollback triggered",
 			"agentRuntime", ar.Name,
 			"reason", "pod_unhealthy")
+		recordRolledBackVersion(ar)
 		rollback(ar)
 		if err := r.Update(ctx, ar); err != nil {
 			return ctrl.Result{}, fmt.Errorf("persist auto-rollback spec: %w", err)
@@ -425,6 +427,7 @@ func (r *AgentRuntimeReconciler) handleAnalysisAutoRollback(
 ) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
 
+	recordRolledBackVersion(ar)
 	rollback(ar)
 	if err := r.Update(ctx, ar); err != nil {
 		return ctrl.Result{}, fmt.Errorf("persist analysis rollback spec: %w", err)

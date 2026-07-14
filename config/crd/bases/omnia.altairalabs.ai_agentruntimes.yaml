@@ -2381,6 +2381,22 @@ spec:
                         - external
                         type: string
                     type: object
+                  trigger:
+                    description: |-
+                      trigger opts this agent into version-triggered canary rollouts: when a
+                      newer PromptPack version appears on the named channel, the controller
+                      sets it as the rollout candidate and the steps above canary it.
+                    properties:
+                      promptPackChannel:
+                        description: promptPackChannel is the release channel to watch
+                          for newer versions.
+                        enum:
+                        - stable
+                        - prerelease
+                        type: string
+                    required:
+                    - promptPackChannel
+                    type: object
                 required:
                 - steps
                 type: object
@@ -5729,6 +5745,10 @@ spec:
             - message: facade type 'custom' requires spec.facades[].image
               rule: '!has(self.facades) || self.facades.all(f, f.type != ''custom''
                 || (has(f.image) && size(f.image) > 0))'
+            - message: spec.rollout.trigger requires a version-pinned spec.promptPackRef
+                and is mutually exclusive with promptPackRef.track
+              rule: '!(has(self.rollout) && has(self.rollout.trigger)) || (has(self.promptPackRef)
+                && has(self.promptPackRef.version) && !has(self.promptPackRef.track))'
           status:
             description: status defines the observed state of AgentRuntime
             properties:

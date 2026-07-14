@@ -146,6 +146,18 @@ func (r *AgentRuntimeReconciler) finishPromotion(
 		return ctrl.Result{}, fmt.Errorf("delete candidate after promotion: %w", err)
 	}
 
+	// Clear the candidate now that stable has fully advanced to it (#1838):
+	// promote() already copied it into the main spec fields, so leaving it set
+	// is redundant and would give a version-triggered rollout's next reconcile
+	// a stale (already-promoted) candidate to compare against instead of a
+	// clean baseline.
+	if ar.Spec.Rollout != nil && ar.Spec.Rollout.Candidate != nil {
+		ar.Spec.Rollout.Candidate = nil
+		if err := r.Update(ctx, ar); err != nil {
+			return ctrl.Result{}, fmt.Errorf("clear candidate after promotion: %w", err)
+		}
+	}
+
 	if r.RolloutMetrics != nil {
 		r.RolloutMetrics.TrafficWeight.WithLabelValues(ar.Namespace, ar.Name, "stable").Set(100)
 		r.RolloutMetrics.TrafficWeight.WithLabelValues(ar.Namespace, ar.Name, "canary").Set(0)

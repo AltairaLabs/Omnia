@@ -44,6 +44,24 @@ type RolloutConfig struct {
 	// trafficRouting configures integration with a service mesh for traffic splitting.
 	// +optional
 	TrafficRouting *TrafficRoutingConfig `json:"trafficRouting,omitempty"`
+
+	// trigger opts this agent into version-triggered canary rollouts: when a
+	// newer PromptPack version appears on the named channel, the controller
+	// sets it as the rollout candidate and the steps above canary it.
+	// +optional
+	Trigger *RolloutTrigger `json:"trigger,omitempty"`
+}
+
+// RolloutTrigger opts an AgentRuntime into version-triggered canary rollouts.
+// When a newer version of the agent's referenced PromptPack appears on the
+// named channel, the controller sets it as spec.rollout.candidate. Requires a
+// version-pinned spec.promptPackRef and is mutually exclusive with
+// promptPackRef.track (which auto-updates the stable pods instead of canarying).
+type RolloutTrigger struct {
+	// promptPackChannel is the release channel to watch for newer versions.
+	// +kubebuilder:validation:Enum=stable;prerelease
+	// +kubebuilder:validation:Required
+	PromptPackChannel string `json:"promptPackChannel"`
 }
 
 // CandidateOverrides defines the sparse overrides for the candidate version.

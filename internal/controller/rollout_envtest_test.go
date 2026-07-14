@@ -79,6 +79,38 @@ var _ = Describe("AgentRuntime Rollout (envtest)", func() {
 	}
 
 	Context("CEL + field validation (API server enforcement)", func() {
+		triggerRollout := func() *omniav1alpha1.RolloutConfig {
+			return &omniav1alpha1.RolloutConfig{
+				Steps:   []omniav1alpha1.RolloutStep{{SetWeight: ptr.To[int32](20)}},
+				Trigger: &omniav1alpha1.RolloutTrigger{PromptPackChannel: "stable"},
+			}
+		}
+
+		It("rejects rollout.trigger when promptPackRef uses track (mode conflict)", func() {
+			ar := baseAR(nextName("ar"))
+			ar.Spec.PromptPackRef.Version = nil
+			ar.Spec.PromptPackRef.Track = ptr.To("stable")
+			ar.Spec.Rollout = triggerRollout()
+			err := k8sClient.Create(ctx, ar)
+			Expect(err).To(HaveOccurred())
+			Expect(apierrors.IsInvalid(err)).To(BeTrue(), "expected Invalid, got: %v", err)
+		})
+
+		It("rejects rollout.trigger when promptPackRef has no pinned version", func() {
+			ar := baseAR(nextName("ar"))
+			ar.Spec.PromptPackRef.Version = nil
+			ar.Spec.Rollout = triggerRollout()
+			err := k8sClient.Create(ctx, ar)
+			Expect(err).To(HaveOccurred())
+			Expect(apierrors.IsInvalid(err)).To(BeTrue(), "expected Invalid, got: %v", err)
+		})
+
+		It("accepts rollout.trigger with a version-pinned promptPackRef", func() {
+			ar := baseAR(nextName("ar"))
+			ar.Spec.Rollout = triggerRollout()
+			Expect(k8sClient.Create(ctx, ar)).To(Succeed())
+		})
+
 		It("rejects an empty rollout step list", func() {
 			ar := baseAR(nextName("ar"))
 			ar.Spec.Rollout = &omniav1alpha1.RolloutConfig{
@@ -342,6 +374,15 @@ var _ = Describe("AgentRuntime Rollout (envtest)", func() {
 			Expect(afterPromote.Status.Rollout.Active).To(BeFalse())
 			Expect(afterPromote.Status.Rollout.Promoting).To(BeFalse())
 			Expect(afterPromote.Status.Rollout.Message).To(Equal("promoted"))
+
+			// #1838: the pin (spec.promptPackRef.version) stays advanced to the
+			// promoted candidate version, and the candidate is cleared — so a
+			// version-triggered rollout's next reconcile compares the channel's
+			// latest against a clean baseline instead of a stale candidate.
+			Expect(afterPromote.Spec.PromptPackRef.Version).NotTo(BeNil())
+			Expect(*afterPromote.Spec.PromptPackRef.Version).To(Equal("1.0.0"))
+			Expect(afterPromote.Spec.Rollout.Candidate).To(BeNil(),
+				"candidate must be cleared once promotion finishes")
 		})
 
 		It("holds the replica-weighted split across pause reconciles (does not re-inflate)", func() {

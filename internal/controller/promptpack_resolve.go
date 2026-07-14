@@ -1,11 +1,13 @@
 package controller
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/Masterminds/semver/v3"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 )
@@ -49,6 +51,24 @@ func parsePackVersion(s string) (*semver.Version, error) {
 	return semver.StrictNewVersion(strings.TrimPrefix(s, "v"))
 }
 
+// latestPackForChannel resolves the highest version of packName published on
+// channel (stable/prerelease), in namespace. PromptPacks are label-keyed
+// (LabelPromptPackName=packName, one object per version, per
+// resolvePromptPack) rather than name-keyed, so this lists the candidates
+// sharing that label and delegates to channelMax for the version comparison.
+// Used by the version-triggered rollout (maybeTriggerVersionRollout) to watch
+// a channel independently of the agent's pinned stable ref.
+func (r *AgentRuntimeReconciler) latestPackForChannel(ctx context.Context, namespace, packName, channel string) (*omniav1alpha1.PromptPack, error) {
+	var list omniav1alpha1.PromptPackList
+	if err := r.List(ctx, &list,
+		client.InNamespace(namespace),
+		client.MatchingLabels{LabelPromptPackName: packName},
+	); err != nil {
+		return nil, fmt.Errorf("failed to list PromptPacks for %q: %w", packName, err)
+	}
+	return channelMax(list.Items, channel)
+}
+
 func channelMax(candidates []omniav1alpha1.PromptPack, track string) (*omniav1alpha1.PromptPack, error) {
 	var best *omniav1alpha1.PromptPack
 	var bestV *semver.Version
@@ -68,4 +88,22 @@ func channelMax(candidates []omniav1alpha1.PromptPack, track string) (*omniav1al
 		return nil, fmt.Errorf("%w: no version in channel %q", errNoMatchingPromptPack, track)
 	}
 	return best, nil
+}
+
+// resolvePromptPack resolves an AgentRuntime's PromptPack reference to a concrete
+// PromptPack object: it lists the version-objects labelled with the ref's logical
+// packName and selects by exact version or channel (via selectPromptPack).
+func (r *AgentRuntimeReconciler) resolvePromptPack(ctx context.Context, namespace string, ref omniav1alpha1.PromptPackRef) (*omniav1alpha1.PromptPack, error) {
+	var list omniav1alpha1.PromptPackList
+	if err := r.List(ctx, &list,
+		client.InNamespace(namespace),
+		client.MatchingLabels{LabelPromptPackName: ref.Name},
+	); err != nil {
+		return nil, fmt.Errorf("failed to list PromptPacks for %q: %w", ref.Name, err)
+	}
+	promptPack, err := selectPromptPack(list.Items, ref.Version, ref.Track)
+	if err != nil {
+		return nil, fmt.Errorf("resolve PromptPack %q: %w", ref.Name, err)
+	}
+	return promptPack, nil
 }

@@ -586,6 +586,47 @@ func TestFindAgentRuntimesForPromptPack_Indexed(t *testing.T) {
 	assert.Equal(t, "match", requests[0].Name)
 }
 
+// TestFindAgentRuntimesForPromptPack_NewerVersionObject confirms the
+// packName-keyed watch (#1837) also drives the version-triggered rollout
+// (#1838): the mapper enqueues on packName alone, with no version filter, so
+// publishing a NEWER version-object for a tracked pack — not just any
+// version-object — still enqueues the referencing AgentRuntime. A regression
+// here (e.g. accidentally filtering the watch by version) would mean new
+// PromptPack versions never reach maybeTriggerVersionRollout's reconcile.
+func TestFindAgentRuntimesForPromptPack_NewerVersionObject(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = omniav1alpha1.AddToScheme(scheme)
+
+	stableVersion := "1.0.0"
+	v1 := &omniav1alpha1.PromptPack{
+		ObjectMeta: metav1.ObjectMeta{Name: "pp-v1-hash", Namespace: "default"},
+		Spec:       omniav1alpha1.PromptPackSpec{PackName: "triggered-pack", Version: "1.0.0"},
+	}
+	v2 := &omniav1alpha1.PromptPack{
+		ObjectMeta: metav1.ObjectMeta{Name: "pp-v2-hash", Namespace: "default"},
+		Spec:       omniav1alpha1.PromptPackSpec{PackName: "triggered-pack", Version: "1.1.0"},
+	}
+	ar := &omniav1alpha1.AgentRuntime{
+		ObjectMeta: metav1.ObjectMeta{Name: "agent-tracking-pack", Namespace: "default"},
+		Spec: omniav1alpha1.AgentRuntimeSpec{
+			PromptPackRef: omniav1alpha1.PromptPackRef{Name: "triggered-pack", Version: &stableVersion},
+		},
+	}
+
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithRuntimeObjects(v1, v2, ar).
+		Build()
+
+	r := &AgentRuntimeReconciler{Client: fakeClient, Scheme: scheme}
+
+	// The watch fires on the NEW (newer) version-object, v2 — not v1.
+	requests := r.findAgentRuntimesForPromptPack(context.Background(), v2)
+
+	assert.Len(t, requests, 1)
+	assert.Equal(t, "agent-tracking-pack", requests[0].Name)
+}
+
 func TestFindAgentRuntimesForToolRegistry(t *testing.T) {
 	scheme := runtime.NewScheme()
 	_ = omniav1alpha1.AddToScheme(scheme)

@@ -1305,6 +1305,10 @@ type MemoryToolsConfig struct {
 // +kubebuilder:validation:XValidation:rule="!has(self.facades) || self.mode != 'function' || self.facades.all(f, f.type == 'rest' || f.type == 'mcp')",message="mode 'function' allows only 'rest' and 'mcp' facades"
 // +kubebuilder:validation:XValidation:rule="!has(self.facades) || self.mode != 'function' || self.facades.exists_one(f, f.type == 'rest')",message="mode 'function' requires exactly one 'rest' facade"
 // +kubebuilder:validation:XValidation:rule="!has(self.facades) || self.facades.all(f, f.type != 'custom' || (has(f.image) && size(f.image) > 0))",message="facade type 'custom' requires spec.facades[].image"
+// Version-triggered rollout (#1838): rollout.trigger canaries new PromptPack
+// versions and requires a version-pinned promptPackRef; it is mutually exclusive
+// with promptPackRef.track (which auto-updates the stable pods instead).
+// +kubebuilder:validation:XValidation:rule="!(has(self.rollout) && has(self.rollout.trigger)) || (has(self.promptPackRef) && has(self.promptPackRef.version) && !has(self.promptPackRef.track))",message="spec.rollout.trigger requires a version-pinned spec.promptPackRef and is mutually exclusive with promptPackRef.track"
 type AgentRuntimeSpec struct {
 	// mode controls how the AgentRuntime is invoked. "agent" (default) is
 	// the existing conversational runtime (websocket and/or a2a facades);

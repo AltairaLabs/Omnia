@@ -441,6 +441,55 @@ spec:
 				g.Expect(output).To(SatisfyAny(Equal("false"), BeEmpty()))
 			}, 60*time.Second, 2*time.Second).Should(Succeed())
 		})
+
+		It("triggers a version-based canary when a newer PromptPack version is on the watched channel", func() {
+			By("switching the AgentRuntime to a version-triggered rollout (no manual candidate)")
+			// A pause after the first weight step holds the canary so
+			// status.rollout.candidateVersion stays observable — otherwise the
+			// rollout promotes straight through and clears it before we assert.
+			triggerPatch := `{"spec":{"rollout":{` +
+				`"trigger":{"promptPackChannel":"stable"},` +
+				`"steps":[{"setWeight":20},{"pause":{"duration":"10m"}},{"setWeight":100}]}}}`
+			cmd := exec.Command("kubectl", "patch", "agentruntime", rolloutAgentName,
+				"-n", rolloutNamespace, "--type=merge", "-p", triggerPatch)
+			_, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+
+			DeferCleanup(func() {
+				if CurrentSpecReport().Failed() {
+					dumpRolloutDebugInfo("version-triggered canary failure")
+				}
+			})
+
+			By("verifying the stable AgentRuntime is up on the pinned 1.0.0 version before any trigger fires")
+			Eventually(func(g Gomega) {
+				output, err := getRolloutJSONPath("agentruntime", rolloutAgentName, rolloutNamespace, "{.status.activeVersion}")
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(Equal("1.0.0"))
+			}, 2*time.Minute, 2*time.Second).Should(Succeed())
+
+			// rollout-prompts-v2 (2.0.0) was published in this Context's BeforeAll —
+			// a distinct metadata.name, same spec.packName, labelled by the
+			// controller (the #1837 v2 pattern) — and is the "newer version on the
+			// watched stable channel" the trigger now reacts to: it only becomes
+			// relevant to this AgentRuntime once the trigger above is enabled,
+			// modeling a newer version "appearing" from this agent's perspective.
+			By("verifying the controller sets the channel-latest as the rollout candidate")
+			Eventually(func(g Gomega) {
+				output, err := getRolloutJSONPath(
+					"agentruntime", rolloutAgentName, rolloutNamespace,
+					"{.status.rollout.candidateVersion}")
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(Equal("2.0.0"))
+			}, 2*time.Minute, 2*time.Second).Should(Succeed())
+
+			By("verifying the canary Deployment is created")
+			Eventually(func(g Gomega) {
+				output, err := getRolloutJSONPath("deployment", rolloutCandidateDeployment, rolloutNamespace, "{.metadata.name}")
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(Equal(rolloutCandidateDeployment))
+			}, 2*time.Minute, 2*time.Second).Should(Succeed())
+		})
 	})
 
 	Context("Istio traffic routing", Ordered, func() {
