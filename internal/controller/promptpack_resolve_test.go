@@ -86,7 +86,8 @@ func TestSelectPromptPack_prereleaseOnlySet(t *testing.T) {
 // labeledPack builds a PromptPack version-object labeled LabelPromptPackName
 // so it is discoverable by latestPackForChannel's List+label-selector, as real
 // PromptPack version-objects are (promptpack_controller.go's label reconcile).
-func labeledPack(objName, packName, version string, namespace string) *omniav1alpha1.PromptPack {
+func labeledPack(objName, version string) *omniav1alpha1.PromptPack {
+	const packName, namespace = "mypack", "default"
 	return &omniav1alpha1.PromptPack{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      objName,
@@ -104,8 +105,8 @@ func labeledPack(objName, packName, version string, namespace string) *omniav1al
 func TestLatestPackForChannel_StableSkipsPrerelease(t *testing.T) {
 	scheme := newTestScheme(t)
 	ns := "default"
-	p1 := labeledPack("mypack-100", "mypack", "1.0.0", ns)
-	p2 := labeledPack("mypack-110", "mypack", "1.1.0", ns)
+	p1 := labeledPack("mypack-100", "1.0.0")
+	p2 := labeledPack("mypack-110", "1.1.0")
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(p1, p2).Build()
 	r := &AgentRuntimeReconciler{Client: c, Scheme: scheme}
 
@@ -121,8 +122,8 @@ func TestLatestPackForChannel_StableSkipsPrerelease(t *testing.T) {
 func TestLatestPackForChannel_MixedTracks(t *testing.T) {
 	scheme := newTestScheme(t)
 	ns := "default"
-	stable := labeledPack("mypack-100", "mypack", "1.0.0", ns)
-	pre := labeledPack("mypack-110-beta", "mypack", "1.1.0-beta.1", ns)
+	stable := labeledPack("mypack-100", "1.0.0")
+	pre := labeledPack("mypack-110-beta", "1.1.0-beta.1")
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(stable, pre).Build()
 	r := &AgentRuntimeReconciler{Client: c, Scheme: scheme}
 
