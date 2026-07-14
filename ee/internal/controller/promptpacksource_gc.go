@@ -29,6 +29,14 @@ import (
 // candidate: (a) it is referenced by an AgentRuntime, or (b) it is younger than
 // the minimum retention age. Each GC'd object takes its backing -content
 // ConfigMap with it.
+//
+// NOTE (#1858): this is a correct-but-DORMANT skeleton. No code yet transitions
+// a PromptPack to Superseded (the controller only sets Active and promote does
+// not supersede the previous version-object), so filterSuperseded returns empty
+// and this GC never removes anything in production today. Wiring the channel-
+// aware Superseded lifecycle — and switching the min-age guard (cutoff below) to
+// measure from the supersession transition time rather than CreationTimestamp so
+// it protects the post-promote rollback window — is tracked in #1858.
 func (r *PromptPackSourceReconciler) gcOldVersions(ctx context.Context, src *omniav1alpha1.PromptPackSource) error {
 	limit := r.historyLimit(src)
 
