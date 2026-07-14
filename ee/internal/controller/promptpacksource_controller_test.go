@@ -10,9 +10,13 @@ package controller
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
 	"os"
 	"path/filepath"
+	"time"
 
+	"github.com/golang-jwt/jwt/v5"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
@@ -26,6 +30,7 @@ import (
 
 	corev1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 	omniav1alpha1 "github.com/altairalabs/omnia/ee/api/v1alpha1"
+	"github.com/altairalabs/omnia/ee/pkg/license"
 	"github.com/altairalabs/omnia/internal/sourcesync"
 )
 
@@ -51,6 +56,43 @@ func (f *fakeFetcher) Fetch(_ context.Context, _ string) (*sourcesync.Artifact, 
 }
 
 func (f *fakeFetcher) Type() string { return "git" }
+
+// pinnedLicenseClaims mirrors the private wire contract of the license
+// package's JWT claims (lid/tier/customer/features/limits) so this package —
+// which cannot import the unexported licenseClaims type — can mint tokens the
+// real Validator accepts.
+type pinnedLicenseClaims struct {
+	jwt.RegisteredClaims
+	LicenseID string           `json:"lid"`
+	Tier      string           `json:"tier"`
+	Customer  string           `json:"customer"`
+	Features  license.Features `json:"features"`
+	Limits    license.Limits   `json:"limits"`
+}
+
+// newEnterpriseTokenDenyingGit signs an enterprise-tier license (no GitSource
+// feature) with a freshly generated RSA key pair, returning the token and the
+// matching public key so a Validator can be built to verify it.
+func newEnterpriseTokenDenyingGit() (string, *rsa.PublicKey) {
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	Expect(err).NotTo(HaveOccurred())
+
+	claims := &pinnedLicenseClaims{
+		RegisteredClaims: jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(24 * time.Hour)),
+			IssuedAt:  jwt.NewNumericDate(time.Now()),
+		},
+		LicenseID: "test-no-git-source",
+		Tier:      "enterprise",
+		Customer:  "Test Corp",
+		Features:  license.Features{}, // GitSource left false — denies git sources
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
+	tokenString, err := token.SignedString(privateKey)
+	Expect(err).NotTo(HaveOccurred())
+
+	return tokenString, &privateKey.PublicKey
+}
 
 var _ = Describe("PromptPackSource Controller", func() {
 	ctx := context.Background()
@@ -270,6 +312,68 @@ var _ = Describe("PromptPackSource Controller", func() {
 			cond := meta.FindStatusCondition(updated.Status.Conditions, omniav1alpha1.PromptPackSourceConditionReady)
 			Expect(cond).NotTo(BeNil())
 			Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+
+			By("verifying no PromptPack was created for this pack")
+			var packs corev1alpha1.PromptPackList
+			Expect(k8sClient.List(ctx, &packs,
+				client.InNamespace(ns),
+				client.MatchingLabels{"omnia.altairalabs.ai/promptpack": packName})).To(Succeed())
+			Expect(packs.Items).To(BeEmpty())
+		})
+	})
+
+	Context("When the license denies the source type", func() {
+		const (
+			name     = "pps-license-denied"
+			packName = "deniedpack"
+		)
+
+		AfterEach(func() {
+			src := &omniav1alpha1.PromptPackSource{}
+			if err := k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: ns}, src); err == nil {
+				Expect(k8sClient.Delete(ctx, src)).To(Succeed())
+			}
+			secret := &corev1.Secret{}
+			if err := k8sClient.Get(ctx, types.NamespacedName{Name: license.LicenseSecretName, Namespace: ns}, secret); err == nil {
+				Expect(k8sClient.Delete(ctx, secret)).To(Succeed())
+			}
+		})
+
+		It("sets Error phase + Ready=False with LicenseViolation, does not requeue, and creates no PromptPack", func() {
+			tokenString, publicKey := newEnterpriseTokenDenyingGit()
+
+			Expect(k8sClient.Create(ctx, &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{Name: license.LicenseSecretName, Namespace: ns},
+				Data:       map[string][]byte{license.LicenseSecretKey: []byte(tokenString)},
+			})).To(Succeed())
+
+			validator, err := license.NewValidator(k8sClient, license.WithPublicKey(publicKey), license.WithNamespace(ns))
+			Expect(err).NotTo(HaveOccurred())
+
+			Expect(k8sClient.Create(ctx, newSource(name, packName, false))).To(Succeed())
+
+			// FetcherFor panics if invoked — proves the license check short-circuits before fetch.
+			r := &PromptPackSourceReconciler{
+				Client:           k8sClient,
+				Scheme:           k8sClient.Scheme(),
+				Recorder:         record.NewFakeRecorder(10),
+				LicenseValidator: validator,
+				FetcherFor: func(context.Context, *omniav1alpha1.PromptPackSource) (sourcesync.Fetcher, error) {
+					Fail("fetcher must not be built when the license denies the source type")
+					return nil, nil
+				},
+			}
+			res, err := reconcileOnce(r, name)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(res.RequeueAfter).To(BeZero(), "license violations must not requeue — a license change, not time, resolves it")
+
+			updated := &omniav1alpha1.PromptPackSource{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: ns}, updated)).To(Succeed())
+			Expect(updated.Status.Phase).To(Equal(omniav1alpha1.PromptPackSourcePhaseError))
+			cond := meta.FindStatusCondition(updated.Status.Conditions, omniav1alpha1.PromptPackSourceConditionReady)
+			Expect(cond).NotTo(BeNil())
+			Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+			Expect(cond.Reason).To(Equal(reasonLicenseViolation))
 
 			By("verifying no PromptPack was created for this pack")
 			var packs corev1alpha1.PromptPackList
