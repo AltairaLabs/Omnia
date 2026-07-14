@@ -1308,5 +1308,187 @@ var _ = Describe("PromptPack Controller", func() {
 	})
 })
 
+var _ = Describe("PromptPack sibling-aware phase (Active vs Superseded)", func() {
+	const ns = "default"
+	ctx := context.Background()
+
+	reconcilerFor := func() *PromptPackReconciler {
+		return &PromptPackReconciler{
+			Client:          k8sClient,
+			Scheme:          k8sClient.Scheme(),
+			SchemaValidator: schema.NewSchemaValidatorWithOptions(logr.Discard(), nil, time.Hour),
+		}
+	}
+
+	createCM := func(name, packJSON string) {
+		cm := &corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns},
+			Data:       map[string]string{"pack.json": packJSON},
+		}
+		Expect(k8sClient.Create(ctx, cm)).To(Succeed())
+		DeferCleanup(func() { _ = k8sClient.Delete(ctx, cm) })
+	}
+
+	createPack := func(objName, packName, version, cmName string) {
+		pp := &omniav1alpha1.PromptPack{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      objName,
+				Namespace: ns,
+				// Seed the resolution-index label so siblings are discoverable
+				// even before their own first reconcile (the controller also
+				// sets it, but tests reconcile in arbitrary order).
+				Labels: map[string]string{LabelPromptPackName: packName},
+			},
+			Spec: omniav1alpha1.PromptPackSpec{
+				PackName: packName,
+				Version:  version,
+				Source: omniav1alpha1.PromptPackContentSource{
+					Type:         omniav1alpha1.PromptPackSourceTypeConfigMap,
+					ConfigMapRef: &corev1.LocalObjectReference{Name: cmName},
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, pp)).To(Succeed())
+		DeferCleanup(func() {
+			got := &omniav1alpha1.PromptPack{}
+			if k8sClient.Get(ctx, types.NamespacedName{Name: objName, Namespace: ns}, got) == nil {
+				_ = k8sClient.Delete(ctx, got)
+			}
+		})
+	}
+
+	doReconcile := func(objName string) error {
+		_, err := reconcilerFor().Reconcile(ctx, reconcile.Request{
+			NamespacedName: types.NamespacedName{Name: objName, Namespace: ns},
+		})
+		return err
+	}
+
+	getPack := func(objName string) *omniav1alpha1.PromptPack {
+		got := &omniav1alpha1.PromptPack{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: objName, Namespace: ns}, got)).To(Succeed())
+		return got
+	}
+
+	supersededCond := func(objName string) *metav1.Condition {
+		return meta.FindStatusCondition(getPack(objName).Status.Conditions, PromptPackConditionTypeSuperseded)
+	}
+
+	It("marks a lone version Active with Superseded=False", func() {
+		createCM("sib-cm-a", validPackJSON)
+		createPack("pp-sib-a-100", "sib-pack-a", "1.0.0", "sib-cm-a")
+
+		Expect(doReconcile("pp-sib-a-100")).To(Succeed())
+
+		Expect(getPack("pp-sib-a-100").Status.Phase).To(Equal(omniav1alpha1.PromptPackPhaseActive))
+		cond := supersededCond("pp-sib-a-100")
+		Expect(cond).NotTo(BeNil())
+		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+		Expect(cond.Reason).To(Equal("IsChannelMax"))
+	})
+
+	It("supersedes the older version when a newer one is published", func() {
+		createCM("sib-cm-b", validPackJSON)
+		createPack("pp-sib-b-100", "sib-pack-b", "1.0.0", "sib-cm-b")
+
+		Expect(doReconcile("pp-sib-b-100")).To(Succeed())
+		Expect(getPack("pp-sib-b-100").Status.Phase).To(Equal(omniav1alpha1.PromptPackPhaseActive))
+
+		createPack("pp-sib-b-110", "sib-pack-b", "1.1.0", "sib-cm-b")
+		Expect(doReconcile("pp-sib-b-110")).To(Succeed())
+		Expect(getPack("pp-sib-b-110").Status.Phase).To(Equal(omniav1alpha1.PromptPackPhaseActive))
+
+		// In-cluster the sibling watch re-reconciles 1.0.0; the suite has no
+		// running manager, so drive the re-reconcile explicitly under Eventually.
+		Eventually(func(g Gomega) {
+			g.Expect(doReconcile("pp-sib-b-100")).To(Succeed())
+			g.Expect(getPack("pp-sib-b-100").Status.Phase).To(Equal(omniav1alpha1.PromptPackPhaseSuperseded))
+		}).Should(Succeed())
+
+		cond := supersededCond("pp-sib-b-100")
+		Expect(cond).NotTo(BeNil())
+		Expect(cond.Status).To(Equal(metav1.ConditionTrue))
+		Expect(cond.Reason).To(Equal("NewerVersionPublished"))
+	})
+
+	It("keeps stable-max and prerelease-max both Active (channel coexistence)", func() {
+		createCM("sib-cm-c", validPackJSON)
+		createPack("pp-sib-c-100", "sib-pack-c", "1.0.0", "sib-cm-c")
+		createPack("pp-sib-c-200b", "sib-pack-c", "2.0.0-beta.1", "sib-cm-c")
+
+		Expect(doReconcile("pp-sib-c-100")).To(Succeed())
+		Expect(doReconcile("pp-sib-c-200b")).To(Succeed())
+
+		Expect(getPack("pp-sib-c-100").Status.Phase).To(Equal(omniav1alpha1.PromptPackPhaseActive))
+		Expect(getPack("pp-sib-c-200b").Status.Phase).To(Equal(omniav1alpha1.PromptPackPhaseActive))
+	})
+
+	It("supersedes lower stable and prerelease when a higher stable ships", func() {
+		createCM("sib-cm-d", validPackJSON)
+		createPack("pp-sib-d-100", "sib-pack-d", "1.0.0", "sib-cm-d")
+		createPack("pp-sib-d-200b", "sib-pack-d", "2.0.0-beta.1", "sib-cm-d")
+		createPack("pp-sib-d-200", "sib-pack-d", "2.0.0", "sib-cm-d")
+
+		Expect(doReconcile("pp-sib-d-100")).To(Succeed())
+		Expect(doReconcile("pp-sib-d-200b")).To(Succeed())
+		Expect(doReconcile("pp-sib-d-200")).To(Succeed())
+
+		Expect(getPack("pp-sib-d-200").Status.Phase).To(Equal(omniav1alpha1.PromptPackPhaseActive))
+		Expect(getPack("pp-sib-d-100").Status.Phase).To(Equal(omniav1alpha1.PromptPackPhaseSuperseded))
+		Expect(getPack("pp-sib-d-200b").Status.Phase).To(Equal(omniav1alpha1.PromptPackPhaseSuperseded))
+	})
+
+	It("maps a changed version to reconcile requests for all its siblings", func() {
+		createCM("sib-cm-f", validPackJSON)
+		createPack("pp-sib-f-100", "sib-pack-f", "1.0.0", "sib-cm-f")
+		createPack("pp-sib-f-110", "sib-pack-f", "1.1.0", "sib-cm-f")
+
+		requests := reconcilerFor().findSiblingPromptPacks(ctx, getPack("pp-sib-f-110"))
+		Expect(requests).To(HaveLen(2))
+		names := []string{requests[0].Name, requests[1].Name}
+		Expect(names).To(ConsistOf("pp-sib-f-100", "pp-sib-f-110"))
+	})
+
+	It("returns no requests for a PromptPack without the pack-name label", func() {
+		unlabeled := &omniav1alpha1.PromptPack{
+			ObjectMeta: metav1.ObjectMeta{Name: "pp-unlabeled", Namespace: ns},
+		}
+		Expect(reconcilerFor().findSiblingPromptPacks(ctx, unlabeled)).To(BeNil())
+	})
+
+	It("always includes self as a channel-max candidate even when unindexed", func() {
+		// A pack whose label index has not yet caught up (not persisted here):
+		// listSiblings must still include self, and resolvePackPhase must treat
+		// a lone self as its own channel-max -> Active.
+		self := &omniav1alpha1.PromptPack{
+			ObjectMeta: metav1.ObjectMeta{Name: "pp-unindexed", Namespace: ns},
+			Spec: omniav1alpha1.PromptPackSpec{
+				PackName: "unindexed-pack",
+				Version:  "3.1.4",
+			},
+		}
+		sibs, err := reconcilerFor().listSiblings(ctx, self)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(sibs).To(HaveLen(1))
+		Expect(sibs[0].Name).To(Equal("pp-unindexed"))
+		Expect(resolvePackPhase(self, nil)).To(BeTrue())
+	})
+
+	It("excludes Failed siblings from channel-max", func() {
+		createCM("sib-cm-e", validPackJSON)
+		createCM("sib-cm-e-bad", `{"name":"bad"}`)
+		createPack("pp-sib-e-100", "sib-pack-e", "1.0.0", "sib-cm-e")
+		createPack("pp-sib-e-200", "sib-pack-e", "2.0.0", "sib-cm-e-bad")
+
+		// 2.0.0 has an invalid pack.json → Failed (Reconcile returns the error).
+		Expect(doReconcile("pp-sib-e-200")).To(HaveOccurred())
+		Expect(getPack("pp-sib-e-200").Status.Phase).To(Equal(omniav1alpha1.PromptPackPhaseFailed))
+
+		// 1.0.0 must stay Active — the Failed 2.0.0 is excluded from channel-max.
+		Expect(doReconcile("pp-sib-e-100")).To(Succeed())
+		Expect(getPack("pp-sib-e-100").Status.Phase).To(Equal(omniav1alpha1.PromptPackPhaseActive))
+	})
+})
+
 // Ensure unused import doesn't cause issues
 var _ = errors.IsNotFound
