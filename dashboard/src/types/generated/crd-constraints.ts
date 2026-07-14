@@ -539,6 +539,9 @@ export const crdConstraints: Record<string, Record<string, FieldConstraint>> =
       "minLength": 1,
       "required": true
     },
+    "spec.media.storage.local.volumeClaim": {
+      "type": "string"
+    },
     "spec.media.storage.maxFileSizeBytes": {
       "type": "integer",
       "minimum": 1

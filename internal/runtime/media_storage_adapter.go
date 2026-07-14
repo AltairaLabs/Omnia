@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/AltairaLabs/PromptKit/runtime/storage"
@@ -31,9 +32,26 @@ func newOmniaMediaStore(s media.Storage, client *http.Client) *omniaMediaStore {
 	return &omniaMediaStore{storage: s, client: client}
 }
 
-// GetURL returns a presigned download URL for the reference.
+// GetURL returns a presigned download URL for the reference, but only when it
+// is a public HTTPS URL the model can fetch directly.
+//
+// URL-first providers (Anthropic, Gemini) embed this as a remote image_url
+// source that the model's own servers fetch — so it must be publicly reachable
+// over HTTPS. The local media backend returns an in-cluster http://…:8080
+// download URL that the model cannot reach (Anthropic rejects it outright with
+// "Only HTTPS URLs are supported"). Returning an empty string signals the
+// loader to fall back to inline base64 via RetrieveMedia, which the runtime
+// fetches over the in-pod localhost link. Cloud backends (S3/GCS/Azure) return
+// presigned HTTPS URLs, which pass through unchanged.
 func (m *omniaMediaStore) GetURL(ctx context.Context, ref storage.Reference, _ time.Duration) (string, error) {
-	return m.storage.GetDownloadURL(ctx, string(ref))
+	url, err := m.storage.GetDownloadURL(ctx, string(ref))
+	if err != nil {
+		return "", err
+	}
+	if !strings.HasPrefix(url, "https://") {
+		return "", nil
+	}
+	return url, nil
 }
 
 // RetrieveMedia fetches the referenced bytes via a presigned URL and returns

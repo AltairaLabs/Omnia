@@ -70,11 +70,11 @@ func TestMediaStorageEnvVars_SecretRef_AzureKey(t *testing.T) {
 
 func TestMediaStorageEnvVars_Local(t *testing.T) {
 	cfg := &omniav1alpha1.MediaStorageConfig{
-		Type:  "local",
+		Type:  string(media.BackendTypeLocal),
 		Local: &omniav1alpha1.LocalMediaBackend{BasePath: "/data/media"},
 	}
 	m := mediaEnvMap(mediaStorageEnvVars(cfg))
-	if m[media.EnvStorageType].Value != "local" {
+	if m[media.EnvStorageType].Value != string(media.BackendTypeLocal) {
 		t.Errorf("%s = %q, want local", media.EnvStorageType, m[media.EnvStorageType].Value)
 	}
 	if m[media.EnvStoragePath].Value != "/data/media" {

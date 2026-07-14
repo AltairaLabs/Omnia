@@ -341,12 +341,19 @@ func loadContextConfigFromCRD(cfg *Config, ar *v1alpha1.AgentRuntime, namespace 
 
 // loadMediaConfigFromCRD populates media-related config fields from the AgentRuntime CRD.
 func loadMediaConfigFromCRD(cfg *Config, ar *v1alpha1.AgentRuntime) {
-	if ar.Spec.Media != nil && ar.Spec.Media.BasePath != "" {
+	// The operator renders spec.media.storage into the OMNIA_MEDIA_STORAGE_* env
+	// (same contract the runtime reads). When a storage backend is configured,
+	// use it — this keeps the facade's storage path aligned with the runtime.
+	// spec.media.basePath is a legacy fallback for a local storage path.
+	if t := getEnvOrDefault(EnvMediaStorageType, ""); t != "" && t != string(MediaStorageTypeNone) {
+		cfg.MediaStorageType = MediaStorageType(t)
+		cfg.MediaStoragePath = getEnvOrDefault(EnvMediaStoragePath, DefaultMediaStoragePath)
+	} else if ar.Spec.Media != nil && ar.Spec.Media.BasePath != "" {
 		cfg.MediaStorageType = MediaStorageTypeLocal
 		cfg.MediaStoragePath = ar.Spec.Media.BasePath
 	} else {
-		cfg.MediaStorageType = MediaStorageType(getEnvOrDefault(EnvMediaStorageType, string(MediaStorageTypeNone)))
-		cfg.MediaStoragePath = getEnvOrDefault(EnvMediaStoragePath, DefaultMediaStoragePath)
+		cfg.MediaStorageType = MediaStorageTypeNone
+		cfg.MediaStoragePath = DefaultMediaStoragePath
 	}
 	cfg.MediaMaxFileSize = DefaultMediaMaxFileSize
 	cfg.MediaDefaultTTL = DefaultMediaDefaultTTL
