@@ -74,6 +74,7 @@ type PromptPackSourceSpec struct {
 
 	// historyLimit caps retained Superseded version-objects per packName. Defaults to 10.
 	// +kubebuilder:default=10
+	// +kubebuilder:validation:Minimum=0
 	// +optional
 	HistoryLimit *int32 `json:"historyLimit,omitempty"`
 }

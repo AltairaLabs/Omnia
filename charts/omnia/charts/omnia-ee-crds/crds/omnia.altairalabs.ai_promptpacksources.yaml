@@ -118,6 +118,7 @@ spec:
                 description: historyLimit caps retained Superseded version-objects
                   per packName. Defaults to 10.
                 format: int32
+                minimum: 0
                 type: integer
               interval:
                 description: interval is the poll cadence, e.g. "5m".

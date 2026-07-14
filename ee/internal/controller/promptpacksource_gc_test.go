@@ -55,6 +55,15 @@ var _ = Describe("PromptPackSourceGC", func() {
 		return corev1alpha1.PromptPackObjectName(packName, version)
 	}
 
+	It("clamps a negative historyLimit to zero (no panic)", func() {
+		r := gcReconciler(5, 0)
+		src := gcSource("clamp-pack")
+		src.Spec.HistoryLimit = ptr.To(int32(-1))
+		Expect(r.historyLimit(src)).To(Equal(0))
+		// gcOldVersions must not panic on a negative limit even with candidates present.
+		Expect(r.gcOldVersions(ctx, src)).To(Succeed())
+	})
+
 	// seedPack creates a PromptPack version-object with the resolution label and
 	// the given phase (set via a status update, since spec is immutable after
 	// create), plus its backing -content ConfigMap.

@@ -60,10 +60,15 @@ func (r *PromptPackSourceReconciler) gcOldVersions(ctx context.Context, src *omn
 // historyLimit resolves the retention window: a per-source spec.historyLimit
 // override when set, otherwise the reconciler-wide MaxVersionsPerSource default.
 func (r *PromptPackSourceReconciler) historyLimit(src *omniav1alpha1.PromptPackSource) int {
+	limit := r.MaxVersionsPerSource
 	if src.Spec.HistoryLimit != nil {
-		return int(*src.Spec.HistoryLimit)
+		limit = int(*src.Spec.HistoryLimit)
 	}
-	return r.MaxVersionsPerSource
+	// Defense in depth against a negative slice bound (Minimum=0 also guards at admission).
+	if limit < 0 {
+		limit = 0
+	}
+	return limit
 }
 
 // deleteCandidates removes each candidate that is neither referenced nor younger

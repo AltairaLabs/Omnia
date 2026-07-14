@@ -336,6 +336,8 @@ rules:
       - arenajobs
       - arenasources
       - arenatemplatesources
+      - promptpacks
+      - promptpacksources
       - toolpolicies
     verbs:
       - create
@@ -352,6 +354,7 @@ rules:
       - arenajobs/finalizers
       - arenasources/finalizers
       - arenatemplatesources/finalizers
+      - promptpacksources/finalizers
     verbs:
       - update
   - apiGroups:
@@ -361,6 +364,7 @@ rules:
       - arenajobs/status
       - arenasources/status
       - arenatemplatesources/status
+      - promptpacksources/status
       - sessionprivacypolicies/status
       - toolpolicies/status
     verbs:
