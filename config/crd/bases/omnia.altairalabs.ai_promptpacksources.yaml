@@ -1,0 +1,325 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.19.0
+  name: promptpacksources.omnia.altairalabs.ai
+spec:
+  group: omnia.altairalabs.ai
+  names:
+    kind: PromptPackSource
+    listKind: PromptPackSourceList
+    plural: promptpacksources
+    shortNames:
+    - pps
+    singular: promptpacksource
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.packName
+      name: Pack
+      type: string
+    - jsonPath: .spec.type
+      name: Type
+      type: string
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .status.lastSyncedVersion
+      name: Version
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: PromptPackSourceSpec defines a feed of pre-built packc releases
+              for one logical pack.
+            properties:
+              git:
+                description: git points at a git repo whose configured path holds
+                  pack.json.
+                properties:
+                  path:
+                    description: |-
+                      path is the path within the repository to the content.
+                      Defaults to the repository root.
+                    type: string
+                  ref:
+                    description: |-
+                      ref specifies the Git reference to checkout.
+                      If not specified, defaults to the default branch.
+                    properties:
+                      branch:
+                        description: branch to checkout. Takes precedence over tag
+                          and commit.
+                        type: string
+                      commit:
+                        description: commit SHA to checkout. Used when branch and
+                          tag are not specified.
+                        type: string
+                      tag:
+                        description: tag to checkout. Takes precedence over commit.
+                        type: string
+                    type: object
+                  secretRef:
+                    description: |-
+                      secretRef references a Secret containing Git credentials.
+                      The Secret should contain 'username' and 'password' keys for HTTPS,
+                      or 'identity' and 'known_hosts' keys for SSH.
+                    properties:
+                      key:
+                        description: |-
+                          key is the key within the Secret to use.
+                          If not specified, the provider-appropriate key is used:
+                          - ANTHROPIC_API_KEY for Claude
+                          - OPENAI_API_KEY for OpenAI
+                          - GEMINI_API_KEY for Gemini
+                        type: string
+                      name:
+                        description: name is the name of the Secret.
+                        minLength: 1
+                        type: string
+                    required:
+                    - name
+                    type: object
+                  url:
+                    description: |-
+                      url is the Git repository URL.
+                      Supports https:// and ssh:// protocols.
+                    pattern: ^(https?|ssh)://.*$
+                    type: string
+                required:
+                - url
+                type: object
+              historyLimit:
+                default: 10
+                description: historyLimit caps retained Superseded version-objects
+                  per packName. Defaults to 10.
+                format: int32
+                type: integer
+              interval:
+                description: interval is the poll cadence, e.g. "5m".
+                pattern: ^([0-9]+(\.[0-9]+)?(ms|s|m|h))+$
+                type: string
+              oci:
+                description: oci points at an OCI artifact holding pack.json.
+                properties:
+                  insecure:
+                    default: false
+                    description: insecure allows connecting to registries without
+                      TLS verification.
+                    type: boolean
+                  secretRef:
+                    description: |-
+                      secretRef references a Secret containing registry credentials.
+                      The Secret should contain 'username' and 'password' keys,
+                      or a '.dockerconfigjson' key for Docker config format.
+                    properties:
+                      key:
+                        description: |-
+                          key is the key within the Secret to use.
+                          If not specified, the provider-appropriate key is used:
+                          - ANTHROPIC_API_KEY for Claude
+                          - OPENAI_API_KEY for OpenAI
+                          - GEMINI_API_KEY for Gemini
+                        type: string
+                      name:
+                        description: name is the name of the Secret.
+                        minLength: 1
+                        type: string
+                    required:
+                    - name
+                    type: object
+                  url:
+                    description: |-
+                      url is the OCI artifact URL.
+                      Format: oci://registry/repository:tag or oci://registry/repository@digest
+                    pattern: ^oci://.*$
+                    type: string
+                required:
+                - url
+                type: object
+              packName:
+                description: 'packName is the logical pack this source publishes (one
+                  source : one pack).'
+                minLength: 1
+                type: string
+              suspend:
+                default: false
+                description: suspend halts polling when true.
+                type: boolean
+              timeout:
+                default: 60s
+                description: timeout bounds a single fetch. Defaults to "60s".
+                type: string
+              type:
+                description: type selects the upstream feed kind.
+                enum:
+                - git
+                - oci
+                type: string
+            required:
+            - interval
+            - packName
+            - type
+            type: object
+            x-kubernetes-validations:
+            - message: exactly the source block matching type must be set
+              rule: (self.type == 'git' && has(self.git) && !has(self.oci)) || (self.type
+                == 'oci' && has(self.oci) && !has(self.git))
+          status:
+            description: PromptPackSourceStatus is the observed state.
+            properties:
+              artifact:
+                description: Artifact represents a fetched content artifact.
+                properties:
+                  checksum:
+                    description: checksum is the SHA256 checksum of the artifact.
+                    type: string
+                  contentPath:
+                    description: |-
+                      contentPath is the filesystem path where the content is synced.
+                      This is relative to the workspace content volume root.
+                      Workers can mount the PVC directly and access content at this path.
+                    type: string
+                  lastUpdateTime:
+                    description: lastUpdateTime is when the artifact was last updated.
+                    format: date-time
+                    type: string
+                  revision:
+                    description: |-
+                      revision is the source revision identifier.
+                      For Git: branch@sha1:commit or tag@sha1:commit
+                      For OCI: tag@sha256:digest
+                      For ConfigMap: resourceVersion
+                    type: string
+                  size:
+                    description: size is the size of the artifact in bytes.
+                    format: int64
+                    type: integer
+                  url:
+                    description: |-
+                      url is the URL where the artifact can be downloaded (legacy tar.gz serving).
+                      Deprecated: Use contentPath for filesystem-based access.
+                    type: string
+                  version:
+                    description: |-
+                      version is the content-addressable version hash (SHA256).
+                      This identifies a specific immutable snapshot of the synced content.
+                    type: string
+                required:
+                - lastUpdateTime
+                - revision
+                type: object
+              conditions:
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              lastFetchTime:
+                format: date-time
+                type: string
+              lastSyncedVersion:
+                description: lastSyncedVersion is the version most recently materialized.
+                type: string
+              nextFetchTime:
+                format: date-time
+                type: string
+              observedGeneration:
+                format: int64
+                type: integer
+              phase:
+                description: PromptPackSourcePhase is the lifecycle phase of a PromptPackSource.
+                enum:
+                - Pending
+                - Ready
+                - Fetching
+                - Error
+                type: string
+              versionsMaterialized:
+                description: versionsMaterialized counts version-objects this source
+                  has created.
+                format: int32
+                type: integer
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
