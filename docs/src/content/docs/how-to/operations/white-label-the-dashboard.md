@@ -131,8 +131,77 @@ they only need to be set once in `colors`.
 
 - SVG is preferred (crisp at any density). The sidebar renders the **dark**
   logo variant on its dark surface.
-- Assets must be reachable by the browser — serve them from the dashboard origin
-  or an allowed host.
+- `logo.light`, `logo.dark`, and `favicon` are **URLs the browser fetches** —
+  not files the chart uploads. Each value can be either an absolute URL on an
+  allowed host, or a path served by the dashboard origin (e.g. `/brand/logo.svg`).
+
+### Serve logos from the dashboard (mount via Helm)
+
+If you don't want to host the assets on an external CDN, mount them into the
+dashboard container and reference them by path. The dashboard serves everything
+under `/app/public/` at the site root, so a file at `/app/public/brand/logo.svg`
+is served at `/brand/logo.svg` — exactly what `logo.light` points at above.
+
+1. **Put the assets in a ConfigMap** (or Secret) in the release namespace:
+
+   ```bash
+   kubectl create configmap dashboard-logos -n omnia-system \
+     --from-file=logo.svg=./acme-light.svg \
+     --from-file=logo-dark.svg=./acme-dark.svg \
+     --from-file=favicon.svg=./acme-favicon.svg
+   ```
+
+2. **Mount each file** into `/app/public/brand/` and point branding at those
+   paths, using the dashboard's `extraVolumes` / `extraVolumeMounts` hooks:
+
+   ```yaml
+   enterprise:
+     enabled: true
+
+   dashboard:
+     branding:
+       productName: "Acme Cloud"        # required — the entitlement gate
+       logo:
+         light: "/brand/logo.svg"
+         dark:  "/brand/logo-dark.svg"
+       favicon: "/brand/favicon.svg"
+
+     extraVolumes:
+       - name: brand-logos
+         configMap:
+           name: dashboard-logos
+
+     extraVolumeMounts:
+       - name: brand-logos
+         mountPath: /app/public/brand/logo.svg
+         subPath: logo.svg
+         readOnly: true
+       - name: brand-logos
+         mountPath: /app/public/brand/logo-dark.svg
+         subPath: logo-dark.svg
+         readOnly: true
+       - name: brand-logos
+         mountPath: /app/public/brand/favicon.svg
+         subPath: favicon.svg
+         readOnly: true
+   ```
+
+   `podOverrides.extraVolumes` / `podOverrides.extraVolumeMounts` work too and
+   append to the same lists — use whichever your values file already favors.
+
+:::note
+Mount **per file with `subPath`**, targeting a subdirectory like `/brand/`.
+Mounting a volume over `/app/public` itself would hide the bundled assets
+(default favicon, presets). A `subPath` ConfigMap mount does **not** hot-reload —
+after changing a logo, roll the dashboard (`kubectl rollout restart`) or rename
+the ConfigMap so the new content is picked up.
+:::
+
+The same license gate applies: filesystem-mounted logos still only render when
+`enterprise.enabled=true` **and** the active license carries the `whiteLabel`
+entitlement. Mounting a file over the built-in `/logo.svg` to bypass that gate is
+a license violation, not a supported configuration — keep custom assets on a
+distinct path (`/brand/…`) behind the branding fields above.
 
 ## Fonts
 

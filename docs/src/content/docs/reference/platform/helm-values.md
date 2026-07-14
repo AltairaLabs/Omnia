@@ -683,6 +683,8 @@ dashboard:
 
 All color values accept any CSS color. `customCss` overrides design tokens; targeting internal selectors is unsupported.
 
+`logoLightUrl`, `logoDarkUrl`, and `faviconUrl` are URLs the browser fetches, not files the chart uploads. To serve logos from the dashboard itself instead of an external host, mount them into the container via `dashboard.extraVolumes` / `extraVolumeMounts` and point these fields at the mounted path — see [White-label the dashboard → Serve logos from the dashboard](/how-to/operations/white-label-the-dashboard/#serve-logos-from-the-dashboard-mount-via-helm).
+
 ## Observability Stack
 
 All observability components are optional and disabled by default.
