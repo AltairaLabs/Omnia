@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"testing"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -29,6 +30,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
@@ -1434,8 +1436,19 @@ var _ = Describe("PromptPack sibling-aware phase (Active vs Superseded)", func()
 		Expect(doReconcile("pp-sib-d-200")).To(Succeed())
 
 		Expect(getPack("pp-sib-d-200").Status.Phase).To(Equal(omniav1alpha1.PromptPackPhaseActive))
-		Expect(getPack("pp-sib-d-100").Status.Phase).To(Equal(omniav1alpha1.PromptPackPhaseSuperseded))
-		Expect(getPack("pp-sib-d-200b").Status.Phase).To(Equal(omniav1alpha1.PromptPackPhaseSuperseded))
+
+		// The older stable and the prerelease only supersede once the higher
+		// stable 2.0.0 has itself validated (Active). In-cluster the sibling
+		// watch re-enqueues them on 2.0.0's phase transition; with no running
+		// manager, drive the re-reconcile explicitly under Eventually.
+		Eventually(func(g Gomega) {
+			g.Expect(doReconcile("pp-sib-d-100")).To(Succeed())
+			g.Expect(getPack("pp-sib-d-100").Status.Phase).To(Equal(omniav1alpha1.PromptPackPhaseSuperseded))
+		}).Should(Succeed())
+		Eventually(func(g Gomega) {
+			g.Expect(doReconcile("pp-sib-d-200b")).To(Succeed())
+			g.Expect(getPack("pp-sib-d-200b").Status.Phase).To(Equal(omniav1alpha1.PromptPackPhaseSuperseded))
+		}).Should(Succeed())
 	})
 
 	It("maps a changed version to reconcile requests for all its siblings", func() {
@@ -1488,7 +1501,125 @@ var _ = Describe("PromptPack sibling-aware phase (Active vs Superseded)", func()
 		Expect(doReconcile("pp-sib-e-100")).To(Succeed())
 		Expect(getPack("pp-sib-e-100").Status.Phase).To(Equal(omniav1alpha1.PromptPackPhaseActive))
 	})
+
+	It("keeps the older version Active when a newer version has a bad pack.json (convergence regression)", func() {
+		// Regression for the sibling-validation convergence bug (#1858): a
+		// newer version that is published but NOT yet validated (Phase "") — or
+		// that ultimately fails validation — must never supersede a live older
+		// version. This reproduces the interleaving where the older version
+		// reconciles while the newer one is still Pending.
+		createCM("sib-cm-g", validPackJSON)
+		createCM("sib-cm-g-bad", `{"name":"bad"}`)
+		createPack("pp-sib-g-100", "sib-pack-g", "1.0.0", "sib-cm-g")
+
+		// 1.0.0 reconciles first and becomes Active.
+		Expect(doReconcile("pp-sib-g-100")).To(Succeed())
+		Expect(getPack("pp-sib-g-100").Status.Phase).To(Equal(omniav1alpha1.PromptPackPhaseActive))
+
+		// A newer 2.0.0 is published with an INVALID pack.json. Its CREATE
+		// enqueues 1.0.0 via the sibling watch; 1.0.0 reconciles while 2.0.0 is
+		// still Phase=="" (not yet validated). The still-unvalidated 2.0.0 must
+		// NOT count toward channel-max, so 1.0.0 stays Active. (Under the old
+		// !Failed eligibility, 1.0.0 wrongly flipped to Superseded here, then
+		// 2.0.0's status-only Failed transition was filtered by the sibling
+		// watch predicate, stranding 1.0.0 Superseded forever.)
+		createPack("pp-sib-g-200", "sib-pack-g", "2.0.0", "sib-cm-g-bad")
+		Expect(doReconcile("pp-sib-g-100")).To(Succeed())
+		Expect(getPack("pp-sib-g-100").Status.Phase).To(Equal(omniav1alpha1.PromptPackPhaseActive))
+
+		// 2.0.0 then reconciles and fails validation.
+		Expect(doReconcile("pp-sib-g-200")).To(HaveOccurred())
+		Expect(getPack("pp-sib-g-200").Status.Phase).To(Equal(omniav1alpha1.PromptPackPhaseFailed))
+
+		// 1.0.0 stays Active — now and on every subsequent reconcile.
+		Eventually(func(g Gomega) {
+			g.Expect(doReconcile("pp-sib-g-100")).To(Succeed())
+			g.Expect(getPack("pp-sib-g-100").Status.Phase).To(Equal(omniav1alpha1.PromptPackPhaseActive))
+		}).Should(Succeed())
+		Consistently(func(g Gomega) {
+			g.Expect(doReconcile("pp-sib-g-100")).To(Succeed())
+			g.Expect(getPack("pp-sib-g-100").Status.Phase).To(Equal(omniav1alpha1.PromptPackPhaseActive))
+		}).Should(Succeed())
+	})
+
+	It("converges the happy path: valid newer version supersedes older via phase-change watch", func() {
+		// Mirrors the in-cluster convergence: 2.0.0 (valid) is published while
+		// 1.0.0 is Active. The sibling watch fires on 2.0.0's Pending→Active
+		// transition, re-reconciling 1.0.0 to Superseded; 1.0.0's
+		// Active→Superseded then re-reconciles 2.0.0, which stays Active.
+		createCM("sib-cm-h", validPackJSON)
+		createPack("pp-sib-h-100", "sib-pack-h", "1.0.0", "sib-cm-h")
+
+		Expect(doReconcile("pp-sib-h-100")).To(Succeed())
+		Expect(getPack("pp-sib-h-100").Status.Phase).To(Equal(omniav1alpha1.PromptPackPhaseActive))
+
+		// 2.0.0 published; 1.0.0 reconciles while 2.0.0 is still Pending -> stays Active.
+		createPack("pp-sib-h-200", "sib-pack-h", "2.0.0", "sib-cm-h")
+		Expect(doReconcile("pp-sib-h-100")).To(Succeed())
+		Expect(getPack("pp-sib-h-100").Status.Phase).To(Equal(omniav1alpha1.PromptPackPhaseActive))
+
+		// 2.0.0 reconciles and becomes Active (the new channel-max).
+		Expect(doReconcile("pp-sib-h-200")).To(Succeed())
+		Expect(getPack("pp-sib-h-200").Status.Phase).To(Equal(omniav1alpha1.PromptPackPhaseActive))
+
+		// Now that 2.0.0 is validated, 1.0.0 re-reconciles to Superseded and
+		// clears its ActiveVersion.
+		Eventually(func(g Gomega) {
+			g.Expect(doReconcile("pp-sib-h-100")).To(Succeed())
+			g.Expect(getPack("pp-sib-h-100").Status.Phase).To(Equal(omniav1alpha1.PromptPackPhaseSuperseded))
+		}).Should(Succeed())
+		Expect(getPack("pp-sib-h-100").Status.ActiveVersion).To(BeNil())
+
+		// 2.0.0 stays Active on re-reconcile (no phase churn).
+		Consistently(func(g Gomega) {
+			g.Expect(doReconcile("pp-sib-h-200")).To(Succeed())
+			g.Expect(getPack("pp-sib-h-200").Status.Phase).To(Equal(omniav1alpha1.PromptPackPhaseActive))
+		}).Should(Succeed())
+	})
 })
+
+func TestSiblingPhaseChangedPredicate(t *testing.T) {
+	pred := siblingPhaseChangedPredicate()
+
+	packWith := func(gen int64, phase omniav1alpha1.PromptPackPhase) *omniav1alpha1.PromptPack {
+		p := &omniav1alpha1.PromptPack{}
+		p.Generation = gen
+		p.Status.Phase = phase
+		return p
+	}
+
+	cases := []struct {
+		name string
+		got  bool
+		want bool
+	}{
+		{"create fires", pred.Create(event.CreateEvent{Object: packWith(1, "")}), true},
+		{"delete fires", pred.Delete(event.DeleteEvent{Object: packWith(1, "")}), true},
+		{"generic does not fire", pred.Generic(event.GenericEvent{Object: packWith(1, "")}), false},
+		{"same gen and phase does not fire", pred.Update(event.UpdateEvent{
+			ObjectOld: packWith(2, omniav1alpha1.PromptPackPhaseActive),
+			ObjectNew: packWith(2, omniav1alpha1.PromptPackPhaseActive),
+		}), false},
+		{"generation change fires", pred.Update(event.UpdateEvent{
+			ObjectOld: packWith(2, omniav1alpha1.PromptPackPhaseActive),
+			ObjectNew: packWith(3, omniav1alpha1.PromptPackPhaseActive),
+		}), true},
+		{"phase transition fires", pred.Update(event.UpdateEvent{
+			ObjectOld: packWith(2, omniav1alpha1.PromptPackPhasePending),
+			ObjectNew: packWith(2, omniav1alpha1.PromptPackPhaseActive),
+		}), true},
+		{"nil objects do not fire", pred.Update(event.UpdateEvent{}), false},
+		{"non-promptpack same gen does not fire", pred.Update(event.UpdateEvent{
+			ObjectOld: &corev1.ConfigMap{},
+			ObjectNew: &corev1.ConfigMap{},
+		}), false},
+	}
+	for _, tc := range cases {
+		if tc.got != tc.want {
+			t.Errorf("%s: got %v, want %v", tc.name, tc.got, tc.want)
+		}
+	}
+}
 
 // Ensure unused import doesn't cause issues
 var _ = errors.IsNotFound

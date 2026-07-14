@@ -31,6 +31,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
@@ -396,9 +397,15 @@ func (r *PromptPackReconciler) listSiblings(ctx context.Context, pack *omniav1al
 
 // resolvePackPhase reports whether self is Active — i.e. its version equals the
 // stable-channel-max OR the prerelease-channel-max of the eligible siblings.
-// Eligible = non-Failed siblings plus self (self is always valid here since it
-// reached updateRolloutStatus post-validation, even if its listed copy shows a
-// stale Failed phase).
+// Eligible = VALIDATED siblings (Phase Active or Superseded) plus self. Self is
+// always eligible: it reached updateRolloutStatus post-validation, so it is a
+// valid channel-max candidate regardless of its currently-stored phase.
+//
+// Excluding not-yet-validated siblings (Phase Pending or "") is deliberate: a
+// newer version whose pack.json is still unvalidated (or bad) must NOT supersede
+// a live older version. The sibling watch re-enqueues older siblings on the
+// newer version's phase transition (Pending→Active), so a valid newer version
+// still converges the older one to Superseded on a subsequent reconcile.
 func resolvePackPhase(self *omniav1alpha1.PromptPack, siblings []omniav1alpha1.PromptPack) bool {
 	eligible := make([]omniav1alpha1.PromptPack, 0, len(siblings)+1)
 	selfIncluded := false
@@ -409,7 +416,7 @@ func resolvePackPhase(self *omniav1alpha1.PromptPack, siblings []omniav1alpha1.P
 			selfIncluded = true
 			continue
 		}
-		if s.Status.Phase == omniav1alpha1.PromptPackPhaseFailed {
+		if !isValidatedPhase(s.Status.Phase) {
 			continue
 		}
 		eligible = append(eligible, s)
@@ -422,6 +429,14 @@ func resolvePackPhase(self *omniav1alpha1.PromptPack, siblings []omniav1alpha1.P
 	preMax, _ := channelMax(eligible, promptPackTrackPrerelease)
 	return (stableMax != nil && versionsEqual(self.Spec.Version, stableMax.Spec.Version)) ||
 		(preMax != nil && versionsEqual(self.Spec.Version, preMax.Spec.Version))
+}
+
+// isValidatedPhase reports whether a sibling has passed validation and so counts
+// toward channel-max. Only Active and Superseded qualify; Failed and the
+// not-yet-reconciled Pending/"" phases are excluded.
+func isValidatedPhase(phase omniav1alpha1.PromptPackPhase) bool {
+	return phase == omniav1alpha1.PromptPackPhaseActive ||
+		phase == omniav1alpha1.PromptPackPhaseSuperseded
 }
 
 // updateRolloutStatus sets the pack's phase channel-aware: Active when it is the
@@ -441,6 +456,9 @@ func (r *PromptPackReconciler) updateRolloutStatus(promptPack *omniav1alpha1.Pro
 	}
 
 	promptPack.Status.Phase = omniav1alpha1.PromptPackPhaseSuperseded
+	// Clear the stale ActiveVersion: a pack that was previously the channel-max
+	// no longer serves as the active version once superseded.
+	promptPack.Status.ActiveVersion = nil
 	SetCondition(&promptPack.Status.Conditions, promptPack.Generation,
 		PromptPackConditionTypeSuperseded, metav1.ConditionTrue,
 		"NewerVersionPublished", "A newer version of this pack has been published on its channel")
@@ -504,6 +522,35 @@ func (r *PromptPackReconciler) findSiblingPromptPacks(ctx context.Context, obj c
 	return requests
 }
 
+// siblingPhaseChangedPredicate fires the sibling watch on spec (generation)
+// changes AND on Status.Phase transitions, but NOT on other status-only writes
+// (e.g. LastUpdated timestamp refreshes). Phase transitions must fan out because
+// eligibility for channel-max is gated on a sibling's validated phase: a newer
+// version going Pending→Active (or Active→Superseded) has to re-enqueue the
+// older siblings so they re-resolve their phase. GenerationChangedPredicate
+// alone would drop those status-only phase transitions, stalling convergence.
+func siblingPhaseChangedPredicate() predicate.Predicate {
+	return predicate.Funcs{
+		CreateFunc:  func(event.CreateEvent) bool { return true },
+		DeleteFunc:  func(event.DeleteEvent) bool { return true },
+		GenericFunc: func(event.GenericEvent) bool { return false },
+		UpdateFunc: func(e event.UpdateEvent) bool {
+			if e.ObjectOld == nil || e.ObjectNew == nil {
+				return false
+			}
+			if e.ObjectOld.GetGeneration() != e.ObjectNew.GetGeneration() {
+				return true
+			}
+			oldPack, okOld := e.ObjectOld.(*omniav1alpha1.PromptPack)
+			newPack, okNew := e.ObjectNew.(*omniav1alpha1.PromptPack)
+			if !okOld || !okNew {
+				return false
+			}
+			return oldPack.Status.Phase != newPack.Status.Phase
+		},
+	}
+}
+
 // SetupWithManager sets up the controller with the Manager.
 func (r *PromptPackReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
@@ -512,14 +559,15 @@ func (r *PromptPackReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			&corev1.ConfigMap{},
 			handler.EnqueueRequestsFromMapFunc(r.findPromptPacksForConfigMap),
 		).
-		// Publishing a new version-object must re-reconcile older siblings so
-		// they transition to Superseded. Gate on generation changes only, so
-		// status-only updates (e.g. the Superseded transition itself) don't
-		// fan out to siblings and cause reconcile churn.
+		// Publishing a new version-object — or a sibling's phase transitioning
+		// once validated — must re-reconcile older siblings so they converge to
+		// Active/Superseded. The custom predicate fires on generation changes
+		// and Status.Phase transitions, but not on LastUpdated-only status
+		// writes, avoiding reconcile churn.
 		Watches(
 			&omniav1alpha1.PromptPack{},
 			handler.EnqueueRequestsFromMapFunc(r.findSiblingPromptPacks),
-			builder.WithPredicates(predicate.GenerationChangedPredicate{}),
+			builder.WithPredicates(siblingPhaseChangedPredicate()),
 		).
 		Named("promptpack").
 		Complete(r)
