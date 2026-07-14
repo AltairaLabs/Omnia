@@ -29,7 +29,7 @@ import (
 	"github.com/altairalabs/omnia/ee/pkg/metrics"
 )
 
-// expectedReconcilers is the canonical 5-reconciler set the binary
+// expectedReconcilers is the canonical 6-reconciler set the binary
 // must register. Each entry corresponds to one SetupWithManager call
 // that was previously inline in main(). A regression that removes a
 // reconciler from buildReconcilers fails this test.
@@ -46,7 +46,7 @@ var expectedReconcilers = []string{
 }
 
 // TestBuildReconcilers_RegistersAllExpected asserts that buildReconcilers
-// produces the five reconciler entries the binary must register. This is
+// produces the six reconciler entries the binary must register. This is
 // the wiring contract: a removed entry here means production silently
 // stops reconciling its CRD. setupOptions can be zero-valued because
 // buildReconcilers doesn't dereference the options at construction —
