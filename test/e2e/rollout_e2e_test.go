@@ -444,9 +444,12 @@ spec:
 
 		It("triggers a version-based canary when a newer PromptPack version is on the watched channel", func() {
 			By("switching the AgentRuntime to a version-triggered rollout (no manual candidate)")
+			// A pause after the first weight step holds the canary so
+			// status.rollout.candidateVersion stays observable — otherwise the
+			// rollout promotes straight through and clears it before we assert.
 			triggerPatch := `{"spec":{"rollout":{` +
 				`"trigger":{"promptPackChannel":"stable"},` +
-				`"steps":[{"setWeight":20},{"setWeight":100}]}}}`
+				`"steps":[{"setWeight":20},{"pause":{"duration":"10m"}},{"setWeight":100}]}}}`
 			cmd := exec.Command("kubectl", "patch", "agentruntime", rolloutAgentName,
 				"-n", rolloutNamespace, "--type=merge", "-p", triggerPatch)
 			_, err := utils.Run(cmd)
