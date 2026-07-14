@@ -22,6 +22,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
+	"github.com/altairalabs/omnia/internal/media"
 )
 
 // workspaceContentVolumeName is the volume + mount name that exposes the
@@ -139,7 +140,7 @@ func mediaLocalPVC(ar *omniav1alpha1.AgentRuntime) (claim, mountPath string) {
 		return "", ""
 	}
 	s := ar.Spec.Media.Storage
-	if s.Type != "local" || s.Local == nil || s.Local.VolumeClaim == "" {
+	if media.BackendType(s.Type) != media.BackendTypeLocal || s.Local == nil || s.Local.VolumeClaim == "" {
 		return "", ""
 	}
 	return s.Local.VolumeClaim, s.Local.BasePath

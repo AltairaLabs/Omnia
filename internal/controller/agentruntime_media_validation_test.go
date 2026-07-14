@@ -19,6 +19,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
+	"github.com/altairalabs/omnia/internal/media"
 )
 
 // startMediaValidationEnv boots a standalone envtest API server with the
@@ -127,7 +128,7 @@ func TestMediaValidation(t *testing.T) {
 		{
 			name:        "local type without local block is rejected",
 			crName:      "media-local-no-block",
-			storage:     &omniav1alpha1.MediaStorageConfig{Type: "local"},
+			storage:     &omniav1alpha1.MediaStorageConfig{Type: string(media.BackendTypeLocal)},
 			wantErr:     true,
 			errContains: "requires spec.media.storage.local",
 		},
@@ -159,7 +160,7 @@ func TestMediaValidation(t *testing.T) {
 			name:   "valid local block is accepted",
 			crName: "media-local-valid",
 			storage: &omniav1alpha1.MediaStorageConfig{
-				Type:  "local",
+				Type:  string(media.BackendTypeLocal),
 				Local: &omniav1alpha1.LocalMediaBackend{BasePath: "/data/media"},
 			},
 		},

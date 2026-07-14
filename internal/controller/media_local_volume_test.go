@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
+	"github.com/altairalabs/omnia/internal/media"
 	corev1 "k8s.io/api/core/v1"
 )
 
@@ -12,7 +13,7 @@ func localStorageAR(basePath, claim string) *omniav1alpha1.AgentRuntime {
 		Spec: omniav1alpha1.AgentRuntimeSpec{
 			Media: &omniav1alpha1.MediaConfig{
 				Storage: &omniav1alpha1.MediaStorageConfig{
-					Type:  "local",
+					Type:  string(media.BackendTypeLocal),
 					Local: &omniav1alpha1.LocalMediaBackend{BasePath: basePath, VolumeClaim: claim},
 				},
 			},
