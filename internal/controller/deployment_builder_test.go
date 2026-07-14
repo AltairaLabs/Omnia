@@ -1107,7 +1107,7 @@ func TestBuildFacadeVolumeMounts_WithConfigMap(t *testing.T) {
 	pp.Spec.Source.Type = omniav1alpha1.PromptPackSourceTypeConfigMap
 	pp.Spec.Source.ConfigMapRef = &corev1.LocalObjectReference{Name: "my-pack-config"}
 
-	mounts := r.buildFacadeVolumeMounts(pp)
+	mounts := r.buildFacadeVolumeMounts(&omniav1alpha1.AgentRuntime{}, pp)
 
 	mount := findPromptpackConfigMount(mounts)
 	if mount == nil {
@@ -1129,7 +1129,7 @@ func TestBuildFacadeVolumeMounts_NoConfigMapRef(t *testing.T) {
 	pp.Spec.Source.Type = omniav1alpha1.PromptPackSourceTypeConfigMap
 	pp.Spec.Source.ConfigMapRef = nil // no ref → no promptpack-config mount
 
-	mounts := r.buildFacadeVolumeMounts(pp)
+	mounts := r.buildFacadeVolumeMounts(&omniav1alpha1.AgentRuntime{}, pp)
 
 	if m := findPromptpackConfigMount(mounts); m != nil {
 		t.Errorf("did not expect promptpack-config mount, got %+v", m)
@@ -1144,7 +1144,7 @@ func TestBuildFacadeVolumeMounts_NonConfigMapSource(t *testing.T) {
 	pp.Spec.Source.Type = omniav1alpha1.PromptPackSourceType("git")
 	pp.Spec.Source.ConfigMapRef = &corev1.LocalObjectReference{Name: "irrelevant"}
 
-	mounts := r.buildFacadeVolumeMounts(pp)
+	mounts := r.buildFacadeVolumeMounts(&omniav1alpha1.AgentRuntime{}, pp)
 
 	if m := findPromptpackConfigMount(mounts); m != nil {
 		t.Errorf("did not expect promptpack-config mount for non-configmap source, got %+v", m)

@@ -622,9 +622,21 @@ type MediaStorageConfig struct {
 
 // LocalMediaBackend stores media on a facade-served local path.
 type LocalMediaBackend struct {
-	// basePath is the on-disk directory the facade serves media from.
+	// basePath is the on-disk directory the facade serves media from and the
+	// runtime resolves references against. When volumeClaim is set it is the
+	// mount path for that PVC.
 	// +kubebuilder:validation:MinLength=1
 	BasePath string `json:"basePath"`
+
+	// volumeClaim names an existing PersistentVolumeClaim to mount at basePath
+	// in both the facade and runtime containers. Use a ReadWriteMany PVC so
+	// uploads written by the facade are durable and readable by the runtime
+	// across pods. When empty, no volume is provisioned — the local backend
+	// then requires a writable basePath (the agent containers have a read-only
+	// root filesystem), so an explicit volumeClaim (or podOverrides volume) is
+	// needed for local storage to function.
+	// +optional
+	VolumeClaim string `json:"volumeClaim,omitempty"`
 }
 
 // S3MediaBackend configures S3 / S3-compatible (MinIO) storage.

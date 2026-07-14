@@ -120,13 +120,63 @@ func (r *AgentRuntimeReconciler) buildVolumes(
 		volumes = append(volumes, agentRuntime.Spec.Runtime.Volumes...)
 	}
 
+	// Mount the local media-backend PVC (shared by facade + runtime) when set.
+	if v := mediaLocalVolume(agentRuntime); v != nil {
+		volumes = append(volumes, *v)
+	}
+
 	return volumes
+}
+
+// mediaLocalVolumeName is the pod volume name for a local media backend PVC.
+const mediaLocalVolumeName = "omnia-media-local"
+
+// mediaLocalPVC returns the local media backend's PVC claim name and mount path
+// when spec.media.storage.type == local and local.volumeClaim is set; otherwise
+// both are empty.
+func mediaLocalPVC(ar *omniav1alpha1.AgentRuntime) (claim, mountPath string) {
+	if ar.Spec.Media == nil || ar.Spec.Media.Storage == nil {
+		return "", ""
+	}
+	s := ar.Spec.Media.Storage
+	if s.Type != "local" || s.Local == nil || s.Local.VolumeClaim == "" {
+		return "", ""
+	}
+	return s.Local.VolumeClaim, s.Local.BasePath
+}
+
+// mediaLocalVolume returns the PVC-backed pod volume for the local media
+// backend, or nil when no volumeClaim is configured.
+func mediaLocalVolume(ar *omniav1alpha1.AgentRuntime) *corev1.Volume {
+	claim, _ := mediaLocalPVC(ar)
+	if claim == "" {
+		return nil
+	}
+	return &corev1.Volume{
+		Name: mediaLocalVolumeName,
+		VolumeSource: corev1.VolumeSource{
+			PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: claim},
+		},
+	}
+}
+
+// mediaLocalVolumeMount returns the volume mount (at basePath) for the local
+// media backend PVC, or nil when no volumeClaim is configured. The same mount
+// is applied to both the facade (writes/serves) and runtime (resolves)
+// containers so they share one durable directory.
+func mediaLocalVolumeMount(ar *omniav1alpha1.AgentRuntime) *corev1.VolumeMount {
+	claim, mountPath := mediaLocalPVC(ar)
+	if claim == "" {
+		return nil
+	}
+	return &corev1.VolumeMount{Name: mediaLocalVolumeName, MountPath: mountPath}
 }
 
 // buildFacadeVolumeMounts creates volume mounts for the facade container.
 // The facade only needs the promptpack-config volume (for dual-protocol A2A access);
 // it does not need tools-config or user-specified runtime volumes.
 func (r *AgentRuntimeReconciler) buildFacadeVolumeMounts(
+	agentRuntime *omniav1alpha1.AgentRuntime,
 	promptPack *omniav1alpha1.PromptPack,
 ) []corev1.VolumeMount {
 	var volumeMounts []corev1.VolumeMount
@@ -138,6 +188,11 @@ func (r *AgentRuntimeReconciler) buildFacadeVolumeMounts(
 			MountPath: PromptPackMountPath,
 			ReadOnly:  true,
 		})
+	}
+
+	// The facade writes uploads to and serves them from the local media PVC.
+	if m := mediaLocalVolumeMount(agentRuntime); m != nil {
+		volumeMounts = append(volumeMounts, *m)
 	}
 
 	return volumeMounts
@@ -159,6 +214,11 @@ func (r *AgentRuntimeReconciler) buildRuntimeVolumeMounts(
 			MountPath: PromptPackMountPath,
 			ReadOnly:  true,
 		})
+	}
+
+	// The runtime resolves local media references against the shared media PVC.
+	if m := mediaLocalVolumeMount(agentRuntime); m != nil {
+		volumeMounts = append(volumeMounts, *m)
 	}
 
 	// Mount tools ConfigMap if ToolRegistry is present

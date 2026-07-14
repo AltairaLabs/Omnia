@@ -67,7 +67,7 @@ func (r *AgentRuntimeReconciler) buildFacadeContainer(
 			},
 		},
 		Env:          r.buildFacadeEnvVars(agentRuntime),
-		VolumeMounts: r.buildFacadeVolumeMounts(promptPack),
+		VolumeMounts: r.buildFacadeVolumeMounts(agentRuntime, promptPack),
 		ReadinessProbe: &corev1.Probe{
 			ProbeHandler: corev1.ProbeHandler{
 				HTTPGet: &corev1.HTTPGetAction{
