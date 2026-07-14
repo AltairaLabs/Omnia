@@ -936,6 +936,65 @@ func TestValidator_ValidateArenaSource(t *testing.T) {
 	})
 }
 
+func TestValidatePromptPackSource(t *testing.T) {
+	privateKey, publicKey := generateTestKeyPair(t)
+
+	enterpriseToken := func(features Features, expiresAt time.Time) string {
+		return createTestToken(t, privateKey, &licenseClaims{
+			RegisteredClaims: jwt.RegisteredClaims{
+				ExpiresAt: jwt.NewNumericDate(expiresAt),
+				IssuedAt:  jwt.NewNumericDate(time.Now()),
+			},
+			LicenseID: "test-123",
+			Tier:      "enterprise",
+			Customer:  "Test Corp",
+			Features:  features,
+		})
+	}
+
+	t.Run("git denied without GitSource feature", func(t *testing.T) {
+		token := enterpriseToken(Features{}, time.Now().Add(24*time.Hour))
+		validator := newValidatorWithSecret(t, publicKey, token)
+
+		err := validator.ValidatePromptPackSource(context.Background(), "git")
+		require.Error(t, err)
+		var valErr *ValidationError
+		require.ErrorAs(t, err, &valErr)
+	})
+
+	t.Run("configmap always allowed", func(t *testing.T) {
+		validator := newValidatorWithSecret(t, publicKey, "")
+
+		err := validator.ValidatePromptPackSource(context.Background(), "configmap")
+		assert.NoError(t, err)
+	})
+
+	t.Run("workspace always allowed", func(t *testing.T) {
+		validator := newValidatorWithSecret(t, publicKey, "")
+
+		err := validator.ValidatePromptPackSource(context.Background(), "workspace")
+		assert.NoError(t, err)
+	})
+
+	t.Run("expired license returns expired error", func(t *testing.T) {
+		token := enterpriseToken(Features{GitSource: true, OCISource: true}, time.Now().Add(-24*time.Hour))
+		validator := newValidatorWithSecret(t, publicKey, token)
+
+		// Expired license falls back to open-core, which allows git — so use
+		// oci (not open-core-allowed) to observe the expired-license path.
+		err := validator.ValidatePromptPackSource(context.Background(), "oci")
+		assert.Error(t, err)
+	})
+
+	t.Run("git allowed with GitSource feature", func(t *testing.T) {
+		token := enterpriseToken(Features{GitSource: true}, time.Now().Add(24*time.Hour))
+		validator := newValidatorWithSecret(t, publicKey, token)
+
+		err := validator.ValidatePromptPackSource(context.Background(), "git")
+		assert.NoError(t, err)
+	})
+}
+
 func TestValidator_ValidateArenaJob(t *testing.T) {
 	privateKey, publicKey := generateTestKeyPair(t)
 

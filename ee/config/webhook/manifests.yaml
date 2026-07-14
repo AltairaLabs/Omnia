@@ -90,6 +90,26 @@ webhooks:
     service:
       name: webhook-service
       namespace: system
+      path: /validate-omnia-altairalabs-ai-v1alpha1-promptpacksource
+  failurePolicy: Fail
+  name: vpromptpacksource.kb.io
+  rules:
+  - apiGroups:
+    - omnia.altairalabs.ai
+    apiVersions:
+    - v1alpha1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - promptpacksources
+  sideEffects: None
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: webhook-service
+      namespace: system
       path: /validate-omnia-altairalabs-ai-v1alpha1-sessionprivacypolicy
   failurePolicy: Fail
   name: vsessionprivacypolicy.kb.io
