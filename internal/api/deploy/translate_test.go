@@ -3,6 +3,8 @@ package deploy
 import (
 	"testing"
 
+	corev1 "k8s.io/api/core/v1"
+
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 	"github.com/altairalabs/omnia/internal/promptpack/packselect"
 )
@@ -82,5 +84,175 @@ func TestPackToPromptPackWithSkills(t *testing.T) {
 	// nil deployLabels must not panic and must still stamp the packselect label.
 	if pp.Labels[packselect.Label] != "support" {
 		t.Errorf("label %s = %q, want support", packselect.Label, pp.Labels[packselect.Label])
+	}
+}
+
+// assertAgentRuntimeMeta and hasEnvVar are extracted out of
+// TestAgentToAgentRuntime_Pinned to keep the test under the repo's gocyclo-15
+// pre-commit gate; the assertions themselves are unchanged from the brief.
+func assertAgentRuntimeMeta(t *testing.T, ar *omniav1alpha1.AgentRuntime, wantName, wantNamespace string) {
+	t.Helper()
+	if ar.Name != wantName || ar.Namespace != wantNamespace {
+		t.Fatalf("meta = %s/%s", ar.Namespace, ar.Name)
+	}
+}
+
+func hasEnvVar(rc *omniav1alpha1.RuntimeConfig, name, value string) bool {
+	if rc == nil {
+		return false
+	}
+	for _, e := range rc.ExtraEnv {
+		if e.Name == name && e.Value == value {
+			return true
+		}
+	}
+	return false
+}
+
+func TestAgentToAgentRuntime_Pinned(t *testing.T) {
+	pack := PackIntent{Name: "support", Version: "1.2.0"}
+	agent := AgentIntent{
+		Name:       "support-triage",
+		PromptName: "triage",
+		Providers:  []ProviderBind{{Name: "default", Ref: "claude"}, {Name: "judge", Ref: "gpt", Role: "llm"}},
+		UseTools:   true,
+	}
+	ar := agentToAgentRuntime("ns", pack, agent, nil)
+
+	assertAgentRuntimeMeta(t, ar, "support-triage", "ns")
+	if ar.Spec.PromptPackRef.Name != "support" || ar.Spec.PromptPackRef.Version == nil || *ar.Spec.PromptPackRef.Version != "1.2.0" {
+		t.Errorf("promptPackRef = %+v", ar.Spec.PromptPackRef)
+	}
+	if ar.Spec.PromptPackRef.Track != nil {
+		t.Errorf("pinned mode must not set track")
+	}
+	if len(ar.Spec.Facades) != 1 || ar.Spec.Facades[0].Type != omniav1alpha1.FacadeTypeWebSocket {
+		t.Errorf("facades = %+v", ar.Spec.Facades)
+	}
+	if len(ar.Spec.Providers) != 2 || ar.Spec.Providers[0].Name != "default" || ar.Spec.Providers[0].ProviderRef.Name != "claude" {
+		t.Errorf("providers = %+v", ar.Spec.Providers)
+	}
+	if ar.Spec.ToolRegistryRef == nil {
+		t.Errorf("useTools true but toolRegistryRef nil")
+	}
+	// OMNIA_PROMPT_NAME env pins the prompt for a fanned-out runtime.
+	if !hasEnvVar(ar.Spec.Runtime, promptNameEnv, "triage") {
+		t.Errorf("OMNIA_PROMPT_NAME env not set: %+v", ar.Spec.Runtime)
+	}
+}
+
+func TestAgentToAgentRuntime_TriggerRollout(t *testing.T) {
+	pack := PackIntent{Name: "support", Version: "1.2.0"}
+	agent := AgentIntent{
+		Name:      "support",
+		Providers: []ProviderBind{{Name: "default", Ref: "claude"}},
+		Rollout:   &RolloutIntent{Trigger: &RolloutTriggerIntent{PromptPackChannel: "stable"}},
+	}
+	ar := agentToAgentRuntime("ns", pack, agent, nil)
+	if ar.Spec.Rollout == nil || ar.Spec.Rollout.Trigger == nil || ar.Spec.Rollout.Trigger.PromptPackChannel != "stable" {
+		t.Fatalf("rollout trigger = %+v", ar.Spec.Rollout)
+	}
+	// Even in trigger mode the *desired* object pins the version; the apply step
+	// is what preserves the live pin on an EXISTING agent (see apply_test).
+	if ar.Spec.PromptPackRef.Version == nil || *ar.Spec.PromptPackRef.Version != "1.2.0" {
+		t.Errorf("promptPackRef = %+v", ar.Spec.PromptPackRef)
+	}
+}
+
+func TestAgentToAgentRuntime_ExplicitFacades(t *testing.T) {
+	pack := PackIntent{Name: "support", Version: "1.2.0"}
+	mgmt := false
+	agent := AgentIntent{
+		Name:      "support",
+		Providers: []ProviderBind{{Name: "default", Ref: "claude"}},
+		Facades:   []FacadeIntent{{Type: "rest", ManagementPlane: &mgmt}, {Type: "mcp"}},
+	}
+	ar := agentToAgentRuntime("ns", pack, agent, nil)
+
+	if len(ar.Spec.Facades) != 2 {
+		t.Fatalf("facades = %+v, want 2 entries", ar.Spec.Facades)
+	}
+	if ar.Spec.Facades[0].Type != omniav1alpha1.FacadeTypeREST || ar.Spec.Facades[0].ManagementPlane == nil || *ar.Spec.Facades[0].ManagementPlane != false {
+		t.Errorf("facades[0] = %+v", ar.Spec.Facades[0])
+	}
+	if ar.Spec.Facades[1].Type != omniav1alpha1.FacadeTypeMCP {
+		t.Errorf("facades[1] = %+v", ar.Spec.Facades[1])
+	}
+	for i, f := range ar.Spec.Facades {
+		if f.Handler == nil || *f.Handler != omniav1alpha1.HandlerModeRuntime {
+			t.Errorf("facades[%d].Handler = %+v, want runtime", i, f.Handler)
+		}
+	}
+}
+
+func TestAgentToAgentRuntime_RuntimeReplicasAndResources(t *testing.T) {
+	pack := PackIntent{Name: "support", Version: "1.2.0"}
+	replicas := int32(3)
+	agent := AgentIntent{
+		Name:      "support",
+		Providers: []ProviderBind{{Name: "default", Ref: "claude"}},
+		Runtime:   &RuntimeIntent{Replicas: &replicas, CPU: "500m", Memory: "256Mi"},
+	}
+	ar := agentToAgentRuntime("ns", pack, agent, nil)
+
+	if ar.Spec.Runtime == nil {
+		t.Fatal("runtime = nil")
+	}
+	if ar.Spec.Runtime.Replicas == nil || *ar.Spec.Runtime.Replicas != 3 {
+		t.Errorf("replicas = %v, want 3", ar.Spec.Runtime.Replicas)
+	}
+	if ar.Spec.Runtime.Resources == nil {
+		t.Fatal("resources = nil")
+	}
+	cpu := ar.Spec.Runtime.Resources.Requests[corev1.ResourceCPU]
+	if cpu.String() != "500m" {
+		t.Errorf("cpu = %s, want 500m", cpu.String())
+	}
+	mem := ar.Spec.Runtime.Resources.Requests[corev1.ResourceMemory]
+	if mem.String() != "256Mi" {
+		t.Errorf("memory = %s, want 256Mi", mem.String())
+	}
+}
+
+func TestAgentToAgentRuntime_RuntimeNilWhenUnset(t *testing.T) {
+	pack := PackIntent{Name: "support", Version: "1.2.0"}
+	agent := AgentIntent{
+		Name:      "support",
+		Providers: []ProviderBind{{Name: "default", Ref: "claude"}},
+		Runtime:   &RuntimeIntent{},
+	}
+	ar := agentToAgentRuntime("ns", pack, agent, nil)
+	if ar.Spec.Runtime != nil {
+		t.Errorf("runtime = %+v, want nil", ar.Spec.Runtime)
+	}
+}
+
+func TestAgentToAgentRuntime_RolloutStepsWithPause(t *testing.T) {
+	pack := PackIntent{Name: "support", Version: "1.2.0"}
+	weight := int32(50)
+	agent := AgentIntent{
+		Name:      "support",
+		Providers: []ProviderBind{{Name: "default", Ref: "claude"}},
+		Rollout: &RolloutIntent{
+			Steps: []RolloutStepIntent{
+				{SetWeight: &weight, PauseDuration: "5m"},
+				{SetWeight: &weight},
+			},
+		},
+	}
+	ar := agentToAgentRuntime("ns", pack, agent, nil)
+	if ar.Spec.Rollout == nil || len(ar.Spec.Rollout.Steps) != 2 {
+		t.Fatalf("rollout steps = %+v", ar.Spec.Rollout)
+	}
+	step0 := ar.Spec.Rollout.Steps[0]
+	if step0.SetWeight == nil || *step0.SetWeight != 50 {
+		t.Errorf("step0.setWeight = %v", step0.SetWeight)
+	}
+	if step0.Pause == nil || step0.Pause.Duration == nil || *step0.Pause.Duration != "5m" {
+		t.Errorf("step0.pause = %+v", step0.Pause)
+	}
+	step1 := ar.Spec.Rollout.Steps[1]
+	if step1.Pause != nil {
+		t.Errorf("step1.pause = %+v, want nil (no pauseDuration)", step1.Pause)
 	}
 }

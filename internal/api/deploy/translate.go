@@ -2,6 +2,7 @@ package deploy
 
 import (
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
@@ -83,3 +84,129 @@ func skillsConfig(in *SkillsConfigIntent) *omniav1alpha1.SkillsConfig {
 	}
 	return &omniav1alpha1.SkillsConfig{MaxActive: in.MaxActive, Selector: omniav1alpha1.SkillSelector(in.Selector)}
 }
+
+const promptNameEnv = "OMNIA_PROMPT_NAME"
+
+// agentToAgentRuntime builds the desired AgentRuntime for one AgentIntent,
+// pinned to pack.Version. The apply step (apply.go) decides whether an existing
+// trigger-mode agent keeps its live pin instead.
+func agentToAgentRuntime(namespace string, pack PackIntent, agent AgentIntent, deployLabels map[string]string) *omniav1alpha1.AgentRuntime {
+	version := pack.Version
+	spec := omniav1alpha1.AgentRuntimeSpec{
+		PromptPackRef: omniav1alpha1.PromptPackRef{Name: pack.Name, Version: &version},
+		Facades:       facadeConfigs(agent.Facades),
+		Providers:     providerRefs(agent.Providers),
+		Runtime:       runtimeConfig(agent),
+		Rollout:       rolloutConfig(agent.Rollout),
+	}
+	if agent.UseTools {
+		spec.ToolRegistryRef = &omniav1alpha1.ToolRegistryRef{Name: toolRegistryName(pack.Name)}
+	}
+	return &omniav1alpha1.AgentRuntime{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      agent.Name,
+			Namespace: namespace,
+			Labels:    mergeLabels(map[string]string{packselect.Label: pack.Name}, deployLabels),
+		},
+		Spec: spec,
+	}
+}
+
+// toolRegistryName is the deterministic ToolRegistry name for a pack (matches
+// the adapter's "<pack>-tools" convention). Registry contents land in Plan B.
+func toolRegistryName(packName string) string { return packName + "-tools" }
+
+func facadeConfigs(in []FacadeIntent) []omniav1alpha1.FacadeConfig {
+	runtimeHandler := omniav1alpha1.HandlerModeRuntime
+	if len(in) == 0 {
+		mgmt := true
+		return []omniav1alpha1.FacadeConfig{{
+			Type:            omniav1alpha1.FacadeTypeWebSocket,
+			Handler:         &runtimeHandler,
+			ManagementPlane: &mgmt,
+		}}
+	}
+	out := make([]omniav1alpha1.FacadeConfig, 0, len(in))
+	for _, f := range in {
+		out = append(out, omniav1alpha1.FacadeConfig{
+			Type:            omniav1alpha1.FacadeType(f.Type),
+			Handler:         &runtimeHandler,
+			ManagementPlane: f.ManagementPlane,
+		})
+	}
+	return out
+}
+
+func providerRefs(in []ProviderBind) []omniav1alpha1.NamedProviderRef {
+	out := make([]omniav1alpha1.NamedProviderRef, 0, len(in))
+	for _, p := range in {
+		role := omniav1alpha1.ProviderRole(p.Role)
+		if p.Role == "" {
+			role = omniav1alpha1.ProviderRoleLLM
+		}
+		out = append(out, omniav1alpha1.NamedProviderRef{
+			Name:        p.Name,
+			ProviderRef: omniav1alpha1.ProviderRef{Name: p.Ref},
+			Role:        role,
+		})
+	}
+	return out
+}
+
+func runtimeConfig(agent AgentIntent) *omniav1alpha1.RuntimeConfig {
+	var rc omniav1alpha1.RuntimeConfig
+	set := false
+	if agent.Runtime != nil {
+		if agent.Runtime.Replicas != nil {
+			rc.Replicas = agent.Runtime.Replicas
+			set = true
+		}
+		if req := resourceRequirements(agent.Runtime); req != nil {
+			rc.Resources = req
+			set = true
+		}
+	}
+	if agent.PromptName != "" {
+		rc.ExtraEnv = append(rc.ExtraEnv, corev1.EnvVar{Name: promptNameEnv, Value: agent.PromptName})
+		set = true
+	}
+	if !set {
+		return nil
+	}
+	return &rc
+}
+
+func resourceRequirements(r *RuntimeIntent) *corev1.ResourceRequirements {
+	if r.CPU == "" && r.Memory == "" {
+		return nil
+	}
+	reqs := corev1.ResourceList{}
+	if r.CPU != "" {
+		reqs[corev1.ResourceCPU] = resource.MustParse(r.CPU)
+	}
+	if r.Memory != "" {
+		reqs[corev1.ResourceMemory] = resource.MustParse(r.Memory)
+	}
+	return &corev1.ResourceRequirements{Requests: reqs}
+}
+
+func rolloutConfig(in *RolloutIntent) *omniav1alpha1.RolloutConfig {
+	if in == nil {
+		return nil
+	}
+	rc := &omniav1alpha1.RolloutConfig{}
+	if in.Trigger != nil {
+		rc.Trigger = &omniav1alpha1.RolloutTrigger{PromptPackChannel: in.Trigger.PromptPackChannel}
+	}
+	for _, s := range in.Steps {
+		step := omniav1alpha1.RolloutStep{SetWeight: s.SetWeight}
+		if s.PauseDuration != "" {
+			step.Pause = &omniav1alpha1.RolloutPause{Duration: rolloutPauseDuration(s.PauseDuration)}
+		}
+		rc.Steps = append(rc.Steps, step)
+	}
+	return rc
+}
+
+// rolloutPauseDuration builds the RolloutPause.Duration pointer (*string).
+func rolloutPauseDuration(s string) *string { return &s }
