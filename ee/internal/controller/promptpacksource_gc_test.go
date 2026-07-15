@@ -97,7 +97,7 @@ var _ = Describe("PromptPackSourceGC", func() {
 					labelPromptPackName:      packName,
 				},
 			},
-			Data: map[string]string{"pack.json": "{}"},
+			Data: map[string]string{packJSONKey: "{}"},
 		}
 		Expect(k8sClient.Create(ctx, cm)).To(Succeed())
 	}

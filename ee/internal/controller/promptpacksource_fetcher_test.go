@@ -36,7 +36,7 @@ func TestBuildFetcher_Git(t *testing.T) {
 			Type: omniav1alpha1.PromptPackSourceTypeGit,
 			Git: &corev1alpha1.GitSource{
 				URL:  "https://example.com/repo.git",
-				Path: "pack.json",
+				Path: packJSONKey,
 				Ref:  &corev1alpha1.GitReference{Branch: "main"},
 			},
 		},

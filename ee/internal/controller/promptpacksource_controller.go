@@ -44,6 +44,8 @@ const (
 	labelPromptPackManagedBy = "omnia.altairalabs.ai/managed-by"
 	managedByPromptPack      = "promptpack"
 	contentSuffix            = "-content"
+	// packJSONKey is the ConfigMap data key (and fetched filename) holding the pack.
+	packJSONKey = "pack.json"
 )
 
 // PromptPackSource event reasons.
@@ -146,7 +148,7 @@ func (r *PromptPackSourceReconciler) fetchAndMaterialize(ctx context.Context, sr
 		defer func() { _ = os.RemoveAll(artifact.Path) }()
 	}
 
-	packJSON, err := os.ReadFile(filepath.Join(artifact.Path, "pack.json"))
+	packJSON, err := os.ReadFile(filepath.Join(artifact.Path, packJSONKey))
 	if err != nil {
 		return r.setErrorStatus(ctx, src, "ReadPackJSON", err, interval)
 	}
@@ -195,7 +197,7 @@ func (r *PromptPackSourceReconciler) materialize(ctx context.Context, src *omnia
 				labelPromptPackName:      src.Spec.PackName,
 			},
 		},
-		Data: map[string]string{"pack.json": string(packJSON)},
+		Data: map[string]string{packJSONKey: string(packJSON)},
 	}
 	if err := r.Create(ctx, cm); err != nil && !apierrors.IsAlreadyExists(err) {
 		return false, err

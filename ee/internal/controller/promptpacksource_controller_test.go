@@ -49,7 +49,7 @@ func (f *fakeFetcher) Fetch(_ context.Context, _ string) (*sourcesync.Artifact, 
 	if err != nil {
 		return nil, err
 	}
-	if err := os.WriteFile(filepath.Join(dir, "pack.json"), []byte(f.pack), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, packJSONKey), []byte(f.pack), 0o600); err != nil {
 		return nil, err
 	}
 	return &sourcesync.Artifact{Path: dir, Revision: f.rev}, nil
@@ -166,7 +166,7 @@ var _ = Describe("PromptPackSource Controller", func() {
 			By("checking the backing ConfigMap")
 			cm := &corev1.ConfigMap{}
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: objName + "-content", Namespace: ns}, cm)).To(Succeed())
-			Expect(cm.Data["pack.json"]).To(Equal(`{"name":"mypack","version":"1.0.0"}`))
+			Expect(cm.Data[packJSONKey]).To(Equal(`{"name":"mypack","version":"1.0.0"}`))
 			Expect(cm.Labels["omnia.altairalabs.ai/managed-by"]).To(Equal("promptpack"))
 			Expect(cm.Labels["omnia.altairalabs.ai/promptpack"]).To(Equal(packName))
 
