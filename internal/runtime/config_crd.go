@@ -73,6 +73,14 @@ func LoadFromCRD(ctx context.Context, c client.Client, name, namespace string) (
 	if ar.Spec.PromptPackRef.Version != nil {
 		cfg.PromptPackVersion = *ar.Spec.PromptPackRef.Version
 	}
+	// track:-selected AgentRuntimes have no pinned version — fall back to the
+	// operator-resolved version stamped into the pod env (#1847), so the
+	// eval-path version stamp is always concrete.
+	if cfg.PromptPackVersion == "" {
+		if v := os.Getenv(envPromptPackVersion); v != "" {
+			cfg.PromptPackVersion = v
+		}
+	}
 
 	// Function response-format inputs (consumed by resolveResponseFormat, #1483).
 	cfg.Mode = string(ar.Spec.Mode)

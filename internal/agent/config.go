@@ -38,6 +38,12 @@ const (
 	EnvRuntimeAddress      = "OMNIA_RUNTIME_ADDRESS"
 	EnvPromptPackMountPath = "OMNIA_PROMPTPACK_PATH"
 	EnvHealthPort          = "OMNIA_HEALTH_PORT"
+	// EnvPromptPackVersion carries the operator-resolved PromptPack's
+	// concrete version. Used as a fallback when spec.promptPackRef.Version is
+	// nil (a `track:`-selected AgentRuntime), so the facade — which writes
+	// the session record — stamps the same concrete version as the runtime
+	// instead of an empty string (#1847).
+	EnvPromptPackVersion = "OMNIA_PROMPTPACK_VERSION"
 	// The Env* / Default* media constants alias internal/media's shared
 	// OMNIA_MEDIA_* contract (internal/media/env.go) so the facade
 	// (cmd/agent) and runtime (cmd/runtime) binaries read the identical env

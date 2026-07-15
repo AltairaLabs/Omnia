@@ -155,6 +155,58 @@ func TestLoadFromCRD_PromptPackVersionNil(t *testing.T) {
 	}
 }
 
+// TestLoadFromCRD_PromptPackVersion_FallsBackToEnv is the #1847 regression:
+// a `track:` (or default-stable) AgentRuntime has spec.promptPackRef.Version
+// == nil, so LoadFromCRD must fall back to OMNIA_PROMPTPACK_VERSION — set by
+// the operator from the RESOLVED PromptPack — instead of leaving
+// cfg.PromptPackVersion empty. The facade writes the session record, so this
+// is what keeps its eval-path version stamp concrete for track-selected
+// agents.
+func TestLoadFromCRD_PromptPackVersion_FallsBackToEnv(t *testing.T) {
+	ar := newFakeAgentRuntime("agent", "ns", v1alpha1.AgentRuntimeSpec{
+		PromptPackRef: v1alpha1.PromptPackRef{
+			Name: "pack",
+			// Version is nil
+		},
+		Facades: []v1alpha1.FacadeConfig{{Type: v1alpha1.FacadeTypeWebSocket}},
+	})
+
+	c := fake.NewClientBuilder().WithScheme(k8s.Scheme()).WithRuntimeObjects(ar, testNamespace(ar.Namespace)).Build()
+	t.Setenv(EnvPromptPackVersion, "2.3.0")
+
+	cfg, err := LoadFromCRD(context.Background(), c, "agent", "ns")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.PromptPackVersion != "2.3.0" {
+		t.Errorf("PromptPackVersion = %q, want %q", cfg.PromptPackVersion, "2.3.0")
+	}
+}
+
+// TestLoadFromCRD_PromptPackVersion_PinnedWinsOverEnv verifies that an
+// explicitly pinned spec.promptPackRef.version always wins over the
+// operator-injected env fallback.
+func TestLoadFromCRD_PromptPackVersion_PinnedWinsOverEnv(t *testing.T) {
+	ar := newFakeAgentRuntime("agent", "ns", v1alpha1.AgentRuntimeSpec{
+		PromptPackRef: v1alpha1.PromptPackRef{
+			Name:    "pack",
+			Version: ptr.To("1.0.0"),
+		},
+		Facades: []v1alpha1.FacadeConfig{{Type: v1alpha1.FacadeTypeWebSocket}},
+	})
+
+	c := fake.NewClientBuilder().WithScheme(k8s.Scheme()).WithRuntimeObjects(ar, testNamespace(ar.Namespace)).Build()
+	t.Setenv(EnvPromptPackVersion, "2.3.0")
+
+	cfg, err := LoadFromCRD(context.Background(), c, "agent", "ns")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.PromptPackVersion != "1.0.0" {
+		t.Errorf("PromptPackVersion = %q, want %q (pinned must win over env fallback)", cfg.PromptPackVersion, "1.0.0")
+	}
+}
+
 func TestLoadFromCRD_FacadePortDefault(t *testing.T) {
 	ar := newFakeAgentRuntime("agent", "ns", v1alpha1.AgentRuntimeSpec{
 		PromptPackRef: v1alpha1.PromptPackRef{Name: "pack"},

@@ -464,6 +464,67 @@ func TestLoadFromCRD_InlineEvalGroups_Custom(t *testing.T) {
 	assert.Equal(t, []string{"pii-checks", "brand-voice"}, cfg.InlineEvalGroups)
 }
 
+// TestLoadFromCRD_PromptPackVersion_FallsBackToEnv is the #1847 regression: a
+// `track:` (or default-stable) AgentRuntime has spec.promptPackRef.Version ==
+// nil, so LoadFromCRD must fall back to OMNIA_PROMPTPACK_VERSION — set by the
+// operator from the RESOLVED PromptPack — instead of leaving
+// cfg.PromptPackVersion empty (which would make the EE eval loader
+// re-resolve to stable-max, diverging from what was actually deployed).
+func TestLoadFromCRD_PromptPackVersion_FallsBackToEnv(t *testing.T) {
+	ar := &v1alpha1.AgentRuntime{
+		ObjectMeta: metav1.ObjectMeta{Name: "agent", Namespace: "test-ns"},
+		Spec: v1alpha1.AgentRuntimeSpec{
+			PromptPackRef: v1alpha1.PromptPackRef{Name: "pack"},
+			Facades:       []v1alpha1.FacadeConfig{{Type: v1alpha1.FacadeTypeWebSocket}},
+		},
+	}
+	c := buildTestClient(ar)
+	t.Setenv(envPromptPackVersion, "2.3.0")
+
+	cfg, err := LoadFromCRD(context.Background(), c, "agent", "test-ns")
+	require.NoError(t, err)
+	assert.Equal(t, "2.3.0", cfg.PromptPackVersion)
+}
+
+// TestLoadFromCRD_PromptPackVersion_PinnedWinsOverEnv verifies that an
+// explicitly pinned spec.promptPackRef.version always wins over the
+// operator-injected env fallback — the env var only fills the gap for
+// track-selected agents, it never overrides an explicit pin.
+func TestLoadFromCRD_PromptPackVersion_PinnedWinsOverEnv(t *testing.T) {
+	ar := &v1alpha1.AgentRuntime{
+		ObjectMeta: metav1.ObjectMeta{Name: "agent", Namespace: "test-ns"},
+		Spec: v1alpha1.AgentRuntimeSpec{
+			PromptPackRef: v1alpha1.PromptPackRef{Name: "pack", Version: strPtr("1.0.0")},
+			Facades:       []v1alpha1.FacadeConfig{{Type: v1alpha1.FacadeTypeWebSocket}},
+		},
+	}
+	c := buildTestClient(ar)
+	t.Setenv(envPromptPackVersion, "2.3.0")
+
+	cfg, err := LoadFromCRD(context.Background(), c, "agent", "test-ns")
+	require.NoError(t, err)
+	assert.Equal(t, "1.0.0", cfg.PromptPackVersion,
+		"an explicitly pinned version must win over the OMNIA_PROMPTPACK_VERSION env fallback")
+}
+
+// TestLoadFromCRD_PromptPackVersion_EmptyWithoutEnv guards the no-env case:
+// nil ref.Version and no env var set must leave PromptPackVersion empty
+// rather than panicking or defaulting to a bogus value.
+func TestLoadFromCRD_PromptPackVersion_EmptyWithoutEnv(t *testing.T) {
+	ar := &v1alpha1.AgentRuntime{
+		ObjectMeta: metav1.ObjectMeta{Name: "agent", Namespace: "test-ns"},
+		Spec: v1alpha1.AgentRuntimeSpec{
+			PromptPackRef: v1alpha1.PromptPackRef{Name: "pack"},
+			Facades:       []v1alpha1.FacadeConfig{{Type: v1alpha1.FacadeTypeWebSocket}},
+		},
+	}
+	c := buildTestClient(ar)
+
+	cfg, err := LoadFromCRD(context.Background(), c, "agent", "test-ns")
+	require.NoError(t, err)
+	assert.Empty(t, cfg.PromptPackVersion)
+}
+
 func TestLoadFromCRD_FunctionOutputFormat(t *testing.T) {
 	ar := &v1alpha1.AgentRuntime{
 		ObjectMeta: metav1.ObjectMeta{Name: "fn-agent", Namespace: "test-ns"},

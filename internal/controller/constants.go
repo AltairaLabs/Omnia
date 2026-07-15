@@ -171,6 +171,12 @@ const (
 	envOmniaAgentName = "OMNIA_AGENT_NAME"
 	// envOmniaNamespace is the env var carrying the namespace (downward API).
 	envOmniaNamespace = "OMNIA_NAMESPACE"
+	// envPromptPackVersion carries the RESOLVED PromptPack's concrete
+	// semver (see appendPromptPackVersionEnv). A `track:`-selected
+	// AgentRuntime has spec.promptPackRef.Version == nil, so without this
+	// the runtime/facade would stamp an empty version on sessions — this
+	// keeps the eval-path version stamp concrete (#1847).
+	envPromptPackVersion = "OMNIA_PROMPTPACK_VERSION"
 )
 
 // Eval-related constants.

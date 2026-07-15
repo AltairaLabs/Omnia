@@ -619,9 +619,13 @@ var _ = Describe("AgentRuntime Controller", func() {
 			Expect(facadeEnvMap["OMNIA_AGENT_NAME"].ValueFrom.FieldRef).NotTo(BeNil())
 			Expect(facadeEnvMap["OMNIA_NAMESPACE"].ValueFrom).NotTo(BeNil())
 			Expect(facadeEnvMap["OMNIA_NAMESPACE"].ValueFrom.FieldRef).NotTo(BeNil())
-			// CRD-derived env vars (PROMPTPACK_NAME, VERSION, FACADE_TYPE) are no longer on facade
+			// CRD-derived env vars (PROMPTPACK_NAME, FACADE_TYPE) are no longer on facade.
+			// OMNIA_PROMPTPACK_VERSION IS injected (#1847): it carries the RESOLVED
+			// PromptPack's concrete version so a `track:`-selected AgentRuntime (whose
+			// spec.promptPackRef.Version is nil) still has the facade — which writes
+			// the session record — stamp a concrete version instead of an empty one.
 			Expect(facadeEnvMap).NotTo(HaveKey("OMNIA_PROMPTPACK_NAME"))
-			Expect(facadeEnvMap).NotTo(HaveKey("OMNIA_PROMPTPACK_VERSION"))
+			Expect(facadeEnvMap["OMNIA_PROMPTPACK_VERSION"].Value).To(Equal("2.1.0"))
 			Expect(facadeEnvMap).NotTo(HaveKey("OMNIA_FACADE_TYPE"))
 			Expect(facadeEnvMap["OMNIA_HANDLER_MODE"].Value).To(Equal("runtime"))
 			Expect(facadeEnvMap["OMNIA_RUNTIME_ADDRESS"].Value).To(Equal("localhost:9000"))

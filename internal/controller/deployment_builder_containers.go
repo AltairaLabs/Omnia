@@ -45,6 +45,12 @@ func (r *AgentRuntimeReconciler) buildFacadeContainer(
 		pullPolicy = corev1.PullIfNotPresent
 	}
 
+	facadeEnvVars := r.buildFacadeEnvVars(agentRuntime)
+	// The facade writes the session record (off the gRPC bus), so its eval-path
+	// version stamp must carry the same RESOLVED PromptPack version as the
+	// runtime container (#1847) — see appendPromptPackVersionEnv.
+	facadeEnvVars = r.appendPromptPackVersionEnv(facadeEnvVars, promptPack)
+
 	container := corev1.Container{
 		Name:            FacadeContainerName,
 		Image:           facadeImage,
@@ -66,7 +72,7 @@ func (r *AgentRuntimeReconciler) buildFacadeContainer(
 				Protocol:      corev1.ProtocolTCP,
 			},
 		},
-		Env:          r.buildFacadeEnvVars(agentRuntime),
+		Env:          facadeEnvVars,
 		VolumeMounts: r.buildFacadeVolumeMounts(agentRuntime, promptPack),
 		ReadinessProbe: &corev1.Probe{
 			ProbeHandler: corev1.ProbeHandler{
@@ -137,7 +143,7 @@ func (r *AgentRuntimeReconciler) buildA2AContainer(
 				Protocol:      corev1.ProtocolTCP,
 			},
 		},
-		Env:          r.buildA2AEnvVars(agentRuntime, resolvedClients),
+		Env:          r.buildA2AEnvVars(agentRuntime, promptPack, resolvedClients),
 		VolumeMounts: r.buildRuntimeVolumeMounts(agentRuntime, promptPack, toolRegistry),
 		ReadinessProbe: &corev1.Probe{
 			ProbeHandler: corev1.ProbeHandler{

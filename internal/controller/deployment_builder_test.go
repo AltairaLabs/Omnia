@@ -111,7 +111,7 @@ func TestBuildA2AEnvVars(t *testing.T) {
 		ConversationTTL: strPtr("45m"),
 	}}}
 
-	envVars := r.buildA2AEnvVars(ar, nil)
+	envVars := r.buildA2AEnvVars(ar, nil, nil)
 
 	envMap := make(map[string]string)
 	for _, ev := range envVars {
@@ -144,7 +144,7 @@ func TestBuildA2AEnvVars_NoA2AConfig(t *testing.T) {
 	ar := &omniav1alpha1.AgentRuntime{}
 	ar.Spec.Facades = []omniav1alpha1.FacadeConfig{{Type: omniav1alpha1.FacadeTypeA2A}}
 
-	envVars := r.buildA2AEnvVars(ar, nil)
+	envVars := r.buildA2AEnvVars(ar, nil, nil)
 
 	envMap := make(map[string]string)
 	for _, ev := range envVars {
@@ -171,7 +171,7 @@ func TestBuildA2AEnvVars_WithTracing(t *testing.T) {
 	ar := &omniav1alpha1.AgentRuntime{}
 	ar.Spec.Facades = []omniav1alpha1.FacadeConfig{{Type: omniav1alpha1.FacadeTypeA2A}}
 
-	envVars := r.buildA2AEnvVars(ar, nil)
+	envVars := r.buildA2AEnvVars(ar, nil, nil)
 
 	envMap := make(map[string]string)
 	for _, ev := range envVars {
@@ -185,6 +185,34 @@ func TestBuildA2AEnvVars_WithTracing(t *testing.T) {
 	}
 	if envMap["OMNIA_TRACING_ENDPOINT"] != "otel-collector:4317" {
 		t.Errorf("OMNIA_TRACING_ENDPOINT = %q, want %q", envMap["OMNIA_TRACING_ENDPOINT"], "otel-collector:4317")
+	}
+}
+
+func TestBuildA2AEnvVars_InjectsResolvedPromptPackVersion(t *testing.T) {
+	r := &AgentRuntimeReconciler{}
+	ar := &omniav1alpha1.AgentRuntime{}
+	ar.Spec.Facades = []omniav1alpha1.FacadeConfig{{Type: omniav1alpha1.FacadeTypeA2A, A2A: &omniav1alpha1.A2AConfig{}}}
+
+	// Standalone A2A writes the session record, so a track:-resolved version must
+	// reach it via env (#1847) — the same guarantee as split facade/runtime.
+	pack := &omniav1alpha1.PromptPack{Spec: omniav1alpha1.PromptPackSpec{Version: "2.1.0"}}
+	envVars := r.buildA2AEnvVars(ar, pack, nil)
+
+	got := ""
+	for _, ev := range envVars {
+		if ev.Name == envPromptPackVersion {
+			got = ev.Value
+		}
+	}
+	if got != "2.1.0" {
+		t.Errorf("%s = %q, want %q", envPromptPackVersion, got, "2.1.0")
+	}
+
+	// Nil pack must not inject the var (and must not panic).
+	for _, ev := range r.buildA2AEnvVars(ar, nil, nil) {
+		if ev.Name == envPromptPackVersion {
+			t.Errorf("%s must be absent for a nil PromptPack", envPromptPackVersion)
+		}
 	}
 }
 
@@ -209,7 +237,7 @@ func TestBuildA2AEnvVars_WithClients(t *testing.T) {
 		{Name: "agent-a", URL: "http://agent-a:8080", ExposeAsTools: true, AuthTokenEnv: "OMNIA_A2A_CLIENT_TOKEN_AGENT_A"},
 	}
 
-	envVars := r.buildA2AEnvVars(ar, clients)
+	envVars := r.buildA2AEnvVars(ar, nil, clients)
 
 	envMap := make(map[string]string)
 	for _, ev := range envVars {
@@ -976,6 +1004,97 @@ func TestBuildRuntimeEnvVars_NoSkillManifestPathWithoutResolvedPack(t *testing.T
 
 	assert.Nil(t, findEnvVar(env, "OMNIA_PROMPTPACK_MANIFEST_PATH"),
 		"manifest path env var must be omitted, not panic, when no PromptPack has been resolved")
+}
+
+// TestBuildRuntimeEnvVars_PromptPackVersion is the #1847 regression: the
+// runtime container must receive the RESOLVED PromptPack's concrete version
+// via OMNIA_PROMPTPACK_VERSION so a `track:` (or default-stable) AgentRuntime
+// — whose spec.promptPackRef.Version is nil — still stamps a concrete
+// version on sessions, instead of an empty string that makes the EE eval
+// loader re-resolve to stable-max and diverge from what was actually
+// deployed for prerelease-track agents.
+func TestBuildRuntimeEnvVars_PromptPackVersion(t *testing.T) {
+	r := &AgentRuntimeReconciler{}
+	ar := &omniav1alpha1.AgentRuntime{
+		Spec: omniav1alpha1.AgentRuntimeSpec{
+			PromptPackRef: omniav1alpha1.PromptPackRef{Name: "mypack"},
+		},
+	}
+	promptPack := &omniav1alpha1.PromptPack{}
+	promptPack.Spec.Version = "2.3.0"
+
+	env := r.buildRuntimeEnvVars(ar, promptPack, nil)
+
+	e := findEnvVar(env, "OMNIA_PROMPTPACK_VERSION")
+	require.NotNil(t, e, "OMNIA_PROMPTPACK_VERSION must be set for a resolved PromptPack")
+	assert.Equal(t, "2.3.0", e.Value)
+}
+
+// TestBuildRuntimeEnvVars_NoPromptPackVersionWithoutResolvedPack guards the
+// nil-safety of the change above: a nil promptPack (no pack resolved yet)
+// must omit the env var rather than panic.
+func TestBuildRuntimeEnvVars_NoPromptPackVersionWithoutResolvedPack(t *testing.T) {
+	r := &AgentRuntimeReconciler{}
+	ar := &omniav1alpha1.AgentRuntime{
+		Spec: omniav1alpha1.AgentRuntimeSpec{
+			PromptPackRef: omniav1alpha1.PromptPackRef{Name: "mypack"},
+		},
+	}
+
+	env := r.buildRuntimeEnvVars(ar, nil, nil)
+
+	assert.Nil(t, findEnvVar(env, "OMNIA_PROMPTPACK_VERSION"),
+		"version env var must be omitted, not panic, when no PromptPack has been resolved")
+}
+
+// TestBuildFacadeContainer_PromptPackVersionEnv is the facade half of the
+// #1847 fix: the facade container writes the session record (per
+// architecture, off the gRPC bus), so the eval-path version stamp comes from
+// the FACADE's config, not just the runtime's — the facade container must
+// also carry OMNIA_PROMPTPACK_VERSION from the resolved pack.
+func TestBuildFacadeContainer_PromptPackVersionEnv(t *testing.T) {
+	r := &AgentRuntimeReconciler{}
+	ar := &omniav1alpha1.AgentRuntime{}
+	ar.Name = "test-agent"
+	ar.Namespace = "default"
+
+	pp := &omniav1alpha1.PromptPack{}
+	pp.Spec.Version = "2.3.0"
+
+	container := r.buildFacadeContainer(ar, pp, 8080)
+
+	e := findEnvVar(container.Env, "OMNIA_PROMPTPACK_VERSION")
+	require.NotNil(t, e, "OMNIA_PROMPTPACK_VERSION must be set on the facade container for a resolved PromptPack")
+	assert.Equal(t, "2.3.0", e.Value)
+}
+
+// TestBuildFacadeContainer_NoPromptPackVersionForUnversionedPack guards the
+// empty-version case: a resolved-but-unversioned PromptPack (defensive only —
+// version is CRD-required) must omit the env var, not emit an empty value.
+func TestBuildFacadeContainer_NoPromptPackVersionForUnversionedPack(t *testing.T) {
+	r := &AgentRuntimeReconciler{}
+	ar := &omniav1alpha1.AgentRuntime{}
+	ar.Name = "test-agent"
+	ar.Namespace = "default"
+
+	container := r.buildFacadeContainer(ar, &omniav1alpha1.PromptPack{}, 8080)
+
+	assert.Nil(t, findEnvVar(container.Env, "OMNIA_PROMPTPACK_VERSION"),
+		"version env var must be omitted when the resolved PromptPack has no version")
+}
+
+// TestAppendPromptPackVersionEnv_NilPromptPack is a direct unit test of the
+// shared helper's nil-safety (independent of buildFacadeContainer, whose
+// volume-mount path has its own, unrelated nil-promptPack invariant): a nil
+// promptPack must return the input slice unchanged, not panic.
+func TestAppendPromptPackVersionEnv_NilPromptPack(t *testing.T) {
+	r := &AgentRuntimeReconciler{}
+	in := []corev1.EnvVar{{Name: "EXISTING", Value: "x"}}
+
+	out := r.appendPromptPackVersionEnv(in, nil)
+
+	assert.Equal(t, in, out)
+	assert.Nil(t, findEnvVar(out, "OMNIA_PROMPTPACK_VERSION"))
 }
 
 func TestResolveSessionURLForWorkspace(t *testing.T) {
