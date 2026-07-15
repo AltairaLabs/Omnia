@@ -10,6 +10,7 @@ resources:
 - bases/omnia.altairalabs.ai_arenajobs.yaml
 - bases/omnia.altairalabs.ai_arenasources.yaml
 - bases/omnia.altairalabs.ai_arenatemplatesources.yaml
+- bases/omnia.altairalabs.ai_promptpacksources.yaml
 - bases/omnia.altairalabs.ai_sessionprivacypolicies.yaml
 - bases/omnia.altairalabs.ai_sessionretentionpolicies.yaml
 - bases/omnia.altairalabs.ai_memorypolicies.yaml

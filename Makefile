@@ -371,6 +371,7 @@ sync-chart-crds: manifests manifests-ee ## Sync CRDs from config/crd/bases to ch
 	# so it lives here too — not in the core crds/ dir.
 	@echo "Syncing enterprise CRDs to omnia-ee-crds subchart..."
 	@for f in config/crd/bases/omnia.altairalabs.ai_arena*.yaml \
+	          config/crd/bases/omnia.altairalabs.ai_promptpacksources.yaml \
 	          config/crd/bases/omnia.altairalabs.ai_sessionprivacypolicies.yaml \
 	          config/crd/bases/omnia.altairalabs.ai_rolloutanalyses.yaml \
 	          config/crd/bases/omnia.altairalabs.ai_toolpolicies.yaml; do \

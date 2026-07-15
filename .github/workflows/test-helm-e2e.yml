@@ -630,7 +630,7 @@ jobs:
           # EE CRDs installed in the cluster right now (0 in a fresh cluster).
           count_ee_crds() {
             kubectl get crd -o name 2>/dev/null \
-              | grep -cE 'arena|rolloutanalyses|sessionprivacypolicies|toolpolicies' || true
+              | grep -cE 'arena|rolloutanalyses|sessionprivacypolicies|toolpolicies|promptpacksources' || true
           }
           # Enterprise install flags (test images never pull; --wait is off so
           # helm returns once manifests are applied — CRD ordering is what we test).
@@ -649,11 +649,11 @@ jobs:
           PKG=$(ls /tmp/pkg/omnia-*.tgz | head -1)
           echo "PKG=$PKG"
 
-          echo "=== Assert the tarball bundles exactly 7 EE subchart CRDs ==="
+          echo "=== Assert the tarball bundles exactly 8 EE subchart CRDs ==="
           EE_IN_PKG=$(tar tzf "$PKG" | grep -cE 'omnia-ee-crds/crds/omnia\.altairalabs\.ai_.*\.yaml' || true)
-          echo "EE CRDs in tarball: $EE_IN_PKG (expect 7)"
-          if [ "$EE_IN_PKG" -ne 7 ]; then
-            echo "ERROR: expected 7 EE CRDs in package, got $EE_IN_PKG"
+          echo "EE CRDs in tarball: $EE_IN_PKG (expect 8)"
+          if [ "$EE_IN_PKG" -ne 8 ]; then
+            echo "ERROR: expected 8 EE CRDs in package, got $EE_IN_PKG"
             tar tzf "$PKG" | grep omnia-ee-crds || echo "(no omnia-ee-crds paths in tarball at all)"
             exit 1
           fi
@@ -674,15 +674,15 @@ jobs:
           fi
           helm uninstall omnia -n omnia-system
 
-          echo "=== Enterprise install → 7 EE CRDs AND in-release EE CRs map (#1796 bug) ==="
+          echo "=== Enterprise install → 8 EE CRDs AND in-release EE CRs map (#1796 bug) ==="
           helm install omnia "$PKG" \
             -f charts/omnia/values-chart-tests.yaml \
             --namespace omnia-system --create-namespace \
             "${EE_FLAGS[@]}" \
             --timeout 3m
           ENT=$(count_ee_crds)
-          echo "EE CRDs after enterprise install: $ENT (expect 7)"
-          [ "$ENT" -eq 7 ] || { echo "ERROR: enterprise install created $ENT EE CRDs, expected 7"; exit 1; }
+          echo "EE CRDs after enterprise install: $ENT (expect 8)"
+          [ "$ENT" -eq 8 ] || { echo "ERROR: enterprise install created $ENT EE CRDs, expected 8"; exit 1; }
 
           # These CRs are rendered in the same release as their CRDs; pre-#1796
           # they aborted the install with "no matches for kind ...".
@@ -693,8 +693,8 @@ jobs:
           helm uninstall omnia -n omnia-system
           sleep 5
           KEPT=$(count_ee_crds)
-          echo "EE CRDs after uninstall: $KEPT (expect 7 preserved)"
-          [ "$KEPT" -eq 7 ] || { echo "ERROR: uninstall deleted EE CRDs (got $KEPT, expected 7)"; exit 1; }
+          echo "EE CRDs after uninstall: $KEPT (expect 8 preserved)"
+          [ "$KEPT" -eq 8 ] || { echo "ERROR: uninstall deleted EE CRDs (got $KEPT, expected 8)"; exit 1; }
 
           echo "=== Reinstall on surviving CRDs → no ownership conflict ==="
           helm install omnia "$PKG" \

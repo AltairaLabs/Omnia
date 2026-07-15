@@ -29,9 +29,12 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
@@ -43,6 +46,11 @@ const (
 	PromptPackConditionTypeSourceValid    = "SourceValid"
 	PromptPackConditionTypeSchemaValid    = "SchemaValid"
 	PromptPackConditionTypeAgentsNotified = "AgentsNotified"
+	// PromptPackConditionTypeSuperseded is True when a newer version of the
+	// pack has been published on the version-object's channel (stable or
+	// prerelease). Its lastTransitionTime marks the supersession time, which
+	// retention GC uses for its min-age guard.
+	PromptPackConditionTypeSuperseded = "Superseded"
 )
 
 // LabelPromptPackName indexes a PromptPack version-object by its logical pack name.
@@ -160,8 +168,17 @@ func (r *PromptPackReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	}
 	log.V(1).Info("Found referencing AgentRuntimes", "count", len(referencingRuntimes))
 
+	// List sibling version-objects (same packName) so phase can be computed
+	// channel-aware: a version is Active iff it is the stable- or
+	// prerelease-channel-max of its pack; otherwise Superseded.
+	siblings, err := r.listSiblings(ctx, promptPack)
+	if err != nil {
+		log.Error(err, "Failed to list sibling PromptPacks")
+		return ctrl.Result{}, err
+	}
+
 	// Update status based on rollout strategy
-	r.updateRolloutStatus(promptPack, referencingRuntimes)
+	r.updateRolloutStatus(promptPack, referencingRuntimes, siblings)
 
 	// Set notification condition
 	if len(referencingRuntimes) > 0 {
@@ -357,14 +374,94 @@ func (r *PromptPackReconciler) findReferencingAgentRuntimes(ctx context.Context,
 	return referencingRuntimes, nil
 }
 
-// updateRolloutStatus updates the status to reflect the active version.
-// The referencingRuntimes parameter is used to track how many agents will be affected.
-func (r *PromptPackReconciler) updateRolloutStatus(promptPack *omniav1alpha1.PromptPack, referencingRuntimes []omniav1alpha1.AgentRuntime) {
+// listSiblings returns the version-objects sharing this pack's logical name
+// (matched by the LabelPromptPackName label). The reconciling pack is always
+// included: it reached this point post-validation, so it participates as a
+// valid channel-max candidate even if its listed copy is momentarily stale
+// (eventual consistency) or missing from the index.
+func (r *PromptPackReconciler) listSiblings(ctx context.Context, pack *omniav1alpha1.PromptPack) ([]omniav1alpha1.PromptPack, error) {
+	var sibs omniav1alpha1.PromptPackList
+	if err := r.List(ctx, &sibs,
+		client.InNamespace(pack.Namespace),
+		client.MatchingLabels{LabelPromptPackName: pack.Spec.PackName}); err != nil {
+		return nil, err
+	}
+	items := sibs.Items
+	for i := range items {
+		if items[i].Name == pack.Name {
+			return items, nil
+		}
+	}
+	return append(items, *pack), nil
+}
+
+// resolvePackPhase reports whether self is Active — i.e. its version equals the
+// stable-channel-max OR the prerelease-channel-max of the eligible siblings.
+// Eligible = VALIDATED siblings (Phase Active or Superseded) plus self. Self is
+// always eligible: it reached updateRolloutStatus post-validation, so it is a
+// valid channel-max candidate regardless of its currently-stored phase.
+//
+// Excluding not-yet-validated siblings (Phase Pending or "") is deliberate: a
+// newer version whose pack.json is still unvalidated (or bad) must NOT supersede
+// a live older version. The sibling watch re-enqueues older siblings on the
+// newer version's phase transition (Pending→Active), so a valid newer version
+// still converges the older one to Superseded on a subsequent reconcile.
+func resolvePackPhase(self *omniav1alpha1.PromptPack, siblings []omniav1alpha1.PromptPack) bool {
+	eligible := make([]omniav1alpha1.PromptPack, 0, len(siblings)+1)
+	selfIncluded := false
+	for i := range siblings {
+		s := siblings[i]
+		if s.Name == self.Name && s.Namespace == self.Namespace {
+			eligible = append(eligible, *self)
+			selfIncluded = true
+			continue
+		}
+		if !isValidatedPhase(s.Status.Phase) {
+			continue
+		}
+		eligible = append(eligible, s)
+	}
+	if !selfIncluded {
+		eligible = append(eligible, *self)
+	}
+
+	stableMax, _ := channelMax(eligible, promptPackTrackStable)
+	preMax, _ := channelMax(eligible, promptPackTrackPrerelease)
+	return (stableMax != nil && versionsEqual(self.Spec.Version, stableMax.Spec.Version)) ||
+		(preMax != nil && versionsEqual(self.Spec.Version, preMax.Spec.Version))
+}
+
+// isValidatedPhase reports whether a sibling has passed validation and so counts
+// toward channel-max. Only Active and Superseded qualify; Failed and the
+// not-yet-reconciled Pending/"" phases are excluded.
+func isValidatedPhase(phase omniav1alpha1.PromptPackPhase) bool {
+	return phase == omniav1alpha1.PromptPackPhaseActive ||
+		phase == omniav1alpha1.PromptPackPhaseSuperseded
+}
+
+// updateRolloutStatus sets the pack's phase channel-aware: Active when it is the
+// stable- or prerelease-channel-max of its siblings, otherwise Superseded. The
+// referencingRuntimes count is retained for future metrics.
+func (r *PromptPackReconciler) updateRolloutStatus(promptPack *omniav1alpha1.PromptPack, referencingRuntimes []omniav1alpha1.AgentRuntime, siblings []omniav1alpha1.PromptPack) {
 	version := promptPack.Spec.Version
 	_ = len(referencingRuntimes) // Track affected agents count for future metrics
 
-	promptPack.Status.Phase = omniav1alpha1.PromptPackPhaseActive
-	promptPack.Status.ActiveVersion = &version
+	if resolvePackPhase(promptPack, siblings) {
+		promptPack.Status.Phase = omniav1alpha1.PromptPackPhaseActive
+		promptPack.Status.ActiveVersion = &version
+		SetCondition(&promptPack.Status.Conditions, promptPack.Generation,
+			PromptPackConditionTypeSuperseded, metav1.ConditionFalse,
+			"IsChannelMax", "This version is the current channel-max for its pack")
+		return
+	}
+
+	promptPack.Status.Phase = omniav1alpha1.PromptPackPhaseSuperseded
+	// Clear the stale ActiveVersion: a pack that was previously the channel-max
+	// no longer serves as the active version once superseded.
+	promptPack.Status.ActiveVersion = nil
+	SetCondition(&promptPack.Status.Conditions, promptPack.Generation,
+		PromptPackConditionTypeSuperseded, metav1.ConditionTrue,
+		"NewerVersionPublished", "A newer version of this pack has been published on its channel")
 }
 
 // findPromptPacksForConfigMap maps a ConfigMap to PromptPacks that reference it.
@@ -395,6 +492,65 @@ func (r *PromptPackReconciler) findPromptPacksForConfigMap(ctx context.Context, 
 	return requests
 }
 
+// findSiblingPromptPacks maps a changed PromptPack to every version-object
+// sharing its logical pack name, so publishing a new version re-reconciles the
+// older siblings (which then transition to Superseded).
+func (r *PromptPackReconciler) findSiblingPromptPacks(ctx context.Context, obj client.Object) []reconcile.Request {
+	log := logf.FromContext(ctx)
+	packName := obj.GetLabels()[LabelPromptPackName]
+	if packName == "" {
+		return nil
+	}
+
+	promptPackList := &omniav1alpha1.PromptPackList{}
+	if err := r.List(ctx, promptPackList,
+		client.InNamespace(obj.GetNamespace()),
+		client.MatchingLabels{LabelPromptPackName: packName}); err != nil {
+		log.Error(err, "Failed to list sibling PromptPacks for watch mapping")
+		return nil
+	}
+
+	requests := make([]reconcile.Request, 0, len(promptPackList.Items))
+	for i := range promptPackList.Items {
+		requests = append(requests, reconcile.Request{
+			NamespacedName: types.NamespacedName{
+				Name:      promptPackList.Items[i].Name,
+				Namespace: promptPackList.Items[i].Namespace,
+			},
+		})
+	}
+	return requests
+}
+
+// siblingPhaseChangedPredicate fires the sibling watch on spec (generation)
+// changes AND on Status.Phase transitions, but NOT on other status-only writes
+// (e.g. LastUpdated timestamp refreshes). Phase transitions must fan out because
+// eligibility for channel-max is gated on a sibling's validated phase: a newer
+// version going Pending→Active (or Active→Superseded) has to re-enqueue the
+// older siblings so they re-resolve their phase. GenerationChangedPredicate
+// alone would drop those status-only phase transitions, stalling convergence.
+func siblingPhaseChangedPredicate() predicate.Predicate {
+	return predicate.Funcs{
+		CreateFunc:  func(event.CreateEvent) bool { return true },
+		DeleteFunc:  func(event.DeleteEvent) bool { return true },
+		GenericFunc: func(event.GenericEvent) bool { return false },
+		UpdateFunc: func(e event.UpdateEvent) bool {
+			if e.ObjectOld == nil || e.ObjectNew == nil {
+				return false
+			}
+			if e.ObjectOld.GetGeneration() != e.ObjectNew.GetGeneration() {
+				return true
+			}
+			oldPack, okOld := e.ObjectOld.(*omniav1alpha1.PromptPack)
+			newPack, okNew := e.ObjectNew.(*omniav1alpha1.PromptPack)
+			if !okOld || !okNew {
+				return false
+			}
+			return oldPack.Status.Phase != newPack.Status.Phase
+		},
+	}
+}
+
 // SetupWithManager sets up the controller with the Manager.
 func (r *PromptPackReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
@@ -402,6 +558,16 @@ func (r *PromptPackReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Watches(
 			&corev1.ConfigMap{},
 			handler.EnqueueRequestsFromMapFunc(r.findPromptPacksForConfigMap),
+		).
+		// Publishing a new version-object — or a sibling's phase transitioning
+		// once validated — must re-reconcile older siblings so they converge to
+		// Active/Superseded. The custom predicate fires on generation changes
+		// and Status.Phase transitions, but not on LastUpdated-only status
+		// writes, avoiding reconcile churn.
+		Watches(
+			&omniav1alpha1.PromptPack{},
+			handler.EnqueueRequestsFromMapFunc(r.findSiblingPromptPacks),
+			builder.WithPredicates(siblingPhaseChangedPredicate()),
 		).
 		Named("promptpack").
 		Complete(r)

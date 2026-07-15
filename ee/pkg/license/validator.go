@@ -363,19 +363,26 @@ func parsePublicKey(pemData []byte) (*rsa.PublicKey, error) {
 	return rsaKey, nil
 }
 
-// ValidateArenaSource validates that the source type is allowed by the license.
-func (v *Validator) ValidateArenaSource(ctx context.Context, sourceType string) error {
-	license := v.GetLicenseOrDefault(ctx)
-
-	if license.IsExpired() {
+// validateSourceType is the shared license gate for any *Source CRD's source type.
+func (v *Validator) validateSourceType(ctx context.Context, sourceType string) error {
+	lic := v.GetLicenseOrDefault(ctx)
+	if lic.IsExpired() {
 		return NewLicenseExpiredError()
 	}
-
-	if !license.CanUseSourceType(sourceType) {
+	if !lic.CanUseSourceType(sourceType) {
 		return NewSourceTypeError(sourceType)
 	}
-
 	return nil
+}
+
+// ValidateArenaSource validates that the source type is allowed by the license.
+func (v *Validator) ValidateArenaSource(ctx context.Context, sourceType string) error {
+	return v.validateSourceType(ctx, sourceType)
+}
+
+// ValidatePromptPackSource validates that the source type is allowed by the license.
+func (v *Validator) ValidatePromptPackSource(ctx context.Context, sourceType string) error {
+	return v.validateSourceType(ctx, sourceType)
 }
 
 // ValidateArenaJob validates that the job configuration is allowed by the license.

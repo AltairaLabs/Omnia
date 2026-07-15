@@ -29,7 +29,7 @@ import (
 	"github.com/altairalabs/omnia/ee/pkg/metrics"
 )
 
-// expectedReconcilers is the canonical 5-reconciler set the binary
+// expectedReconcilers is the canonical 6-reconciler set the binary
 // must register. Each entry corresponds to one SetupWithManager call
 // that was previously inline in main(). A regression that removes a
 // reconciler from buildReconcilers fails this test.
@@ -42,10 +42,11 @@ var expectedReconcilers = []string{
 	controllerArenaJob,
 	controllerArenaDevSession,
 	controllerKeyRotation,
+	controllerPromptPackSource,
 }
 
 // TestBuildReconcilers_RegistersAllExpected asserts that buildReconcilers
-// produces the five reconciler entries the binary must register. This is
+// produces the six reconciler entries the binary must register. This is
 // the wiring contract: a removed entry here means production silently
 // stops reconciling its CRD. setupOptions can be zero-valued because
 // buildReconcilers doesn't dereference the options at construction —
@@ -88,6 +89,7 @@ func TestBuildWebhooks_WithLicenseHooks(t *testing.T) {
 	want := []string{
 		controllerArenaSource, controllerArenaJob,
 		controllerArenaTemplateSource, webhookAgentRuntimeCustomFacade,
+		controllerPromptPackSource,
 	}
 	assertWebhookNames(t, got, want)
 }
@@ -339,6 +341,7 @@ func TestSetupWebhooks_RegistersAllAgainstRealManager(t *testing.T) {
 	want := []string{
 		controllerArenaSource, controllerArenaJob,
 		controllerArenaTemplateSource, webhookAgentRuntimeCustomFacade,
+		controllerPromptPackSource,
 	}
 	if len(registered) != len(want) {
 		t.Errorf("registered %d webhooks, want %d: %v", len(registered), len(want), registered)
