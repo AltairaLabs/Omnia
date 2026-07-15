@@ -29,14 +29,15 @@ import (
 	corev1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 	omniav1alpha1 "github.com/altairalabs/omnia/ee/api/v1alpha1"
 	"github.com/altairalabs/omnia/ee/pkg/license"
+	"github.com/altairalabs/omnia/internal/promptpack/packselect"
 	"github.com/altairalabs/omnia/internal/sourcesync"
 )
 
 // labelPromptPackName is the resolution label carried by every materialized
 // PromptPack version-object and its backing ConfigMap. The value is the logical
-// pack name (spec.packName). Defined locally to avoid crossing the
-// internal/controller module boundary.
-const labelPromptPackName = "omnia.altairalabs.ai/promptpack"
+// pack name (spec.packName). Aliases packselect.Label, the single source of
+// truth for the value.
+const labelPromptPackName = packselect.Label
 
 // managedByPromptPack marks the backing ConfigMap as owned by the promptpack
 // materialization flow (mirrors the dashboard deploy route convention).

@@ -29,31 +29,19 @@ package promptpack
 import (
 	"context"
 	"fmt"
-	"strings"
 
-	"github.com/Masterminds/semver/v3"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
+	"github.com/altairalabs/omnia/internal/promptpack/packselect"
 )
 
 // packJSONKey is the ConfigMap data key holding the compiled pack.json. It is an
 // implementation detail of the configmap source type and is never exposed to
 // callers — Load returns raw bytes.
 const packJSONKey = "pack.json"
-
-// packNameLabel is the label the operator stamps on every PromptPack object
-// with its logical spec.packName (metadata.name is a deterministic pp-<hash>
-// and is never the packName since Phase 1, #1836). Load resolves by this
-// label, never by object name.
-//
-// TODO(#1837 follow-up): the label key, semver parsing (parsePackVersion),
-// and stable-channel selection here duplicate internal/controller's
-// selectPromptPack/parsePackVersion/channelMax helpers. Consolidate into one
-// shared package once both call sites stabilize.
-const packNameLabel = "omnia.altairalabs.ai/promptpack"
 
 // Resolver loads PromptPack content via the PromptPack CR.
 type Resolver struct {
@@ -75,7 +63,7 @@ func NewResolver(c client.Client) *Resolver {
 // backing store directly.
 func (r *Resolver) Load(ctx context.Context, namespace, packName, version string) ([]byte, error) {
 	var list omniav1alpha1.PromptPackList
-	if err := r.client.List(ctx, &list, client.InNamespace(namespace), client.MatchingLabels{packNameLabel: packName}); err != nil {
+	if err := r.client.List(ctx, &list, client.InNamespace(namespace), client.MatchingLabels{packselect.Label: packName}); err != nil {
 		return nil, fmt.Errorf("list PromptPacks %s/%s: %w", namespace, packName, err)
 	}
 
@@ -94,64 +82,29 @@ func (r *Resolver) Load(ctx context.Context, namespace, packName, version string
 }
 
 // selectPromptPack picks one PromptPack from candidates (all sharing packName,
-// already filtered by the packNameLabel List call) by exact version match, or
-// — when version is empty — the highest stable (non-prerelease) semver, via
-// stableChannelMax. This applies even when there is exactly one candidate: a
-// lone prerelease-only pack must NOT be returned as the implicit default,
-// consistent with the operator's stable-channel default (#1837 review).
+// already filtered by the packselect.Label List call) by exact version match,
+// or — when version is empty — the highest stable (non-prerelease) semver via
+// packselect.ChannelMax. This applies even when there is exactly one candidate:
+// a lone prerelease-only pack must NOT be returned as the implicit default,
+// consistent with the operator's stable-channel default (#1837 review). It wraps
+// packselect with resolver-specific error wording that callers/tests rely on.
 func selectPromptPack(candidates []omniav1alpha1.PromptPack, packName, version string) (*omniav1alpha1.PromptPack, error) {
 	if len(candidates) == 0 {
 		return nil, fmt.Errorf("no PromptPack found for packName %q", packName)
 	}
 	if version != "" {
 		for i := range candidates {
-			if versionsEqual(candidates[i].Spec.Version, version) {
+			if packselect.VersionsEqual(candidates[i].Spec.Version, version) {
 				return &candidates[i], nil
 			}
 		}
 		return nil, fmt.Errorf("no PromptPack matches packName %q version %q", packName, version)
 	}
-	return stableChannelMax(candidates, packName)
-}
-
-// versionsEqual compares two spec.version strings, tolerating a leading "v" on
-// either side via strict semver parsing; falls back to raw string equality
-// when either side fails to parse as semver.
-func versionsEqual(a, b string) bool {
-	av, aErr := parsePackVersion(a)
-	bv, bErr := parsePackVersion(b)
-	if aErr == nil && bErr == nil {
-		return av.Equal(bv)
-	}
-	return a == b
-}
-
-// parsePackVersion parses a PromptPack spec.version (CRD pattern allows a
-// leading "v"). Stripping the "v" before StrictNewVersion accepts full
-// v-prefixed semver (v1.5.0 == 1.5.0) while still rejecting incomplete values
-// like "v1"/"1" (which then fall back to string equality at call sites).
-func parsePackVersion(s string) (*semver.Version, error) {
-	return semver.StrictNewVersion(strings.TrimPrefix(s, "v"))
-}
-
-// stableChannelMax returns the candidate with the highest stable (non-
-// prerelease) semver, matching the operator's stable channel default.
-func stableChannelMax(candidates []omniav1alpha1.PromptPack, packName string) (*omniav1alpha1.PromptPack, error) {
-	var best *omniav1alpha1.PromptPack
-	var bestV *semver.Version
-	for i := range candidates {
-		v, err := parsePackVersion(candidates[i].Spec.Version)
-		if err != nil || v.Prerelease() != "" {
-			continue
-		}
-		if bestV == nil || v.GreaterThan(bestV) {
-			best, bestV = &candidates[i], v
-		}
-	}
-	if best == nil {
+	pp, err := packselect.ChannelMax(candidates, packselect.TrackStable)
+	if err != nil {
 		return nil, fmt.Errorf("no stable PromptPack version found for packName %q", packName)
 	}
-	return best, nil
+	return pp, nil
 }
 
 // loadConfigMap resolves a configmap-source PromptPack: it follows

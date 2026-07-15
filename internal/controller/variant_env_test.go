@@ -48,9 +48,9 @@ func TestA2AEnvVars_SetsStableVariant(t *testing.T) {
 	ar.Name = variantTestAgent
 	ar.Spec.Facades = []omniav1alpha1.FacadeConfig{{Type: omniav1alpha1.FacadeTypeA2A}}
 
-	_, ok := findEnv(r.buildA2AEnvVars(ar, nil), envFacadeVariant)
+	_, ok := findEnv(r.buildA2AEnvVars(ar, nil, nil), envFacadeVariant)
 	assert.True(t, ok, "buildA2AEnvVars must set %s", envFacadeVariant)
-	assert.Equal(t, variantStable, envValue(r.buildA2AEnvVars(ar, nil), envFacadeVariant))
+	assert.Equal(t, variantStable, envValue(r.buildA2AEnvVars(ar, nil, nil), envFacadeVariant))
 }
 
 // setCandidateVariantEnv must flip the facade container's variant to candidate

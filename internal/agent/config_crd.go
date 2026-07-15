@@ -54,6 +54,14 @@ func LoadFromCRD(ctx context.Context, c client.Client, name, namespace string) (
 	if ar.Spec.PromptPackRef.Version != nil {
 		cfg.PromptPackVersion = *ar.Spec.PromptPackRef.Version
 	}
+	// track:-selected AgentRuntimes have no pinned version — fall back to the
+	// operator-resolved version stamped into the pod env (#1847), so the
+	// facade (which writes the session record) stamps a concrete version.
+	if cfg.PromptPackVersion == "" {
+		if v := os.Getenv(EnvPromptPackVersion); v != "" {
+			cfg.PromptPackVersion = v
+		}
+	}
 	cfg.PromptPackPath = getEnvOrDefault(EnvPromptPackMountPath, DefaultPromptPackMountPath)
 
 	// Facade config from CRD: derive the flat Config from spec.facades.

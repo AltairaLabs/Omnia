@@ -189,7 +189,12 @@ export default function PromptPackDetailPage({ params }: Readonly<PromptPackDeta
   const namespace = workspace?.namespace || namespaceParam;
 
   const { data: promptPack, isLoading } = usePromptPack(name, workspaceName);
-  const { data: packContent, isLoading: isContentLoading } = usePromptPackContent(name, workspaceName);
+  // Content is fetched by the RESOLVED object name (pp-<hash>), not the logical
+  // packName route param — after #1837 the ConfigMap route keys off metadata.name.
+  const { data: packContent, isLoading: isContentLoading } = usePromptPackContent(
+    promptPack?.metadata.name ?? "",
+    workspaceName,
+  );
   const { sources: skillSources } = useSkillSources();
   const { data: allAgents } = useAgents();
 

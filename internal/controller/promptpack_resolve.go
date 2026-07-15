@@ -2,53 +2,35 @@ package controller
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"strings"
 
-	"github.com/Masterminds/semver/v3"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
+	"github.com/altairalabs/omnia/internal/promptpack/packselect"
 )
 
 const (
-	promptPackTrackStable     = "stable"
-	promptPackTrackPrerelease = "prerelease"
+	promptPackTrackStable     = packselect.TrackStable
+	promptPackTrackPrerelease = packselect.TrackPrerelease
 )
 
-var errNoMatchingPromptPack = errors.New("no PromptPack matches the ref")
+// errNoMatchingPromptPack aliases packselect's sentinel so existing errors.Is
+// call sites in this package (and its tests) continue to detect the "no such
+// PromptPack" outcome that now originates in the shared packselect helpers.
+var errNoMatchingPromptPack = packselect.ErrNoMatchingPromptPack
 
 // selectPromptPack picks one PromptPack from candidates (all sharing a packName)
-// by exact version pin or by channel-max. At most one of version/track may be set;
-// if neither is set, defaults to the stable channel.
+// by exact version pin or by channel-max. At most one of version/track may be set
+// (both set is an error); if neither is set, defaults to the stable channel. The
+// selection itself is delegated to the shared packselect package.
 func selectPromptPack(candidates []omniav1alpha1.PromptPack, version, track *string) (*omniav1alpha1.PromptPack, error) {
 	hasVersion := version != nil && *version != ""
 	hasTrack := track != nil && *track != ""
 	if hasVersion && hasTrack { // both set is an error
 		return nil, fmt.Errorf("exactly one of promptPackRef.version or promptPackRef.track must be set")
 	}
-	if hasVersion {
-		for i := range candidates {
-			if versionsEqual(candidates[i].Spec.Version, *version) {
-				return &candidates[i], nil
-			}
-		}
-		return nil, fmt.Errorf("%w: version %q", errNoMatchingPromptPack, *version)
-	}
-	// track is set, or neither is set (default to stable)
-	if hasTrack {
-		return channelMax(candidates, *track)
-	}
-	return channelMax(candidates, promptPackTrackStable)
-}
-
-// parsePackVersion parses a PromptPack spec.version (CRD pattern allows a leading
-// "v"). Stripping the "v" before StrictNewVersion accepts full v-prefixed semver
-// (v1.5.0 == 1.5.0) while still rejecting incomplete values like "v1"/"1" (which
-// then fall back to string equality at call sites) — avoiding lenient coercion.
-func parsePackVersion(s string) (*semver.Version, error) {
-	return semver.StrictNewVersion(strings.TrimPrefix(s, "v"))
+	return packselect.Select(candidates, version, track)
 }
 
 // latestPackForChannel resolves the highest version of packName published on
@@ -66,28 +48,7 @@ func (r *AgentRuntimeReconciler) latestPackForChannel(ctx context.Context, names
 	); err != nil {
 		return nil, fmt.Errorf("failed to list PromptPacks for %q: %w", packName, err)
 	}
-	return channelMax(list.Items, channel)
-}
-
-func channelMax(candidates []omniav1alpha1.PromptPack, track string) (*omniav1alpha1.PromptPack, error) {
-	var best *omniav1alpha1.PromptPack
-	var bestV *semver.Version
-	for i := range candidates {
-		v, err := parsePackVersion(candidates[i].Spec.Version)
-		if err != nil {
-			continue // skip unparseable; spec.version is semver-validated at the CRD, defensive here
-		}
-		if track == promptPackTrackStable && v.Prerelease() != "" {
-			continue
-		}
-		if bestV == nil || v.GreaterThan(bestV) {
-			best, bestV = &candidates[i], v
-		}
-	}
-	if best == nil {
-		return nil, fmt.Errorf("%w: no version in channel %q", errNoMatchingPromptPack, track)
-	}
-	return best, nil
+	return packselect.ChannelMax(list.Items, channel)
 }
 
 // resolvePromptPack resolves an AgentRuntime's PromptPack reference to a concrete

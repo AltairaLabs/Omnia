@@ -44,7 +44,7 @@ export function PromptPackCard({ promptPack }: Readonly<PromptPackCardProps>) {
 
   return (
     <Link
-      href={`/promptpacks/${metadata.name}?namespace=${metadata.namespace}`}
+      href={`/promptpacks/${spec.packName}?namespace=${metadata.namespace}`}
     >
       <Card className="hover:border-primary/50 transition-colors cursor-pointer h-full" data-testid="promptpack-card">
         <CardHeader className="pb-3">

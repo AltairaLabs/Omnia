@@ -342,6 +342,7 @@ func (r *AgentRuntimeReconciler) buildDeploymentSpec(
 // buildA2AEnvVars creates environment variables for the A2A container.
 func (r *AgentRuntimeReconciler) buildA2AEnvVars(
 	agentRuntime *omniav1alpha1.AgentRuntime,
+	promptPack *omniav1alpha1.PromptPack,
 	resolvedClients []ResolvedA2AClient,
 ) []corev1.EnvVar {
 	port := primaryFacadePort(agentRuntime)
@@ -414,6 +415,10 @@ func (r *AgentRuntimeReconciler) buildA2AEnvVars(
 	if f := primaryFacade(agentRuntime); f != nil && f.ExtraEnv != nil {
 		envVars = append(envVars, f.ExtraEnv...)
 	}
+
+	// Standalone A2A combines facade+runtime and writes the session record, so it
+	// needs the resolved PromptPack version stamp for track: agents too (#1847).
+	envVars = r.appendPromptPackVersionEnv(envVars, promptPack)
 
 	return envVars
 }

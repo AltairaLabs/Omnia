@@ -171,6 +171,11 @@ const (
 	// envCanaryOverridePath points at the mounted canary override file. Set on
 	// candidate pods by the operator; unset on stable / non-rollout pods.
 	envCanaryOverridePath = "OMNIA_CANARY_OVERRIDE_PATH"
+	// envPromptPackVersion carries the operator-resolved PromptPack's concrete
+	// version. Used as a fallback when spec.promptPackRef.Version is nil (a
+	// `track:`-selected AgentRuntime), so the eval-path version stamp is
+	// always concrete instead of empty (#1847).
+	envPromptPackVersion = "OMNIA_PROMPTPACK_VERSION"
 )
 
 // Default values.

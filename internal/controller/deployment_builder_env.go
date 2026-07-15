@@ -275,6 +275,7 @@ func (r *AgentRuntimeReconciler) buildRuntimeEnvVars(
 	}
 
 	envVars = r.appendSkillManifestPathEnv(envVars, promptPack)
+	envVars = r.appendPromptPackVersionEnv(envVars, promptPack)
 
 	// OMNIA_CONTEXT_URL — the Redis URL used by the runtime's durable context
 	// store (statestore.NewRedisStore). Sourced from the storeRef secret when a
@@ -368,6 +369,28 @@ func (r *AgentRuntimeReconciler) appendSkillManifestPathEnv(
 	return append(envVars, corev1.EnvVar{
 		Name:  "OMNIA_PROMPTPACK_MANIFEST_PATH",
 		Value: path,
+	})
+}
+
+// appendPromptPackVersionEnv appends OMNIA_PROMPTPACK_VERSION from the
+// RESOLVED PromptPack's concrete version. This is what makes a `track:` (or
+// default-stable) AgentRuntime — whose spec.promptPackRef.Version is nil —
+// stamp a concrete version on sessions instead of an empty string: an empty
+// stamp makes the EE eval loader re-resolve to stable-max, diverging from
+// whatever the operator actually deployed (prerelease-max, for
+// prerelease-track agents). Called for BOTH the runtime and facade container
+// env (the facade writes the session record off the gRPC bus, so it must
+// carry the same resolved version as the runtime).
+func (r *AgentRuntimeReconciler) appendPromptPackVersionEnv(
+	envVars []corev1.EnvVar,
+	promptPack *omniav1alpha1.PromptPack,
+) []corev1.EnvVar {
+	if promptPack == nil || promptPack.Spec.Version == "" {
+		return envVars
+	}
+	return append(envVars, corev1.EnvVar{
+		Name:  envPromptPackVersion,
+		Value: promptPack.Spec.Version,
 	})
 }
 
