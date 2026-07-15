@@ -33,7 +33,7 @@ func NewApplier(c client.Client, log logr.Logger) *Applier {
 // a failed resource is recorded and the rest still apply. Succeeded is false
 // if any resource failed.
 func (a *Applier) Apply(ctx context.Context, namespace string, intent DeployIntent) DeployResult {
-	var results []ResourceResult
+	results := make([]ResourceResult, 0, 2+len(intent.Agents))
 
 	cm := packContentConfigMap(namespace, intent.Pack, intent.Labels)
 	results = append(results, a.createImmutable(ctx, kindConfigMap, cm))
@@ -122,8 +122,8 @@ func reconcileAgentRuntimeSpec(live, desired *omniav1alpha1.AgentRuntime) {
 
 	if triggerMode {
 		live.Spec.PromptPackRef = preservedRef
-		switch {
-		case live.Spec.Rollout == nil:
+		switch live.Spec.Rollout {
+		case nil:
 			// Config-only deploy: intent had no rollout block. Keep the live
 			// rollout wholesale so trigger+steps+candidate all stay intact.
 			live.Spec.Rollout = preservedRollout
