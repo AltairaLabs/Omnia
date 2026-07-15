@@ -268,7 +268,7 @@ function PromptPackSummaryCard({ promptPack, onClose }: Readonly<{ promptPack: P
   return (
     <SummaryCardLayout
       type="promptpack"
-      name={metadata.name}
+      name={spec.packName}
       namespace={metadata.namespace || "default"}
       phase={status?.phase}
       detailsHref={`/promptpacks/${spec.packName}?namespace=${metadata.namespace}`}

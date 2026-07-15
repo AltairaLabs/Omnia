@@ -3,7 +3,7 @@ import ELK from "elkjs/lib/elk.bundled.js";
 import type { AgentRuntime, PromptPack, ToolRegistry, Provider, ProviderType } from "@/types";
 import type { NotesMap } from "@/lib/notes-storage";
 import { getProviderColor } from "./provider-icons";
-import { selectChannelMax } from "@/lib/promptpack/channel-select";
+import { channelMaxByGroup } from "@/lib/promptpack/channel-select";
 
 // Edge label colors (tokens; extracted to satisfy sonarjs/no-duplicate-string).
 const EDGE_LABEL_FILL = "var(--muted-foreground)";
@@ -37,24 +37,7 @@ function getNoteForResource(notes: NotesMap | undefined, type: string, namespace
  * share a `spec.packName`; the topology shows a single node per logical pack.
  */
 function buildChannelMaxPackMap(promptPacks: PromptPack[]): Map<string, PromptPack> {
-  const groups = new Map<string, PromptPack[]>();
-  for (const pp of promptPacks) {
-    const key = `${pp.metadata.namespace}/${pp.spec.packName}`;
-    const group = groups.get(key);
-    if (group) {
-      group.push(pp);
-    } else {
-      groups.set(key, [pp]);
-    }
-  }
-
-  const result = new Map<string, PromptPack>();
-  for (const [key, group] of groups) {
-    const chosen =
-      selectChannelMax(group, "stable") ?? selectChannelMax(group, "prerelease") ?? group[0];
-    result.set(key, chosen);
-  }
-  return result;
+  return channelMaxByGroup(promptPacks, (pp) => `${pp.metadata.namespace}/${pp.spec.packName}`);
 }
 
 // Node dimensions for layout

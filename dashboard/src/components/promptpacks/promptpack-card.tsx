@@ -51,7 +51,7 @@ export function PromptPackCard({ promptPack }: Readonly<PromptPackCardProps>) {
           <div className="flex items-start justify-between gap-2">
             <div className="flex items-center gap-2 min-w-0">
               <FileText className="h-4 w-4 text-muted-foreground shrink-0" />
-              <CardTitle className="text-base truncate">{metadata.name}</CardTitle>
+              <CardTitle className="text-base truncate">{spec.packName}</CardTitle>
             </div>
             <StatusBadge phase={status?.phase} />
           </div>

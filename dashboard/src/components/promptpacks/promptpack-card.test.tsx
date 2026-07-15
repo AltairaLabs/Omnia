@@ -23,7 +23,9 @@ const mockPromptPack: PromptPack = {
   apiVersion: "omnia.altairalabs.ai/v1alpha1",
   kind: "PromptPack",
   metadata: {
-    name: "test-pack",
+    // Real objects are named with a deterministic pp-<hash> (#1837), distinct
+    // from the logical packName the UI must display (#1860).
+    name: "pp-abc123hash",
     namespace: "production",
     uid: "pack-001",
   },
@@ -40,9 +42,10 @@ const mockPromptPack: PromptPack = {
 };
 
 describe("PromptPackCard", () => {
-  it("renders the pack name", () => {
+  it("renders the logical packName as the title, not the hash object name", () => {
     render(<PromptPackCard promptPack={mockPromptPack} />);
     expect(screen.getByText("test-pack")).toBeInTheDocument();
+    expect(screen.queryByText("pp-abc123hash")).not.toBeInTheDocument();
   });
 
   it("renders the namespace", () => {

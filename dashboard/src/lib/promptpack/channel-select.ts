@@ -122,3 +122,31 @@ export function selectChannelMax(
   }
   return best.pack;
 }
+
+/**
+ * Group version-objects by `keyFn` and reduce each group to its channel-max
+ * (stable, falling back to prerelease, then the first entry). Shared by the
+ * PromptPack list page and the topology graph so both show one logical pack
+ * per `namespace/packName`.
+ */
+export function channelMaxByGroup(
+  packs: PromptPack[],
+  keyFn: (pack: PromptPack) => string,
+): Map<string, PromptPack> {
+  const groups = new Map<string, PromptPack[]>();
+  for (const pack of packs) {
+    const key = keyFn(pack);
+    const group = groups.get(key);
+    if (group) {
+      group.push(pack);
+    } else {
+      groups.set(key, [pack]);
+    }
+  }
+
+  const result = new Map<string, PromptPack>();
+  for (const [key, group] of groups) {
+    result.set(key, selectChannelMax(group, "stable") ?? selectChannelMax(group, "prerelease") ?? group[0]);
+  }
+  return result;
+}

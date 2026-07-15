@@ -251,7 +251,7 @@ export default function PromptPackDetailPage({ params }: Readonly<PromptPackDeta
   return (
     <div className="flex flex-col h-full">
       <Header
-        title={metadata.name}
+        title={spec.packName}
         description={`${metadata.namespace} namespace`}
       />
 
