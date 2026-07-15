@@ -225,6 +225,84 @@ func TestApply_AgentRuntimeCreateFailure(t *testing.T) {
 	t.Fatal("no AgentRuntime result found")
 }
 
+// TestApply_TriggerModePreservesLivePin verifies that when the live agent is
+// in version-trigger mode, a deploy does not advance the PromptPack pin or
+// clobber an in-flight canary candidate, while still applying other fields.
+func TestApply_TriggerModePreservesLivePin(t *testing.T) {
+	// Live agent: trigger-mode, pinned to 1.0.0, mid-canary (candidate set).
+	pinned := "1.0.0"
+	live := &omniav1alpha1.AgentRuntime{}
+	live.Name = "support"
+	live.Namespace = "ns"
+	live.Spec.PromptPackRef = omniav1alpha1.PromptPackRef{Name: "support", Version: &pinned}
+	live.Spec.Rollout = &omniav1alpha1.RolloutConfig{
+		Trigger:   &omniav1alpha1.RolloutTrigger{PromptPackChannel: "stable"},
+		Candidate: &omniav1alpha1.CandidateOverrides{},
+		Steps:     []omniav1alpha1.RolloutStep{{}},
+	}
+	live.Spec.Providers = []omniav1alpha1.NamedProviderRef{{Name: "default", ProviderRef: omniav1alpha1.ProviderRef{Name: "old"}}}
+
+	c := fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(live).Build()
+	a := NewApplier(c, logr.Discard())
+
+	// Deploy a NEW version (1.1.0) with changed providers, trigger-mode.
+	intent := DeployIntent{
+		APIVersion: APIVersionV1,
+		Pack:       PackIntent{Name: "support", Version: "1.1.0", Content: "{}"},
+		Agents: []AgentIntent{{
+			Name:      "support",
+			Providers: []ProviderBind{{Name: "default", Ref: "new"}},
+			Rollout:   &RolloutIntent{Trigger: &RolloutTriggerIntent{PromptPackChannel: "stable"}},
+		}},
+	}
+	res := a.Apply(context.Background(), "ns", intent)
+	if !res.Succeeded {
+		t.Fatalf("apply failed: %+v", res.Results)
+	}
+
+	got := &omniav1alpha1.AgentRuntime{}
+	if err := c.Get(context.Background(), types.NamespacedName{Name: "support", Namespace: "ns"}, got); err != nil {
+		t.Fatal(err)
+	}
+	// Pin PRESERVED at 1.0.0 (not advanced to 1.1.0) — the controller canaries.
+	if got.Spec.PromptPackRef.Version == nil || *got.Spec.PromptPackRef.Version != "1.0.0" {
+		t.Errorf("pin = %v, want preserved 1.0.0", got.Spec.PromptPackRef.Version)
+	}
+	// In-flight candidate PRESERVED.
+	if got.Spec.Rollout == nil || got.Spec.Rollout.Candidate == nil {
+		t.Errorf("candidate clobbered: %+v", got.Spec.Rollout)
+	}
+	// Other config STILL applied.
+	if len(got.Spec.Providers) != 1 || got.Spec.Providers[0].ProviderRef.Name != "new" {
+		t.Errorf("providers not updated: %+v", got.Spec.Providers)
+	}
+}
+
+// TestApply_PinnedModeHardSwaps verifies that when the live agent is NOT in
+// trigger mode, a deploy hard-swaps the PromptPack pin to the new version.
+func TestApply_PinnedModeHardSwaps(t *testing.T) {
+	old := "1.0.0"
+	live := &omniav1alpha1.AgentRuntime{}
+	live.Name = "support"
+	live.Namespace = "ns"
+	live.Spec.PromptPackRef = omniav1alpha1.PromptPackRef{Name: "support", Version: &old}
+
+	c := fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(live).Build()
+	a := NewApplier(c, logr.Discard())
+
+	intent := testIntent()
+	intent.Pack.Version = "2.0.0"
+	res := a.Apply(context.Background(), "ns", intent)
+	if !res.Succeeded {
+		t.Fatalf("apply failed: %+v", res.Results)
+	}
+	got := &omniav1alpha1.AgentRuntime{}
+	_ = c.Get(context.Background(), types.NamespacedName{Name: "support", Namespace: "ns"}, got)
+	if got.Spec.PromptPackRef.Version == nil || *got.Spec.PromptPackRef.Version != "2.0.0" {
+		t.Errorf("pinned mode should hard-swap to 2.0.0, got %v", got.Spec.PromptPackRef.Version)
+	}
+}
+
 // TestApply_AgentRuntimeUpdateFailure exercises the upsertAgentRuntime branch
 // where the AgentRuntime already exists but Update fails.
 func TestApply_AgentRuntimeUpdateFailure(t *testing.T) {

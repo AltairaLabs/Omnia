@@ -95,10 +95,32 @@ func (a *Applier) upsertAgentRuntime(ctx context.Context, desired *omniav1alpha1
 	return ResourceResult{Kind: kindAgentRuntime, Name: desired.Name, Action: ActionUpdated}
 }
 
-// reconcileAgentRuntimeSpec copies the desired spec onto the live object.
-// Task 5 makes it rollout-aware; for now it is a full spec replace.
+// reconcileAgentRuntimeSpec copies the desired spec onto the live object,
+// rollout-aware: when the LIVE agent is in version-trigger mode, the deploy
+// must not advance the PromptPack pin or clobber an in-flight canary — the
+// #1838 controller owns those. Every other desired field is still applied.
 func reconcileAgentRuntimeSpec(live, desired *omniav1alpha1.AgentRuntime) {
+	triggerMode := live.Spec.Rollout != nil && live.Spec.Rollout.Trigger != nil
+
+	var (
+		preservedRef       omniav1alpha1.PromptPackRef
+		preservedCandidate *omniav1alpha1.CandidateOverrides
+	)
+	if triggerMode {
+		preservedRef = live.Spec.PromptPackRef
+		preservedCandidate = live.Spec.Rollout.Candidate
+	}
+
 	live.Spec = desired.Spec
+
+	if triggerMode {
+		live.Spec.PromptPackRef = preservedRef
+		if live.Spec.Rollout == nil {
+			live.Spec.Rollout = &omniav1alpha1.RolloutConfig{}
+		}
+		live.Spec.Rollout.Candidate = preservedCandidate
+	}
+
 	if live.Labels == nil {
 		live.Labels = map[string]string{}
 	}
