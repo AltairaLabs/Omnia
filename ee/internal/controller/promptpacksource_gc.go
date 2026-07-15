@@ -17,6 +17,7 @@ import (
 	"github.com/Masterminds/semver/v3"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -24,19 +25,21 @@ import (
 	omniav1alpha1 "github.com/altairalabs/omnia/ee/api/v1alpha1"
 )
 
+// supersededConditionType is the PromptPack status condition the core controller
+// stamps when a version is superseded; its LastTransitionTime is the supersession
+// time the retention min-age guard measures from. Defined locally because the
+// core controller's const lives across the module boundary.
+const supersededConditionType = "Superseded"
+
+// trackStable is the stable release channel; a stable track excludes prereleases.
+const trackStable = "stable"
+
 // gcOldVersions garbage-collects Superseded PromptPack version-objects for a
 // pack beyond the retention limit. Two guards protect an otherwise-eligible
-// candidate: (a) it is referenced by an AgentRuntime, or (b) it is younger than
-// the minimum retention age. Each GC'd object takes its backing -content
-// ConfigMap with it.
-//
-// NOTE (#1858): this is a correct-but-DORMANT skeleton. No code yet transitions
-// a PromptPack to Superseded (the controller only sets Active and promote does
-// not supersede the previous version-object), so filterSuperseded returns empty
-// and this GC never removes anything in production today. Wiring the channel-
-// aware Superseded lifecycle — and switching the min-age guard (cutoff below) to
-// measure from the supersession transition time rather than CreationTimestamp so
-// it protects the post-promote rollback window — is tracked in #1858.
+// candidate: (a) it is referenced by an AgentRuntime (an exact version pin, or a
+// track-only ref pointing at that track's channel-max), or (b) it was superseded
+// more recently than the minimum retention age (protecting the post-promote
+// rollback window). Each GC'd object takes its backing -content ConfigMap with it.
 func (r *PromptPackSourceReconciler) gcOldVersions(ctx context.Context, src *omniav1alpha1.PromptPackSource) error {
 	limit := r.historyLimit(src)
 
@@ -59,10 +62,12 @@ func (r *PromptPackSourceReconciler) gcOldVersions(ctx context.Context, src *omn
 	if err != nil {
 		return err
 	}
-	highestName := highestVersionObjName(packs.Items)
+	// Object names a track-only ref protects, resolved channel-aware (a stable
+	// track protects the stable-channel-max, a prerelease track the overall max).
+	protected := refs.protectedTrackNames(src.Spec.PackName, packs.Items)
 	cutoff := time.Now().Add(-r.MinRetentionAge)
 
-	return r.deleteCandidates(ctx, candidates, refs, highestName, cutoff)
+	return r.deleteCandidates(ctx, candidates, refs, protected, cutoff)
 }
 
 // historyLimit resolves the retention window: a per-source spec.historyLimit
@@ -79,22 +84,34 @@ func (r *PromptPackSourceReconciler) historyLimit(src *omniav1alpha1.PromptPackS
 	return limit
 }
 
-// deleteCandidates removes each candidate that is neither referenced nor younger
-// than the min-age cutoff, deleting its backing ConfigMap alongside it.
-func (r *PromptPackSourceReconciler) deleteCandidates(ctx context.Context, candidates []corev1alpha1.PromptPack, refs *arRefIndex, highestName string, cutoff time.Time) error {
+// deleteCandidates removes each candidate that is neither referenced nor was
+// superseded more recently than the min-age cutoff, deleting its backing
+// ConfigMap alongside it.
+func (r *PromptPackSourceReconciler) deleteCandidates(ctx context.Context, candidates []corev1alpha1.PromptPack, refs *arRefIndex, protected map[string]struct{}, cutoff time.Time) error {
 	for i := range candidates {
 		pp := &candidates[i]
-		if refs.isReferenced(pp, pp.Name == highestName) {
+		if refs.isReferenced(pp, protected) {
 			continue // an AgentRuntime still points at this version
 		}
-		if pp.CreationTimestamp.Time.After(cutoff) {
-			continue // younger than the min-age guard
+		if supersededAt(pp).After(cutoff) {
+			continue // superseded more recently than the min-age guard
 		}
 		if err := r.deletePackAndContent(ctx, pp); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// supersededAt reports when pp became Superseded: the Superseded condition's
+// LastTransitionTime when present, else the object's creation time. Measuring
+// from supersession (not creation) protects a long-lived version that was only
+// just superseded — the rollback target after a promote.
+func supersededAt(pp *corev1alpha1.PromptPack) time.Time {
+	if c := meta.FindStatusCondition(pp.Status.Conditions, supersededConditionType); c != nil {
+		return c.LastTransitionTime.Time
+	}
+	return pp.CreationTimestamp.Time
 }
 
 // deletePackAndContent deletes a PromptPack version-object and its backing
@@ -142,13 +159,24 @@ func packVersionGreater(a, b string) bool {
 	return av.GreaterThan(bv)
 }
 
-// highestVersionObjName returns the object name of the highest-version pack in
-// the list (across all phases), or "" when the list is empty.
-func highestVersionObjName(packs []corev1alpha1.PromptPack) string {
-	bestName, bestVer := "", ""
+// channelMaxObjName returns the object name of the channel-max pack for track:
+// the highest version overall for the prerelease track, or the highest version
+// with no prerelease identifier for the stable track. Returns "" when no version
+// qualifies. Mirrors the resolver's channel semantics so GC protects exactly the
+// object a track-only ref resolves to.
+func channelMaxObjName(packs []corev1alpha1.PromptPack, track string) string {
+	bestName := ""
+	var bestV *semver.Version
 	for i := range packs {
-		if bestName == "" || packVersionGreater(packs[i].Spec.Version, bestVer) {
-			bestName, bestVer = packs[i].Name, packs[i].Spec.Version
+		v, err := semver.NewVersion(strings.TrimPrefix(packs[i].Spec.Version, "v"))
+		if err != nil {
+			continue
+		}
+		if track == trackStable && v.Prerelease() != "" {
+			continue // stable channel excludes prereleases
+		}
+		if bestV == nil || v.GreaterThan(bestV) {
+			bestName, bestV = packs[i].Name, v
 		}
 	}
 	return bestName
@@ -158,7 +186,7 @@ func highestVersionObjName(packs []corev1alpha1.PromptPack) string {
 // namespace, so GC can protect versions that are still in use.
 type arRefIndex struct {
 	pinned    map[string]map[string]struct{} // packName -> normalized pinned versions
-	trackOnly map[string]bool                // packName -> a track-only ref exists
+	trackOnly map[string]map[string]struct{} // packName -> set of track-only tracks referenced
 }
 
 // referencedRefs builds the reference index once per GC call by listing every
@@ -169,7 +197,7 @@ func (r *PromptPackSourceReconciler) referencedRefs(ctx context.Context, namespa
 	if err := r.List(ctx, &ars, client.InNamespace(namespace)); err != nil {
 		return nil, err
 	}
-	idx := &arRefIndex{pinned: map[string]map[string]struct{}{}, trackOnly: map[string]bool{}}
+	idx := &arRefIndex{pinned: map[string]map[string]struct{}{}, trackOnly: map[string]map[string]struct{}{}}
 	for i := range ars.Items {
 		ar := &ars.Items[i]
 		idx.add(&ar.Spec.PromptPackRef)
@@ -181,7 +209,7 @@ func (r *PromptPackSourceReconciler) referencedRefs(ctx context.Context, namespa
 }
 
 // add records one PromptPack reference: a version-pinned ref protects that exact
-// version; a track-only ref flags the pack for newest-object protection.
+// version; a track-only ref records the track so GC can protect that channel's max.
 func (x *arRefIndex) add(ref *corev1alpha1.PromptPackRef) {
 	if ref == nil || ref.Name == "" {
 		return
@@ -194,24 +222,37 @@ func (x *arRefIndex) add(ref *corev1alpha1.PromptPackRef) {
 		return
 	}
 	if ref.Track != nil && *ref.Track != "" {
-		x.trackOnly[ref.Name] = true
+		if x.trackOnly[ref.Name] == nil {
+			x.trackOnly[ref.Name] = map[string]struct{}{}
+		}
+		x.trackOnly[ref.Name][*ref.Track] = struct{}{}
 	}
 }
 
-// isReferenced reports whether pp is protected from GC by an AgentRuntime ref.
-// A version-pinned ref protects the exact version. A track-only ref is treated
-// conservatively: it protects only the highest-version object of the pack
-// (isHighest), because resolving the precise channel-max here would need the
-// full resolver — over-protecting the newest object is the safe choice, and a
-// track-only ref never legitimately points at an older Superseded version.
-func (x *arRefIndex) isReferenced(pp *corev1alpha1.PromptPack, isHighest bool) bool {
+// protectedTrackNames returns the set of object names protected by track-only
+// refs for packName, resolving each referenced track to its channel-max object.
+func (x *arRefIndex) protectedTrackNames(packName string, packs []corev1alpha1.PromptPack) map[string]struct{} {
+	out := map[string]struct{}{}
+	for track := range x.trackOnly[packName] {
+		if name := channelMaxObjName(packs, track); name != "" {
+			out[name] = struct{}{}
+		}
+	}
+	return out
+}
+
+// isReferenced reports whether pp is protected from GC by an AgentRuntime ref: an
+// exact version pin, or membership in protected (the channel-max object names a
+// track-only ref points at, resolved channel-aware by protectedTrackNames).
+func (x *arRefIndex) isReferenced(pp *corev1alpha1.PromptPack, protected map[string]struct{}) bool {
 	name := pp.Labels[labelPromptPackName]
 	if versions, ok := x.pinned[name]; ok {
 		if _, pinned := versions[normalizeVersion(pp.Spec.Version)]; pinned {
 			return true
 		}
 	}
-	return isHighest && x.trackOnly[name]
+	_, ok := protected[pp.Name]
+	return ok
 }
 
 // normalizeVersion strips a leading "v" so pinned refs and pack versions compare

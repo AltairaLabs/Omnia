@@ -102,6 +102,24 @@ var _ = Describe("PromptPackSourceGC", func() {
 		Expect(k8sClient.Create(ctx, cm)).To(Succeed())
 	}
 
+	// setSupersededCondition stamps a Superseded status condition with a specific
+	// transition time, so the min-age guard (which measures from supersession, not
+	// creation) can be exercised deterministically — LastTransitionTime is
+	// settable via a status update, unlike CreationTimestamp.
+	setSupersededCondition := func(packName, version string, at time.Time) {
+		name := objName(packName, version)
+		pp := &corev1alpha1.PromptPack{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: ns}, pp)).To(Succeed())
+		pp.Status.Conditions = []metav1.Condition{{
+			Type:               supersededConditionType,
+			Status:             metav1.ConditionTrue,
+			Reason:             "NewerVersionPublished",
+			Message:            "superseded",
+			LastTransitionTime: metav1.NewTime(at),
+		}}
+		Expect(k8sClient.Status().Update(ctx, pp)).To(Succeed())
+	}
+
 	exists := func(kind client.Object, name string) bool {
 		err := k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: ns}, kind)
 		return err == nil
@@ -229,6 +247,68 @@ var _ = Describe("PromptPackSourceGC", func() {
 			Expect(gone(&corev1alpha1.PromptPack{}, objName(packName, "1.1.0"))).To(BeTrue())
 			Expect(exists(&corev1alpha1.PromptPack{}, objName(packName, "1.2.0"))).To(BeTrue())
 			Expect(exists(&corev1alpha1.PromptPack{}, objName(packName, "1.3.0"))).To(BeTrue())
+		})
+	})
+
+	Context("When the min-age is measured from supersession time", func() {
+		const packName = "supage"
+		AfterEach(func() { cleanup(packName) })
+
+		It("protects a recently-superseded version and GCs a long-ago-superseded one", func() {
+			for _, v := range []string{"1.0.0", "1.1.0", "1.2.0"} {
+				seedPack(packName, v, corev1alpha1.PromptPackPhaseSuperseded)
+			}
+			now := time.Now()
+			// limit 1 keeps 1.2.0; candidates beyond the window are 1.1.0 and 1.0.0.
+			// Both are freshly created, so a CreationTimestamp-based guard would treat
+			// them identically — only the supersession condition distinguishes them.
+			setSupersededCondition(packName, "1.1.0", now)                   // just superseded -> protected
+			setSupersededCondition(packName, "1.0.0", now.Add(-2*time.Hour)) // superseded long ago -> eligible
+
+			r := gcReconciler(1, time.Hour)
+			Expect(r.gcOldVersions(ctx, gcSource(packName))).To(Succeed())
+
+			By("keeping the newest, in the keep window")
+			Expect(exists(&corev1alpha1.PromptPack{}, objName(packName, "1.2.0"))).To(BeTrue())
+			By("protecting the recently-superseded 1.1.0 despite being beyond the limit")
+			Expect(exists(&corev1alpha1.PromptPack{}, objName(packName, "1.1.0"))).To(BeTrue())
+			By("GCing the long-ago-superseded 1.0.0")
+			Expect(gone(&corev1alpha1.PromptPack{}, objName(packName, "1.0.0"))).To(BeTrue())
+		})
+	})
+
+	Context("When a track-only ref must protect the channel-max, not the pure-highest", func() {
+		const packName = "chpack"
+		AfterEach(func() { cleanup(packName) })
+
+		It("protects the stable-channel-max for a stable track even when a higher prerelease exists", func() {
+			// Pure-highest semver is the prerelease 2.0.0-beta.1; the stable-channel-max
+			// (what a stable track resolves to) is 1.1.0.
+			seedPack(packName, "1.0.0", corev1alpha1.PromptPackPhaseSuperseded)
+			seedPack(packName, "1.1.0", corev1alpha1.PromptPackPhaseSuperseded)
+			seedPack(packName, "2.0.0-beta.1", corev1alpha1.PromptPackPhaseSuperseded)
+
+			port := int32(8080)
+			facades := []corev1alpha1.FacadeConfig{{Type: corev1alpha1.FacadeType("websocket"), Port: &port}}
+			tracked := &corev1alpha1.AgentRuntime{
+				ObjectMeta: metav1.ObjectMeta{Name: "ar-stable", Namespace: ns},
+				Spec: corev1alpha1.AgentRuntimeSpec{
+					PromptPackRef: corev1alpha1.PromptPackRef{Name: packName, Track: ptr.To("stable")},
+					Facades:       facades,
+				},
+			}
+			Expect(k8sClient.Create(ctx, tracked)).To(Succeed())
+
+			// limit 1 keeps the semver-highest 2.0.0-beta.1; candidates are 1.1.0 and 1.0.0.
+			r := gcReconciler(1, 0)
+			Expect(r.gcOldVersions(ctx, gcSource(packName))).To(Succeed())
+
+			By("keeping the semver-highest prerelease, in the keep window")
+			Expect(exists(&corev1alpha1.PromptPack{}, objName(packName, "2.0.0-beta.1"))).To(BeTrue())
+			By("protecting the stable-channel-max 1.1.0 the stable track resolves to")
+			Expect(exists(&corev1alpha1.PromptPack{}, objName(packName, "1.1.0"))).To(BeTrue())
+			By("GCing the unreferenced older stable 1.0.0")
+			Expect(gone(&corev1alpha1.PromptPack{}, objName(packName, "1.0.0"))).To(BeTrue())
 		})
 	})
 })
