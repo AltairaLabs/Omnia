@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { selectChannelMax } from "./channel-select";
+import { selectChannelMax, channelMaxByGroup } from "./channel-select";
 import type { PromptPack } from "@/types";
 
 function pack(version: string, packName = "demo"): PromptPack {
@@ -73,5 +73,32 @@ describe("selectChannelMax", () => {
   it("ignores build metadata when comparing", () => {
     const packs = [pack("1.0.0+build.9"), pack("1.0.1")];
     expect(selectChannelMax(packs)?.spec.version).toBe("1.0.1");
+  });
+});
+
+describe("channelMaxByGroup", () => {
+  const byPackName = (p: PromptPack) => p.spec.packName;
+
+  it("reduces each packName group to its stable channel-max", () => {
+    const packs = [
+      pack("1.0.0", "a"),
+      pack("1.1.0", "a"),
+      pack("2.0.0-beta.1", "a"), // prerelease excluded from stable-max
+      pack("3.0.0", "b"),
+    ];
+    const result = channelMaxByGroup(packs, byPackName);
+    expect(result.size).toBe(2);
+    expect(result.get("a")?.spec.version).toBe("1.1.0");
+    expect(result.get("b")?.spec.version).toBe("3.0.0");
+  });
+
+  it("falls back to prerelease-max when a group has only prereleases", () => {
+    const packs = [pack("2.0.0-beta.1", "a"), pack("2.0.0-beta.2", "a")];
+    const result = channelMaxByGroup(packs, byPackName);
+    expect(result.get("a")?.spec.version).toBe("2.0.0-beta.2");
+  });
+
+  it("returns an empty map for no packs", () => {
+    expect(channelMaxByGroup([], byPackName).size).toBe(0);
   });
 });

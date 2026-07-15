@@ -48,8 +48,10 @@ beforeEach(() => {
     data: {
       apiVersion: "omnia.altairalabs.ai/v1alpha1",
       kind: "PromptPack",
-      metadata: { name: "p", namespace: "production" },
-      spec: { version: "1.0.0", source: { type: "configmap", configMapRef: { name: "cm" } } },
+      // metadata.name is the deterministic pp-<hash> object name (#1837);
+      // spec.packName is the logical name the header should display (#1860).
+      metadata: { name: "pp-abc123hash", namespace: "production" },
+      spec: { packName: "p", version: "1.0.0", source: { type: "configmap", configMapRef: { name: "cm" } } },
       status: { phase: "Active", activeVersion: "1.0.0" },
     },
     isLoading: false,
@@ -68,5 +70,17 @@ describe("PromptPack detail page", () => {
     expect(screen.getByTestId("workload-graph")).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: /workload/i })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: /advanced/i })).toBeInTheDocument();
+  });
+
+  it("shows the logical packName in the header, not the hash object name", async () => {
+    await act(async () => {
+      render(
+        <Suspense fallback={<div>Loading...</div>}>
+          <PromptPackDetailPage params={Promise.resolve({ name: "p" })} />
+        </Suspense>,
+      );
+    });
+    expect(screen.getByRole("heading", { name: "p" })).toBeInTheDocument();
+    expect(screen.queryByText("pp-abc123hash")).not.toBeInTheDocument();
   });
 });

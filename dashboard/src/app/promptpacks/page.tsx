@@ -11,9 +11,22 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { usePromptPacks } from "@/hooks/resources";
 import { useQueryClient } from "@tanstack/react-query";
 import { useWorkspace } from "@/contexts/workspace-context";
-import type { PromptPackPhase } from "@/types";
+import { channelMaxByGroup } from "@/lib/promptpack/channel-select";
+import type { PromptPack, PromptPackPhase } from "@/types";
 
 type FilterPhase = "all" | PromptPackPhase;
+
+/**
+ * Deduplicate PromptPack version-objects to one channel-max (latest stable)
+ * object per logical `namespace/packName`. Mirrors
+ * `buildChannelMaxPackMap` in `components/topology/graph-builder.ts` — after
+ * #1837 many hash-named objects share a `spec.packName`, so the list should
+ * show a single card per logical pack.
+ */
+function dedupeToChannelMax(packs: PromptPack[]): PromptPack[] {
+  const byGroup = channelMaxByGroup(packs, (pack) => `${pack.metadata.namespace}/${pack.spec.packName}`);
+  return Array.from(byGroup.values());
+}
 
 export default function PromptPacksPage() {
   const [filterPhase, setFilterPhase] = useState<FilterPhase>("all");
@@ -27,11 +40,18 @@ export default function PromptPacksPage() {
   // Show loading when either workspace or packs are loading
   const isLoading = isWorkspaceLoading || isPacksLoading;
 
+  // Dedupe version-objects to one channel-max card per logical packName.
+  // NOTE: only this page dedupes — the shared usePromptPacks() hook must
+  // keep returning every version-object for the deploy wizard.
+  const dedupedPacks = useMemo(() => {
+    if (!promptPacks) return [];
+    return dedupeToChannelMax(promptPacks);
+  }, [promptPacks]);
+
   // Extract unique namespaces
   const allNamespaces = useMemo(() => {
-    if (!promptPacks) return [];
-    return [...new Set(promptPacks.map((p) => p.metadata.namespace).filter((ns): ns is string => !!ns))];
-  }, [promptPacks]);
+    return [...new Set(dedupedPacks.map((p) => p.metadata.namespace).filter((ns): ns is string => !!ns))];
+  }, [dedupedPacks]);
 
   // Initialize selected namespaces when data loads
   const handleNamespaceChange = useCallback((namespaces: string[]) => {
@@ -40,19 +60,18 @@ export default function PromptPacksPage() {
 
   // Filter by namespace first, then by phase
   const namespaceFilteredPacks = useMemo(() => {
-    if (!promptPacks) return [];
-    if (selectedNamespaces.length === 0) return promptPacks;
-    return promptPacks.filter((p) => p.metadata.namespace && selectedNamespaces.includes(p.metadata.namespace));
-  }, [promptPacks, selectedNamespaces]);
+    if (selectedNamespaces.length === 0) return dedupedPacks;
+    return dedupedPacks.filter((p) => p.metadata.namespace && selectedNamespaces.includes(p.metadata.namespace));
+  }, [dedupedPacks, selectedNamespaces]);
 
-  // Filter by phase and sort alphabetically by name
+  // Filter by phase and sort alphabetically by packName
   const filteredPacks = useMemo(() => {
     const filtered = filterPhase === "all"
       ? namespaceFilteredPacks
       : namespaceFilteredPacks.filter((p) => p.status?.phase === filterPhase);
-    // Sort alphabetically by name for stable ordering
+    // Sort alphabetically by logical packName for stable ordering
     return [...filtered].sort((a, b) =>
-      (a.metadata.name || "").localeCompare(b.metadata.name || "")
+      (a.spec.packName || "").localeCompare(b.spec.packName || "")
     );
   }, [namespaceFilteredPacks, filterPhase]);
 

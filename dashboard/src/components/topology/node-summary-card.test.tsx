@@ -52,14 +52,16 @@ function createMockProvider(name: string, namespace: string): Provider {
   };
 }
 
-// Helper to create mock prompt pack
-function createMockPromptPack(name: string, namespace: string): PromptPack {
+// Helper to create mock prompt pack. `metadataName` mirrors the real
+// deterministic `pp-<hash>` object name (#1837); `packName` is the logical
+// name the UI should display, which may differ from `metadataName`.
+function createMockPromptPack(metadataName: string, namespace: string, packName: string = metadataName): PromptPack {
   return {
     apiVersion: "omnia.altairalabs.ai/v1alpha1",
     kind: "PromptPack",
-    metadata: { name, namespace },
+    metadata: { name: metadataName, namespace },
     spec: {
-      packName: name,
+      packName,
       source: { type: "configmap", configMapRef: { name: "test" } },
       version: "1.0.0",
     },
@@ -210,11 +212,13 @@ describe("NodeSummaryCard", () => {
   });
 
   describe("prompt pack cards", () => {
-    it("renders prompt pack summary card when prompt pack is selected", () => {
-      const promptPack = createMockPromptPack("test-pack", "default");
+    it("renders prompt pack summary card showing the logical packName, not the hash object name", () => {
+      // metadata.name is the deterministic pp-<hash> object name; the card
+      // must display spec.packName instead (#1860).
+      const promptPack = createMockPromptPack("pp-abc123hash", "default", "test-pack");
       const selectedNode: SelectedNode = {
         type: "promptpack",
-        name: "test-pack",
+        name: "pp-abc123hash",
         namespace: "default",
       };
 
@@ -230,14 +234,15 @@ describe("NodeSummaryCard", () => {
       );
 
       expect(screen.getByText("test-pack")).toBeInTheDocument();
+      expect(screen.queryByText("pp-abc123hash")).not.toBeInTheDocument();
       expect(screen.getByText("PromptPack")).toBeInTheDocument();
     });
 
-    it("renders view details link for prompt pack", () => {
-      const promptPack = createMockPromptPack("my-pack", "ns3");
+    it("renders view details link for prompt pack using the logical packName", () => {
+      const promptPack = createMockPromptPack("pp-def456hash", "ns3", "my-pack");
       const selectedNode: SelectedNode = {
         type: "promptpack",
-        name: "my-pack",
+        name: "pp-def456hash",
         namespace: "ns3",
       };
 
