@@ -7,6 +7,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
@@ -15,6 +16,10 @@ import (
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 )
+
+// promptpackLabel mirrors packselect.Label's value as an external-contract
+// assertion (the persisted label a consumer of the apply result would see).
+const promptpackLabel = "omnia.altairalabs.ai/promptpack"
 
 var errBoom = errors.New("boom")
 
@@ -42,7 +47,8 @@ func TestApply_CreatesThenUnchanged(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(testScheme(t)).Build()
 	a := NewApplier(c, logr.Discard())
 
-	res := a.Apply(context.Background(), "ns", testIntent())
+	intent := testIntent()
+	res := a.Apply(context.Background(), "ns", intent)
 	if !res.Succeeded {
 		t.Fatalf("apply failed: %+v", res.Results)
 	}
@@ -55,8 +61,15 @@ func TestApply_CreatesThenUnchanged(t *testing.T) {
 		t.Fatalf("first apply actions = %+v", res.Results)
 	}
 
-	// Re-apply: immutable pack objects are unchanged; agent is updated.
-	res2 := a.Apply(context.Background(), "ns", testIntent())
+	assertPackObjectsPersisted(t, c, intent)
+	assertAgentRuntimePersisted(t, c, "ns", intent.Agents[0].Name, intent.Pack.Name, intent.Pack.Version, "claude")
+
+	// Re-apply with a VARIED intent (different provider ref on the agent) to
+	// prove Update genuinely writes the new desired spec, not just that it
+	// reports "updated" while leaving the stale first-apply data in place.
+	intent2 := testIntent()
+	intent2.Agents[0].Providers[0].Ref = "gpt"
+	res2 := a.Apply(context.Background(), "ns", intent2)
 	byKind2 := map[string]string{}
 	for _, r := range res2.Results {
 		byKind2[r.Kind] = r.Action
@@ -66,6 +79,59 @@ func TestApply_CreatesThenUnchanged(t *testing.T) {
 	}
 	if byKind2["AgentRuntime"] != ActionUpdated {
 		t.Errorf("re-apply agent action = %s", byKind2["AgentRuntime"])
+	}
+
+	assertAgentRuntimePersisted(t, c, "ns", intent.Agents[0].Name, intent.Pack.Name, intent.Pack.Version, "gpt")
+}
+
+// assertPackObjectsPersisted verifies the pack content ConfigMap and the
+// PromptPack it backs were actually written to the client with the intent's
+// data, not just reported "created" by the apply result.
+func assertPackObjectsPersisted(t *testing.T, c client.Client, intent DeployIntent) {
+	t.Helper()
+	packObjName := omniav1alpha1.PromptPackObjectName(intent.Pack.Name, intent.Pack.Version)
+
+	cm := &corev1.ConfigMap{}
+	if err := c.Get(context.Background(), types.NamespacedName{Name: packObjName + "-content", Namespace: "ns"}, cm); err != nil {
+		t.Fatalf("get ConfigMap: %v", err)
+	}
+	if cm.Data["pack.json"] != intent.Pack.Content {
+		t.Errorf("ConfigMap Data[pack.json] = %q, want %q", cm.Data["pack.json"], intent.Pack.Content)
+	}
+
+	pp := &omniav1alpha1.PromptPack{}
+	if err := c.Get(context.Background(), types.NamespacedName{Name: packObjName, Namespace: "ns"}, pp); err != nil {
+		t.Fatalf("get PromptPack: %v", err)
+	}
+	if pp.Spec.PackName != intent.Pack.Name {
+		t.Errorf("PromptPack Spec.PackName = %q, want %q", pp.Spec.PackName, intent.Pack.Name)
+	}
+	if pp.Spec.Version != intent.Pack.Version {
+		t.Errorf("PromptPack Spec.Version = %q, want %q", pp.Spec.Version, intent.Pack.Version)
+	}
+	if pp.Labels[promptpackLabel] != intent.Pack.Name {
+		t.Errorf("PromptPack label %s = %q, want %q", promptpackLabel, pp.Labels[promptpackLabel], intent.Pack.Name)
+	}
+}
+
+// assertAgentRuntimePersisted fetches the AgentRuntime and verifies its
+// PromptPackRef and single provider ref actually match what was applied —
+// proving Create/Update wrote real data, not just that the action was
+// reported as created/updated.
+func assertAgentRuntimePersisted(t *testing.T, c client.Client, namespace, name, packName, packVersion, wantProviderRef string) {
+	t.Helper()
+	ar := &omniav1alpha1.AgentRuntime{}
+	if err := c.Get(context.Background(), types.NamespacedName{Name: name, Namespace: namespace}, ar); err != nil {
+		t.Fatalf("get AgentRuntime: %v", err)
+	}
+	if ar.Spec.PromptPackRef.Name != packName {
+		t.Errorf("AgentRuntime Spec.PromptPackRef.Name = %q, want %q", ar.Spec.PromptPackRef.Name, packName)
+	}
+	if ar.Spec.PromptPackRef.Version == nil || *ar.Spec.PromptPackRef.Version != packVersion {
+		t.Errorf("AgentRuntime Spec.PromptPackRef.Version = %v, want %q", ar.Spec.PromptPackRef.Version, packVersion)
+	}
+	if len(ar.Spec.Providers) != 1 || ar.Spec.Providers[0].ProviderRef.Name != wantProviderRef {
+		t.Fatalf("AgentRuntime Spec.Providers = %+v, want a single provider ref %q", ar.Spec.Providers, wantProviderRef)
 	}
 }
 

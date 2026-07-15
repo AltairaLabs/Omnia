@@ -28,9 +28,10 @@ func NewApplier(c client.Client, log logr.Logger) *Applier {
 	return &Applier{client: c, log: log}
 }
 
-// Apply materializes the intent: PromptPack (+ConfigMap) first, then each
-// AgentRuntime. Best-effort — a failed resource is recorded and the rest still
-// apply. Succeeded is false if any resource failed.
+// Apply materializes the intent: the pack content ConfigMap then the
+// PromptPack that references it first, then each AgentRuntime. Best-effort —
+// a failed resource is recorded and the rest still apply. Succeeded is false
+// if any resource failed.
 func (a *Applier) Apply(ctx context.Context, namespace string, intent DeployIntent) DeployResult {
 	var results []ResourceResult
 
