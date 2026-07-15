@@ -151,8 +151,8 @@ func sortByVersionDesc(packs []corev1alpha1.PromptPack) {
 // packVersionGreater reports whether version a is greater than b under semver,
 // falling back to string comparison when either side is unparseable.
 func packVersionGreater(a, b string) bool {
-	av, aErr := semver.NewVersion(strings.TrimPrefix(a, "v"))
-	bv, bErr := semver.NewVersion(strings.TrimPrefix(b, "v"))
+	av, aErr := semver.StrictNewVersion(strings.TrimPrefix(a, "v"))
+	bv, bErr := semver.StrictNewVersion(strings.TrimPrefix(b, "v"))
 	if aErr != nil || bErr != nil {
 		return a > b
 	}
@@ -168,7 +168,7 @@ func channelMaxObjName(packs []corev1alpha1.PromptPack, track string) string {
 	bestName := ""
 	var bestV *semver.Version
 	for i := range packs {
-		v, err := semver.NewVersion(strings.TrimPrefix(packs[i].Spec.Version, "v"))
+		v, err := semver.StrictNewVersion(strings.TrimPrefix(packs[i].Spec.Version, "v"))
 		if err != nil {
 			continue
 		}
@@ -209,7 +209,9 @@ func (r *PromptPackSourceReconciler) referencedRefs(ctx context.Context, namespa
 }
 
 // add records one PromptPack reference: a version-pinned ref protects that exact
-// version; a track-only ref records the track so GC can protect that channel's max.
+// version; a track ref (explicit, or a bare {name}-only ref that defaults to the
+// stable channel — mirroring selectPromptPack) records the track so GC can
+// protect that channel's max.
 func (x *arRefIndex) add(ref *corev1alpha1.PromptPackRef) {
 	if ref == nil || ref.Name == "" {
 		return
@@ -221,12 +223,16 @@ func (x *arRefIndex) add(ref *corev1alpha1.PromptPackRef) {
 		x.pinned[ref.Name][normalizeVersion(*ref.Version)] = struct{}{}
 		return
 	}
+	// No version pin: the ref resolves to a channel-max. An explicit track selects
+	// that channel; a bare {name}-only ref defaults to stable (see selectPromptPack).
+	track := trackStable
 	if ref.Track != nil && *ref.Track != "" {
-		if x.trackOnly[ref.Name] == nil {
-			x.trackOnly[ref.Name] = map[string]struct{}{}
-		}
-		x.trackOnly[ref.Name][*ref.Track] = struct{}{}
+		track = *ref.Track
 	}
+	if x.trackOnly[ref.Name] == nil {
+		x.trackOnly[ref.Name] = map[string]struct{}{}
+	}
+	x.trackOnly[ref.Name][track] = struct{}{}
 }
 
 // protectedTrackNames returns the set of object names protected by track-only

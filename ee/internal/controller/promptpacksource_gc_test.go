@@ -311,4 +311,38 @@ var _ = Describe("PromptPackSourceGC", func() {
 			Expect(gone(&corev1alpha1.PromptPack{}, objName(packName, "1.0.0"))).To(BeTrue())
 		})
 	})
+
+	Context("When a bare ref (no version, no track) protects the implicit stable channel-max", func() {
+		const packName = "barepack"
+		AfterEach(func() { cleanup(packName) })
+
+		It("protects the stable-channel-max for a bare {name}-only ref that defaults to stable", func() {
+			seedPack(packName, "1.0.0", corev1alpha1.PromptPackPhaseSuperseded)
+			seedPack(packName, "1.1.0", corev1alpha1.PromptPackPhaseSuperseded)
+			seedPack(packName, "2.0.0-beta.1", corev1alpha1.PromptPackPhaseSuperseded)
+
+			port := int32(8080)
+			facades := []corev1alpha1.FacadeConfig{{Type: corev1alpha1.FacadeType("websocket"), Port: &port}}
+			// A bare ref: neither Version nor Track — the resolver treats this as the
+			// stable channel, so GC must protect the stable-channel-max (1.1.0).
+			bare := &corev1alpha1.AgentRuntime{
+				ObjectMeta: metav1.ObjectMeta{Name: "ar-bare", Namespace: ns},
+				Spec: corev1alpha1.AgentRuntimeSpec{
+					PromptPackRef: corev1alpha1.PromptPackRef{Name: packName},
+					Facades:       facades,
+				},
+			}
+			Expect(k8sClient.Create(ctx, bare)).To(Succeed())
+
+			r := gcReconciler(1, 0)
+			Expect(r.gcOldVersions(ctx, gcSource(packName))).To(Succeed())
+
+			By("protecting the stable-channel-max 1.1.0 the bare ref resolves to")
+			Expect(exists(&corev1alpha1.PromptPack{}, objName(packName, "1.1.0"))).To(BeTrue())
+			By("keeping the semver-highest prerelease, in the keep window")
+			Expect(exists(&corev1alpha1.PromptPack{}, objName(packName, "2.0.0-beta.1"))).To(BeTrue())
+			By("GCing the unreferenced older stable 1.0.0")
+			Expect(gone(&corev1alpha1.PromptPack{}, objName(packName, "1.0.0"))).To(BeTrue())
+		})
+	})
 })
