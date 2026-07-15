@@ -29,3 +29,30 @@ func TestValidate(t *testing.T) {
 		}
 	}
 }
+
+func TestValidate_RuntimeQuantities(t *testing.T) {
+	base := DeployIntent{
+		APIVersion: APIVersionV1,
+		Pack:       PackIntent{Name: "p", Version: "1.0.0", Content: "{}"},
+		Agents:     []AgentIntent{{Name: "a", Providers: []ProviderBind{{Name: "default", Ref: "claude"}}}},
+	}
+
+	for name, mut := range map[string]func(*DeployIntent){
+		"malformed cpu":    func(d *DeployIntent) { d.Agents[0].Runtime = &RuntimeIntent{CPU: "not-a-quantity"} },
+		"malformed memory": func(d *DeployIntent) { d.Agents[0].Runtime = &RuntimeIntent{Memory: "bad"} },
+	} {
+		d := base
+		d.Agents = append([]AgentIntent(nil), base.Agents...)
+		mut(&d)
+		if err := d.Validate(); err == nil {
+			t.Errorf("%s: expected validation error, got nil", name)
+		}
+	}
+
+	valid := base
+	valid.Agents = append([]AgentIntent(nil), base.Agents...)
+	valid.Agents[0].Runtime = &RuntimeIntent{CPU: "500m", Memory: "256Mi"}
+	if err := valid.Validate(); err != nil {
+		t.Errorf("valid runtime quantities rejected: %v", err)
+	}
+}

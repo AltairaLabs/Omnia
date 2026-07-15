@@ -135,8 +135,12 @@ func TestAgentToAgentRuntime_Pinned(t *testing.T) {
 	if ar.Spec.ToolRegistryRef == nil {
 		t.Errorf("useTools true but toolRegistryRef nil")
 	}
-	// OMNIA_PROMPT_NAME env pins the prompt for a fanned-out runtime.
-	if !hasEnvVar(ar.Spec.Runtime, promptNameEnv, "triage") {
+	// OMNIA_PROMPT_NAME env pins the prompt for a fanned-out runtime. The literal
+	// (not the promptNameEnv constant) is asserted here because OMNIA_PROMPT_NAME
+	// is a cross-package external contract (also literal in internal/runtime/config.go
+	// and internal/controller/deployment_builder_env.go) — pinning the literal means
+	// a future rename of the local constant can't silently pass while breaking it.
+	if !hasEnvVar(ar.Spec.Runtime, "OMNIA_PROMPT_NAME", "triage") {
 		t.Errorf("OMNIA_PROMPT_NAME env not set: %+v", ar.Spec.Runtime)
 	}
 }

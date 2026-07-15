@@ -3,6 +3,8 @@ package deploy
 import (
 	"errors"
 	"fmt"
+
+	"k8s.io/apimachinery/pkg/api/resource"
 )
 
 // APIVersionV1 is the only DeployIntent contract version this operator serves.
@@ -148,11 +150,40 @@ func (d DeployIntent) Validate() error {
 		return errors.New("at least one agent is required")
 	}
 	for i, a := range d.Agents {
-		if a.Name == "" {
-			return fmt.Errorf("agents[%d].name is required", i)
+		if err := a.validate(i); err != nil {
+			return err
 		}
-		if len(a.Providers) == 0 {
-			return fmt.Errorf("agents[%d].providers must not be empty", i)
+	}
+	return nil
+}
+
+// validate checks one AgentIntent at index i in the parent Agents slice.
+func (a AgentIntent) validate(i int) error {
+	if a.Name == "" {
+		return fmt.Errorf("agents[%d].name is required", i)
+	}
+	if len(a.Providers) == 0 {
+		return fmt.Errorf("agents[%d].providers must not be empty", i)
+	}
+	return a.Runtime.validate(i)
+}
+
+// validate checks the CPU/Memory quantities, when set, parse cleanly.
+// resourceRequirements (translate.go) uses resource.MustParse on these same
+// fields, so a malformed quantity must be rejected here (400) rather than
+// panicking during translation (500).
+func (r *RuntimeIntent) validate(i int) error {
+	if r == nil {
+		return nil
+	}
+	if r.CPU != "" {
+		if _, err := resource.ParseQuantity(r.CPU); err != nil {
+			return fmt.Errorf("agents[%d].runtime.cpu: invalid quantity %q: %w", i, r.CPU, err)
+		}
+	}
+	if r.Memory != "" {
+		if _, err := resource.ParseQuantity(r.Memory); err != nil {
+			return fmt.Errorf("agents[%d].runtime.memory: invalid quantity %q: %w", i, r.Memory, err)
 		}
 	}
 	return nil
