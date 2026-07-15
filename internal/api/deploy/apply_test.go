@@ -8,6 +8,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
@@ -273,6 +274,75 @@ func TestApply_TriggerModePreservesLivePin(t *testing.T) {
 		t.Errorf("candidate clobbered: %+v", got.Spec.Rollout)
 	}
 	// Other config STILL applied.
+	if len(got.Spec.Providers) != 1 || got.Spec.Providers[0].ProviderRef.Name != "new" {
+		t.Errorf("providers not updated: %+v", got.Spec.Providers)
+	}
+}
+
+// TestApply_TriggerModeConfigOnlyDeployPreservesRollout verifies that when the
+// deploy intent for a trigger-mode agent omits the rollout block entirely
+// (config-only deploy), the LIVE rollout is preserved wholesale — trigger,
+// steps, AND candidate — not rebuilt with only Candidate set. Rebuilding with
+// only Candidate would produce a RolloutConfig with zero Steps, which is
+// invalid against the CRD (Steps has MinItems=1) and would cause a real
+// apiserver Update to reject the whole AgentRuntime, silently dropping the
+// provider/facade changes the deploy intended.
+func TestApply_TriggerModeConfigOnlyDeployPreservesRollout(t *testing.T) {
+	// Live agent: trigger-mode, pinned to 1.0.0, mid-canary, with a full
+	// rollout (trigger + steps + candidate).
+	pinned := "1.0.0"
+	live := &omniav1alpha1.AgentRuntime{}
+	live.Name = "support"
+	live.Namespace = "ns"
+	live.Spec.PromptPackRef = omniav1alpha1.PromptPackRef{Name: "support", Version: &pinned}
+	live.Spec.Rollout = &omniav1alpha1.RolloutConfig{
+		Trigger:   &omniav1alpha1.RolloutTrigger{PromptPackChannel: "stable"},
+		Candidate: &omniav1alpha1.CandidateOverrides{},
+		Steps:     []omniav1alpha1.RolloutStep{{SetWeight: ptr.To(int32(25))}},
+	}
+	live.Spec.Providers = []omniav1alpha1.NamedProviderRef{{Name: "default", ProviderRef: omniav1alpha1.ProviderRef{Name: "old"}}}
+
+	c := fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(live).Build()
+	a := NewApplier(c, logr.Discard())
+
+	// Deploy a NEW version (1.1.0) with changed providers, but NO rollout
+	// block on the agent intent — a config-only deploy.
+	intent := DeployIntent{
+		APIVersion: APIVersionV1,
+		Pack:       PackIntent{Name: "support", Version: "1.1.0", Content: "{}"},
+		Agents: []AgentIntent{{
+			Name:      "support",
+			Providers: []ProviderBind{{Name: "default", Ref: "new"}},
+		}},
+	}
+	res := a.Apply(context.Background(), "ns", intent)
+	if !res.Succeeded {
+		t.Fatalf("apply failed: %+v", res.Results)
+	}
+
+	got := &omniav1alpha1.AgentRuntime{}
+	if err := c.Get(context.Background(), types.NamespacedName{Name: "support", Namespace: "ns"}, got); err != nil {
+		t.Fatal(err)
+	}
+	// Pin PRESERVED at 1.0.0 (not advanced to 1.1.0).
+	if got.Spec.PromptPackRef.Version == nil || *got.Spec.PromptPackRef.Version != "1.0.0" {
+		t.Errorf("pin = %v, want preserved 1.0.0", got.Spec.PromptPackRef.Version)
+	}
+	// Whole live rollout PRESERVED — trigger, steps (CRD-required, MinItems=1),
+	// and candidate all intact.
+	if got.Spec.Rollout == nil {
+		t.Fatal("rollout dropped entirely")
+	}
+	if got.Spec.Rollout.Trigger == nil || got.Spec.Rollout.Trigger.PromptPackChannel != "stable" {
+		t.Errorf("trigger = %+v, want preserved stable channel", got.Spec.Rollout.Trigger)
+	}
+	if len(got.Spec.Rollout.Steps) < 1 {
+		t.Errorf("steps = %+v, want at least 1 (CRD MinItems=1) — object would fail a real apiserver Update", got.Spec.Rollout.Steps)
+	}
+	if got.Spec.Rollout.Candidate == nil {
+		t.Errorf("candidate clobbered: %+v", got.Spec.Rollout)
+	}
+	// Config change STILL applied.
 	if len(got.Spec.Providers) != 1 || got.Spec.Providers[0].ProviderRef.Name != "new" {
 		t.Errorf("providers not updated: %+v", got.Spec.Providers)
 	}

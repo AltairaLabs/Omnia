@@ -98,27 +98,40 @@ func (a *Applier) upsertAgentRuntime(ctx context.Context, desired *omniav1alpha1
 // reconcileAgentRuntimeSpec copies the desired spec onto the live object,
 // rollout-aware: when the LIVE agent is in version-trigger mode, the deploy
 // must not advance the PromptPack pin or clobber an in-flight canary — the
-// #1838 controller owns those. Every other desired field is still applied.
+// #1838 controller owns those. Every other desired field is still applied,
+// EXCEPT that a config-only deploy (intent omits the rollout block entirely)
+// against a trigger-mode agent leaves the live rollout — trigger, steps, and
+// candidate — untouched, since RolloutConfig.Steps is CRD-required
+// (MinItems=1) and rebuilding it with only Candidate set would produce an
+// invalid object that a real apiserver Update rejects outright.
 func reconcileAgentRuntimeSpec(live, desired *omniav1alpha1.AgentRuntime) {
 	triggerMode := live.Spec.Rollout != nil && live.Spec.Rollout.Trigger != nil
 
 	var (
 		preservedRef       omniav1alpha1.PromptPackRef
+		preservedRollout   *omniav1alpha1.RolloutConfig
 		preservedCandidate *omniav1alpha1.CandidateOverrides
 	)
 	if triggerMode {
 		preservedRef = live.Spec.PromptPackRef
-		preservedCandidate = live.Spec.Rollout.Candidate
+		preservedRollout = live.Spec.Rollout
+		preservedCandidate = preservedRollout.Candidate
 	}
 
 	live.Spec = desired.Spec
 
 	if triggerMode {
 		live.Spec.PromptPackRef = preservedRef
-		if live.Spec.Rollout == nil {
-			live.Spec.Rollout = &omniav1alpha1.RolloutConfig{}
+		switch {
+		case live.Spec.Rollout == nil:
+			// Config-only deploy: intent had no rollout block. Keep the live
+			// rollout wholesale so trigger+steps+candidate all stay intact.
+			live.Spec.Rollout = preservedRollout
+		default:
+			// Intent specified a rollout (new trigger/steps) — honor it, but
+			// the in-flight candidate is still owned by the controller.
+			live.Spec.Rollout.Candidate = preservedCandidate
 		}
-		live.Spec.Rollout.Candidate = preservedCandidate
 	}
 
 	if live.Labels == nil {
