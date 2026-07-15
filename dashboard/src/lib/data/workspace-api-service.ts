@@ -21,6 +21,10 @@ import type {
   Stats,
 } from "./types";
 import type { DeployProfile } from "@/types/deploy-profile";
+import { selectChannelMax } from "@/lib/promptpack/channel-select";
+
+/** Label whose value is the logical PromptPack name (packName), stamped by the operator (#1837). */
+const PROMPTPACK_LABEL = "omnia.altairalabs.ai/promptpack";
 
 /**
  * Workspace API service that calls workspace-scoped endpoints.
@@ -157,9 +161,19 @@ export class WorkspaceApiService {
     return response.json();
   }
 
+  /**
+   * Resolve a logical PromptPack by its packName label and return the
+   * channel-max (latest stable) version-object.
+   *
+   * After #1837 a PromptPack's `metadata.name` is a deterministic `pp-<hash>`,
+   * so packs must be listed by the `omnia.altairalabs.ai/promptpack=<packName>`
+   * label rather than fetched by object name. The collection GET returns a bare
+   * JSON array of PromptPack objects.
+   */
   async getPromptPack(workspace: string, name: string): Promise<PromptPack | undefined> {
+    const labelSelector = `${PROMPTPACK_LABEL}=${name}`;
     const response = await fetch(
-      `/api/workspaces/${encodeURIComponent(workspace)}/promptpacks/${encodeURIComponent(name)}`
+      `/api/workspaces/${encodeURIComponent(workspace)}/promptpacks?labelSelector=${encodeURIComponent(labelSelector)}`
     );
     if (!response.ok) {
       if (response.status === 404) {
@@ -167,7 +181,8 @@ export class WorkspaceApiService {
       }
       throw new Error(`Failed to fetch prompt pack: ${response.statusText}`);
     }
-    return response.json();
+    const packs = (await response.json()) as PromptPack[];
+    return selectChannelMax(packs, "stable");
   }
 
   async getPromptPackContent(workspace: string, name: string): Promise<PromptPackContent | undefined> {

@@ -3,6 +3,7 @@ import ELK from "elkjs/lib/elk.bundled.js";
 import type { AgentRuntime, PromptPack, ToolRegistry, Provider, ProviderType } from "@/types";
 import type { NotesMap } from "@/lib/notes-storage";
 import { getProviderColor } from "./provider-icons";
+import { selectChannelMax } from "@/lib/promptpack/channel-select";
 
 // Edge label colors (tokens; extracted to satisfy sonarjs/no-duplicate-string).
 const EDGE_LABEL_FILL = "var(--muted-foreground)";
@@ -28,6 +29,32 @@ function getNoteForResource(notes: NotesMap | undefined, type: string, namespace
   if (!notes) return undefined;
   const key = `${type}/${namespace}/${name}`;
   return notes[key]?.note;
+}
+
+/**
+ * Deduplicate PromptPack version-objects to one channel-max (latest stable)
+ * object per logical `namespace/packName`. After #1837 many hash-named objects
+ * share a `spec.packName`; the topology shows a single node per logical pack.
+ */
+function buildChannelMaxPackMap(promptPacks: PromptPack[]): Map<string, PromptPack> {
+  const groups = new Map<string, PromptPack[]>();
+  for (const pp of promptPacks) {
+    const key = `${pp.metadata.namespace}/${pp.spec.packName}`;
+    const group = groups.get(key);
+    if (group) {
+      group.push(pp);
+    } else {
+      groups.set(key, [pp]);
+    }
+  }
+
+  const result = new Map<string, PromptPack>();
+  for (const [key, group] of groups) {
+    const chosen =
+      selectChannelMax(group, "stable") ?? selectChannelMax(group, "prerelease") ?? group[0];
+    result.set(key, chosen);
+  }
+  return result;
 }
 
 // Node dimensions for layout
@@ -130,8 +157,9 @@ export function buildTopologyGraph({
   const nodes: Node[] = [];
   const edges: Edge[] = [];
 
-  // Create maps for lookups
-  const promptPackMap = new Map(promptPacks.map((pp) => [`${pp.metadata.namespace}/${pp.metadata.name}`, pp]));
+  // Create maps for lookups. PromptPacks are deduped to the channel-max
+  // version-object per logical namespace/packName (#1837 + #1849).
+  const promptPackMap = buildChannelMaxPackMap(promptPacks);
   const toolRegistryMap = new Map(toolRegistries.map((tr) => [`${tr.metadata.namespace}/${tr.metadata.name}`, tr]));
   const providerMap = new Map(providers.map((p) => [`${p.metadata.namespace}/${p.metadata.name}`, p]));
 
@@ -183,37 +211,40 @@ export function buildTopologyGraph({
     }
   });
 
-  // Create PromptPack nodes
+  // Create PromptPack nodes. Keys are logical namespace/packName; agents
+  // reference the logical packName (not the hash-named object).
   const allPromptPackKeys = new Set([
     ...connectedPromptPacks,
-    ...promptPacks.map((pp) => `${pp.metadata.namespace}/${pp.metadata.name}`),
+    ...promptPackMap.keys(),
   ]);
 
   allPromptPackKeys.forEach((key) => {
     const pp = promptPackMap.get(key);
     if (!pp) return;
 
-    const nodeId = `promptpack-${pp.metadata.namespace}-${pp.metadata.name}`;
+    const nodeId = `promptpack-${pp.metadata.namespace}-${pp.spec.packName}`;
     nodes.push({
       id: nodeId,
       type: "promptPack",
       position: { x: 0, y: 0 },
       data: {
-        label: pp.metadata.name,
+        label: pp.spec.packName,
         namespace: pp.metadata.namespace,
         version: pp.status?.activeVersion || pp.spec.version,
         phase: pp.status?.phase,
+        // node-summary-card resolves by metadata.name, so pass the concrete
+        // channel-max object name here.
         onClick: () => onNodeClick?.("promptpack", pp.metadata.name, pp.metadata.namespace || "default"),
-        note: getNoteForResource(notes, "promptpack", pp.metadata.namespace || "default", pp.metadata.name),
+        note: getNoteForResource(notes, "promptpack", pp.metadata.namespace || "default", pp.spec.packName),
         onNoteEdit,
         onNoteDelete,
       },
     });
 
-    // Create edges from agents to this PromptPack
+    // Create edges from agents to this PromptPack (join on logical packName)
     agents.forEach((agent) => {
       if (
-        agent.spec.promptPackRef?.name === pp.metadata.name &&
+        agent.spec.promptPackRef?.name === pp.spec.packName &&
         (agent.metadata.namespace || "default") === (pp.metadata.namespace || "default")
       ) {
         edges.push({

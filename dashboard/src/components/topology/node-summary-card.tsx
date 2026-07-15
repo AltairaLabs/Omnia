@@ -271,7 +271,7 @@ function PromptPackSummaryCard({ promptPack, onClose }: Readonly<{ promptPack: P
       name={metadata.name}
       namespace={metadata.namespace || "default"}
       phase={status?.phase}
-      detailsHref={`/promptpacks/${metadata.name}?namespace=${metadata.namespace}`}
+      detailsHref={`/promptpacks/${spec.packName}?namespace=${metadata.namespace}`}
       onClose={onClose}
     >
       <div className="grid grid-cols-2 gap-3 text-sm">

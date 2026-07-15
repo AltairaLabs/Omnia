@@ -59,6 +59,7 @@ function createMockPromptPack(name: string, namespace: string): PromptPack {
     kind: "PromptPack",
     metadata: { name, namespace },
     spec: {
+      packName: name,
       source: { type: "configmap", configMapRef: { name: "test" } },
       version: "1.0.0",
     },
