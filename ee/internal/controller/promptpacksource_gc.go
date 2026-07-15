@@ -14,7 +14,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Masterminds/semver/v3"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -23,6 +22,7 @@ import (
 
 	corev1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 	omniav1alpha1 "github.com/altairalabs/omnia/ee/api/v1alpha1"
+	"github.com/altairalabs/omnia/internal/promptpack/packselect"
 )
 
 // supersededConditionType is the PromptPack status condition the core controller
@@ -31,8 +31,9 @@ import (
 // core controller's const lives across the module boundary.
 const supersededConditionType = "Superseded"
 
-// trackStable is the stable release channel; a stable track excludes prereleases.
-const trackStable = "stable"
+// trackStable is the stable release channel; a stable track excludes
+// prereleases. Aliases packselect.TrackStable.
+const trackStable = packselect.TrackStable
 
 // gcOldVersions garbage-collects Superseded PromptPack version-objects for a
 // pack beyond the retention limit. Two guards protect an otherwise-eligible
@@ -151,35 +152,12 @@ func sortByVersionDesc(packs []corev1alpha1.PromptPack) {
 // packVersionGreater reports whether version a is greater than b under semver,
 // falling back to string comparison when either side is unparseable.
 func packVersionGreater(a, b string) bool {
-	av, aErr := semver.StrictNewVersion(strings.TrimPrefix(a, "v"))
-	bv, bErr := semver.StrictNewVersion(strings.TrimPrefix(b, "v"))
+	av, aErr := packselect.ParseVersion(a)
+	bv, bErr := packselect.ParseVersion(b)
 	if aErr != nil || bErr != nil {
 		return a > b
 	}
 	return av.GreaterThan(bv)
-}
-
-// channelMaxObjName returns the object name of the channel-max pack for track:
-// the highest version overall for the prerelease track, or the highest version
-// with no prerelease identifier for the stable track. Returns "" when no version
-// qualifies. Mirrors the resolver's channel semantics so GC protects exactly the
-// object a track-only ref resolves to.
-func channelMaxObjName(packs []corev1alpha1.PromptPack, track string) string {
-	bestName := ""
-	var bestV *semver.Version
-	for i := range packs {
-		v, err := semver.StrictNewVersion(strings.TrimPrefix(packs[i].Spec.Version, "v"))
-		if err != nil {
-			continue
-		}
-		if track == trackStable && v.Prerelease() != "" {
-			continue // stable channel excludes prereleases
-		}
-		if bestV == nil || v.GreaterThan(bestV) {
-			bestName, bestV = packs[i].Name, v
-		}
-	}
-	return bestName
 }
 
 // arRefIndex indexes the PromptPack references held by every AgentRuntime in a
@@ -240,8 +218,11 @@ func (x *arRefIndex) add(ref *corev1alpha1.PromptPackRef) {
 func (x *arRefIndex) protectedTrackNames(packName string, packs []corev1alpha1.PromptPack) map[string]struct{} {
 	out := map[string]struct{}{}
 	for track := range x.trackOnly[packName] {
-		if name := channelMaxObjName(packs, track); name != "" {
-			out[name] = struct{}{}
+		// Resolve each referenced track to its channel-max object so GC protects
+		// exactly the object a track-only ref resolves to. A track with no
+		// qualifying version (packselect.ChannelMax error) protects nothing.
+		if pp, err := packselect.ChannelMax(packs, track); err == nil {
+			out[pp.Name] = struct{}{}
 		}
 	}
 	return out

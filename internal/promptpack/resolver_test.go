@@ -28,6 +28,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
+	"github.com/altairalabs/omnia/internal/promptpack/packselect"
 )
 
 func testScheme(t *testing.T) *runtime.Scheme {
@@ -47,7 +48,7 @@ func configmapPack(objName, packName, version, cmName string) *omniav1alpha1.Pro
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      objName,
 			Namespace: "ns",
-			Labels:    map[string]string{packNameLabel: packName},
+			Labels:    map[string]string{packselect.Label: packName},
 		},
 		Spec: omniav1alpha1.PromptPackSpec{
 			PackName: packName,
@@ -196,7 +197,7 @@ func TestLoad_MissingConfigMapRef(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "pp-p",
 			Namespace: "ns",
-			Labels:    map[string]string{packNameLabel: "p"},
+			Labels:    map[string]string{packselect.Label: "p"},
 		},
 		Spec: omniav1alpha1.PromptPackSpec{
 			PackName: "p",
@@ -227,7 +228,7 @@ func TestLoad_UnsupportedSourceType(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "pp-p",
 			Namespace: "ns",
-			Labels:    map[string]string{packNameLabel: "p"},
+			Labels:    map[string]string{packselect.Label: "p"},
 		},
 		Spec: omniav1alpha1.PromptPackSpec{
 			PackName: "p",

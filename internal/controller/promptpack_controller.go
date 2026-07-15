@@ -38,6 +38,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
+	"github.com/altairalabs/omnia/internal/promptpack/packselect"
 	"github.com/altairalabs/omnia/internal/schema"
 )
 
@@ -53,8 +54,9 @@ const (
 	PromptPackConditionTypeSuperseded = "Superseded"
 )
 
-// LabelPromptPackName indexes a PromptPack version-object by its logical pack name.
-const LabelPromptPackName = "omnia.altairalabs.ai/promptpack"
+// LabelPromptPackName indexes a PromptPack version-object by its logical pack
+// name. It aliases packselect.Label, the single source of truth for the value.
+const LabelPromptPackName = packselect.Label
 
 // Event reasons for PromptPack
 const (
@@ -425,8 +427,8 @@ func resolvePackPhase(self *omniav1alpha1.PromptPack, siblings []omniav1alpha1.P
 		eligible = append(eligible, *self)
 	}
 
-	stableMax, _ := channelMax(eligible, promptPackTrackStable)
-	preMax, _ := channelMax(eligible, promptPackTrackPrerelease)
+	stableMax, _ := packselect.ChannelMax(eligible, promptPackTrackStable)
+	preMax, _ := packselect.ChannelMax(eligible, promptPackTrackPrerelease)
 	return (stableMax != nil && versionsEqual(self.Spec.Version, stableMax.Spec.Version)) ||
 		(preMax != nil && versionsEqual(self.Spec.Version, preMax.Spec.Version))
 }

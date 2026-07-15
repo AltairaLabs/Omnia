@@ -28,6 +28,7 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
+	"github.com/altairalabs/omnia/internal/promptpack/packselect"
 )
 
 // reasonProgressDeadlineExceeded is the Deployment Progressing-condition reason
@@ -584,26 +585,13 @@ func normalizeTrack(t string) string {
 	return t
 }
 
-// versionsEqual reports whether two version strings are semantically equal.
-// Both are parsed with parsePackVersion (strict major.minor.patch, tolerating
-// an optional leading "v" per the PromptPack CRD's spec.version pattern, and
-// ignoring build metadata per semver semantics); if either fails to parse, it
-// falls back to raw string equality — defensive, since these values aren't
-// guaranteed to be strict semver at this layer (e.g. free-form placeholder
-// version strings). Deliberately strict rather than semver.NewVersion's
-// lenient/coercing parse: the latter treats a bare "v1" as equivalent to
-// "1.0.0", which would silently conflate distinct informal version labels
-// used elsewhere in this codebase.
+// versionsEqual reports whether two version strings are semantically equal. It
+// delegates to packselect.VersionsEqual (strict major.minor.patch parsing,
+// tolerating an optional leading "v" and ignoring build metadata; raw string
+// equality fallback when either side fails to parse) — a thin wrapper kept so
+// this package's call sites read naturally.
 func versionsEqual(a, b string) bool {
-	if a == b {
-		return true
-	}
-	av, aErr := parsePackVersion(a)
-	bv, bErr := parsePackVersion(b)
-	if aErr != nil || bErr != nil {
-		return false
-	}
-	return av.Equal(bv)
+	return packselect.VersionsEqual(a, b)
 }
 
 // providerRefsDiffer checks if the candidate overrides the provider refs.

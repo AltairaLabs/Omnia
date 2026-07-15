@@ -12,6 +12,7 @@ import (
 	"fmt"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
+	"github.com/altairalabs/omnia/internal/promptpack/packselect"
 )
 
 // resolveTriggerCandidate decides whether a version-triggered rollout should
@@ -72,15 +73,15 @@ func (r *AgentRuntimeReconciler) maybeTriggerVersionRollout(ctx context.Context,
 }
 
 // versionsNewer reports whether a is a strictly newer semver than b. Both are
-// parsed with parsePackVersion (shared with the resolver so "v"-prefixed
+// parsed with packselect.ParseVersion (shared with the resolver so "v"-prefixed
 // forms compare consistently); an unparseable value on either side returns
 // false rather than risking a spurious canary on malformed version strings.
 func versionsNewer(a, b string) bool {
-	av, err := parsePackVersion(a)
+	av, err := packselect.ParseVersion(a)
 	if err != nil {
 		return false
 	}
-	bv, err := parsePackVersion(b)
+	bv, err := packselect.ParseVersion(b)
 	if err != nil {
 		return false
 	}
