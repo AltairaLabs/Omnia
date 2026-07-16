@@ -10,6 +10,29 @@ or `api/proto/`, add an entry below with the date, affected API, and reason.
 
 ## Unreleased
 
+### Added (operator: deploy-intent API, deploy-intent decoupling epic Plan A)
+
+- **`POST /api/v1/workspaces/{workspace}/deployments`** — new operator-served REST endpoint
+  (`internal/api/deploy`) that accepts a versioned, CRD-agnostic **`DeployIntent`**
+  (`apiVersion: deploy.omnia.altairalabs.ai/v1`) and translates it server-side into a
+  `PromptPack` + its content `ConfigMap` and one or more `AgentRuntime` objects, applied
+  idempotently (pack/ConfigMap created once; existing objects reported `unchanged`) and
+  rollout-aware (an `AgentRuntime` already in version-trigger rollout mode keeps its live
+  `promptPackRef`/candidate/rollout state unless the intent explicitly supplies a new
+  rollout block). Response is **`DeployResult`**: `{succeeded, results: [{kind, name,
+  action: created|updated|unchanged|failed, error?}]}` — HTTP 200, or 207 on partial
+  failure. Auth matches the content API: dashboard-minted management-plane JWT verified
+  against `--mgmt-plane-jwks-url`, editor role required on the target workspace
+  (`internal/api/authz`). Gated behind the new `--deploy-api-bind-address` operator flag
+  (empty disables it; requires `--mgmt-plane-jwks-url`).
+- This is **Plan A** of the deploy-intent decoupling epic (#1835 family, supersedes
+  #1839): it lets a future deploy adapter submit one intent instead of authoring
+  `PromptPack`/`AgentRuntime` CRDs itself. The existing `promptarena-deploy-omnia` adapter
+  has **not** migrated to this endpoint yet — it still writes CRDs directly via the
+  dashboard's workspace CRD REST API (unchanged). `DeployIntent` fields for external auth,
+  memory, evals, ToolRegistry, and AgentPolicy mapping ("Plan B") are declared on the wire
+  for contract stability but not yet mapped by the translator.
+
 ### Changed (auth: rename `apiKeys` → `clientKeys` + arbitrary per-key claims, #1775)
 
 - **BREAKING (CRD + `pkg/facade` SDK).** The facade external-auth **`spec.externalAuth.apiKeys`** field is renamed to **`clientKeys`** (`APIKeysAuth` → `ClientKeysAuth`), disambiguating it from LLM-provider api-keys and the dashboard's own user api-keys. The origin surfaced to ToolPolicy is renamed `identity.origin == "api-key"` → **`"client-key"`** (`policy.OriginAPIKey` → `OriginClientKey`). In the public `pkg/facade/auth` SDK: `APIKey`/`APIKeyValidator`/`NewAPIKeyValidator`/`WithAPIKey*` → `ClientKey`/`ClientKeyValidator`/`NewClientKeyValidator`/`WithClientKey*`.

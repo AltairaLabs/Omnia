@@ -1632,3 +1632,175 @@ components:
               type: integer
             degraded:
               type: integer
+
+    DeployIntent:
+      type: object
+      description: |
+        Versioned, CRD-agnostic description of a whole deploy. The operator's
+        deploy-intent API (internal, mgmt-plane-JWT authenticated — not the
+        `ApiKeyAuth` surface below) translates this into PromptPack + AgentRuntime
+        objects, so the promptarena-deploy-omnia adapter never constructs CRDs
+        directly. Field names mirror `internal/api/deploy.DeployIntent` exactly.
+      required: [apiVersion, pack, agents]
+      properties:
+        apiVersion:
+          type: string
+          description: Contract version. Only `deploy.omnia.altairalabs.ai/v1` is accepted; unknown values are rejected with 400.
+          example: deploy.omnia.altairalabs.ai/v1
+        pack:
+          $ref: '#/components/schemas/PackIntent'
+        tools:
+          $ref: '#/components/schemas/ToolsIntent'
+        policy:
+          $ref: '#/components/schemas/PolicyIntent'
+        agents:
+          type: array
+          items:
+            $ref: '#/components/schemas/AgentIntent'
+        labels:
+          type: object
+          additionalProperties: { type: string }
+
+    PackIntent:
+      type: object
+      description: Maps to a PromptPack plus its content ConfigMap. `content` is the raw pack.json; the operator treats it as opaque bytes.
+      required: [name, version, content]
+      properties:
+        name: { type: string }
+        version: { type: string }
+        content: { type: string }
+        skills:
+          type: array
+          items:
+            $ref: '#/components/schemas/SkillRefIntent'
+        skillsConfig:
+          $ref: '#/components/schemas/SkillsConfigIntent'
+
+    SkillRefIntent:
+      type: object
+      description: Maps to a PromptPack spec.skills[] entry.
+      required: [source]
+      properties:
+        source: { type: string }
+        include: { type: array, items: { type: string } }
+        mountAs: { type: string }
+
+    SkillsConfigIntent:
+      type: object
+      description: Maps to PromptPack spec.skillsConfig.
+      properties:
+        maxActive: { type: integer }
+        selector: { type: string }
+
+    ToolsIntent:
+      type: object
+      description: Plan B placeholder — declared so the wire contract is stable; not yet mapped by the operator.
+      properties:
+        ref: { type: string }
+
+    PolicyIntent:
+      type: object
+      description: Plan B placeholder — declared so the wire contract is stable; not yet mapped by the operator.
+      properties:
+        toolBlocklist: { type: array, items: { type: string } }
+
+    AgentIntent:
+      type: object
+      description: Maps to one AgentRuntime.
+      required: [name, providers]
+      properties:
+        name: { type: string }
+        promptName: { type: string }
+        providers:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProviderBind'
+        runtime:
+          $ref: '#/components/schemas/RuntimeIntent'
+        facades:
+          type: array
+          items:
+            $ref: '#/components/schemas/FacadeIntent'
+        useTools: { type: boolean }
+        externalAuth:
+          type: object
+          description: Plan B placeholder — not yet mapped by the operator.
+        memory:
+          type: object
+          description: Plan B placeholder — not yet mapped by the operator.
+        evals:
+          type: object
+          description: Plan B placeholder — not yet mapped by the operator.
+        rollout:
+          $ref: '#/components/schemas/RolloutIntent'
+
+    ProviderBind:
+      type: object
+      description: One provider binding — a logical slot name, the Provider CRD name, and the role (default "llm").
+      required: [name, ref]
+      properties:
+        name: { type: string }
+        ref: { type: string }
+        role: { type: string }
+
+    RuntimeIntent:
+      type: object
+      description: Maps to spec.runtime (Plan A supports replicas + resources only).
+      properties:
+        replicas: { type: integer, format: int32 }
+        cpu: { type: string }
+        memory: { type: string }
+
+    FacadeIntent:
+      type: object
+      description: Maps to one spec.facades[] entry. A nil/empty agents[].facades yields a single default websocket facade.
+      required: [type]
+      properties:
+        type: { type: string }
+        managementPlane: { type: boolean }
+
+    RolloutIntent:
+      type: object
+      description: Maps to spec.rollout. A non-nil trigger switches the AgentRuntime into canary mode.
+      properties:
+        trigger:
+          $ref: '#/components/schemas/RolloutTriggerIntent'
+        steps:
+          type: array
+          items:
+            $ref: '#/components/schemas/RolloutStepIntent'
+
+    RolloutTriggerIntent:
+      type: object
+      description: Maps to spec.rollout.trigger.
+      required: [promptPackChannel]
+      properties:
+        promptPackChannel: { type: string }
+
+    RolloutStepIntent:
+      type: object
+      description: Maps to a spec.rollout.steps[] entry (Plan A supports setWeight + pause duration).
+      properties:
+        setWeight: { type: integer, format: int32 }
+        pauseDuration: { type: string }
+
+    DeployResult:
+      type: object
+      description: The deploy-intent endpoint's response body — best-effort per-resource status.
+      required: [succeeded, results]
+      properties:
+        succeeded: { type: boolean }
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/ResourceResult'
+
+    ResourceResult:
+      type: object
+      description: The per-object apply outcome.
+      required: [kind, name, action]
+      properties:
+        kind: { type: string }
+        name: { type: string }
+        action: { type: string, enum: [created, updated, unchanged, failed] }
+        error: { type: string }

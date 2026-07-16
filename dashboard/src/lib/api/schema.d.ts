@@ -957,6 +957,116 @@ export interface components {
                 degraded?: number;
             };
         };
+        /**
+         * @description Versioned, CRD-agnostic description of a whole deploy. The operator's
+         *     deploy-intent API (internal, mgmt-plane-JWT authenticated — not the
+         *     `ApiKeyAuth` surface below) translates this into PromptPack + AgentRuntime
+         *     objects, so the promptarena-deploy-omnia adapter never constructs CRDs
+         *     directly. Field names mirror `internal/api/deploy.DeployIntent` exactly.
+         */
+        DeployIntent: {
+            /**
+             * @description Contract version. Only `deploy.omnia.altairalabs.ai/v1` is accepted; unknown values are rejected with 400.
+             * @example deploy.omnia.altairalabs.ai/v1
+             */
+            apiVersion: string;
+            pack: components["schemas"]["PackIntent"];
+            tools?: components["schemas"]["ToolsIntent"];
+            policy?: components["schemas"]["PolicyIntent"];
+            agents: components["schemas"]["AgentIntent"][];
+            labels?: {
+                [key: string]: string;
+            };
+        };
+        /** @description Maps to a PromptPack plus its content ConfigMap. `content` is the raw pack.json; the operator treats it as opaque bytes. */
+        PackIntent: {
+            name: string;
+            version: string;
+            content: string;
+            skills?: components["schemas"]["SkillRefIntent"][];
+            skillsConfig?: components["schemas"]["SkillsConfigIntent"];
+        };
+        /** @description Maps to a PromptPack spec.skills[] entry. */
+        SkillRefIntent: {
+            source: string;
+            include?: string[];
+            mountAs?: string;
+        };
+        /** @description Maps to PromptPack spec.skillsConfig. */
+        SkillsConfigIntent: {
+            maxActive?: number;
+            selector?: string;
+        };
+        /** @description Plan B placeholder — declared so the wire contract is stable; not yet mapped by the operator. */
+        ToolsIntent: {
+            ref?: string;
+        };
+        /** @description Plan B placeholder — declared so the wire contract is stable; not yet mapped by the operator. */
+        PolicyIntent: {
+            toolBlocklist?: string[];
+        };
+        /** @description Maps to one AgentRuntime. */
+        AgentIntent: {
+            name: string;
+            promptName?: string;
+            providers: components["schemas"]["ProviderBind"][];
+            runtime?: components["schemas"]["RuntimeIntent"];
+            facades?: components["schemas"]["FacadeIntent"][];
+            useTools?: boolean;
+            /** @description Plan B placeholder — not yet mapped by the operator. */
+            externalAuth?: Record<string, never>;
+            /** @description Plan B placeholder — not yet mapped by the operator. */
+            memory?: Record<string, never>;
+            /** @description Plan B placeholder — not yet mapped by the operator. */
+            evals?: Record<string, never>;
+            rollout?: components["schemas"]["RolloutIntent"];
+        };
+        /** @description One provider binding — a logical slot name, the Provider CRD name, and the role (default "llm"). */
+        ProviderBind: {
+            name: string;
+            ref: string;
+            role?: string;
+        };
+        /** @description Maps to spec.runtime (Plan A supports replicas + resources only). */
+        RuntimeIntent: {
+            /** Format: int32 */
+            replicas?: number;
+            cpu?: string;
+            memory?: string;
+        };
+        /** @description Maps to one spec.facades[] entry. A nil/empty agents[].facades yields a single default websocket facade. */
+        FacadeIntent: {
+            type: string;
+            managementPlane?: boolean;
+        };
+        /** @description Maps to spec.rollout. A non-nil trigger switches the AgentRuntime into canary mode. */
+        RolloutIntent: {
+            trigger?: components["schemas"]["RolloutTriggerIntent"];
+            steps?: components["schemas"]["RolloutStepIntent"][];
+        };
+        /** @description Maps to spec.rollout.trigger. */
+        RolloutTriggerIntent: {
+            promptPackChannel: string;
+        };
+        /** @description Maps to a spec.rollout.steps[] entry (Plan A supports setWeight + pause duration). */
+        RolloutStepIntent: {
+            /** Format: int32 */
+            setWeight?: number;
+            pauseDuration?: string;
+        };
+        /** @description The deploy-intent endpoint's response body — best-effort per-resource status. */
+        DeployResult: {
+            succeeded: boolean;
+            results: components["schemas"]["ResourceResult"][];
+        };
+        /** @description The per-object apply outcome. */
+        ResourceResult: {
+            kind: string;
+            name: string;
+            /** @enum {string} */
+            action: "created" | "updated" | "unchanged" | "failed";
+            error?: string;
+        };
     };
     responses: {
         /** @description Missing or invalid API key */
