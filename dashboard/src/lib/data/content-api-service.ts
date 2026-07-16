@@ -11,14 +11,8 @@
  * Server-only: reads the signing key off disk and never runs in the browser.
  */
 
-import type { KeyObject } from "node:crypto";
-
 import type { User } from "@/lib/auth/types";
-// Shared CJS minter (server.js requires the same module); see invoke-token.ts.
-import { loadSigningKey, mintIdentityToken } from "../../../lib/mgmt-plane-token";
-
-/** Identity tokens are used immediately for a single request, so keep them short. */
-const TOKEN_TTL_SECONDS = 60;
+import { OperatorApiError, mintOperatorIdentityToken, operatorBaseURL } from "./operator-identity";
 
 /** A single directory entry, mirroring the Go content.Entry json shape. */
 export interface ContentEntry {
@@ -68,56 +62,32 @@ export function isContentFile(node: ContentNode): node is ContentFile {
  * Error carrying the operator's HTTP status so route handlers can pass through
  * 404 / 400 / 403 instead of collapsing everything to 500.
  */
-export class ContentApiError extends Error {
-  constructor(
-    message: string,
-    readonly status: number,
-  ) {
-    super(message);
+export class ContentApiError extends OperatorApiError {
+  constructor(message: string, status: number) {
+    super(message, status);
     this.name = "ContentApiError";
   }
 }
 
-let cachedPath: string | undefined | null = undefined;
-let cachedKey: KeyObject | null = null;
-
-/** Load the signing key, caching by path so a changed path reloads. */
-function signingKey(): KeyObject | null {
-  const path = process.env.OMNIA_MGMT_PLANE_SIGNING_KEY_PATH || "";
-  if (path === cachedPath) return cachedKey;
-  cachedPath = path;
-  cachedKey = path ? (loadSigningKey(path) as KeyObject) : null;
-  return cachedKey;
+/** Re-throw a shared OperatorApiError (config errors) as a ContentApiError so callers only see this file's error type. */
+function asContentError<T>(fn: () => T): T {
+  try {
+    return fn();
+  } catch (err) {
+    if (err instanceof OperatorApiError && !(err instanceof ContentApiError)) {
+      throw new ContentApiError(err.message, err.status);
+    }
+    throw err;
+  }
 }
 
 /** Operator content API base URL, without a trailing slash. */
 function baseURL(): string {
-  let url = process.env.OPERATOR_CONTENT_API_URL;
-  if (!url) {
-    throw new ContentApiError("OPERATOR_CONTENT_API_URL not configured", 500);
-  }
-  while (url.endsWith("/")) {
-    url = url.slice(0, -1);
-  }
-  return url;
-}
-
-function principalFor(user: User): { identity: string; groups: string[]; anonymous: boolean } {
-  const anonymous = user.provider === "anonymous";
-  return {
-    identity: anonymous ? "" : user.email || user.username,
-    groups: user.groups ?? [],
-    anonymous,
-  };
+  return asContentError(() => operatorBaseURL("OPERATOR_CONTENT_API_URL"));
 }
 
 function identityToken(workspace: string, user: User): string {
-  const key = signingKey();
-  if (!key) {
-    throw new ContentApiError("content API auth not configured (no signing key)", 500);
-  }
-  const { identity, groups, anonymous } = principalFor(user);
-  return mintIdentityToken({ key, workspace, identity, groups, anonymous, ttlSeconds: TOKEN_TTL_SECONDS });
+  return asContentError(() => mintOperatorIdentityToken(workspace, user));
 }
 
 /** Encode a workspace-relative path, preserving "/" separators between segments. */

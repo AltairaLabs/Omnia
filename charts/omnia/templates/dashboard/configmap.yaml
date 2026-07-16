@@ -200,4 +200,13 @@ data:
   {{- if $contentApiAddr }}
   OPERATOR_CONTENT_API_URL: {{ printf "http://%s-operator.%s.svc.cluster.local:%s" (include "omnia.fullname" .) .Release.Namespace (trimPrefix ":" $contentApiAddr) | quote }}
   {{- end }}
+  {{- /*
+    OPERATOR_DEPLOY_API_URL points the dashboard's deploy-intent forwarder at
+    the operator's authenticated deploy-intent API (#1866). Set whenever that
+    API is served (dashboard enabled).
+  */}}
+  {{- $deployApiAddr := include "omnia.deployApi.bindAddress" . }}
+  {{- if $deployApiAddr }}
+  OPERATOR_DEPLOY_API_URL: {{ printf "http://%s-operator.%s.svc.cluster.local:%s" (include "omnia.fullname" .) .Release.Namespace (trimPrefix ":" $deployApiAddr) | quote }}
+  {{- end }}
 {{- end }}

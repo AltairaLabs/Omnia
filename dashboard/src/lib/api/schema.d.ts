@@ -418,6 +418,8 @@ export interface components {
                 /** @enum {string} */
                 type: "git" | "oci" | "configmap";
             }[];
+            /** @description DeployIntent contract versions the operator accepts. */
+            supportedDeployIntentVersions: string[];
         };
         /**
          * @description Generic create/update body accepted by the workspace CRD routes. The

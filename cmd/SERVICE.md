@@ -32,6 +32,18 @@
   auth model as the content API): `POST /api/v1/workspaces/{workspace}/deployments`, a
   versioned `DeployIntent` body (`internal/api/deploy`). Gated by `--deploy-api-bind-address`
   (requires `--mgmt-plane-jwks-url`); disabled when the flag is empty.
+  - **Caller (Plan C, #1866):** the dashboard's `POST /api/workspaces/{name}/deployments`
+    proxy route (`dashboard/src/lib/data/deploy-api-service.ts`), which mints the identity
+    JWT via the shared `operator-identity.ts` helper (aud `omnia-operator`, same minter the
+    content API uses) — the operator never sees the caller's original `omnia_sk_` key.
+    Reachable end-to-end now that the chart wires `--deploy-api-bind-address` (default
+    `:8085` — deliberately not `:8083`, which is the tool-test API's default and would
+    collide on the same operator process), a `deploy-api` container/Service port, and the
+    dashboard's `OPERATOR_DEPLOY_API_URL` env var.
+  - The dashboard's `GET /api/workspaces/{name}/deploy-profile` endpoint advertises
+    `supportedDeployIntentVersions` (currently `["deploy.omnia.altairalabs.ai/v1"]`,
+    mirroring the Go `deploy.APIVersionV1` constant this endpoint accepts) so a deploy
+    client can version-negotiate before POSTing an intent here.
 - Helm chart values at deployment time
 
 ## Outputs
