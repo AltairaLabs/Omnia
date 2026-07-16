@@ -29,4 +29,6 @@ export interface DeployProfile {
   providers: DeployProfileProvider[];
   /** SkillSources discovered in the workspace. */
   skills: DeployProfileSkill[];
+  /** DeployIntent contract versions the operator accepts (highest wins). */
+  supportedDeployIntentVersions: string[];
 }

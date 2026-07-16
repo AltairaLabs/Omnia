@@ -718,7 +718,7 @@ components:
         Deploy publish-profile discovery payload. Connection details plus a
         discovery menu of the workspace's Providers and SkillSources. Discovery
         only — never contains a secret. See issue #1519.
-      required: [api_endpoint, workspace, providers, skills]
+      required: [api_endpoint, workspace, providers, skills, supportedDeployIntentVersions]
       properties:
         api_endpoint:
           type: string
@@ -743,6 +743,11 @@ components:
             properties:
               name: { type: string }
               type: { type: string, enum: [git, oci, configmap] }
+        supportedDeployIntentVersions:
+          type: array
+          items:
+            type: string
+          description: DeployIntent contract versions the operator accepts.
     CrdWriteRequest:
       type: object
       description: |
