@@ -105,6 +105,10 @@ func (a *Applier) upsertAgentRuntime(ctx context.Context, desired *omniav1alpha1
 // (MinItems=1) and rebuilding it with only Candidate set would produce an
 // invalid object that a real apiserver Update rejects outright.
 func reconcileAgentRuntimeSpec(live, desired *omniav1alpha1.AgentRuntime) {
+	// Preservation below covers ONLY version-trigger rollouts (spec.rollout.trigger
+	// != nil, i.e. the #1838 controller owns the pin/candidate). A manually-driven
+	// rollout (candidate set without a trigger) is NOT preserved in Plan A — the
+	// desired spec always wins for that case.
 	triggerMode := live.Spec.Rollout != nil && live.Spec.Rollout.Trigger != nil
 
 	var (

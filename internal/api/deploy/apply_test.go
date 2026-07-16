@@ -246,14 +246,21 @@ func TestApply_TriggerModePreservesLivePin(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(live).Build()
 	a := NewApplier(c, logr.Discard())
 
-	// Deploy a NEW version (1.1.0) with changed providers, trigger-mode.
+	// Deploy a NEW version (1.1.0) with changed providers, trigger-mode. The
+	// intent's rollout carries a step — the CRD requires
+	// spec.rollout.steps to be non-empty (MinItems=1), so a valid intent must
+	// supply at least one even though the desired steps get overwritten by
+	// the preserved live rollout below.
 	intent := DeployIntent{
 		APIVersion: APIVersionV1,
 		Pack:       PackIntent{Name: "support", Version: "1.1.0", Content: "{}"},
 		Agents: []AgentIntent{{
 			Name:      "support",
 			Providers: []ProviderBind{{Name: "default", Ref: "new"}},
-			Rollout:   &RolloutIntent{Trigger: &RolloutTriggerIntent{PromptPackChannel: "stable"}},
+			Rollout: &RolloutIntent{
+				Trigger: &RolloutTriggerIntent{PromptPackChannel: "stable"},
+				Steps:   []RolloutStepIntent{{SetWeight: ptr.To(int32(25))}},
+			},
 		}},
 	}
 	res := a.Apply(context.Background(), "ns", intent)
@@ -272,6 +279,10 @@ func TestApply_TriggerModePreservesLivePin(t *testing.T) {
 	// In-flight candidate PRESERVED.
 	if got.Spec.Rollout == nil || got.Spec.Rollout.Candidate == nil {
 		t.Errorf("candidate clobbered: %+v", got.Spec.Rollout)
+	}
+	// Resulting object is CRD-valid: steps non-empty (MinItems=1).
+	if len(got.Spec.Rollout.Steps) == 0 {
+		t.Errorf("steps = %+v, want non-empty (CRD MinItems=1)", got.Spec.Rollout.Steps)
 	}
 	// Other config STILL applied.
 	if len(got.Spec.Providers) != 1 || got.Spec.Providers[0].ProviderRef.Name != "new" {

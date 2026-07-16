@@ -1660,8 +1660,6 @@ components:
         labels:
           type: object
           additionalProperties: { type: string }
-        dryRun:
-          type: boolean
 
     PackIntent:
       type: object

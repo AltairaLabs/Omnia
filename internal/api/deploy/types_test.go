@@ -1,6 +1,10 @@
 package deploy
 
-import "testing"
+import (
+	"testing"
+
+	"k8s.io/utils/ptr"
+)
 
 func TestValidate(t *testing.T) {
 	valid := DeployIntent{
@@ -16,9 +20,25 @@ func TestValidate(t *testing.T) {
 		"bad apiVersion":     func(d *DeployIntent) { d.APIVersion = "deploy.omnia.altairalabs.ai/v2" },
 		"empty pack name":    func(d *DeployIntent) { d.Pack.Name = "" },
 		"empty pack version": func(d *DeployIntent) { d.Pack.Version = "" },
+		"empty pack content": func(d *DeployIntent) { d.Pack.Content = "" },
 		"no agents":          func(d *DeployIntent) { d.Agents = nil },
 		"empty agent name":   func(d *DeployIntent) { d.Agents[0].Name = "" },
 		"agent no providers": func(d *DeployIntent) { d.Agents[0].Providers = nil },
+		"provider empty name": func(d *DeployIntent) {
+			d.Agents[0].Providers[0].Name = ""
+		},
+		"provider empty ref": func(d *DeployIntent) {
+			d.Agents[0].Providers[0].Ref = ""
+		},
+		"rollout with no steps": func(d *DeployIntent) {
+			d.Agents[0].Rollout = &RolloutIntent{Trigger: &RolloutTriggerIntent{PromptPackChannel: "stable"}}
+		},
+		"rollout trigger with no channel": func(d *DeployIntent) {
+			d.Agents[0].Rollout = &RolloutIntent{
+				Trigger: &RolloutTriggerIntent{},
+				Steps:   []RolloutStepIntent{{SetWeight: ptr.To(int32(25))}},
+			}
+		},
 	} {
 		d := valid
 		d.Agents = append([]AgentIntent(nil), valid.Agents...)
@@ -27,6 +47,28 @@ func TestValidate(t *testing.T) {
 		if err := d.Validate(); err == nil {
 			t.Errorf("%s: expected validation error, got nil", name)
 		}
+	}
+}
+
+// TestValidate_Rollout covers the positive counterpart of the "rollout with
+// no steps" / "rollout trigger with no channel" rejection cases in
+// TestValidate: a rollout with at least one step and a populated trigger
+// channel passes.
+func TestValidate_Rollout(t *testing.T) {
+	base := DeployIntent{
+		APIVersion: APIVersionV1,
+		Pack:       PackIntent{Name: "p", Version: "1.0.0", Content: "{}"},
+		Agents:     []AgentIntent{{Name: "a", Providers: []ProviderBind{{Name: "default", Ref: "claude"}}}},
+	}
+
+	valid := base
+	valid.Agents = append([]AgentIntent(nil), base.Agents...)
+	valid.Agents[0].Rollout = &RolloutIntent{
+		Trigger: &RolloutTriggerIntent{PromptPackChannel: "stable"},
+		Steps:   []RolloutStepIntent{{SetWeight: ptr.To(int32(25))}},
+	}
+	if err := valid.Validate(); err != nil {
+		t.Errorf("valid rollout (trigger + step) rejected: %v", err)
 	}
 }
 

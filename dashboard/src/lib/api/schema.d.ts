@@ -977,7 +977,6 @@ export interface components {
             labels?: {
                 [key: string]: string;
             };
-            dryRun?: boolean;
         };
         /** @description Maps to a PromptPack plus its content ConfigMap. `content` is the raw pack.json; the operator treats it as opaque bytes. */
         PackIntent: {

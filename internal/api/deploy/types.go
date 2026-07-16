@@ -21,7 +21,6 @@ type DeployIntent struct {
 	Policy     *PolicyIntent     `json:"policy,omitempty"` // Plan B
 	Agents     []AgentIntent     `json:"agents"`
 	Labels     map[string]string `json:"labels,omitempty"`
-	DryRun     bool              `json:"dryRun,omitempty"`
 }
 
 // PackIntent maps to a PromptPack + its content ConfigMap. Content is the raw
@@ -146,6 +145,9 @@ func (d DeployIntent) Validate() error {
 	if d.Pack.Version == "" {
 		return errors.New("pack.version is required")
 	}
+	if d.Pack.Content == "" {
+		return errors.New("pack.content is required")
+	}
 	if len(d.Agents) == 0 {
 		return errors.New("at least one agent is required")
 	}
@@ -165,7 +167,36 @@ func (a AgentIntent) validate(i int) error {
 	if len(a.Providers) == 0 {
 		return fmt.Errorf("agents[%d].providers must not be empty", i)
 	}
+	for j, p := range a.Providers {
+		if p.Name == "" {
+			return fmt.Errorf("agents[%d].providers[%d].name is required", i, j)
+		}
+		if p.Ref == "" {
+			return fmt.Errorf("agents[%d].providers[%d].ref is required", i, j)
+		}
+	}
+	if err := a.Rollout.validate(i); err != nil {
+		return err
+	}
 	return a.Runtime.validate(i)
+}
+
+// validate checks the RolloutIntent, when set: the CRD requires
+// spec.rollout.steps to be non-empty (MinItems=1) — an intent that specifies
+// a rollout block but no steps would translate to a CRD-invalid AgentRuntime.
+// When a trigger is set, its PromptPackChannel is required (mirrors the CRD's
+// RolloutTrigger.PromptPackChannel required field).
+func (r *RolloutIntent) validate(i int) error {
+	if r == nil {
+		return nil
+	}
+	if len(r.Steps) == 0 {
+		return fmt.Errorf("agents[%d].rollout.steps must not be empty", i)
+	}
+	if r.Trigger != nil && r.Trigger.PromptPackChannel == "" {
+		return fmt.Errorf("agents[%d].rollout.trigger.promptPackChannel is required", i)
+	}
+	return nil
 }
 
 // validate checks the CPU/Memory quantities, when set, parse cleanly.
