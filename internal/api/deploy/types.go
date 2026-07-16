@@ -1,6 +1,7 @@
 package deploy
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -100,16 +101,111 @@ type SkillsConfigIntent struct {
 	Selector  string `json:"selector,omitempty"`
 }
 
-// Plan B placeholders — declared so the wire contract is stable, mapped later.
-type ToolsIntent struct {
-	Ref string `json:"ref,omitempty"`
+// ExternalAuthIntent maps to spec.externalAuth (AgentExternalAuth). Current CRD
+// vocabulary — the server maps to whatever shape the CRD has.
+type ExternalAuthIntent struct {
+	ClientKeys *ClientKeysIntent `json:"clientKeys,omitempty"`
+	OIDC       *OIDCIntent       `json:"oidc,omitempty"`
+	EdgeTrust  *EdgeTrustIntent  `json:"edgeTrust,omitempty"`
 }
+
+// ClientKeysIntent maps to AgentExternalAuth.clientKeys.
+type ClientKeysIntent struct {
+	DefaultRole        string `json:"defaultRole,omitempty"`
+	TrustEndUserHeader bool   `json:"trustEndUserHeader,omitempty"`
+}
+
+// OIDCIntent maps to AgentExternalAuth.oidc.
+type OIDCIntent struct {
+	Issuer       string             `json:"issuer"`
+	Audience     string             `json:"audience"`
+	ClaimMapping *OIDCMappingIntent `json:"claimMapping,omitempty"`
+}
+
+// OIDCMappingIntent maps to AgentExternalAuth.oidc.claimMapping.
+type OIDCMappingIntent struct {
+	Subject string `json:"subject,omitempty"`
+	EndUser string `json:"endUser,omitempty"`
+}
+
+// EdgeTrustIntent maps to AgentExternalAuth.edgeTrust.
+type EdgeTrustIntent struct {
+	HeaderMapping     *EdgeTrustHeaderIntent `json:"headerMapping,omitempty"`
+	ClaimsFromHeaders map[string]string      `json:"claimsFromHeaders,omitempty"`
+}
+
+// EdgeTrustHeaderIntent maps to AgentExternalAuth.edgeTrust.headerMapping.
+type EdgeTrustHeaderIntent struct {
+	Subject string `json:"subject,omitempty"`
+	EndUser string `json:"endUser,omitempty"`
+	Email   string `json:"email,omitempty"`
+}
+
+// MemoryIntent maps to spec.memory (MemoryConfig).
+type MemoryIntent struct {
+	Enabled   bool                   `json:"enabled,omitempty"`
+	Retrieval *MemoryRetrievalIntent `json:"retrieval,omitempty"`
+	Tools     *MemoryToolsIntent     `json:"tools,omitempty"`
+}
+
+// MemoryRetrievalIntent maps to spec.memory.retrieval.
+type MemoryRetrievalIntent struct {
+	Enabled  *bool  `json:"enabled,omitempty"`
+	Strategy string `json:"strategy,omitempty"` // keyword|semantic|composite
+	Limit    *int32 `json:"limit,omitempty"`
+	DenyCEL  string `json:"denyCEL,omitempty"`
+}
+
+// MemoryToolsIntent maps to spec.memory.tools.
+type MemoryToolsIntent struct {
+	Enabled *bool `json:"enabled,omitempty"`
+}
+
+// EvalsIntent maps to spec.evals (EvalConfig).
+type EvalsIntent struct {
+	Enabled bool     `json:"enabled,omitempty"`
+	Inline  []string `json:"inlineGroups,omitempty"`
+	Worker  []string `json:"workerGroups,omitempty"`
+}
+
+// ToolsIntent: reference an existing registry OR create one (create-only).
+type ToolsIntent struct {
+	Ref      string          `json:"ref,omitempty"`      // existing registry name
+	Handlers []HandlerIntent `json:"handlers,omitempty"` // create-only registry contents
+}
+
+// HandlerIntent mirrors HandlerDefinition's stable surface. The per-executor
+// config blocks are carried as raw JSON so the intent tracks CRD growth without
+// re-typing every executor (mapped straight onto the CRD's json fields).
+type HandlerIntent struct {
+	Name          string           `json:"name"`
+	Type          string           `json:"type"` // http|openapi|grpc|mcp|client
+	Tool          *json.RawMessage `json:"tool,omitempty"`
+	HTTPConfig    *json.RawMessage `json:"httpConfig,omitempty"`
+	OpenAPIConfig *json.RawMessage `json:"openAPIConfig,omitempty"`
+	GRPCConfig    *json.RawMessage `json:"grpcConfig,omitempty"`
+	MCPConfig     *json.RawMessage `json:"mcpConfig,omitempty"`
+	ClientConfig  *json.RawMessage `json:"clientConfig,omitempty"`
+	Auth          *json.RawMessage `json:"auth,omitempty"`
+	Timeout       string           `json:"timeout,omitempty"`
+}
+
+// PolicyIntent maps to an AgentPolicy denylist (NOT a toolBlocklist field —
+// see the shape-correction note). toolBlocklist is the flat list of tool names
+// to deny; the server builds toolAccess{denylist, rules:[{registry, tools}]}.
 type PolicyIntent struct {
 	ToolBlocklist []string `json:"toolBlocklist,omitempty"`
 }
-type ExternalAuthIntent struct{}
-type MemoryIntent struct{}
-type EvalsIntent struct{}
+
+// validHandlerTypes is the allowed set of HandlerIntent.Type values, mirroring
+// the ToolRegistry CRD's handler executor kinds.
+var validHandlerTypes = map[string]bool{
+	"http":    true,
+	"openapi": true,
+	"grpc":    true,
+	"mcp":     true,
+	"client":  true,
+}
 
 // Resource action outcomes reported per applied object.
 const (
@@ -151,10 +247,53 @@ func (d DeployIntent) Validate() error {
 	if len(d.Agents) == 0 {
 		return errors.New("at least one agent is required")
 	}
+	if err := d.Tools.validate(); err != nil {
+		return err
+	}
+	if err := d.Policy.validate(d.Tools); err != nil {
+		return err
+	}
 	for i, a := range d.Agents {
 		if err := a.validate(i); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+// validate checks ToolsIntent, when set: ref and handlers are mutually
+// exclusive (one references an existing registry, the other creates one),
+// and each handler has a non-empty name/type drawn from the allowed set.
+func (t *ToolsIntent) validate() error {
+	if t == nil {
+		return nil
+	}
+	if t.Ref != "" && len(t.Handlers) > 0 {
+		return errors.New("tools: ref and handlers are mutually exclusive")
+	}
+	for i, h := range t.Handlers {
+		if h.Name == "" {
+			return fmt.Errorf("tools.handlers[%d].name is required", i)
+		}
+		if h.Type == "" {
+			return fmt.Errorf("tools.handlers[%d].type is required", i)
+		}
+		if !validHandlerTypes[h.Type] {
+			return fmt.Errorf("tools.handlers[%d].type: invalid type %q", i, h.Type)
+		}
+	}
+	return nil
+}
+
+// validate checks PolicyIntent, when set: a non-empty toolBlocklist requires
+// tools (ref or handlers) so the server has a registry to build the
+// AgentPolicy denylist rule against.
+func (p *PolicyIntent) validate(tools *ToolsIntent) error {
+	if p == nil || len(p.ToolBlocklist) == 0 {
+		return nil
+	}
+	if tools == nil || (tools.Ref == "" && len(tools.Handlers) == 0) {
+		return errors.New("policy.toolBlocklist requires tools.ref or tools.handlers to reference a registry")
 	}
 	return nil
 }
@@ -178,7 +317,42 @@ func (a AgentIntent) validate(i int) error {
 	if err := a.Rollout.validate(i); err != nil {
 		return err
 	}
+	if err := a.ExternalAuth.validate(i); err != nil {
+		return err
+	}
+	if err := a.Memory.validate(i); err != nil {
+		return err
+	}
 	return a.Runtime.validate(i)
+}
+
+// validate checks ExternalAuthIntent, when set: an OIDC block requires a
+// non-empty issuer and audience (mirrors the CRD's required OIDC fields).
+func (e *ExternalAuthIntent) validate(i int) error {
+	if e == nil || e.OIDC == nil {
+		return nil
+	}
+	if e.OIDC.Issuer == "" {
+		return fmt.Errorf("agents[%d].externalAuth.oidc.issuer is required", i)
+	}
+	if e.OIDC.Audience == "" {
+		return fmt.Errorf("agents[%d].externalAuth.oidc.audience is required", i)
+	}
+	return nil
+}
+
+// validate checks MemoryIntent, when set: a non-empty retrieval strategy must
+// be one of the recognized strategies.
+func (m *MemoryIntent) validate(i int) error {
+	if m == nil || m.Retrieval == nil || m.Retrieval.Strategy == "" {
+		return nil
+	}
+	switch m.Retrieval.Strategy {
+	case "keyword", "semantic", "composite":
+		return nil
+	default:
+		return fmt.Errorf("agents[%d].memory.retrieval.strategy: invalid strategy %q", i, m.Retrieval.Strategy)
+	}
 }
 
 // validate checks the RolloutIntent, when set: the CRD requires
