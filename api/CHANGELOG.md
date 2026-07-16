@@ -54,6 +54,29 @@ or `api/proto/`, add an entry below with the date, affected API, and reason.
   `paths:` entry — this remains an internal, mgmt-plane-JWT-authenticated endpoint; a
   dashboard-facing proxy route is deferred to a later plan).
 
+### Added (dashboard: deploy-intent proxy + deploy-profile version advertisement, deploy-intent decoupling epic Plan C, #1866)
+
+- **`GET /api/workspaces/{name}/deploy-profile`** response gains **`supportedDeployIntentVersions`**
+  (`string[]`, required) — the `DeployIntent` `apiVersion` values the operator's deploy-intent
+  API (see Plan A entry above) accepts, currently `["deploy.omnia.altairalabs.ai/v1"]`
+  (`dashboard/src/lib/deploy/intent-versions.ts`, a hand-kept mirror of the Go
+  `deploy.APIVersionV1` constant). Lets a deploy client version-negotiate before POSTing an
+  intent. `api/openapi/openapi.yaml`'s `DeployProfile` schema updated to match.
+- **`POST /api/workspaces/{name}/deployments`** — new dashboard-served REST endpoint
+  (`dashboard/src/app/api/workspaces/[name]/deployments/route.ts`), editor-gated via
+  `withWorkspaceAccess`, that forwards an opaque `DeployIntent` request body to the operator's
+  `POST /api/v1/workspaces/{workspace}/deployments` (Plan A entry above). `deploy-api-service.ts`
+  mints a short-lived RS256 identity JWT (aud `omnia-operator`, 60s TTL) via the shared
+  `operator-identity.ts` helper — the same minting path `content-api-service.ts` already uses —
+  and returns the operator's `DeployResult` response (200, or 207 on partial failure) verbatim.
+  The dashboard does not validate or interpret the intent body.
+- This is **Plan C** of the deploy-intent decoupling epic (#1863 family): it makes the Plan
+  A/B operator API reachable end-to-end for the first time. The chart now wires
+  `--deploy-api-bind-address` (default `:8085`), a `deploy-api` container/Service port, and the
+  dashboard's `OPERATOR_DEPLOY_API_URL` env var. The external `promptarena-deploy-omnia` adapter
+  authenticates to this new dashboard route with its existing `omnia_sk_` key; the operator only
+  ever sees the dashboard-minted JWT.
+
 ### Changed (auth: rename `apiKeys` → `clientKeys` + arbitrary per-key claims, #1775)
 
 - **BREAKING (CRD + `pkg/facade` SDK).** The facade external-auth **`spec.externalAuth.apiKeys`** field is renamed to **`clientKeys`** (`APIKeysAuth` → `ClientKeysAuth`), disambiguating it from LLM-provider api-keys and the dashboard's own user api-keys. The origin surfaced to ToolPolicy is renamed `identity.origin == "api-key"` → **`"client-key"`** (`policy.OriginAPIKey` → `OriginClientKey`). In the public `pkg/facade/auth` SDK: `APIKey`/`APIKeyValidator`/`NewAPIKeyValidator`/`WithAPIKey*` → `ClientKey`/`ClientKeyValidator`/`NewClientKeyValidator`/`WithClientKey*`.
