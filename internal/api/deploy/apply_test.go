@@ -613,6 +613,215 @@ func TestApply_ToolRegistryCreateGenericFailure(t *testing.T) {
 	}
 }
 
+// assertCreatedAgentPolicySpec checks the toolAccess/selector/mode/onFailure
+// of a just-created AgentPolicy, split out of
+// TestApply_AgentPolicyCreatedThenUpdated to keep that test's cyclomatic
+// complexity under the SonarCloud threshold.
+func assertCreatedAgentPolicySpec(t *testing.T, got *omniav1alpha1.AgentPolicy, packName string) {
+	t.Helper()
+	if got.Spec.ToolAccess == nil || got.Spec.ToolAccess.Mode != omniav1alpha1.ToolAccessModeDenylist {
+		t.Fatalf("toolAccess = %+v, want denylist", got.Spec.ToolAccess)
+	}
+	wantRegistry := toolRegistryName(packName)
+	if len(got.Spec.ToolAccess.Rules) != 1 || got.Spec.ToolAccess.Rules[0].Registry != wantRegistry {
+		t.Fatalf("rules = %+v, want one rule against registry %q", got.Spec.ToolAccess.Rules, wantRegistry)
+	}
+	if len(got.Spec.ToolAccess.Rules[0].Tools) != 1 || got.Spec.ToolAccess.Rules[0].Tools[0] != "delete-account" {
+		t.Errorf("rule.tools = %v, want [delete-account]", got.Spec.ToolAccess.Rules[0].Tools)
+	}
+	if got.Spec.Selector == nil || len(got.Spec.Selector.Agents) != 1 || got.Spec.Selector.Agents[0] != "support" {
+		t.Errorf("selector.agents = %+v, want [support]", got.Spec.Selector)
+	}
+	if got.Spec.Mode != omniav1alpha1.AgentPolicyModeEnforce {
+		t.Errorf("mode = %q, want enforce", got.Spec.Mode)
+	}
+	if got.Spec.OnFailure != omniav1alpha1.OnFailureDeny {
+		t.Errorf("onFailure = %q, want deny", got.Spec.OnFailure)
+	}
+}
+
+// TestApply_AgentPolicyCreatedThenUpdated verifies a policy + registry-backed
+// deploy creates an AgentPolicy with the toolAccess denylist shape, and that
+// re-applying with a DIFFERENT blocklist updates it in place (unlike the
+// create-only ToolRegistry, AgentPolicy is a plain upsert).
+func TestApply_AgentPolicyCreatedThenUpdated(t *testing.T) {
+	c := fake.NewClientBuilder().WithScheme(testScheme(t)).Build()
+	a := NewApplier(c, logr.Discard())
+
+	intent := testIntent()
+	intent.Tools = testToolsIntent()
+	intent.Policy = &PolicyIntent{ToolBlocklist: []string{"delete-account"}}
+
+	res := a.Apply(context.Background(), "ns", intent)
+	if !res.Succeeded {
+		t.Fatalf("apply failed: %+v", res.Results)
+	}
+	byKind := resultsByKind(res.Results)
+	if byKind[kindAgentPolicy].Action != ActionCreated {
+		t.Fatalf("expected AgentPolicy created, got %+v", byKind[kindAgentPolicy])
+	}
+
+	policyName := agentPolicyName(intent.Pack.Name)
+	got := &omniav1alpha1.AgentPolicy{}
+	if err := c.Get(context.Background(), types.NamespacedName{Name: policyName, Namespace: "ns"}, got); err != nil {
+		t.Fatalf("get AgentPolicy: %v", err)
+	}
+	assertCreatedAgentPolicySpec(t, got, intent.Pack.Name)
+
+	// Re-apply with a different blocklist: expect an update, and the live
+	// object's rule to pick up the new blocklist (plain upsert, not create-only).
+	intent2 := testIntent()
+	intent2.Tools = testToolsIntent()
+	intent2.Policy = &PolicyIntent{ToolBlocklist: []string{"delete-account", "wipe-db"}}
+
+	res2 := a.Apply(context.Background(), "ns", intent2)
+	if !res2.Succeeded {
+		t.Fatalf("re-apply failed: %+v", res2.Results)
+	}
+	byKind2 := resultsByKind(res2.Results)
+	if byKind2[kindAgentPolicy].Action != ActionUpdated {
+		t.Errorf("re-apply action = %s, want updated", byKind2[kindAgentPolicy].Action)
+	}
+
+	updated := &omniav1alpha1.AgentPolicy{}
+	if err := c.Get(context.Background(), types.NamespacedName{Name: policyName, Namespace: "ns"}, updated); err != nil {
+		t.Fatal(err)
+	}
+	if len(updated.Spec.ToolAccess.Rules[0].Tools) != 2 {
+		t.Errorf("updated rule.tools = %v, want 2 entries", updated.Spec.ToolAccess.Rules[0].Tools)
+	}
+}
+
+// TestApply_PolicyWithoutToolsCreatesNoAgentPolicy verifies a policy present
+// but no tools (ref or handlers) in the deploy translates to no AgentPolicy —
+// exercising the translate-level guard directly (Validate already rejects
+// this combination at the HTTP layer, so this path shouldn't be reachable in
+// practice, but Apply must still degrade safely if it is).
+func TestApply_PolicyWithoutToolsCreatesNoAgentPolicy(t *testing.T) {
+	c := fake.NewClientBuilder().WithScheme(testScheme(t)).Build()
+	a := NewApplier(c, logr.Discard())
+
+	intent := testIntent()
+	intent.Policy = &PolicyIntent{ToolBlocklist: []string{"delete-account"}}
+
+	res := a.Apply(context.Background(), "ns", intent)
+	if !res.Succeeded {
+		t.Fatalf("apply failed: %+v", res.Results)
+	}
+	if _, ok := resultsByKind(res.Results)[kindAgentPolicy]; ok {
+		t.Fatalf("expected no AgentPolicy result, got %+v", res.Results)
+	}
+
+	got := &omniav1alpha1.AgentPolicy{}
+	err := c.Get(context.Background(), types.NamespacedName{Name: agentPolicyName(intent.Pack.Name), Namespace: "ns"}, got)
+	if !apierrors.IsNotFound(err) {
+		t.Errorf("expected NotFound, got %v", err)
+	}
+}
+
+// TestApply_NilPolicyCreatesNoAgentPolicy verifies a deploy with no policy at
+// all creates no AgentPolicy, even when tools are present.
+func TestApply_NilPolicyCreatesNoAgentPolicy(t *testing.T) {
+	c := fake.NewClientBuilder().WithScheme(testScheme(t)).Build()
+	a := NewApplier(c, logr.Discard())
+
+	intent := testIntent()
+	intent.Tools = testToolsIntent()
+
+	res := a.Apply(context.Background(), "ns", intent)
+	if !res.Succeeded {
+		t.Fatalf("apply failed: %+v", res.Results)
+	}
+	if _, ok := resultsByKind(res.Results)[kindAgentPolicy]; ok {
+		t.Fatalf("expected no AgentPolicy result, got %+v", res.Results)
+	}
+}
+
+// TestApply_AgentPolicyGetFailure exercises the upsertAgentPolicy branch where
+// Get fails with a non-NotFound error.
+func TestApply_AgentPolicyGetFailure(t *testing.T) {
+	c := fake.NewClientBuilder().WithScheme(testScheme(t)).WithInterceptorFuncs(interceptor.Funcs{
+		Get: func(ctx context.Context, cli client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+			if _, ok := obj.(*omniav1alpha1.AgentPolicy); ok {
+				return errBoom
+			}
+			return cli.Get(ctx, key, obj, opts...)
+		},
+	}).Build()
+	a := NewApplier(c, logr.Discard())
+
+	intent := testIntent()
+	intent.Tools = testToolsIntent()
+	intent.Policy = &PolicyIntent{ToolBlocklist: []string{"delete-account"}}
+
+	res := a.Apply(context.Background(), "ns", intent)
+	if res.Succeeded {
+		t.Fatalf("expected failure, got succeeded=true: %+v", res.Results)
+	}
+	byKind := resultsByKind(res.Results)
+	if byKind[kindAgentPolicy].Action != ActionFailed || byKind[kindAgentPolicy].Error == "" {
+		t.Fatalf("expected failed AgentPolicy result, got %+v", byKind[kindAgentPolicy])
+	}
+}
+
+// TestApply_AgentPolicyCreateFailure exercises the upsertAgentPolicy branch
+// where Create fails.
+func TestApply_AgentPolicyCreateFailure(t *testing.T) {
+	c := fake.NewClientBuilder().WithScheme(testScheme(t)).WithInterceptorFuncs(interceptor.Funcs{
+		Create: func(ctx context.Context, cli client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
+			if _, ok := obj.(*omniav1alpha1.AgentPolicy); ok {
+				return errBoom
+			}
+			return cli.Create(ctx, obj, opts...)
+		},
+	}).Build()
+	a := NewApplier(c, logr.Discard())
+
+	intent := testIntent()
+	intent.Tools = testToolsIntent()
+	intent.Policy = &PolicyIntent{ToolBlocklist: []string{"delete-account"}}
+
+	res := a.Apply(context.Background(), "ns", intent)
+	if res.Succeeded {
+		t.Fatalf("expected failure, got succeeded=true: %+v", res.Results)
+	}
+	byKind := resultsByKind(res.Results)
+	if byKind[kindAgentPolicy].Action != ActionFailed || byKind[kindAgentPolicy].Error == "" {
+		t.Fatalf("expected failed AgentPolicy result, got %+v", byKind[kindAgentPolicy])
+	}
+}
+
+// TestApply_AgentPolicyUpdateFailure exercises the upsertAgentPolicy branch
+// where the AgentPolicy already exists but Update fails.
+func TestApply_AgentPolicyUpdateFailure(t *testing.T) {
+	c := fake.NewClientBuilder().WithScheme(testScheme(t)).WithInterceptorFuncs(interceptor.Funcs{
+		Update: func(ctx context.Context, cli client.WithWatch, obj client.Object, opts ...client.UpdateOption) error {
+			if _, ok := obj.(*omniav1alpha1.AgentPolicy); ok {
+				return errBoom
+			}
+			return cli.Update(ctx, obj, opts...)
+		},
+	}).Build()
+	a := NewApplier(c, logr.Discard())
+
+	intent := testIntent()
+	intent.Tools = testToolsIntent()
+	intent.Policy = &PolicyIntent{ToolBlocklist: []string{"delete-account"}}
+
+	if res := a.Apply(context.Background(), "ns", intent); !res.Succeeded {
+		t.Fatalf("initial apply failed: %+v", res.Results)
+	}
+
+	res := a.Apply(context.Background(), "ns", intent)
+	if res.Succeeded {
+		t.Fatalf("expected failure, got succeeded=true: %+v", res.Results)
+	}
+	byKind := resultsByKind(res.Results)
+	if byKind[kindAgentPolicy].Action != ActionFailed || byKind[kindAgentPolicy].Error == "" {
+		t.Fatalf("expected failed AgentPolicy result, got %+v", byKind[kindAgentPolicy])
+	}
+}
+
 // TestApply_AgentRuntimeUpdateFailure exercises the upsertAgentRuntime branch
 // where the AgentRuntime already exists but Update fails.
 func TestApply_AgentRuntimeUpdateFailure(t *testing.T) {

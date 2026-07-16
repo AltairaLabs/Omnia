@@ -438,3 +438,42 @@ func evalPathConfig(groups []string) *omniav1alpha1.EvalPathConfig {
 	}
 	return &omniav1alpha1.EvalPathConfig{Groups: groups}
 }
+
+// agentPolicyNameSuffix names the AgentPolicy derived from a pack's
+// toolBlocklist, matching the "<pack>-tools" ToolRegistry naming convention.
+const agentPolicyNameSuffix = "-policy"
+
+// agentPolicyName is the deterministic AgentPolicy name for a pack.
+func agentPolicyName(packName string) string { return packName + agentPolicyNameSuffix }
+
+// agentPolicy builds the desired AgentPolicy translating PolicyIntent's flat
+// toolBlocklist into a toolAccess denylist rule against registryName. Returns
+// nil when there's nothing to apply: no policy, an empty blocklist, or no
+// registry to attach the denylist rule to — a denylist rule requires a
+// ToolAccessRule.Registry name (CRD MinLength=1). Validate (types.go) already
+// rejects a non-empty blocklist with no tools at the HTTP layer, so the
+// registryName=="" case here is a translate-level guard against that same
+// invariant, not a path expected to be hit at apply time.
+func agentPolicy(namespace string, pack PackIntent, policy *PolicyIntent, agentNames []string, registryName string, deployLabels map[string]string) *omniav1alpha1.AgentPolicy {
+	if policy == nil || len(policy.ToolBlocklist) == 0 || registryName == "" {
+		return nil
+	}
+	return &omniav1alpha1.AgentPolicy{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      agentPolicyName(pack.Name),
+			Namespace: namespace,
+			Labels:    mergeLabels(map[string]string{packselect.Label: pack.Name}, deployLabels),
+		},
+		Spec: omniav1alpha1.AgentPolicySpec{
+			Selector: &omniav1alpha1.AgentPolicySelector{Agents: agentNames},
+			ToolAccess: &omniav1alpha1.ToolAccessConfig{
+				Mode: omniav1alpha1.ToolAccessModeDenylist,
+				Rules: []omniav1alpha1.ToolAccessRule{
+					{Registry: registryName, Tools: policy.ToolBlocklist},
+				},
+			},
+			Mode:      omniav1alpha1.AgentPolicyModeEnforce,
+			OnFailure: omniav1alpha1.OnFailureDeny,
+		},
+	}
+}

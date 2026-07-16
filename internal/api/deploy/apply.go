@@ -16,6 +16,7 @@ const (
 	kindConfigMap    = "ConfigMap"
 	kindAgentRuntime = "AgentRuntime"
 	kindToolRegistry = "ToolRegistry"
+	kindAgentPolicy  = "AgentPolicy"
 )
 
 // Applier translates a DeployIntent and applies the resulting objects.
@@ -44,6 +45,10 @@ func (a *Applier) Apply(ctx context.Context, namespace string, intent DeployInte
 
 	if r, ok := a.applyToolRegistry(ctx, namespace, intent); ok {
 		results = append(results, r)
+	}
+
+	if desired := agentPolicy(namespace, intent.Pack, intent.Policy, agentNames(intent.Agents), deployRegistryName(intent), intent.Labels); desired != nil {
+		results = append(results, a.upsertAgentPolicy(ctx, desired))
 	}
 
 	for _, agent := range intent.Agents {
@@ -112,6 +117,61 @@ func (a *Applier) createToolRegistry(ctx context.Context, obj *omniav1alpha1.Too
 		a.log.Error(err, "deploy create failed", "kind", kindToolRegistry, "name", obj.GetName())
 		return ResourceResult{Kind: kindToolRegistry, Name: obj.GetName(), Action: ActionFailed, Error: err.Error()}
 	}
+}
+
+// agentNames extracts the AgentRuntime names an AgentPolicy selector should
+// target from the intent's agents.
+func agentNames(agents []AgentIntent) []string {
+	out := make([]string, 0, len(agents))
+	for _, agent := range agents {
+		out = append(out, agent.Name)
+	}
+	return out
+}
+
+// deployRegistryName is the ToolRegistry name an AgentPolicy denylist rule
+// attaches to: toolRegistryName(pack.Name) when the deploy has tools (ref or
+// handlers), else "" — mirrors agentToAgentRuntime's ToolRegistryRef naming,
+// which always resolves to the pack convention name regardless of whether
+// tools.ref or tools.handlers was used.
+func deployRegistryName(intent DeployIntent) string {
+	if intent.Tools == nil || (intent.Tools.Ref == "" && len(intent.Tools.Handlers) == 0) {
+		return ""
+	}
+	return toolRegistryName(intent.Pack.Name)
+}
+
+// upsertAgentPolicy creates the AgentPolicy, or updates the existing one's
+// spec + labels in place. Unlike AgentRuntime, AgentPolicy carries no
+// controller-owned fields (no rollout pin/candidate to preserve), so the
+// update path is a plain spec overwrite.
+func (a *Applier) upsertAgentPolicy(ctx context.Context, desired *omniav1alpha1.AgentPolicy) ResourceResult {
+	live := &omniav1alpha1.AgentPolicy{}
+	err := a.client.Get(ctx, types.NamespacedName{Name: desired.Name, Namespace: desired.Namespace}, live)
+	if apierrors.IsNotFound(err) {
+		if cerr := a.client.Create(ctx, desired); cerr != nil {
+			a.log.Error(cerr, "deploy create failed", "kind", kindAgentPolicy, "name", desired.Name)
+			return ResourceResult{Kind: kindAgentPolicy, Name: desired.Name, Action: ActionFailed, Error: cerr.Error()}
+		}
+		return ResourceResult{Kind: kindAgentPolicy, Name: desired.Name, Action: ActionCreated}
+	}
+	if err != nil {
+		a.log.Error(err, "deploy get failed", "kind", kindAgentPolicy, "name", desired.Name)
+		return ResourceResult{Kind: kindAgentPolicy, Name: desired.Name, Action: ActionFailed, Error: err.Error()}
+	}
+
+	live.Spec = desired.Spec
+	if live.Labels == nil {
+		live.Labels = map[string]string{}
+	}
+	for k, v := range desired.Labels {
+		live.Labels[k] = v
+	}
+	if uerr := a.client.Update(ctx, live); uerr != nil {
+		a.log.Error(uerr, "deploy update failed", "kind", kindAgentPolicy, "name", desired.Name)
+		return ResourceResult{Kind: kindAgentPolicy, Name: desired.Name, Action: ActionFailed, Error: uerr.Error()}
+	}
+	return ResourceResult{Kind: kindAgentPolicy, Name: desired.Name, Action: ActionUpdated}
 }
 
 // upsertAgentRuntime creates the AgentRuntime, or updates the existing one

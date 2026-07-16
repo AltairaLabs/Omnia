@@ -564,6 +564,94 @@ func TestAgentToAgentRuntime_RolloutStepsWithPause(t *testing.T) {
 	}
 }
 
+func TestAgentPolicy_ToolAccessDenylistShape(t *testing.T) {
+	pack := PackIntent{Name: "support"}
+	policy := &PolicyIntent{ToolBlocklist: []string{"delete-account", "wipe-db"}}
+	agents := []string{"support-agent", "escalation-agent"}
+
+	ap := agentPolicy("ns", pack, policy, agents, toolRegistryName("support"), map[string]string{"env": "prod"})
+	if ap == nil {
+		t.Fatal("agentPolicy = nil, want non-nil")
+	}
+	assertAgentPolicyMetadata(t, ap)
+	assertAgentPolicySpec(t, ap, agents, policy.ToolBlocklist)
+}
+
+// assertAgentPolicyMetadata checks the name/namespace/labels of an AgentPolicy
+// built by agentPolicy, split out of TestAgentPolicy_ToolAccessDenylistShape to
+// keep that test's cyclomatic complexity under the SonarCloud threshold.
+func assertAgentPolicyMetadata(t *testing.T, ap *omniav1alpha1.AgentPolicy) {
+	t.Helper()
+	if ap.Name != "support-policy" {
+		t.Errorf("name = %q, want support-policy", ap.Name)
+	}
+	if ap.Namespace != "ns" {
+		t.Errorf("namespace = %q, want ns", ap.Namespace)
+	}
+	if ap.Labels[packselect.Label] != "support" {
+		t.Errorf("label %s = %q, want support", packselect.Label, ap.Labels[packselect.Label])
+	}
+	if ap.Labels["env"] != "prod" {
+		t.Errorf("deploy label not propagated: %v", ap.Labels)
+	}
+}
+
+// assertAgentPolicySpec checks the mode/onFailure/selector/toolAccess of an
+// AgentPolicy built by agentPolicy, split out of
+// TestAgentPolicy_ToolAccessDenylistShape to keep that test's cyclomatic
+// complexity under the SonarCloud threshold.
+func assertAgentPolicySpec(t *testing.T, ap *omniav1alpha1.AgentPolicy, wantAgents, wantTools []string) {
+	t.Helper()
+	if ap.Spec.Mode != omniav1alpha1.AgentPolicyModeEnforce {
+		t.Errorf("mode = %q, want enforce", ap.Spec.Mode)
+	}
+	if ap.Spec.OnFailure != omniav1alpha1.OnFailureDeny {
+		t.Errorf("onFailure = %q, want deny", ap.Spec.OnFailure)
+	}
+	if ap.Spec.Selector == nil || len(ap.Spec.Selector.Agents) != 2 ||
+		ap.Spec.Selector.Agents[0] != wantAgents[0] || ap.Spec.Selector.Agents[1] != wantAgents[1] {
+		t.Errorf("selector.agents = %+v, want %v", ap.Spec.Selector, wantAgents)
+	}
+	if ap.Spec.ToolAccess == nil {
+		t.Fatal("toolAccess = nil, want non-nil")
+	}
+	if ap.Spec.ToolAccess.Mode != omniav1alpha1.ToolAccessModeDenylist {
+		t.Errorf("toolAccess.mode = %q, want denylist", ap.Spec.ToolAccess.Mode)
+	}
+	if len(ap.Spec.ToolAccess.Rules) != 1 {
+		t.Fatalf("toolAccess.rules = %+v, want 1 rule", ap.Spec.ToolAccess.Rules)
+	}
+	rule := ap.Spec.ToolAccess.Rules[0]
+	if rule.Registry != toolRegistryName("support") {
+		t.Errorf("rule.registry = %q, want %q", rule.Registry, toolRegistryName("support"))
+	}
+	if len(rule.Tools) != 2 || rule.Tools[0] != wantTools[0] || rule.Tools[1] != wantTools[1] {
+		t.Errorf("rule.tools = %v, want %v", rule.Tools, wantTools)
+	}
+}
+
+// TestAgentPolicy_NilGuards verifies agentPolicy returns nil for each
+// individual guard condition: nil policy, empty blocklist, and no registry
+// name to attach the denylist rule to (the last case mirrors what Validate
+// already rejects at the HTTP layer — asserted here as a translate-level
+// belt-and-suspenders guard).
+func TestAgentPolicy_NilGuards(t *testing.T) {
+	pack := PackIntent{Name: "support"}
+	agents := []string{"support-agent"}
+	registry := toolRegistryName("support")
+
+	if ap := agentPolicy("ns", pack, nil, agents, registry, nil); ap != nil {
+		t.Errorf("nil policy: got %+v, want nil", ap)
+	}
+	if ap := agentPolicy("ns", pack, &PolicyIntent{}, agents, registry, nil); ap != nil {
+		t.Errorf("empty blocklist: got %+v, want nil", ap)
+	}
+	policy := &PolicyIntent{ToolBlocklist: []string{"delete-account"}}
+	if ap := agentPolicy("ns", pack, policy, agents, "", nil); ap != nil {
+		t.Errorf("no registry: got %+v, want nil", ap)
+	}
+}
+
 func TestToolRegistry_NilOrRefOnlyCreatesNothing(t *testing.T) {
 	pack := PackIntent{Name: "support"}
 
