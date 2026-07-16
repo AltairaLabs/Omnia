@@ -110,20 +110,21 @@ func jwksJSON(pub *rsa.PublicKey, kid string) string {
 	return string(b)
 }
 
-// mintDeployToken signs an RS256 identity JWT scoped to workspace for identity,
-// mirroring the dashboard's content-API token shape (authz.IdentityClaims).
-func mintDeployToken(key *rsa.PrivateKey, kid, workspace, identity string) string {
+// mintDeployToken signs an RS256 identity JWT scoped to workspace for the test
+// identity (deployIdentity), mirroring the dashboard's content-API token shape
+// (authz.IdentityClaims).
+func mintDeployToken(key *rsa.PrivateKey, kid, workspace string) string {
 	now := time.Now()
 	claims := authz.IdentityClaims{
 		RegisteredClaims: jwt.RegisteredClaims{
 			Issuer:    authz.IssuerDashboard,
 			Audience:  jwt.ClaimStrings{authz.AudienceContentAPI},
-			Subject:   identity,
+			Subject:   deployIdentity,
 			IssuedAt:  jwt.NewNumericDate(now),
 			NotBefore: jwt.NewNumericDate(now.Add(-time.Second)),
 			ExpiresAt: jwt.NewNumericDate(now.Add(5 * time.Minute)),
 		},
-		Identity:  identity,
+		Identity:  deployIdentity,
 		Workspace: workspace,
 	}
 	tok := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
@@ -351,15 +352,16 @@ spec:
 // restore returns the shared manager to exactly the args a sibling suite
 // expects.
 func managerArgsPatch(extra ...string) string {
-	args := []string{
+	args := make([]string, 0, 8+len(extra))
+	args = append(args,
 		"--metrics-bind-address=:8443", "--leader-elect",
 		"--health-probe-bind-address=:8081",
-		"--facade-image=" + facadeImageRef,
-		"--framework-image=" + runtimeImageRef,
-		"--session-api-image=" + sessionApiImage,
-		"--memory-api-image=" + memoryApiImage,
+		"--facade-image="+facadeImageRef,
+		"--framework-image="+runtimeImageRef,
+		"--session-api-image="+sessionApiImage,
+		"--memory-api-image="+memoryApiImage,
 		"--agent-workspace-reader-clusterrole=omnia-agent-workspace-reader",
-	}
+	)
 	args = append(args, extra...)
 	patch := map[string]any{"spec": map[string]any{"template": map[string]any{
 		"spec": map[string]any{"containers": []map[string]any{
@@ -578,7 +580,7 @@ var _ = Describe("Deploy Intent API", Ordered, Label("deploy"), func() {
 			Keys: map[string]*rsa.PublicKey{deployRunKid: &deployKey.PublicKey},
 		}
 		verifier := authz.NewIdentityVerifier(resolver)
-		token := mintDeployToken(deployKey, deployRunKid, deployWorkspace, deployIdentity)
+		token := mintDeployToken(deployKey, deployRunKid, deployWorkspace)
 
 		id, err := verifier.Verify(context.Background(), token)
 		Expect(err).NotTo(HaveOccurred())
@@ -587,7 +589,7 @@ var _ = Describe("Deploy Intent API", Ordered, Label("deploy"), func() {
 	})
 
 	It("materializes PromptPack, ConfigMap and AgentRuntime from a DeployIntent", func() {
-		token := mintDeployToken(deployKey, deployRunKid, deployWorkspace, deployIdentity)
+		token := mintDeployToken(deployKey, deployRunKid, deployWorkspace)
 
 		By("posting the DeployIntent with an editor token")
 		var body, status string
@@ -626,7 +628,7 @@ var _ = Describe("Deploy Intent API", Ordered, Label("deploy"), func() {
 		// authorize() (internal/api/authz/workspace_role.go) returns exactly 403
 		// for a workspace-claim/path mismatch, which precisely proves path-binding
 		// (a bad/expired token would 401 instead).
-		wrongToken := mintDeployToken(deployKey, deployRunKid, "some-other-ws", deployIdentity)
+		wrongToken := mintDeployToken(deployKey, deployRunKid, "some-other-ws")
 		out, err = curlDeploy("-X", "POST",
 			"-H", "Authorization: Bearer "+wrongToken,
 			"-H", "Content-Type: application/json",
@@ -637,7 +639,7 @@ var _ = Describe("Deploy Intent API", Ordered, Label("deploy"), func() {
 	})
 
 	It("canaries a trigger-mode agent on a version bump", func() {
-		token := mintDeployToken(deployKey, deployRunKid, deployWorkspace, deployIdentity)
+		token := mintDeployToken(deployKey, deployRunKid, deployWorkspace)
 
 		By("creating the mock provider the trigger-mode agent binds to")
 		Expect(deployApplyStdin(deployTriggerProviderManifest())).To(Succeed())
