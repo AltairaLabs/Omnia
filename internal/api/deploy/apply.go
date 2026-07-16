@@ -47,12 +47,14 @@ func (a *Applier) Apply(ctx context.Context, namespace string, intent DeployInte
 		results = append(results, r)
 	}
 
-	if desired := agentPolicy(namespace, intent.Pack, intent.Policy, agentNames(intent.Agents), deployRegistryName(intent), intent.Labels); desired != nil {
+	registryName := deployRegistryName(intent.Pack, intent.Tools)
+
+	if desired := agentPolicy(namespace, intent.Pack, intent.Policy, agentNames(intent.Agents), registryName, intent.Labels); desired != nil {
 		results = append(results, a.upsertAgentPolicy(ctx, desired))
 	}
 
 	for _, agent := range intent.Agents {
-		desired := agentToAgentRuntime(namespace, intent.Pack, agent, intent.Labels)
+		desired := agentToAgentRuntime(namespace, intent.Pack, agent, registryName, intent.Labels)
 		results = append(results, a.upsertAgentRuntime(ctx, desired))
 	}
 
@@ -127,18 +129,6 @@ func agentNames(agents []AgentIntent) []string {
 		out = append(out, agent.Name)
 	}
 	return out
-}
-
-// deployRegistryName is the ToolRegistry name an AgentPolicy denylist rule
-// attaches to: toolRegistryName(pack.Name) when the deploy has tools (ref or
-// handlers), else "" — mirrors agentToAgentRuntime's ToolRegistryRef naming,
-// which always resolves to the pack convention name regardless of whether
-// tools.ref or tools.handlers was used.
-func deployRegistryName(intent DeployIntent) string {
-	if intent.Tools == nil || (intent.Tools.Ref == "" && len(intent.Tools.Handlers) == 0) {
-		return ""
-	}
-	return toolRegistryName(intent.Pack.Name)
 }
 
 // upsertAgentPolicy creates the AgentPolicy, or updates the existing one's

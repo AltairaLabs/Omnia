@@ -93,8 +93,14 @@ const promptNameEnv = "OMNIA_PROMPT_NAME"
 
 // agentToAgentRuntime builds the desired AgentRuntime for one AgentIntent,
 // pinned to pack.Version. The apply step (apply.go) decides whether an existing
-// trigger-mode agent keeps its live pin instead.
-func agentToAgentRuntime(namespace string, pack PackIntent, agent AgentIntent, deployLabels map[string]string) *omniav1alpha1.AgentRuntime {
+// trigger-mode agent keeps its live pin instead. registryName is the resolved
+// ToolRegistry name (see deployRegistryName) — the caller computes it once per
+// deploy so every agent and the AgentPolicy denylist rule agree on the same
+// registry, whether it came from tools.ref or the pack's handler convention
+// name. A registryName of "" means the deploy has no tools, so ToolRegistryRef
+// is left nil even when agent.UseTools is set — a dangling ref to a
+// non-existent registry is worse than silently granting no tools.
+func agentToAgentRuntime(namespace string, pack PackIntent, agent AgentIntent, registryName string, deployLabels map[string]string) *omniav1alpha1.AgentRuntime {
 	version := pack.Version
 	spec := omniav1alpha1.AgentRuntimeSpec{
 		PromptPackRef: omniav1alpha1.PromptPackRef{Name: pack.Name, Version: &version},
@@ -106,8 +112,8 @@ func agentToAgentRuntime(namespace string, pack PackIntent, agent AgentIntent, d
 		Memory:        memoryConfig(agent.Memory),
 		Evals:         evalConfig(agent.Evals),
 	}
-	if agent.UseTools {
-		spec.ToolRegistryRef = &omniav1alpha1.ToolRegistryRef{Name: toolRegistryName(pack.Name)}
+	if agent.UseTools && registryName != "" {
+		spec.ToolRegistryRef = &omniav1alpha1.ToolRegistryRef{Name: registryName}
 	}
 	return &omniav1alpha1.AgentRuntime{
 		ObjectMeta: metav1.ObjectMeta{
@@ -122,6 +128,26 @@ func agentToAgentRuntime(namespace string, pack PackIntent, agent AgentIntent, d
 // toolRegistryName is the deterministic ToolRegistry name for a pack (matches
 // the adapter's "<pack>-tools" convention). Registry contents land in Plan B.
 func toolRegistryName(packName string) string { return packName + "-tools" }
+
+// deployRegistryName is the single source of truth for which ToolRegistry a
+// deploy's agents and AgentPolicy denylist rule point at. tools.ref names an
+// EXISTING, operator/user-owned registry and always wins when set — it is
+// never overridden by the pack's handler-convention name. Only when tools has
+// handlers and no ref does the deploy create (and point at) the
+// "<pack>-tools" registry. Returns "" when the deploy has no tools at all, so
+// callers can distinguish "no registry" from "use the pack convention name".
+func deployRegistryName(pack PackIntent, tools *ToolsIntent) string {
+	if tools == nil {
+		return ""
+	}
+	if tools.Ref != "" {
+		return tools.Ref
+	}
+	if len(tools.Handlers) > 0 {
+		return toolRegistryName(pack.Name)
+	}
+	return ""
+}
 
 // toolRegistry builds the create-only ToolRegistry for tools.Handlers. Returns
 // nil (no error) when tools is nil or has no handlers — a ref-only ToolsIntent

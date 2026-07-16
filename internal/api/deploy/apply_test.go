@@ -520,6 +520,57 @@ func TestApply_ToolsRefOnlyCreatesNoRegistry(t *testing.T) {
 	}
 }
 
+// TestApply_ToolsRefOnlyWiresAgentAndPolicyToRef is the regression test for
+// the tools.ref registry-name bug: a ref-only ToolsIntent (no handlers) names
+// an EXISTING, operator/user-owned registry. Before the fix, both the
+// AgentRuntime's toolRegistryRef and the AgentPolicy denylist rule ignored
+// tools.ref and pointed at the pack-convention "<pack>-tools" name instead —
+// a registry that a ref-only deploy never creates. This asserts BOTH refs
+// resolve to the actual tools.ref value, and that no "<pack>-tools"
+// ToolRegistry object exists.
+func TestApply_ToolsRefOnlyWiresAgentAndPolicyToRef(t *testing.T) {
+	c := fake.NewClientBuilder().WithScheme(testScheme(t)).Build()
+	a := NewApplier(c, logr.Discard())
+
+	intent := testIntent()
+	intent.Agents[0].UseTools = true
+	intent.Tools = &ToolsIntent{Ref: "other-registry"}
+	intent.Policy = &PolicyIntent{ToolBlocklist: []string{"delete-account"}}
+
+	res := a.Apply(context.Background(), "ns", intent)
+	if !res.Succeeded {
+		t.Fatalf("apply failed: %+v", res.Results)
+	}
+	if _, ok := resultsByKind(res.Results)[kindToolRegistry]; ok {
+		t.Fatalf("expected no ToolRegistry result for ref-only tools, got %+v", res.Results)
+	}
+
+	// No "<pack>-tools" convention-named registry was created.
+	convention := &omniav1alpha1.ToolRegistry{}
+	err := c.Get(context.Background(), types.NamespacedName{Name: toolRegistryName(intent.Pack.Name), Namespace: "ns"}, convention)
+	if !apierrors.IsNotFound(err) {
+		t.Errorf("expected no %q ToolRegistry, got %+v / %v", toolRegistryName(intent.Pack.Name), convention, err)
+	}
+
+	// AgentRuntime's toolRegistryRef points at the ref, not the convention name.
+	ar := &omniav1alpha1.AgentRuntime{}
+	if err := c.Get(context.Background(), types.NamespacedName{Name: intent.Agents[0].Name, Namespace: "ns"}, ar); err != nil {
+		t.Fatalf("get AgentRuntime: %v", err)
+	}
+	if ar.Spec.ToolRegistryRef == nil || ar.Spec.ToolRegistryRef.Name != "other-registry" {
+		t.Errorf("AgentRuntime toolRegistryRef = %+v, want name=other-registry", ar.Spec.ToolRegistryRef)
+	}
+
+	// AgentPolicy's denylist rule targets the same ref.
+	ap := &omniav1alpha1.AgentPolicy{}
+	if err := c.Get(context.Background(), types.NamespacedName{Name: agentPolicyName(intent.Pack.Name), Namespace: "ns"}, ap); err != nil {
+		t.Fatalf("get AgentPolicy: %v", err)
+	}
+	if ap.Spec.ToolAccess == nil || len(ap.Spec.ToolAccess.Rules) != 1 || ap.Spec.ToolAccess.Rules[0].Registry != "other-registry" {
+		t.Errorf("AgentPolicy rules = %+v, want one rule against other-registry", ap.Spec.ToolAccess)
+	}
+}
+
 // TestApply_ToolRegistryMalformedHandlerFailsButDeployContinues verifies a
 // translation error (malformed raw-JSON config block) surfaces as a failed
 // ToolRegistry result while the rest of the deploy still applies.

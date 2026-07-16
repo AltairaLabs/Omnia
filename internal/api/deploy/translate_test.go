@@ -124,7 +124,7 @@ func TestAgentToAgentRuntime_Pinned(t *testing.T) {
 		Providers:  []ProviderBind{{Name: "default", Ref: "claude"}, {Name: "judge", Ref: "gpt", Role: "llm"}},
 		UseTools:   true,
 	}
-	ar := agentToAgentRuntime("ns", pack, agent, nil)
+	ar := agentToAgentRuntime("ns", pack, agent, toolRegistryName("support"), nil)
 
 	assertAgentRuntimeMeta(t, ar, "support-triage", "ns")
 	if ar.Spec.PromptPackRef.Name != "support" || ar.Spec.PromptPackRef.Version == nil || *ar.Spec.PromptPackRef.Version != "1.2.0" {
@@ -152,6 +152,66 @@ func TestAgentToAgentRuntime_Pinned(t *testing.T) {
 	}
 }
 
+// TestAgentToAgentRuntime_RegistryNameFlowsThroughAsToolRegistryRef verifies
+// the #1862-adjacent fix: agentToAgentRuntime no longer recomputes
+// "<pack>-tools" internally — it trusts the caller-resolved registryName
+// verbatim, so a tools.ref value (which names an EXISTING registry, not the
+// pack's own "<pack>-tools" convention name) reaches spec.toolRegistryRef
+// unchanged instead of being silently overridden.
+func TestAgentToAgentRuntime_RegistryNameFlowsThroughAsToolRegistryRef(t *testing.T) {
+	pack := PackIntent{Name: "support", Version: "1.2.0"}
+	agent := AgentIntent{
+		Name:      "support-triage",
+		Providers: []ProviderBind{{Name: "default", Ref: "claude"}},
+		UseTools:  true,
+	}
+	ar := agentToAgentRuntime("ns", pack, agent, "other-registry", nil)
+	if ar.Spec.ToolRegistryRef == nil || ar.Spec.ToolRegistryRef.Name != "other-registry" {
+		t.Errorf("toolRegistryRef = %+v, want name=other-registry", ar.Spec.ToolRegistryRef)
+	}
+}
+
+// TestAgentToAgentRuntime_EmptyRegistryNameLeavesRefNil verifies that when
+// the deploy has no resolvable registry (registryName == ""), UseTools:true
+// does NOT produce a dangling ToolRegistryRef pointing at a registry that was
+// never created — better to grant no tools than reference a 404.
+func TestAgentToAgentRuntime_EmptyRegistryNameLeavesRefNil(t *testing.T) {
+	pack := PackIntent{Name: "support", Version: "1.2.0"}
+	agent := AgentIntent{
+		Name:      "support-triage",
+		Providers: []ProviderBind{{Name: "default", Ref: "claude"}},
+		UseTools:  true,
+	}
+	ar := agentToAgentRuntime("ns", pack, agent, "", nil)
+	if ar.Spec.ToolRegistryRef != nil {
+		t.Errorf("toolRegistryRef = %+v, want nil (registryName empty)", ar.Spec.ToolRegistryRef)
+	}
+}
+
+func TestDeployRegistryName(t *testing.T) {
+	pack := PackIntent{Name: "support"}
+
+	if got := deployRegistryName(pack, nil); got != "" {
+		t.Errorf("nil tools: got %q, want \"\"", got)
+	}
+	if got := deployRegistryName(pack, &ToolsIntent{}); got != "" {
+		t.Errorf("empty tools: got %q, want \"\"", got)
+	}
+	if got := deployRegistryName(pack, &ToolsIntent{Ref: "other-registry"}); got != "other-registry" {
+		t.Errorf("ref-only: got %q, want other-registry", got)
+	}
+	handlersOnly := &ToolsIntent{Handlers: []HandlerIntent{{Name: "h", Type: handlerTypeClient}}}
+	if got := deployRegistryName(pack, handlersOnly); got != toolRegistryName("support") {
+		t.Errorf("handlers-only: got %q, want %q", got, toolRegistryName("support"))
+	}
+	// Ref wins even when handlers are also present (shouldn't normally co-occur,
+	// but the resolution priority must still be well-defined).
+	both := &ToolsIntent{Ref: "other-registry", Handlers: handlersOnly.Handlers}
+	if got := deployRegistryName(pack, both); got != "other-registry" {
+		t.Errorf("ref+handlers: got %q, want other-registry (ref wins)", got)
+	}
+}
+
 func TestAgentToAgentRuntime_TriggerRollout(t *testing.T) {
 	pack := PackIntent{Name: "support", Version: "1.2.0"}
 	agent := AgentIntent{
@@ -159,7 +219,7 @@ func TestAgentToAgentRuntime_TriggerRollout(t *testing.T) {
 		Providers: []ProviderBind{{Name: "default", Ref: "claude"}},
 		Rollout:   &RolloutIntent{Trigger: &RolloutTriggerIntent{PromptPackChannel: "stable"}},
 	}
-	ar := agentToAgentRuntime("ns", pack, agent, nil)
+	ar := agentToAgentRuntime("ns", pack, agent, "", nil)
 	if ar.Spec.Rollout == nil || ar.Spec.Rollout.Trigger == nil || ar.Spec.Rollout.Trigger.PromptPackChannel != "stable" {
 		t.Fatalf("rollout trigger = %+v", ar.Spec.Rollout)
 	}
@@ -178,7 +238,7 @@ func TestAgentToAgentRuntime_ExplicitFacades(t *testing.T) {
 		Providers: []ProviderBind{{Name: "default", Ref: "claude"}},
 		Facades:   []FacadeIntent{{Type: "rest", ManagementPlane: &mgmt}, {Type: "mcp"}},
 	}
-	ar := agentToAgentRuntime("ns", pack, agent, nil)
+	ar := agentToAgentRuntime("ns", pack, agent, "", nil)
 
 	if len(ar.Spec.Facades) != 2 {
 		t.Fatalf("facades = %+v, want 2 entries", ar.Spec.Facades)
@@ -204,7 +264,7 @@ func TestAgentToAgentRuntime_RuntimeReplicasAndResources(t *testing.T) {
 		Providers: []ProviderBind{{Name: "default", Ref: "claude"}},
 		Runtime:   &RuntimeIntent{Replicas: &replicas, CPU: "500m", Memory: "256Mi"},
 	}
-	ar := agentToAgentRuntime("ns", pack, agent, nil)
+	ar := agentToAgentRuntime("ns", pack, agent, "", nil)
 
 	if ar.Spec.Runtime == nil {
 		t.Fatal("runtime = nil")
@@ -232,7 +292,7 @@ func TestAgentToAgentRuntime_RuntimeNilWhenUnset(t *testing.T) {
 		Providers: []ProviderBind{{Name: "default", Ref: "claude"}},
 		Runtime:   &RuntimeIntent{},
 	}
-	ar := agentToAgentRuntime("ns", pack, agent, nil)
+	ar := agentToAgentRuntime("ns", pack, agent, "", nil)
 	if ar.Spec.Runtime != nil {
 		t.Errorf("runtime = %+v, want nil", ar.Spec.Runtime)
 	}
@@ -357,7 +417,7 @@ func TestAgentToAgentRuntime_ExternalAuthWired(t *testing.T) {
 			ClientKeys: &ClientKeysIntent{DefaultRole: "viewer"},
 		},
 	}
-	ar := agentToAgentRuntime("ns", pack, agent, nil)
+	ar := agentToAgentRuntime("ns", pack, agent, "", nil)
 	if ar.Spec.ExternalAuth == nil || ar.Spec.ExternalAuth.ClientKeys == nil || ar.Spec.ExternalAuth.ClientKeys.DefaultRole != "viewer" {
 		t.Errorf("externalAuth = %+v", ar.Spec.ExternalAuth)
 	}
@@ -369,7 +429,7 @@ func TestAgentToAgentRuntime_ExternalAuthNilWhenUnset(t *testing.T) {
 		Name:      "support",
 		Providers: []ProviderBind{{Name: "default", Ref: "claude"}},
 	}
-	ar := agentToAgentRuntime("ns", pack, agent, nil)
+	ar := agentToAgentRuntime("ns", pack, agent, "", nil)
 	if ar.Spec.ExternalAuth != nil {
 		t.Errorf("externalAuth = %+v, want nil", ar.Spec.ExternalAuth)
 	}
@@ -510,7 +570,7 @@ func TestAgentToAgentRuntime_MemoryAndEvalsWired(t *testing.T) {
 		},
 		Evals: &EvalsIntent{Enabled: true, Inline: []string{"safety"}},
 	}
-	ar := agentToAgentRuntime("ns", pack, agent, nil)
+	ar := agentToAgentRuntime("ns", pack, agent, "", nil)
 	if ar.Spec.Memory == nil || !ar.Spec.Memory.Enabled || ar.Spec.Memory.Retrieval == nil || ar.Spec.Memory.Retrieval.Strategy != "composite" {
 		t.Errorf("memory = %+v", ar.Spec.Memory)
 	}
@@ -525,7 +585,7 @@ func TestAgentToAgentRuntime_MemoryAndEvalsNilWhenUnset(t *testing.T) {
 		Name:      "support",
 		Providers: []ProviderBind{{Name: "default", Ref: "claude"}},
 	}
-	ar := agentToAgentRuntime("ns", pack, agent, nil)
+	ar := agentToAgentRuntime("ns", pack, agent, "", nil)
 	if ar.Spec.Memory != nil {
 		t.Errorf("memory = %+v, want nil", ar.Spec.Memory)
 	}
@@ -547,7 +607,7 @@ func TestAgentToAgentRuntime_RolloutStepsWithPause(t *testing.T) {
 			},
 		},
 	}
-	ar := agentToAgentRuntime("ns", pack, agent, nil)
+	ar := agentToAgentRuntime("ns", pack, agent, "", nil)
 	if ar.Spec.Rollout == nil || len(ar.Spec.Rollout.Steps) != 2 {
 		t.Fatalf("rollout steps = %+v", ar.Spec.Rollout)
 	}
