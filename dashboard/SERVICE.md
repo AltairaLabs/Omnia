@@ -13,10 +13,12 @@
 ## Inputs
 - **HTTP** from browser: page requests, API proxy calls, deploy-wizard agent creation
 - **HTTP** from the external `promptarena-deploy-omnia` deploy adapter: creates PromptPack + AgentRuntime through the workspace CRD REST API (bearer-auth with a workspace-scoped `omnia_sk_` token). See [Deploy / CRD REST API](#deploy--crd-rest-api).
+- **HTTP** `POST /api/workspaces/{name}/deployments` (editor-gated, `omnia_sk_` auth): the server-owned **deploy-intent** proxy (#1866). Forwards an opaque versioned `DeployIntent` body to the Operator's deploy-intent API — the Operator, not the adapter, translates it to CRDs. Distinct from the legacy verbatim CRD REST passthrough above.
 - **WebSocket** from browser: chat messages, tool results
 
 ## Outputs
 - **HTTP** to Operator: CRUD proxy requests
+- **HTTP** to Operator's **deploy-intent API** (`POST /api/v1/workspaces/{workspace}/deployments`, `OPERATOR_DEPLOY_API_URL`, chart-wired `:8085`): forwards the `DeployIntent` from the proxy above, authenticated with a short-lived dashboard-minted RS256 identity JWT (aud `omnia-operator`) — the Operator never sees the caller's `omnia_sk_` key. Also advertises `supportedDeployIntentVersions` on the `deploy-profile` response (#1866).
 - **K8s API** (direct): create/list/update/delete of workspace CRDs (AgentRuntime, PromptPack, …). The create/update path is a **verbatim passthrough** — the caller's `body.spec` is applied unmodified; the only schema gate is the CRD's own OpenAPI/CEL validation (surfaced to the caller as the real 4xx, e.g. `422`).
 - **WebSocket** to Facade: agent chat (port 8080 on agent pods)
 - **WebSocket** to PromptKit LSP: code intelligence
