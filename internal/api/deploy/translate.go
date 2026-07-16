@@ -126,7 +126,8 @@ func agentToAgentRuntime(namespace string, pack PackIntent, agent AgentIntent, r
 }
 
 // toolRegistryName is the deterministic ToolRegistry name for a pack (matches
-// the adapter's "<pack>-tools" convention). Registry contents land in Plan B.
+// the adapter's "<pack>-tools" convention). The registry is materialized
+// create-only from tools.handlers by toolRegistry / applyToolRegistry.
 func toolRegistryName(packName string) string { return packName + "-tools" }
 
 // deployRegistryName is the single source of truth for which ToolRegistry a
