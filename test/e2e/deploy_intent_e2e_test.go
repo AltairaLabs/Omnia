@@ -56,6 +56,15 @@ const (
 	deployJWKSObject = "deploy-e2e-jwks"
 	deployAPIService = "deploy-api-e2e"
 
+	// Trigger-mode fixture (version-bump canary spec). Isolated from the
+	// materialize spec's pack/agent so the two deploys don't collide.
+	deployTriggerPackName  = "deploy-e2e-trigger-pack"
+	deployTriggerAgentName = "deploy-e2e-trigger-agent"
+	deployTriggerProvider  = "deploy-e2e-trigger-provider"
+	deployTriggerChannel   = "stable"
+	deployTriggerVersionV1 = "1.0.0"
+	deployTriggerVersionV2 = "1.1.0"
+
 	// deployJWKSURL is served by the in-cluster nginx pod (public half of the
 	// test RSA key). The manager verifies identity tokens against it.
 	deployJWKSURL = "http://deploy-e2e-jwks.omnia-system.svc.cluster.local/keys"
@@ -334,20 +343,39 @@ spec:
 `, deployCurlPod, namespace)
 }
 
-// patchManagerDeployArgs rewrites the manager container args to include the
-// deploy API bind address + JWKS URL. A full-args strategic merge (not a JSON
-// append) keeps it idempotent across E2E_SKIP_CLEANUP re-runs — a duplicated
-// flag would crash the manager at startup.
-func patchManagerDeployArgs() error {
-	args := fmt.Sprintf(`{"spec":{"template":{"spec":{"containers":[{"name":"manager",`+
-		`"args":["--metrics-bind-address=:8443","--leader-elect",`+
-		`"--health-probe-bind-address=:8081","--facade-image=%s","--framework-image=%s",`+
-		`"--session-api-image=%s","--memory-api-image=%s",`+
-		`"--agent-workspace-reader-clusterrole=omnia-agent-workspace-reader",`+
-		`"--deploy-api-bind-address=:8085","--mgmt-plane-jwks-url=%s"]}]}}}}`,
-		facadeImageRef, runtimeImageRef, sessionApiImage, memoryApiImage, deployJWKSURL)
+// managerArgsPatch builds a strategic-merge patch that sets the manager
+// container args to the suite's canonical base set plus any extra flags. A
+// full-args merge (not a JSON append) keeps it idempotent across
+// E2E_SKIP_CLEANUP re-runs — a duplicated flag would crash the manager at
+// startup. The base set mirrors ensureManagerDeployed (e2e_test.go) so a
+// restore returns the shared manager to exactly the args a sibling suite
+// expects.
+func managerArgsPatch(extra ...string) string {
+	args := []string{
+		"--metrics-bind-address=:8443", "--leader-elect",
+		"--health-probe-bind-address=:8081",
+		"--facade-image=" + facadeImageRef,
+		"--framework-image=" + runtimeImageRef,
+		"--session-api-image=" + sessionApiImage,
+		"--memory-api-image=" + memoryApiImage,
+		"--agent-workspace-reader-clusterrole=omnia-agent-workspace-reader",
+	}
+	args = append(args, extra...)
+	patch := map[string]any{"spec": map[string]any{"template": map[string]any{
+		"spec": map[string]any{"containers": []map[string]any{
+			{"name": "manager", "args": args},
+		}},
+	}}}
+	b, err := json.Marshal(patch)
+	Expect(err).NotTo(HaveOccurred())
+	return string(b)
+}
+
+// applyManagerArgsPatch strategic-merges patch onto the manager Deployment and
+// waits for the resulting rollout to complete.
+func applyManagerArgsPatch(patch string) error {
 	cmd := exec.Command("kubectl", "patch", "deployment", "omnia-controller-manager",
-		"-n", namespace, "--type=strategic", "-p", args)
+		"-n", namespace, "--type=strategic", "-p", patch)
 	if _, err := utils.Run(cmd); err != nil {
 		return err
 	}
@@ -357,10 +385,125 @@ func patchManagerDeployArgs() error {
 	return err
 }
 
+// patchManagerDeployArgs enables the deploy API on the manager (bind address +
+// JWKS URL) on top of the canonical base args.
+func patchManagerDeployArgs() error {
+	return applyManagerArgsPatch(managerArgsPatch(
+		"--deploy-api-bind-address=:8085",
+		"--mgmt-plane-jwks-url="+deployJWKSURL))
+}
+
+// restoreManagerBaseArgs reverts the manager to the canonical base args (no
+// deploy API flags), undoing patchManagerDeployArgs so a non-skipCleanup run
+// leaves the shared manager unmutated for sibling suites.
+func restoreManagerBaseArgs() error {
+	return applyManagerArgsPatch(managerArgsPatch())
+}
+
 // deployContentConfigMapName mirrors deploy.contentConfigMapName (unexported):
 // the pack's object name suffixed with "-content".
 func deployContentConfigMapName() string {
 	return omniav1alpha1.PromptPackObjectName(deployPackName, deployPackVersion) + "-content"
+}
+
+// i32 returns a pointer to v (for the *int32 setWeight fields).
+func i32(v int32) *int32 { return &v }
+
+// deployTriggerPackContent builds a schema-valid pack.json for the given
+// version. The shape mirrors the known-good rollout E2E fixture (includes the
+// template_engine block) so the PromptPack reaches the Active phase and the
+// agent's stable pin comes up — a prerequisite for the version trigger.
+func deployTriggerPackContent(version string) string {
+	return fmt.Sprintf(`{"id":%[1]q,"name":%[1]q,"version":%[2]q,`+
+		`"template_engine":{"version":"v1","syntax":"{{variable}}"},`+
+		`"prompts":{"default":{"id":"default","name":"default","version":%[2]q,`+
+		`"system_template":"You are version %[2]s."}}}`, deployTriggerPackName, version)
+}
+
+// deployTriggerIntentBody returns a DeployIntent for a single version-triggered
+// (spec.rollout.trigger) agent at the given pack version. The rollout steps
+// hold a canary at 20% behind an indefinite-enough pause so the candidate ref
+// stays observable rather than promoting straight through.
+func deployTriggerIntentBody(version string) string {
+	intent := deploy.DeployIntent{
+		APIVersion: deploy.APIVersionV1,
+		Pack: deploy.PackIntent{
+			Name:    deployTriggerPackName,
+			Version: version,
+			Content: deployTriggerPackContent(version),
+		},
+		Agents: []deploy.AgentIntent{{
+			Name:      deployTriggerAgentName,
+			Providers: []deploy.ProviderBind{{Name: "default", Ref: deployTriggerProvider}},
+			Rollout: &deploy.RolloutIntent{
+				Trigger: &deploy.RolloutTriggerIntent{PromptPackChannel: deployTriggerChannel},
+				Steps: []deploy.RolloutStepIntent{
+					{SetWeight: i32(20)},
+					{PauseDuration: "10m"},
+					{SetWeight: i32(100)},
+				},
+			},
+		}},
+	}
+	b, err := json.Marshal(intent)
+	Expect(err).NotTo(HaveOccurred())
+	return string(b)
+}
+
+// deployTriggerProviderManifest builds a dummy secret + mock Provider the
+// trigger-mode agent binds to. Mock needs no real key; the secret mirrors the
+// rollout E2E fixture so the Provider reconciles to Ready and the agent's
+// references resolve.
+func deployTriggerProviderManifest() string {
+	return fmt.Sprintf(`
+apiVersion: v1
+kind: Secret
+metadata:
+  name: %[1]s
+  namespace: %[2]s
+type: Opaque
+stringData:
+  api-key: mock-key
+---
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: Provider
+metadata:
+  name: %[1]s
+  namespace: %[2]s
+spec:
+  type: mock
+  credential:
+    secretRef:
+      name: %[1]s
+`, deployTriggerProvider, deployWorkspaceNS)
+}
+
+// postDeployIntent POSTs body with an editor token and asserts a 200 + a
+// succeeded DeployResult. Retried since the manager's deploy API may still be
+// coming up on the first call of a spec.
+func postDeployIntent(token, body string) {
+	var respBody, status string
+	Eventually(func(g Gomega) {
+		out, err := curlDeploy("-X", "POST",
+			"-H", "Authorization: Bearer "+token,
+			"-H", "Content-Type: application/json",
+			"-d", body, deployAPIURL())
+		g.Expect(err).NotTo(HaveOccurred())
+		respBody, status = splitCurlResponse(out)
+		g.Expect(status).To(Equal("200"), "body: "+respBody)
+	}, 2*time.Minute, 3*time.Second).Should(Succeed())
+
+	var result deploy.DeployResult
+	Expect(json.Unmarshal([]byte(respBody), &result)).To(Succeed(), "body: "+respBody)
+	Expect(result.Succeeded).To(BeTrue(), "results: "+respBody)
+}
+
+// deployTriggerAgentField returns a jsonpath field value from the trigger-mode
+// AgentRuntime in the deploy workspace namespace.
+func deployTriggerAgentField(jsonpath string) (string, error) {
+	cmd := exec.Command("kubectl", "get", "agentruntime", deployTriggerAgentName,
+		"-n", deployWorkspaceNS, "-o", "jsonpath="+jsonpath)
+	return utils.Run(cmd)
 }
 
 var _ = Describe("Deploy Intent API", Ordered, Label("deploy"), func() {
@@ -395,6 +538,10 @@ var _ = Describe("Deploy Intent API", Ordered, Label("deploy"), func() {
 			_, _ = fmt.Fprintf(GinkgoWriter,
 				"Skipping deploy-intent cleanup (E2E_SKIP_CLEANUP=true)\n")
 			return
+		}
+		By("restoring the manager's canonical base args (undo deploy-API patch)")
+		if err := restoreManagerBaseArgs(); err != nil {
+			_, _ = fmt.Fprintf(GinkgoWriter, "failed to restore manager base args: %v\n", err)
 		}
 		for _, res := range []struct{ kind, ns, name string }{
 			{"pod", namespace, deployCurlPod},
@@ -475,7 +622,10 @@ var _ = Describe("Deploy Intent API", Ordered, Label("deploy"), func() {
 		_, status := splitCurlResponse(out)
 		Expect(status).To(Equal("401"))
 
-		By("rejecting a token whose workspace claim != path workspace (401/403)")
+		By("rejecting a token whose workspace claim != path workspace (403)")
+		// authorize() (internal/api/authz/workspace_role.go) returns exactly 403
+		// for a workspace-claim/path mismatch, which precisely proves path-binding
+		// (a bad/expired token would 401 instead).
 		wrongToken := mintDeployToken(deployKey, deployRunKid, "some-other-ws", deployIdentity)
 		out, err = curlDeploy("-X", "POST",
 			"-H", "Authorization: Bearer "+wrongToken,
@@ -483,6 +633,61 @@ var _ = Describe("Deploy Intent API", Ordered, Label("deploy"), func() {
 			"-d", "{}", deployAPIURL())
 		Expect(err).NotTo(HaveOccurred())
 		_, status = splitCurlResponse(out)
-		Expect(status).To(SatisfyAny(Equal("401"), Equal("403")))
+		Expect(status).To(Equal("403"))
+	})
+
+	It("canaries a trigger-mode agent on a version bump", func() {
+		token := mintDeployToken(deployKey, deployRunKid, deployWorkspace, deployIdentity)
+
+		By("creating the mock provider the trigger-mode agent binds to")
+		Expect(deployApplyStdin(deployTriggerProviderManifest())).To(Succeed())
+
+		By("posting the initial trigger-mode DeployIntent at pack version 1.0.0")
+		postDeployIntent(token, deployTriggerIntentBody(deployTriggerVersionV1))
+
+		By("asserting the AgentRuntime materialized with the version trigger configured")
+		deployObjectExists("agentruntime", deployTriggerAgentName)
+		Eventually(func(g Gomega) {
+			out, err := deployTriggerAgentField("{.spec.rollout.trigger.promptPackChannel}")
+			g.Expect(err).NotTo(HaveOccurred())
+			g.Expect(out).To(Equal(deployTriggerChannel))
+		}, 2*time.Minute, 3*time.Second).Should(Succeed())
+
+		By("waiting for the stable pin to come up (status.activeVersion == 1.0.0)")
+		// The version trigger only fires once a stable version is active — until
+		// then resolveTriggerCandidate treats it as a first deploy and canaries
+		// nothing (rollout_version_trigger.go).
+		Eventually(func(g Gomega) {
+			out, err := deployTriggerAgentField("{.status.activeVersion}")
+			g.Expect(err).NotTo(HaveOccurred())
+			g.Expect(out).To(Equal(deployTriggerVersionV1))
+		}, 3*time.Minute, 3*time.Second).Should(Succeed())
+
+		By("posting a second DeployIntent bumping the same agent's pack to 1.1.0")
+		postDeployIntent(token, deployTriggerIntentBody(deployTriggerVersionV2))
+
+		By("asserting the 1.1.0 PromptPack object was materialized")
+		deployObjectExists("promptpack",
+			omniav1alpha1.PromptPackObjectName(deployTriggerPackName, deployTriggerVersionV2))
+
+		By("asserting a canary started: candidate -> 1.1.0 while the stable pin stays 1.0.0")
+		// The rollout-aware apply (reconcileAgentRuntimeSpec) preserves the live
+		// pin on a trigger-mode agent, and the #1838 controller sets the newer
+		// channel version as spec.rollout.candidate — a canary, NOT a hard swap
+		// of spec.promptPackRef to 1.1.0.
+		Eventually(func(g Gomega) {
+			candidate, err := deployTriggerAgentField("{.spec.rollout.candidate.promptPackRef.version}")
+			g.Expect(err).NotTo(HaveOccurred())
+			g.Expect(candidate).To(Equal(deployTriggerVersionV2), "a canary must start on the 1.1.0 pack")
+
+			pin, err := deployTriggerAgentField("{.spec.promptPackRef.version}")
+			g.Expect(err).NotTo(HaveOccurred())
+			g.Expect(pin).To(Equal(deployTriggerVersionV1), "the stable pin must be preserved, not hard-swapped")
+		}, 3*time.Minute, 3*time.Second).Should(Succeed())
+
+		By("asserting the candidate references the same logical pack name")
+		candidateName, err := deployTriggerAgentField("{.spec.rollout.candidate.promptPackRef.name}")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(candidateName).To(Equal(deployTriggerPackName))
 	})
 })
