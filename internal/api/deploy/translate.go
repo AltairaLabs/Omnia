@@ -1,6 +1,10 @@
 package deploy
 
 import (
+	"encoding/json"
+	"fmt"
+	"time"
+
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -118,6 +122,101 @@ func agentToAgentRuntime(namespace string, pack PackIntent, agent AgentIntent, d
 // toolRegistryName is the deterministic ToolRegistry name for a pack (matches
 // the adapter's "<pack>-tools" convention). Registry contents land in Plan B.
 func toolRegistryName(packName string) string { return packName + "-tools" }
+
+// toolRegistry builds the create-only ToolRegistry for tools.Handlers. Returns
+// nil (no error) when tools is nil or has no handlers — a ref-only ToolsIntent
+// points AgentRuntimes at an existing, operator/user-owned registry and
+// creates nothing. A malformed handler config block (raw JSON that doesn't
+// unmarshal into the corresponding CRD field) is a translation error the
+// caller must surface, not a panic.
+func toolRegistry(namespace string, pack PackIntent, tools *ToolsIntent, deployLabels map[string]string) (*omniav1alpha1.ToolRegistry, error) {
+	if tools == nil || len(tools.Handlers) == 0 {
+		return nil, nil
+	}
+	handlers := make([]omniav1alpha1.HandlerDefinition, 0, len(tools.Handlers))
+	for i, h := range tools.Handlers {
+		hd, err := handlerDefinition(h)
+		if err != nil {
+			return nil, fmt.Errorf("tools.handlers[%d]: %w", i, err)
+		}
+		handlers = append(handlers, hd)
+	}
+	return &omniav1alpha1.ToolRegistry{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      toolRegistryName(pack.Name),
+			Namespace: namespace,
+			Labels:    mergeLabels(map[string]string{packselect.Label: pack.Name}, deployLabels),
+		},
+		Spec: omniav1alpha1.ToolRegistrySpec{Handlers: handlers},
+	}, nil
+}
+
+// handlerDefinition translates one HandlerIntent onto the real
+// HandlerDefinition CRD shape: Name/Type direct, Timeout parsed from the
+// intent's duration string, and each non-nil raw-JSON config block unmarshaled
+// into its corresponding CRD pointer field.
+func handlerDefinition(h HandlerIntent) (omniav1alpha1.HandlerDefinition, error) {
+	hd := omniav1alpha1.HandlerDefinition{
+		Name: h.Name,
+		Type: omniav1alpha1.HandlerType(h.Type),
+	}
+	if h.Timeout != "" {
+		d, err := time.ParseDuration(h.Timeout)
+		if err != nil {
+			return omniav1alpha1.HandlerDefinition{}, fmt.Errorf("timeout: invalid duration %q: %w", h.Timeout, err)
+		}
+		hd.Timeout = &metav1.Duration{Duration: d}
+	}
+	if err := unmarshalHandlerConfigs(h, &hd); err != nil {
+		return omniav1alpha1.HandlerDefinition{}, err
+	}
+	return hd, nil
+}
+
+// unmarshalHandlerConfigs decodes each non-nil raw-JSON config block on h into
+// its corresponding CRD field on hd. Carrying config as raw JSON on
+// HandlerIntent lets the intent track CRD growth without re-typing every
+// executor's fields. Delegates the identical unmarshal-or-error-wrap step for
+// each field to decodeHandlerConfig to keep this function's cognitive
+// complexity low despite the field count.
+func unmarshalHandlerConfigs(h HandlerIntent, hd *omniav1alpha1.HandlerDefinition) error {
+	if err := decodeHandlerConfig(h.Tool, "tool", &hd.Tool); err != nil {
+		return err
+	}
+	if err := decodeHandlerConfig(h.HTTPConfig, "httpConfig", &hd.HTTPConfig); err != nil {
+		return err
+	}
+	if err := decodeHandlerConfig(h.OpenAPIConfig, "openAPIConfig", &hd.OpenAPIConfig); err != nil {
+		return err
+	}
+	if err := decodeHandlerConfig(h.GRPCConfig, "grpcConfig", &hd.GRPCConfig); err != nil {
+		return err
+	}
+	if err := decodeHandlerConfig(h.MCPConfig, "mcpConfig", &hd.MCPConfig); err != nil {
+		return err
+	}
+	if err := decodeHandlerConfig(h.ClientConfig, "clientConfig", &hd.ClientConfig); err != nil {
+		return err
+	}
+	if err := decodeHandlerConfig(h.Auth, "auth", &hd.Auth); err != nil {
+		return err
+	}
+	return nil
+}
+
+// decodeHandlerConfig unmarshals raw into a new T and points *out at it, when
+// raw is non-nil. label names the field in a wrapped error on failure.
+func decodeHandlerConfig[T any](raw *json.RawMessage, label string, out **T) error {
+	if raw == nil {
+		return nil
+	}
+	var v T
+	if err := json.Unmarshal(*raw, &v); err != nil {
+		return fmt.Errorf("%s: %w", label, err)
+	}
+	*out = &v
+	return nil
+}
 
 func facadeConfigs(in []FacadeIntent) []omniav1alpha1.FacadeConfig {
 	runtimeHandler := omniav1alpha1.HandlerModeRuntime

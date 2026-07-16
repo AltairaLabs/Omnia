@@ -1,13 +1,20 @@
 package deploy
 
 import (
+	"encoding/json"
 	"testing"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 	"github.com/altairalabs/omnia/internal/promptpack/packselect"
 )
+
+// handlerTypeClient is the HandlerIntent.Type value for client-side tools,
+// shared across translate_test.go and apply_test.go test fixtures to avoid
+// the goconst "client" literal appearing 3+ times across the package.
+const handlerTypeClient = "client"
 
 func TestPackToPromptPack(t *testing.T) {
 	pack := PackIntent{Name: "support", Version: "1.2.0", Content: `{"id":"support"}`}
@@ -554,5 +561,193 @@ func TestAgentToAgentRuntime_RolloutStepsWithPause(t *testing.T) {
 	step1 := ar.Spec.Rollout.Steps[1]
 	if step1.Pause != nil {
 		t.Errorf("step1.pause = %+v, want nil (no pauseDuration)", step1.Pause)
+	}
+}
+
+func TestToolRegistry_NilOrRefOnlyCreatesNothing(t *testing.T) {
+	pack := PackIntent{Name: "support"}
+
+	if tr, err := toolRegistry("ns", pack, nil, nil); err != nil || tr != nil {
+		t.Errorf("nil tools: got (%+v, %v), want (nil, nil)", tr, err)
+	}
+	refOnly := &ToolsIntent{Ref: "existing-registry"}
+	if tr, err := toolRegistry("ns", pack, refOnly, nil); err != nil || tr != nil {
+		t.Errorf("ref-only tools: got (%+v, %v), want (nil, nil)", tr, err)
+	}
+	empty := &ToolsIntent{}
+	if tr, err := toolRegistry("ns", pack, empty, nil); err != nil || tr != nil {
+		t.Errorf("empty tools: got (%+v, %v), want (nil, nil)", tr, err)
+	}
+}
+
+// toolRegistryTestHandlers returns the three-handler fixture shared by the
+// ToolRegistry handler tests below: a client handler (consent + timeout), an
+// http handler (tool + httpConfig), and a grpc handler carrying every other
+// raw config block (grpcConfig/openAPIConfig/mcpConfig/auth) purely to
+// exercise each unmarshal branch — not a realistic single-handler config.
+func toolRegistryTestHandlers() []HandlerIntent {
+	clientCfg := json.RawMessage(`{"consentMessage":"allow?","categories":["location"]}`)
+	httpCfg := json.RawMessage(`{"endpoint":"https://api.example.com/tool","method":"POST"}`)
+	toolDef := json.RawMessage(`{"name":"lookup","description":"desc","inputSchema":{}}`)
+	grpcCfg := json.RawMessage(`{"endpoint":"grpc.example.com:443","tls":true}`)
+	openAPICfg := json.RawMessage(`{"specURL":"https://api.example.com/openapi.json"}`)
+	mcpCfg := json.RawMessage(`{"transport":"sse","endpoint":"https://mcp.example.com/sse"}`)
+	authCfg := json.RawMessage(`{"type":"bearer","secretRef":{"name":"tool-secret","key":"token"}}`)
+
+	return []HandlerIntent{
+		{Name: "browser-consent", Type: handlerTypeClient, ClientConfig: &clientCfg, Timeout: "15s"},
+		{Name: "lookup-http", Type: "http", HTTPConfig: &httpCfg, Tool: &toolDef},
+		{
+			Name:          "multi",
+			Type:          "grpc",
+			GRPCConfig:    &grpcCfg,
+			OpenAPIConfig: &openAPICfg,
+			MCPConfig:     &mcpCfg,
+			Auth:          &authCfg,
+		},
+	}
+}
+
+func TestToolRegistry_Metadata(t *testing.T) {
+	tools := &ToolsIntent{Handlers: toolRegistryTestHandlers()}
+	pack := PackIntent{Name: "support"}
+
+	tr, err := toolRegistry("ns", pack, tools, map[string]string{"env": "prod"})
+	if err != nil {
+		t.Fatalf("toolRegistry: %v", err)
+	}
+	if tr == nil {
+		t.Fatal("toolRegistry = nil, want non-nil")
+	}
+	if tr.Name != toolRegistryName("support") {
+		t.Errorf("name = %q, want %q", tr.Name, toolRegistryName("support"))
+	}
+	if tr.Namespace != "ns" {
+		t.Errorf("namespace = %q, want ns", tr.Namespace)
+	}
+	if tr.Labels[packselect.Label] != "support" {
+		t.Errorf("label %s = %q, want support", packselect.Label, tr.Labels[packselect.Label])
+	}
+	if tr.Labels["env"] != "prod" {
+		t.Errorf("deploy label not propagated: %v", tr.Labels)
+	}
+	if len(tr.Spec.Handlers) != 3 {
+		t.Fatalf("handlers = %+v, want 3", tr.Spec.Handlers)
+	}
+}
+
+func TestToolRegistry_ClientHandler(t *testing.T) {
+	tools := &ToolsIntent{Handlers: toolRegistryTestHandlers()}
+	tr, err := toolRegistry("ns", PackIntent{Name: "support"}, tools, nil)
+	if err != nil {
+		t.Fatalf("toolRegistry: %v", err)
+	}
+
+	h0 := tr.Spec.Handlers[0]
+	if h0.Name != "browser-consent" || h0.Type != omniav1alpha1.HandlerTypeClient {
+		t.Errorf("name/type = %q/%q", h0.Name, h0.Type)
+	}
+	if h0.ClientConfig == nil || h0.ClientConfig.ConsentMessage != "allow?" ||
+		len(h0.ClientConfig.Categories) != 1 || h0.ClientConfig.Categories[0] != "location" {
+		t.Errorf("clientConfig = %+v", h0.ClientConfig)
+	}
+	if h0.Timeout == nil || h0.Timeout.Duration != 15*time.Second {
+		t.Errorf("timeout = %v, want 15s", h0.Timeout)
+	}
+}
+
+func TestToolRegistry_HTTPHandler(t *testing.T) {
+	tools := &ToolsIntent{Handlers: toolRegistryTestHandlers()}
+	tr, err := toolRegistry("ns", PackIntent{Name: "support"}, tools, nil)
+	if err != nil {
+		t.Fatalf("toolRegistry: %v", err)
+	}
+
+	h1 := tr.Spec.Handlers[1]
+	if h1.Name != "lookup-http" || h1.Type != omniav1alpha1.HandlerTypeHTTP {
+		t.Errorf("name/type = %q/%q", h1.Name, h1.Type)
+	}
+	if h1.HTTPConfig == nil || h1.HTTPConfig.Endpoint != "https://api.example.com/tool" || h1.HTTPConfig.Method != "POST" {
+		t.Errorf("httpConfig = %+v", h1.HTTPConfig)
+	}
+	if h1.Tool == nil || h1.Tool.Name != "lookup" || h1.Tool.Description != "desc" {
+		t.Errorf("tool = %+v", h1.Tool)
+	}
+	if h1.Timeout != nil {
+		t.Errorf("timeout = %v, want nil (no timeout set)", h1.Timeout)
+	}
+}
+
+func TestToolRegistry_MultiConfigHandler(t *testing.T) {
+	tools := &ToolsIntent{Handlers: toolRegistryTestHandlers()}
+	tr, err := toolRegistry("ns", PackIntent{Name: "support"}, tools, nil)
+	if err != nil {
+		t.Fatalf("toolRegistry: %v", err)
+	}
+
+	h2 := tr.Spec.Handlers[2]
+	if h2.GRPCConfig == nil || h2.GRPCConfig.Endpoint != "grpc.example.com:443" || !h2.GRPCConfig.TLS {
+		t.Errorf("grpcConfig = %+v", h2.GRPCConfig)
+	}
+	if h2.OpenAPIConfig == nil || h2.OpenAPIConfig.SpecURL != "https://api.example.com/openapi.json" {
+		t.Errorf("openAPIConfig = %+v", h2.OpenAPIConfig)
+	}
+	if h2.MCPConfig == nil || h2.MCPConfig.Transport != omniav1alpha1.MCPTransportSSE {
+		t.Errorf("mcpConfig = %+v", h2.MCPConfig)
+	}
+	if h2.Auth == nil || h2.Auth.Type != "bearer" || h2.Auth.SecretRef == nil || h2.Auth.SecretRef.Name != "tool-secret" {
+		t.Errorf("auth = %+v", h2.Auth)
+	}
+}
+
+func TestToolRegistry_MalformedConfigReturnsError(t *testing.T) {
+	badCfg := json.RawMessage(`{"endpoint": 123}`) // endpoint should be a string, not a number
+	tools := &ToolsIntent{
+		Handlers: []HandlerIntent{{Name: "bad", Type: "http", HTTPConfig: &badCfg}},
+	}
+	tr, err := toolRegistry("ns", PackIntent{Name: "support"}, tools, nil)
+	if err == nil {
+		t.Fatal("expected error for malformed httpConfig, got nil")
+	}
+	if tr != nil {
+		t.Errorf("expected nil ToolRegistry on error, got %+v", tr)
+	}
+}
+
+// TestToolRegistry_MalformedConfigReturnsError_AllFields exercises the
+// malformed-unmarshal error branch for every raw-JSON config field on
+// HandlerIntent, not just httpConfig — each block is a near-identical
+// unmarshal-or-error step in unmarshalHandlerConfigs, and each has its own
+// error return to cover.
+func TestToolRegistry_MalformedConfigReturnsError_AllFields(t *testing.T) {
+	bad := json.RawMessage(`"not-an-object"`)
+	tests := map[string]HandlerIntent{
+		"tool":          {Name: "h", Type: "http", Tool: &bad},
+		"openAPIConfig": {Name: "h", Type: "openapi", OpenAPIConfig: &bad},
+		"grpcConfig":    {Name: "h", Type: "grpc", GRPCConfig: &bad},
+		"mcpConfig":     {Name: "h", Type: "mcp", MCPConfig: &bad},
+		"clientConfig":  {Name: "h", Type: handlerTypeClient, ClientConfig: &bad},
+		"auth":          {Name: "h", Type: "http", Auth: &bad},
+	}
+	for name, h := range tests {
+		t.Run(name, func(t *testing.T) {
+			tools := &ToolsIntent{Handlers: []HandlerIntent{h}}
+			tr, err := toolRegistry("ns", PackIntent{Name: "support"}, tools, nil)
+			if err == nil {
+				t.Fatalf("expected error for malformed %s, got nil", name)
+			}
+			if tr != nil {
+				t.Errorf("expected nil ToolRegistry on error, got %+v", tr)
+			}
+		})
+	}
+}
+
+func TestToolRegistry_InvalidTimeoutReturnsError(t *testing.T) {
+	tools := &ToolsIntent{Handlers: []HandlerIntent{{Name: "h", Type: handlerTypeClient, Timeout: "not-a-duration"}}}
+	if tr, err := toolRegistry("ns", PackIntent{Name: "support"}, tools, nil); err == nil {
+		t.Fatal("expected error for invalid timeout")
+	} else if tr != nil {
+		t.Errorf("expected nil ToolRegistry on error, got %+v", tr)
 	}
 }

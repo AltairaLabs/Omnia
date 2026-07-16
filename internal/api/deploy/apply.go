@@ -15,6 +15,7 @@ const (
 	kindPromptPack   = "PromptPack"
 	kindConfigMap    = "ConfigMap"
 	kindAgentRuntime = "AgentRuntime"
+	kindToolRegistry = "ToolRegistry"
 )
 
 // Applier translates a DeployIntent and applies the resulting objects.
@@ -40,6 +41,10 @@ func (a *Applier) Apply(ctx context.Context, namespace string, intent DeployInte
 
 	pp := packToPromptPack(namespace, intent.Pack, intent.Labels)
 	results = append(results, a.createImmutable(ctx, kindPromptPack, pp))
+
+	if r, ok := a.applyToolRegistry(ctx, namespace, intent); ok {
+		results = append(results, r)
+	}
 
 	for _, agent := range intent.Agents {
 		desired := agentToAgentRuntime(namespace, intent.Pack, agent, intent.Labels)
@@ -67,6 +72,45 @@ func (a *Applier) createImmutable(ctx context.Context, kind string, obj client.O
 	default:
 		a.log.Error(err, "deploy create failed", "kind", kind, "name", obj.GetName())
 		return ResourceResult{Kind: kind, Name: obj.GetName(), Action: ActionFailed, Error: err.Error()}
+	}
+}
+
+// applyToolRegistry translates and create-only applies the ToolRegistry for
+// intent.Tools, when it has handlers. Returns ok=false when there's nothing to
+// apply — a nil or ref-only ToolsIntent creates no registry object and
+// contributes no result entry.
+func (a *Applier) applyToolRegistry(ctx context.Context, namespace string, intent DeployIntent) (ResourceResult, bool) {
+	if intent.Tools == nil || len(intent.Tools.Handlers) == 0 {
+		return ResourceResult{}, false
+	}
+	tr, err := toolRegistry(namespace, intent.Pack, intent.Tools, intent.Labels)
+	if err != nil {
+		name := toolRegistryName(intent.Pack.Name)
+		a.log.Error(err, "deploy translate failed", "kind", kindToolRegistry, "name", name)
+		return ResourceResult{Kind: kindToolRegistry, Name: name, Action: ActionFailed, Error: err.Error()}, true
+	}
+	return a.createToolRegistry(ctx, tr), true
+}
+
+// createToolRegistry creates a ToolRegistry create-only: an existing registry
+// is operator/user-owned and is never updated by a deploy (AlreadyExists =>
+// unchanged). An RBAC-forbidden create degrades to a logged warning and a
+// non-fatal "unchanged" result — the deploy still proceeds — rather than
+// failing the whole deploy over a permissions gap on an optional resource.
+func (a *Applier) createToolRegistry(ctx context.Context, obj *omniav1alpha1.ToolRegistry) ResourceResult {
+	err := a.client.Create(ctx, obj)
+	switch {
+	case err == nil:
+		return ResourceResult{Kind: kindToolRegistry, Name: obj.GetName(), Action: ActionCreated}
+	case apierrors.IsAlreadyExists(err):
+		return ResourceResult{Kind: kindToolRegistry, Name: obj.GetName(), Action: ActionUnchanged}
+	case apierrors.IsForbidden(err):
+		a.log.Info("deploy tool registry create forbidden, skipping",
+			"kind", kindToolRegistry, "name", obj.GetName(), "reason", err.Error())
+		return ResourceResult{Kind: kindToolRegistry, Name: obj.GetName(), Action: ActionUnchanged}
+	default:
+		a.log.Error(err, "deploy create failed", "kind", kindToolRegistry, "name", obj.GetName())
+		return ResourceResult{Kind: kindToolRegistry, Name: obj.GetName(), Action: ActionFailed, Error: err.Error()}
 	}
 }
 
