@@ -6,6 +6,8 @@ import (
 	"fmt"
 
 	"k8s.io/apimachinery/pkg/api/resource"
+
+	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 )
 
 // APIVersionV1 is the only DeployIntent contract version this operator serves.
@@ -197,14 +199,15 @@ type PolicyIntent struct {
 	ToolBlocklist []string `json:"toolBlocklist,omitempty"`
 }
 
-// validHandlerTypes is the allowed set of HandlerIntent.Type values, mirroring
-// the ToolRegistry CRD's handler executor kinds.
+// validHandlerTypes is the allowed set of HandlerIntent.Type values, built
+// from the ToolRegistry CRD's handler executor kind constants so there is a
+// single source of truth for the recognized types.
 var validHandlerTypes = map[string]bool{
-	"http":    true,
-	"openapi": true,
-	"grpc":    true,
-	"mcp":     true,
-	"client":  true,
+	string(omniav1alpha1.HandlerTypeHTTP):    true,
+	string(omniav1alpha1.HandlerTypeOpenAPI): true,
+	string(omniav1alpha1.HandlerTypeGRPC):    true,
+	string(omniav1alpha1.HandlerTypeMCP):     true,
+	string(omniav1alpha1.HandlerTypeClient):  true,
 }
 
 // Resource action outcomes reported per applied object.
@@ -341,6 +344,15 @@ func (e *ExternalAuthIntent) validate(i int) error {
 	return nil
 }
 
+// Memory retrieval strategy values recognized by MemoryIntent.validate. The
+// CRD's MemoryRetrievalConfig.Strategy is a plain string (no typed enum), so
+// these are local constants rather than reused CRD constants.
+const (
+	memoryStrategyKeyword   = "keyword"
+	memoryStrategySemantic  = "semantic"
+	memoryStrategyComposite = "composite"
+)
+
 // validate checks MemoryIntent, when set: a non-empty retrieval strategy must
 // be one of the recognized strategies.
 func (m *MemoryIntent) validate(i int) error {
@@ -348,7 +360,7 @@ func (m *MemoryIntent) validate(i int) error {
 		return nil
 	}
 	switch m.Retrieval.Strategy {
-	case "keyword", "semantic", "composite":
+	case memoryStrategyKeyword, memoryStrategySemantic, memoryStrategyComposite:
 		return nil
 	default:
 		return fmt.Errorf("agents[%d].memory.retrieval.strategy: invalid strategy %q", i, m.Retrieval.Strategy)
