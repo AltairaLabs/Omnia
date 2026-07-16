@@ -29,9 +29,30 @@ or `api/proto/`, add an entry below with the date, affected API, and reason.
   #1839): it lets a future deploy adapter submit one intent instead of authoring
   `PromptPack`/`AgentRuntime` CRDs itself. The existing `promptarena-deploy-omnia` adapter
   has **not** migrated to this endpoint yet — it still writes CRDs directly via the
-  dashboard's workspace CRD REST API (unchanged). `DeployIntent` fields for external auth,
-  memory, evals, ToolRegistry, and AgentPolicy mapping ("Plan B") are declared on the wire
-  for contract stability but not yet mapped by the translator.
+  dashboard's workspace CRD REST API (unchanged).
+
+### Added (operator: deploy-intent API full config surface, deploy-intent decoupling epic Plan B, #1865)
+
+- The `DeployIntent` fields declared as wire placeholders in Plan A are now mapped by the
+  translator: `agents[].externalAuth` → `AgentRuntime.spec.externalAuth` (current CRD
+  vocabulary — `clientKeys`/`oidc`/`edgeTrust`, not the adapter's legacy
+  `sharedToken`/`apiKeys` shape), `agents[].memory` → `spec.memory`, and `agents[].evals` →
+  `spec.evals` (enabled + `inlineGroups`/`workerGroups` only — sampling/rateLimit/
+  sessionCompletion are not yet in the intent contract).
+- **`tools`** (top-level `ToolsIntent`) either references an existing `ToolRegistry` by
+  name (`ref`) or **create-only** creates one from `handlers[]` (`ref` and `handlers` are
+  mutually exclusive) — the operator never updates an existing `ToolRegistry` through this
+  endpoint. Each `HandlerIntent`'s per-executor config block (`httpConfig`/`openAPIConfig`/
+  `grpcConfig`/`mcpConfig`/`clientConfig`/`auth`/`tool`) is carried as free-form JSON, mapped
+  straight onto the `ToolRegistry` CRD's matching field, so the intent contract tracks new
+  executor types without a schema change.
+- **`policy.toolBlocklist`** (top-level `PolicyIntent`) creates an `AgentPolicy` with a
+  `toolAccess` denylist rule scoped to the deploy's `ToolRegistry` — the CRD has no
+  `toolBlocklist` field; the server does the shape correction.
+- `api/openapi/openapi.yaml` schemas for `ExternalAuthIntent`, `MemoryIntent`, `EvalsIntent`,
+  `ToolsIntent`/`HandlerIntent`, and `PolicyIntent` are updated to the real fields (no new
+  `paths:` entry — this remains an internal, mgmt-plane-JWT-authenticated endpoint; a
+  dashboard-facing proxy route is deferred to a later plan).
 
 ### Changed (auth: rename `apiKeys` → `clientKeys` + arbitrary per-key claims, #1775)
 

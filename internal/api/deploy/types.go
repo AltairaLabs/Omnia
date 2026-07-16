@@ -192,9 +192,10 @@ type HandlerIntent struct {
 	Timeout       string           `json:"timeout,omitempty"`
 }
 
-// PolicyIntent maps to an AgentPolicy denylist (NOT a toolBlocklist field —
-// see the shape-correction note). toolBlocklist is the flat list of tool names
-// to deny; the server builds toolAccess{denylist, rules:[{registry, tools}]}.
+// PolicyIntent maps to an AgentPolicy denylist. ToolBlocklist is the flat
+// list of tool names to deny; the server builds
+// toolAccess{denylist, rules:[{registry, tools}]} against the deploy's
+// ToolRegistry.
 type PolicyIntent struct {
 	ToolBlocklist []string `json:"toolBlocklist,omitempty"`
 }

@@ -997,11 +997,42 @@ export interface components {
             maxActive?: number;
             selector?: string;
         };
-        /** @description Plan B placeholder — declared so the wire contract is stable; not yet mapped by the operator. */
+        /** @description Reference an existing ToolRegistry, or create one (create-only). `ref` and `handlers` are mutually exclusive. */
         ToolsIntent: {
+            /** @description Existing ToolRegistry name. */
             ref?: string;
+            /** @description Create-only registry contents. */
+            handlers?: components["schemas"]["HandlerIntent"][];
         };
-        /** @description Plan B placeholder — declared so the wire contract is stable; not yet mapped by the operator. */
+        /** @description Mirrors HandlerDefinition's stable surface. The per-executor config blocks are free-form JSON, mapped straight onto the ToolRegistry CRD's json fields. */
+        HandlerIntent: {
+            name: string;
+            /** @enum {string} */
+            type: "http" | "openapi" | "grpc" | "mcp" | "client";
+            tool?: {
+                [key: string]: unknown;
+            };
+            httpConfig?: {
+                [key: string]: unknown;
+            };
+            openAPIConfig?: {
+                [key: string]: unknown;
+            };
+            grpcConfig?: {
+                [key: string]: unknown;
+            };
+            mcpConfig?: {
+                [key: string]: unknown;
+            };
+            clientConfig?: {
+                [key: string]: unknown;
+            };
+            auth?: {
+                [key: string]: unknown;
+            };
+            timeout?: string;
+        };
+        /** @description Maps to an AgentPolicy denylist. `toolBlocklist` is the flat list of tool names to deny; the server builds `toolAccess{denylist, rules:[{registry, tools}]}` against the deploy's ToolRegistry. */
         PolicyIntent: {
             toolBlocklist?: string[];
         };
@@ -1013,12 +1044,9 @@ export interface components {
             runtime?: components["schemas"]["RuntimeIntent"];
             facades?: components["schemas"]["FacadeIntent"][];
             useTools?: boolean;
-            /** @description Plan B placeholder — not yet mapped by the operator. */
-            externalAuth?: Record<string, never>;
-            /** @description Plan B placeholder — not yet mapped by the operator. */
-            memory?: Record<string, never>;
-            /** @description Plan B placeholder — not yet mapped by the operator. */
-            evals?: Record<string, never>;
+            externalAuth?: components["schemas"]["ExternalAuthIntent"];
+            memory?: components["schemas"]["MemoryIntent"];
+            evals?: components["schemas"]["EvalsIntent"];
             rollout?: components["schemas"]["RolloutIntent"];
         };
         /** @description One provider binding — a logical slot name, the Provider CRD name, and the role (default "llm"). */
@@ -1033,6 +1061,66 @@ export interface components {
             replicas?: number;
             cpu?: string;
             memory?: string;
+        };
+        /** @description Maps to spec.externalAuth (AgentExternalAuth) — current CRD vocabulary, not the adapter's legacy sharedToken/apiKeys shape. */
+        ExternalAuthIntent: {
+            clientKeys?: components["schemas"]["ClientKeysIntent"];
+            oidc?: components["schemas"]["OIDCIntent"];
+            edgeTrust?: components["schemas"]["EdgeTrustIntent"];
+        };
+        /** @description Maps to AgentExternalAuth.clientKeys. */
+        ClientKeysIntent: {
+            defaultRole?: string;
+            trustEndUserHeader?: boolean;
+        };
+        /** @description Maps to AgentExternalAuth.oidc. */
+        OIDCIntent: {
+            issuer: string;
+            audience: string;
+            claimMapping?: components["schemas"]["OIDCMappingIntent"];
+        };
+        /** @description Maps to AgentExternalAuth.oidc.claimMapping. */
+        OIDCMappingIntent: {
+            subject?: string;
+            endUser?: string;
+        };
+        /** @description Maps to AgentExternalAuth.edgeTrust. */
+        EdgeTrustIntent: {
+            headerMapping?: components["schemas"]["EdgeTrustHeaderIntent"];
+            claimsFromHeaders?: {
+                [key: string]: string;
+            };
+        };
+        /** @description Maps to AgentExternalAuth.edgeTrust.headerMapping. */
+        EdgeTrustHeaderIntent: {
+            subject?: string;
+            endUser?: string;
+            email?: string;
+        };
+        /** @description Maps to spec.memory (MemoryConfig). */
+        MemoryIntent: {
+            enabled?: boolean;
+            retrieval?: components["schemas"]["MemoryRetrievalIntent"];
+            tools?: components["schemas"]["MemoryToolsIntent"];
+        };
+        /** @description Maps to spec.memory.retrieval. */
+        MemoryRetrievalIntent: {
+            enabled?: boolean;
+            /** @enum {string} */
+            strategy?: "keyword" | "semantic" | "composite";
+            /** Format: int32 */
+            limit?: number;
+            denyCEL?: string;
+        };
+        /** @description Maps to spec.memory.tools. */
+        MemoryToolsIntent: {
+            enabled?: boolean;
+        };
+        /** @description Maps to spec.evals (EvalConfig). Only enabled + inline/worker groups are mapped (matches the adapter surface; sampling/rateLimit/sessionCompletion are not yet in the intent contract). */
+        EvalsIntent: {
+            enabled?: boolean;
+            inlineGroups?: string[];
+            workerGroups?: string[];
         };
         /** @description Maps to one spec.facades[] entry. A nil/empty agents[].facades yields a single default websocket facade. */
         FacadeIntent: {

@@ -17,8 +17,9 @@
 - Dashboard server (embedded Next.js app via `dashboard/server.js`)
 - REST API for dashboard proxy routes
 - Deploy-intent API (`internal/api/deploy`, gated by `--deploy-api-bind-address`) — translates
-  a versioned `DeployIntent` into PromptPack/ConfigMap/AgentRuntime objects; see Inputs/Outputs
-  and the "Does NOT Own" note below
+  a versioned `DeployIntent` into PromptPack/ConfigMap/ToolRegistry(create-only)/AgentPolicy/
+  AgentRuntime objects, including per-agent externalAuth/memory/evals mapping; see
+  Inputs/Outputs and the "Does NOT Own" note below
 - Webhook validation for CRDs
 - Prometheus metrics endpoints
 - Health probes
@@ -36,10 +37,14 @@
 ## Outputs
 - **K8s API**: Deployments, Services, ConfigMaps, PVCs, Events, CRD status updates
 - **K8s API**: `AgentRuntime.status.facade.endpoints` — external URLs derived from observed HTTPRoutes (empty if cluster-internal only)
-- **K8s API** (deploy-intent API only): creates a `PromptPack` + content `ConfigMap` and
-  upserts one or more `AgentRuntime` objects translated from a `DeployIntent` — idempotent
-  (pack/ConfigMap create-once, `AgentRuntime` rollout-aware upsert) and best-effort
-  (`DeployResult` reports per-object created/updated/unchanged/failed)
+- **K8s API** (deploy-intent API only): creates a `PromptPack` + content `ConfigMap`,
+  create-only-creates a `ToolRegistry` (when `tools.handlers` is set — never updates an
+  existing one) and an `AgentPolicy` (when `policy.toolBlocklist` is set, denylisting
+  against that registry), and upserts one or more `AgentRuntime` objects translated from a
+  `DeployIntent` — idempotent (pack/ConfigMap/ToolRegistry create-once, `AgentRuntime`
+  rollout-aware upsert) and best-effort (`DeployResult` reports per-object
+  created/updated/unchanged/failed). Per-agent `externalAuth`/`memory`/`evals` intent
+  fields map onto the `AgentRuntime`'s `spec.externalAuth`/`spec.memory`/`spec.evals`.
 - **HTTP** to Dashboard: proxied responses
 - **HTTP**: `DeployResult` response to the deploy-intent API caller (200, or 207 on partial failure)
 - **Prometheus** metrics: reconciliation counts, retention stats
