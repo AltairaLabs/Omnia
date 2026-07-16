@@ -231,6 +231,143 @@ func TestAgentToAgentRuntime_RuntimeNilWhenUnset(t *testing.T) {
 	}
 }
 
+func TestExternalAuthConfig_Nil(t *testing.T) {
+	if got := externalAuthConfig(nil); got != nil {
+		t.Errorf("externalAuthConfig(nil) = %+v, want nil", got)
+	}
+}
+
+// assertClientKeysAuth, assertOIDCAuth, and assertEdgeTrustAuth are extracted
+// out of TestExternalAuthConfig_FullMapping to keep the test under the repo's
+// gocyclo-15 pre-commit gate; the assertions themselves are unchanged.
+func assertClientKeysAuth(t *testing.T, got *omniav1alpha1.ClientKeysAuth) {
+	t.Helper()
+	if got == nil || got.DefaultRole != "editor" || !got.TrustEndUserHeader {
+		t.Errorf("clientKeys = %+v", got)
+	}
+}
+
+func assertOIDCAuth(t *testing.T, got *omniav1alpha1.OIDCAuth) {
+	t.Helper()
+	if got == nil || got.Issuer != "https://issuer.example.com" || got.Audience != "aud-1" {
+		t.Fatalf("oidc = %+v", got)
+	}
+	if got.ClaimMapping == nil || got.ClaimMapping.Subject != "sub-claim" || got.ClaimMapping.EndUser != "enduser-claim" {
+		t.Errorf("oidc.claimMapping = %+v", got.ClaimMapping)
+	}
+}
+
+func assertEdgeTrustAuth(t *testing.T, got *omniav1alpha1.EdgeTrustAuth) {
+	t.Helper()
+	if got == nil {
+		t.Fatal("edgeTrust = nil")
+	}
+	hm := got.HeaderMapping
+	if hm == nil || hm.Subject != "x-subject" || hm.EndUser != "x-end-user" || hm.Email != "x-email" {
+		t.Errorf("edgeTrust.headerMapping = %+v", hm)
+	}
+	if got.ClaimsFromHeaders["x-user-groups"] != "groups" {
+		t.Errorf("edgeTrust.claimsFromHeaders = %+v", got.ClaimsFromHeaders)
+	}
+}
+
+func TestExternalAuthConfig_FullMapping(t *testing.T) {
+	in := &ExternalAuthIntent{
+		ClientKeys: &ClientKeysIntent{DefaultRole: "editor", TrustEndUserHeader: true},
+		OIDC: &OIDCIntent{
+			Issuer:   "https://issuer.example.com",
+			Audience: "aud-1",
+			ClaimMapping: &OIDCMappingIntent{
+				Subject: "sub-claim",
+				EndUser: "enduser-claim",
+			},
+		},
+		EdgeTrust: &EdgeTrustIntent{
+			HeaderMapping: &EdgeTrustHeaderIntent{
+				Subject: "x-subject",
+				EndUser: "x-end-user",
+				Email:   "x-email",
+			},
+			ClaimsFromHeaders: map[string]string{"x-user-groups": "groups"},
+		},
+	}
+
+	got := externalAuthConfig(in)
+	if got == nil {
+		t.Fatal("externalAuthConfig(in) = nil, want non-nil")
+	}
+	assertClientKeysAuth(t, got.ClientKeys)
+	assertOIDCAuth(t, got.OIDC)
+	assertEdgeTrustAuth(t, got.EdgeTrust)
+}
+
+func TestExternalAuthConfig_PartialNilSubStructs(t *testing.T) {
+	in := &ExternalAuthIntent{
+		OIDC: &OIDCIntent{Issuer: "https://issuer.example.com", Audience: "aud-1"},
+	}
+	got := externalAuthConfig(in)
+	if got == nil {
+		t.Fatal("externalAuthConfig(in) = nil, want non-nil")
+	}
+	if got.ClientKeys != nil {
+		t.Errorf("clientKeys = %+v, want nil", got.ClientKeys)
+	}
+	if got.OIDC == nil || got.OIDC.ClaimMapping != nil {
+		t.Errorf("oidc.claimMapping = %+v, want nil", got.OIDC.ClaimMapping)
+	}
+	if got.EdgeTrust != nil {
+		t.Errorf("edgeTrust = %+v, want nil", got.EdgeTrust)
+	}
+}
+
+// TestExternalAuthConfig_EdgeTrustWithoutHeaderMapping covers the case where
+// EdgeTrust is configured (e.g. only claimsFromHeaders) but headerMapping is
+// left unset — headerMapping must stay nil rather than becoming an empty struct.
+func TestExternalAuthConfig_EdgeTrustWithoutHeaderMapping(t *testing.T) {
+	in := &ExternalAuthIntent{
+		EdgeTrust: &EdgeTrustIntent{
+			ClaimsFromHeaders: map[string]string{"x-user-groups": "groups"},
+		},
+	}
+	got := externalAuthConfig(in)
+	if got == nil || got.EdgeTrust == nil {
+		t.Fatal("externalAuthConfig(in).EdgeTrust = nil, want non-nil")
+	}
+	if got.EdgeTrust.HeaderMapping != nil {
+		t.Errorf("edgeTrust.headerMapping = %+v, want nil", got.EdgeTrust.HeaderMapping)
+	}
+	if got.EdgeTrust.ClaimsFromHeaders["x-user-groups"] != "groups" {
+		t.Errorf("edgeTrust.claimsFromHeaders = %+v", got.EdgeTrust.ClaimsFromHeaders)
+	}
+}
+
+func TestAgentToAgentRuntime_ExternalAuthWired(t *testing.T) {
+	pack := PackIntent{Name: "support", Version: "1.2.0"}
+	agent := AgentIntent{
+		Name:      "support",
+		Providers: []ProviderBind{{Name: "default", Ref: "claude"}},
+		ExternalAuth: &ExternalAuthIntent{
+			ClientKeys: &ClientKeysIntent{DefaultRole: "viewer"},
+		},
+	}
+	ar := agentToAgentRuntime("ns", pack, agent, nil)
+	if ar.Spec.ExternalAuth == nil || ar.Spec.ExternalAuth.ClientKeys == nil || ar.Spec.ExternalAuth.ClientKeys.DefaultRole != "viewer" {
+		t.Errorf("externalAuth = %+v", ar.Spec.ExternalAuth)
+	}
+}
+
+func TestAgentToAgentRuntime_ExternalAuthNilWhenUnset(t *testing.T) {
+	pack := PackIntent{Name: "support", Version: "1.2.0"}
+	agent := AgentIntent{
+		Name:      "support",
+		Providers: []ProviderBind{{Name: "default", Ref: "claude"}},
+	}
+	ar := agentToAgentRuntime("ns", pack, agent, nil)
+	if ar.Spec.ExternalAuth != nil {
+		t.Errorf("externalAuth = %+v, want nil", ar.Spec.ExternalAuth)
+	}
+}
+
 func TestAgentToAgentRuntime_RolloutStepsWithPause(t *testing.T) {
 	pack := PackIntent{Name: "support", Version: "1.2.0"}
 	weight := int32(50)

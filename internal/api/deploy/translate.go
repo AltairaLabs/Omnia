@@ -98,6 +98,7 @@ func agentToAgentRuntime(namespace string, pack PackIntent, agent AgentIntent, d
 		Providers:     providerRefs(agent.Providers),
 		Runtime:       runtimeConfig(agent),
 		Rollout:       rolloutConfig(agent.Rollout),
+		ExternalAuth:  externalAuthConfig(agent.ExternalAuth),
 	}
 	if agent.UseTools {
 		spec.ToolRegistryRef = &omniav1alpha1.ToolRegistryRef{Name: toolRegistryName(pack.Name)}
@@ -210,3 +211,70 @@ func rolloutConfig(in *RolloutIntent) *omniav1alpha1.RolloutConfig {
 
 // rolloutPauseDuration builds the RolloutPause.Duration pointer (*string).
 func rolloutPauseDuration(s string) *string { return &s }
+
+// externalAuthConfig maps ExternalAuthIntent field-for-field onto the real
+// AgentExternalAuth CRD shape. nil-safe: nil in => nil out. Nested sub-structs
+// are only built when their intent pointer is non-nil, so an unset OIDC
+// claimMapping (etc.) stays nil rather than becoming an empty struct.
+func externalAuthConfig(in *ExternalAuthIntent) *omniav1alpha1.AgentExternalAuth {
+	if in == nil {
+		return nil
+	}
+	return &omniav1alpha1.AgentExternalAuth{
+		ClientKeys: clientKeysAuth(in.ClientKeys),
+		OIDC:       oidcAuth(in.OIDC),
+		EdgeTrust:  edgeTrustAuth(in.EdgeTrust),
+	}
+}
+
+func clientKeysAuth(in *ClientKeysIntent) *omniav1alpha1.ClientKeysAuth {
+	if in == nil {
+		return nil
+	}
+	return &omniav1alpha1.ClientKeysAuth{
+		DefaultRole:        in.DefaultRole,
+		TrustEndUserHeader: in.TrustEndUserHeader,
+	}
+}
+
+func oidcAuth(in *OIDCIntent) *omniav1alpha1.OIDCAuth {
+	if in == nil {
+		return nil
+	}
+	return &omniav1alpha1.OIDCAuth{
+		Issuer:       in.Issuer,
+		Audience:     in.Audience,
+		ClaimMapping: oidcClaimMapping(in.ClaimMapping),
+	}
+}
+
+func oidcClaimMapping(in *OIDCMappingIntent) *omniav1alpha1.OIDCClaimMapping {
+	if in == nil {
+		return nil
+	}
+	return &omniav1alpha1.OIDCClaimMapping{
+		Subject: in.Subject,
+		EndUser: in.EndUser,
+	}
+}
+
+func edgeTrustAuth(in *EdgeTrustIntent) *omniav1alpha1.EdgeTrustAuth {
+	if in == nil {
+		return nil
+	}
+	return &omniav1alpha1.EdgeTrustAuth{
+		HeaderMapping:     edgeTrustHeaderMapping(in.HeaderMapping),
+		ClaimsFromHeaders: in.ClaimsFromHeaders,
+	}
+}
+
+func edgeTrustHeaderMapping(in *EdgeTrustHeaderIntent) *omniav1alpha1.EdgeTrustHeaderMapping {
+	if in == nil {
+		return nil
+	}
+	return &omniav1alpha1.EdgeTrustHeaderMapping{
+		Subject: in.Subject,
+		EndUser: in.EndUser,
+		Email:   in.Email,
+	}
+}
