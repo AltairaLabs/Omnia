@@ -368,6 +368,165 @@ func TestAgentToAgentRuntime_ExternalAuthNilWhenUnset(t *testing.T) {
 	}
 }
 
+func TestMemoryConfig_Nil(t *testing.T) {
+	if got := memoryConfig(nil); got != nil {
+		t.Errorf("memoryConfig(nil) = %+v, want nil", got)
+	}
+}
+
+func TestMemoryConfig_FullMapping(t *testing.T) {
+	retrievalEnabled := false
+	toolsEnabled := false
+	limit := int32(5)
+	in := &MemoryIntent{
+		Enabled: true,
+		Retrieval: &MemoryRetrievalIntent{
+			Enabled:  &retrievalEnabled,
+			Strategy: "semantic",
+			Limit:    &limit,
+			DenyCEL:  `has(memory.tags) && memory.tags.exists(t, t == "secret")`,
+		},
+		Tools: &MemoryToolsIntent{Enabled: &toolsEnabled},
+	}
+
+	got := memoryConfig(in)
+	if got == nil {
+		t.Fatal("memoryConfig(in) = nil, want non-nil")
+	}
+	if !got.Enabled {
+		t.Errorf("enabled = %v, want true", got.Enabled)
+	}
+	if got.Retrieval == nil {
+		t.Fatal("retrieval = nil, want non-nil")
+	}
+	if got.Retrieval.Enabled == nil || *got.Retrieval.Enabled != false {
+		t.Errorf("retrieval.enabled = %v, want false", got.Retrieval.Enabled)
+	}
+	if got.Retrieval.Strategy != "semantic" {
+		t.Errorf("retrieval.strategy = %q, want semantic", got.Retrieval.Strategy)
+	}
+	if got.Retrieval.Limit == nil || *got.Retrieval.Limit != 5 {
+		t.Errorf("retrieval.limit = %v, want 5", got.Retrieval.Limit)
+	}
+	if got.Retrieval.AccessFilter == nil || got.Retrieval.AccessFilter.DenyCEL != in.Retrieval.DenyCEL {
+		t.Errorf("retrieval.accessFilter = %+v, want denyCEL %q", got.Retrieval.AccessFilter, in.Retrieval.DenyCEL)
+	}
+	if got.Tools == nil || got.Tools.Enabled == nil || *got.Tools.Enabled != false {
+		t.Errorf("tools = %+v, want enabled=false", got.Tools)
+	}
+}
+
+func TestMemoryConfig_DenyCELEmptyOmitsAccessFilter(t *testing.T) {
+	in := &MemoryIntent{
+		Enabled:   true,
+		Retrieval: &MemoryRetrievalIntent{Strategy: "keyword"},
+	}
+	got := memoryConfig(in)
+	if got == nil || got.Retrieval == nil {
+		t.Fatal("memoryConfig(in).Retrieval = nil, want non-nil")
+	}
+	if got.Retrieval.AccessFilter != nil {
+		t.Errorf("accessFilter = %+v, want nil (denyCEL empty)", got.Retrieval.AccessFilter)
+	}
+}
+
+func TestMemoryConfig_NoRetrievalOrTools(t *testing.T) {
+	in := &MemoryIntent{Enabled: true}
+	got := memoryConfig(in)
+	if got == nil {
+		t.Fatal("memoryConfig(in) = nil, want non-nil")
+	}
+	if !got.Enabled {
+		t.Errorf("enabled = %v, want true", got.Enabled)
+	}
+	if got.Retrieval != nil {
+		t.Errorf("retrieval = %+v, want nil", got.Retrieval)
+	}
+	if got.Tools != nil {
+		t.Errorf("tools = %+v, want nil", got.Tools)
+	}
+}
+
+func TestEvalConfig_Nil(t *testing.T) {
+	if got := evalConfig(nil); got != nil {
+		t.Errorf("evalConfig(nil) = %+v, want nil", got)
+	}
+}
+
+func TestEvalConfig_FullMapping(t *testing.T) {
+	in := &EvalsIntent{
+		Enabled: true,
+		Inline:  []string{"safety", "quality"},
+		Worker:  []string{"regression"},
+	}
+	got := evalConfig(in)
+	if got == nil {
+		t.Fatal("evalConfig(in) = nil, want non-nil")
+	}
+	if !got.Enabled {
+		t.Errorf("enabled = %v, want true", got.Enabled)
+	}
+	if got.Inline == nil || len(got.Inline.Groups) != 2 || got.Inline.Groups[0] != "safety" || got.Inline.Groups[1] != "quality" {
+		t.Errorf("inline = %+v", got.Inline)
+	}
+	if got.Worker == nil || len(got.Worker.Groups) != 1 || got.Worker.Groups[0] != "regression" {
+		t.Errorf("worker = %+v", got.Worker)
+	}
+	if got.Sampling != nil || got.RateLimit != nil || got.SessionCompletion != nil || got.PodOverrides != nil {
+		t.Errorf("unmapped fields must stay nil: sampling=%+v rateLimit=%+v sessionCompletion=%+v podOverrides=%+v",
+			got.Sampling, got.RateLimit, got.SessionCompletion, got.PodOverrides)
+	}
+}
+
+func TestEvalConfig_EmptyGroupsOmitPaths(t *testing.T) {
+	in := &EvalsIntent{Enabled: true}
+	got := evalConfig(in)
+	if got == nil {
+		t.Fatal("evalConfig(in) = nil, want non-nil")
+	}
+	if got.Inline != nil {
+		t.Errorf("inline = %+v, want nil (no groups)", got.Inline)
+	}
+	if got.Worker != nil {
+		t.Errorf("worker = %+v, want nil (no groups)", got.Worker)
+	}
+}
+
+func TestAgentToAgentRuntime_MemoryAndEvalsWired(t *testing.T) {
+	pack := PackIntent{Name: "support", Version: "1.2.0"}
+	agent := AgentIntent{
+		Name:      "support",
+		Providers: []ProviderBind{{Name: "default", Ref: "claude"}},
+		Memory: &MemoryIntent{
+			Enabled:   true,
+			Retrieval: &MemoryRetrievalIntent{Strategy: "composite"},
+		},
+		Evals: &EvalsIntent{Enabled: true, Inline: []string{"safety"}},
+	}
+	ar := agentToAgentRuntime("ns", pack, agent, nil)
+	if ar.Spec.Memory == nil || !ar.Spec.Memory.Enabled || ar.Spec.Memory.Retrieval == nil || ar.Spec.Memory.Retrieval.Strategy != "composite" {
+		t.Errorf("memory = %+v", ar.Spec.Memory)
+	}
+	if ar.Spec.Evals == nil || !ar.Spec.Evals.Enabled || ar.Spec.Evals.Inline == nil || len(ar.Spec.Evals.Inline.Groups) != 1 || ar.Spec.Evals.Inline.Groups[0] != "safety" {
+		t.Errorf("evals = %+v", ar.Spec.Evals)
+	}
+}
+
+func TestAgentToAgentRuntime_MemoryAndEvalsNilWhenUnset(t *testing.T) {
+	pack := PackIntent{Name: "support", Version: "1.2.0"}
+	agent := AgentIntent{
+		Name:      "support",
+		Providers: []ProviderBind{{Name: "default", Ref: "claude"}},
+	}
+	ar := agentToAgentRuntime("ns", pack, agent, nil)
+	if ar.Spec.Memory != nil {
+		t.Errorf("memory = %+v, want nil", ar.Spec.Memory)
+	}
+	if ar.Spec.Evals != nil {
+		t.Errorf("evals = %+v, want nil", ar.Spec.Evals)
+	}
+}
+
 func TestAgentToAgentRuntime_RolloutStepsWithPause(t *testing.T) {
 	pack := PackIntent{Name: "support", Version: "1.2.0"}
 	weight := int32(50)

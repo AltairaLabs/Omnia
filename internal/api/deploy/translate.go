@@ -99,6 +99,8 @@ func agentToAgentRuntime(namespace string, pack PackIntent, agent AgentIntent, d
 		Runtime:       runtimeConfig(agent),
 		Rollout:       rolloutConfig(agent.Rollout),
 		ExternalAuth:  externalAuthConfig(agent.ExternalAuth),
+		Memory:        memoryConfig(agent.Memory),
+		Evals:         evalConfig(agent.Evals),
 	}
 	if agent.UseTools {
 		spec.ToolRegistryRef = &omniav1alpha1.ToolRegistryRef{Name: toolRegistryName(pack.Name)}
@@ -277,4 +279,63 @@ func edgeTrustHeaderMapping(in *EdgeTrustHeaderIntent) *omniav1alpha1.EdgeTrustH
 		EndUser: in.EndUser,
 		Email:   in.Email,
 	}
+}
+
+// memoryConfig maps MemoryIntent onto the real MemoryConfig CRD shape. nil-safe:
+// nil in => nil out. The intent's flat Retrieval.DenyCEL becomes the nested
+// Retrieval.AccessFilter.DenyCEL — AccessFilter is only built when DenyCEL is
+// non-empty, so an unset deny policy stays nil rather than an empty struct.
+func memoryConfig(in *MemoryIntent) *omniav1alpha1.MemoryConfig {
+	if in == nil {
+		return nil
+	}
+	return &omniav1alpha1.MemoryConfig{
+		Enabled:   in.Enabled,
+		Retrieval: memoryRetrievalConfig(in.Retrieval),
+		Tools:     memoryToolsConfig(in.Tools),
+	}
+}
+
+func memoryRetrievalConfig(in *MemoryRetrievalIntent) *omniav1alpha1.MemoryRetrievalConfig {
+	if in == nil {
+		return nil
+	}
+	rc := &omniav1alpha1.MemoryRetrievalConfig{
+		Enabled:  in.Enabled,
+		Strategy: in.Strategy,
+		Limit:    in.Limit,
+	}
+	if in.DenyCEL != "" {
+		rc.AccessFilter = &omniav1alpha1.MemoryAccessFilterConfig{DenyCEL: in.DenyCEL}
+	}
+	return rc
+}
+
+func memoryToolsConfig(in *MemoryToolsIntent) *omniav1alpha1.MemoryToolsConfig {
+	if in == nil {
+		return nil
+	}
+	return &omniav1alpha1.MemoryToolsConfig{Enabled: in.Enabled}
+}
+
+// evalConfig maps EvalsIntent onto the real EvalConfig CRD shape. nil-safe: nil
+// in => nil out. Inline/Worker are only built when their group slice is
+// non-empty; other EvalConfig fields (Sampling, RateLimit, SessionCompletion,
+// PodOverrides) are not part of Plan B and stay unset.
+func evalConfig(in *EvalsIntent) *omniav1alpha1.EvalConfig {
+	if in == nil {
+		return nil
+	}
+	return &omniav1alpha1.EvalConfig{
+		Enabled: in.Enabled,
+		Inline:  evalPathConfig(in.Inline),
+		Worker:  evalPathConfig(in.Worker),
+	}
+}
+
+func evalPathConfig(groups []string) *omniav1alpha1.EvalPathConfig {
+	if len(groups) == 0 {
+		return nil
+	}
+	return &omniav1alpha1.EvalPathConfig{Groups: groups}
 }
