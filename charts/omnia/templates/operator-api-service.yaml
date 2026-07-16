@@ -1,6 +1,7 @@
 {{- $apiAddr := include "omnia.toolTest.bindAddress" . }}
 {{- $contentApiAddr := include "omnia.contentApi.bindAddress" . }}
-{{- if or $apiAddr $contentApiAddr }}
+{{- $deployApiAddr := include "omnia.deployApi.bindAddress" . }}
+{{- if or $apiAddr $contentApiAddr $deployApiAddr }}
 apiVersion: v1
 kind: Service
 metadata:
@@ -21,6 +22,12 @@ spec:
     - name: content-api
       port: {{ trimPrefix ":" $contentApiAddr }}
       targetPort: content-api
+      protocol: TCP
+    {{- end }}
+    {{- if $deployApiAddr }}
+    - name: deploy-api
+      port: {{ trimPrefix ":" $deployApiAddr }}
+      targetPort: deploy-api
       protocol: TCP
     {{- end }}
   selector:
