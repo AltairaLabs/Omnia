@@ -21,7 +21,7 @@ import type { User } from "@/lib/auth/types";
 import { loadSigningKey, mintIdentityToken } from "../../../lib/mgmt-plane-token";
 
 /** Identity tokens are used immediately for a single request, so keep them short. */
-export const TOKEN_TTL_SECONDS = 60;
+const TOKEN_TTL_SECONDS = 60;
 
 /**
  * Error carrying the operator's HTTP status so route handlers can pass
@@ -37,11 +37,33 @@ export class OperatorApiError extends Error {
   }
 }
 
+/**
+ * Run `fn` and, if it throws the shared base OperatorApiError (a config failure
+ * from signing-key / base-URL resolution), re-throw it as a service-specific
+ * subclass via `wrap` so callers only ever see their own error type. Errors
+ * that are already a subclass, or not an OperatorApiError at all, pass through
+ * untouched. Shared so `content-api-service` and `deploy-api-service` don't
+ * near-duplicate this wrapper (which would trip SonarCloud's duplication gate).
+ */
+export function asOperatorError<T>(
+  fn: () => T,
+  wrap: (message: string, status: number) => OperatorApiError,
+): T {
+  try {
+    return fn();
+  } catch (err) {
+    if (err instanceof OperatorApiError && err.constructor === OperatorApiError) {
+      throw wrap(err.message, err.status);
+    }
+    throw err;
+  }
+}
+
 let cachedPath: string | undefined | null = undefined;
 let cachedKey: KeyObject | null = null;
 
 /** Load the signing key, caching by path so a changed path reloads. */
-export function signingKey(): KeyObject | null {
+function signingKey(): KeyObject | null {
   const path = process.env.OMNIA_MGMT_PLANE_SIGNING_KEY_PATH || "";
   if (path === cachedPath) return cachedKey;
   cachedPath = path;
@@ -61,7 +83,7 @@ export function operatorBaseURL(envVar: string): string {
   return url;
 }
 
-export function principalFor(user: User): { identity: string; groups: string[]; anonymous: boolean } {
+function principalFor(user: User): { identity: string; groups: string[]; anonymous: boolean } {
   const anonymous = user.provider === "anonymous";
   return {
     identity: anonymous ? "" : user.email || user.username,

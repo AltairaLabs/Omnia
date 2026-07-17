@@ -97,10 +97,37 @@ describe("postDeployment", () => {
   });
 
   it("throws DeployApiError with the operator status on a 403", async () => {
-    fetchMock.mockResolvedValue({ ok: false, status: 403, json: async () => ({}) });
+    fetchMock.mockResolvedValue({ ok: false, status: 403, text: async () => "" });
     await expect(postDeployment("demo", user, intent)).rejects.toMatchObject({
       name: "DeployApiError",
       status: 403,
+    });
+  });
+
+  it("surfaces the operator error body in the DeployApiError message", async () => {
+    fetchMock.mockResolvedValue({
+      ok: false,
+      status: 400,
+      text: async () => 'unsupported deploy intent version "v2"',
+    });
+    await expect(postDeployment("demo", user, intent)).rejects.toMatchObject({
+      name: "DeployApiError",
+      status: 400,
+      message: expect.stringContaining('unsupported deploy intent version "v2"'),
+    });
+  });
+
+  it("does not break when the operator error body is unreadable", async () => {
+    fetchMock.mockResolvedValue({
+      ok: false,
+      status: 502,
+      text: async () => {
+        throw new Error("stream closed");
+      },
+    });
+    await expect(postDeployment("demo", user, intent)).rejects.toMatchObject({
+      name: "DeployApiError",
+      status: 502,
     });
   });
 

@@ -5,7 +5,14 @@ import os from "node:os";
 import path from "node:path";
 
 import type { User } from "@/lib/auth/types";
-import { OperatorApiError, mintOperatorIdentityToken, operatorBaseURL } from "./operator-identity";
+import { OperatorApiError, asOperatorError, mintOperatorIdentityToken, operatorBaseURL } from "./operator-identity";
+
+class SubError extends OperatorApiError {
+  constructor(message: string, status: number) {
+    super(message, status);
+    this.name = "SubError";
+  }
+}
 
 const user = {
   id: "u",
@@ -101,5 +108,47 @@ describe("OperatorApiError", () => {
     expect(err).toBeInstanceOf(Error);
     expect(err.name).toBe("OperatorApiError");
     expect(err.status).toBe(403);
+  });
+});
+
+describe("asOperatorError", () => {
+  const wrap = (message: string, status: number) => new SubError(message, status);
+
+  it("returns the value when fn does not throw", () => {
+    expect(asOperatorError(() => 42, wrap)).toBe(42);
+  });
+
+  it("re-wraps a base OperatorApiError via the factory", () => {
+    expect(() =>
+      asOperatorError(() => {
+        throw new OperatorApiError("config missing", 500);
+      }, wrap),
+    ).toThrowError(expect.objectContaining({ name: "SubError", status: 500, message: "config missing" }));
+  });
+
+  it("passes an already-specific subclass error through untouched", () => {
+    const original = new SubError("already specific", 403);
+    let caught: unknown;
+    try {
+      asOperatorError(() => {
+        throw original;
+      }, wrap);
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBe(original);
+  });
+
+  it("passes a non-OperatorApiError through untouched", () => {
+    const original = new Error("unrelated");
+    let caught: unknown;
+    try {
+      asOperatorError(() => {
+        throw original;
+      }, wrap);
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBe(original);
   });
 });

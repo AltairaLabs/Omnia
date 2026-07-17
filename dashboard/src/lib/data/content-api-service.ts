@@ -12,7 +12,7 @@
  */
 
 import type { User } from "@/lib/auth/types";
-import { OperatorApiError, mintOperatorIdentityToken, operatorBaseURL } from "./operator-identity";
+import { OperatorApiError, asOperatorError, mintOperatorIdentityToken, operatorBaseURL } from "./operator-identity";
 
 /** A single directory entry, mirroring the Go content.Entry json shape. */
 export interface ContentEntry {
@@ -69,17 +69,9 @@ export class ContentApiError extends OperatorApiError {
   }
 }
 
-/** Re-throw a shared OperatorApiError (config errors) as a ContentApiError so callers only see this file's error type. */
-function asContentError<T>(fn: () => T): T {
-  try {
-    return fn();
-  } catch (err) {
-    if (err instanceof OperatorApiError && !(err instanceof ContentApiError)) {
-      throw new ContentApiError(err.message, err.status);
-    }
-    throw err;
-  }
-}
+/** Wrap a shared OperatorApiError (config errors) as a ContentApiError so callers only see this file's error type. */
+const asContentError = <T>(fn: () => T): T =>
+  asOperatorError(fn, (message, status) => new ContentApiError(message, status));
 
 /** Operator content API base URL, without a trailing slash. */
 function baseURL(): string {
