@@ -1741,12 +1741,13 @@ framework:
   # `image` above supplies the `promptkit` entry (back-compat). Each entry
   # renders a `--framework-image=<type>=<repository>:<tag>` operator arg.
   #
-  # Only `promptkit` is built and tested by this repo. Community framework
-  # runtimes (e.g. langchain) are UNSUPPORTED: they implement the
-  # omnia.runtime.v1 contract independently and may lag it. Set one here only
-  # if you have verified the image against the contract version documented at
-  # docs/reference/platform/facade-runtime-protocol.md, and pin an explicit
-  # tag — do not rely on :latest.
+  # Only `promptkit` is built and tested by this repo. Other framework
+  # runtimes (e.g. langchain) are UNSUPPORTED — not built, tested, or
+  # released by this repo: they implement the omnia.runtime.v1 contract
+  # independently and may lag it. Set one here only if you have verified the
+  # image against the contract version documented at
+  # docs/src/content/docs/reference/platform/facade-runtime-protocol.md, and
+  # pin an explicit tag — do not rely on :latest.
   images: {}
 
 # Observability configuration (for Omnia-specific templates)

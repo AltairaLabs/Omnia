@@ -73,7 +73,7 @@ config is needed; the worker image is set via
 NOTE: The built-in default runtime image for `spec.framework.type: langchain`
 has been removed. An AgentRuntime with framework.type: langchain and no
 explicit image now blocks with FrameworkImageUnavailable. Set
-`frameworkImages.images.langchain.repository`/`.tag` (pin an explicit tag, not
+`framework.images.langchain.repository`/`.tag` (pin an explicit tag, not
 `latest`) or `spec.framework.image` to unblock it.
 
 {{- if .Values.internalServiceAuth.enabled }}
