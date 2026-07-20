@@ -17,9 +17,11 @@ limitations under the License.
 package main
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/go-logr/logr"
+	"github.com/go-logr/logr/funcr"
 )
 
 func TestWarnIfCustomTruncation(t *testing.T) {
@@ -40,4 +42,52 @@ func TestWarnIfCustomTruncation(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestWarnIfCustomTruncation_EmitsWarning guards the actual feature: the
+// operator-visible log line, not just the bool return. It would fail if the
+// log.Info call were deleted or gutted, unlike TestWarnIfCustomTruncation
+// above which only checks the return value.
+func TestWarnIfCustomTruncation_EmitsWarning(t *testing.T) {
+	t.Run("custom strategy emits the warning with structured fields", func(t *testing.T) {
+		var captured []string
+		log := funcr.NewJSON(func(obj string) {
+			captured = append(captured, obj)
+		}, funcr.Options{})
+
+		if got := warnIfCustomTruncation(log, "custom"); !got {
+			t.Fatalf("warnIfCustomTruncation(custom) = %v, want true", got)
+		}
+		if len(captured) != 1 {
+			t.Fatalf("expected exactly one log record, got %d: %v", len(captured), captured)
+		}
+
+		record := captured[0]
+		wantFields := []string{
+			`"msg":"truncation disabled"`,
+			`"reason":"customStrategyOnPromptKitRuntime"`,
+			`"truncationStrategy":"custom"`,
+			`"impact":"no truncation applied; context may exceed the provider limit"`,
+			`"remedy":"use sliding or summarize, or run a custom runtime that implements truncation"`,
+		}
+		for _, want := range wantFields {
+			if !strings.Contains(record, want) {
+				t.Fatalf("log record missing %q; got: %s", want, record)
+			}
+		}
+	})
+
+	t.Run("non-custom strategy emits no log record", func(t *testing.T) {
+		var captured []string
+		log := funcr.NewJSON(func(obj string) {
+			captured = append(captured, obj)
+		}, funcr.Options{})
+
+		if got := warnIfCustomTruncation(log, "sliding"); got {
+			t.Fatalf("warnIfCustomTruncation(sliding) = %v, want false", got)
+		}
+		if len(captured) != 0 {
+			t.Fatalf("expected no log records for non-custom strategy, got %d: %v", len(captured), captured)
+		}
+	})
 }
