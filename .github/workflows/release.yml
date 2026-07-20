@@ -385,7 +385,7 @@ jobs:
           fetch-depth: 0
 
       - name: Setup Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           # Astro 6.x requires Node >=22.12. Keep in sync with docs.yml.
           node-version: '22'

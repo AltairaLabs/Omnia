@@ -390,7 +390,7 @@ jobs:
       run: sudo apt-get update && sudo apt-get install -y libasound2-dev
 
     - name: Setup Node.js
-      uses: actions/setup-node@v6
+      uses: actions/setup-node@v7
       with:
         node-version: '20'
         cache: 'npm'
@@ -675,7 +675,7 @@ jobs:
       uses: actions/checkout@v7
 
     - name: Setup Node.js
-      uses: actions/setup-node@v6
+      uses: actions/setup-node@v7
       with:
         node-version: '20'
         cache: 'npm'
@@ -741,7 +741,7 @@ jobs:
       uses: actions/checkout@v7
 
     - name: Setup Node.js
-      uses: actions/setup-node@v6
+      uses: actions/setup-node@v7
       with:
         node-version: '20'
         cache: 'npm'
