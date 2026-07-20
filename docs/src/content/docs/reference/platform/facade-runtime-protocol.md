@@ -17,6 +17,50 @@ This page is the authoritative reference for two things:
    every gRPC call so that the runtime — and the ToolPolicy decision broker it
    calls — can make identity-aware decisions.
 
+## Contract version
+
+The contract is versioned. The current version is **1.0.0**, declared in two
+places that are asserted equal by `pkg/runtime/contract/version_test.go`:
+
+- the `// Contract-Version:` marker at the top of
+  `api/proto/runtime/v1/runtime.proto`
+- the `contract.Version` constant in `pkg/runtime/contract/version.go`
+
+The minor version is bumped for additive changes — a new message, a new
+optional field, a new `oneof` variant. The major version is bumped for any
+change that would break an existing conformant runtime.
+
+## Implementing this contract in your own runtime
+
+Any container that serves `omnia.runtime.v1.RuntimeService` can be an Omnia
+runtime: set `spec.framework.type: custom` and `spec.framework.image` on the
+AgentRuntime. Only `promptkit` has a built-in image; every other framework type
+must supply one explicitly, and blocks with `FrameworkImageUnavailable` if it
+does not.
+
+:::caution[Do not copy this proto file]
+Consume the published stubs and pin the contract version. A hand-copied `.proto`
+cannot tell you when it has diverged: the community LangChain runtime drifted
+six months and seven features behind the contract this way — silently dropping
+`audio_input`, `client_tool_result`, and `consent_grants` because the generated
+types for them did not exist in its copy.
+:::
+
+A conformant runtime must:
+
+1. Handle every `ClientMessage` variant, or fail loudly on the ones it does not
+   — never drop a message part silently.
+2. Emit `ServerMessage` variants for the surfaces it advertises.
+3. Read caller identity from the flat `x-omnia-*` gRPC metadata below —
+   `context.invocation_metadata()` or your language's equivalent. The raw
+   `Authorization` bearer token is deliberately withheld.
+4. Serve `Health`, and report the contract version it was built against.
+5. Never forward the caller's credentials to third-party tool upstreams.
+
+Full authoring guidance, the platform-input contract (PromptPack, ToolRegistry,
+skills, providers), and the conformance suite land with later waves of the
+custom-runtime epic.
+
 For the client-facing WebSocket protocol (browser ↔ facade), see the
 [WebSocket protocol reference](/reference/platform/websocket-protocol/). For
 *why* the policy engine is shaped the way it is, see

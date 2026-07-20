@@ -77,6 +77,16 @@ or `api/proto/`, add an entry below with the date, affected API, and reason.
   authenticates to this new dashboard route with its existing `omnia_sk_` key; the operator only
   ever sees the dashboard-minted JWT.
 
+### gRPC — `omnia.runtime.v1`
+
+- **Added a contract version.** `api/proto/runtime/v1/runtime.proto` now carries
+  a `// Contract-Version:` marker (currently `1.0.0`), mirrored by the
+  `contract.Version` constant in `pkg/runtime/contract/version.go` and asserted
+  equal by `pkg/runtime/contract/version_test.go`. No message or RPC changed —
+  this is documentation of the existing surface so third-party runtimes have
+  something to pin and report. Minor bumps are additive; major bumps break
+  conformant runtimes. (custom-runtime epic, wave 1)
+
 ### Changed (auth: rename `apiKeys` → `clientKeys` + arbitrary per-key claims, #1775)
 
 - **BREAKING (CRD + `pkg/facade` SDK).** The facade external-auth **`spec.externalAuth.apiKeys`** field is renamed to **`clientKeys`** (`APIKeysAuth` → `ClientKeysAuth`), disambiguating it from LLM-provider api-keys and the dashboard's own user api-keys. The origin surfaced to ToolPolicy is renamed `identity.origin == "api-key"` → **`"client-key"`** (`policy.OriginAPIKey` → `OriginClientKey`). In the public `pkg/facade/auth` SDK: `APIKey`/`APIKeyValidator`/`NewAPIKeyValidator`/`WithAPIKey*` → `ClientKey`/`ClientKeyValidator`/`NewClientKeyValidator`/`WithClientKey*`.
