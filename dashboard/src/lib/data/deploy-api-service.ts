@@ -13,7 +13,7 @@
  */
 
 import type { User } from "@/lib/auth/types";
-import { OperatorApiError, mintOperatorIdentityToken, operatorBaseURL } from "./operator-identity";
+import { OperatorApiError, asOperatorError, mintOperatorIdentityToken, operatorBaseURL } from "./operator-identity";
 
 /** Per-object apply outcome, mirroring Go's deploy.ResourceResult json shape. */
 export interface DeployResourceResult {
@@ -40,17 +40,9 @@ export class DeployApiError extends OperatorApiError {
   }
 }
 
-/** Re-throw a shared OperatorApiError (config errors) as a DeployApiError so callers only see this file's error type. */
-function asDeployError<T>(fn: () => T): T {
-  try {
-    return fn();
-  } catch (err) {
-    if (err instanceof OperatorApiError && !(err instanceof DeployApiError)) {
-      throw new DeployApiError(err.message, err.status);
-    }
-    throw err;
-  }
-}
+/** Wrap a shared OperatorApiError (config errors) as a DeployApiError so callers only see this file's error type. */
+const asDeployError = <T>(fn: () => T): T =>
+  asOperatorError(fn, (message, status) => new DeployApiError(message, status));
 
 function identityToken(workspace: string, user: User): string {
   return asDeployError(() => mintOperatorIdentityToken(workspace, user));
@@ -58,6 +50,19 @@ function identityToken(workspace: string, user: User): string {
 
 function baseURL(): string {
   return asDeployError(() => operatorBaseURL("OPERATOR_DEPLOY_API_URL"));
+}
+
+/**
+ * Best-effort read of an error response body, returned as a `: <trimmed>`
+ * suffix (or "" when empty/unreadable) for embedding in an error message.
+ */
+async function readErrorBody(res: Response): Promise<string> {
+  try {
+    const body = (await res.text()).trim();
+    return body ? `: ${body}` : "";
+  } catch {
+    return "";
+  }
 }
 
 async function deployRequest(
@@ -76,7 +81,10 @@ async function deployRequest(
   // best-effort and some resources failed; res.ok is true for the whole
   // 200-299 range so this only throws on genuine 4xx/5xx.
   if (!res.ok) {
-    throw new DeployApiError(`deploy API POST ${url} -> ${res.status}`, res.status);
+    // Surface the operator's error body (e.g. a version-negotiation rejection)
+    // so callers get a diagnosable message, not just a bare status code.
+    const detail = await readErrorBody(res);
+    throw new DeployApiError(`deploy API POST ${url} -> ${res.status}${detail}`, res.status);
   }
   return { status: res.status, result: (await res.json()) as DeployResult };
 }
