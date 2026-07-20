@@ -399,4 +399,39 @@ describe("DeployWizard integration", () => {
     const nextBtn = screen.getByRole("button", { name: /next/i });
     expect(nextBtn).toBeDisabled();
   });
+
+  // Only `promptkit` has a built-in default runtime image (custom-runtime
+  // wave 1). Selecting langchain/autogen in the wizard must block Next until
+  // an image is supplied — same as `custom` — or the wizard silently submits
+  // an AgentRuntime that is permanently unschedulable with no way to fix it
+  // from the UI.
+  it("blocks Next on the Framework step for langchain until an image is supplied", async () => {
+    renderWizard();
+
+    fireEvent.change(screen.getByLabelText(/Agent Name/i), { target: { value: "my-agent" } });
+    fireEvent.click(screen.getByRole("button", { name: /next/i }));
+
+    // Now on the Framework step.
+    await screen.findByText("Agent Framework");
+    fireEvent.click(screen.getByRole("radio", { name: /LangChain/i }));
+
+    const nextBtn = screen.getByRole("button", { name: /next/i });
+    expect(nextBtn).toBeDisabled();
+
+    fireEvent.change(screen.getByLabelText("Container Image"), {
+      target: { value: "ghcr.io/acme/langchain-runtime:v1.0" },
+    });
+    expect(nextBtn).not.toBeDisabled();
+  });
+
+  it("does not require an image when promptkit is selected", async () => {
+    renderWizard();
+
+    fireEvent.change(screen.getByLabelText(/Agent Name/i), { target: { value: "my-agent" } });
+    fireEvent.click(screen.getByRole("button", { name: /next/i }));
+
+    await screen.findByText("Agent Framework");
+    expect(screen.queryByLabelText("Container Image")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /next/i })).not.toBeDisabled();
+  });
 });

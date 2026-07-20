@@ -73,7 +73,22 @@ interface FrameworkStepProps {
   updateField: <K extends keyof WizardFormData>(field: K, value: WizardFormData[K]) => void;
 }
 
+/**
+ * Only `promptkit` has a built-in default runtime image (operator
+ * `--framework-image=promptkit=...` / chart `framework.image`). Every other
+ * framework type — including the built-in `langchain`/`autogen` choices, not
+ * just `custom` — blocks with `FrameworkImageUnavailable` unless an image is
+ * supplied here or configured cluster-wide via `framework.images.<type>`.
+ */
+function imageHelpText(framework: FrameworkType): string {
+  if (framework === "custom") {
+    return "Required — your container image implementing the omnia.runtime.v1 contract.";
+  }
+  return "Required — no built-in image is provided for this framework. Pin an explicit tag; avoid \"latest\".";
+}
+
 export function FrameworkStep({ formData, updateField }: Readonly<FrameworkStepProps>) {
+  const requiresImage = formData.framework !== "promptkit";
   return (
     <div className="space-y-4">
       <Label>Agent Framework</Label>
@@ -102,7 +117,7 @@ export function FrameworkStep({ formData, updateField }: Readonly<FrameworkStepP
         ))}
       </RadioGroup>
 
-      {formData.framework === "custom" && (
+      {requiresImage && (
         <div className="space-y-2 pt-2">
           <Label htmlFor="customImage">Container Image</Label>
           <Input
@@ -111,6 +126,7 @@ export function FrameworkStep({ formData, updateField }: Readonly<FrameworkStepP
             onChange={(e) => updateField("customImage", e.target.value)}
             placeholder="myregistry/my-agent:v1.0"
           />
+          <p className="text-xs text-muted-foreground">{imageHelpText(formData.framework)}</p>
         </div>
       )}
     </div>

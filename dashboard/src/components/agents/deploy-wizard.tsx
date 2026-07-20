@@ -535,7 +535,10 @@ export function DeployWizard({ open, onOpenChange }: Readonly<DeployWizardProps>
         }
         return true;
       case 1: // Framework
-        return formData.framework !== "custom" || formData.customImage.length > 0;
+        // Only promptkit has a built-in default runtime image; every other
+        // framework type (including langchain/autogen, not just custom)
+        // requires an explicit image or it deploys unschedulable (#FrameworkImageUnavailable).
+        return formData.framework === "promptkit" || formData.customImage.length > 0;
       case 2: // PromptPack
         return formData.promptPackName.length > 0;
       case 3: // Provider
