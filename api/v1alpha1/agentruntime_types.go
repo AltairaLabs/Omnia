@@ -540,8 +540,9 @@ const (
 	// FrameworkTypeLangChain uses a LangChain runtime image. UNSUPPORTED:
 	// no image is built by this repo and none is defaulted, so
 	// spec.framework.image (or an operator --framework-image entry) is
-	// required. The community image implements omnia.runtime.v1
-	// independently and may lag the contract.
+	// required. Not built, tested, or released by this repo — such an
+	// image implements omnia.runtime.v1 independently and may lag the
+	// contract.
 	FrameworkTypeLangChain FrameworkType = "langchain"
 	// FrameworkTypeAutoGen is reserved. NOT IMPLEMENTED: no image is built or
 	// defaulted, so an AgentRuntime declaring it blocks with

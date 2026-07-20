@@ -87,12 +87,14 @@ or `api/proto/`, add an entry below with the date, affected API, and reason.
   something to pin and report. Minor bumps are additive; major bumps break
   conformant runtimes. (custom-runtime epic, wave 1)
 - **Added `HealthResponse.contract_version`** (field 3, additive). The runtime
-  now reports the `omnia.runtime.v1` contract version it was built against, so
-  the control plane can detect a runtime that has fallen behind. An empty value
-  means the runtime predates contract versioning. The contract version stays
-  `1.0.0`: the marker and this field are landing together, unreleased, so
-  `1.0.0` describes the contract including this field. (custom-runtime epic,
-  wave 1; the capability feature-flag set follows in wave 3)
+  now reports the `omnia.runtime.v1` contract version it was built against.
+  Nothing reads this field yet in wave 1 — it lays the groundwork for a wave 3
+  control-plane check that will detect a runtime that has fallen behind. An
+  empty value means the runtime predates contract versioning. The contract
+  version stays `1.0.0`: the marker and this field are landing together,
+  unreleased, so `1.0.0` describes the contract including this field.
+  (custom-runtime epic, wave 1; the capability feature-flag set follows in
+  wave 3)
 
 ### Changed (auth: rename `apiKeys` → `clientKeys` + arbitrary per-key claims, #1775)
 
