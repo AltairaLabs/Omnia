@@ -57,8 +57,6 @@ const (
 	DefaultFacadeImage = "ghcr.io/altairalabs/omnia-facade:latest"
 	// DefaultFrameworkImage is the default image for the framework container (PromptKit).
 	DefaultFrameworkImage = "ghcr.io/altairalabs/omnia-runtime:latest"
-	// DefaultLangChainImage is the default image for LangChain framework.
-	DefaultLangChainImage = "ghcr.io/altairalabs/omnia-langchain-runtime:latest"
 	// DefaultFacadePort is the default port for the WebSocket facade.
 	DefaultFacadePort = 8080
 	// DefaultA2APort is the default port for the A2A endpoint in dual-protocol mode.
