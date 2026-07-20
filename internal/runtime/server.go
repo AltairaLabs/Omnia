@@ -573,8 +573,11 @@ func WithContextWindow(tokens int) ServerOption {
 }
 
 // WithTruncationStrategy sets the strategy for handling context overflow.
-// Valid values: "sliding" (remove oldest), "summarize" (summarize before removing),
-// "custom" (delegate to custom runtime implementation - no SDK truncation).
+// Valid values: "sliding" (remove oldest), "summarize" (summarize before
+// removing), "custom" (the runtime implements truncation itself — no SDK
+// truncation is configured). "custom" is intended for custom runtimes
+// (spec.framework.type: custom); on this PromptKit runtime it means no
+// truncation is applied at all, which cmd/runtime warns about at startup.
 func WithTruncationStrategy(strategy string) ServerOption {
 	return func(s *Server) {
 		// "custom" means the custom runtime handles it - don't set SDK truncation
