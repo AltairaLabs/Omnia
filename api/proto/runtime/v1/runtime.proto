@@ -7,6 +7,19 @@ package omnia.runtime.v1;
 
 option go_package = "github.com/altairalabs/omnia/pkg/runtime/v1;runtimev1";
 
+// Contract-Version: 1.0.0
+//
+// The version of this contract, as consumed by third-party runtime
+// implementations. Bump the minor version for additive changes (new message,
+// new optional field, new oneof variant); bump the major version for any
+// change that would break an existing conformant runtime. The value is
+// mirrored in pkg/runtime/contract/version.go and the two are asserted equal
+// by pkg/runtime/contract/version_test.go — update both together.
+//
+// Implementors: do NOT hand-copy this file. Consume the published stubs so
+// drift is detectable. See
+// docs/src/content/docs/reference/platform/facade-runtime-protocol.md
+
 // RuntimeService defines the communication protocol between the facade and runtime containers.
 // The facade handles external protocol translation (WebSocket/REST/gRPC to internal gRPC),
 // while the runtime handles all business logic including sessions, LLM calls, and tool execution.
