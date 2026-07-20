@@ -314,6 +314,12 @@ message HealthResponse {
 
   // status provides additional status information.
   string status = 2;
+
+  // contract_version is the omnia.runtime.v1 contract version this runtime
+  // was built against, as a semver string (see the Contract-Version marker at
+  // the top of this file). A runtime that reports an empty value predates
+  // contract versioning and must be treated as unversioned.
+  string contract_version = 3;
 }
 
 // DuplexStart opens a bidirectional audio session on a Converse stream.

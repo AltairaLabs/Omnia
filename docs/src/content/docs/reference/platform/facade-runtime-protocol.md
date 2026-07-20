@@ -48,8 +48,9 @@ types for them did not exist in its copy.
 
 A conformant runtime must:
 
-1. Handle every `ClientMessage` variant, or fail loudly on the ones it does not
-   — never drop a message part silently.
+1. Handle every `ClientMessage` field it may receive, or fail loudly on the ones
+   it does not — never drop a message part silently. Note that `ClientMessage`
+   is not a `oneof`: several fields may be set on the same message.
 2. Emit `ServerMessage` variants for the surfaces it advertises.
 3. Read caller identity from the flat `x-omnia-*` gRPC metadata below —
    `context.invocation_metadata()` or your language's equivalent. The raw

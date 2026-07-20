@@ -49,6 +49,7 @@ import (
 	"github.com/altairalabs/omnia/internal/runtime/tools"
 	"github.com/altairalabs/omnia/internal/session"
 	"github.com/altairalabs/omnia/internal/tracing"
+	"github.com/altairalabs/omnia/pkg/runtime/contract"
 )
 
 // Server implements the RuntimeService gRPC server.
@@ -668,8 +669,9 @@ func (s *Server) Health(_ context.Context, _ *runtimev1.HealthRequest) (*runtime
 	}
 
 	return &runtimev1.HealthResponse{
-		Healthy: s.healthy,
-		Status:  statusMsg,
+		Healthy:         s.healthy,
+		Status:          statusMsg,
+		ContractVersion: contract.Version,
 	}, nil
 }
 

@@ -38,6 +38,7 @@ import (
 	"github.com/AltairaLabs/PromptKit/runtime/providers/base"
 	"github.com/AltairaLabs/PromptKit/runtime/types"
 	"github.com/altairalabs/omnia/internal/tracing"
+	"github.com/altairalabs/omnia/pkg/runtime/contract"
 	runtimev1 "github.com/altairalabs/omnia/pkg/runtime/v1"
 	"github.com/prometheus/client_golang/prometheus"
 )
@@ -63,6 +64,9 @@ func TestServer_Health(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, resp.Healthy)
 	assert.Equal(t, "ready", resp.Status)
+	if got := resp.GetContractVersion(); got != contract.Version {
+		t.Fatalf("Health contract_version = %q, want %q", got, contract.Version)
+	}
 
 	// Set unhealthy
 	server.SetHealthy(false)
@@ -70,12 +74,18 @@ func TestServer_Health(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, resp.Healthy)
 	assert.Equal(t, "not ready", resp.Status)
+	if got := resp.GetContractVersion(); got != contract.Version {
+		t.Fatalf("Health contract_version = %q, want %q", got, contract.Version)
+	}
 
 	// Set healthy again
 	server.SetHealthy(true)
 	resp, err = server.Health(context.Background(), &runtimev1.HealthRequest{})
 	require.NoError(t, err)
 	assert.True(t, resp.Healthy)
+	if got := resp.GetContractVersion(); got != contract.Version {
+		t.Fatalf("Health contract_version = %q, want %q", got, contract.Version)
+	}
 }
 
 func TestServer_Close(t *testing.T) {
