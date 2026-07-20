@@ -44,6 +44,7 @@ import (
 	pkmemory "github.com/AltairaLabs/PromptKit/runtime/memory"
 	pkskills "github.com/AltairaLabs/PromptKit/runtime/skills"
 
+	v1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 	"github.com/altairalabs/omnia/internal/media"
 	"github.com/altairalabs/omnia/internal/runtime/skills"
 	"github.com/altairalabs/omnia/internal/runtime/tools"
@@ -582,7 +583,7 @@ func WithContextWindow(tokens int) ServerOption {
 func WithTruncationStrategy(strategy string) ServerOption {
 	return func(s *Server) {
 		// "custom" means the custom runtime handles it - don't set SDK truncation
-		if strategy != "" && strategy != "custom" {
+		if strategy != "" && strategy != string(v1alpha1.TruncationStrategyCustom) {
 			s.sdkOptions = append(s.sdkOptions, sdk.WithTruncation(strategy))
 		}
 	}
