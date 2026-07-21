@@ -310,6 +310,26 @@ func TestServerOptions(t *testing.T) {
 		assert.Len(t, server2.sdkOptions, 0)
 	})
 
+	t.Run("WithTruncationStrategy", func(t *testing.T) {
+		// A concrete strategy configures SDK truncation.
+		server := NewServer(
+			WithTruncationStrategy("sliding"),
+		)
+		assert.Len(t, server.sdkOptions, 1)
+
+		// "custom" means the runtime handles truncation itself — no SDK option.
+		custom := NewServer(
+			WithTruncationStrategy("custom"),
+		)
+		assert.Len(t, custom.sdkOptions, 0)
+
+		// Empty strategy adds nothing.
+		empty := NewServer(
+			WithTruncationStrategy(""),
+		)
+		assert.Len(t, empty.sdkOptions, 0)
+	})
+
 	t.Run("WithMemoryStore", func(t *testing.T) {
 		// Verify default is nil and option sets the store
 		srv := NewServer()
