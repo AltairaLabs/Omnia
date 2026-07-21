@@ -18,6 +18,7 @@ package runtime
 
 import (
 	"context"
+	"os"
 	"testing"
 
 	"github.com/AltairaLabs/PromptKit/sdk"
@@ -150,6 +151,31 @@ func TestExtraProviderOptions_RoleMapping(t *testing.T) {
 	for i, o := range opts {
 		assert.NotNil(t, o, "option %d is non-nil", i)
 	}
+}
+
+// TestProviderSpec_SameTypeProvidersDoNotCollide is the regression for the
+// credential-bleed bug (design §5.3.1): two providers of the SAME type with
+// DIFFERENT carried keys must each produce a spec with its own key. Before the
+// fix both keys went to one process-type-keyed env var and last-write-wins.
+func TestProviderSpec_SameTypeProvidersDoNotCollide(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "") // no shared env fallback
+
+	openai := func(name string) *v1alpha1.Provider {
+		return &v1alpha1.Provider{
+			ObjectMeta: metav1.ObjectMeta{Name: name},
+			Spec:       v1alpha1.ProviderSpec{Type: v1alpha1.ProviderTypeOpenAI, Model: "gpt-4o"},
+		}
+	}
+
+	specA := providerToSDKSpec(openai("default"), "sk-default")
+	specB := providerToSDKSpec(openai("embeddings"), "sk-embed")
+
+	require.NotNil(t, specA.Credential)
+	require.NotNil(t, specB.Credential)
+	assert.Equal(t, "sk-default", specA.Credential.APIKey)
+	assert.Equal(t, "sk-embed", specB.Credential.APIKey,
+		"same-type providers must keep distinct keys — no shared env, no last-write-wins")
+	assert.Empty(t, os.Getenv("OPENAI_API_KEY"), "no key leaked to process env")
 }
 
 // TestExtraProviderOptions_Empty verifies no options when no extra providers.
