@@ -170,6 +170,12 @@ export class LiveAgentConnection implements AgentConnection {
             return;
           }
 
+          // Any other terminal outcome for the in-flight turn releases the
+          // retry slot, so a later message can itself become retriable.
+          if (message.type === "done" || message.type === "error") {
+            this.pendingRetry = null;
+          }
+
           this.emitMessage(message);
         } catch (err) {
           console.error("Failed to parse WebSocket message:", err);
@@ -226,7 +232,10 @@ export class LiveAgentConnection implements AgentConnection {
 
     // Retained so the message can be resent if the server reports the session
     // it named has expired; the server drops such a message without answering.
-    this.pendingRetry = { content, parts: options?.parts };
+    // Only the earliest un-answered turn is held: the server processes one
+    // message at a time, so a SESSION_EXPIRED arriving while several are
+    // outstanding refers to that one, not to whichever was sent most recently.
+    this.pendingRetry ??= { content, parts: options?.parts };
 
     const message: ClientMessage = {
       type: "message",

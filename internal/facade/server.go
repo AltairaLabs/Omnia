@@ -408,7 +408,7 @@ func NewServer(cfg ServerConfig, store session.Store, handler MessageHandler, lo
 		s.graceWindow = 15 * time.Second
 	}
 	s.parked = newRealtimeRegistry(s.routeStore, s.podAddr, s.graceWindow, s.log)
-	s.parked.onExpire = func(sessionID string) {
+	s.parked.onExpire = func(sessionID string, persisted bool) {
 		s.decrementAudioSessions(s.metrics)
 		s.metrics.RealtimeSessionParkExpired()
 		// cleanupConnection deliberately skips completion for a parked session,
@@ -416,7 +416,11 @@ func NewServer(cfg ServerConfig, store session.Store, handler MessageHandler, lo
 		// point at which it definitively did not, so this is where the archive
 		// row reaches a terminal status — without it, every parked-then-expired
 		// session stays "active" forever (#1876).
-		if sessionID != "" {
+		// Only a session that was archived has a row to complete. A pure-audio
+		// session never persists one (binary frames bypass processMessage), so
+		// completing it would write a terminal status for a row that does not
+		// exist.
+		if persisted && sessionID != "" {
 			s.metrics.SessionClosed()
 			s.completeSession(sessionID, s.log)
 		}

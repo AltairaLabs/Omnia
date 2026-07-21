@@ -84,7 +84,7 @@ func TestDrain_DeadlineReturnsRemaining(t *testing.T) {
 	cfg.DrainTimeout = 20 * time.Millisecond
 	s := NewServer(cfg, nil, nil, logr.Discard())
 	// Park one session so the count stays > 0 for the whole window.
-	s.parked.park(context.Background(), "sid", "u", newAudioSession("sid", &fakeDuplexSink{audio: make(chan []byte, 1)}, nil))
+	s.parked.park(context.Background(), "sid", "u", newAudioSession("sid", &fakeDuplexSink{audio: make(chan []byte, 1)}, nil), true)
 	left := s.Drain(context.Background())
 	if left < 1 {
 		t.Fatalf("want >=1 remaining at deadline, got %d", left)

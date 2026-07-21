@@ -28,6 +28,11 @@ type parkedSession struct {
 	session *audioSession
 	ownerID string
 	timer   *time.Timer
+	// persisted records whether the session had an archive row when it was
+	// parked. A pure-audio session never persists one — binary frames bypass
+	// processMessage — so completing it on expiry would write a terminal status
+	// for a row that does not exist.
+	persisted bool
 }
 
 type realtimeRegistry struct {
@@ -37,7 +42,7 @@ type realtimeRegistry struct {
 	podAddr  string
 	grace    time.Duration
 	log      logr.Logger
-	onExpire func(sessionID string)
+	onExpire func(sessionID string, persisted bool)
 }
 
 func newRealtimeRegistry(routes RouteStore, podAddr string, grace time.Duration, log logr.Logger) *realtimeRegistry {
@@ -52,10 +57,10 @@ func newRealtimeRegistry(routes RouteStore, podAddr string, grace time.Duration,
 
 // park stores the session under sessionID owned by ownerID, writes the route
 // hint, and arms a grace timer that calls expire(sessionID) on fire.
-func (r *realtimeRegistry) park(ctx context.Context, sessionID, ownerID string, as *audioSession) {
+func (r *realtimeRegistry) park(ctx context.Context, sessionID, ownerID string, as *audioSession, persisted bool) {
 	timer := time.AfterFunc(r.grace, func() { r.expire(sessionID) })
 	r.mu.Lock()
-	r.parked[sessionID] = &parkedSession{session: as, ownerID: ownerID, timer: timer}
+	r.parked[sessionID] = &parkedSession{session: as, ownerID: ownerID, timer: timer, persisted: persisted}
 	r.mu.Unlock()
 
 	if err := r.routes.PutRoute(ctx, sessionID, r.podAddr, r.grace); err != nil {
@@ -104,7 +109,7 @@ func (r *realtimeRegistry) expire(sessionID string) {
 		r.log.Error(err, "realtime route hint delete failed", "sessionID", sessionID)
 	}
 	if r.onExpire != nil {
-		r.onExpire(sessionID)
+		r.onExpire(sessionID, ps.persisted)
 	}
 	r.log.V(1).Info("realtime session park expired", "sessionID", sessionID)
 }

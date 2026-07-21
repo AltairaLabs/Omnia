@@ -878,3 +878,75 @@ describe("LiveAgentConnection — unsubscribe and guards", () => {
     expect(c.reconnectTimer).toBeNull();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Retry-slot lifecycle (Copilot review, PR #1879)
+// ---------------------------------------------------------------------------
+describe("LiveAgentConnection — retry slot lifecycle", () => {
+  async function openConn(sessionId = "sess-r") {
+    const conn = new LiveAgentConnection("ns", "agent");
+    conn.connect();
+    await Promise.resolve();
+    const ws = lastFakeWs();
+    ws.triggerOpen();
+    simulateConnected(ws, sessionId);
+    return { conn, ws };
+  }
+
+  function expire(ws: FakeWsInstance): void {
+    ws.triggerMessage(
+      JSON.stringify({
+        type: "error",
+        error: { code: "SESSION_EXPIRED", message: "gone" },
+      })
+    );
+  }
+
+  it("retries the earliest unanswered turn, not the most recent send", async () => {
+    const { conn, ws } = await openConn();
+
+    conn.send("first");
+    conn.send("second");
+    ws.sentMessages.length = 0;
+
+    expire(ws);
+
+    // The server answers one message at a time, so the SESSION_EXPIRED refers
+    // to "first" — retrying "second" would drop the turn that was rejected.
+    const retry = JSON.parse(ws.sentMessages[0] as string) as { content?: string };
+    expect(retry.content).toBe("first");
+  });
+
+  it("releases the retry slot once a turn completes", async () => {
+    const { conn, ws } = await openConn();
+
+    conn.send("first");
+    ws.triggerMessage(JSON.stringify({ type: "done", content: "answered" }));
+
+    conn.send("second");
+    ws.sentMessages.length = 0;
+
+    expire(ws);
+
+    // "first" was answered, so the slot belongs to "second" now.
+    const retry = JSON.parse(ws.sentMessages[0] as string) as { content?: string };
+    expect(retry.content).toBe("second");
+  });
+
+  it("releases the retry slot on a non-expiry error", async () => {
+    const { conn, ws } = await openConn();
+
+    conn.send("first");
+    ws.triggerMessage(
+      JSON.stringify({ type: "error", error: { code: "INTERNAL_ERROR", message: "boom" } })
+    );
+
+    conn.send("second");
+    ws.sentMessages.length = 0;
+
+    expire(ws);
+
+    const retry = JSON.parse(ws.sentMessages[0] as string) as { content?: string };
+    expect(retry.content).toBe("second");
+  });
+});

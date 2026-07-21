@@ -173,6 +173,7 @@ func (s *Server) parkOnClose(ctx context.Context, c *Connection) bool {
 	intentional := c.intentionalClose
 	sessionID := c.sessionID
 	ownerID := c.userID
+	persisted := c.sessionPersisted
 	c.mu.Unlock()
 
 	if as == nil {
@@ -185,7 +186,7 @@ func (s *Server) parkOnClose(ctx context.Context, c *Connection) bool {
 		s.decrementAudioSessions(s.metrics)
 		return false
 	}
-	s.parked.park(ctx, sessionID, ownerID, as)
+	s.parked.park(ctx, sessionID, ownerID, as, persisted)
 	s.metrics.RealtimeSessionParked()
 	return true
 }
@@ -247,6 +248,10 @@ func (s *Server) cleanupConnection(c *Connection, log logr.Logger) {
 // reading first only bought a round-trip to avoid a write the store rejects
 // anyway.
 func (s *Server) completeSession(sessionID string, log logr.Logger) {
+	// Recording may be disabled entirely (nil store), as in the drain tests.
+	if s.sessionStore == nil || sessionID == "" {
+		return
+	}
 	s.submitCompletion(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
