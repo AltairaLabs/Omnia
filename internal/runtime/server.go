@@ -97,6 +97,7 @@ type Server struct {
 
 	// Provider info (for logging and provider creation)
 	providerType              string
+	providerAPIKey            string             // Resolved default-provider API key, carried on the spec (§5.3.1)
 	providerRefName           string             // Provider CRD name (for per-provider attribution)
 	extraProviders            []ResolvedProvider // Non-default providers (embedding/tts/stt/image/inference)
 	model                     string
@@ -373,6 +374,14 @@ func WithProviderInfo(providerType, model string) ServerOption {
 	return func(s *Server) {
 		s.providerType = providerType
 		s.model = model
+	}
+}
+
+// WithProviderAPIKey sets the resolved default-provider API key. Carried on the
+// spec's Credential rather than process env (design §5.3.1).
+func WithProviderAPIKey(key string) ServerOption {
+	return func(s *Server) {
+		s.providerAPIKey = key
 	}
 }
 

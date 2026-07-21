@@ -109,6 +109,21 @@ func TestBuildProviderSpec_StaticProvider(t *testing.T) {
 	assert.Nil(t, spec.Credential)
 }
 
+func TestCreateProviderFromConfig_SetsCredentialFromKey(t *testing.T) {
+	s := NewServer(
+		WithLogger(logr.Discard()),
+		WithProviderInfo("openai", "gpt-4o"),
+		WithProviderAPIKey("sk-unit-test"),
+	)
+	// No OPENAI_API_KEY in env: only the carried key can satisfy resolution.
+	t.Setenv("OPENAI_API_KEY", "")
+
+	p, err := s.createProviderFromConfig()
+	require.NoError(t, err)
+	require.NotNil(t, p,
+		"provider construction must succeed with the key carried on the spec, no env credential")
+}
+
 func TestBuildProviderSpec_Headers(t *testing.T) {
 	// OpenRouter-style custom attribution headers flow into the spec.
 	s := &Server{

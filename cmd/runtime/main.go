@@ -490,6 +490,7 @@ func configDerivedServerOpts(cfg *pkruntime.Config) []pkruntime.ServerOption {
 		pkruntime.WithMockConfigPath(cfg.MockConfigPath),
 		pkruntime.WithToolsConfig(cfg.ToolsConfigPath),
 		pkruntime.WithProviderInfo(cfg.ProviderType, cfg.Model),
+		pkruntime.WithProviderAPIKey(cfg.ProviderAPIKey),
 		pkruntime.WithProviderRefName(cfg.ProviderRefName),
 		pkruntime.WithExtraProviders(cfg.ExtraProviders),
 		pkruntime.WithBaseURL(cfg.BaseURL),

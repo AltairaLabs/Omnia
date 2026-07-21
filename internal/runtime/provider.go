@@ -100,16 +100,28 @@ func (s *Server) createProviderFromConfig() (providers.Provider, error) {
 
 	spec := s.buildProviderSpec()
 
-	// Resolve platform credential lazily at provider-creation time (not during
-	// spec assembly) so tests that exercise spec wiring don't need cloud
-	// credentials in their environment.
-	if spec.Platform != "" {
+	// Resolve the credential lazily at provider-creation time (not during spec
+	// assembly) so tests that exercise spec wiring don't need cloud credentials
+	// in their environment. Platform providers resolve via the cloud SDK chain;
+	// a direct provider resolves from the carried API key (§5.3.1) — no reliance
+	// on a process-env var.
+	switch {
+	case spec.Platform != "":
 		cred, err := credentials.Resolve(context.Background(), credentials.ResolverConfig{
 			ProviderType:   s.providerType,
 			PlatformConfig: spec.PlatformConfig,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("resolve platform credential: %w", err)
+		}
+		spec.Credential = cred
+	case s.providerAPIKey != "":
+		cred, err := credentials.Resolve(context.Background(), credentials.ResolverConfig{
+			ProviderType:     s.providerType,
+			CredentialConfig: &credentials.CredentialConfig{APIKey: s.providerAPIKey},
+		})
+		if err != nil {
+			return nil, fmt.Errorf("resolve API key credential: %w", err)
 		}
 		spec.Credential = cred
 	}
