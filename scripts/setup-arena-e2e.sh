@@ -293,6 +293,15 @@ log_info "Deploying via Helm..."
 # environment out — the documented escape hatch for non-token callers. Auth-on is
 # covered by the serviceauth unit + cmd/session-api wiring + helm-render tests;
 # authenticated-e2e coverage is a follow-up (rides the OTLP-ingest work).
+# framework.images.langchain: since the custom-runtime epic, non-promptkit
+# framework types have no built-in default image and block with
+# FrameworkImageUnavailable unless one is configured. The eval-worker fixture
+# (eval-e2e-agent) is framework: langchain, so without this the operator never
+# reconciles it and never deploys the per-group eval-worker (BeforeAll times
+# out). The langchain pod's runtime behaviour is irrelevant here — eval-worker
+# deployment triggers on the AgentRuntime reconciling, not on agent readiness —
+# so it reuses the already-loaded runtime image (pullPolicy Never, applied
+# globally to all framework images below).
 retry 2 15 helm upgrade --install omnia charts/omnia \
     --namespace "$NAMESPACE" \
     --create-namespace \
@@ -306,6 +315,8 @@ retry 2 15 helm upgrade --install omnia charts/omnia \
     --set framework.image.repository=omnia-runtime-dev \
     --set framework.image.tag=latest \
     --set framework.image.pullPolicy=Never \
+    --set framework.images.langchain.repository=omnia-runtime-dev \
+    --set framework.images.langchain.tag=latest \
     --set enterprise.enabled=true \
     --set devMode=true \
     --set enterprise.arena.controller.image.repository=omnia-arena-controller-dev \

@@ -114,7 +114,10 @@ flowchart LR
     EW --> ER[(eval_results)]
 ```
 
-Pattern A works with every framework type — PromptKit, LangChain, AutoGen, or custom runtimes.
+Pattern A is framework-agnostic by construction: it records off the facade, so it
+works with any runtime that implements the `omnia.runtime.v1` contract, including
+custom runtimes. It is verified against PromptKit only — community and custom
+runtimes are not covered by this repo's tests.
 
 ### Pattern C: EventBus-driven (PromptKit agents)
 

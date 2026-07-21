@@ -58,7 +58,7 @@ func TestResolveFrameworkImage(t *testing.T) {
 		wantOK    bool
 	}{
 		{"explicit override wins", arWithFramework(omniav1alpha1.FrameworkTypeLangChain, "custom:tag"), "custom:tag", true},
-		{"langchain from map (the bug)", arWithFramework(omniav1alpha1.FrameworkTypeLangChain, ""), "ghcr.io/altairalabs/omnia-langchain-runtime:v1", true},
+		{"langchain from map", arWithFramework(omniav1alpha1.FrameworkTypeLangChain, ""), "ghcr.io/altairalabs/omnia-langchain-runtime:v1", true},
 		{"promptkit from map", arWithFramework(omniav1alpha1.FrameworkTypePromptKit, ""), "ghcr.io/altairalabs/omnia-runtime:v1", true},
 		{"nil framework -> promptkit", arWithFramework("", ""), "ghcr.io/altairalabs/omnia-runtime:v1", true},
 		{"autogen -> blocked", arWithFramework(omniav1alpha1.FrameworkTypeAutoGen, ""), "", false},
@@ -116,11 +116,16 @@ func TestReconcileResources_UnresolvableFramework_Blocks(t *testing.T) {
 }
 
 func TestResolveFrameworkImage_BareDevFallback(t *testing.T) {
-	// No map configured (bare operator run) -> built-in :latest last resort.
+	// No map configured (bare operator run) -> only promptkit has a built-in.
 	r := &AgentRuntimeReconciler{}
-	img, ok := r.resolveFrameworkImage(arWithFramework(omniav1alpha1.FrameworkTypeLangChain, ""))
-	if !ok || img != DefaultLangChainImage {
-		t.Fatalf("bare-dev langchain: got (%q,%v) want (%q,true)", img, ok, DefaultLangChainImage)
+	img, ok := r.resolveFrameworkImage(arWithFramework(omniav1alpha1.FrameworkTypePromptKit, ""))
+	if !ok || img != DefaultFrameworkImage {
+		t.Fatalf("bare-dev promptkit: got (%q,%v) want (%q,true)", img, ok, DefaultFrameworkImage)
+	}
+	// langchain has no built-in: it must block rather than silently run a
+	// stale :latest community image (custom-runtime wave 1).
+	if _, ok := r.resolveFrameworkImage(arWithFramework(omniav1alpha1.FrameworkTypeLangChain, "")); ok {
+		t.Fatal("langchain must block with no explicit image configured")
 	}
 	// autogen has no built-in -> blocked even bare.
 	if _, ok := r.resolveFrameworkImage(arWithFramework(omniav1alpha1.FrameworkTypeAutoGen, "")); ok {

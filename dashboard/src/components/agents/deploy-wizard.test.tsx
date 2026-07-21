@@ -365,6 +365,51 @@ describe("composeAgentYaml", () => {
     ]);
   });
 
+  it("omits spec.framework entirely for promptkit with no customisation", () => {
+    const yaml = composeAgentYaml(baseForm, "ns-a");
+    expect((yaml as { spec: Record<string, unknown> }).spec).not.toHaveProperty("framework");
+  });
+
+  it("emits framework type and image for a non-promptkit framework", () => {
+    const yaml = composeAgentYaml(
+      { ...baseForm, framework: "langchain", customImage: "ghcr.io/acme/lc:v1" },
+      "ns-a",
+    );
+    expect((yaml as { spec: { framework: unknown } }).spec.framework).toEqual({
+      type: "langchain",
+      image: "ghcr.io/acme/lc:v1",
+    });
+  });
+
+  it("trims surrounding whitespace from the framework image", () => {
+    const yaml = composeAgentYaml(
+      { ...baseForm, framework: "custom", customImage: "  ghcr.io/acme/x:v1  " },
+      "ns-a",
+    );
+    const framework = (yaml as { spec: { framework: { image: string } } }).spec.framework;
+    expect(framework.image).toBe("ghcr.io/acme/x:v1");
+  });
+
+  it("does not emit a framework image for a non-promptkit framework when it is whitespace-only", () => {
+    const yaml = composeAgentYaml(
+      { ...baseForm, framework: "langchain", customImage: "   " },
+      "ns-a",
+    );
+    const framework = (yaml as { spec: { framework: Record<string, unknown> } }).spec.framework;
+    expect(framework).toEqual({ type: "langchain" });
+    expect(framework).not.toHaveProperty("image");
+  });
+
+  it("never emits a stale customImage under promptkit", () => {
+    // A customImage can linger in form state after switching back to promptkit.
+    // It must not leak into the promptkit AgentRuntime as spec.framework.image.
+    const yaml = composeAgentYaml(
+      { ...baseForm, framework: "promptkit", customImage: "ghcr.io/acme/langchain:v1" },
+      "ns-a",
+    );
+    expect((yaml as { spec: Record<string, unknown> }).spec).not.toHaveProperty("framework");
+  });
+
   it("omits the runtime block when defaults are unchanged", () => {
     const yaml = composeAgentYaml(baseForm, "ns-a");
     expect((yaml as { spec: Record<string, unknown> }).spec).not.toHaveProperty("runtime");
@@ -398,5 +443,56 @@ describe("DeployWizard integration", () => {
     // (b) Next button must be disabled
     const nextBtn = screen.getByRole("button", { name: /next/i });
     expect(nextBtn).toBeDisabled();
+  });
+
+  // Only `promptkit` has a built-in default runtime image (custom-runtime
+  // wave 1). Selecting langchain/autogen in the wizard must block Next until
+  // an image is supplied — same as `custom` — or the wizard silently submits
+  // an AgentRuntime that is permanently unschedulable with no way to fix it
+  // from the UI.
+  it("blocks Next on the Framework step for langchain until an image is supplied", async () => {
+    renderWizard();
+
+    fireEvent.change(screen.getByLabelText(/Agent Name/i), { target: { value: "my-agent" } });
+    fireEvent.click(screen.getByRole("button", { name: /next/i }));
+
+    // Now on the Framework step.
+    await screen.findByText("Agent Framework");
+    fireEvent.click(screen.getByRole("radio", { name: /LangChain/i }));
+
+    const nextBtn = screen.getByRole("button", { name: /next/i });
+    expect(nextBtn).toBeDisabled();
+
+    fireEvent.change(screen.getByLabelText("Container Image"), {
+      target: { value: "ghcr.io/acme/langchain-runtime:v1.0" },
+    });
+    expect(nextBtn).not.toBeDisabled();
+  });
+
+  // Whitespace-only input is not a real image reference — it would be emitted as
+  // spec.framework.image and deploy unschedulable. The gate must trim.
+  it("keeps Next disabled when the Container Image is whitespace-only", async () => {
+    renderWizard();
+
+    fireEvent.change(screen.getByLabelText(/Agent Name/i), { target: { value: "my-agent" } });
+    fireEvent.click(screen.getByRole("button", { name: /next/i }));
+
+    await screen.findByText("Agent Framework");
+    fireEvent.click(screen.getByRole("radio", { name: /LangChain/i }));
+
+    const nextBtn = screen.getByRole("button", { name: /next/i });
+    fireEvent.change(screen.getByLabelText("Container Image"), { target: { value: "   " } });
+    expect(nextBtn).toBeDisabled();
+  });
+
+  it("does not require an image when promptkit is selected", async () => {
+    renderWizard();
+
+    fireEvent.change(screen.getByLabelText(/Agent Name/i), { target: { value: "my-agent" } });
+    fireEvent.click(screen.getByRole("button", { name: /next/i }));
+
+    await screen.findByText("Agent Framework");
+    expect(screen.queryByLabelText("Container Image")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /next/i })).not.toBeDisabled();
   });
 });

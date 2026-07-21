@@ -11,8 +11,14 @@ tests:
       - contains:
           path: spec.template.spec.containers[0].args
           content: --framework-image=promptkit=ghcr.io/altairalabs/omnia-runtime:testtag
-  - it: renders a langchain framework-image arg from framework.images
+  - it: renders no langchain framework-image arg by default (custom-runtime wave 1)
+    asserts:
+      - notMatchRegex:
+          path: spec.template.spec.containers[0].args[*]
+          pattern: ^--framework-image=langchain=
+  - it: renders a langchain framework-image arg when explicitly configured
     set:
+      framework.images.langchain.repository: ghcr.io/altairalabs/omnia-langchain-runtime
       framework.images.langchain.tag: testtag
     asserts:
       - contains:
