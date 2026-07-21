@@ -17,6 +17,18 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
   cancel-in-progress: true
 
+# Disable the testcontainers resource reaper (Ryuk) across all jobs. Ryuk is a
+# leaked-container cleanup sidecar; on GitHub's ephemeral runners the runner is
+# destroyed after the job so cleanup is automatic, and the real-DB test suites
+# (internal/memory, internal/session, ee/pkg/*) already Terminate their own
+# containers in TestMain. In CI the process↔Ryuk keep-alive handshake
+# intermittently fails ("Reaper handshake failed: connection reset by peer");
+# Ryuk then reaps the shared pgvector container mid-run and every RealStore test
+# fails together with "connection reset by peer". Disabling Ryuk removes that
+# race with no downside here.
+env:
+  TESTCONTAINERS_RYUK_DISABLED: "true"
+
 jobs:
   # Detect what files changed to determine which jobs to run
   changes:
