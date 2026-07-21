@@ -241,6 +241,8 @@ func (r *AgentRuntimeReconciler) buildRuntimeEnvVars(
 		wsUID := r.resolveWorkspaceUIDForNamespace(agentRuntime.Namespace)
 		if wsUID != "" {
 			envVars = append(envVars, corev1.EnvVar{
+				// Name must match internal/runtime's envWorkspaceUID — the runtime
+				// prefers this over a cluster-wide WorkspaceList (#1874).
 				Name:  "OMNIA_WORKSPACE_UID",
 				Value: wsUID,
 			})

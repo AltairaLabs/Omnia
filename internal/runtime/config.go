@@ -176,6 +176,10 @@ const (
 	// `track:`-selected AgentRuntime), so the eval-path version stamp is
 	// always concrete instead of empty (#1847).
 	envPromptPackVersion = "OMNIA_PROMPTPACK_VERSION"
+	// envWorkspaceUID carries the Workspace CR's UID, injected by the operator
+	// when memory is enabled. Preferred over a cluster-wide WorkspaceList so
+	// every memory-enabled agent pod does not List all workspaces at startup.
+	envWorkspaceUID = "OMNIA_WORKSPACE_UID"
 )
 
 // Default values.
