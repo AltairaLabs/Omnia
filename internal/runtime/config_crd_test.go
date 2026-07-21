@@ -127,9 +127,9 @@ func TestLoadFromCRD_NamedProviders(t *testing.T) {
 	assert.Equal(t, "/custom/media", cfg.MediaBasePath)
 	assert.Equal(t, "memory", cfg.ContextType)
 
-	// Verify API key env var was set
-	assert.Equal(t, "sk-ant-test-key", os.Getenv("ANTHROPIC_API_KEY"))
-	t.Cleanup(func() { os.Unsetenv("ANTHROPIC_API_KEY") })
+	// The resolved API key travels on Config, not process env.
+	assert.Equal(t, "sk-ant-test-key", cfg.ProviderAPIKey)
+	assert.Empty(t, os.Getenv("ANTHROPIC_API_KEY"))
 }
 
 func TestLoadFromCRD_SingleProvider(t *testing.T) {
@@ -179,8 +179,65 @@ func TestLoadFromCRD_SingleProvider(t *testing.T) {
 
 	assert.Equal(t, "openai", cfg.ProviderType)
 	assert.Equal(t, "gpt-4o", cfg.Model)
-	assert.Equal(t, "sk-openai-test", os.Getenv("OPENAI_API_KEY"))
-	t.Cleanup(func() { os.Unsetenv("OPENAI_API_KEY") })
+	assert.Equal(t, "sk-openai-test", cfg.ProviderAPIKey,
+		"resolved API key must travel on Config, not process env")
+	assert.Empty(t, os.Getenv("OPENAI_API_KEY"),
+		"the runtime must not write the API key to process env")
+}
+
+// TestLoadExtraProviders_CarryAPIKeyOnValue proves a same-type extra provider
+// carries its own resolved key on the value rather than overwriting the
+// default's via a shared env var (design §5.3.1).
+func TestLoadExtraProviders_CarryAPIKeyOnValue(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "")
+	_ = os.Unsetenv("OPENAI_API_KEY")
+
+	defaultProvider := &v1alpha1.Provider{
+		ObjectMeta: metav1.ObjectMeta{Name: testLLMProviderName, Namespace: "test-ns"},
+		Spec: v1alpha1.ProviderSpec{
+			Type:  v1alpha1.ProviderTypeOpenAI,
+			Model: "gpt-4o",
+			Credential: &v1alpha1.CredentialConfig{
+				SecretRef: &v1alpha1.SecretKeyRef{Name: "default-secret"},
+			},
+		},
+	}
+	embedProvider := &v1alpha1.Provider{
+		ObjectMeta: metav1.ObjectMeta{Name: testInferenceProviderName, Namespace: "test-ns"},
+		Spec: v1alpha1.ProviderSpec{
+			Type:  v1alpha1.ProviderTypeOpenAI,
+			Model: "text-embedding-3-small",
+			Role:  v1alpha1.ProviderRoleEmbedding,
+			Credential: &v1alpha1.CredentialConfig{
+				SecretRef: &v1alpha1.SecretKeyRef{Name: "embed-secret"},
+			},
+		},
+	}
+	defaultSecret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "default-secret", Namespace: "test-ns"},
+		Data:       map[string][]byte{"OPENAI_API_KEY": []byte("sk-default")},
+	}
+	embedSecret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "embed-secret", Namespace: "test-ns"},
+		Data:       map[string][]byte{"OPENAI_API_KEY": []byte("sk-embed")},
+	}
+
+	c := buildTestClient(defaultProvider, embedProvider, defaultSecret, embedSecret)
+
+	providers := []v1alpha1.NamedProviderRef{
+		{Name: "default", ProviderRef: v1alpha1.ProviderRef{Name: testLLMProviderName}},
+		{Name: "embeddings", ProviderRef: v1alpha1.ProviderRef{Name: testInferenceProviderName}},
+	}
+
+	cfg := &Config{}
+	err := loadFromNamedProviders(context.Background(), c, cfg, providers, "test-ns")
+	require.NoError(t, err)
+
+	require.Equal(t, "sk-default", cfg.ProviderAPIKey)
+	require.Len(t, cfg.ExtraProviders, 1)
+	assert.Equal(t, "sk-embed", cfg.ExtraProviders[0].APIKey,
+		"same-type extra provider must carry its own key, not overwrite the default's")
+	assert.Empty(t, os.Getenv("OPENAI_API_KEY"))
 }
 
 // TestLoadFromCRD_Headers verifies spec.headers from the Provider CRD flows
@@ -383,8 +440,8 @@ func TestLoadFromCRD_CredentialSecretRef(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, "gemini", cfg.ProviderType)
-	assert.Equal(t, "gemini-key-value", os.Getenv("GEMINI_API_KEY"))
-	t.Cleanup(func() { os.Unsetenv("GEMINI_API_KEY") })
+	assert.Equal(t, "gemini-key-value", cfg.ProviderAPIKey)
+	assert.Empty(t, os.Getenv("GEMINI_API_KEY"))
 }
 
 func TestLoadFromCRD_NamedProvidersSortedFallback(t *testing.T) {
@@ -1445,13 +1502,12 @@ func TestLoadFromNamedProviders_ExtraProviders(t *testing.T) {
 	}
 }
 
-// TestLoadFromNamedProviders_InjectsExtraProviderSecret verifies that a
+// TestLoadFromNamedProviders_CarriesExtraProviderKey verifies that a
 // non-default spec.providers[] entry (e.g. a HuggingFace inference provider)
-// has its Secret injected into the process env, so PromptKit's
-// os.Getenv("HF_TOKEN") resolves at construction time. Before the fix only the
-// default provider's secret was injected.
-func TestLoadFromNamedProviders_InjectsExtraProviderSecret(t *testing.T) {
-	// Save/restore so the test doesn't leak HF_TOKEN.
+// has its Secret resolved onto ResolvedProvider.APIKey, carried on the value
+// rather than written to process env (design §5.3.1).
+func TestLoadFromNamedProviders_CarriesExtraProviderKey(t *testing.T) {
+	// Ensure no ambient HF_TOKEN can mask a regression.
 	const hfEnv = "HF_TOKEN"
 	t.Setenv(hfEnv, "")
 	_ = os.Unsetenv(hfEnv)
@@ -1494,8 +1550,10 @@ func TestLoadFromNamedProviders_InjectsExtraProviderSecret(t *testing.T) {
 	err := loadFromNamedProviders(context.Background(), c, cfg, providers, "test-ns")
 	require.NoError(t, err)
 
-	assert.Equal(t, "hf-test-token", os.Getenv(hfEnv),
-		"extra provider's secret must be injected into the process env")
+	require.Len(t, cfg.ExtraProviders, 1)
+	assert.Equal(t, "hf-test-token", cfg.ExtraProviders[0].APIKey,
+		"extra provider's key must be carried on the value, not process env")
+	assert.Empty(t, os.Getenv(hfEnv), "no key leaked to process env")
 }
 
 // testLLMProviderName is the default llm Provider name reused across the

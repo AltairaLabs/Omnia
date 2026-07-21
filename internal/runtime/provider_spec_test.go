@@ -18,6 +18,7 @@ package runtime
 
 import (
 	"context"
+	"os"
 	"testing"
 
 	"github.com/AltairaLabs/PromptKit/sdk"
@@ -41,7 +42,7 @@ func hfProvider(name, baseURL string) *v1alpha1.Provider {
 }
 
 func TestProviderToSDKSpec_HuggingFaceDedicated(t *testing.T) {
-	spec := providerToSDKSpec(hfProvider("embed-1", "https://my-endpoint.hf.space"))
+	spec := providerToSDKSpec(hfProvider("embed-1", "https://my-endpoint.hf.space"), "")
 
 	assert.Equal(t, "embed-1", spec.ID)
 	assert.Equal(t, "huggingface", spec.Type)
@@ -56,7 +57,7 @@ func TestProviderToSDKSpec_HuggingFaceDedicated(t *testing.T) {
 }
 
 func TestProviderToSDKSpec_HuggingFaceServerless(t *testing.T) {
-	spec := providerToSDKSpec(hfProvider("embed-2", ""))
+	spec := providerToSDKSpec(hfProvider("embed-2", ""), "")
 
 	require.NotNil(t, spec.Credential)
 	assert.Equal(t, "HF_TOKEN", spec.Credential.CredentialEnv)
@@ -64,11 +65,23 @@ func TestProviderToSDKSpec_HuggingFaceServerless(t *testing.T) {
 	assert.Nil(t, spec.AdditionalConfig)
 }
 
+func TestProviderToSDKSpec_PrefersCarriedAPIKey(t *testing.T) {
+	p := &v1alpha1.Provider{
+		ObjectMeta: metav1.ObjectMeta{Name: "embeddings"},
+		Spec:       v1alpha1.ProviderSpec{Type: v1alpha1.ProviderTypeOpenAI, Model: "text-embedding-3-small"},
+	}
+	spec := providerToSDKSpec(p, "sk-embed")
+	require.NotNil(t, spec.Credential)
+	assert.Equal(t, "sk-embed", spec.Credential.APIKey)
+	assert.Empty(t, spec.Credential.CredentialEnv,
+		"a carried key must be set as APIKey, not left as an env-var reference")
+}
+
 func TestProviderToSDKSpec_CredentialEnvOverride(t *testing.T) {
 	p := hfProvider("hf-custom", "")
 	p.Spec.Credential = &v1alpha1.CredentialConfig{EnvVar: "CUSTOM_TOKEN"}
 
-	spec := providerToSDKSpec(p)
+	spec := providerToSDKSpec(p, "")
 
 	require.NotNil(t, spec.Credential)
 	assert.Equal(t, "CUSTOM_TOKEN", spec.Credential.CredentialEnv,
@@ -85,7 +98,7 @@ func TestProviderToSDKSpec_PlatformHostedLeavesCredentialNil(t *testing.T) {
 		},
 	}
 
-	spec := providerToSDKSpec(p)
+	spec := providerToSDKSpec(p, "")
 
 	assert.Nil(t, spec.Credential,
 		"platform-hosted providers cannot express auth via ProviderSpec; Credential must stay nil")
@@ -101,7 +114,7 @@ func TestProviderToSDKSpec_NoCredentialEnv(t *testing.T) {
 		},
 	}
 
-	spec := providerToSDKSpec(p)
+	spec := providerToSDKSpec(p, "")
 
 	assert.Equal(t, "ollama-1", spec.ID)
 	assert.Equal(t, "ollama", spec.Type)
@@ -138,6 +151,31 @@ func TestExtraProviderOptions_RoleMapping(t *testing.T) {
 	for i, o := range opts {
 		assert.NotNil(t, o, "option %d is non-nil", i)
 	}
+}
+
+// TestProviderSpec_SameTypeProvidersDoNotCollide is the regression for the
+// credential-bleed bug (design §5.3.1): two providers of the SAME type with
+// DIFFERENT carried keys must each produce a spec with its own key. Before the
+// fix both keys went to one process-type-keyed env var and last-write-wins.
+func TestProviderSpec_SameTypeProvidersDoNotCollide(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "") // no shared env fallback
+
+	openai := func(name string) *v1alpha1.Provider {
+		return &v1alpha1.Provider{
+			ObjectMeta: metav1.ObjectMeta{Name: name},
+			Spec:       v1alpha1.ProviderSpec{Type: v1alpha1.ProviderTypeOpenAI, Model: "gpt-4o"},
+		}
+	}
+
+	specA := providerToSDKSpec(openai("default"), "sk-default")
+	specB := providerToSDKSpec(openai("embeddings"), "sk-embed")
+
+	require.NotNil(t, specA.Credential)
+	require.NotNil(t, specB.Credential)
+	assert.Equal(t, "sk-default", specA.Credential.APIKey)
+	assert.Equal(t, "sk-embed", specB.Credential.APIKey,
+		"same-type providers must keep distinct keys — no shared env, no last-write-wins")
+	assert.Empty(t, os.Getenv("OPENAI_API_KEY"), "no key leaked to process env")
 }
 
 // TestExtraProviderOptions_Empty verifies no options when no extra providers.

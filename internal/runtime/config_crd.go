@@ -245,6 +245,9 @@ func loadRuntimeContextFromCRD(cfg *Config, ar *v1alpha1.AgentRuntime) error {
 type ResolvedProvider struct {
 	Role     v1alpha1.ProviderRole
 	Provider *v1alpha1.Provider
+	// APIKey is the resolved non-platform API key for this provider, carried on
+	// the value rather than process env. Empty for platform/keyless providers.
+	APIKey string
 }
 
 // loadProviderFromCRD resolves the provider from the AgentRuntime CRD and sets
@@ -300,25 +303,23 @@ func loadExtraProviders(ctx context.Context, c client.Client, cfg *Config, provi
 		if err != nil {
 			return fmt.Errorf("resolve provider %q: %w", np.Name, err)
 		}
-		if err := injectProviderCredentials(ctx, c, provider); err != nil {
-			return fmt.Errorf("inject credentials for provider %q: %w", np.Name, err)
+		var apiKey string
+		if provider.Spec.Platform == nil {
+			apiKey, err = resolveProviderAPIKey(ctx, c, provider)
+			if err != nil {
+				return fmt.Errorf("resolve API key for provider %q: %w", np.Name, err)
+			}
+		} else if err := injectPlatformCredentials(ctx, c, provider); err != nil {
+			// Platform credentials still travel via process env in this wave (2b-1b).
+			return fmt.Errorf("inject platform credentials for provider %q: %w", np.Name, err)
 		}
 		cfg.ExtraProviders = append(cfg.ExtraProviders, ResolvedProvider{
 			Role:     provider.EffectiveRole(),
 			Provider: provider,
+			APIKey:   apiKey,
 		})
 	}
 	return nil
-}
-
-// injectProviderCredentials reads a Provider's Secret and injects the
-// appropriate env var(s) into the process so PromptKit resolves them at
-// construction time. Mirrors the default-provider credential path.
-func injectProviderCredentials(ctx context.Context, c client.Client, provider *v1alpha1.Provider) error {
-	if provider.Spec.Platform == nil {
-		return injectAPIKey(ctx, c, provider)
-	}
-	return injectPlatformCredentials(ctx, c, provider)
 }
 
 // loadFromProviderRef loads config from a Provider CRD reference and injects the API key.
@@ -349,8 +350,17 @@ func loadFromProviderRef(ctx context.Context, c client.Client, cfg *Config, ref 
 		return err
 	}
 
-	// Inject credentials from secret (API key, or platform creds for static auth).
-	return injectProviderCredentials(ctx, c, provider)
+	// Resolve credentials from secret. API keys travel on the value
+	// (cfg.ProviderAPIKey); platform creds still use process env in this wave.
+	if provider.Spec.Platform == nil {
+		key, keyErr := resolveProviderAPIKey(ctx, c, provider)
+		if keyErr != nil {
+			return keyErr
+		}
+		cfg.ProviderAPIKey = key
+		return nil
+	}
+	return injectPlatformCredentials(ctx, c, provider)
 }
 
 // loadPlatformConfig copies spec.platform into the runtime Config.
@@ -433,37 +443,34 @@ func loadProviderPricing(cfg *Config, pricing *v1alpha1.ProviderPricing) error {
 	return nil
 }
 
-// injectAPIKey reads the provider's secret and sets the appropriate env var
-// for the PromptKit SDK (e.g., ANTHROPIC_API_KEY, OPENAI_API_KEY).
-func injectAPIKey(ctx context.Context, c client.Client, provider *v1alpha1.Provider) error {
+// resolveProviderAPIKey reads the provider's Secret and returns the API key
+// value. It does NOT write process env — the caller carries the value on
+// Config/ResolvedProvider so same-type providers cannot overwrite each other
+// (design §5.3.1). Returns "" (no error) when the provider has no secret ref
+// (ollama/mock) or its type has no API-key env var name.
+func resolveProviderAPIKey(ctx context.Context, c client.Client, provider *v1alpha1.Provider) (string, error) {
 	ref := k8s.EffectiveSecretRef(provider)
 	if ref == nil {
-		return nil // No secret configured (e.g., ollama, mock)
+		return "", nil // No secret configured (e.g., ollama, mock)
+	}
+
+	// Provider types with no API-key env var name don't use a key.
+	if pkgprovider.APIKeyEnvVarName(string(provider.Spec.Type)) == "" {
+		return "", nil
 	}
 
 	secret, err := k8s.GetSecret(ctx, c, ref.Name, provider.Namespace)
 	if err != nil {
-		return fmt.Errorf("read provider secret: %w", err)
+		return "", fmt.Errorf("read provider secret: %w", err)
 	}
 
-	// Determine which key in the Secret to read
 	secretKey := k8s.DetermineSecretKey(ref, provider.Spec.Type)
 	apiKeyValue, ok := secret.Data[secretKey]
 	if !ok {
-		return fmt.Errorf("secret %s/%s does not contain key %q", provider.Namespace, ref.Name, secretKey)
+		return "", fmt.Errorf("secret %s/%s does not contain key %q", provider.Namespace, ref.Name, secretKey)
 	}
 
-	// Set the env var the PromptKit SDK expects
-	envVarName := pkgprovider.APIKeyEnvVarName(string(provider.Spec.Type))
-	if envVarName == "" {
-		return nil // Provider type doesn't use API key env vars
-	}
-
-	if err := os.Setenv(envVarName, string(apiKeyValue)); err != nil {
-		return fmt.Errorf("set env var %s: %w", envVarName, err)
-	}
-
-	return nil
+	return string(apiKeyValue), nil
 }
 
 // injectPlatformCredentials reads a platform auth secret (when static) and
