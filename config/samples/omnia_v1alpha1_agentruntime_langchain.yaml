@@ -15,8 +15,8 @@ spec:
   framework:
     type: langchain
     # PLACEHOLDER — replace with a real image you have built and verified
-    # against the omnia.runtime.v1 contract. This registry does not exist;
-    # left as-is, the pod will ImagePullBackOff.
+    # against the omnia.runtime.v1 contract. `your-org` is not a real
+    # registry path; left unchanged the pod will fail to pull (ImagePullBackOff).
     image: ghcr.io/your-org/omnia-langchain-runtime:v0.1.0
 
   # Reference to the PromptPack containing agent prompts

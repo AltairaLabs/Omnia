@@ -365,6 +365,51 @@ describe("composeAgentYaml", () => {
     ]);
   });
 
+  it("omits spec.framework entirely for promptkit with no customisation", () => {
+    const yaml = composeAgentYaml(baseForm, "ns-a");
+    expect((yaml as { spec: Record<string, unknown> }).spec).not.toHaveProperty("framework");
+  });
+
+  it("emits framework type and image for a non-promptkit framework", () => {
+    const yaml = composeAgentYaml(
+      { ...baseForm, framework: "langchain", customImage: "ghcr.io/acme/lc:v1" },
+      "ns-a",
+    );
+    expect((yaml as { spec: { framework: unknown } }).spec.framework).toEqual({
+      type: "langchain",
+      image: "ghcr.io/acme/lc:v1",
+    });
+  });
+
+  it("trims surrounding whitespace from the framework image", () => {
+    const yaml = composeAgentYaml(
+      { ...baseForm, framework: "custom", customImage: "  ghcr.io/acme/x:v1  " },
+      "ns-a",
+    );
+    const framework = (yaml as { spec: { framework: { image: string } } }).spec.framework;
+    expect(framework.image).toBe("ghcr.io/acme/x:v1");
+  });
+
+  it("does not emit a framework image for a non-promptkit framework when it is whitespace-only", () => {
+    const yaml = composeAgentYaml(
+      { ...baseForm, framework: "langchain", customImage: "   " },
+      "ns-a",
+    );
+    const framework = (yaml as { spec: { framework: Record<string, unknown> } }).spec.framework;
+    expect(framework).toEqual({ type: "langchain" });
+    expect(framework).not.toHaveProperty("image");
+  });
+
+  it("never emits a stale customImage under promptkit", () => {
+    // A customImage can linger in form state after switching back to promptkit.
+    // It must not leak into the promptkit AgentRuntime as spec.framework.image.
+    const yaml = composeAgentYaml(
+      { ...baseForm, framework: "promptkit", customImage: "ghcr.io/acme/langchain:v1" },
+      "ns-a",
+    );
+    expect((yaml as { spec: Record<string, unknown> }).spec).not.toHaveProperty("framework");
+  });
+
   it("omits the runtime block when defaults are unchanged", () => {
     const yaml = composeAgentYaml(baseForm, "ns-a");
     expect((yaml as { spec: Record<string, unknown> }).spec).not.toHaveProperty("runtime");

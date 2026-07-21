@@ -95,6 +95,33 @@ describe("FrameworkStep", () => {
     fireEvent.click(screen.getByRole("radio", { name: /LangChain/i }));
     expect(updateField).toHaveBeenCalledWith("framework", "langchain");
   });
+
+  it("clears a stale customImage and version when switching back to promptkit", () => {
+    const updateField = vi.fn();
+    render(
+      <FrameworkStep
+        formData={{ ...baseForm, framework: "langchain", customImage: "ghcr.io/acme/lc:v1" }}
+        updateField={updateField}
+      />,
+    );
+    fireEvent.click(screen.getByRole("radio", { name: /PromptKit/i }));
+    expect(updateField).toHaveBeenCalledWith("framework", "promptkit");
+    expect(updateField).toHaveBeenCalledWith("customImage", "");
+    expect(updateField).toHaveBeenCalledWith("frameworkVersion", "");
+  });
+
+  it("does not clear customImage when switching between non-promptkit frameworks", () => {
+    const updateField = vi.fn();
+    render(
+      <FrameworkStep
+        formData={{ ...baseForm, framework: "langchain", customImage: "ghcr.io/acme/lc:v1" }}
+        updateField={updateField}
+      />,
+    );
+    fireEvent.click(screen.getByRole("radio", { name: /Custom/i }));
+    expect(updateField).toHaveBeenCalledWith("framework", "custom");
+    expect(updateField).not.toHaveBeenCalledWith("customImage", "");
+  });
 });
 
 describe("PromptPackStep", () => {

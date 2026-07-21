@@ -94,7 +94,17 @@ export function FrameworkStep({ formData, updateField }: Readonly<FrameworkStepP
       <Label>Agent Framework</Label>
       <RadioGroup
         value={formData.framework}
-        onValueChange={(v) => updateField("framework", v as FrameworkType)}
+        onValueChange={(v) => {
+          const next = v as FrameworkType;
+          updateField("framework", next);
+          // promptkit hides the image input and uses its built-in image, so
+          // clear any stale image/version left from a previous selection —
+          // otherwise it leaks into the generated YAML.
+          if (next === "promptkit") {
+            updateField("customImage", "");
+            updateField("frameworkVersion", "");
+          }
+        }}
         className="grid grid-cols-1 gap-2"
       >
         {FRAMEWORKS.map((fw) => (

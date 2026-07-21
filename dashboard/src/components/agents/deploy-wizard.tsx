@@ -214,12 +214,18 @@ export function composeAgentYaml(
     spec.outputSchema = JSON.parse(formData.outputSchemaJson);
   }
 
-  const trimmedImage = formData.customImage.trim();
-  if (formData.framework !== "promptkit" || trimmedImage) {
+  // customImage only applies to non-promptkit frameworks. promptkit has a
+  // built-in runtime image, and its UI hides the image input — so a stale
+  // customImage left over from a previous framework selection must never be
+  // emitted as spec.framework.image (which would run e.g. a LangChain image
+  // under a promptkit AgentRuntime).
+  const isCustomFramework = formData.framework !== "promptkit";
+  const frameworkImage = isCustomFramework ? formData.customImage.trim() : "";
+  if (isCustomFramework || frameworkImage) {
     spec.framework = {
       type: formData.framework,
       ...(formData.frameworkVersion && { version: formData.frameworkVersion }),
-      ...(trimmedImage && { image: trimmedImage }),
+      ...(frameworkImage && { image: frameworkImage }),
     };
   }
 
