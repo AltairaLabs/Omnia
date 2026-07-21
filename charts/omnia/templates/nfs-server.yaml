@@ -71,6 +71,36 @@ spec:
             capabilities:
               add:
                 - SYS_ADMIN
+{{- if .Values.nfs.csiDriver.storageClass.subDir }}
+        # The CSI driver creates a per-volume directory when subDir is unset,
+        # but a fixed shared subDir is a path it expects to already exist — it
+        # is not created during provisioning. On a freshly provisioned backing
+        # volume the export root is empty, so every mount of a PVC on this
+        # storage class fails with "reason given by server: No such file or
+        # directory", and anything mounting workspace-content (the operator,
+        # dashboard and vscode-server) never starts.
+        #
+        # The directory only ever existed because it happened to persist inside
+        # an older backing volume, so the failure appears the moment that volume
+        # is recreated rather than when the value is set. Creating it here makes
+        # the export self-initialising.
+        - name: init-shared-subdir
+          image: {{ .Values.nfs.server.image.repository }}:{{ .Values.nfs.server.image.tag }}
+          imagePullPolicy: {{ .Values.nfs.server.image.pullPolicy | default "IfNotPresent" }}
+          command:
+            - sh
+            - -c
+            - |
+              set -e
+              mkdir -p "/nfsshare/{{ .Values.nfs.csiDriver.storageClass.subDir }}"
+              # 0777 mirrors mountPermissions in nfs-storageclass.yaml, where it
+              # is likewise fixed, so non-root workloads can write through the
+              # mount. Keep the two in step if that ever becomes configurable.
+              chmod 0777 "/nfsshare/{{ .Values.nfs.csiDriver.storageClass.subDir }}"
+          volumeMounts:
+            - name: nfs-data
+              mountPath: /nfsshare
+{{- end }}
       containers:
         - name: nfs-server
           image: {{ .Values.nfs.server.image.repository }}:{{ .Values.nfs.server.image.tag }}

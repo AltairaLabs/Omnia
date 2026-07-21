@@ -1,0 +1,62 @@
+suite: internal NFS server shared subDir initialisation
+# The nfs-csi driver creates a per-volume directory when subDir is unset, but a
+# fixed shared subDir is a path it expects to already exist — provisioning does
+# not create it. On a freshly provisioned backing volume the export root is
+# empty, so every mount on the storage class fails with "No such file or
+# directory" and anything mounting workspace-content never starts. An init
+# container creates it so the export is self-initialising.
+values:
+  - ../values-chart-tests.yaml
+templates:
+  - templates/nfs-server.yaml
+tests:
+  - it: does not add the init container when no shared subDir is configured
+    set:
+      nfs.server.enabled: true
+      nfs.server.internal: true
+      nfs.csiDriver.enabled: true
+      nfs.csiDriver.storageClass.subDir: ""
+    documentSelector:
+      path: kind
+      value: Deployment
+    asserts:
+      - notContains:
+          path: spec.template.spec.initContainers
+          content:
+            name: init-shared-subdir
+          any: true
+
+  - it: creates the shared subDir when one is configured
+    set:
+      nfs.server.enabled: true
+      nfs.server.internal: true
+      nfs.csiDriver.enabled: true
+      nfs.csiDriver.storageClass.subDir: omnia-content
+    documentSelector:
+      path: kind
+      value: Deployment
+    asserts:
+      - exists:
+          path: spec.template.spec.initContainers[?(@.name=="init-shared-subdir")]
+      - matchRegex:
+          path: spec.template.spec.initContainers[?(@.name=="init-shared-subdir")].command[2]
+          pattern: 'mkdir -p "/nfsshare/omnia-content"'
+      # Without the export mounted the init container would create the directory
+      # in its own filesystem and the fix would silently do nothing.
+      - equal:
+          path: spec.template.spec.initContainers[?(@.name=="init-shared-subdir")].volumeMounts[0].mountPath
+          value: /nfsshare
+
+  - it: honours a custom subDir name
+    set:
+      nfs.server.enabled: true
+      nfs.server.internal: true
+      nfs.csiDriver.enabled: true
+      nfs.csiDriver.storageClass.subDir: some-other-dir
+    documentSelector:
+      path: kind
+      value: Deployment
+    asserts:
+      - matchRegex:
+          path: spec.template.spec.initContainers[?(@.name=="init-shared-subdir")].command[2]
+          pattern: 'mkdir -p "/nfsshare/some-other-dir"'
