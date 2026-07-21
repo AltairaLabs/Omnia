@@ -616,7 +616,6 @@ func (r *ArenaDevSessionReconciler) reconcileDeployment(ctx context.Context, ses
 							Args: []string{
 								"--http-port=8080",
 								"--health-port=8081",
-								"--session-ttl=30m",
 								"--dev-mode",
 							},
 							Ports: []corev1.ContainerPort{

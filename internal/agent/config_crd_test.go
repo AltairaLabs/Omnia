@@ -102,9 +102,6 @@ func TestLoadFromCRD_HappyPath(t *testing.T) {
 	if cfg.FacadePort != 9090 {
 		t.Errorf("FacadePort = %d, want %d", cfg.FacadePort, 9090)
 	}
-	if cfg.SessionTTL != 2*time.Hour {
-		t.Errorf("SessionTTL = %v, want %v", cfg.SessionTTL, 2*time.Hour)
-	}
 	if cfg.ToolRegistryName != "my-tools" {
 		t.Errorf("ToolRegistryName = %q, want %q", cfg.ToolRegistryName, "my-tools")
 	}
@@ -227,7 +224,12 @@ func TestLoadFromCRD_FacadePortDefault(t *testing.T) {
 	}
 }
 
-func TestLoadFromCRD_InvalidSessionTTL(t *testing.T) {
+// spec.context.ttl belongs to the context store, which the runtime owns. The
+// agent config must not consume it: it was previously parsed here into
+// SessionTTL and applied to session-api row expiry, so one field silently
+// governed two unrelated lifetimes while the store it names ignored it (#1876).
+// Parsing and validation now live solely in the runtime's loader.
+func TestLoadFromCRD_IgnoresContextTTL(t *testing.T) {
 	ar := newFakeAgentRuntime("agent", "ns", v1alpha1.AgentRuntimeSpec{
 		PromptPackRef: v1alpha1.PromptPackRef{Name: "pack"},
 		Facades:       []v1alpha1.FacadeConfig{{Type: v1alpha1.FacadeTypeWebSocket}},
@@ -239,9 +241,9 @@ func TestLoadFromCRD_InvalidSessionTTL(t *testing.T) {
 
 	c := fake.NewClientBuilder().WithScheme(k8s.Scheme()).WithRuntimeObjects(ar, testNamespace(ar.Namespace)).Build()
 
-	_, err := LoadFromCRD(context.Background(), c, "agent", "ns")
-	if err == nil {
-		t.Fatal("expected error for invalid TTL")
+	// Even an unparseable value is inert here — the agent never reads it.
+	if _, err := LoadFromCRD(context.Background(), c, "agent", "ns"); err != nil {
+		t.Fatalf("agent config must not parse spec.context.ttl: %v", err)
 	}
 }
 
@@ -254,33 +256,8 @@ func TestLoadFromCRD_SessionNil(t *testing.T) {
 
 	c := fake.NewClientBuilder().WithScheme(k8s.Scheme()).WithRuntimeObjects(ar, testNamespace(ar.Namespace)).Build()
 
-	cfg, err := LoadFromCRD(context.Background(), c, "agent", "ns")
-	if err != nil {
+	if _, err := LoadFromCRD(context.Background(), c, "agent", "ns"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
-	}
-	if cfg.SessionTTL != DefaultSessionTTL {
-		t.Errorf("SessionTTL = %v, want default %v", cfg.SessionTTL, DefaultSessionTTL)
-	}
-}
-
-func TestLoadFromCRD_SessionTTLNil(t *testing.T) {
-	ar := newFakeAgentRuntime("agent", "ns", v1alpha1.AgentRuntimeSpec{
-		PromptPackRef: v1alpha1.PromptPackRef{Name: "pack"},
-		Facades:       []v1alpha1.FacadeConfig{{Type: v1alpha1.FacadeTypeWebSocket}},
-		Context: &v1alpha1.ContextConfig{
-			Type: v1alpha1.ContextStoreTypeMemory,
-			// TTL is nil — should default
-		},
-	})
-
-	c := fake.NewClientBuilder().WithScheme(k8s.Scheme()).WithRuntimeObjects(ar, testNamespace(ar.Namespace)).Build()
-
-	cfg, err := LoadFromCRD(context.Background(), c, "agent", "ns")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if cfg.SessionTTL != DefaultSessionTTL {
-		t.Errorf("SessionTTL = %v, want default %v", cfg.SessionTTL, DefaultSessionTTL)
 	}
 }
 

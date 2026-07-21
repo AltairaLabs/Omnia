@@ -25,9 +25,11 @@ import (
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/stats"
+	"google.golang.org/grpc/status"
 
 	"github.com/altairalabs/omnia/internal/session"
 	runtimev1 "github.com/altairalabs/omnia/pkg/runtime/v1"
@@ -153,6 +155,35 @@ func (c *RuntimeClient) Invoke(ctx context.Context, req *runtimev1.InvocationReq
 // Health checks the runtime's health status.
 func (c *RuntimeClient) Health(ctx context.Context) (*runtimev1.HealthResponse, error) {
 	return c.client.Health(ctx, &runtimev1.HealthRequest{})
+}
+
+// HasConversation reports whether a session's working context can still be
+// resumed, translating the wire enum into the facade's ResumeState.
+//
+// An unrecognised wire value maps to ResumeStateUnavailable rather than to a
+// resumable or expired verdict: an older or newer runtime that answers with a
+// state this build does not know must not have that silently read as "the
+// user's conversation is gone".
+func (c *RuntimeClient) HasConversation(ctx context.Context, sessionID string) (ResumeState, error) {
+	resp, err := c.client.HasConversation(ctx, &runtimev1.HasConversationRequest{SessionId: sessionID})
+	if err != nil {
+		// A runtime built against an older contract version does not serve this
+		// method. It cannot answer, which is not the same as answering "gone" —
+		// report it distinctly so the facade degrades to letting the session
+		// through rather than failing every resume against such a runtime.
+		if status.Code(err) == codes.Unimplemented {
+			return ResumeStateUnknown, ErrProbeUnsupported
+		}
+		return ResumeStateUnknown, err
+	}
+	switch resp.GetState() {
+	case runtimev1.ResumeState_RESUME_STATE_RESUMABLE:
+		return ResumeStateResumable, nil
+	case runtimev1.ResumeState_RESUME_STATE_NOT_FOUND:
+		return ResumeStateNotFound, nil
+	default:
+		return ResumeStateUnavailable, nil
+	}
 }
 
 // Close closes the gRPC connection.

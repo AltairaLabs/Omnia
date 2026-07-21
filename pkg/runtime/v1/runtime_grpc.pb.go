@@ -22,9 +22,10 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	RuntimeService_Converse_FullMethodName = "/omnia.runtime.v1.RuntimeService/Converse"
-	RuntimeService_Invoke_FullMethodName   = "/omnia.runtime.v1.RuntimeService/Invoke"
-	RuntimeService_Health_FullMethodName   = "/omnia.runtime.v1.RuntimeService/Health"
+	RuntimeService_Converse_FullMethodName        = "/omnia.runtime.v1.RuntimeService/Converse"
+	RuntimeService_Invoke_FullMethodName          = "/omnia.runtime.v1.RuntimeService/Invoke"
+	RuntimeService_Health_FullMethodName          = "/omnia.runtime.v1.RuntimeService/Health"
+	RuntimeService_HasConversation_FullMethodName = "/omnia.runtime.v1.RuntimeService/HasConversation"
 )
 
 // RuntimeServiceClient is the client API for RuntimeService service.
@@ -56,6 +57,15 @@ type RuntimeServiceClient interface {
 	Invoke(ctx context.Context, in *InvocationRequest, opts ...grpc.CallOption) (*InvocationResponse, error)
 	// Health checks the runtime's readiness to handle requests.
 	Health(ctx context.Context, in *HealthRequest, opts ...grpc.CallOption) (*HealthResponse, error)
+	// HasConversation reports whether a session's working context can still be
+	// resumed. The runtime owns the context store, so it is the only component
+	// that can answer this — a session-api row proves only that the conversation
+	// once existed, not that its turns are still in the statestore.
+	//
+	// The answer is exact rather than approximate: sdk.Resume succeeds precisely
+	// when the state store returns a non-nil state for the id, so this RPC
+	// performs the same load against the same store.
+	HasConversation(ctx context.Context, in *HasConversationRequest, opts ...grpc.CallOption) (*HasConversationResponse, error)
 }
 
 type runtimeServiceClient struct {
@@ -99,6 +109,16 @@ func (c *runtimeServiceClient) Health(ctx context.Context, in *HealthRequest, op
 	return out, nil
 }
 
+func (c *runtimeServiceClient) HasConversation(ctx context.Context, in *HasConversationRequest, opts ...grpc.CallOption) (*HasConversationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(HasConversationResponse)
+	err := c.cc.Invoke(ctx, RuntimeService_HasConversation_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // RuntimeServiceServer is the server API for RuntimeService service.
 // All implementations must embed UnimplementedRuntimeServiceServer
 // for forward compatibility.
@@ -128,6 +148,15 @@ type RuntimeServiceServer interface {
 	Invoke(context.Context, *InvocationRequest) (*InvocationResponse, error)
 	// Health checks the runtime's readiness to handle requests.
 	Health(context.Context, *HealthRequest) (*HealthResponse, error)
+	// HasConversation reports whether a session's working context can still be
+	// resumed. The runtime owns the context store, so it is the only component
+	// that can answer this — a session-api row proves only that the conversation
+	// once existed, not that its turns are still in the statestore.
+	//
+	// The answer is exact rather than approximate: sdk.Resume succeeds precisely
+	// when the state store returns a non-nil state for the id, so this RPC
+	// performs the same load against the same store.
+	HasConversation(context.Context, *HasConversationRequest) (*HasConversationResponse, error)
 	mustEmbedUnimplementedRuntimeServiceServer()
 }
 
@@ -146,6 +175,9 @@ func (UnimplementedRuntimeServiceServer) Invoke(context.Context, *InvocationRequ
 }
 func (UnimplementedRuntimeServiceServer) Health(context.Context, *HealthRequest) (*HealthResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Health not implemented")
+}
+func (UnimplementedRuntimeServiceServer) HasConversation(context.Context, *HasConversationRequest) (*HasConversationResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method HasConversation not implemented")
 }
 func (UnimplementedRuntimeServiceServer) mustEmbedUnimplementedRuntimeServiceServer() {}
 func (UnimplementedRuntimeServiceServer) testEmbeddedByValue()                        {}
@@ -211,6 +243,24 @@ func _RuntimeService_Health_Handler(srv interface{}, ctx context.Context, dec fu
 	return interceptor(ctx, in, info, handler)
 }
 
+func _RuntimeService_HasConversation_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(HasConversationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RuntimeServiceServer).HasConversation(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RuntimeService_HasConversation_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RuntimeServiceServer).HasConversation(ctx, req.(*HasConversationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // RuntimeService_ServiceDesc is the grpc.ServiceDesc for RuntimeService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -225,6 +275,10 @@ var RuntimeService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Health",
 			Handler:    _RuntimeService_Health_Handler,
+		},
+		{
+			MethodName: "HasConversation",
+			Handler:    _RuntimeService_HasConversation_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

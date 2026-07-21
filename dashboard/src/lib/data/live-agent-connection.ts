@@ -46,6 +46,12 @@ export class LiveAgentConnection implements AgentConnection {
   private intentionalDisconnect = false;
   private binaryMode = false;
   private readonly binaryHandlers: Array<(payload: ArrayBuffer, sequence: number, isLast: boolean, sampleRate?: number) => void> = [];
+  /**
+   * Last outbound message, kept so it can be resent once if the server reports
+   * the named session's context has expired. Cleared as soon as it is retried,
+   * so a second SESSION_EXPIRED surfaces as a real error instead of looping.
+   */
+  private pendingRetry: { content: string; parts?: ContentPart[] } | null = null;
 
   constructor(
     private readonly namespace: string,
@@ -157,6 +163,19 @@ export class LiveAgentConnection implements AgentConnection {
             this.emitConnected({ sessionId, resumed });
           }
 
+          // A session whose working context has expired cannot be continued.
+          // Recover in the transport rather than surfacing a failure: drop the
+          // dead id and resend once without one, which starts a fresh session.
+          if (this.handleSessionExpired(message)) {
+            return;
+          }
+
+          // Any other terminal outcome for the in-flight turn releases the
+          // retry slot, so a later message can itself become retriable.
+          if (message.type === "done" || message.type === "error") {
+            this.pendingRetry = null;
+          }
+
           this.emitMessage(message);
         } catch (err) {
           console.error("Failed to parse WebSocket message:", err);
@@ -211,6 +230,13 @@ export class LiveAgentConnection implements AgentConnection {
       return;
     }
 
+    // Retained so the message can be resent if the server reports the session
+    // it named has expired; the server drops such a message without answering.
+    // Only the earliest un-answered turn is held: the server processes one
+    // message at a time, so a SESSION_EXPIRED arriving while several are
+    // outstanding refers to that one, not to whichever was sent most recently.
+    this.pendingRetry ??= { content, parts: options?.parts };
+
     const message: ClientMessage = {
       type: "message",
       session_id: options?.sessionId || this.sessionId || undefined,
@@ -219,6 +245,44 @@ export class LiveAgentConnection implements AgentConnection {
     };
 
     this.ws.send(JSON.stringify(message));
+  }
+
+  /**
+   * Handles a SESSION_EXPIRED error: the session id we sent names a
+   * conversation whose working context is gone, so the server dropped the
+   * message rather than answering it with no history.
+   *
+   * Clears the dead id — including lastSessionId, so a later reconnect does not
+   * offer it as resume= — and resends the message once without a session id,
+   * which makes the server start a fresh session and reply with `connected`.
+   *
+   * Returns true when the error was handled and should not reach consumers: the
+   * message is being retried, so presenting a failure would be wrong. A repeat
+   * expiry has no pending retry left and falls through as a real error.
+   */
+  private handleSessionExpired(message: ServerMessage): boolean {
+    if (message.type !== "error" || message.error?.code !== "SESSION_EXPIRED") {
+      return false;
+    }
+
+    this.sessionId = null;
+    this.lastSessionId = null;
+
+    const retry = this.pendingRetry;
+    this.pendingRetry = null;
+    if (!retry || this.ws?.readyState !== WebSocket.OPEN) {
+      return false;
+    }
+
+    console.warn("[LiveAgentConnection] session context expired; starting a new session");
+    this.ws.send(
+      JSON.stringify({
+        type: "message",
+        content: retry.content,
+        parts: retry.parts,
+      } satisfies ClientMessage)
+    );
+    return true;
   }
 
   sendToolCallAck(callId: string): void {

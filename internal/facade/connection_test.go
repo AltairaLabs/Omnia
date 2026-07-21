@@ -334,7 +334,7 @@ func TestReattach_BindsParkedSession(t *testing.T) {
 	s := NewServer(DefaultServerConfig(), nil, nil, logr.Discard(), WithGraceWindow(time.Minute))
 	sink := &fakeDuplexSink{audio: make(chan []byte, 1)}
 	as := newAudioSession("sid-9", sink, nil)
-	s.parked.park(context.Background(), "sid-9", testParkOwnerID, as)
+	s.parked.park(context.Background(), "sid-9", testParkOwnerID, as, true)
 
 	c := &Connection{sessionID: "", userID: testParkOwnerID, resumeID: "sid-9"}
 	got, resumed := s.tryReattach(context.Background(), c)
@@ -350,7 +350,7 @@ func TestReattach_BindsParkedSession(t *testing.T) {
 // (nil, false) when the parked session is owned by a different user.
 func TestReattach_OwnerMismatchFallsThrough(t *testing.T) {
 	s := NewServer(DefaultServerConfig(), nil, nil, logr.Discard(), WithGraceWindow(time.Minute))
-	s.parked.park(context.Background(), "sid-9", testParkOwnerID, newAudioSession("sid-9", &fakeDuplexSink{audio: make(chan []byte, 1)}, nil))
+	s.parked.park(context.Background(), "sid-9", testParkOwnerID, newAudioSession("sid-9", &fakeDuplexSink{audio: make(chan []byte, 1)}, nil), true)
 
 	c := &Connection{userID: "attacker", resumeID: "sid-9"}
 	if _, resumed := s.tryReattach(context.Background(), c); resumed {
@@ -371,4 +371,104 @@ func readServerMsg(t *testing.T, conn *websocket.Conn) ServerMessage {
 		t.Fatalf("failed to read server message: %v", err)
 	}
 	return msg
+}
+
+// Parking defers completion because the conversation may yet resume. Expiry is
+// the point at which it definitively did not, so the archive row must reach a
+// terminal status there — otherwise every parked-then-expired session stays
+// "active" forever (#1876). This exercises the real onExpire wiring installed by
+// NewServer, not the registry callback in isolation.
+func TestParkExpiry_CompletesSession(t *testing.T) {
+	spy := &spySessionStore{Store: session.NewMemoryStore()}
+
+	s := NewServer(DefaultServerConfig(), spy, nil, logr.Discard(),
+		WithGraceWindow(20*time.Millisecond))
+
+	sink := &fakeDuplexSink{audio: make(chan []byte, 1)}
+	c := &Connection{
+		sessionID:        "sid-expire",
+		sessionPersisted: true,
+		userID:           testParkOwnerID,
+		intentionalClose: false,
+		audioSession:     newAudioSession("sid-expire", sink, nil),
+	}
+
+	if parked := s.parkOnClose(context.Background(), c); !parked {
+		t.Fatal("parkOnClose must park an unintentional close with an audio session")
+	}
+	// Nothing terminal yet — the session is still reattachable.
+	if got := spy.completedCalls(); got != 0 {
+		t.Fatalf("completion written while still parked: %d call(s), want 0", got)
+	}
+
+	// Wait for the grace window to elapse and the completion write to drain.
+	deadline := time.Now().Add(2 * time.Second)
+	for spy.completedCalls() == 0 && time.Now().Before(deadline) {
+		time.Sleep(2 * time.Millisecond)
+	}
+
+	if got := spy.completedCalls(); got != 1 {
+		t.Fatalf("UpdateSessionStatus(Completed) called %d time(s) after park expiry, want 1", got)
+	}
+}
+
+// A pure-audio session never persists an archive row — binary frames bypass
+// processMessage, so sessionPersisted stays false. Completing it on park expiry
+// would write a terminal status for a row that does not exist.
+func TestParkExpiry_SkipsCompletionForUnpersistedSession(t *testing.T) {
+	spy := &spySessionStore{Store: session.NewMemoryStore()}
+
+	s := NewServer(DefaultServerConfig(), spy, nil, logr.Discard(),
+		WithGraceWindow(20*time.Millisecond))
+
+	sink := &fakeDuplexSink{audio: make(chan []byte, 1)}
+	c := &Connection{
+		sessionID:        "sid-audio-only",
+		sessionPersisted: false, // never wrote an archive row
+		userID:           testParkOwnerID,
+		intentionalClose: false,
+		audioSession:     newAudioSession("sid-audio-only", sink, nil),
+	}
+
+	if parked := s.parkOnClose(context.Background(), c); !parked {
+		t.Fatal("parkOnClose must park an unintentional close with an audio session")
+	}
+
+	// Wait past the grace window and let any completion drain.
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		if spy.completedCalls() > 0 {
+			t.Fatalf("completed a session that was never archived")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// Recording can be disabled entirely (nil store). Park expiry must not panic.
+func TestParkExpiry_NilSessionStoreDoesNotPanic(t *testing.T) {
+	s := NewServer(DefaultServerConfig(), nil, nil, logr.Discard(),
+		WithGraceWindow(10*time.Millisecond))
+
+	sink := &fakeDuplexSink{audio: make(chan []byte, 1)}
+	c := &Connection{
+		sessionID:        "sid-nostore",
+		sessionPersisted: true,
+		userID:           testParkOwnerID,
+		audioSession:     newAudioSession("sid-nostore", sink, nil),
+	}
+
+	if parked := s.parkOnClose(context.Background(), c); !parked {
+		t.Fatal("parkOnClose must park an unintentional close with an audio session")
+	}
+
+	// Expiry fires on the registry's timer goroutine; a panic there would take
+	// the test binary down.
+	deadline := time.Now().Add(time.Second)
+	for s.parked.len() != 0 && time.Now().Before(deadline) {
+		time.Sleep(2 * time.Millisecond)
+	}
+	if s.parked.len() != 0 {
+		t.Fatal("parked session did not expire")
+	}
+	time.Sleep(50 * time.Millisecond) // let the callback finish
 }

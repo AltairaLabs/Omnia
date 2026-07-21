@@ -70,8 +70,6 @@ type ServerConfig struct {
 	// MaxConnections is the maximum number of concurrent WebSocket connections.
 	// 0 means unlimited (not recommended for production).
 	MaxConnections int
-	// SessionTTL is the default TTL for new sessions.
-	SessionTTL time.Duration
 	// PromptPackName is the PromptPack associated with this agent (from env).
 	PromptPackName string
 	// PromptPackVersion is the PromptPack version (from env).
@@ -106,7 +104,6 @@ func DefaultServerConfig() ServerConfig {
 		WriteTimeout:     10 * time.Second,
 		MaxMessageSize:   16 * 1024 * 1024, // 16MB to support base64-encoded images
 		MaxConnections:   500,
-		SessionTTL:       24 * time.Hour,
 		MessageRateLimit: 50,
 		MessageRateBurst: 100,
 		// Keep one in-flight request per connection to avoid unbounded runtime
@@ -411,9 +408,22 @@ func NewServer(cfg ServerConfig, store session.Store, handler MessageHandler, lo
 		s.graceWindow = 15 * time.Second
 	}
 	s.parked = newRealtimeRegistry(s.routeStore, s.podAddr, s.graceWindow, s.log)
-	s.parked.onExpire = func(string) {
+	s.parked.onExpire = func(sessionID string, persisted bool) {
 		s.decrementAudioSessions(s.metrics)
 		s.metrics.RealtimeSessionParkExpired()
+		// cleanupConnection deliberately skips completion for a parked session,
+		// because parking means the conversation may yet resume. Expiry is the
+		// point at which it definitively did not, so this is where the archive
+		// row reaches a terminal status — without it, every parked-then-expired
+		// session stays "active" forever (#1876).
+		// Only a session that was archived has a row to complete. A pure-audio
+		// session never persists one (binary frames bypass processMessage), so
+		// completing it would write a terminal status for a row that does not
+		// exist.
+		if persisted && sessionID != "" {
+			s.metrics.SessionClosed()
+			s.completeSession(sessionID, s.log)
+		}
 	}
 
 	return s

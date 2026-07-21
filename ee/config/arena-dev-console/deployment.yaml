@@ -34,7 +34,6 @@ spec:
           args:
             - --http-port=8080
             - --health-port=8081
-            - --session-ttl=30m
             - --workspace-path=/workspace-content
           env:
             - name: POD_NAMESPACE

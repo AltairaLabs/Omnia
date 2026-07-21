@@ -10,6 +10,50 @@ or `api/proto/`, add an entry below with the date, affected API, and reason.
 
 ## Unreleased
 
+### Changed (resume: the context store decides resumability, #1876)
+
+- **Contract version 1.0.0 → 1.1.0.** Adding `HasConversation` is an additive change to
+  the `omnia.runtime.v1` contract, so the minor version is bumped in both
+  `api/proto/runtime/v1/runtime.proto` and `pkg/runtime/contract/version.go`. A custom
+  runtime built against 1.0.0 remains conformant — it simply does not serve the new
+  method, and the facade treats an unimplemented probe as `UNAVAILABLE`, which is never
+  reported to a client as an expiry.
+- **New gRPC method.** `RuntimeService.HasConversation(HasConversationRequest) returns
+  (HasConversationResponse)` reports whether a session's working context can still be
+  resumed. It answers `RESUME_STATE_RESUMABLE` / `RESUME_STATE_NOT_FOUND` /
+  `RESUME_STATE_UNAVAILABLE`. Additive — existing clients are unaffected.
+- **BEHAVIOR CHANGE (WebSocket).** The facade previously decided whether a session could
+  be resumed by asking **session-api**, which cannot know: a row proves a conversation
+  once existed, not that its turns survive in the context store. A client naming a
+  session whose context had expired was told the session resumed and then answered with
+  **no history at all** — silent amnesia. The facade now asks the runtime, which owns
+  the context store, and the answer is exact: `HasConversation` performs the same state
+  store load that `sdk.Resume` performs.
+- **New client-visible error.** A resume request for a session with no surviving context
+  is answered with **`SESSION_EXPIRED`** and the message is dropped rather than answered
+  without history. Clients should retry with no `session_id`, which starts a new session.
+  The error code already existed in the protocol but was never emitted. An unreachable
+  context store yields `INTERNAL_ERROR`, never `SESSION_EXPIRED` — an unreachable store
+  is a server fault, and reporting it as expiry would discard an intact conversation.
+  Only a session id *differing* from the one the connection announced in `connected` is
+  treated as a resume request, so a client echoing its own session id on the first
+  message is unaffected.
+- session-api is no longer read on the message path. `GetSession` as the resume oracle,
+  the `RefreshTTL` call in `ensureSession`, and the terminal-status pre-read before the
+  completion write are all removed — the last was redundant because the warm store
+  already refuses to overwrite a terminal status and suppresses the duplicate event.
+- **Session status fix.** A parked realtime session that expired without reattaching
+  never reached a terminal status, so it stayed `active` in the archive forever.
+  Connection cleanup deliberately skips completion while a session is parked (it may
+  yet resume); park expiry is the point at which it definitively did not, and now
+  writes `completed` there.
+- `spec.context.ttl` now reaches the context store (`statestore.WithTTL` /
+  `WithMemoryTTL`), which it never did — the value was parsed and dropped at store
+  construction, so the store's own default always applied. It is also no longer read
+  into the facade's session TTL, where it governed session-api row expiry; one CRD
+  field no longer sets two unrelated lifetimes. Archival retention belongs to
+  `SessionRetentionPolicy`. The facade no longer sends any TTL to session-api.
+
 ### Added (operator: deploy-intent API, deploy-intent decoupling epic Plan A)
 
 - **`POST /api/v1/workspaces/{workspace}/deployments`** — new operator-served REST endpoint

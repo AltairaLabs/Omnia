@@ -179,7 +179,6 @@ func buildWebSocketServer(
 	mediaStorage media.Storage,
 ) (*webSocketServers, error) {
 	wsConfig := facade.DefaultServerConfig()
-	wsConfig.SessionTTL = cfg.SessionTTL
 	wsConfig.PromptPackName = cfg.PromptPackName
 	wsConfig.PromptPackVersion = cfg.PromptPackVersion
 	wsConfig.WorkspaceName = cfg.WorkspaceName

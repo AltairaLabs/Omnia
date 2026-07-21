@@ -168,8 +168,8 @@ func main() {
 	var store statestore.Store
 	switch cfg.ContextType {
 	case pkruntime.ContextTypeMemory:
-		store = statestore.NewMemoryStore()
-		log.Info("using in-memory state store")
+		store = statestore.NewMemoryStore(memoryStoreOptions(cfg.ContextTTL)...)
+		log.Info("using in-memory state store", "contextTTL", cfg.ContextTTL)
 	case pkruntime.ContextTypeRedis:
 		// Parse Redis URL
 		opts, err := redis.ParseURL(cfg.ContextURL)
@@ -191,8 +191,8 @@ func main() {
 		}
 		cancel()
 
-		store = statestore.NewRedisStore(client)
-		log.Info("using Redis state store", "url", cfg.ContextURL)
+		store = statestore.NewRedisStore(client, redisStoreOptions(cfg.ContextTTL)...)
+		log.Info("using Redis state store", "url", cfg.ContextURL, "contextTTL", cfg.ContextTTL)
 	}
 
 	// Initialize tracing if enabled
@@ -415,6 +415,27 @@ func main() {
 
 // enrichToolRegistryMeta reads the ToolRegistry CRD and sets handler metadata on the tool manager.
 // This is best-effort — if the CRD read fails, tools still work without provenance metadata.
+// memoryStoreOptions and redisStoreOptions translate spec.context.ttl — how
+// long a conversation's working context survives in the context store between
+// messages — into store construction options.
+//
+// A non-positive TTL is left to the store's own default rather than forwarded,
+// because zero means "never expire" to both stores; silently unbounded
+// retention is a worse failure than falling back to the default.
+func memoryStoreOptions(ttl time.Duration) []statestore.MemoryStoreOption {
+	if ttl <= 0 {
+		return nil
+	}
+	return []statestore.MemoryStoreOption{statestore.WithMemoryTTL(ttl)}
+}
+
+func redisStoreOptions(ttl time.Duration) []statestore.RedisOption {
+	if ttl <= 0 {
+		return nil
+	}
+	return []statestore.RedisOption{statestore.WithTTL(ttl)}
+}
+
 func enrichToolRegistryMeta(cfg *pkruntime.Config, server *pkruntime.Server, log logr.Logger) {
 	trCtx, trCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer trCancel()

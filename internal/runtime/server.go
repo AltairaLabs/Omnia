@@ -18,6 +18,7 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -673,6 +674,97 @@ func (s *Server) Health(_ context.Context, _ *runtimev1.HealthRequest) (*runtime
 		Healthy:         s.healthy,
 		Status:          statusMsg,
 		ContractVersion: contract.Version,
+	}, nil
+}
+
+// probeConversationExists reports whether the state store holds a conversation
+// for sessionID, returning ErrNotFound when it definitively does not.
+//
+// It prefers MessageReader.MessageCount over Store.Load because a probe must not
+// change what it measures. The two bundled stores disagree on what a TTL means:
+// the memory store treats it as idle time and refreshes it on Load, while Redis
+// runs a fixed window from the last write and does not. Probing with Load would
+// therefore silently extend a memory-backed conversation's life on every
+// reconnect while leaving a Redis-backed one untouched. MessageCount is a pure
+// read on both.
+//
+// That divergence is upstream — PromptKit#1649. This is a workaround, not a
+// fix: any path that reads through Load still inherits it.
+//
+// The existence verdict is unchanged: MessageCount returns ErrNotFound exactly
+// where Load finds nothing, and (0, nil) for a conversation that exists but
+// holds no messages — which resumes fine.
+//
+// Falls back to Load for a store that does not implement MessageReader, matching
+// the optional-interface pattern PromptKit's own pipeline stages use.
+func (s *Server) probeConversationExists(ctx context.Context, sessionID string) error {
+	if reader, ok := s.stateStore.(statestore.MessageReader); ok {
+		_, err := reader.MessageCount(ctx, sessionID)
+		return err
+	}
+
+	state, err := s.stateStore.Load(ctx, sessionID)
+	if err == nil && state == nil {
+		// Defensive: a custom store may signal a miss this way instead.
+		return statestore.ErrNotFound
+	}
+	return err
+}
+
+// HasConversation reports whether a session's working context can still be
+// resumed. It mirrors getOrCreateConversation's resolution order exactly — the
+// process-local conversation map first, then the state store — so the answer is
+// the same one the next Converse call would arrive at, not an approximation.
+//
+// A store failure is reported as UNAVAILABLE rather than NOT_FOUND. The
+// distinction matters: NOT_FOUND is a client-visible expiry, while UNAVAILABLE
+// means the context may well be intact and the store was simply unreachable.
+func (s *Server) HasConversation(
+	ctx context.Context,
+	req *runtimev1.HasConversationRequest,
+) (*runtimev1.HasConversationResponse, error) {
+	sessionID := req.GetSessionId()
+	if sessionID == "" {
+		return nil, status.Error(codes.InvalidArgument, "session_id is required")
+	}
+
+	// An in-flight Converse stream holds the conversation here; getOrCreateConversation
+	// short-circuits on it before ever consulting the store, so it must be checked first.
+	s.conversationMu.RLock()
+	_, live := s.conversations[sessionID]
+	s.conversationMu.RUnlock()
+	if live {
+		return &runtimev1.HasConversationResponse{
+			State: runtimev1.ResumeState_RESUME_STATE_RESUMABLE,
+		}, nil
+	}
+
+	// sdk.Resume returns ErrNoStateStore when no store is configured, so nothing
+	// would ever resume — but that is a runtime misconfiguration, not an expiry.
+	if s.stateStore == nil {
+		return &runtimev1.HasConversationResponse{
+			State:  runtimev1.ResumeState_RESUME_STATE_UNAVAILABLE,
+			Detail: "no state store configured",
+		}, nil
+	}
+
+	// Both bundled stores report a miss as ErrNotFound, so that sentinel — not a
+	// nil result — is what distinguishes an expired conversation from a store
+	// that could not be reached.
+	err := s.probeConversationExists(ctx, sessionID)
+	switch {
+	case errors.Is(err, statestore.ErrNotFound), errors.Is(err, statestore.ErrInvalidID):
+		return &runtimev1.HasConversationResponse{
+			State: runtimev1.ResumeState_RESUME_STATE_NOT_FOUND,
+		}, nil
+	case err != nil:
+		return &runtimev1.HasConversationResponse{
+			State:  runtimev1.ResumeState_RESUME_STATE_UNAVAILABLE,
+			Detail: err.Error(),
+		}, nil
+	}
+	return &runtimev1.HasConversationResponse{
+		State: runtimev1.ResumeState_RESUME_STATE_RESUMABLE,
 	}, nil
 }
 

@@ -50,9 +50,9 @@ func TestRegistry_ParkThenExpireClosesSession(t *testing.T) {
 	}
 
 	reg := newRealtimeRegistry(noopRouteStore{}, "10.0.0.1:8080", 20*time.Millisecond, logr.Discard())
-	reg.onExpire = func(id string) { setExpired(id) }
+	reg.onExpire = func(id string, _ bool) { setExpired(id) }
 
-	reg.park(context.Background(), testParkSessionID, testParkOwnerID, as)
+	reg.park(context.Background(), testParkSessionID, testParkOwnerID, as, true)
 	if reg.len() != 1 {
 		t.Fatalf("want 1 parked, got %d", reg.len())
 	}
@@ -80,7 +80,7 @@ func TestRegistry_Take(t *testing.T) {
 		sink := &fakeDuplexSink{audio: make(chan []byte, 1)}
 		as := newAudioSession(testParkSessionID, sink, nil)
 		reg := newRealtimeRegistry(noopRouteStore{}, "addr", time.Minute, logr.Discard())
-		reg.park(context.Background(), testParkSessionID, testParkOwnerID, as)
+		reg.park(context.Background(), testParkSessionID, testParkOwnerID, as, true)
 		return reg, sink, as
 	}
 

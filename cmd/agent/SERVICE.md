@@ -36,13 +36,36 @@
 
 ## Outputs
 - **WebSocket** to browser/dashboard: ServerMessage (chunk, done, tool_call, error, connected, media_chunk, upload_ready, upload_complete, **interrupt** — signals barge-in; client should clear buffered audio). The `connected` message includes a `resumed` boolean field indicating whether this connection reattached to a parked realtime session.
-- **gRPC** to Runtime: ClientMessage (user message, client tool result, `DuplexStart` to open a duplex audio session, `AudioInputChunk` per audio frame)
-- **HTTP** to Session API: session create, message append, TTL refresh, `GET /api/v1/privacy-policy` (at connection time, cached 60s per WebSocket session)
+- **gRPC** to Runtime: ClientMessage (user message, client tool result, `DuplexStart` to open a duplex audio session, `AudioInputChunk` per audio frame); `HasConversation` to ask whether a named session's working context can still be resumed
+- **HTTP** to Session API: session create, message append, `GET /api/v1/privacy-policy` (at connection time, cached 60s per WebSocket session). Writes only — session-api is never read to decide whether a conversation can continue (see "Resuming a session").
+
+## Resuming a session
+
+A client continues a conversation by naming it in `session_id`. Resumability is
+decided by the **context store via the Runtime** (`HasConversation`), never by
+session-api: a session-api row proves a conversation once existed, not that its
+turns still exist in the context store, so treating a found row as resumable is
+how a session "resumes" into an empty model context (#1876).
+
+Only an id the client brought from elsewhere is treated as a resume request. The
+id the facade minted for this connection and announced in `connected` names the
+connection's own session, which legitimately does not exist yet on the first
+message — probing for it would reject the opening turn of every new conversation.
+
+| Probe result | Behaviour |
+|---|---|
+| resumable | The conversation continues. |
+| context gone | `SESSION_EXPIRED` is sent and the message is **dropped** rather than answered with no history. The connection stays open; the client should retry with no `session_id`, which starts a new session. |
+| store unreachable | `INTERNAL_ERROR`. Never reported as an expiry — the context may be intact. |
+
+Realtime blip-resume (`resume=<session_id>`) is separate: it reattaches a parked
+provider socket held in this pod, and is resolved before any message arrives.
 
 ## Does NOT Own
 - Tool execution logic (Runtime's job — client or server)
 - LLM provider interaction (Runtime's job)
 - Session persistence (Session API's job)
+- Whether a conversation can be resumed (the context store's answer, via the Runtime)
 - Prompt pack content or evaluation (Runtime's job)
 - UI state management (Dashboard's job)
 - Authentication (passes headers through)

@@ -106,7 +106,6 @@ const (
 	DefaultFacadePort          = 8080
 	DefaultHealthPort          = 8081
 	DefaultRuntimeAddress      = "localhost:9000"
-	DefaultSessionTTL          = 24 * time.Hour
 	DefaultPromptPackMountPath = "/etc/omnia/pack"
 	// DefaultMediaStoragePath / DefaultMediaMaxFileSize / DefaultMediaDefaultTTL /
 	// DefaultMediaUploadURLTTL / DefaultMediaDownloadURLTTL alias internal/media's
@@ -219,9 +218,6 @@ type Config struct {
 	// ToolRegistry configuration (optional).
 	ToolRegistryName      string
 	ToolRegistryNamespace string
-
-	// Session configuration.
-	SessionTTL time.Duration
 
 	// ClientToolTimeout overrides the default 60s timeout for client tool
 	// responses. Sourced from the primary facade's clientToolTimeout.
