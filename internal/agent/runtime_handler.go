@@ -460,6 +460,12 @@ func (h *RuntimeHandler) Client() *facade.RuntimeClient {
 	return h.client
 }
 
+// HasConversation implements facade.ResumeProber by asking the runtime, which
+// owns the context store, whether a session's working context survives.
+func (h *RuntimeHandler) HasConversation(ctx context.Context, sessionID string) (facade.ResumeState, error) {
+	return h.client.HasConversation(ctx, sessionID)
+}
+
 // toGRPCContentParts converts facade ContentParts to gRPC ContentParts.
 func toGRPCContentParts(parts []facade.ContentPart) []*runtimev1.ContentPart {
 	if len(parts) == 0 {

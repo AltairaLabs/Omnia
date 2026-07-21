@@ -17,7 +17,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/go-logr/logr"
 	"github.com/gorilla/websocket"
@@ -129,7 +128,6 @@ func TestBuildWebSocketServer_PseudonymizesUserIDHeader(t *testing.T) {
 		AgentName:     "test-agent",
 		Namespace:     "test-ns",
 		WorkspaceName: "test-ws",
-		SessionTTL:    5 * time.Minute,
 	}
 	metrics := agent.NewMetrics(cfg.AgentName, cfg.Namespace)
 
@@ -199,7 +197,6 @@ func TestBuildWebSocketServer_StrictDefaultRejectsUnauthenticatedUpgrade(t *test
 		AgentName:     "strict-agent",
 		Namespace:     "test-ns",
 		WorkspaceName: "test-ws",
-		SessionTTL:    5 * time.Minute,
 	}
 	metrics := agent.NewMetrics(cfg.AgentName, cfg.Namespace)
 

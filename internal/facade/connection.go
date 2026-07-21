@@ -227,38 +227,37 @@ func (s *Server) cleanupConnection(c *Connection, log logr.Logger) {
 	// Snapshot session ID once under the mutex; the closure runs in a goroutine
 	// and must not race against concurrent writers of c.sessionID.
 	sessionID := c.SessionID()
+	// A parked session is still live — its provider socket is held open for a
+	// reattach — so completion is deferred to whichever end actually finishes
+	// it: a later close after reattach, or the registry's expiry callback.
 	if !parked && sessionID != "" && c.SessionPersisted() {
 		s.metrics.SessionClosed()
-		s.submitCompletion(func() {
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			defer cancel()
-
-			// Read the session to check its current status. If the session
-			// already has a terminal status (e.g. "error"), do not overwrite
-			// it with "completed".
-			sess, err := s.sessionStore.GetSession(ctx, sessionID)
-			if err != nil {
-				log.Error(err, "session lookup for completion failed", "sessionID", sessionID)
-				return
-			}
-			if session.IsTerminalStatus(sess.Status) {
-				log.V(1).Info("session already terminal, skipping completion",
-					"sessionID", sessionID, "status", sess.Status)
-				return
-			}
-
-			if err := s.sessionStore.UpdateSessionStatus(ctx, sessionID, session.SessionStatusUpdate{
-				SetStatus:  session.SessionStatusCompleted,
-				SetEndedAt: time.Now(),
-			}); err != nil {
-				log.Error(err, "session completion failed", "sessionID", sessionID)
-			}
-		})
+		s.completeSession(sessionID, log)
 	}
 
 	if err := c.conn.Close(); err != nil {
 		log.Error(err, "error closing connection")
 	}
+}
+
+// completeSession records a session's terminal status in the archive.
+//
+// The write is unconditional: session-api refuses to overwrite an already
+// terminal status server-side and suppresses the duplicate completion event, so
+// reading first only bought a round-trip to avoid a write the store rejects
+// anyway.
+func (s *Server) completeSession(sessionID string, log logr.Logger) {
+	s.submitCompletion(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		if err := s.sessionStore.UpdateSessionStatus(ctx, sessionID, session.SessionStatusUpdate{
+			SetStatus:  session.SessionStatusCompleted,
+			SetEndedAt: time.Now(),
+		}); err != nil {
+			log.Error(err, "session completion failed", "sessionID", sessionID)
+		}
+	})
 }
 
 // configureConnection sets up connection limits and handlers.

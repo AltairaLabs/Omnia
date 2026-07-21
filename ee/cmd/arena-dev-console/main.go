@@ -60,7 +60,6 @@ var (
 	httpPort      = flag.Int("http-port", 8080, "HTTP server port")
 	healthPort    = flag.Int("health-port", 8081, "Health check server port")
 	devMode       = flag.Bool("dev-mode", false, "Enable development mode (verbose logging)")
-	sessionTTL    = flag.Duration("session-ttl", 30*time.Minute, "Session timeout duration")
 	workspacePath = flag.String("workspace-path", "/workspace-content", "Base path for workspace content")
 	configFile    = flag.String("config-file", "", "Optional: Path to arena config file for initialization")
 	sessionAPIURL = flag.String("session-api-url", "", "URL of session-api service for session recording")
@@ -93,7 +92,6 @@ func main() {
 		"httpPort", *httpPort,
 		"healthPort", *healthPort,
 		"devMode", *devMode,
-		"sessionTTL", *sessionTTL,
 		"workspacePath", *workspacePath,
 	)
 
@@ -161,7 +159,6 @@ func main() {
 
 	// Create WebSocket server using the facade pattern
 	wsConfig := facade.DefaultServerConfig()
-	wsConfig.SessionTTL = *sessionTTL
 	serverOpts := []facade.ServerOption{
 		facade.WithAllowUnauthenticated(allowUnauthenticated),
 	}

@@ -93,9 +93,7 @@ func LoadFromCRD(ctx context.Context, c client.Client, name, namespace string) (
 	}
 	cfg.HealthPort = healthPort
 
-	if err := loadContextConfigFromCRD(cfg, ar, namespace); err != nil {
-		return nil, err
-	}
+	loadToolRegistryConfigFromCRD(cfg, ar, namespace)
 	loadMediaConfigFromCRD(cfg, ar)
 
 	if err := loadTracingConfigFromEnv(cfg); err != nil {
@@ -322,29 +320,25 @@ func loadA2ATaskStoreFromCRD(cfg *Config, a2a *v1alpha1.A2AConfig) {
 	}
 }
 
-// loadContextConfigFromCRD populates context-store-related config fields from the AgentRuntime CRD.
-func loadContextConfigFromCRD(cfg *Config, ar *v1alpha1.AgentRuntime, namespace string) error {
-	if ar.Spec.Context != nil && ar.Spec.Context.TTL != nil {
-		ttl, err := time.ParseDuration(*ar.Spec.Context.TTL)
-		if err != nil {
-			return fmt.Errorf("invalid context TTL %q: %w", *ar.Spec.Context.TTL, err)
-		}
-		cfg.SessionTTL = ttl
+// loadToolRegistryConfigFromCRD populates ToolRegistry config from the AgentRuntime CRD.
+//
+// This previously also read spec.context.ttl, hence its former name. That field
+// is the context store's TTL — how long a conversation's working context
+// survives between messages — and belongs to the runtime, which owns that store
+// (cmd/runtime/main.go). Reading it here applied it to session-api row expiry
+// instead, so one field silently governed two unrelated lifetimes while the
+// store it names ignored it entirely (#1876). Archival retention belongs to
+// SessionRetentionPolicy.
+func loadToolRegistryConfigFromCRD(cfg *Config, ar *v1alpha1.AgentRuntime, namespace string) {
+	if ar.Spec.ToolRegistryRef == nil {
+		return
+	}
+	cfg.ToolRegistryName = ar.Spec.ToolRegistryRef.Name
+	if ar.Spec.ToolRegistryRef.Namespace != nil {
+		cfg.ToolRegistryNamespace = *ar.Spec.ToolRegistryRef.Namespace
 	} else {
-		cfg.SessionTTL = DefaultSessionTTL
+		cfg.ToolRegistryNamespace = namespace
 	}
-
-	// ToolRegistry from CRD
-	if ar.Spec.ToolRegistryRef != nil {
-		cfg.ToolRegistryName = ar.Spec.ToolRegistryRef.Name
-		if ar.Spec.ToolRegistryRef.Namespace != nil {
-			cfg.ToolRegistryNamespace = *ar.Spec.ToolRegistryRef.Namespace
-		} else {
-			cfg.ToolRegistryNamespace = namespace
-		}
-	}
-
-	return nil
 }
 
 // loadMediaConfigFromCRD populates media-related config fields from the AgentRuntime CRD.
@@ -433,8 +427,6 @@ func loadFromEnvFallback(name, namespace string) (*Config, error) {
 		return nil, fmt.Errorf(errFmtInvalidEnv, EnvHealthPort, err)
 	}
 	cfg.HealthPort = healthPort
-
-	cfg.SessionTTL = DefaultSessionTTL
 
 	cfg.MediaStorageType = MediaStorageType(getEnvOrDefault(EnvMediaStorageType, string(MediaStorageTypeNone)))
 	cfg.MediaStoragePath = getEnvOrDefault(EnvMediaStoragePath, DefaultMediaStoragePath)

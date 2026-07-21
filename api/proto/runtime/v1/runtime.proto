@@ -34,6 +34,16 @@ service RuntimeService {
 
   // Health checks the runtime's readiness to handle requests.
   rpc Health(HealthRequest) returns (HealthResponse);
+
+  // HasConversation reports whether a session's working context can still be
+  // resumed. The runtime owns the context store, so it is the only component
+  // that can answer this — a session-api row proves only that the conversation
+  // once existed, not that its turns are still in the statestore.
+  //
+  // The answer is exact rather than approximate: sdk.Resume succeeds precisely
+  // when the state store returns a non-nil state for the id, so this RPC
+  // performs the same load against the same store.
+  rpc HasConversation(HasConversationRequest) returns (HasConversationResponse);
 }
 
 // ClientMessage represents a message from the client to the runtime.
@@ -301,6 +311,45 @@ message HealthResponse {
 
   // status provides additional status information.
   string status = 2;
+}
+
+// HasConversationRequest asks whether one session's context is resumable.
+message HasConversationRequest {
+  // session_id is the conversation id to probe.
+  string session_id = 1;
+}
+
+// ResumeState is the disposition of a session's working context.
+//
+// The three states exist because the facade must act differently on each: a
+// missing conversation is a client-visible expiry, whereas an unreachable
+// store is a server fault. Collapsing them would recreate the bug this RPC
+// exists to fix — telling a client its session expired when in fact the
+// context is intact and the store was merely briefly unreachable.
+enum ResumeState {
+  // Unset. Treated as RESUME_STATE_UNAVAILABLE by callers.
+  RESUME_STATE_UNSPECIFIED = 0;
+
+  // Context is present; sdk.Resume will succeed.
+  RESUME_STATE_RESUMABLE = 1;
+
+  // Store answered definitively that no context exists for this id — it
+  // expired, or was never persisted. The session cannot be continued.
+  RESUME_STATE_NOT_FOUND = 2;
+
+  // The store could not be consulted (unreachable, timed out, or no store is
+  // configured). Resumability is unknown; this is NOT an expiry.
+  RESUME_STATE_UNAVAILABLE = 3;
+}
+
+// HasConversationResponse reports one session's resume disposition.
+message HasConversationResponse {
+  // state is the disposition of the session's working context.
+  ResumeState state = 1;
+
+  // detail carries store-level error text when state is
+  // RESUME_STATE_UNAVAILABLE. Diagnostic only; never surfaced to end clients.
+  string detail = 2;
 }
 
 // DuplexStart opens a bidirectional audio session on a Converse stream.

@@ -155,6 +155,28 @@ func (c *RuntimeClient) Health(ctx context.Context) (*runtimev1.HealthResponse, 
 	return c.client.Health(ctx, &runtimev1.HealthRequest{})
 }
 
+// HasConversation reports whether a session's working context can still be
+// resumed, translating the wire enum into the facade's ResumeState.
+//
+// An unrecognised wire value maps to ResumeStateUnavailable rather than to a
+// resumable or expired verdict: an older or newer runtime that answers with a
+// state this build does not know must not have that silently read as "the
+// user's conversation is gone".
+func (c *RuntimeClient) HasConversation(ctx context.Context, sessionID string) (ResumeState, error) {
+	resp, err := c.client.HasConversation(ctx, &runtimev1.HasConversationRequest{SessionId: sessionID})
+	if err != nil {
+		return ResumeStateUnknown, err
+	}
+	switch resp.GetState() {
+	case runtimev1.ResumeState_RESUME_STATE_RESUMABLE:
+		return ResumeStateResumable, nil
+	case runtimev1.ResumeState_RESUME_STATE_NOT_FOUND:
+		return ResumeStateNotFound, nil
+	default:
+		return ResumeStateUnavailable, nil
+	}
+}
+
 // Close closes the gRPC connection.
 func (c *RuntimeClient) Close() error {
 	if c.conn != nil {

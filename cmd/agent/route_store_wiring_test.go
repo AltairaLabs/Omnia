@@ -18,7 +18,6 @@ package main
 
 import (
 	"testing"
-	"time"
 
 	"github.com/alicebob/miniredis/v2"
 	"github.com/go-logr/logr"
@@ -53,7 +52,6 @@ func TestBuildWebSocketServer_WiresRedisRouteStore(t *testing.T) {
 		AgentName:  probeAgentName,
 		Namespace:  "ns",
 		FacadePort: 8080,
-		SessionTTL: 5 * time.Minute,
 	}
 	metrics := agent.NewMetrics(cfg.AgentName, cfg.Namespace)
 	handler := &captureHandler{name: probeAgentName}
@@ -88,7 +86,6 @@ func TestBuildWebSocketServer_NoopRouteStoreWhenEnvUnset(t *testing.T) {
 		AgentName:  "probe-no-redis",
 		Namespace:  "ns",
 		FacadePort: 8080,
-		SessionTTL: 5 * time.Minute,
 	}
 	metrics := agent.NewMetrics(cfg.AgentName, cfg.Namespace)
 	handler := &captureHandler{name: "probe-no-redis"}

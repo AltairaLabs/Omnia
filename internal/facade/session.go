@@ -75,6 +75,14 @@ func (s *Server) processMessage(ctx context.Context, c *Connection, msg *ClientM
 	// Get or create session first — the session ID determines the trace ID.
 	sessionID, err := s.ensureSession(ctx, c, msg.SessionID, log)
 	if err != nil {
+		// An expired context is the client's to recover from — it should retry
+		// without a session_id to start a new conversation. Anything else is a
+		// server fault and must not be reported as an expiry.
+		if errors.Is(err, errSessionExpired) {
+			s.sendError(c, msg.SessionID, ErrorCodeSessionExpired,
+				"session context has expired; start a new session")
+			return err
+		}
 		s.sendError(c, msg.SessionID, ErrorCodeInternalError, "failed to create session")
 		return err
 	}
@@ -230,30 +238,41 @@ func (s *Server) processRegularMessage(ctx context.Context, c *Connection, sessi
 	return nil
 }
 
-// ensureSession gets an existing session or creates a new one.
-// When sessionID is non-empty, the store is checked first; if not found the
-// session is created with that same ID. This supports deferred persistence:
-// handleConnection generates a UUID on connect (for the "connected" message)
-// but does not persist — the first processMessage call triggers the actual write.
+// errSessionExpired signals that the client named a session whose working
+// context no longer exists. processMessage turns this into a client-visible
+// SESSION_EXPIRED; it is not an internal error.
+var errSessionExpired = errors.New("session context expired")
+
+// ensureSession resolves the session id for a message, creating the archive
+// row if it is absent.
+//
+// Resumability is decided by the context store via the runtime, never by
+// session-api: a session-api row proves a conversation once existed, not that
+// its turns survive, so treating a found row as resumable is how a session
+// "resumes" into an empty model context (#1876).
+//
+// Only an id the client brought from elsewhere is a resume request. The id this
+// connection minted and announced in its `connected` message names this
+// connection's own session, which legitimately does not exist yet on the first
+// message — probing for it would reject every new conversation.
+//
+// The archive row is created unconditionally rather than read first;
+// CreateSession treats 409 as success, so it is create-if-absent. That keeps
+// session-api a write-only archive and restores the row for a session whose
+// context outlived it.
 func (s *Server) ensureSession(ctx context.Context, c *Connection, sessionID string, log logr.Logger) (string, error) {
-	if sessionID != "" {
-		// Try to resume existing session
-		sess, err := s.sessionStore.GetSession(ctx, sessionID)
-		if err == nil {
-			s.metrics.SessionCreated()
-			// Refresh TTL
-			if err := s.sessionStore.RefreshTTL(ctx, sessionID, s.config.SessionTTL); err != nil {
-				log.Error(err, "failed to refresh session TTL")
-			}
-			return sess.ID, nil
-		}
-		if !errors.Is(err, session.ErrSessionNotFound) {
-			log.Error(err, "failed to resume session", "sessionID", sessionID)
+	// ensureSession runs for every message, so anything below this point costs a
+	// round trip per turn. Once this connection has established its session both
+	// questions are already settled: the context was resolved on the first
+	// message and the archive row was written then.
+	if sessionID != "" && sessionID == c.SessionID() && c.SessionPersisted() {
+		return sessionID, nil
+	}
+
+	if sessionID != "" && sessionID != c.SessionID() {
+		if err := s.requireResumableContext(ctx, sessionID, log); err != nil {
 			return "", err
 		}
-		// Session not found or expired — create with the requested ID so the
-		// client-visible session ID stays stable.
-		log.V(1).Info("session not found, creating", "sessionID", sessionID)
 	}
 
 	// virtual_user_id is a NOT-NULL column and session-api 400s an empty
@@ -275,7 +294,6 @@ func (s *Server) ensureSession(ctx context.Context, c *Connection, sessionID str
 		AgentName:         c.agentName,
 		Namespace:         c.namespace,
 		WorkspaceName:     c.workspaceName,
-		TTL:               s.config.SessionTTL,
 		PromptPackName:    s.config.PromptPackName,
 		PromptPackVersion: s.config.PromptPackVersion,
 		Tags:              buildSessionTags(c),
@@ -291,6 +309,43 @@ func (s *Server) ensureSession(ctx context.Context, c *Connection, sessionID str
 	s.metrics.SessionCreated()
 
 	return sess.ID, nil
+}
+
+// requireResumableContext asks the runtime whether sessionID's working context
+// still exists, returning errSessionExpired when it definitively does not.
+//
+// A store that cannot be reached yields an internal error rather than an
+// expiry. The distinction is the point of the check: reporting an unreachable
+// store as an expiry would discard a conversation whose context is intact.
+//
+// When the handler cannot answer (no runtime behind it), the probe is skipped
+// and the session is allowed through — the facade must not invent an expiry it
+// has no authority to declare.
+func (s *Server) requireResumableContext(ctx context.Context, sessionID string, log logr.Logger) error {
+	prober, ok := s.handler.(ResumeProber)
+	if !ok {
+		log.V(1).Info("resume probe skipped", "reason", "handler is not a ResumeProber",
+			"sessionID", sessionID)
+		return nil
+	}
+
+	state, err := prober.HasConversation(ctx, sessionID)
+	if err != nil {
+		log.Error(err, "resume probe failed", "sessionID", sessionID)
+		return fmt.Errorf("resume probe: %w", err)
+	}
+
+	switch state {
+	case ResumeStateResumable:
+		log.V(1).Info("session resumed", "sessionID", sessionID)
+		return nil
+	case ResumeStateNotFound:
+		log.V(1).Info("session not resumable", "sessionID", sessionID, "reason", "context expired")
+		return errSessionExpired
+	default:
+		log.V(1).Info("resume undetermined", "sessionID", sessionID, "reason", "context store unavailable")
+		return fmt.Errorf("resume probe: context store unavailable")
+	}
 }
 
 // virtualUserIDForSession returns the non-empty virtual_user_id to persist on

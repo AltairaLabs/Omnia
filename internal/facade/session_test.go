@@ -540,21 +540,23 @@ func (s *ensureSessionStore) CreateSession(ctx context.Context, opts session.Cre
 	return s.Store.CreateSession(ctx, opts)
 }
 
-func TestEnsureSession_DoesNotCreateOnGetSessionError(t *testing.T) {
+// A session-api read failure must no longer abort the message. session-api is
+// an archive, not the resume oracle, so its availability has no bearing on
+// whether a conversation can continue (#1876).
+func TestEnsureSession_ArchiveReadFailureDoesNotAbort(t *testing.T) {
 	backingStore := session.NewMemoryStore()
 	t.Cleanup(func() { _ = backingStore.Close() })
 
-	getErr := errors.New("session-api unavailable")
-	store := &ensureSessionStore{Store: backingStore, getErr: getErr}
+	store := &ensureSessionStore{Store: backingStore, getErr: errors.New("session-api unavailable")}
 	server := NewServer(DefaultServerConfig(), store, nil, logr.Discard())
 	conn := &Connection{agentName: "agent", namespace: "default", workspaceName: "ws"}
 
-	_, err := server.ensureSession(context.Background(), conn, "existing-session-id", logr.Discard())
-	if !errors.Is(err, getErr) {
-		t.Fatalf("ensureSession error = %v, want %v", err, getErr)
+	sessionID, err := server.ensureSession(context.Background(), conn, "existing-session-id", logr.Discard())
+	if err != nil {
+		t.Fatalf("ensureSession: %v", err)
 	}
-	if store.createCalls != 0 {
-		t.Fatalf("CreateSession called %d times, want 0", store.createCalls)
+	if sessionID != "existing-session-id" {
+		t.Fatalf("sessionID = %q, want %q", sessionID, "existing-session-id")
 	}
 }
 
@@ -607,8 +609,11 @@ func TestEnsureSession_ResumedSessionIncrementsSessionCreatedMetric(t *testing.T
 	if sessionID != "existing-session-id" {
 		t.Fatalf("sessionID = %q, want %q", sessionID, "existing-session-id")
 	}
-	if store.createCalls != 0 {
-		t.Fatalf("CreateSession called %d times, want 0", store.createCalls)
+	// The archive row is now written unconditionally rather than read first:
+	// CreateSession is INSERT ... WHERE NOT EXISTS, so this is create-if-absent
+	// and also restores the row for a session whose context outlived it.
+	if store.createCalls != 1 {
+		t.Fatalf("CreateSession called %d times, want 1", store.createCalls)
 	}
 	if metrics.sessionCreated != 1 {
 		t.Fatalf("SessionCreated metric calls = %d, want 1", metrics.sessionCreated)

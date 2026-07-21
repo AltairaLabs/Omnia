@@ -18,6 +18,7 @@
   - `DuplexStart` (first message of a duplex audio session) — switches the stream into `handleDuplexSession` mode, opening an `sdk.OpenDuplex` conversation. Fields: `codec`, `sample_rate`, `channels`, `system_instruction` (optional).
   - `AudioInputChunk` — subsequent audio frames forwarded via `pumpDuplexInput` → `conv.SendChunk`. `is_last` on a chunk signals stream end; the pipeline drains and the session closes.
   - **gRPC** `Invoke` (function mode) — one-shot `InvocationRequest` with `input_json` (already validated by the Facade against `spec.inputSchema`).
+- **gRPC** `HasConversation` — the Facade asks whether a session's working context can still be resumed before continuing a conversation the client named. The runtime owns the context store, so it is the only component that can answer: a session-api row proves a conversation once existed, not that its turns survive. Answers `RESUMABLE` / `NOT_FOUND` / `UNAVAILABLE`, where `UNAVAILABLE` means the store could not be consulted and is explicitly not an expiry. Probes through `MessageReader.MessageCount` so the check cannot extend the lifetime of what it measures (see PromptKit#1649).
 - **AgentRuntime CRD** (read directly via the k8s client at startup): `spec.mode`, `spec.outputFormat`, and `spec.outputSchema` (used to constrain function-mode output), alongside the PromptPack, provider, tools, and eval config.
 
 ## Outputs
@@ -45,7 +46,7 @@ conversation state across turns.
 | `spec.context.type` | `memory` (default) | In-process store; the runtime context (working LLM context) is ephemeral and lost when the pod restarts |
 | `spec.context.type` | `redis` | Durable, fast store; the runtime context survives pod restarts and is resumable cross-pod via `sdk.Resume` |
 | `spec.context.storeRef` | `name: <secret-name>` | Required when `type` is `redis`. References a Kubernetes Secret in the same namespace. The secret **must** contain a `url` key holding the connection URL (e.g. `redis://…`). |
-| `spec.context.ttl` | duration string (default `"24h"`) | How long idle conversation state is retained in the store. |
+| `spec.context.ttl` | duration string (default `"24h"`) | How long conversation state is retained in the store. Applied at store construction (`statestore.WithTTL` / `WithMemoryTTL`). **Note:** the two backends currently measure this differently — the memory store treats it as idle time and refreshes it on read, while Redis runs a fixed window from the last write (PromptKit#1649). |
 
 Only fast/instant stores back the **runtime context** (the working LLM context
 concatenated into each provider call) — `memory` or `redis`. This is distinct

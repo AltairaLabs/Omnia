@@ -372,3 +372,42 @@ func readServerMsg(t *testing.T, conn *websocket.Conn) ServerMessage {
 	}
 	return msg
 }
+
+// Parking defers completion because the conversation may yet resume. Expiry is
+// the point at which it definitively did not, so the archive row must reach a
+// terminal status there — otherwise every parked-then-expired session stays
+// "active" forever (#1876). This exercises the real onExpire wiring installed by
+// NewServer, not the registry callback in isolation.
+func TestParkExpiry_CompletesSession(t *testing.T) {
+	spy := &spySessionStore{Store: session.NewMemoryStore()}
+
+	s := NewServer(DefaultServerConfig(), spy, nil, logr.Discard(),
+		WithGraceWindow(20*time.Millisecond))
+
+	sink := &fakeDuplexSink{audio: make(chan []byte, 1)}
+	c := &Connection{
+		sessionID:        "sid-expire",
+		sessionPersisted: true,
+		userID:           testParkOwnerID,
+		intentionalClose: false,
+		audioSession:     newAudioSession("sid-expire", sink, nil),
+	}
+
+	if parked := s.parkOnClose(context.Background(), c); !parked {
+		t.Fatal("parkOnClose must park an unintentional close with an audio session")
+	}
+	// Nothing terminal yet — the session is still reattachable.
+	if got := spy.completedCalls(); got != 0 {
+		t.Fatalf("completion written while still parked: %d call(s), want 0", got)
+	}
+
+	// Wait for the grace window to elapse and the completion write to drain.
+	deadline := time.Now().Add(2 * time.Second)
+	for spy.completedCalls() == 0 && time.Now().Before(deadline) {
+		time.Sleep(2 * time.Millisecond)
+	}
+
+	if got := spy.completedCalls(); got != 1 {
+		t.Fatalf("UpdateSessionStatus(Completed) called %d time(s) after park expiry, want 1", got)
+	}
+}

@@ -171,8 +171,8 @@ Doctor read that status to dial the management plane. See
 | Dashboard | LSP | WebSocket | Code intelligence for Arena |
 | Dashboard | Dev Console | WebSocket | Interactive agent testing |
 | `promptarena-deploy-omnia` (external adapter) | Dashboard | HTTP | Deploy program: creates PromptPack + AgentRuntime through the workspace CRD REST API with a workspace-scoped `omnia_sk_` token. The adapter authors the AgentRuntime body — see the schema-version contract in [deploy-program.md](docs/src/content/docs/explanation/platform/deploy-program.md). |
-| Facade | Runtime | gRPC (bidirectional) | LLM conversation stream; duplex audio transport (persistent `Converse` stream opened per audio session, carrying `AudioInputChunk` inbound and `MediaChunk` outbound) |
-| Facade | Session API | HTTP | Session recording — conversation messages are captured off the gRPC bus by a protocol-agnostic RuntimeClient interceptor (#1630), then written via the session HTTP client |
+| Facade | Runtime | gRPC (bidirectional) | LLM conversation stream; duplex audio transport (persistent `Converse` stream opened per audio session, carrying `AudioInputChunk` inbound and `MediaChunk` outbound); `HasConversation` resume probe — the Runtime owns the context store, so it is the sole authority on whether a session can be continued (#1876) |
+| Facade | Session API | HTTP | Session recording — conversation messages are captured off the gRPC bus by a protocol-agnostic RuntimeClient interceptor (#1630), then written via the session HTTP client. **Write-only on the message path**: session-api is never read to decide whether a conversation can be resumed (#1876) |
 | Facade | Redis | Direct | Realtime session route table (`rt:route:<session_id>`→podIP, TTL=grace period) for reconnect routing in multi-replica deployments |
 | Runtime | Session API | HTTP | Event recording |
 | Memory API | Privacy API | HTTP | Audit drain-forwarder: `POST /api/v1/privacy/audit-events` ships local enforcement audit rows to the central audit hub, at-least-once (#1673) |
