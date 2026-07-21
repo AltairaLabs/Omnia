@@ -1497,7 +1497,7 @@ var _ = Describe("AgentRuntime Controller", func() {
 			Expect(promptVol.ConfigMap.Name).To(Equal("prompts-config"))
 		})
 
-		It("should handle ToolRegistry in different namespace", func() {
+		It("should reject a cross-namespace ToolRegistry reference", func() {
 			By("creating a PromptPack")
 			promptPack := &omniav1alpha1.PromptPack{
 				ObjectMeta: metav1.ObjectMeta{
@@ -1541,18 +1541,22 @@ var _ = Describe("AgentRuntime Controller", func() {
 			}
 			Expect(k8sClient.Create(ctx, agentRuntime)).To(Succeed())
 
-			By("reconciling - should fail to find ToolRegistry in other namespace")
+			By("reconciling - cross-namespace refs are rejected (#1874)")
 			_, _ = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: agentRuntimeKey})
 			_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: agentRuntimeKey})
-			// ToolRegistry is optional, so reconciliation should still succeed
-			Expect(err).NotTo(HaveOccurred())
+			// Cross-namespace references are not supported: the agent pod's Role is
+			// namespace-scoped so it can never read the registry, and registry-scoped
+			// ToolPolicies would silently fail to match. Reconcile must fail loudly.
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("cross-namespace"))
 
-			By("verifying ToolRegistryReady condition reflects the failure")
+			By("verifying ToolRegistryReady=False with the cross-namespace reason")
 			updated := &omniav1alpha1.AgentRuntime{}
 			Expect(k8sClient.Get(ctx, agentRuntimeKey, updated)).To(Succeed())
 			toolRegistryCond := meta.FindStatusCondition(updated.Status.Conditions, ConditionTypeToolRegistryReady)
 			Expect(toolRegistryCond).NotTo(BeNil())
 			Expect(toolRegistryCond.Status).To(Equal(metav1.ConditionFalse))
+			Expect(toolRegistryCond.Reason).To(Equal(reasonToolRegistryCrossNamespace))
 		})
 
 		It("should create HPA when HPA autoscaling is enabled", func() {
