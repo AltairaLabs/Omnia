@@ -464,3 +464,37 @@ func TestDispatch_PolicyBrokerDisabled_NoBehaviorChange(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, string(result), "ok")
 }
+
+// TestDispatch_RegistryConfiguredButIdentityUnknown_FailsClosed proves the
+// #1874 hardening: when a ToolRegistry is configured for the agent but a tool's
+// registry identity cannot be resolved (no per-tool ToolMeta), enforcePolicy
+// DENIES rather than falling back to the handler name — which would let a
+// registry-scoped ToolPolicy silently not match and allow the call. No broker
+// is needed: the deny happens before the broker is consulted.
+func TestDispatch_RegistryConfiguredButIdentityUnknown_FailsClosed(t *testing.T) {
+	t.Setenv(envPolicyBrokerURL, "")
+
+	toolCalled := false
+	toolSrv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
+		toolCalled = true
+	}))
+	defer toolSrv.Close()
+
+	e := NewOmniaExecutor(logr.Discard(), nil)
+	// A ToolRegistry is configured for the agent. Recording it with no handler
+	// entries (and before any tool is registered) leaves per-tool ToolMeta
+	// unset — the "registry configured but identity unknown" state.
+	e.SetRegistryInfo("orders", "agent-ns", nil)
+	e.handlers["test-http"] = &HandlerEntry{
+		Name:       "test-http",
+		Type:       ToolTypeHTTP,
+		HTTPConfig: &HTTPCfg{Endpoint: toolSrv.URL, Method: "POST"},
+		Tool:       &ToolDefCfg{Name: "test-http-tool", Description: "test tool"},
+	}
+	e.toolHandlers["test-http-tool"] = "test-http"
+
+	_, err := e.ExecuteTool(context.Background(), "test-http-tool", json.RawMessage(`{}`))
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, errPolicyDenied), "expected errPolicyDenied, got %v", err)
+	assert.False(t, toolCalled, "tool backend must not be called when registry identity is unknown")
+}

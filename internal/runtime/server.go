@@ -653,6 +653,15 @@ func (s *Server) SetToolRegistryInfo(registryName, registryNamespace string, han
 	s.toolExecutor.SetRegistryInfo(registryName, registryNamespace, handlers)
 }
 
+// ServerToolRegistryInfo exposes the registry name/namespace recorded on the
+// tool executor. Test-only accessor — production code should not depend on it.
+func ServerToolRegistryInfo(s *Server) (string, string) {
+	if s == nil || s.toolExecutor == nil {
+		return "", ""
+	}
+	return s.toolExecutor.RegistryName(), s.toolExecutor.RegistryNamespace()
+}
+
 // SetHealthy sets the server health status.
 func (s *Server) SetHealthy(healthy bool) {
 	s.mu.Lock()

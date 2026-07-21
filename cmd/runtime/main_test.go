@@ -17,12 +17,53 @@ limitations under the License.
 package main
 
 import (
+	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/go-logr/logr"
 	"github.com/go-logr/logr/funcr"
+
+	pkruntime "github.com/altairalabs/omnia/internal/runtime"
 )
+
+// TestEnrichToolRegistryMeta_NoKubernetesAccess proves enrichment records
+// registry provenance from Config alone, with no Kubernetes client — the whole
+// point of removing the vestigial ToolRegistry GET. The previous implementation
+// called k8s.NewClient()/GetToolRegistry and returned early on failure, so this
+// was impossible before.
+func TestEnrichToolRegistryMeta_NoKubernetesAccess(t *testing.T) {
+	dir := t.TempDir()
+	toolsPath := filepath.Join(dir, "tools.yaml")
+	if err := os.WriteFile(toolsPath, []byte("handlers: []\n"), 0o600); err != nil {
+		t.Fatalf("write tools config: %v", err)
+	}
+
+	cfg := &pkruntime.Config{
+		ToolRegistryName:      "orders",
+		ToolRegistryNamespace: "other-ns",
+		ToolsConfigPath:       toolsPath,
+	}
+
+	// Mirror production ordering: InitializeTools creates the executor that
+	// SetToolRegistryInfo records onto. It touches no Kubernetes API.
+	server := pkruntime.NewServer(pkruntime.WithToolsConfig(toolsPath))
+	if err := server.InitializeTools(context.Background()); err != nil {
+		t.Fatalf("InitializeTools: %v", err)
+	}
+
+	// No KUBECONFIG, no in-cluster service account: any Kubernetes call fails.
+	t.Setenv("KUBECONFIG", filepath.Join(dir, "does-not-exist"))
+
+	enrichToolRegistryMeta(cfg, server, logr.Discard())
+
+	name, ns := pkruntime.ServerToolRegistryInfo(server)
+	if name != "orders" || ns != "other-ns" {
+		t.Fatalf("registry info = (%q,%q), want (\"orders\",\"other-ns\")", name, ns)
+	}
+}
 
 func TestWarnIfCustomTruncation(t *testing.T) {
 	cases := []struct {

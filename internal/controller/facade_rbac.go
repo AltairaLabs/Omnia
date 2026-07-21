@@ -194,7 +194,11 @@ func (r *AgentRuntimeReconciler) reconcileRole(
 		role.Rules = []rbacv1.PolicyRule{
 			{
 				APIGroups: []string{"omnia.altairalabs.ai"},
-				Resources: []string{"agentruntimes", "providers", "toolregistries"},
+				// toolregistries removed: the runtime's only GET was vestigial
+				// (it consumed just the lookup key it supplied) and 403'd on
+				// cross-namespace refs, silently disabling registry-scoped
+				// ToolPolicies. Registry provenance now comes from Config.
+				Resources: []string{"agentruntimes", "providers"},
 				Verbs:     []string{"get"},
 			},
 			{
