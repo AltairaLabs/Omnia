@@ -53,7 +53,7 @@ func (s *invokerStub) Invoke(_ context.Context, req *runtimev1.InvocationRequest
 type invokerSessionStore struct {
 	session.Store
 	mu        sync.Mutex
-	creates   []session.CreateSessionOptions
+	creates   []session.SessionRecordOptions
 	events    []session.RuntimeEvent
 	statuses  []session.SessionStatusUpdate
 	createErr error
@@ -61,7 +61,7 @@ type invokerSessionStore struct {
 	eventErr  error
 }
 
-func (s *invokerSessionStore) CreateSession(_ context.Context, opts session.CreateSessionOptions) (*session.Session, error) {
+func (s *invokerSessionStore) EnsureSessionRecord(_ context.Context, opts session.SessionRecordOptions) (*session.Session, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.creates = append(s.creates, opts)

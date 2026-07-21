@@ -171,7 +171,7 @@ type ResponseWriter interface {
 type Server struct {
 	config          ServerConfig
 	upgrader        websocket.Upgrader
-	sessionStore    session.Store
+	sessionStore    session.Recorder
 	handler         MessageHandler
 	metrics         ServerMetrics
 	mediaStorage    media.Storage
@@ -368,7 +368,7 @@ func WithGraceWindow(d time.Duration) ServerOption {
 }
 
 // NewServer creates a new WebSocket server.
-func NewServer(cfg ServerConfig, store session.Store, handler MessageHandler, log logr.Logger, opts ...ServerOption) *Server {
+func NewServer(cfg ServerConfig, store session.Recorder, handler MessageHandler, log logr.Logger, opts ...ServerOption) *Server {
 	s := &Server{
 		config:       cfg,
 		sessionStore: store,

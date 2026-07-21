@@ -23,7 +23,7 @@ import (
 	"github.com/go-logr/logr"
 
 	"github.com/altairalabs/omnia/internal/agent"
-	"github.com/altairalabs/omnia/internal/session"
+	"github.com/altairalabs/omnia/internal/session/sessiontest"
 )
 
 const probeAgentName = "probe"
@@ -45,7 +45,7 @@ func TestBuildWebSocketServer_WiresRedisRouteStore(t *testing.T) {
 	t.Setenv("OMNIA_ROUTE_REDIS_URL", "redis://"+mr.Addr())
 	t.Setenv("POD_IP", "10.0.0.1")
 
-	store := session.NewMemoryStore()
+	store := sessiontest.NewStore()
 	t.Cleanup(func() { _ = store.Close() })
 
 	cfg := &agent.Config{
@@ -79,7 +79,7 @@ func TestBuildWebSocketServer_NoopRouteStoreWhenEnvUnset(t *testing.T) {
 	// Explicitly unset to avoid leakage from other tests in the package.
 	t.Setenv("OMNIA_ROUTE_REDIS_URL", "")
 
-	store := session.NewMemoryStore()
+	store := sessiontest.NewStore()
 	t.Cleanup(func() { _ = store.Close() })
 
 	cfg := &agent.Config{

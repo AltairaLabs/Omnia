@@ -36,7 +36,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/altairalabs/omnia/internal/session"
+	"github.com/altairalabs/omnia/internal/session/sessiontest"
 	"github.com/altairalabs/omnia/pkg/facade/auth"
 	"github.com/altairalabs/omnia/pkg/identity"
 	"github.com/altairalabs/omnia/pkg/policy"
@@ -119,7 +119,7 @@ func newAuthTestServer(t *testing.T, v auth.Validator) (*httptest.Server, <-chan
 		},
 	}
 
-	store := session.NewMemoryStore()
+	store := sessiontest.NewStore()
 	cfg := DefaultServerConfig()
 	cfg.PingInterval = 100 * time.Millisecond
 	cfg.PongTimeout = 200 * time.Millisecond
@@ -292,7 +292,7 @@ func TestServerAuth_BearerChain_AdmitsBeforeMgmtPlane(t *testing.T) {
 			return w.WriteDone("echo: " + msg.Content)
 		},
 	}
-	store := session.NewMemoryStore()
+	store := sessiontest.NewStore()
 	cfg := DefaultServerConfig()
 	cfg.PingInterval = 100 * time.Millisecond
 	cfg.PongTimeout = 200 * time.Millisecond
@@ -326,7 +326,7 @@ func TestServerAuth_BearerChain_RejectsWrongToken(t *testing.T) {
 	chain := auth.Chain{&testBearerValidator{token: "expected-token"}, mgmt}
 
 	cfg := DefaultServerConfig()
-	store := session.NewMemoryStore()
+	store := sessiontest.NewStore()
 	server := NewServer(cfg, store, &mockHandler{}, logr.Discard(), WithAuthChain(chain))
 	ts := httptest.NewServer(server)
 	t.Cleanup(func() { ts.Close(); _ = store.Close() })
@@ -379,7 +379,7 @@ func TestServerAuth_IdentityClaims_PropagatedToHeaders(t *testing.T) {
 			return w.WriteDone("echo: " + msg.Content)
 		},
 	}
-	store := session.NewMemoryStore()
+	store := sessiontest.NewStore()
 	cfg := DefaultServerConfig()
 	cfg.PingInterval = 100 * time.Millisecond
 	cfg.PongTimeout = 200 * time.Millisecond
@@ -495,7 +495,7 @@ func TestServerAuth_NonMgmtPlane_IgnoresUserIDHeader(t *testing.T) {
 			return w.WriteDone("echo: " + msg.Content)
 		},
 	}
-	store := session.NewMemoryStore()
+	store := sessiontest.NewStore()
 	cfg := DefaultServerConfig()
 	cfg.PingInterval = 100 * time.Millisecond
 	cfg.PongTimeout = 200 * time.Millisecond

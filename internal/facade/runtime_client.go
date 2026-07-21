@@ -61,7 +61,7 @@ type RuntimeClientConfig struct {
 	// SessionStore, RecordingPool and RecordingPolicy enable the bus recorder —
 	// the protocol-agnostic recording of conversation messages off the bus. When
 	// any is nil the recording interceptors are no-ops (e.g. doctor/tests).
-	SessionStore    session.Store
+	SessionStore    session.Recorder
 	RecordingPool   *RecordingPool
 	RecordingPolicy recordingPolicyGetter
 }

@@ -27,7 +27,7 @@ import (
 // mockSessionStore implements session.Store for testing session creation and status updates.
 type mockSessionStore struct {
 	mu              sync.Mutex
-	createdSessions []session.CreateSessionOptions
+	createdSessions []session.SessionRecordOptions
 	statusUpdates   map[string]session.SessionStatusUpdate
 	messages        map[string][]session.Message
 	providerCalls   map[string][]session.ProviderCall
@@ -44,8 +44,8 @@ func newMockStore() *mockSessionStore {
 	}
 }
 
-func (m *mockSessionStore) CreateSession(
-	_ context.Context, opts session.CreateSessionOptions,
+func (m *mockSessionStore) EnsureSessionRecord(
+	_ context.Context, opts session.SessionRecordOptions,
 ) (*session.Session, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -118,10 +118,10 @@ func (m *mockSessionStore) GetRuntimeEvents(_ context.Context, _ string, _, _ in
 }
 func (m *mockSessionStore) Close() error { return nil }
 
-func (m *mockSessionStore) getCreatedSessions() []session.CreateSessionOptions {
+func (m *mockSessionStore) getCreatedSessions() []session.SessionRecordOptions {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return append([]session.CreateSessionOptions{}, m.createdSessions...)
+	return append([]session.SessionRecordOptions{}, m.createdSessions...)
 }
 
 func (m *mockSessionStore) getStatusUpdates() map[string]session.SessionStatusUpdate {
@@ -134,11 +134,11 @@ func (m *mockSessionStore) getStatusUpdates() map[string]session.SessionStatusUp
 	return out
 }
 
-// failingSessionStore returns an error on CreateSession.
+// failingSessionStore returns an error on EnsureSessionRecord.
 type failingSessionStore struct{ mockSessionStore }
 
-func (f *failingSessionStore) CreateSession(
-	_ context.Context, _ session.CreateSessionOptions,
+func (f *failingSessionStore) EnsureSessionRecord(
+	_ context.Context, _ session.SessionRecordOptions,
 ) (*session.Session, error) {
 	return nil, errors.New("connection refused")
 }
@@ -151,8 +151,8 @@ type failThenSucceedStore struct {
 	calls     int
 }
 
-func (f *failThenSucceedStore) CreateSession(
-	ctx context.Context, opts session.CreateSessionOptions,
+func (f *failThenSucceedStore) EnsureSessionRecord(
+	ctx context.Context, opts session.SessionRecordOptions,
 ) (*session.Session, error) {
 	f.mu.Lock()
 	f.calls++
@@ -161,7 +161,7 @@ func (f *failThenSucceedStore) CreateSession(
 	if shouldFail {
 		return nil, errors.New("connection refused")
 	}
-	return f.mockSessionStore.CreateSession(ctx, opts)
+	return f.mockSessionStore.EnsureSessionRecord(ctx, opts)
 }
 
 func TestRunIDToUUID(t *testing.T) {
@@ -395,7 +395,7 @@ func TestArenaSessionManager_CompleteAll_FailedRun(t *testing.T) {
 	assert.Equal(t, session.SessionStatusError, updates[uuidFail].SetStatus, "failed run should be error")
 }
 
-func TestArenaSessionManager_OnEvent_CreateSessionError(t *testing.T) {
+func TestArenaSessionManager_OnEvent_EnsureSessionRecordError(t *testing.T) {
 	store := &failingSessionStore{}
 	mgr := newArenaSessionManager(store, logr.Discard(), arenaSessionMetadata{
 		JobName:    "test-job",
@@ -403,7 +403,7 @@ func TestArenaSessionManager_OnEvent_CreateSessionError(t *testing.T) {
 		ProviderID: "openai",
 	}, "test-item")
 
-	// Should not panic on CreateSession error
+	// Should not panic on EnsureSessionRecord error
 	mgr.OnEvent(&events.Event{
 		Type:      events.EventProviderCallCompleted,
 		SessionID: "run-fail",
@@ -422,7 +422,7 @@ func TestArenaSessionManager_OnEvent_CreateSessionError(t *testing.T) {
 	// CompleteAll should handle empty sessions gracefully (no sessions created due to errors)
 	mgr.CompleteAll(context.Background())
 
-	// No sessions should have been created since CreateSession always fails
+	// No sessions should have been created since EnsureSessionRecord always fails
 	assert.Empty(t, store.getCreatedSessions(), "no sessions created when store fails")
 }
 

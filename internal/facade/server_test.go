@@ -32,7 +32,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/altairalabs/omnia/internal/media"
-	"github.com/altairalabs/omnia/internal/session"
+	"github.com/altairalabs/omnia/internal/session/sessiontest"
 	"github.com/altairalabs/omnia/internal/tracing"
 )
 
@@ -60,8 +60,20 @@ func (m *mockHandler) HandleMessage(ctx context.Context, sessionID string, msg *
 
 func newTestServer(t *testing.T, handler MessageHandler) (*Server, *httptest.Server) {
 	t.Helper()
+	server, ts, _ := newTestServerWithStore(t, handler)
+	return server, ts
+}
 
-	store := session.NewMemoryStore()
+// newTestServerWithStore is newTestServer for tests that need to assert against
+// the archive. The facade holds a session.Recorder, which is write-only by
+// design (#1876), so a test verifying what was recorded reads its own double
+// rather than reaching back through the server.
+func newTestServerWithStore(
+	t *testing.T, handler MessageHandler,
+) (*Server, *httptest.Server, *sessiontest.Store) {
+	t.Helper()
+
+	store := sessiontest.NewStore()
 	cfg := DefaultServerConfig()
 	cfg.PingInterval = 100 * time.Millisecond
 	cfg.PongTimeout = 200 * time.Millisecond
@@ -75,7 +87,7 @@ func newTestServer(t *testing.T, handler MessageHandler) (*Server, *httptest.Ser
 		_ = store.Close()
 	})
 
-	return server, ts
+	return server, ts, store
 }
 
 func wsURL(httpURL string) string {
@@ -444,7 +456,7 @@ func TestServerRejectsAfterShutdown(t *testing.T) {
 }
 
 func TestServerRejectsWhenConnectionLimitReached(t *testing.T) {
-	store := session.NewMemoryStore()
+	store := sessiontest.NewStore()
 	cfg := DefaultServerConfig()
 	cfg.PingInterval = 100 * time.Millisecond
 	cfg.PongTimeout = 200 * time.Millisecond
@@ -536,7 +548,7 @@ func TestServerWithMetrics(t *testing.T) {
 	metrics := &NoOpMetrics{}
 	config := DefaultServerConfig()
 	log := logr.Discard()
-	store := session.NewMemoryStore()
+	store := sessiontest.NewStore()
 	server := NewServer(config, store, nil, log, WithMetrics(metrics))
 	defer func() { _ = store.Close() }()
 
@@ -559,7 +571,7 @@ func TestServerWithTracingProvider(t *testing.T) {
 		},
 	}
 
-	store := session.NewMemoryStore()
+	store := sessiontest.NewStore()
 	cfg := DefaultServerConfig()
 	cfg.PingInterval = 100 * time.Millisecond
 	cfg.PongTimeout = 200 * time.Millisecond
@@ -600,7 +612,7 @@ func TestServerWithTracingProvider(t *testing.T) {
 }
 
 func TestServerPingPong(t *testing.T) {
-	store := session.NewMemoryStore()
+	store := sessiontest.NewStore()
 	cfg := DefaultServerConfig()
 	// Short ping interval to test ping loop quickly
 	cfg.PingInterval = 50 * time.Millisecond
@@ -664,7 +676,7 @@ func TestServerSendPingClosedConnection(t *testing.T) {
 		closed: true,
 	}
 
-	store := session.NewMemoryStore()
+	store := sessiontest.NewStore()
 	cfg := DefaultServerConfig()
 	log := logr.Discard()
 	server := NewServer(cfg, store, nil, log)
@@ -933,7 +945,7 @@ func (m *mockMediaStorage) Close() error {
 func newTestServerWithMedia(t *testing.T, handler MessageHandler, storage media.Storage) *httptest.Server {
 	t.Helper()
 
-	store := session.NewMemoryStore()
+	store := sessiontest.NewStore()
 	cfg := DefaultServerConfig()
 	cfg.PingInterval = 100 * time.Millisecond
 	cfg.PongTimeout = 200 * time.Millisecond
@@ -1118,7 +1130,7 @@ func TestServerUploadRequest_StorageError(t *testing.T) {
 
 func TestWithMediaStorage(t *testing.T) {
 	storage := &mockMediaStorage{}
-	store := session.NewMemoryStore()
+	store := sessiontest.NewStore()
 	defer func() { _ = store.Close() }()
 
 	cfg := DefaultServerConfig()
@@ -1458,7 +1470,7 @@ func TestParseAllowedOrigins(t *testing.T) {
 
 func TestServerCheckOrigin_SameOriginDefault(t *testing.T) {
 	// Without allowed origins, the server should use same-origin policy
-	store := session.NewMemoryStore()
+	store := sessiontest.NewStore()
 	cfg := DefaultServerConfig()
 	log := logr.Discard()
 
@@ -1496,7 +1508,7 @@ func TestServerCheckOrigin_SameOriginDefault(t *testing.T) {
 }
 
 func TestServerCheckOrigin_WithAllowedOrigins(t *testing.T) {
-	store := session.NewMemoryStore()
+	store := sessiontest.NewStore()
 	cfg := DefaultServerConfig()
 	log := logr.Discard()
 
@@ -1534,7 +1546,7 @@ func TestServerCheckOrigin_WithAllowedOrigins(t *testing.T) {
 }
 
 func TestServerCheckOrigin_FromEnvVar(t *testing.T) {
-	store := session.NewMemoryStore()
+	store := sessiontest.NewStore()
 	cfg := DefaultServerConfig()
 	log := logr.Discard()
 
@@ -1600,7 +1612,7 @@ func TestSessionStats_ClientToolCallFlow(t *testing.T) {
 		toolResultCh: make(chan *ClientToolResultInfo, 1),
 	}
 
-	store := session.NewMemoryStore()
+	store := sessiontest.NewStore()
 	cfg := DefaultServerConfig()
 	cfg.PingInterval = 100 * time.Millisecond
 	cfg.PongTimeout = 200 * time.Millisecond
@@ -1661,7 +1673,7 @@ func TestSessionStats_ClientToolCallFlow(t *testing.T) {
 }
 
 func TestServerWithAllowedOrigins(t *testing.T) {
-	store := session.NewMemoryStore()
+	store := sessiontest.NewStore()
 	cfg := DefaultServerConfig()
 	log := logr.Discard()
 

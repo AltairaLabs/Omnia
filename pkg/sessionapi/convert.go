@@ -62,8 +62,8 @@ func uuidToString(u *openapi_types.UUID) string {
 
 // --- Request conversions (internal → generated) ---
 
-// SessionToAPI converts internal CreateSessionOptions to a generated CreateSessionRequest.
-func SessionToAPI(id string, opts session.CreateSessionOptions) CreateSessionRequest {
+// SessionToAPI converts internal SessionRecordOptions to a generated CreateSessionRequest.
+func SessionToAPI(id string, opts session.SessionRecordOptions) CreateSessionRequest {
 	req := CreateSessionRequest{
 		Id:                uuidPtr(id),
 		AgentName:         ptr(opts.AgentName),

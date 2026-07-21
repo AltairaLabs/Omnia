@@ -26,7 +26,7 @@ type recordingPolicyGetter interface {
 // calls, and pipeline events are the runtime's responsibility (event_store) and
 // are deliberately NOT recorded here.
 type busRecorder struct {
-	store  session.Store
+	store  session.Recorder
 	pool   *RecordingPool
 	policy recordingPolicyGetter
 	log    logr.Logger
@@ -34,7 +34,7 @@ type busRecorder struct {
 
 // newBusRecorder returns a recorder, or nil if recording isn't wired (store or
 // pool absent) — in which case the interceptors are no-ops.
-func newBusRecorder(store session.Store, pool *RecordingPool, policy recordingPolicyGetter, log logr.Logger) *busRecorder {
+func newBusRecorder(store session.Recorder, pool *RecordingPool, policy recordingPolicyGetter, log logr.Logger) *busRecorder {
 	if store == nil || pool == nil || policy == nil {
 		return nil
 	}

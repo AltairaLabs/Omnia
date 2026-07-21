@@ -66,7 +66,7 @@ func TestUuidToString(t *testing.T) {
 
 func TestSessionToAPI(t *testing.T) {
 	id := uuid.New().String()
-	opts := session.CreateSessionOptions{
+	opts := session.SessionRecordOptions{
 		AgentName:         "agent-1",
 		Namespace:         "default",
 		WorkspaceName:     "ws-1",
@@ -88,7 +88,7 @@ func TestSessionToAPI(t *testing.T) {
 
 func TestSessionToAPI_Minimal(t *testing.T) {
 	id := uuid.New().String()
-	result := SessionToAPI(id, session.CreateSessionOptions{
+	result := SessionToAPI(id, session.SessionRecordOptions{
 		AgentName: "a",
 		Namespace: "ns",
 	})
@@ -102,7 +102,7 @@ func TestSessionToAPI_Minimal(t *testing.T) {
 
 func TestSessionToAPI_WithTags(t *testing.T) {
 	id := uuid.New().String()
-	result := SessionToAPI(id, session.CreateSessionOptions{
+	result := SessionToAPI(id, session.SessionRecordOptions{
 		AgentName: "a",
 		Namespace: "ns",
 		Tags:      []string{"tag1", "tag2"},
@@ -114,7 +114,7 @@ func TestSessionToAPI_WithTags(t *testing.T) {
 
 func TestSessionToAPI_EmptyTags(t *testing.T) {
 	id := uuid.New().String()
-	result := SessionToAPI(id, session.CreateSessionOptions{
+	result := SessionToAPI(id, session.SessionRecordOptions{
 		AgentName: "a",
 		Namespace: "ns",
 		Tags:      []string{},
@@ -125,7 +125,7 @@ func TestSessionToAPI_EmptyTags(t *testing.T) {
 
 func TestSessionToAPI_WithInitialState(t *testing.T) {
 	id := uuid.New().String()
-	result := SessionToAPI(id, session.CreateSessionOptions{
+	result := SessionToAPI(id, session.SessionRecordOptions{
 		AgentName:    "a",
 		Namespace:    "ns",
 		InitialState: map[string]string{"key": "value", "foo": "bar"},
@@ -137,7 +137,7 @@ func TestSessionToAPI_WithInitialState(t *testing.T) {
 
 func TestSessionToAPI_EmptyInitialState(t *testing.T) {
 	id := uuid.New().String()
-	result := SessionToAPI(id, session.CreateSessionOptions{
+	result := SessionToAPI(id, session.SessionRecordOptions{
 		AgentName:    "a",
 		Namespace:    "ns",
 		InitialState: map[string]string{},
@@ -148,7 +148,7 @@ func TestSessionToAPI_EmptyInitialState(t *testing.T) {
 
 func TestSessionToAPI_WithCohortFields(t *testing.T) {
 	id := uuid.New().String()
-	result := SessionToAPI(id, session.CreateSessionOptions{
+	result := SessionToAPI(id, session.SessionRecordOptions{
 		AgentName: "a",
 		Namespace: "ns",
 		CohortID:  "cohort-42",
@@ -163,7 +163,7 @@ func TestSessionToAPI_WithCohortFields(t *testing.T) {
 
 func TestSessionToAPI_EmptyCohortFields(t *testing.T) {
 	id := uuid.New().String()
-	result := SessionToAPI(id, session.CreateSessionOptions{
+	result := SessionToAPI(id, session.SessionRecordOptions{
 		AgentName: "a",
 		Namespace: "ns",
 	})
@@ -174,7 +174,7 @@ func TestSessionToAPI_EmptyCohortFields(t *testing.T) {
 
 func TestSessionToAPI_WithVirtualUserID(t *testing.T) {
 	id := uuid.New().String()
-	result := SessionToAPI(id, session.CreateSessionOptions{
+	result := SessionToAPI(id, session.SessionRecordOptions{
 		AgentName:     "a",
 		Namespace:     "ns",
 		VirtualUserID: "vu-42",
@@ -186,7 +186,7 @@ func TestSessionToAPI_WithVirtualUserID(t *testing.T) {
 
 func TestSessionToAPI_EmptyVirtualUserID(t *testing.T) {
 	id := uuid.New().String()
-	result := SessionToAPI(id, session.CreateSessionOptions{
+	result := SessionToAPI(id, session.SessionRecordOptions{
 		AgentName: "a",
 		Namespace: "ns",
 	})

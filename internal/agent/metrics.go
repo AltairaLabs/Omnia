@@ -325,13 +325,15 @@ func (m *Metrics) SessionClosed() {
 // truth.
 const (
 	SessionStoreModeHTTPClient = "httpclient"
-	SessionStoreModeMemory     = "memory"
+	// SessionStoreModeNone means no archive is configured: session-api could
+	// not be discovered, so no session/token/cost data is recorded.
+	SessionStoreModeNone = "none"
 )
 
 // sessionStoreModes is every mode the SessionStore gauge reports, so setting one
 // active also resets the others to 0 (avoids a stale "1" lingering after a mode
 // change across restarts on a re-used series).
-var sessionStoreModes = []string{SessionStoreModeHTTPClient, SessionStoreModeMemory}
+var sessionStoreModes = []string{SessionStoreModeHTTPClient, SessionStoreModeNone}
 
 // SetSessionStoreMode marks the active session-store mode (1) and the rest (0).
 func (m *Metrics) SetSessionStoreMode(mode string) {

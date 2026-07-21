@@ -42,6 +42,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/altairalabs/omnia/internal/session"
+	"github.com/altairalabs/omnia/internal/session/sessiontest"
 	"github.com/altairalabs/omnia/internal/tracing"
 	"github.com/altairalabs/omnia/pkg/facade/auth"
 	"github.com/altairalabs/omnia/pkg/identity"
@@ -85,7 +86,7 @@ func findSpanAttr(span tracetest.SpanStub, key string) (attribute.Value, bool) {
 func newTestServerWithTracing(t *testing.T, handler MessageHandler, provider *tracing.Provider) *httptest.Server {
 	t.Helper()
 
-	store := session.NewMemoryStore()
+	store := sessiontest.NewStore()
 	cfg := DefaultServerConfig()
 	cfg.PingInterval = 100 * time.Millisecond
 	cfg.PongTimeout = 200 * time.Millisecond
@@ -350,7 +351,7 @@ func TestProcessMessage_NoTracingProvider(t *testing.T) {
 // authenticated connection carries VirtualUserID = c.userID, so the NOT-NULL
 // virtual_user_id column on the session is populated for attribution.
 func TestEnsureSession_SetsVirtualUserID(t *testing.T) {
-	store := session.NewMemoryStore()
+	store := sessiontest.NewStore()
 	t.Cleanup(func() { _ = store.Close() })
 
 	cfg := DefaultServerConfig()
@@ -382,7 +383,7 @@ func TestEnsureSession_SetsVirtualUserID(t *testing.T) {
 // to PseudonymizeID(sessionID) so the NOT-NULL create still succeeds and each
 // anonymous session becomes its own deterministic virtual user.
 func TestEnsureSession_AnonymousFallbackVirtualUserID(t *testing.T) {
-	store := session.NewMemoryStore()
+	store := sessiontest.NewStore()
 	t.Cleanup(func() { _ = store.Close() })
 
 	cfg := DefaultServerConfig()
@@ -535,16 +536,16 @@ func (s *ensureSessionStore) GetSession(ctx context.Context, sessionID string) (
 	return s.Store.GetSession(ctx, sessionID)
 }
 
-func (s *ensureSessionStore) CreateSession(ctx context.Context, opts session.CreateSessionOptions) (*session.Session, error) {
+func (s *ensureSessionStore) EnsureSessionRecord(ctx context.Context, opts session.SessionRecordOptions) (*session.Session, error) {
 	s.createCalls++
-	return s.Store.CreateSession(ctx, opts)
+	return s.Store.EnsureSessionRecord(ctx, opts)
 }
 
 // A session-api read failure must no longer abort the message. session-api is
 // an archive, not the resume oracle, so its availability has no bearing on
 // whether a conversation can continue (#1876).
 func TestEnsureSession_ArchiveReadFailureDoesNotAbort(t *testing.T) {
-	backingStore := session.NewMemoryStore()
+	backingStore := sessiontest.NewStore()
 	t.Cleanup(func() { _ = backingStore.Close() })
 
 	store := &ensureSessionStore{Store: backingStore, getErr: errors.New("session-api unavailable")}
@@ -561,7 +562,7 @@ func TestEnsureSession_ArchiveReadFailureDoesNotAbort(t *testing.T) {
 }
 
 func TestEnsureSession_CreatesWhenSessionNotFound(t *testing.T) {
-	backingStore := session.NewMemoryStore()
+	backingStore := sessiontest.NewStore()
 	t.Cleanup(func() { _ = backingStore.Close() })
 
 	store := &ensureSessionStore{Store: backingStore, getErr: session.ErrSessionNotFound}
@@ -576,7 +577,7 @@ func TestEnsureSession_CreatesWhenSessionNotFound(t *testing.T) {
 		t.Fatalf("sessionID = %q, want %q", sessionID, "existing-session-id")
 	}
 	if store.createCalls != 1 {
-		t.Fatalf("CreateSession called %d times, want 1", store.createCalls)
+		t.Fatalf("EnsureSessionRecord called %d times, want 1", store.createCalls)
 	}
 	if _, err := backingStore.GetSession(context.Background(), sessionID); err != nil {
 		t.Fatalf("GetSession(created): %v", err)
@@ -584,7 +585,7 @@ func TestEnsureSession_CreatesWhenSessionNotFound(t *testing.T) {
 }
 
 func TestEnsureSession_ResumedSessionIncrementsSessionCreatedMetric(t *testing.T) {
-	backingStore := session.NewMemoryStore()
+	backingStore := sessiontest.NewStore()
 	t.Cleanup(func() { _ = backingStore.Close() })
 
 	store := &ensureSessionStore{Store: backingStore}
@@ -592,14 +593,14 @@ func TestEnsureSession_ResumedSessionIncrementsSessionCreatedMetric(t *testing.T
 	server := NewServer(DefaultServerConfig(), store, nil, logr.Discard(), WithMetrics(metrics))
 	conn := &Connection{agentName: "agent", namespace: "default", workspaceName: "ws"}
 
-	_, err := backingStore.CreateSession(context.Background(), session.CreateSessionOptions{
+	_, err := backingStore.EnsureSessionRecord(context.Background(), session.SessionRecordOptions{
 		ID:            "existing-session-id",
 		AgentName:     "agent",
 		Namespace:     "default",
 		WorkspaceName: "ws",
 	})
 	if err != nil {
-		t.Fatalf("CreateSession(existing): %v", err)
+		t.Fatalf("EnsureSessionRecord(existing): %v", err)
 	}
 
 	sessionID, err := server.ensureSession(context.Background(), conn, "existing-session-id", logr.Discard())
@@ -610,10 +611,10 @@ func TestEnsureSession_ResumedSessionIncrementsSessionCreatedMetric(t *testing.T
 		t.Fatalf("sessionID = %q, want %q", sessionID, "existing-session-id")
 	}
 	// The archive row is now written unconditionally rather than read first:
-	// CreateSession is INSERT ... WHERE NOT EXISTS, so this is create-if-absent
+	// EnsureSessionRecord is INSERT ... WHERE NOT EXISTS, so this is create-if-absent
 	// and also restores the row for a session whose context outlived it.
 	if store.createCalls != 1 {
-		t.Fatalf("CreateSession called %d times, want 1", store.createCalls)
+		t.Fatalf("EnsureSessionRecord called %d times, want 1", store.createCalls)
 	}
 	if metrics.sessionCreated != 1 {
 		t.Fatalf("SessionCreated metric calls = %d, want 1", metrics.sessionCreated)
@@ -630,7 +631,7 @@ func TestProcessMessage_PropagatesUserIDToPolicyContext(t *testing.T) {
 		},
 	}
 
-	store := session.NewMemoryStore()
+	store := sessiontest.NewStore()
 	cfg := DefaultServerConfig()
 	cfg.PingInterval = 100 * time.Millisecond
 	cfg.PongTimeout = 200 * time.Millisecond
@@ -688,7 +689,7 @@ func TestCohortHeaders_ExtractedAndStoredOnSession(t *testing.T) {
 		},
 	}
 
-	store := session.NewMemoryStore()
+	store := sessiontest.NewStore()
 	cfg := DefaultServerConfig()
 	cfg.PingInterval = 100 * time.Millisecond
 	cfg.PongTimeout = 200 * time.Millisecond
@@ -749,7 +750,7 @@ func TestCohortHeaders_EmptyWhenNotSet(t *testing.T) {
 		},
 	}
 
-	store := session.NewMemoryStore()
+	store := sessiontest.NewStore()
 	cfg := DefaultServerConfig()
 	cfg.PingInterval = 100 * time.Millisecond
 	cfg.PongTimeout = 200 * time.Millisecond
@@ -1045,7 +1046,7 @@ func TestProcessMessage_MgmtPlaneJWTPrefersDeviceIDForUserScope(t *testing.T) {
 	now := time.Now()
 	tokenString := mintTestMgmtPlaneToken(t, key, kid, operatorSubject, now)
 
-	store := session.NewMemoryStore()
+	store := sessiontest.NewStore()
 	cfg := DefaultServerConfig()
 	cfg.PingInterval = 100 * time.Millisecond
 	cfg.PongTimeout = 200 * time.Millisecond

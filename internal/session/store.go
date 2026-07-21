@@ -68,11 +68,6 @@ func IsTerminalStatus(s SessionStatus) bool {
 	return s == SessionStatusCompleted || s == SessionStatusError || s == SessionStatusExpired
 }
 
-// isTerminalStatus is an unexported alias kept for internal callers.
-func isTerminalStatus(s SessionStatus) bool {
-	return IsTerminalStatus(s)
-}
-
 // Message represents a single message in a conversation.
 type Message struct {
 	// ID is the unique identifier for this message.
@@ -197,8 +192,8 @@ func (s *Session) IsExpired() bool {
 	return time.Now().After(s.ExpiresAt)
 }
 
-// CreateSessionOptions contains options for creating a new session.
-type CreateSessionOptions struct {
+// SessionRecordOptions contains options for creating a new session.
+type SessionRecordOptions struct {
 	// ID is an optional pre-generated session ID. When set, the store uses this
 	// ID instead of generating a new one. This supports deferred persistence:
 	// the facade generates a UUID on connect (for immediate client response) but
@@ -397,10 +392,50 @@ type RuntimeEvent struct {
 	Timestamp time.Time `json:"timestamp"`
 }
 
+// Recorder is the write-only view of a session archive: everything a producer
+// needs to record a conversation, and nothing that reads it back.
+//
+// The facade depends on this rather than on Store. It is a producer — it never
+// reads session-api — and narrowing the dependency makes that structural rather
+// than a convention. #1876 was caused precisely by a read creeping onto the
+// message path: the facade asked session-api whether a session could be
+// resumed, a question only the runtime's context store can answer. With a
+// write-only interface that mistake does not compile.
+//
+// A nil Recorder is a valid state meaning "no archive configured" — session-api
+// could not be discovered — and callers must treat it as such rather than
+// substituting a store that silently discards writes.
+type Recorder interface {
+	// EnsureSessionRecord registers the session in the archive. Idempotent.
+	EnsureSessionRecord(ctx context.Context, opts SessionRecordOptions) (*Session, error)
+
+	// AppendMessage records one conversation message.
+	AppendMessage(ctx context.Context, sessionID string, msg Message) error
+
+	// RecordRuntimeEvent records a pipeline/stage lifecycle event.
+	RecordRuntimeEvent(ctx context.Context, sessionID string, event RuntimeEvent) error
+
+	// UpdateSessionStatus moves the session's lifecycle status. The archive
+	// refuses to overwrite a terminal status, so this is safe to call
+	// unconditionally.
+	UpdateSessionStatus(ctx context.Context, sessionID string, update SessionStatusUpdate) error
+}
+
 // Store defines the interface for session storage.
 type Store interface {
-	// CreateSession creates a new session and returns its ID.
-	CreateSession(ctx context.Context, opts CreateSessionOptions) (*Session, error)
+	// EnsureSessionRecord registers the session in the archive with the
+	// metadata later captured writes are attached to and queried by — agent,
+	// namespace, workspace, prompt pack, cohort, variant, virtual user.
+	//
+	// It does NOT create the conversation: that lives in the runtime's context
+	// store, which is also the sole authority on whether a session can be
+	// resumed (#1876). Nor does it allocate the id — the caller supplies one,
+	// or one is minted locally.
+	//
+	// Idempotent. Calling it for a session that already has a record succeeds
+	// and changes nothing, so a caller that cannot cheaply know whether the
+	// record exists may simply call it.
+	EnsureSessionRecord(ctx context.Context, opts SessionRecordOptions) (*Session, error)
 
 	// GetSession retrieves a session by ID.
 	// Returns ErrSessionNotFound if the session does not exist.

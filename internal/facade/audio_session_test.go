@@ -28,6 +28,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/altairalabs/omnia/internal/session"
+	"github.com/altairalabs/omnia/internal/session/sessiontest"
 )
 
 // fakeDuplexSink records sent audio for test assertion.
@@ -379,7 +380,7 @@ func TestHandleBinaryMessage_SendAudioError(t *testing.T) {
 
 func newTestStoreAndHandler(t *testing.T) (session.Store, MessageHandler) {
 	t.Helper()
-	store := session.NewMemoryStore()
+	store := sessiontest.NewStore()
 	t.Cleanup(func() { _ = store.Close() })
 	handler := &mockHandler{}
 	return store, handler

@@ -75,7 +75,8 @@ func (w *connResponseWriter) WriteError(code, message string) error {
 
 // recordError persists an error message and sets the session status to error.
 func (s *Server) recordError(sessionID, code, message string) {
-	if sessionID == "" {
+	// No archive configured, or no session to attach to: nothing to record.
+	if sessionID == "" || s.sessionStore == nil {
 		return
 	}
 	s.submitCompletion(func() {
