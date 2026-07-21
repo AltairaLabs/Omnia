@@ -424,6 +424,22 @@ describe("DeployWizard integration", () => {
     expect(nextBtn).not.toBeDisabled();
   });
 
+  // Whitespace-only input is not a real image reference — it would be emitted as
+  // spec.framework.image and deploy unschedulable. The gate must trim.
+  it("keeps Next disabled when the Container Image is whitespace-only", async () => {
+    renderWizard();
+
+    fireEvent.change(screen.getByLabelText(/Agent Name/i), { target: { value: "my-agent" } });
+    fireEvent.click(screen.getByRole("button", { name: /next/i }));
+
+    await screen.findByText("Agent Framework");
+    fireEvent.click(screen.getByRole("radio", { name: /LangChain/i }));
+
+    const nextBtn = screen.getByRole("button", { name: /next/i });
+    fireEvent.change(screen.getByLabelText("Container Image"), { target: { value: "   " } });
+    expect(nextBtn).toBeDisabled();
+  });
+
   it("does not require an image when promptkit is selected", async () => {
     renderWizard();
 
