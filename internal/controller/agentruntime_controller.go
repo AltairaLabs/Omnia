@@ -416,6 +416,11 @@ func (r *AgentRuntimeReconciler) reconcileResources(
 	SetCondition(&agentRuntime.Status.Conditions, agentRuntime.Generation,
 		ConditionTypeFrameworkReady, metav1.ConditionTrue, "FrameworkImageResolved", "runtime image resolved for framework type")
 
+	// Reject cross-namespace toolRegistryRef before provisioning anything (#1874).
+	if err := r.rejectCrossNamespaceToolRegistry(ctx, log, agentRuntime); err != nil {
+		return nil, err
+	}
+
 	// Reconcile facade RBAC (ServiceAccount, Role, RoleBinding)
 	if err := r.reconcileFacadeRBAC(ctx, agentRuntime); err != nil {
 		log.Error(err, "Failed to reconcile facade RBAC")

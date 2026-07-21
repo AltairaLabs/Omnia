@@ -217,6 +217,12 @@ type ToolRegistryRef struct {
 
 	// namespace is the namespace of the ToolRegistry resource.
 	// If not specified, the same namespace as the AgentRuntime is used.
+	//
+	// Cross-namespace references are NOT supported: it must either be omitted
+	// or equal the AgentRuntime's own namespace. The agent pod's Role is
+	// namespace-scoped, so a foreign namespace is unreadable from the pod and
+	// registry-scoped ToolPolicies would not match. An AgentRuntime declaring
+	// one is rejected with ToolRegistryCrossNamespace.
 	// +optional
 	Namespace *string `json:"namespace,omitempty"`
 }

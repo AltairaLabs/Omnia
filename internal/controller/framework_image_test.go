@@ -115,6 +115,87 @@ func TestReconcileResources_UnresolvableFramework_Blocks(t *testing.T) {
 	// reconcileFacadeRBAC/reconcileDeployment proves no Deployment is built.
 }
 
+// TestReconcileResources_CrossNamespaceToolRegistry_Blocks proves #1874: an
+// AgentRuntime whose toolRegistryRef names a foreign namespace is rejected
+// loudly (condition + Event + no Deployment) rather than left running with
+// registry-scoped ToolPolicies silently disabled.
+func TestReconcileResources_CrossNamespaceToolRegistry_Blocks(t *testing.T) {
+	scheme := newTestScheme(t)
+	otherNS := "other-ns"
+	ar := &omniav1alpha1.AgentRuntime{
+		ObjectMeta: metav1.ObjectMeta{Name: "xns-agent", Namespace: "agent-ns"},
+		Spec: omniav1alpha1.AgentRuntimeSpec{
+			ToolRegistryRef: &omniav1alpha1.ToolRegistryRef{
+				Name:      "orders",
+				Namespace: &otherNS,
+			},
+		},
+	}
+	c := fake.NewClientBuilder().WithScheme(scheme).
+		WithObjects(ar).
+		WithStatusSubresource(&omniav1alpha1.AgentRuntime{}).
+		Build()
+	rec := record.NewFakeRecorder(10)
+	r := &AgentRuntimeReconciler{
+		Client: c, Scheme: scheme, Recorder: rec,
+		FrameworkImages: promptkitImage("test-runtime:v1"),
+		FacadeImage:     testFacadeImage,
+	}
+
+	dep, err := r.reconcileResources(context.Background(), logr.Discard(), ar, nil, nil, nil)
+	if err == nil {
+		t.Fatal("expected error for cross-namespace toolRegistryRef")
+	}
+	if dep != nil {
+		t.Fatal("no Deployment should be built for a cross-namespace toolRegistryRef")
+	}
+	cond := findCondition(ar.Status.Conditions, ConditionTypeToolRegistryReady)
+	if cond == nil || cond.Status != metav1.ConditionFalse || cond.Reason != reasonToolRegistryCrossNamespace {
+		t.Fatalf("want ToolRegistryReady=False/%s, got %+v", reasonToolRegistryCrossNamespace, cond)
+	}
+	select {
+	case ev := <-rec.Events:
+		if !strings.Contains(ev, reasonToolRegistryCrossNamespace) {
+			t.Fatalf("event %q missing %s", ev, reasonToolRegistryCrossNamespace)
+		}
+	default:
+		t.Fatal("expected a Warning event")
+	}
+}
+
+// TestReconcileResources_SameNamespaceToolRegistry_Allowed proves an explicit
+// namespace equal to the AgentRuntime's own does not trip the cross-namespace
+// guard. Other reconcile errors (missing registry/providers) are tolerated —
+// only the cross-namespace rejection must not fire.
+func TestReconcileResources_SameNamespaceToolRegistry_Allowed(t *testing.T) {
+	scheme := newTestScheme(t)
+	sameNS := "agent-ns"
+	ar := &omniav1alpha1.AgentRuntime{
+		ObjectMeta: metav1.ObjectMeta{Name: "same-ns-agent", Namespace: sameNS},
+		Spec: omniav1alpha1.AgentRuntimeSpec{
+			ToolRegistryRef: &omniav1alpha1.ToolRegistryRef{
+				Name:      "orders",
+				Namespace: &sameNS,
+			},
+		},
+	}
+	c := fake.NewClientBuilder().WithScheme(scheme).
+		WithObjects(ar).
+		WithStatusSubresource(&omniav1alpha1.AgentRuntime{}).
+		Build()
+	r := &AgentRuntimeReconciler{
+		Client: c, Scheme: scheme, Recorder: record.NewFakeRecorder(10),
+		FrameworkImages: promptkitImage("test-runtime:v1"),
+		FacadeImage:     testFacadeImage,
+	}
+
+	if _, err := r.reconcileResources(context.Background(), logr.Discard(), ar, nil, nil, nil); err != nil {
+		if strings.Contains(err.Error(), "cross-namespace") {
+			t.Fatalf("same-namespace ref must not be rejected: %v", err)
+		}
+	}
+}
+
 func TestResolveFrameworkImage_BareDevFallback(t *testing.T) {
 	// No map configured (bare operator run) -> only promptkit has a built-in.
 	r := &AgentRuntimeReconciler{}
