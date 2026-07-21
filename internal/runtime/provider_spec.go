@@ -28,22 +28,26 @@ import (
 )
 
 // providerToSDKSpec maps a resolved Provider CRD to the SDK's uniform
-// ProviderSpec. Credentials stay unresolved (CredentialEnv only) — the
-// WithXProvider option resolves them at construction time.
-func providerToSDKSpec(p *v1alpha1.Provider) sdk.ProviderSpec {
+// ProviderSpec. When a resolved API key is carried (apiKey != ""), it travels
+// on the spec as CredentialConfig.APIKey (design §5.3.1); otherwise it falls
+// back to a CredentialEnv reference. Platform-hosted providers keep Credential
+// nil and authenticate via the cloud SDK credential chain (still process-env in
+// this wave; follow-up 2b-1b).
+func providerToSDKSpec(p *v1alpha1.Provider, apiKey string) sdk.ProviderSpec {
 	spec := sdk.ProviderSpec{
 		ID:      p.Name,
 		Type:    string(p.Spec.Type),
 		Model:   p.Spec.Model,
 		BaseURL: p.Spec.BaseURL,
 	}
-	// Platform-hosted providers (Bedrock/Vertex/Azure) authenticate via the
-	// cloud SDK credential chain, which sdk.ProviderSpec cannot express (it has
-	// no Platform field). Leave Credential nil; the caller warns and the
-	// provider's process-env credentials still apply where the SDK reads them.
 	if p.Spec.Platform == nil {
-		if env := credentialEnvVar(p); env != "" {
-			spec.Credential = &pkgconfig.CredentialConfig{CredentialEnv: env}
+		switch {
+		case apiKey != "":
+			spec.Credential = &pkgconfig.CredentialConfig{APIKey: apiKey}
+		default:
+			if env := credentialEnvVar(p); env != "" {
+				spec.Credential = &pkgconfig.CredentialConfig{CredentialEnv: env}
+			}
 		}
 	}
 	if p.Spec.Type == v1alpha1.ProviderTypeHuggingFace {
@@ -75,13 +79,17 @@ func (s *Server) extraProviderOptions(log logr.Logger) []sdk.Option {
 		if rp.Provider.Spec.Platform != nil {
 			log.V(0).Info("platform-hosted non-llm provider not yet supported via spec.providers[]; skipping credential",
 				"name", rp.Provider.Name, "role", rp.Role)
-		} else if env := credentialEnvVar(rp.Provider); env != "" && os.Getenv(env) == "" {
-			log.V(0).Info("skipping extra provider: credential not set in runtime",
-				"name", rp.Provider.Name, "role", rp.Role, "envVar", env,
-				"impact", "this role is unavailable; the agent still serves its default LLM")
-			continue
+		} else if rp.APIKey == "" {
+			// No carried key — fall back to the env contract, and skip (rather
+			// than wire and fail sdk.Open) when the env var isn't present either.
+			if env := credentialEnvVar(rp.Provider); env != "" && os.Getenv(env) == "" {
+				log.V(0).Info("skipping extra provider: credential not set in runtime",
+					"name", rp.Provider.Name, "role", rp.Role, "envVar", env,
+					"impact", "this role is unavailable; the agent still serves its default LLM")
+				continue
+			}
 		}
-		opt, ok := extraProviderOption(rp.Role, providerToSDKSpec(rp.Provider))
+		opt, ok := extraProviderOption(rp.Role, providerToSDKSpec(rp.Provider, rp.APIKey))
 		if !ok {
 			log.V(1).Info("skipping provider with unhandled role",
 				"name", rp.Provider.Name, "role", rp.Role)

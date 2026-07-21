@@ -41,7 +41,7 @@ func hfProvider(name, baseURL string) *v1alpha1.Provider {
 }
 
 func TestProviderToSDKSpec_HuggingFaceDedicated(t *testing.T) {
-	spec := providerToSDKSpec(hfProvider("embed-1", "https://my-endpoint.hf.space"))
+	spec := providerToSDKSpec(hfProvider("embed-1", "https://my-endpoint.hf.space"), "")
 
 	assert.Equal(t, "embed-1", spec.ID)
 	assert.Equal(t, "huggingface", spec.Type)
@@ -56,7 +56,7 @@ func TestProviderToSDKSpec_HuggingFaceDedicated(t *testing.T) {
 }
 
 func TestProviderToSDKSpec_HuggingFaceServerless(t *testing.T) {
-	spec := providerToSDKSpec(hfProvider("embed-2", ""))
+	spec := providerToSDKSpec(hfProvider("embed-2", ""), "")
 
 	require.NotNil(t, spec.Credential)
 	assert.Equal(t, "HF_TOKEN", spec.Credential.CredentialEnv)
@@ -64,11 +64,23 @@ func TestProviderToSDKSpec_HuggingFaceServerless(t *testing.T) {
 	assert.Nil(t, spec.AdditionalConfig)
 }
 
+func TestProviderToSDKSpec_PrefersCarriedAPIKey(t *testing.T) {
+	p := &v1alpha1.Provider{
+		ObjectMeta: metav1.ObjectMeta{Name: "embeddings"},
+		Spec:       v1alpha1.ProviderSpec{Type: v1alpha1.ProviderTypeOpenAI, Model: "text-embedding-3-small"},
+	}
+	spec := providerToSDKSpec(p, "sk-embed")
+	require.NotNil(t, spec.Credential)
+	assert.Equal(t, "sk-embed", spec.Credential.APIKey)
+	assert.Empty(t, spec.Credential.CredentialEnv,
+		"a carried key must be set as APIKey, not left as an env-var reference")
+}
+
 func TestProviderToSDKSpec_CredentialEnvOverride(t *testing.T) {
 	p := hfProvider("hf-custom", "")
 	p.Spec.Credential = &v1alpha1.CredentialConfig{EnvVar: "CUSTOM_TOKEN"}
 
-	spec := providerToSDKSpec(p)
+	spec := providerToSDKSpec(p, "")
 
 	require.NotNil(t, spec.Credential)
 	assert.Equal(t, "CUSTOM_TOKEN", spec.Credential.CredentialEnv,
@@ -85,7 +97,7 @@ func TestProviderToSDKSpec_PlatformHostedLeavesCredentialNil(t *testing.T) {
 		},
 	}
 
-	spec := providerToSDKSpec(p)
+	spec := providerToSDKSpec(p, "")
 
 	assert.Nil(t, spec.Credential,
 		"platform-hosted providers cannot express auth via ProviderSpec; Credential must stay nil")
@@ -101,7 +113,7 @@ func TestProviderToSDKSpec_NoCredentialEnv(t *testing.T) {
 		},
 	}
 
-	spec := providerToSDKSpec(p)
+	spec := providerToSDKSpec(p, "")
 
 	assert.Equal(t, "ollama-1", spec.ID)
 	assert.Equal(t, "ollama", spec.Type)
