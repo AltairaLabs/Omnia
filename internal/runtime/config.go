@@ -60,6 +60,13 @@ type Config struct {
 	ProviderRefName      string // Name of the Provider CRD (for metrics, if using providerRef)
 	ProviderRefNamespace string // Namespace of the Provider CRD (for metrics)
 
+	// ProviderAPIKey is the resolved API key for the default (flat) provider,
+	// read from its Secret at boot. Carried on the value — NOT written to
+	// process env — so same-type providers cannot overwrite each other's key
+	// (design §5.3.1). Empty for keyless providers (ollama/mock) and platform
+	// providers (which still use env in this wave).
+	ProviderAPIKey string
+
 	// Custom headers passed to every provider request.
 	// Empty map/nil means no custom headers. Used for gateway providers like OpenRouter.
 	Headers map[string]string
