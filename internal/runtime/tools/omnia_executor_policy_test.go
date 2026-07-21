@@ -25,6 +25,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/go-logr/logr"
@@ -474,9 +475,9 @@ func TestDispatch_PolicyBrokerDisabled_NoBehaviorChange(t *testing.T) {
 func TestDispatch_RegistryConfiguredButIdentityUnknown_FailsClosed(t *testing.T) {
 	t.Setenv(envPolicyBrokerURL, "")
 
-	toolCalled := false
+	var toolCalled atomic.Bool
 	toolSrv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
-		toolCalled = true
+		toolCalled.Store(true)
 	}))
 	defer toolSrv.Close()
 
@@ -496,5 +497,5 @@ func TestDispatch_RegistryConfiguredButIdentityUnknown_FailsClosed(t *testing.T)
 	_, err := e.ExecuteTool(context.Background(), "test-http-tool", json.RawMessage(`{}`))
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, errPolicyDenied), "expected errPolicyDenied, got %v", err)
-	assert.False(t, toolCalled, "tool backend must not be called when registry identity is unknown")
+	assert.False(t, toolCalled.Load(), "tool backend must not be called when registry identity is unknown")
 }

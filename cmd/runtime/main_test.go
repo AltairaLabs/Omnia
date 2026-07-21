@@ -65,6 +65,38 @@ func TestEnrichToolRegistryMeta_NoKubernetesAccess(t *testing.T) {
 	}
 }
 
+// TestEnrichToolRegistryMeta_LoadConfigError_StillRecordsRegistry proves the
+// fail-closed guarantee: even when the handler mapping cannot be reloaded, the
+// configured registry name/namespace is still recorded, so enforcePolicy knows a
+// registry is configured and denies rather than falling back to the handler
+// name (#1874).
+func TestEnrichToolRegistryMeta_LoadConfigError_StillRecordsRegistry(t *testing.T) {
+	dir := t.TempDir()
+	goodPath := filepath.Join(dir, "tools.yaml")
+	if err := os.WriteFile(goodPath, []byte("handlers: []\n"), 0o600); err != nil {
+		t.Fatalf("write tools config: %v", err)
+	}
+
+	// Server initialized from a valid config so the executor exists, but enrich
+	// is pointed at a path that does not exist, so tools.LoadConfig fails.
+	server := pkruntime.NewServer(pkruntime.WithToolsConfig(goodPath))
+	if err := server.InitializeTools(context.Background()); err != nil {
+		t.Fatalf("InitializeTools: %v", err)
+	}
+	cfg := &pkruntime.Config{
+		ToolRegistryName:      "orders",
+		ToolRegistryNamespace: "other-ns",
+		ToolsConfigPath:       filepath.Join(dir, "does-not-exist.yaml"),
+	}
+
+	enrichToolRegistryMeta(cfg, server, logr.Discard())
+
+	name, ns := pkruntime.ServerToolRegistryInfo(server)
+	if name != "orders" || ns != "other-ns" {
+		t.Fatalf("registry info = (%q,%q), want (\"orders\",\"other-ns\") even on load error", name, ns)
+	}
+}
+
 func TestWarnIfCustomTruncation(t *testing.T) {
 	cases := []struct {
 		name     string

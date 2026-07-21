@@ -917,7 +917,7 @@ func memoryEnabledAgent() *v1alpha1.AgentRuntime {
 }
 
 // TestLoadFromCRD_WorkspaceUIDFromEnv proves the runtime prefers the injected
-// OMNIA_WORKSPACE_UID over a cluster-wide WorkspaceList (#1874). No Workspace is
+// OMNIA_WORKSPACE_UID over a cluster-wide WorkspaceList (#1875). No Workspace is
 // seeded, so only the env var can supply the UID.
 func TestLoadFromCRD_WorkspaceUIDFromEnv(t *testing.T) {
 	t.Setenv("OMNIA_WORKSPACE_UID", "uid-from-env")

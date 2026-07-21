@@ -450,7 +450,15 @@ func redisStoreOptions(ttl time.Duration) []statestore.RedisOption {
 func enrichToolRegistryMeta(cfg *pkruntime.Config, server *pkruntime.Server, log logr.Logger) {
 	toolsCfg, err := tools.LoadConfig(cfg.ToolsConfigPath)
 	if err != nil {
-		log.Error(err, "failed to reload tools config for metadata mapping")
+		// Record the configured registry even without handler metadata. Returning
+		// early here would leave the executor registry-less, so enforcePolicy
+		// would treat the agent as having no registry and fall back to the handler
+		// name — the exact fail-open this change closes (#1874). Handler metadata
+		// only feeds tool spans/labels; policy enforcement needs just the registry
+		// name.
+		log.Error(err, "tools config reload failed; recording registry provenance without handler metadata",
+			"registryName", cfg.ToolRegistryName, "reason", "policy enforcement stays fail-closed")
+		server.SetToolRegistryInfo(cfg.ToolRegistryName, cfg.ToolRegistryNamespace, nil)
 		return
 	}
 
