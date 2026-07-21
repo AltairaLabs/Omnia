@@ -64,6 +64,13 @@ type OmniaExecutor struct {
 	toolHandlers map[string]string
 	// Registry metadata for tracing/event store
 	toolMeta map[string]ToolMeta
+	// configuredRegistry is the ToolRegistry name/namespace configured for this
+	// agent (empty when no toolRegistryRef). Recorded independently of per-tool
+	// toolMeta so enforcePolicy can distinguish "no registry configured" from
+	// "registry configured but this tool's identity is unknown" and fail closed
+	// on the latter (#1874).
+	configuredRegistry   string
+	configuredRegistryNS string
 
 	// MCP sessions keyed by handler name
 	mcpClients  map[string]*mcp.Client
@@ -312,6 +319,22 @@ func (e *OmniaExecutor) buildToolLabels(toolName string, h *HandlerEntry) map[st
 	return labels
 }
 
+// RegistryName returns the ToolRegistry name configured for this agent, or ""
+// when no toolRegistryRef is set. Set by SetRegistryInfo.
+func (e *OmniaExecutor) RegistryName() string {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.configuredRegistry
+}
+
+// RegistryNamespace returns the ToolRegistry namespace configured for this
+// agent, or "" when no toolRegistryRef is set. Set by SetRegistryInfo.
+func (e *OmniaExecutor) RegistryNamespace() string {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.configuredRegistryNS
+}
+
 // GetToolMeta returns registry/handler metadata for a tool.
 func (e *OmniaExecutor) GetToolMeta(toolName string) (ToolMeta, bool) {
 	e.mu.RLock()
@@ -324,6 +347,9 @@ func (e *OmniaExecutor) GetToolMeta(toolName string) (ToolMeta, bool) {
 func (e *OmniaExecutor) SetRegistryInfo(registryName, registryNamespace string, cfgHandlers []HandlerEntry) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+
+	e.configuredRegistry = registryName
+	e.configuredRegistryNS = registryNamespace
 
 	handlerLookup := make(map[string]HandlerEntry, len(cfgHandlers))
 	for _, h := range cfgHandlers {
@@ -416,10 +442,20 @@ func (e *OmniaExecutor) enforcePolicy(
 	// decision request must carry that — not the handler name. The two differ in
 	// practice (e.g. handler "echo" inside registry "orders"); sending the
 	// handler name made every registry-scoped policy silently fail to match and
-	// allow. Fall back to the handler name only when registry metadata is unset.
+	// allow.
+	//
+	// Fail closed when a registry IS configured for this agent but this tool's
+	// registry identity is unknown: matching on the handler name there would let
+	// registry-scoped ToolPolicies silently not match and allow a call that
+	// should be denied (#1874). The handler-name fallback is only correct for a
+	// genuinely registry-less agent, where no registry-scoped policy can apply.
 	registryName := handlerName
 	if meta, ok := e.GetToolMeta(toolName); ok && meta.RegistryName != "" {
 		registryName = meta.RegistryName
+	} else if configured := e.RegistryName(); configured != "" {
+		e.log.Info("enforcePolicy denying: tool registry identity unknown while a registry is configured",
+			"tool", toolName, "configuredRegistry", configured)
+		return ctx, fmt.Errorf("%w: registry-scoped policy enforcement cannot resolve the registry identity for tool %q", errPolicyDenied, toolName)
 	}
 	e.log.V(1).Info("enforcePolicy calling broker", "tool", toolName, "registry", registryName, "brokerEnabled", e.policyBroker.Enabled())
 	decision := e.policyBroker.Decide(ctx, toolName, registryName, args)

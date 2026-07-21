@@ -117,6 +117,42 @@ func TestReconcileRole_IncludesToolPoliciesReadAccess(t *testing.T) {
 		"facade Role must grant get/list/watch on toolpolicies for the policy-broker sidecar")
 }
 
+// TestReconcileRole_ExcludesToolRegistriesReadAccess asserts the runtime's
+// agent Role no longer grants toolregistries. The runtime's only GET was
+// vestigial and 403'd on cross-namespace refs; registry provenance now comes
+// from Config (#1874). The grant would silently disable registry-scoped
+// ToolPolicies via the fail-open it enabled.
+func TestReconcileRole_ExcludesToolRegistriesReadAccess(t *testing.T) {
+	ar := &omniav1alpha1.AgentRuntime{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-agent",
+			Namespace: "test-ns",
+			UID:       "fake-uid",
+		},
+	}
+
+	scheme := runtime.NewScheme()
+	require.NoError(t, omniav1alpha1.AddToScheme(scheme))
+	require.NoError(t, rbacv1.AddToScheme(scheme))
+
+	fakeClient := fake.NewClientBuilder().WithScheme(scheme).Build()
+	r := &AgentRuntimeReconciler{Client: fakeClient, Scheme: scheme}
+	require.NoError(t, r.reconcileRole(context.Background(), ar))
+
+	role := &rbacv1.Role{}
+	require.NoError(t, fakeClient.Get(context.Background(), types.NamespacedName{
+		Name:      "test-agent-facade",
+		Namespace: "test-ns",
+	}, role))
+
+	for _, rule := range role.Rules {
+		for _, res := range rule.Resources {
+			assert.NotEqual(t, "toolregistries", res,
+				"facade Role must not grant toolregistries — the read that justified it was removed")
+		}
+	}
+}
+
 // reconcileRoleAndGetSecretVerbs reconciles the facade Role for ar and returns
 // the verbs granted on core/secrets.
 func reconcileRoleAndGetSecretVerbs(t *testing.T, ar *omniav1alpha1.AgentRuntime) []string {

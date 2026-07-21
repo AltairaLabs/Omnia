@@ -22,7 +22,10 @@ import (
 	"testing"
 
 	"github.com/go-logr/logr"
+	appsv1 "k8s.io/api/apps/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
@@ -113,6 +116,100 @@ func TestReconcileResources_UnresolvableFramework_Blocks(t *testing.T) {
 	}
 	// dep == nil (asserted above) + the block returns before any
 	// reconcileFacadeRBAC/reconcileDeployment proves no Deployment is built.
+}
+
+// TestReconcileResources_CrossNamespaceToolRegistry_Blocks proves #1874: an
+// AgentRuntime whose toolRegistryRef names a foreign namespace is rejected
+// loudly (condition + Event + no Deployment) rather than left running with
+// registry-scoped ToolPolicies silently disabled.
+func TestReconcileResources_CrossNamespaceToolRegistry_Blocks(t *testing.T) {
+	scheme := newTestScheme(t)
+	if err := appsv1.AddToScheme(scheme); err != nil {
+		t.Fatalf("add appsv1 to scheme: %v", err)
+	}
+	otherNS := "other-ns"
+	ar := &omniav1alpha1.AgentRuntime{
+		ObjectMeta: metav1.ObjectMeta{Name: "xns-agent", Namespace: "agent-ns"},
+		Spec: omniav1alpha1.AgentRuntimeSpec{
+			ToolRegistryRef: &omniav1alpha1.ToolRegistryRef{
+				Name:      "orders",
+				Namespace: &otherNS,
+			},
+		},
+	}
+	// A Deployment already reconciled under the pre-change fail-open — the
+	// rejection must stop it, not leave it running with policy silently off.
+	existing := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{Name: "xns-agent", Namespace: "agent-ns"},
+	}
+	c := fake.NewClientBuilder().WithScheme(scheme).
+		WithObjects(ar, existing).
+		WithStatusSubresource(&omniav1alpha1.AgentRuntime{}).
+		Build()
+	rec := record.NewFakeRecorder(10)
+	r := &AgentRuntimeReconciler{
+		Client: c, Scheme: scheme, Recorder: rec,
+		FrameworkImages: promptkitImage("test-runtime:v1"),
+		FacadeImage:     testFacadeImage,
+	}
+
+	dep, err := r.reconcileResources(context.Background(), logr.Discard(), ar, nil, nil, nil)
+	if err == nil {
+		t.Fatal("expected error for cross-namespace toolRegistryRef")
+	}
+	if dep != nil {
+		t.Fatal("no Deployment should be built for a cross-namespace toolRegistryRef")
+	}
+	// The pre-existing Deployment must have been stopped.
+	got := &appsv1.Deployment{}
+	if getErr := c.Get(context.Background(), types.NamespacedName{Name: "xns-agent", Namespace: "agent-ns"}, got); !apierrors.IsNotFound(getErr) {
+		t.Fatalf("existing Deployment should have been deleted, got err=%v", getErr)
+	}
+	cond := findCondition(ar.Status.Conditions, ConditionTypeToolRegistryReady)
+	if cond == nil || cond.Status != metav1.ConditionFalse || cond.Reason != reasonToolRegistryCrossNamespace {
+		t.Fatalf("want ToolRegistryReady=False/%s, got %+v", reasonToolRegistryCrossNamespace, cond)
+	}
+	select {
+	case ev := <-rec.Events:
+		if !strings.Contains(ev, reasonToolRegistryCrossNamespace) {
+			t.Fatalf("event %q missing %s", ev, reasonToolRegistryCrossNamespace)
+		}
+	default:
+		t.Fatal("expected a Warning event")
+	}
+}
+
+// TestReconcileResources_SameNamespaceToolRegistry_Allowed proves an explicit
+// namespace equal to the AgentRuntime's own does not trip the cross-namespace
+// guard. Other reconcile errors (missing registry/providers) are tolerated —
+// only the cross-namespace rejection must not fire.
+func TestReconcileResources_SameNamespaceToolRegistry_Allowed(t *testing.T) {
+	scheme := newTestScheme(t)
+	sameNS := "agent-ns"
+	ar := &omniav1alpha1.AgentRuntime{
+		ObjectMeta: metav1.ObjectMeta{Name: "same-ns-agent", Namespace: sameNS},
+		Spec: omniav1alpha1.AgentRuntimeSpec{
+			ToolRegistryRef: &omniav1alpha1.ToolRegistryRef{
+				Name:      "orders",
+				Namespace: &sameNS,
+			},
+		},
+	}
+	c := fake.NewClientBuilder().WithScheme(scheme).
+		WithObjects(ar).
+		WithStatusSubresource(&omniav1alpha1.AgentRuntime{}).
+		Build()
+	r := &AgentRuntimeReconciler{
+		Client: c, Scheme: scheme, Recorder: record.NewFakeRecorder(10),
+		FrameworkImages: promptkitImage("test-runtime:v1"),
+		FacadeImage:     testFacadeImage,
+	}
+
+	if _, err := r.reconcileResources(context.Background(), logr.Discard(), ar, nil, nil, nil); err != nil {
+		if strings.Contains(err.Error(), "cross-namespace") {
+			t.Fatalf("same-namespace ref must not be rejected: %v", err)
+		}
+	}
 }
 
 func TestResolveFrameworkImage_BareDevFallback(t *testing.T) {

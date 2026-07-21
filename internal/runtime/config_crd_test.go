@@ -18,6 +18,7 @@ package runtime
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"testing"
 
@@ -29,6 +30,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	v1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 	"github.com/altairalabs/omnia/pkg/k8s"
@@ -902,6 +904,79 @@ func TestLoadFromCRD_MemoryEnabled(t *testing.T) {
 	// Both axes default ON when memory is enabled and the sub-toggles are unset.
 	assert.True(t, cfg.MemoryRetrievalEnabled)
 	assert.True(t, cfg.MemoryToolsEnabled)
+}
+
+// memoryEnabledAgent builds a memory-enabled AgentRuntime in test-ns.
+func memoryEnabledAgent() *v1alpha1.AgentRuntime {
+	return &v1alpha1.AgentRuntime{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-agent", Namespace: "test-ns"},
+		Spec: v1alpha1.AgentRuntimeSpec{
+			PromptPackRef: v1alpha1.PromptPackRef{Name: "test-pack"},
+			Facades:       []v1alpha1.FacadeConfig{{Type: v1alpha1.FacadeTypeWebSocket}},
+			Memory:        &v1alpha1.MemoryConfig{Enabled: true},
+		},
+	}
+}
+
+// TestLoadFromCRD_WorkspaceUIDFromEnv proves the runtime prefers the injected
+// OMNIA_WORKSPACE_UID over a cluster-wide WorkspaceList (#1875). No Workspace is
+// seeded, so only the env var can supply the UID.
+func TestLoadFromCRD_WorkspaceUIDFromEnv(t *testing.T) {
+	t.Setenv("OMNIA_WORKSPACE_UID", "uid-from-env")
+	t.Setenv("SESSION_API_URL", "http://omnia-session-api.omnia-system:8080")
+	t.Setenv("MEMORY_API_URL", "http://omnia-memory-api.omnia-system:8080")
+
+	c := buildTestClient(memoryEnabledAgent())
+	cfg, err := LoadFromCRD(context.Background(), c, "test-agent", "test-ns")
+	require.NoError(t, err)
+	assert.Equal(t, "uid-from-env", cfg.WorkspaceUID)
+}
+
+// TestLoadFromCRD_WorkspaceUIDFallsBackToList proves the List remains the
+// fallback when the env var is absent — the operator only injects a non-empty
+// value, so a pod can legitimately start without it.
+func TestLoadFromCRD_WorkspaceUIDFallsBackToList(t *testing.T) {
+	t.Setenv("OMNIA_WORKSPACE_UID", "")
+	t.Setenv("SESSION_API_URL", "http://omnia-session-api.omnia-system:8080")
+	t.Setenv("MEMORY_API_URL", "http://omnia-memory-api.omnia-system:8080")
+
+	ws := &v1alpha1.Workspace{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-ws", UID: "uid-from-list"},
+		Spec:       v1alpha1.WorkspaceSpec{Namespace: v1alpha1.NamespaceConfig{Name: "test-ns"}},
+	}
+
+	c := buildTestClient(memoryEnabledAgent(), ws)
+	cfg, err := LoadFromCRD(context.Background(), c, "test-agent", "test-ns")
+	require.NoError(t, err)
+	assert.Equal(t, "uid-from-list", cfg.WorkspaceUID)
+}
+
+// TestLoadFromCRD_WorkspaceUIDListError proves the List fallback surfaces its
+// error: with the env var absent, a failed WorkspaceList is a hard startup
+// failure rather than a silent empty UID.
+func TestLoadFromCRD_WorkspaceUIDListError(t *testing.T) {
+	t.Setenv("OMNIA_WORKSPACE_UID", "")
+	t.Setenv("SESSION_API_URL", "http://omnia-session-api.omnia-system:8080")
+	t.Setenv("MEMORY_API_URL", "http://omnia-memory-api.omnia-system:8080")
+
+	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{
+		Name:   "test-ns",
+		Labels: map[string]string{"omnia.altairalabs.ai/workspace": "test-ws"},
+	}}
+	c := fake.NewClientBuilder().WithScheme(k8s.Scheme()).
+		WithRuntimeObjects(ns, memoryEnabledAgent()).
+		WithInterceptorFuncs(interceptor.Funcs{
+			List: func(ctx context.Context, cl client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+				if _, ok := list.(*v1alpha1.WorkspaceList); ok {
+					return fmt.Errorf("boom")
+				}
+				return cl.List(ctx, list, opts...)
+			},
+		}).Build()
+
+	_, err := LoadFromCRD(context.Background(), c, "test-agent", "test-ns")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "resolve workspace UID")
 }
 
 func TestLoadFromCRD_MemoryToggles(t *testing.T) {

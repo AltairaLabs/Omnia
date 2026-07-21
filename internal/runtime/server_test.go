@@ -759,6 +759,20 @@ func TestServer_InitializeTools_ValidConfig(t *testing.T) {
 	assert.True(t, server.toolsInitialized)
 }
 
+// TestServerToolRegistryInfo_NilSafe covers the accessor's guard: a nil Server
+// or one whose tools were never initialized reports empty registry info rather
+// than panicking.
+func TestServerToolRegistryInfo_NilSafe(t *testing.T) {
+	if name, ns := ServerToolRegistryInfo(nil); name != "" || ns != "" {
+		t.Fatalf("nil server: got (%q,%q), want empty", name, ns)
+	}
+	// A server with no InitializeTools has a nil toolExecutor.
+	s := NewServer(WithLogger(logr.Discard()))
+	if name, ns := ServerToolRegistryInfo(s); name != "" || ns != "" {
+		t.Fatalf("uninitialized server: got (%q,%q), want empty", name, ns)
+	}
+}
+
 func TestServer_Close_WithToolManager(t *testing.T) {
 	tmpDir := t.TempDir()
 	toolsPath := tmpDir + "/tools.yaml"

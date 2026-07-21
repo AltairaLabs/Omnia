@@ -159,11 +159,18 @@ func LoadFromCRD(ctx context.Context, c client.Client, name, namespace string) (
 		// enabled and the sub-toggle is unset, preserving existing behavior.
 		cfg.MemoryRetrievalEnabled = true
 		cfg.MemoryToolsEnabled = true
-		uid, uidErr := resolveWorkspaceUID(ctx, c, namespace)
-		if uidErr != nil {
-			return nil, fmt.Errorf("resolve workspace UID for memory: %w", uidErr)
+		// The operator injects OMNIA_WORKSPACE_UID when memory is enabled
+		// (deployment_builder_env.go). Prefer it: it avoids a cluster-wide
+		// WorkspaceList from every agent pod at startup. Fall back to the List
+		// when it is absent, since the operator only injects a non-empty value.
+		cfg.WorkspaceUID = os.Getenv(envWorkspaceUID)
+		if cfg.WorkspaceUID == "" {
+			uid, uidErr := resolveWorkspaceUID(ctx, c, namespace)
+			if uidErr != nil {
+				return nil, fmt.Errorf("resolve workspace UID for memory: %w", uidErr)
+			}
+			cfg.WorkspaceUID = uid
 		}
-		cfg.WorkspaceUID = uid
 		if r := ar.Spec.Memory.Retrieval; r != nil {
 			if r.Enabled != nil {
 				cfg.MemoryRetrievalEnabled = *r.Enabled

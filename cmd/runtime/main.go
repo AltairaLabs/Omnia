@@ -413,8 +413,6 @@ func main() {
 	log.Info("shutdown complete")
 }
 
-// enrichToolRegistryMeta reads the ToolRegistry CRD and sets handler metadata on the tool manager.
-// This is best-effort — if the CRD read fails, tools still work without provenance metadata.
 // memoryStoreOptions and redisStoreOptions translate spec.context.ttl — how
 // long a conversation's working context survives in the context store between
 // messages — into store construction options.
@@ -436,33 +434,37 @@ func redisStoreOptions(ttl time.Duration) []statestore.RedisOption {
 	return []statestore.RedisOption{statestore.WithTTL(ttl)}
 }
 
+// enrichToolRegistryMeta records ToolRegistry provenance on the tool manager so
+// tool spans, metrics, and ToolPolicy `registry:` selectors carry the registry
+// name rather than the handler name.
+//
+// The registry name and namespace come from the AgentRuntime spec via Config —
+// NOT from a ToolRegistry API read. The previous implementation did GET the CRD,
+// but consumed only tr.Name/tr.Namespace, i.e. the lookup key it had just been
+// given, already present in Config. That round-trip bought nothing and actively
+// broke cross-namespace refs: the agent's Role is namespace-scoped, so the GET
+// 403'd, enrichment was skipped, and every registry-scoped ToolPolicy silently
+// fell back to matching on the handler name (see enforcePolicy). The handler
+// payload has always come from the operator-projected ConfigMap, which is what
+// tools.LoadConfig reads below.
 func enrichToolRegistryMeta(cfg *pkruntime.Config, server *pkruntime.Server, log logr.Logger) {
-	trCtx, trCancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer trCancel()
-
-	k8sClient, err := k8s.NewClient()
-	if err != nil {
-		log.Error(err, "failed to create k8s client for ToolRegistry metadata")
-		return
-	}
-
-	tr, err := k8s.GetToolRegistry(trCtx, k8sClient, cfg.ToolRegistryName, cfg.ToolRegistryNamespace)
-	if err != nil {
-		log.Error(err, "failed to read ToolRegistry, continuing without registry metadata",
-			"name", cfg.ToolRegistryName, "namespace", cfg.ToolRegistryNamespace)
-		return
-	}
-
-	// Load the tools config to get handler entries for metadata mapping
 	toolsCfg, err := tools.LoadConfig(cfg.ToolsConfigPath)
 	if err != nil {
-		log.Error(err, "failed to reload tools config for metadata mapping")
+		// Record the configured registry even without handler metadata. Returning
+		// early here would leave the executor registry-less, so enforcePolicy
+		// would treat the agent as having no registry and fall back to the handler
+		// name — the exact fail-open this change closes (#1874). Handler metadata
+		// only feeds tool spans/labels; policy enforcement needs just the registry
+		// name.
+		log.Error(err, "tools config reload failed; recording registry provenance without handler metadata",
+			"registryName", cfg.ToolRegistryName, "reason", "policy enforcement stays fail-closed")
+		server.SetToolRegistryInfo(cfg.ToolRegistryName, cfg.ToolRegistryNamespace, nil)
 		return
 	}
 
-	server.SetToolRegistryInfo(tr.Name, tr.Namespace, toolsCfg.Handlers)
+	server.SetToolRegistryInfo(cfg.ToolRegistryName, cfg.ToolRegistryNamespace, toolsCfg.Handlers)
 	log.Info("tool registry metadata enriched",
-		"registryName", tr.Name, "registryNamespace", tr.Namespace)
+		"registryName", cfg.ToolRegistryName, "registryNamespace", cfg.ToolRegistryNamespace)
 }
 
 // isNotHealthCheck filters out gRPC health check RPCs from tracing.
