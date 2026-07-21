@@ -22,7 +22,10 @@ import (
 	"testing"
 
 	"github.com/go-logr/logr"
+	appsv1 "k8s.io/api/apps/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
@@ -121,6 +124,9 @@ func TestReconcileResources_UnresolvableFramework_Blocks(t *testing.T) {
 // registry-scoped ToolPolicies silently disabled.
 func TestReconcileResources_CrossNamespaceToolRegistry_Blocks(t *testing.T) {
 	scheme := newTestScheme(t)
+	if err := appsv1.AddToScheme(scheme); err != nil {
+		t.Fatalf("add appsv1 to scheme: %v", err)
+	}
 	otherNS := "other-ns"
 	ar := &omniav1alpha1.AgentRuntime{
 		ObjectMeta: metav1.ObjectMeta{Name: "xns-agent", Namespace: "agent-ns"},
@@ -131,8 +137,13 @@ func TestReconcileResources_CrossNamespaceToolRegistry_Blocks(t *testing.T) {
 			},
 		},
 	}
+	// A Deployment already reconciled under the pre-change fail-open — the
+	// rejection must stop it, not leave it running with policy silently off.
+	existing := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{Name: "xns-agent", Namespace: "agent-ns"},
+	}
 	c := fake.NewClientBuilder().WithScheme(scheme).
-		WithObjects(ar).
+		WithObjects(ar, existing).
 		WithStatusSubresource(&omniav1alpha1.AgentRuntime{}).
 		Build()
 	rec := record.NewFakeRecorder(10)
@@ -148,6 +159,11 @@ func TestReconcileResources_CrossNamespaceToolRegistry_Blocks(t *testing.T) {
 	}
 	if dep != nil {
 		t.Fatal("no Deployment should be built for a cross-namespace toolRegistryRef")
+	}
+	// The pre-existing Deployment must have been stopped.
+	got := &appsv1.Deployment{}
+	if getErr := c.Get(context.Background(), types.NamespacedName{Name: "xns-agent", Namespace: "agent-ns"}, got); !apierrors.IsNotFound(getErr) {
+		t.Fatalf("existing Deployment should have been deleted, got err=%v", getErr)
 	}
 	cond := findCondition(ar.Status.Conditions, ConditionTypeToolRegistryReady)
 	if cond == nil || cond.Status != metav1.ConditionFalse || cond.Reason != reasonToolRegistryCrossNamespace {
