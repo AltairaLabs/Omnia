@@ -109,6 +109,7 @@ describe("GET /api/workspaces/[name]/deploy-profile", () => {
       { name: "legacy", role: "llm", type: "claude" },
     ]);
     expect(body.skills).toEqual([{ name: "docs-search", type: "git" }]);
+    expect(body.supportedDeployIntentVersions).toEqual(["deploy.omnia.altairalabs.ai/v1"]);
   });
 
   it("excludes Providers/SkillSources that are not Ready (#1519)", async () => {

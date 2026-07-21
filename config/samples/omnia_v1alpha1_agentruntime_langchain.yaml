@@ -6,12 +6,18 @@ metadata:
     app.kubernetes.io/managed-by: kustomize
   name: langchain-support-agent
 spec:
-  # Use LangChain framework for the runtime
-  # This uses the omnia-langchain-runtime container
+  # Use LangChain framework for the runtime.
+  # There is no built-in default image for non-promptkit framework types:
+  # image is REQUIRED here (or configure it cluster-wide via the operator's
+  # --framework-image flag / the chart's framework.images map), or the
+  # AgentRuntime blocks with FrameworkImageUnavailable. Pin an explicit tag,
+  # not `latest`.
   framework:
     type: langchain
-    # Optionally override the default image:
-    # image: ghcr.io/altairalabs/omnia-langchain-runtime:v0.1.0
+    # PLACEHOLDER — replace with a real image you have built and verified
+    # against the omnia.runtime.v1 contract. `your-org` is not a real
+    # registry path; left unchanged the pod will fail to pull (ImagePullBackOff).
+    image: ghcr.io/your-org/omnia-langchain-runtime:v0.1.0
 
   # Reference to the PromptPack containing agent prompts
   promptPackRef:

@@ -25,9 +25,11 @@ import (
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/stats"
+	"google.golang.org/grpc/status"
 
 	"github.com/altairalabs/omnia/internal/session"
 	runtimev1 "github.com/altairalabs/omnia/pkg/runtime/v1"
@@ -165,6 +167,13 @@ func (c *RuntimeClient) Health(ctx context.Context) (*runtimev1.HealthResponse, 
 func (c *RuntimeClient) HasConversation(ctx context.Context, sessionID string) (ResumeState, error) {
 	resp, err := c.client.HasConversation(ctx, &runtimev1.HasConversationRequest{SessionId: sessionID})
 	if err != nil {
+		// A runtime built against an older contract version does not serve this
+		// method. It cannot answer, which is not the same as answering "gone" —
+		// report it distinctly so the facade degrades to letting the session
+		// through rather than failing every resume against such a runtime.
+		if status.Code(err) == codes.Unimplemented {
+			return ResumeStateUnknown, ErrProbeUnsupported
+		}
 		return ResumeStateUnknown, err
 	}
 	switch resp.GetState() {

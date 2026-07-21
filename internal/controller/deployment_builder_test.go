@@ -282,9 +282,11 @@ func TestBuiltinDefaultImage(t *testing.T) {
 			want:          DefaultFrameworkImage,
 		},
 		{
-			name:          "LangChain returns LangChain image",
+			// custom-runtime wave 1: LangChain has no built-in image; it must
+			// be configured explicitly or block loudly.
+			name:          "LangChain has no built-in image",
 			frameworkType: string(omniav1alpha1.FrameworkTypeLangChain),
-			want:          DefaultLangChainImage,
+			want:          "",
 		},
 		{
 			// #1206: AutoGen must NOT silently fall back to the PromptKit image.

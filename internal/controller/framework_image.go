@@ -34,7 +34,7 @@ func frameworkTypeKey(ar *omniav1alpha1.AgentRuntime) string {
 // resolveFrameworkImage selects the runtime image for an AgentRuntime:
 //  1. explicit spec.framework.image override
 //  2. the configured FrameworkImages entry for the framework type
-//  3. a built-in :latest default (promptkit/langchain only) — bare-dev last resort
+//  3. a built-in :latest default (promptkit only) — bare-dev last resort
 //  4. otherwise ("", false) — the caller must fail loudly, NOT substitute another image
 func (r *AgentRuntimeReconciler) resolveFrameworkImage(ar *omniav1alpha1.AgentRuntime) (string, bool) {
 	if ar.Spec.Framework != nil && ar.Spec.Framework.Image != "" {
@@ -51,16 +51,14 @@ func (r *AgentRuntimeReconciler) resolveFrameworkImage(ar *omniav1alpha1.AgentRu
 }
 
 // builtinDefaultImage returns the hardcoded :latest image for the framework
-// type, or "" when none exists. ONLY promptkit and langchain have built-ins;
-// autogen and unknown types return "" so they block instead of silently
-// running PromptKit (issue #1206).
+// type, or "" when none exists. ONLY promptkit has a built-in: it is the
+// framework this repo builds and tests. Every other type (langchain, autogen,
+// custom, unknown) returns "" so the reconciler blocks loudly instead of
+// silently running an unversioned or unmaintained image (issues #1206 and the
+// custom-runtime epic wave 1).
 func builtinDefaultImage(frameworkType string) string {
-	switch frameworkType {
-	case string(omniav1alpha1.FrameworkTypePromptKit):
+	if frameworkType == string(omniav1alpha1.FrameworkTypePromptKit) {
 		return DefaultFrameworkImage
-	case string(omniav1alpha1.FrameworkTypeLangChain):
-		return DefaultLangChainImage
-	default:
-		return ""
 	}
+	return ""
 }

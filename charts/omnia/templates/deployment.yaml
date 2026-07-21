@@ -246,6 +246,12 @@ spec:
             # serves --workspace-content-path.
             - --content-api-bind-address={{ $contentApiAddr }}
             {{- end }}
+            {{- $deployApiAddr := include "omnia.deployApi.bindAddress" . }}
+            {{- if $deployApiAddr }}
+            # Deploy-intent API: the dashboard forwards DeployIntent bodies here; the operator
+            # verifies the dashboard-minted identity JWT (via --mgmt-plane-jwks-url) and applies.
+            - --deploy-api-bind-address={{ $deployApiAddr }}
+            {{- end }}
             {{- if .Values.enterprise.enabled }}
             - --enterprise
             - --policy-broker-image={{ .Values.enterprise.policyBroker.image.repository }}:{{ .Values.enterprise.policyBroker.image.tag | default .Chart.AppVersion }}
@@ -285,6 +291,12 @@ spec:
             {{- if $contentApiAddr }}
             - name: content-api
               containerPort: {{ trimPrefix ":" $contentApiAddr }}
+              protocol: TCP
+            {{- end }}
+            {{- $deployApiAddr := include "omnia.deployApi.bindAddress" . }}
+            {{- if $deployApiAddr }}
+            - name: deploy-api
+              containerPort: {{ trimPrefix ":" $deployApiAddr }}
               protocol: TCP
             {{- end }}
             {{- if .Values.metrics.enabled }}

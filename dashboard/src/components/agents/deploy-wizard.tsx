@@ -214,11 +214,18 @@ export function composeAgentYaml(
     spec.outputSchema = JSON.parse(formData.outputSchemaJson);
   }
 
-  if (formData.framework !== "promptkit" || formData.customImage) {
+  // customImage only applies to non-promptkit frameworks. promptkit has a
+  // built-in runtime image, and its UI hides the image input — so a stale
+  // customImage left over from a previous framework selection must never be
+  // emitted as spec.framework.image (which would run e.g. a LangChain image
+  // under a promptkit AgentRuntime).
+  const isCustomFramework = formData.framework !== "promptkit";
+  const frameworkImage = isCustomFramework ? formData.customImage.trim() : "";
+  if (isCustomFramework || frameworkImage) {
     spec.framework = {
       type: formData.framework,
       ...(formData.frameworkVersion && { version: formData.frameworkVersion }),
-      ...(formData.customImage && { image: formData.customImage }),
+      ...(frameworkImage && { image: frameworkImage }),
     };
   }
 
@@ -535,7 +542,11 @@ export function DeployWizard({ open, onOpenChange }: Readonly<DeployWizardProps>
         }
         return true;
       case 1: // Framework
-        return formData.framework !== "custom" || formData.customImage.length > 0;
+        // Only promptkit has a built-in default runtime image; every other
+        // framework type (including langchain/autogen, not just custom)
+        // requires an explicit image or it deploys unschedulable (#FrameworkImageUnavailable).
+        // Trim so whitespace-only input cannot pass as a real image reference.
+        return formData.framework === "promptkit" || formData.customImage.trim().length > 0;
       case 2: // PromptPack
         return formData.promptPackName.length > 0;
       case 3: // Provider

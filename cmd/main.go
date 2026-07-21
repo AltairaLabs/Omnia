@@ -46,6 +46,7 @@ import (
 	eesetup "github.com/altairalabs/omnia/ee/pkg/setup"
 	"github.com/altairalabs/omnia/internal/api/authz"
 	"github.com/altairalabs/omnia/internal/api/content"
+	"github.com/altairalabs/omnia/internal/api/deploy"
 	"github.com/altairalabs/omnia/internal/controller"
 	"github.com/altairalabs/omnia/internal/schema"
 	"github.com/altairalabs/omnia/internal/tooltest"
@@ -104,6 +105,7 @@ func main() {
 	var apiBindAddress string
 	var toolTestAllowedSubjects string
 	var contentAPIBindAddress string
+	var deployAPIBindAddress string
 	var sessionAPIAuthEnabled bool
 	var sessionAPIAuthAudience string
 	var sessionAPIAuthTokenExpirationSeconds int64
@@ -221,6 +223,8 @@ func main() {
 			"of mounting the NFS content volume. Requires --mgmt-plane-jwks-url (to verify the "+
 			"dashboard-minted identity token) and --workspace-content-path (the mounted content "+
 			"root). If empty, the content API server is not started.")
+	flag.StringVar(&deployAPIBindAddress, "deploy-api-bind-address", "",
+		"Address for the deploy-intent API server (e.g. :8083). Empty disables it. Requires --mgmt-plane-jwks-url.")
 	flag.StringVar(&toolTestAllowedSubjects, "tool-test-allowed-subjects", "",
 		"Comma-separated list of authenticated usernames allowed to call the tool-test API "+
 			"(e.g. system:serviceaccount:omnia-system:omnia-dashboard). Each request must present a "+
@@ -617,6 +621,32 @@ func main() {
 		}()
 	}
 
+	// Start deploy-intent API server if configured. It translates a versioned,
+	// CRD-agnostic DeployIntent into PromptPack/AgentRuntime objects, so the
+	// deploy adapter never constructs CRDs.
+	var deployServer *deploy.Server
+	if deployAPIBindAddress != "" {
+		if mgmtPlaneJWKSURL == "" {
+			setupLog.Error(fmt.Errorf("mgmt-plane-jwks-url required"),
+				"deploy-api-bind-address requires --mgmt-plane-jwks-url")
+			os.Exit(1)
+		}
+		verifier, verr := authz.NewIdentityVerifierFromJWKS(mgmtPlaneJWKSURL)
+		if verr != nil {
+			setupLog.Error(verr, "unable to build identity verifier for deploy API")
+			os.Exit(1)
+		}
+		deployLog := ctrl.Log.WithName("deploy-api")
+		authorizer := authz.NewAuthorizer(verifier, authz.NewClientWorkspaceResolver(mgr.GetClient()))
+		handler := deploy.NewHandler(deploy.NewApplier(mgr.GetClient(), deployLog), deployLog)
+		deployServer = deploy.NewServer(deployAPIBindAddress, handler, authorizer, deployLog)
+		go func() {
+			if err := deployServer.Start(ctx); err != nil {
+				setupLog.Error(err, "deploy API server stopped")
+			}
+		}()
+	}
+
 	setupLog.Info("starting manager")
 	if err := mgr.Start(ctx); err != nil {
 		setupLog.Error(err, "problem running manager")
@@ -636,6 +666,13 @@ func main() {
 		defer cancel()
 		if err := contentServer.Shutdown(shutdownCtx); err != nil {
 			setupLog.Error(err, "content API server shutdown error")
+		}
+	}
+	if deployServer != nil {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := deployServer.Shutdown(shutdownCtx); err != nil {
+			setupLog.Error(err, "deploy API server shutdown error")
 		}
 	}
 }

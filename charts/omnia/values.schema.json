@@ -504,6 +504,13 @@
             "bindAddress": { "type": "string" }
           }
         },
+        "deployApi": {
+          "type": "object",
+          "properties": {
+            "enabled":     { "type": "boolean" },
+            "bindAddress": { "type": "string" }
+          }
+        },
         "admissionPolicy": {
           "type": "object",
           "properties": {

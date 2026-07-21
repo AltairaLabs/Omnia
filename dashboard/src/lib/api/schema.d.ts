@@ -418,6 +418,8 @@ export interface components {
                 /** @enum {string} */
                 type: "git" | "oci" | "configmap";
             }[];
+            /** @description DeployIntent contract versions the operator accepts. */
+            supportedDeployIntentVersions: string[];
         };
         /**
          * @description Generic create/update body accepted by the workspace CRD routes. The
@@ -956,6 +958,204 @@ export interface components {
                 available?: number;
                 degraded?: number;
             };
+        };
+        /**
+         * @description Versioned, CRD-agnostic description of a whole deploy. The operator's
+         *     deploy-intent API (internal, mgmt-plane-JWT authenticated — not the
+         *     `ApiKeyAuth` surface below) translates this into PromptPack + AgentRuntime
+         *     objects, so the promptarena-deploy-omnia adapter never constructs CRDs
+         *     directly. Field names mirror `internal/api/deploy.DeployIntent` exactly.
+         */
+        DeployIntent: {
+            /**
+             * @description Contract version. Only `deploy.omnia.altairalabs.ai/v1` is accepted; unknown values are rejected with 400.
+             * @example deploy.omnia.altairalabs.ai/v1
+             */
+            apiVersion: string;
+            pack: components["schemas"]["PackIntent"];
+            tools?: components["schemas"]["ToolsIntent"];
+            policy?: components["schemas"]["PolicyIntent"];
+            agents: components["schemas"]["AgentIntent"][];
+            labels?: {
+                [key: string]: string;
+            };
+        };
+        /** @description Maps to a PromptPack plus its content ConfigMap. `content` is the raw pack.json; the operator treats it as opaque bytes. */
+        PackIntent: {
+            name: string;
+            version: string;
+            content: string;
+            skills?: components["schemas"]["SkillRefIntent"][];
+            skillsConfig?: components["schemas"]["SkillsConfigIntent"];
+        };
+        /** @description Maps to a PromptPack spec.skills[] entry. */
+        SkillRefIntent: {
+            source: string;
+            include?: string[];
+            mountAs?: string;
+        };
+        /** @description Maps to PromptPack spec.skillsConfig. */
+        SkillsConfigIntent: {
+            maxActive?: number;
+            selector?: string;
+        };
+        /** @description Reference an existing ToolRegistry, or create one (create-only). `ref` and `handlers` are mutually exclusive. */
+        ToolsIntent: {
+            /** @description Existing ToolRegistry name. */
+            ref?: string;
+            /** @description Create-only registry contents. */
+            handlers?: components["schemas"]["HandlerIntent"][];
+        };
+        /** @description Mirrors HandlerDefinition's stable surface. The per-executor config blocks are free-form JSON, mapped straight onto the ToolRegistry CRD's json fields. */
+        HandlerIntent: {
+            name: string;
+            /** @enum {string} */
+            type: "http" | "openapi" | "grpc" | "mcp" | "client";
+            tool?: {
+                [key: string]: unknown;
+            };
+            httpConfig?: {
+                [key: string]: unknown;
+            };
+            openAPIConfig?: {
+                [key: string]: unknown;
+            };
+            grpcConfig?: {
+                [key: string]: unknown;
+            };
+            mcpConfig?: {
+                [key: string]: unknown;
+            };
+            clientConfig?: {
+                [key: string]: unknown;
+            };
+            auth?: {
+                [key: string]: unknown;
+            };
+            timeout?: string;
+        };
+        /** @description Maps to an AgentPolicy denylist. `toolBlocklist` is the flat list of tool names to deny; the server builds `toolAccess{denylist, rules:[{registry, tools}]}` against the deploy's ToolRegistry. */
+        PolicyIntent: {
+            toolBlocklist?: string[];
+        };
+        /** @description Maps to one AgentRuntime. */
+        AgentIntent: {
+            name: string;
+            promptName?: string;
+            providers: components["schemas"]["ProviderBind"][];
+            runtime?: components["schemas"]["RuntimeIntent"];
+            facades?: components["schemas"]["FacadeIntent"][];
+            useTools?: boolean;
+            externalAuth?: components["schemas"]["ExternalAuthIntent"];
+            memory?: components["schemas"]["MemoryIntent"];
+            evals?: components["schemas"]["EvalsIntent"];
+            rollout?: components["schemas"]["RolloutIntent"];
+        };
+        /** @description One provider binding — a logical slot name, the Provider CRD name, and the role (default "llm"). */
+        ProviderBind: {
+            name: string;
+            ref: string;
+            role?: string;
+        };
+        /** @description Maps to spec.runtime (Plan A supports replicas + resources only). */
+        RuntimeIntent: {
+            /** Format: int32 */
+            replicas?: number;
+            cpu?: string;
+            memory?: string;
+        };
+        /** @description Maps to spec.externalAuth (AgentExternalAuth) — current CRD vocabulary, not the adapter's legacy sharedToken/apiKeys shape. */
+        ExternalAuthIntent: {
+            clientKeys?: components["schemas"]["ClientKeysIntent"];
+            oidc?: components["schemas"]["OIDCIntent"];
+            edgeTrust?: components["schemas"]["EdgeTrustIntent"];
+        };
+        /** @description Maps to AgentExternalAuth.clientKeys. */
+        ClientKeysIntent: {
+            defaultRole?: string;
+            trustEndUserHeader?: boolean;
+        };
+        /** @description Maps to AgentExternalAuth.oidc. */
+        OIDCIntent: {
+            issuer: string;
+            audience: string;
+            claimMapping?: components["schemas"]["OIDCMappingIntent"];
+        };
+        /** @description Maps to AgentExternalAuth.oidc.claimMapping. */
+        OIDCMappingIntent: {
+            subject?: string;
+            endUser?: string;
+        };
+        /** @description Maps to AgentExternalAuth.edgeTrust. */
+        EdgeTrustIntent: {
+            headerMapping?: components["schemas"]["EdgeTrustHeaderIntent"];
+            claimsFromHeaders?: {
+                [key: string]: string;
+            };
+        };
+        /** @description Maps to AgentExternalAuth.edgeTrust.headerMapping. */
+        EdgeTrustHeaderIntent: {
+            subject?: string;
+            endUser?: string;
+            email?: string;
+        };
+        /** @description Maps to spec.memory (MemoryConfig). */
+        MemoryIntent: {
+            enabled?: boolean;
+            retrieval?: components["schemas"]["MemoryRetrievalIntent"];
+            tools?: components["schemas"]["MemoryToolsIntent"];
+        };
+        /** @description Maps to spec.memory.retrieval. */
+        MemoryRetrievalIntent: {
+            enabled?: boolean;
+            /** @enum {string} */
+            strategy?: "keyword" | "semantic" | "composite";
+            /** Format: int32 */
+            limit?: number;
+            denyCEL?: string;
+        };
+        /** @description Maps to spec.memory.tools. */
+        MemoryToolsIntent: {
+            enabled?: boolean;
+        };
+        /** @description Maps to spec.evals (EvalConfig). Only enabled + inline/worker groups are mapped (matches the adapter surface; sampling/rateLimit/sessionCompletion are not yet in the intent contract). */
+        EvalsIntent: {
+            enabled?: boolean;
+            inlineGroups?: string[];
+            workerGroups?: string[];
+        };
+        /** @description Maps to one spec.facades[] entry. A nil/empty agents[].facades yields a single default websocket facade. */
+        FacadeIntent: {
+            type: string;
+            managementPlane?: boolean;
+        };
+        /** @description Maps to spec.rollout. A non-nil trigger switches the AgentRuntime into canary mode. */
+        RolloutIntent: {
+            trigger?: components["schemas"]["RolloutTriggerIntent"];
+            steps?: components["schemas"]["RolloutStepIntent"][];
+        };
+        /** @description Maps to spec.rollout.trigger. */
+        RolloutTriggerIntent: {
+            promptPackChannel: string;
+        };
+        /** @description Maps to a spec.rollout.steps[] entry (Plan A supports setWeight + pause duration). */
+        RolloutStepIntent: {
+            /** Format: int32 */
+            setWeight?: number;
+            pauseDuration?: string;
+        };
+        /** @description The deploy-intent endpoint's response body — best-effort per-resource status. */
+        DeployResult: {
+            succeeded: boolean;
+            results: components["schemas"]["ResourceResult"][];
+        };
+        /** @description The per-object apply outcome. */
+        ResourceResult: {
+            kind: string;
+            name: string;
+            /** @enum {string} */
+            action: "created" | "updated" | "unchanged" | "failed";
+            error?: string;
         };
     };
     responses: {

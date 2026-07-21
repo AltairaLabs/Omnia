@@ -684,8 +684,10 @@ export interface AgentRuntimeSpec {
     type: "websocket" | "a2a" | "rest" | "mcp" | "custom";
   }[];
   /** framework specifies which agent framework to use.
-   * Supports PromptKit, LangChain, AutoGen, or a custom image.
-   * If not specified, defaults to PromptKit. */
+   * Defaults to PromptKit, the only framework this repo builds and tests.
+   * Any other type (langchain, autogen, custom) requires an explicit image
+   * via spec.framework.image or an operator --framework-image entry, and
+   * must implement the omnia.runtime.v1 gRPC contract. */
   framework?: {
     /** image overrides the default container image for the framework.
      * Required when type is "custom".

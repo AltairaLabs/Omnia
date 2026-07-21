@@ -16,7 +16,18 @@ limitations under the License.
 
 package facade
 
-import "context"
+import (
+	"context"
+	"errors"
+)
+
+// ErrProbeUnsupported means the runtime does not serve HasConversation — it was
+// built against an older contract version (see the Contract-Version marker in
+// api/proto/runtime/v1/runtime.proto). Such a runtime cannot answer, which is
+// not the same as answering "gone", so the facade lets the session through
+// rather than failing every resume or inventing an expiry it has no authority
+// to declare.
+var ErrProbeUnsupported = errors.New("runtime does not implement HasConversation")
 
 // ResumeState reports whether a session's working context can still be continued.
 type ResumeState int

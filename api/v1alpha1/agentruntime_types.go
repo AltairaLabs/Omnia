@@ -534,13 +534,22 @@ type ProviderRef struct {
 type FrameworkType string
 
 const (
-	// FrameworkTypePromptKit uses AltairaLabs' PromptKit framework.
+	// FrameworkTypePromptKit uses AltairaLabs' PromptKit framework. This is
+	// the only framework built, tested, and released by this repo.
 	FrameworkTypePromptKit FrameworkType = "promptkit"
-	// FrameworkTypeLangChain uses the LangChain framework.
+	// FrameworkTypeLangChain uses a LangChain runtime image. UNSUPPORTED:
+	// no image is built by this repo and none is defaulted, so
+	// spec.framework.image (or an operator --framework-image entry) is
+	// required. Not built, tested, or released by this repo — such an
+	// image implements omnia.runtime.v1 independently and may lag the
+	// contract.
 	FrameworkTypeLangChain FrameworkType = "langchain"
-	// FrameworkTypeAutoGen uses Microsoft's AutoGen framework.
+	// FrameworkTypeAutoGen is reserved. NOT IMPLEMENTED: no image is built or
+	// defaulted, so an AgentRuntime declaring it blocks with
+	// FrameworkImageUnavailable unless spec.framework.image is set.
 	FrameworkTypeAutoGen FrameworkType = "autogen"
-	// FrameworkTypeCustom uses a user-provided container image.
+	// FrameworkTypeCustom uses a user-provided container image implementing
+	// the omnia.runtime.v1 gRPC contract. Requires spec.framework.image.
 	FrameworkTypeCustom FrameworkType = "custom"
 )
 
@@ -1363,8 +1372,10 @@ type AgentRuntimeSpec struct {
 	OutputFormat string `json:"outputFormat,omitempty"`
 
 	// framework specifies which agent framework to use.
-	// Supports PromptKit, LangChain, AutoGen, or a custom image.
-	// If not specified, defaults to PromptKit.
+	// Defaults to PromptKit, the only framework this repo builds and tests.
+	// Any other type (langchain, autogen, custom) requires an explicit image
+	// via spec.framework.image or an operator --framework-image entry, and
+	// must implement the omnia.runtime.v1 gRPC contract.
 	// +optional
 	Framework *FrameworkConfig `json:"framework,omitempty"`
 

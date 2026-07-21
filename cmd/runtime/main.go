@@ -48,6 +48,7 @@ import (
 	"github.com/go-logr/logr"
 	"github.com/go-logr/zapr"
 
+	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 	memoryhttpclient "github.com/altairalabs/omnia/internal/memory/httpclient"
 	pkruntime "github.com/altairalabs/omnia/internal/runtime"
 	"github.com/altairalabs/omnia/internal/runtime/tools"
@@ -293,6 +294,7 @@ func main() {
 	if len(evalDefs) > 0 {
 		serverOpts = append(serverOpts, pkruntime.WithEvalDefs(evalDefs))
 	}
+	warnIfCustomTruncation(log, cfg.TruncationStrategy)
 	runtimeServer := pkruntime.NewServer(serverOpts...)
 	defer func() { _ = runtimeServer.Close() }()
 
@@ -513,6 +515,25 @@ func configDerivedServerOpts(cfg *pkruntime.Config) []pkruntime.ServerOption {
 		pkruntime.WithMemoryRetrieval(cfg.MemoryStrategy, cfg.MemoryDenyCEL, cfg.MemoryLimit),
 		pkruntime.WithFunctionOutputFormat(cfg.Mode, cfg.OutputFormat, cfg.OutputSchemaJSON),
 	}
+}
+
+// warnIfCustomTruncation flags the one combination where truncationStrategy
+// silently does nothing: "custom" tells the runtime to implement truncation
+// itself, but this PromptKit runtime has no custom implementation, so no
+// truncation is applied at all and context grows until the provider rejects
+// the request. The field is valid for custom runtimes (spec.framework.type:
+// custom), which is why this warns rather than failing. Returns true when a
+// warning was emitted.
+func warnIfCustomTruncation(log logr.Logger, strategy string) bool {
+	if strategy != string(omniav1alpha1.TruncationStrategyCustom) {
+		return false
+	}
+	log.Info("truncation disabled",
+		"reason", "customStrategyOnPromptKitRuntime",
+		"truncationStrategy", strategy,
+		"impact", "no truncation applied; context may exceed the provider limit",
+		"remedy", "use sliding or summarize, or run a custom runtime that implements truncation")
+	return true
 }
 
 // buildGRPCServer constructs the runtime gRPC server with the policy

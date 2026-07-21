@@ -1,0 +1,131 @@
+suite: operator deploy-intent API wiring (bind addr, port, dashboard env) — mirrors content-API (#1866)
+release:
+  name: omnia
+  namespace: NAMESPACE
+values:
+  - ../values-chart-tests.yaml
+templates:
+  - templates/deployment.yaml
+  - templates/operator-api-service.yaml
+  - templates/dashboard/configmap.yaml
+tests:
+  - it: manager container gets --deploy-api-bind-address=:8085 by default (dashboard enabled)
+    # :8085, NOT :8083 -- the tool-test API (operator.apiBindAddress) also
+    # defaults to :8083 whenever dashboard.enabled is true, so :8083 here
+    # would collide with it on the same operator process.
+    template: templates/deployment.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --deploy-api-bind-address=:8085
+
+  - it: manager container exposes a deploy-api port 8085 by default
+    template: templates/deployment.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].ports
+          content:
+            name: deploy-api
+            containerPort: 8085
+            protocol: TCP
+
+  - it: operator Service exposes a deploy-api port 8085 targeting the deploy-api container port
+    template: templates/operator-api-service.yaml
+    asserts:
+      - contains:
+          path: spec.ports
+          content:
+            name: deploy-api
+            port: 8085
+            targetPort: deploy-api
+            protocol: TCP
+
+  - it: dashboard ConfigMap gets OPERATOR_DEPLOY_API_URL pointing at the operator Service on :8085
+    template: templates/dashboard/configmap.yaml
+    asserts:
+      - equal:
+          path: data.OPERATOR_DEPLOY_API_URL
+          value: "http://omnia-operator.NAMESPACE.svc.cluster.local:8085"
+
+  - it: deploy-api and tool-test API bind addresses never collide on default install
+    # Regression guard: both the tool-test API (operator.apiBindAddress,
+    # via omnia.toolTest.bindAddress) and the deploy API are enabled by
+    # default whenever dashboard.enabled is true, so their bind addresses
+    # must differ or the operator binary fails to start (two servers can't
+    # bind the same port). Pins both ports explicitly rather than just
+    # asserting inequality, so a future default change on either side is
+    # forced to update this test consciously.
+    template: templates/deployment.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --api-bind-address=:8083
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --deploy-api-bind-address=:8085
+
+  - it: workspaceContent.deployApi.enabled=false omits the deploy-api arg
+    set:
+      workspaceContent.deployApi.enabled: false
+    template: templates/deployment.yaml
+    asserts:
+      - notMatchRegex:
+          path: spec.template.spec.containers[0].args[*]
+          pattern: ^--deploy-api-bind-address=
+
+  - it: workspaceContent.deployApi.enabled=false omits the deploy-api container port
+    set:
+      workspaceContent.deployApi.enabled: false
+    template: templates/deployment.yaml
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].ports
+          content:
+            name: deploy-api
+            containerPort: 8085
+            protocol: TCP
+
+  - it: workspaceContent.deployApi.enabled=false omits the Service deploy-api port
+    set:
+      workspaceContent.deployApi.enabled: false
+    template: templates/operator-api-service.yaml
+    asserts:
+      - notContains:
+          path: spec.ports
+          content:
+            name: deploy-api
+            port: 8085
+            targetPort: deploy-api
+            protocol: TCP
+
+  - it: workspaceContent.deployApi.enabled=false omits OPERATOR_DEPLOY_API_URL
+    set:
+      workspaceContent.deployApi.enabled: false
+    template: templates/dashboard/configmap.yaml
+    asserts:
+      - notExists:
+          path: data.OPERATOR_DEPLOY_API_URL
+
+  - it: dashboard.enabled=false omits the deploy-api arg
+    # dashboard.enabled=false also disables the dashboard ConfigMap template
+    # entirely (no document rendered), so only the operator-side deployment
+    # args/ports are checked here.
+    set:
+      dashboard.enabled: false
+    template: templates/deployment.yaml
+    asserts:
+      - notMatchRegex:
+          path: spec.template.spec.containers[0].args[*]
+          pattern: ^--deploy-api-bind-address=
+
+  - it: dashboard.enabled=false omits the deploy-api container port
+    set:
+      dashboard.enabled: false
+    template: templates/deployment.yaml
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].ports
+          content:
+            name: deploy-api
+            containerPort: 8085
+            protocol: TCP

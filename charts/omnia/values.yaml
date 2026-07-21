@@ -1571,6 +1571,19 @@ workspaceContent:
     # -- Bind address for the operator content API (port-only form, e.g. ":8084").
     bindAddress: ":8084"
 
+  # -- Operator deploy-intent API. The dashboard forwards DeployIntent bodies
+  # through this authenticated operator endpoint (#1866). The operator
+  # verifies the dashboard-minted identity JWT and applies the resulting
+  # spec. Served only when `dashboard.enabled` is true.
+  deployApi:
+    # -- Enable the operator deploy-intent API.
+    enabled: true
+    # -- Bind address for the operator deploy API (port-only form, e.g.
+    # ":8085"). NOT ":8083" -- the tool-test API (operator.apiBindAddress)
+    # also defaults to ":8083" whenever dashboard.enabled is true, so that
+    # value would collide with it on the same operator process.
+    bindAddress: ":8085"
+
   # -- Layer-2 isolation backstop (#1463): a ValidatingAdmissionPolicy that
   # denies a pod in a workspace namespace from mounting any workspace-content
   # PVC other than its own `workspace-<namespace>-content` (catches foreign and
@@ -1727,11 +1740,15 @@ framework:
   # override) is blocked loudly rather than silently running PromptKit (#1206).
   # `image` above supplies the `promptkit` entry (back-compat). Each entry
   # renders a `--framework-image=<type>=<repository>:<tag>` operator arg.
-  images:
-    langchain:
-      repository: ghcr.io/altairalabs/omnia-langchain-runtime
-      # tag defaults to the chart appVersion when empty
-      tag: ""
+  #
+  # Only `promptkit` is built and tested by this repo. Other framework
+  # runtimes (e.g. langchain) are UNSUPPORTED — not built, tested, or
+  # released by this repo: they implement the omnia.runtime.v1 contract
+  # independently and may lag it. Set one here only if you have verified the
+  # image against the contract version documented at
+  # docs/src/content/docs/reference/platform/facade-runtime-protocol.md, and
+  # pin an explicit tag — do not rely on :latest.
+  images: {}
 
 # Observability configuration (for Omnia-specific templates)
 observability:

@@ -186,6 +186,25 @@ Empty disables it.
 {{- end -}}
 
 {{/*
+omnia.deployApi.bindAddress — operator deploy-intent API bind address.
+The dashboard forwards DeployIntent bodies to this authenticated operator
+endpoint, which verifies the dashboard-minted identity JWT (via
+--mgmt-plane-jwks-url, already emitted unconditionally when the dashboard
+is enabled) and applies the resulting spec. Explicit
+workspaceContent.deployApi.bindAddress wins; defaults to ":8085". NOT ":8083"
+-- omnia.toolTest.bindAddress (above) ALSO defaults to ":8083" whenever
+dashboard.enabled is true (the chart's own default), so ":8083" here would
+collide with the tool-test API on the same operator process and crash-loop
+it on any default install. Empty disables the deploy API.
+*/}}
+{{- define "omnia.deployApi.bindAddress" -}}
+{{- $da := .Values.workspaceContent.deployApi | default dict -}}
+{{- if and .Values.dashboard.enabled $da.enabled -}}
+{{- $da.bindAddress | default ":8085" -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 Compaction image
 */}}
 {{- define "omnia.compaction.image" -}}

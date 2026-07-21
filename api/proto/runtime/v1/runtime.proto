@@ -7,6 +7,22 @@ package omnia.runtime.v1;
 
 option go_package = "github.com/altairalabs/omnia/pkg/runtime/v1;runtimev1";
 
+// Contract-Version: 1.1.0
+//
+// The version of this contract, as consumed by third-party runtime
+// implementations. Bump the minor version for additive changes (new message,
+// new optional field, new oneof variant); bump the major version for any
+// change that would break an existing conformant runtime. The value is
+// mirrored in pkg/runtime/contract/version.go and the two are asserted equal
+// by pkg/runtime/contract/version_test.go — update both together.
+//
+// Implementors: do NOT hand-copy this file. Published stubs are not
+// available yet (they land with a later wave of the custom-runtime epic) —
+// until then, generate from this file at a pinned git ref, record the
+// Contract-Version you generated against, and report it from Health via
+// contract_version. See
+// docs/src/content/docs/reference/platform/facade-runtime-protocol.md
+
 // RuntimeService defines the communication protocol between the facade and runtime containers.
 // The facade handles external protocol translation (WebSocket/REST/gRPC to internal gRPC),
 // while the runtime handles all business logic including sessions, LLM calls, and tool execution.
@@ -311,6 +327,12 @@ message HealthResponse {
 
   // status provides additional status information.
   string status = 2;
+
+  // contract_version is the omnia.runtime.v1 contract version this runtime
+  // was built against, as a semver string (see the Contract-Version marker at
+  // the top of this file). A runtime that reports an empty value predates
+  // contract versioning and must be treated as unversioned.
+  string contract_version = 3;
 }
 
 // HasConversationRequest asks whether one session's context is resumable.

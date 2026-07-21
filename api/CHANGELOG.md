@@ -12,6 +12,12 @@ or `api/proto/`, add an entry below with the date, affected API, and reason.
 
 ### Changed (resume: the context store decides resumability, #1876)
 
+- **Contract version 1.0.0 → 1.1.0.** Adding `HasConversation` is an additive change to
+  the `omnia.runtime.v1` contract, so the minor version is bumped in both
+  `api/proto/runtime/v1/runtime.proto` and `pkg/runtime/contract/version.go`. A custom
+  runtime built against 1.0.0 remains conformant — it simply does not serve the new
+  method, and the facade treats an unimplemented probe as `UNAVAILABLE`, which is never
+  reported to a client as an expiry.
 - **New gRPC method.** `RuntimeService.HasConversation(HasConversationRequest) returns
   (HasConversationResponse)` reports whether a session's working context can still be
   resumed. It answers `RESUME_STATE_RESUMABLE` / `RESUME_STATE_NOT_FOUND` /
@@ -47,6 +53,92 @@ or `api/proto/`, add an entry below with the date, affected API, and reason.
   into the facade's session TTL, where it governed session-api row expiry; one CRD
   field no longer sets two unrelated lifetimes. Archival retention belongs to
   `SessionRetentionPolicy`. The facade no longer sends any TTL to session-api.
+
+### Added (operator: deploy-intent API, deploy-intent decoupling epic Plan A)
+
+- **`POST /api/v1/workspaces/{workspace}/deployments`** — new operator-served REST endpoint
+  (`internal/api/deploy`) that accepts a versioned, CRD-agnostic **`DeployIntent`**
+  (`apiVersion: deploy.omnia.altairalabs.ai/v1`) and translates it server-side into a
+  `PromptPack` + its content `ConfigMap` and one or more `AgentRuntime` objects, applied
+  idempotently (pack/ConfigMap created once; existing objects reported `unchanged`) and
+  rollout-aware (an `AgentRuntime` already in version-trigger rollout mode keeps its live
+  `promptPackRef`/candidate/rollout state unless the intent explicitly supplies a new
+  rollout block). Response is **`DeployResult`**: `{succeeded, results: [{kind, name,
+  action: created|updated|unchanged|failed, error?}]}` — HTTP 200, or 207 on partial
+  failure. Auth matches the content API: dashboard-minted management-plane JWT verified
+  against `--mgmt-plane-jwks-url`, editor role required on the target workspace
+  (`internal/api/authz`). Gated behind the new `--deploy-api-bind-address` operator flag
+  (empty disables it; requires `--mgmt-plane-jwks-url`).
+- This is **Plan A** of the deploy-intent decoupling epic (#1835 family, supersedes
+  #1839): it lets a future deploy adapter submit one intent instead of authoring
+  `PromptPack`/`AgentRuntime` CRDs itself. The existing `promptarena-deploy-omnia` adapter
+  has **not** migrated to this endpoint yet — it still writes CRDs directly via the
+  dashboard's workspace CRD REST API (unchanged).
+
+### Added (operator: deploy-intent API full config surface, deploy-intent decoupling epic Plan B, #1865)
+
+- The `DeployIntent` fields declared as wire placeholders in Plan A are now mapped by the
+  translator: `agents[].externalAuth` → `AgentRuntime.spec.externalAuth` (current CRD
+  vocabulary — `clientKeys`/`oidc`/`edgeTrust`, not the adapter's legacy
+  `sharedToken`/`apiKeys` shape), `agents[].memory` → `spec.memory`, and `agents[].evals` →
+  `spec.evals` (enabled + `inlineGroups`/`workerGroups` only — sampling/rateLimit/
+  sessionCompletion are not yet in the intent contract).
+- **`tools`** (top-level `ToolsIntent`) either references an existing `ToolRegistry` by
+  name (`ref`) or **create-only** creates one from `handlers[]` (`ref` and `handlers` are
+  mutually exclusive) — the operator never updates an existing `ToolRegistry` through this
+  endpoint. Each `HandlerIntent`'s per-executor config block (`httpConfig`/`openAPIConfig`/
+  `grpcConfig`/`mcpConfig`/`clientConfig`/`auth`/`tool`) is carried as free-form JSON, mapped
+  straight onto the `ToolRegistry` CRD's matching field, so the intent contract tracks new
+  executor types without a schema change.
+- **`policy.toolBlocklist`** (top-level `PolicyIntent`) creates an `AgentPolicy` with a
+  `toolAccess` denylist rule scoped to the deploy's `ToolRegistry` — the CRD has no
+  `toolBlocklist` field; the server does the shape correction.
+- `api/openapi/openapi.yaml` schemas for `ExternalAuthIntent`, `MemoryIntent`, `EvalsIntent`,
+  `ToolsIntent`/`HandlerIntent`, and `PolicyIntent` are updated to the real fields (no new
+  `paths:` entry — this remains an internal, mgmt-plane-JWT-authenticated endpoint; a
+  dashboard-facing proxy route is deferred to a later plan).
+
+### Added (dashboard: deploy-intent proxy + deploy-profile version advertisement, deploy-intent decoupling epic Plan C, #1866)
+
+- **`GET /api/workspaces/{name}/deploy-profile`** response gains **`supportedDeployIntentVersions`**
+  (`string[]`, required) — the `DeployIntent` `apiVersion` values the operator's deploy-intent
+  API (see Plan A entry above) accepts, currently `["deploy.omnia.altairalabs.ai/v1"]`
+  (`dashboard/src/lib/deploy/intent-versions.ts`, a hand-kept mirror of the Go
+  `deploy.APIVersionV1` constant). Lets a deploy client version-negotiate before POSTing an
+  intent. `api/openapi/openapi.yaml`'s `DeployProfile` schema updated to match.
+- **`POST /api/workspaces/{name}/deployments`** — new dashboard-served REST endpoint
+  (`dashboard/src/app/api/workspaces/[name]/deployments/route.ts`), editor-gated via
+  `withWorkspaceAccess`, that forwards an opaque `DeployIntent` request body to the operator's
+  `POST /api/v1/workspaces/{workspace}/deployments` (Plan A entry above). `deploy-api-service.ts`
+  mints a short-lived RS256 identity JWT (aud `omnia-operator`, 60s TTL) via the shared
+  `operator-identity.ts` helper — the same minting path `content-api-service.ts` already uses —
+  and returns the operator's `DeployResult` response (200, or 207 on partial failure) verbatim.
+  The dashboard does not validate or interpret the intent body.
+- This is **Plan C** of the deploy-intent decoupling epic (#1863 family): it makes the Plan
+  A/B operator API reachable end-to-end for the first time. The chart now wires
+  `--deploy-api-bind-address` (default `:8085`), a `deploy-api` container/Service port, and the
+  dashboard's `OPERATOR_DEPLOY_API_URL` env var. The external `promptarena-deploy-omnia` adapter
+  authenticates to this new dashboard route with its existing `omnia_sk_` key; the operator only
+  ever sees the dashboard-minted JWT.
+
+### gRPC — `omnia.runtime.v1`
+
+- **Added a contract version.** `api/proto/runtime/v1/runtime.proto` now carries
+  a `// Contract-Version:` marker (currently `1.0.0`), mirrored by the
+  `contract.Version` constant in `pkg/runtime/contract/version.go` and asserted
+  equal by `pkg/runtime/contract/version_test.go`. No message or RPC changed —
+  this is documentation of the existing surface so third-party runtimes have
+  something to pin and report. Minor bumps are additive; major bumps break
+  conformant runtimes. (custom-runtime epic, wave 1)
+- **Added `HealthResponse.contract_version`** (field 3, additive). The runtime
+  now reports the `omnia.runtime.v1` contract version it was built against.
+  Nothing reads this field yet in wave 1 — it lays the groundwork for a wave 3
+  control-plane check that will detect a runtime that has fallen behind. An
+  empty value means the runtime predates contract versioning. The contract
+  version stays `1.0.0`: the marker and this field are landing together,
+  unreleased, so `1.0.0` describes the contract including this field.
+  (custom-runtime epic, wave 1; the capability feature-flag set follows in
+  wave 3)
 
 ### Changed (auth: rename `apiKeys` → `clientKeys` + arbitrary per-key claims, #1775)
 

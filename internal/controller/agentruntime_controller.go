@@ -92,8 +92,9 @@ type AgentRuntimeReconciler struct {
 	// FrameworkImages maps framework type (e.g. "promptkit", "langchain") to a
 	// release-pinned runtime image. Populated from the repeatable
 	// --framework-image flag. The selector falls back to a built-in :latest
-	// default for promptkit/langchain when a type is absent (bare-dev), and
-	// blocks loudly for types with no image (see resolveFrameworkImage).
+	// default only for promptkit when a type is absent (bare-dev); every
+	// other type (langchain, autogen, custom) blocks loudly for types with
+	// no image (see resolveFrameworkImage).
 	FrameworkImages          map[string]string
 	FrameworkImagePullPolicy corev1.PullPolicy
 	// Tracing configuration for runtime containers

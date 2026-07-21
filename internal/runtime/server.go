@@ -45,11 +45,13 @@ import (
 	pkmemory "github.com/AltairaLabs/PromptKit/runtime/memory"
 	pkskills "github.com/AltairaLabs/PromptKit/runtime/skills"
 
+	v1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 	"github.com/altairalabs/omnia/internal/media"
 	"github.com/altairalabs/omnia/internal/runtime/skills"
 	"github.com/altairalabs/omnia/internal/runtime/tools"
 	"github.com/altairalabs/omnia/internal/session"
 	"github.com/altairalabs/omnia/internal/tracing"
+	"github.com/altairalabs/omnia/pkg/runtime/contract"
 )
 
 // Server implements the RuntimeService gRPC server.
@@ -574,12 +576,15 @@ func WithContextWindow(tokens int) ServerOption {
 }
 
 // WithTruncationStrategy sets the strategy for handling context overflow.
-// Valid values: "sliding" (remove oldest), "summarize" (summarize before removing),
-// "custom" (delegate to custom runtime implementation - no SDK truncation).
+// Valid values: "sliding" (remove oldest), "summarize" (summarize before
+// removing), "custom" (the runtime implements truncation itself — no SDK
+// truncation is configured). "custom" is intended for custom runtimes
+// (spec.framework.type: custom); on this PromptKit runtime it means no
+// truncation is applied at all, which cmd/runtime warns about at startup.
 func WithTruncationStrategy(strategy string) ServerOption {
 	return func(s *Server) {
 		// "custom" means the custom runtime handles it - don't set SDK truncation
-		if strategy != "" && strategy != "custom" {
+		if strategy != "" && strategy != string(v1alpha1.TruncationStrategyCustom) {
 			s.sdkOptions = append(s.sdkOptions, sdk.WithTruncation(strategy))
 		}
 	}
@@ -666,8 +671,9 @@ func (s *Server) Health(_ context.Context, _ *runtimev1.HealthRequest) (*runtime
 	}
 
 	return &runtimev1.HealthResponse{
-		Healthy: s.healthy,
-		Status:  statusMsg,
+		Healthy:         s.healthy,
+		Status:          statusMsg,
+		ContractVersion: contract.Version,
 	}, nil
 }
 

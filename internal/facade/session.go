@@ -330,7 +330,14 @@ func (s *Server) requireResumableContext(ctx context.Context, sessionID string, 
 	}
 
 	state, err := prober.HasConversation(ctx, sessionID)
-	if err != nil {
+	switch {
+	case errors.Is(err, ErrProbeUnsupported):
+		// An older-contract runtime cannot answer. Degrade to letting the
+		// session through, as for a handler with no runtime behind it at all.
+		log.V(1).Info("resume probe skipped", "reason", "runtime predates the probe",
+			"sessionID", sessionID)
+		return nil
+	case err != nil:
 		log.Error(err, "resume probe failed", "sessionID", sessionID)
 		return fmt.Errorf("resume probe: %w", err)
 	}

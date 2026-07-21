@@ -1322,9 +1322,14 @@ type HealthResponse struct {
 	// healthy indicates whether the runtime is ready to handle requests.
 	Healthy bool `protobuf:"varint,1,opt,name=healthy,proto3" json:"healthy,omitempty"`
 	// status provides additional status information.
-	Status        string `protobuf:"bytes,2,opt,name=status,proto3" json:"status,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Status string `protobuf:"bytes,2,opt,name=status,proto3" json:"status,omitempty"`
+	// contract_version is the omnia.runtime.v1 contract version this runtime
+	// was built against, as a semver string (see the Contract-Version marker at
+	// the top of this file). A runtime that reports an empty value predates
+	// contract versioning and must be treated as unversioned.
+	ContractVersion string `protobuf:"bytes,3,opt,name=contract_version,json=contractVersion,proto3" json:"contract_version,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *HealthResponse) Reset() {
@@ -1367,6 +1372,13 @@ func (x *HealthResponse) GetHealthy() bool {
 func (x *HealthResponse) GetStatus() string {
 	if x != nil {
 		return x.Status
+	}
+	return ""
+}
+
+func (x *HealthResponse) GetContractVersion() string {
+	if x != nil {
+		return x.ContractVersion
 	}
 	return ""
 }
@@ -1706,10 +1718,11 @@ const file_api_proto_runtime_v1_runtime_proto_rawDesc = "" +
 	"\vduration_ms\x18\x03 \x01(\x05R\n" +
 	"durationMs\x12#\n" +
 	"\rinvocation_id\x18\x04 \x01(\tR\finvocationId\"\x0f\n" +
-	"\rHealthRequest\"B\n" +
+	"\rHealthRequest\"m\n" +
 	"\x0eHealthResponse\x12\x18\n" +
 	"\ahealthy\x18\x01 \x01(\bR\ahealthy\x12\x16\n" +
-	"\x06status\x18\x02 \x01(\tR\x06status\"7\n" +
+	"\x06status\x18\x02 \x01(\tR\x06status\x12)\n" +
+	"\x10contract_version\x18\x03 \x01(\tR\x0fcontractVersion\"7\n" +
 	"\x16HasConversationRequest\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\"f\n" +

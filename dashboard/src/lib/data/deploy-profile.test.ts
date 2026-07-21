@@ -32,6 +32,7 @@ describe("buildDeployProfile", () => {
         { name: "legacy", role: "llm", type: "claude" },
       ],
       skills: [{ name: "docs", type: "git" }],
+      supportedDeployIntentVersions: ["deploy.omnia.altairalabs.ai/v1"],
     });
   });
 
@@ -49,5 +50,14 @@ describe("buildDeployProfile", () => {
     const profile = await buildDeployProfile(clientOptions, "team-acme", "https://x");
     expect(profile.providers.map((p) => p.name)).toEqual(["chat"]);
     expect(profile.providers.map((p) => p.role)).not.toContain("embedding");
+  });
+
+  it("advertises the supported DeployIntent contract versions", async () => {
+    const { listCrd } = await import("@/lib/k8s/crd-operations");
+    vi.mocked(listCrd).mockResolvedValueOnce([] as never).mockResolvedValueOnce([] as never);
+
+    const { buildDeployProfile } = await import("./deploy-profile");
+    const profile = await buildDeployProfile(clientOptions, "team-acme", "https://x");
+    expect(profile.supportedDeployIntentVersions).toEqual(["deploy.omnia.altairalabs.ai/v1"]);
   });
 });

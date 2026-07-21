@@ -9,6 +9,7 @@ import type {
   DeployProfileProvider,
   DeployProfileSkill,
 } from "@/types/deploy-profile";
+import { SUPPORTED_DEPLOY_INTENT_VERSIONS } from "@/lib/deploy/intent-versions";
 
 const DEFAULT_ROLE = "llm";
 const PHASE_READY = "Ready";
@@ -67,5 +68,6 @@ export async function buildDeployProfile(
       .filter(isLlmProvider)
       .map(toProfileProvider),
     skills: skills.filter(isSkillReady).map(toProfileSkill),
+    supportedDeployIntentVersions: [...SUPPORTED_DEPLOY_INTENT_VERSIONS],
   };
 }

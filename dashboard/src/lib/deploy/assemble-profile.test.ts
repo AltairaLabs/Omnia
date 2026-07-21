@@ -11,6 +11,7 @@ const profile: DeployProfile = {
     { name: "embedder", role: "embedding", type: "openai", model: "text-embed-3" },
   ],
   skills: [{ name: "docs-search", type: "git" }],
+  supportedDeployIntentVersions: ["deploy.omnia.altairalabs.ai/v1"],
 };
 
 describe("assembleDeployConfig", () => {
@@ -50,6 +51,7 @@ describe("assembleDeployConfig", () => {
       workspace: "w",
       providers: [],
       skills: [],
+      supportedDeployIntentVersions: ["deploy.omnia.altairalabs.ai/v1"],
     };
     const { json } = assembleDeployConfig(empty, "omnia_sk_X");
     const parsed = JSON.parse(json);
@@ -69,6 +71,7 @@ describe("assembleDeployConfig", () => {
       { name: "rag-hero-embeddings", role: "embedding", type: "openai" },
     ],
     skills: [],
+    supportedDeployIntentVersions: ["deploy.omnia.altairalabs.ai/v1"],
   };
 
   it("promotes the explicitly chosen LLM to the default binding", () => {

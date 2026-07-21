@@ -177,6 +177,27 @@ func TestEnsureSession_EstablishedSessionCostsNothing(t *testing.T) {
 	}
 }
 
+// A runtime built against an older contract version does not serve
+// HasConversation, so gRPC answers Unimplemented. That is "cannot answer", not
+// "gone" — failing the message would break resume against every such runtime,
+// and reporting an expiry would discard a conversation that may be intact.
+func TestEnsureSession_OlderRuntimeContractDegrades(t *testing.T) {
+	handler := &probeHandler{err: ErrProbeUnsupported}
+	server, store := newResumeServer(t, handler)
+	conn := &Connection{agentName: "agent", namespace: "default", workspaceName: "ws"}
+
+	sessionID, err := server.ensureSession(context.Background(), conn, "prior-session", logr.Discard())
+	if err != nil {
+		t.Fatalf("an older-contract runtime must not fail the message: %v", err)
+	}
+	if sessionID != "prior-session" {
+		t.Fatalf("sessionID = %q, want %q", sessionID, "prior-session")
+	}
+	if store.createCalls != 1 {
+		t.Fatalf("CreateSession called %d times, want 1", store.createCalls)
+	}
+}
+
 // A handler with no runtime behind it has no context store to consult, so the
 // facade must let the session through rather than invent an expiry.
 func TestEnsureSession_NonProbingHandlerAllowsSession(t *testing.T) {

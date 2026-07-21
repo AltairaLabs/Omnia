@@ -718,7 +718,7 @@ components:
         Deploy publish-profile discovery payload. Connection details plus a
         discovery menu of the workspace's Providers and SkillSources. Discovery
         only — never contains a secret. See issue #1519.
-      required: [api_endpoint, workspace, providers, skills]
+      required: [api_endpoint, workspace, providers, skills, supportedDeployIntentVersions]
       properties:
         api_endpoint:
           type: string
@@ -743,6 +743,11 @@ components:
             properties:
               name: { type: string }
               type: { type: string, enum: [git, oci, configmap] }
+        supportedDeployIntentVersions:
+          type: array
+          items:
+            type: string
+          description: DeployIntent contract versions the operator accepts.
     CrdWriteRequest:
       type: object
       description: |
@@ -1632,3 +1637,279 @@ components:
               type: integer
             degraded:
               type: integer
+
+    DeployIntent:
+      type: object
+      description: |
+        Versioned, CRD-agnostic description of a whole deploy. The operator's
+        deploy-intent API (internal, mgmt-plane-JWT authenticated — not the
+        `ApiKeyAuth` surface below) translates this into PromptPack + AgentRuntime
+        objects, so the promptarena-deploy-omnia adapter never constructs CRDs
+        directly. Field names mirror `internal/api/deploy.DeployIntent` exactly.
+      required: [apiVersion, pack, agents]
+      properties:
+        apiVersion:
+          type: string
+          description: Contract version. Only `deploy.omnia.altairalabs.ai/v1` is accepted; unknown values are rejected with 400.
+          example: deploy.omnia.altairalabs.ai/v1
+        pack:
+          $ref: '#/components/schemas/PackIntent'
+        tools:
+          $ref: '#/components/schemas/ToolsIntent'
+        policy:
+          $ref: '#/components/schemas/PolicyIntent'
+        agents:
+          type: array
+          items:
+            $ref: '#/components/schemas/AgentIntent'
+        labels:
+          type: object
+          additionalProperties: { type: string }
+
+    PackIntent:
+      type: object
+      description: Maps to a PromptPack plus its content ConfigMap. `content` is the raw pack.json; the operator treats it as opaque bytes.
+      required: [name, version, content]
+      properties:
+        name: { type: string }
+        version: { type: string }
+        content: { type: string }
+        skills:
+          type: array
+          items:
+            $ref: '#/components/schemas/SkillRefIntent'
+        skillsConfig:
+          $ref: '#/components/schemas/SkillsConfigIntent'
+
+    SkillRefIntent:
+      type: object
+      description: Maps to a PromptPack spec.skills[] entry.
+      required: [source]
+      properties:
+        source: { type: string }
+        include: { type: array, items: { type: string } }
+        mountAs: { type: string }
+
+    SkillsConfigIntent:
+      type: object
+      description: Maps to PromptPack spec.skillsConfig.
+      properties:
+        maxActive: { type: integer }
+        selector: { type: string }
+
+    ToolsIntent:
+      type: object
+      description: Reference an existing ToolRegistry, or create one (create-only). `ref` and `handlers` are mutually exclusive.
+      properties:
+        ref: { type: string, description: Existing ToolRegistry name. }
+        handlers:
+          type: array
+          description: Create-only registry contents.
+          items:
+            $ref: '#/components/schemas/HandlerIntent'
+
+    HandlerIntent:
+      type: object
+      description: Mirrors HandlerDefinition's stable surface. The per-executor config blocks are free-form JSON, mapped straight onto the ToolRegistry CRD's json fields.
+      required: [name, type]
+      properties:
+        name: { type: string }
+        type: { type: string, enum: [http, openapi, grpc, mcp, client] }
+        tool: { type: object, additionalProperties: true }
+        httpConfig: { type: object, additionalProperties: true }
+        openAPIConfig: { type: object, additionalProperties: true }
+        grpcConfig: { type: object, additionalProperties: true }
+        mcpConfig: { type: object, additionalProperties: true }
+        clientConfig: { type: object, additionalProperties: true }
+        auth: { type: object, additionalProperties: true }
+        timeout: { type: string }
+
+    PolicyIntent:
+      type: object
+      description: Maps to an AgentPolicy denylist. `toolBlocklist` is the flat list of tool names to deny; the server builds `toolAccess{denylist, rules:[{registry, tools}]}` against the deploy's ToolRegistry.
+      properties:
+        toolBlocklist: { type: array, items: { type: string } }
+
+    AgentIntent:
+      type: object
+      description: Maps to one AgentRuntime.
+      required: [name, providers]
+      properties:
+        name: { type: string }
+        promptName: { type: string }
+        providers:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProviderBind'
+        runtime:
+          $ref: '#/components/schemas/RuntimeIntent'
+        facades:
+          type: array
+          items:
+            $ref: '#/components/schemas/FacadeIntent'
+        useTools: { type: boolean }
+        externalAuth:
+          $ref: '#/components/schemas/ExternalAuthIntent'
+        memory:
+          $ref: '#/components/schemas/MemoryIntent'
+        evals:
+          $ref: '#/components/schemas/EvalsIntent'
+        rollout:
+          $ref: '#/components/schemas/RolloutIntent'
+
+    ProviderBind:
+      type: object
+      description: One provider binding — a logical slot name, the Provider CRD name, and the role (default "llm").
+      required: [name, ref]
+      properties:
+        name: { type: string }
+        ref: { type: string }
+        role: { type: string }
+
+    RuntimeIntent:
+      type: object
+      description: Maps to spec.runtime (Plan A supports replicas + resources only).
+      properties:
+        replicas: { type: integer, format: int32 }
+        cpu: { type: string }
+        memory: { type: string }
+
+    ExternalAuthIntent:
+      type: object
+      description: Maps to spec.externalAuth (AgentExternalAuth) — current CRD vocabulary, not the adapter's legacy sharedToken/apiKeys shape.
+      properties:
+        clientKeys:
+          $ref: '#/components/schemas/ClientKeysIntent'
+        oidc:
+          $ref: '#/components/schemas/OIDCIntent'
+        edgeTrust:
+          $ref: '#/components/schemas/EdgeTrustIntent'
+
+    ClientKeysIntent:
+      type: object
+      description: Maps to AgentExternalAuth.clientKeys.
+      properties:
+        defaultRole: { type: string }
+        trustEndUserHeader: { type: boolean }
+
+    OIDCIntent:
+      type: object
+      description: Maps to AgentExternalAuth.oidc.
+      required: [issuer, audience]
+      properties:
+        issuer: { type: string }
+        audience: { type: string }
+        claimMapping:
+          $ref: '#/components/schemas/OIDCMappingIntent'
+
+    OIDCMappingIntent:
+      type: object
+      description: Maps to AgentExternalAuth.oidc.claimMapping.
+      properties:
+        subject: { type: string }
+        endUser: { type: string }
+
+    EdgeTrustIntent:
+      type: object
+      description: Maps to AgentExternalAuth.edgeTrust.
+      properties:
+        headerMapping:
+          $ref: '#/components/schemas/EdgeTrustHeaderIntent'
+        claimsFromHeaders:
+          type: object
+          additionalProperties: { type: string }
+
+    EdgeTrustHeaderIntent:
+      type: object
+      description: Maps to AgentExternalAuth.edgeTrust.headerMapping.
+      properties:
+        subject: { type: string }
+        endUser: { type: string }
+        email: { type: string }
+
+    MemoryIntent:
+      type: object
+      description: Maps to spec.memory (MemoryConfig).
+      properties:
+        enabled: { type: boolean }
+        retrieval:
+          $ref: '#/components/schemas/MemoryRetrievalIntent'
+        tools:
+          $ref: '#/components/schemas/MemoryToolsIntent'
+
+    MemoryRetrievalIntent:
+      type: object
+      description: Maps to spec.memory.retrieval.
+      properties:
+        enabled: { type: boolean }
+        strategy: { type: string, enum: [keyword, semantic, composite] }
+        limit: { type: integer, format: int32 }
+        denyCEL: { type: string }
+
+    MemoryToolsIntent:
+      type: object
+      description: Maps to spec.memory.tools.
+      properties:
+        enabled: { type: boolean }
+
+    EvalsIntent:
+      type: object
+      description: Maps to spec.evals (EvalConfig). Only enabled + inline/worker groups are mapped (matches the adapter surface; sampling/rateLimit/sessionCompletion are not yet in the intent contract).
+      properties:
+        enabled: { type: boolean }
+        inlineGroups: { type: array, items: { type: string } }
+        workerGroups: { type: array, items: { type: string } }
+
+    FacadeIntent:
+      type: object
+      description: Maps to one spec.facades[] entry. A nil/empty agents[].facades yields a single default websocket facade.
+      required: [type]
+      properties:
+        type: { type: string }
+        managementPlane: { type: boolean }
+
+    RolloutIntent:
+      type: object
+      description: Maps to spec.rollout. A non-nil trigger switches the AgentRuntime into canary mode.
+      properties:
+        trigger:
+          $ref: '#/components/schemas/RolloutTriggerIntent'
+        steps:
+          type: array
+          items:
+            $ref: '#/components/schemas/RolloutStepIntent'
+
+    RolloutTriggerIntent:
+      type: object
+      description: Maps to spec.rollout.trigger.
+      required: [promptPackChannel]
+      properties:
+        promptPackChannel: { type: string }
+
+    RolloutStepIntent:
+      type: object
+      description: Maps to a spec.rollout.steps[] entry (Plan A supports setWeight + pause duration).
+      properties:
+        setWeight: { type: integer, format: int32 }
+        pauseDuration: { type: string }
+
+    DeployResult:
+      type: object
+      description: The deploy-intent endpoint's response body — best-effort per-resource status.
+      required: [succeeded, results]
+      properties:
+        succeeded: { type: boolean }
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/ResourceResult'
+
+    ResourceResult:
+      type: object
+      description: The per-object apply outcome.
+      required: [kind, name, action]
+      properties:
+        kind: { type: string }
+        name: { type: string }
+        action: { type: string, enum: [created, updated, unchanged, failed] }
+        error: { type: string }
