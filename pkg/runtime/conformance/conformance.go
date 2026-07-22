@@ -73,11 +73,11 @@ func Run(ctx context.Context, cfg Config) Result {
 	client := runtimev1.NewRuntimeServiceClient(cfg.Conn)
 	var checks []CheckResult
 
-	_, hc := checkHealth(ctx, client)
+	caps, hc := checkHealth(ctx, client)
 	checks = append(checks, hc)
-
-	// Converse + Invoke + duplex probes are added in later tasks; each takes the
-	// advertised capability set so it can gate itself.
+	checks = append(checks, checkConverse(ctx, client, caps)...)
+	checks = append(checks, checkMalformedInput(ctx, client, caps))
+	// Invoke + duplex honesty probes are added in Task 3; each gates on caps.
 
 	return finalize(checks)
 }

@@ -23,7 +23,9 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
 
 	"github.com/altairalabs/omnia/pkg/runtime/contract"
@@ -159,4 +161,88 @@ func TestRun_HealthTransportError_Fails(t *testing.T) {
 	c := findCheck(t, res, "health/contract")
 	require.Equal(t, StatusFail, c.Status)
 	require.Contains(t, c.Detail, "Health RPC failed")
+}
+
+// ── Converse checks (Task 2) ──────────────────────────────────────────────
+
+func TestRun_HelloFirst_Passes(t *testing.T) {
+	res := runAgainst(t, conformantFake{})
+	require.Equal(t, StatusPass, findCheck(t, res, "hello-first").Status)
+	require.Equal(t, StatusPass, findCheck(t, res, "text-turn-shape").Status)
+	require.Equal(t, StatusPass, findCheck(t, res, "graceful-malformed-input").Status)
+}
+
+// noHelloFake sends a done with no preceding RuntimeHello.
+type noHelloFake struct{ conformantFake }
+
+func (noHelloFake) Converse(stream runtimev1.RuntimeService_ConverseServer) error {
+	if _, err := stream.Recv(); err != nil {
+		return err
+	}
+	return stream.Send(doneFrame())
+}
+
+func TestRun_HelloFirst_FailsWhenNoHello(t *testing.T) {
+	res := runAgainst(t, noHelloFake{})
+	c := findCheck(t, res, "hello-first")
+	require.Equal(t, StatusFail, c.Status)
+	require.False(t, res.Passed)
+}
+
+// doneBeforeHelloFake emits done before the hello.
+type doneBeforeHelloFake struct{ conformantFake }
+
+func (doneBeforeHelloFake) Converse(stream runtimev1.RuntimeService_ConverseServer) error {
+	if _, err := stream.Recv(); err != nil {
+		return err
+	}
+	if err := stream.Send(doneFrame()); err != nil {
+		return err
+	}
+	return stream.Send(helloFrame())
+}
+
+func TestRun_TextTurn_FailsWhenDoneBeforeHello(t *testing.T) {
+	res := runAgainst(t, doneBeforeHelloFake{})
+	c := findCheck(t, res, "text-turn-shape")
+	require.Equal(t, StatusFail, c.Status)
+	require.Contains(t, c.Detail, "before")
+}
+
+// crashConverseFake tears the stream down with an internal error.
+type crashConverseFake struct{ conformantFake }
+
+func (crashConverseFake) Converse(stream runtimev1.RuntimeService_ConverseServer) error {
+	if _, err := stream.Recv(); err != nil {
+		return err
+	}
+	return status.Error(codes.Internal, "boom")
+}
+
+func TestRun_MalformedInput_FailsOnCrash(t *testing.T) {
+	res := runAgainst(t, crashConverseFake{})
+	c := findCheck(t, res, "graceful-malformed-input")
+	require.Equal(t, StatusFail, c.Status)
+	require.False(t, res.Passed)
+}
+
+// legacyFake is healthy but advertises no capabilities and sends no hello.
+type legacyFake struct{ conformantFake }
+
+func (legacyFake) Health(context.Context, *runtimev1.HealthRequest) (*runtimev1.HealthResponse, error) {
+	return &runtimev1.HealthResponse{Healthy: true, ContractVersion: contract.Version}, nil
+}
+
+func (legacyFake) Converse(stream runtimev1.RuntimeService_ConverseServer) error {
+	if _, err := stream.Recv(); err != nil {
+		return err
+	}
+	return stream.Send(doneFrame())
+}
+
+func TestRun_LegacyRuntime_SkipsHelloChecks(t *testing.T) {
+	res := runAgainst(t, legacyFake{})
+	require.Equal(t, StatusSkip, findCheck(t, res, "hello-first").Status)
+	require.Equal(t, StatusSkip, findCheck(t, res, "text-turn-shape").Status)
+	require.True(t, res.Passed, "a legacy runtime must not fail the run")
 }
