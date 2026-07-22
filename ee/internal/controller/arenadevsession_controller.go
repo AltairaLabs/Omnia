@@ -574,7 +574,6 @@ func (r *ArenaDevSessionReconciler) reconcileDeployment(ctx context.Context, ses
 		},
 	}
 
-	// Inject SESSION_API_URL for session recording if a workspace is configured
 	// No SESSION_API_URL: the console resolves it from its own Workspace. The
 	// two become available at different times — the Workspace object exists well
 	// before its status.services is populated — so injecting the URL here would
