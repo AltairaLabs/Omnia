@@ -20,6 +20,7 @@ import {
   RuntimeStep,
   type WizardFormData,
 } from "./deploy-wizard-steps";
+import { crdConstraints } from "@/types/generated/crd-constraints";
 
 const baseForm: WizardFormData = {
   name: "test-agent",
@@ -150,6 +151,28 @@ describe("PromptPackStep", () => {
     expect(screen.getByText("support-pack")).toBeInTheDocument();
   });
 
+  // #1882: the radio offered "canary", which spec.promptPackRef.track rejects
+  // (enum is stable|prerelease), so every Canary deploy failed at the API
+  // server. Assert against the CRD's own enum — crd-constraints.ts is
+  // regenerated from the CRD OpenAPI schema by `make generate-dashboard-types`,
+  // so this test tracks the schema rather than restating it.
+  it("only offers Release Track values the AgentRuntime CRD accepts", () => {
+    const allowed = crdConstraints.AgentRuntime["spec.promptPackRef.track"].enum;
+    render(
+      <PromptPackStep
+        formData={baseForm}
+        currentWorkspace={workspace}
+        promptPacks={[]}
+        updateField={vi.fn()}
+      />,
+    );
+    const offered = screen.getAllByRole("radio").map((r) => r.getAttribute("value"));
+    expect(offered.length).toBeGreaterThan(0);
+    for (const value of offered) {
+      expect(allowed).toContain(value);
+    }
+  });
+
   it("switches the release track via updateField", () => {
     const updateField = vi.fn();
     render(
@@ -160,8 +183,8 @@ describe("PromptPackStep", () => {
         updateField={updateField}
       />,
     );
-    fireEvent.click(screen.getByLabelText("Canary"));
-    expect(updateField).toHaveBeenCalledWith("promptPackTrack", "canary");
+    fireEvent.click(screen.getByLabelText("Prerelease"));
+    expect(updateField).toHaveBeenCalledWith("promptPackTrack", "prerelease");
   });
 });
 
