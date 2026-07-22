@@ -419,3 +419,60 @@ func TestResolveServiceURLs_IgnoresEnvOverrides(t *testing.T) {
 		t.Errorf("env override still in effect: %s", urls.SessionURL)
 	}
 }
+
+// PrivacyURL is workspace-level rather than per service group, and resolves to
+// empty rather than erroring when no privacy-api is configured — privacy is
+// optional, unlike session.
+func TestPrivacyURL_FromWorkspaceStatus(t *testing.T) {
+	ws := makeWorkspaceWithStatus("demo", "omnia-demo", []omniav1alpha1.ServiceGroupStatus{
+		{Name: "default", SessionURL: "http://session.svc"},
+	})
+	ws.Status.PrivacyURL = "http://privacy.svc"
+	c := fake.NewClientBuilder().WithScheme(newTestScheme()).WithObjects(ws).Build()
+
+	got, err := NewResolver(c).PrivacyURL(context.Background(), "demo", "default")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "http://privacy.svc" {
+		t.Errorf("unexpected privacy URL: %s", got)
+	}
+}
+
+func TestPrivacyURL_EmptyWhenUnconfigured(t *testing.T) {
+	ws := makeWorkspaceWithStatus("demo", "omnia-demo", nil)
+	c := fake.NewClientBuilder().WithScheme(newTestScheme()).WithObjects(ws).Build()
+
+	got, err := NewResolver(c).PrivacyURL(context.Background(), "demo", "default")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "" {
+		t.Errorf("expected empty privacy URL, got %s", got)
+	}
+}
+
+func TestPrivacyURL_ErrorsWhenWorkspaceMissing(t *testing.T) {
+	c := fake.NewClientBuilder().WithScheme(newTestScheme()).Build()
+
+	if _, err := NewResolver(c).PrivacyURL(context.Background(), "demo", "default"); err == nil {
+		t.Fatal("expected an error when the workspace does not exist")
+	}
+}
+
+// The per-service accessors share serviceGroup(), so its failure modes are
+// asserted once here: an unknown group, and a missing workspace name.
+func TestMemoryURL_ErrorsOnUnknownServiceGroup(t *testing.T) {
+	ws := makeWorkspaceWithStatus("demo", "omnia-demo", []omniav1alpha1.ServiceGroupStatus{
+		{Name: "default", SessionURL: "http://session.svc"},
+	})
+	c := fake.NewClientBuilder().WithScheme(newTestScheme()).WithObjects(ws).Build()
+	r := NewResolver(c)
+
+	if _, err := r.MemoryURL(context.Background(), "demo", "no-such-group"); err == nil {
+		t.Fatal("expected an error for an unknown service group")
+	}
+	if _, err := r.MemoryURL(context.Background(), "", "default"); err == nil {
+		t.Fatal("expected an error when no workspace name is supplied")
+	}
+}
