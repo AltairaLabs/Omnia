@@ -15,8 +15,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"os"
-	"strings"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -63,9 +61,10 @@ type MemoryAPINotifier struct {
 }
 
 // NewMemoryAPINotifier creates a MemoryAPINotifier. memoryURLs is the set of
-// memory-api base URLs to fan out to; if MEMORY_API_URLS is non-empty at
-// construction time it overrides memoryURLs entirely (comma-separated). workspace
-// is appended as a required ?workspace= query parameter on every POST — the
+// memory-api base URLs to fan out to, resolved by the caller from the workspace
+// — there is no env override, because the workspace is the only source of truth
+// for a service endpoint. workspace is appended as a required ?workspace= query
+// parameter on every POST — the
 // memory-api consent-events endpoint returns 400 without it. ts is the SA token
 // source used to attach an Authorization: Bearer header; pass nil to send requests
 // unauthenticated (development / tests). An empty URL set is valid and causes
@@ -76,9 +75,6 @@ func NewMemoryAPINotifier(
 	ts *serviceauth.TokenSource,
 	log logr.Logger,
 ) *MemoryAPINotifier {
-	if override := os.Getenv("MEMORY_API_URLS"); override != "" {
-		memoryURLs = splitURLList(override)
-	}
 	return &MemoryAPINotifier{
 		urls:      memoryURLs,
 		workspace: workspace,
@@ -164,15 +160,4 @@ func (n *MemoryAPINotifier) pushOne(
 		"category", string(category),
 	)
 	return nil
-}
-
-// splitURLList splits a comma-separated string, trims whitespace, and drops empty strings.
-func splitURLList(s string) []string {
-	var out []string
-	for _, part := range strings.Split(s, ",") {
-		if v := strings.TrimSpace(part); v != "" {
-			out = append(out, v)
-		}
-	}
-	return out
 }
