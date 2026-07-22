@@ -68,6 +68,19 @@ func TestNewFileBackedClient_BadYAMLErrors(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestNewFileBackedClient_FailsFastOnBadPath(t *testing.T) {
+	// A path that does not exist.
+	_, err := newFileBackedClient(filepath.Join(t.TempDir(), "does-not-exist"))
+	require.Error(t, err)
+
+	// A path that is a file, not a directory.
+	f := filepath.Join(t.TempDir(), "a-file.yaml")
+	require.NoError(t, os.WriteFile(f, []byte("{}"), 0o600))
+	_, err = newFileBackedClient(f)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not a directory")
+}
+
 func TestNewFileBackedClient_EmptyDirIsEmptyClient(t *testing.T) {
 	c, err := newFileBackedClient(t.TempDir())
 	require.NoError(t, err)

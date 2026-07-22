@@ -40,6 +40,17 @@ const envConfigDir = "OMNIA_CONFIG_DIR"
 // registered in Scheme(). Backed by controller-runtime's fake client — this is
 // a local-dev convenience (see NewClient), not a production store.
 func newFileBackedClient(dir string) (client.Client, error) {
+	// Fail fast on a misconfigured OMNIA_CONFIG_DIR: a missing path or a file
+	// would otherwise glob to nothing and silently seed an empty client, which
+	// only surfaces later as a confusing "AgentRuntime not found".
+	info, err := os.Stat(dir)
+	if err != nil {
+		return nil, fmt.Errorf("config dir %q: %w", dir, err)
+	}
+	if !info.IsDir() {
+		return nil, fmt.Errorf("config dir %q is not a directory", dir)
+	}
+
 	scheme := Scheme()
 	decoder := serializer.NewCodecFactory(scheme).UniversalDeserializer()
 
