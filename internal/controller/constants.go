@@ -235,6 +235,11 @@ const (
 	// means the policy requested type "keda" but the KEDA CRDs are absent — the
 	// agent stays at static replicas (non-blocking).
 	ConditionTypeAutoscalingReady = "AutoscalingReady"
+
+	// ConditionTypeCapabilitiesSatisfied is False when the running runtime does
+	// not advertise a capability the AgentRuntime's spec requires (§4.4). While
+	// False for the current generation, the Deployment is scaled to 0.
+	ConditionTypeCapabilitiesSatisfied = "CapabilitiesSatisfied"
 )
 
 // Autoscaling condition reasons.
@@ -243,4 +248,11 @@ const (
 	reasonAutoscalingDisabled    = "Disabled"
 	reasonAutoscalingError       = "Error"
 	reasonAutoscalingKEDAMissing = "KEDANotInstalled"
+)
+
+// Capability-gating condition reasons.
+const (
+	reasonCapabilitiesMissing   = "CapabilitiesMissing"
+	reasonCapabilitiesSatisfied = "CapabilitiesSatisfied"
+	reasonCapabilitiesPending   = "CapabilitiesPending"
 )
