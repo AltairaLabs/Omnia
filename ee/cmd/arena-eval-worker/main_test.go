@@ -274,6 +274,9 @@ func TestResolveSessionAPIURL_FromWorkspaceCRD(t *testing.T) {
 	// Tell the resolver which namespace this "process" runs in (the
 	// eval-worker pod's workspace namespace in a real deployment).
 	t.Setenv("OMNIA_NAMESPACE", "ws-ns")
+	// The operator injects the workspace NAME ("ws"); the pod no longer infers
+	// it from its namespace ("ws-ns"), which is a different identifier (#1875).
+	t.Setenv(k8s.EnvWorkspaceName, "ws")
 
 	scheme := runtime.NewScheme()
 	require.NoError(t, omniav1alpha1.AddToScheme(scheme))
