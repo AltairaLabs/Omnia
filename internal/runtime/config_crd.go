@@ -23,6 +23,7 @@ import (
 	"strconv"
 	"time"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
@@ -49,9 +50,15 @@ func LoadFromCRD(ctx context.Context, c client.Client, name, namespace string) (
 		return nil, fmt.Errorf("apply canary override: %w", err)
 	}
 
-	workspaceName, err := k8s.ResolveWorkspaceName(ctx, c, ar.Labels, namespace)
+	// Prefer the operator-injected name, then the AgentRuntime's own label.
+	// Both avoid reading the Namespace object; ResolveWorkspaceName's
+	// namespace-label fallback stays for pods that predate the injection (#1875).
+	workspaceName, err := k8s.WorkspaceNameFromEnvOrLabels(ar.Labels)
 	if err != nil {
-		return nil, fmt.Errorf("resolve workspace name: %w", err)
+		workspaceName, err = k8s.ResolveWorkspaceName(ctx, c, ar.Labels, namespace)
+		if err != nil {
+			return nil, fmt.Errorf("resolve workspace name: %w", err)
+		}
 	}
 
 	cfg := &Config{
@@ -147,19 +154,13 @@ func LoadFromCRD(ctx context.Context, c client.Client, name, namespace string) (
 	// recurring bug class here (#1875). An unresolvable name is treated like any
 	// other discovery failure: loud, but non-fatal, so a pod that predates the
 	// operator injecting it still starts and falls back to env vars.
-	wsName, wsNameErr := k8s.WorkspaceNameFromEnvOrLabels(ar.Labels)
-	if wsNameErr != nil {
-		logf.FromContext(ctx).V(1).Info("workspace name unresolved",
-			"reason", wsNameErr.Error(),
-			"impact", "service URLs can only come from env overrides")
-	}
-	// Called even when the name is unknown: the resolver checks env overrides
-	// before it needs a workspace, so this preserves the env-only path.
-	urls, urlErr := resolver.ResolveServiceURLs(ctx, wsName, serviceGroup)
+	// Reuses the workspace name resolved above — the pod never infers it from
+	// its namespace, which is a different identifier (#1875).
+	urls, urlErr := resolver.ResolveServiceURLs(ctx, workspaceName, serviceGroup)
 	if urlErr != nil {
 		log := logf.FromContext(ctx)
 		log.Error(urlErr, "service URL resolution failed, falling back to env vars",
-			"serviceGroup", serviceGroup, "workspace", wsName)
+			"serviceGroup", serviceGroup, "workspace", workspaceName)
 	} else {
 		cfg.SessionAPIURL = urls.SessionURL
 		cfg.MemoryAPIURL = urls.MemoryURL
@@ -173,12 +174,12 @@ func LoadFromCRD(ctx context.Context, c client.Client, name, namespace string) (
 		cfg.MemoryRetrievalEnabled = true
 		cfg.MemoryToolsEnabled = true
 		// The operator injects OMNIA_WORKSPACE_UID when memory is enabled
-		// (deployment_builder_env.go). Prefer it: it avoids a cluster-wide
-		// WorkspaceList from every agent pod at startup. Fall back to the List
-		// when it is absent, since the operator only injects a non-empty value.
+		// (deployment_builder_env.go). Prefer it; otherwise read metadata.uid off
+		// the agent's own Workspace. This used to be a second cluster-wide
+		// WorkspaceList issued at startup purely to learn a UID (#1875).
 		cfg.WorkspaceUID = os.Getenv(envWorkspaceUID)
-		if cfg.WorkspaceUID == "" {
-			uid, uidErr := resolveWorkspaceUID(ctx, c, namespace)
+		if cfg.WorkspaceUID == "" && workspaceName != "" {
+			uid, uidErr := workspaceUID(ctx, resolver, workspaceName)
 			if uidErr != nil {
 				return nil, fmt.Errorf("resolve workspace UID for memory: %w", uidErr)
 			}
@@ -215,20 +216,24 @@ func LoadFromCRD(ctx context.Context, c client.Client, name, namespace string) (
 	return cfg, nil
 }
 
-// resolveWorkspaceUID finds the Workspace CRD whose spec.namespace.name matches
-// the given namespace and returns its Kubernetes UID. The memory_entities table
-// uses workspace_id as UUID, which corresponds to the Workspace CR's UID.
-func resolveWorkspaceUID(ctx context.Context, c client.Client, namespace string) (string, error) {
-	var list v1alpha1.WorkspaceList
-	if err := c.List(ctx, &list); err != nil {
-		return "", fmt.Errorf("list workspaces: %w", err)
-	}
-	for _, ws := range list.Items {
-		if ws.Spec.Namespace.Name == namespace {
-			return string(ws.UID), nil
+// workspaceUID returns the Kubernetes UID of the named Workspace. The
+// memory_entities table uses workspace_id as UUID, which corresponds to the
+// Workspace CR's UID.
+//
+// A missing Workspace yields an empty UID rather than an error, matching the
+// behaviour of the cluster-wide list this replaced: that returned "" when no
+// workspace matched and only failed on a genuine API error (#1875).
+func workspaceUID(
+	ctx context.Context, resolver *servicediscovery.Resolver, workspaceName string,
+) (string, error) {
+	ws, err := resolver.GetWorkspace(ctx, workspaceName)
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return "", nil
 		}
+		return "", err
 	}
-	return "", nil
+	return string(ws.UID), nil
 }
 
 // loadRuntimeContextFromCRD populates context store config from the AgentRuntime CRD.
