@@ -189,6 +189,11 @@ const (
 const (
 	envRedisURL      = "REDIS_URL"
 	envSessionAPIURL = "SESSION_API_URL"
+
+	// envWorkspaceName carries the Workspace CR's metadata.name to pods that
+	// must read their own Workspace. Must match pkg/k8s.EnvWorkspaceName. It is
+	// the workspace NAME, never the namespace that workspace owns (#1875).
+	envWorkspaceName = "OMNIA_WORKSPACE_NAME"
 	envNamespace     = "NAMESPACE"
 	envServiceGroup  = "OMNIA_SERVICE_GROUP"
 )

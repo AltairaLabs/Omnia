@@ -351,6 +351,14 @@ func (r *AgentRuntimeReconciler) buildEvalWorkerEnvVars(ctx context.Context, nam
 		envVars = append(envVars, corev1.EnvVar{Name: envSessionAPIURL, Value: sessionURL})
 	}
 
+	// The eval-worker resolves its own service URLs from the Workspace when no
+	// session URL override applies, so it needs the workspace name for the same
+	// scoped Get the agent does. It has no AgentRuntime of its own to fall back
+	// to, so this injection is the only source (#1875).
+	if wsName, _ := r.resolveWorkspaceForNamespace(namespace); wsName != "" {
+		envVars = append(envVars, corev1.EnvVar{Name: envWorkspaceName, Value: wsName})
+	}
+
 	return envVars
 }
 

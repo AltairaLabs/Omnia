@@ -897,6 +897,46 @@ func TestBuildRuntimeEnvVars_MemoryWithWorkspaceUID(t *testing.T) {
 	assert.Equal(t, "ws-uid-abc-123", workspaceUID)
 }
 
+// Service discovery always needs the workspace name, so it is injected even
+// when memory is off — unlike the UID, which is memory-only. The value is the
+// Workspace's metadata.name ("demo"), never the namespace it owns
+// ("omnia-demo"): the name is what RBAC resourceNames match (#1875).
+func TestBuildRuntimeEnvVars_InjectsWorkspaceNameWithoutMemory(t *testing.T) {
+	scheme := runtime.NewScheme()
+	require.NoError(t, omniav1alpha1.AddToScheme(scheme))
+
+	ws := &omniav1alpha1.Workspace{
+		ObjectMeta: metav1.ObjectMeta{Name: "demo", UID: "ws-uid-abc-123"},
+		Spec: omniav1alpha1.WorkspaceSpec{
+			DisplayName: "Demo",
+			Namespace:   omniav1alpha1.NamespaceConfig{Name: "omnia-demo"},
+		},
+	}
+
+	k8sClient := fake.NewClientBuilder().WithScheme(scheme).WithRuntimeObjects(ws).Build()
+	r := &AgentRuntimeReconciler{Client: k8sClient}
+
+	ar := &omniav1alpha1.AgentRuntime{}
+	ar.Name = "test-agent"
+	ar.Namespace = "omnia-demo"
+	// Memory deliberately not enabled.
+
+	envVars := r.buildRuntimeEnvVars(ar, nil, nil)
+
+	var workspaceName, workspaceUID string
+	for _, ev := range envVars {
+		switch ev.Name {
+		case "OMNIA_WORKSPACE_NAME":
+			workspaceName = ev.Value
+		case "OMNIA_WORKSPACE_UID":
+			workspaceUID = ev.Value
+		}
+	}
+	assert.Equal(t, "demo", workspaceName)
+	assert.NotEqual(t, "omnia-demo", workspaceName, "namespace injected instead of workspace name")
+	assert.Empty(t, workspaceUID, "UID stays memory-gated")
+}
+
 func TestBuildRuntimeEnvVars_MemoryDisabled(t *testing.T) {
 	r := &AgentRuntimeReconciler{}
 
