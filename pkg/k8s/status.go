@@ -52,3 +52,31 @@ func PatchAgentRuntimeCondition(
 
 	return c.Status().Patch(ctx, ar, client.MergeFrom(base))
 }
+
+// ConditionRuntimeCapabilitiesReported is set True once the runtime has
+// self-reported its advertised capabilities to status.
+const ConditionRuntimeCapabilitiesReported = "RuntimeCapabilitiesReported"
+
+// PatchAgentRuntimeCapabilities records the runtime's advertised capabilities on
+// the AgentRuntime status subresource (field + condition).
+func PatchAgentRuntimeCapabilities(
+	ctx context.Context, c client.Client,
+	name, namespace string, caps []string,
+) error {
+	ar, err := GetAgentRuntime(ctx, c, name, namespace)
+	if err != nil {
+		return fmt.Errorf("get AgentRuntime for capabilities patch: %w", err)
+	}
+
+	base := ar.DeepCopy()
+	ar.Status.RuntimeCapabilities = caps
+	meta.SetStatusCondition(&ar.Status.Conditions, metav1.Condition{
+		Type:               ConditionRuntimeCapabilitiesReported,
+		Status:             metav1.ConditionTrue,
+		ObservedGeneration: ar.Generation,
+		Reason:             "Reported",
+		Message:            fmt.Sprintf("runtime advertises %d capabilities", len(caps)),
+	})
+
+	return c.Status().Patch(ctx, ar, client.MergeFrom(base))
+}
