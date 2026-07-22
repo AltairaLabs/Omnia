@@ -542,6 +542,12 @@ func (r *AgentRuntimeReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{}, err
 	}
 
+	// Gate on the capabilities the running runtime advertises (§4.4). Sets the
+	// CapabilitiesSatisfied condition (the deployment builder scales to 0 while
+	// it's False for the current generation); requeues while within the report
+	// grace window.
+	capRequeue := r.enforceCapabilities(log, agentRuntime, deployment)
+
 	// Reconcile rollout (candidate Deployment, step progression)
 	if rolloutResult, rolloutErr := r.reconcileRollout(ctx, agentRuntime, promptPack, toolRegistry, providers); rolloutErr != nil {
 		log.Error(rolloutErr, "rollout reconciliation failed")
@@ -620,7 +626,7 @@ func (r *AgentRuntimeReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{}, err
 	}
 
-	return scheduleOIDCJWKSRefresh(jwksNext), nil
+	return scheduleOIDCJWKSRefresh(earliestRequeue(jwksNext, capRequeue)), nil
 }
 
 func (r *AgentRuntimeReconciler) reconcileDelete(ctx context.Context, agentRuntime *omniav1alpha1.AgentRuntime) (ctrl.Result, error) {

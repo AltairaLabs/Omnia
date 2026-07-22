@@ -249,3 +249,10 @@ const (
 	reasonAutoscalingError       = "Error"
 	reasonAutoscalingKEDAMissing = "KEDANotInstalled"
 )
+
+// Capability-gating condition reasons.
+const (
+	reasonCapabilitiesMissing   = "CapabilitiesMissing"
+	reasonCapabilitiesSatisfied = "CapabilitiesSatisfied"
+	reasonCapabilitiesPending   = "CapabilitiesPending"
+)

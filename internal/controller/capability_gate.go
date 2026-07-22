@@ -17,14 +17,24 @@ limitations under the License.
 package controller
 
 import (
+	"fmt"
 	"time"
 
+	"github.com/go-logr/logr"
+	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
+	"github.com/altairalabs/omnia/pkg/k8s"
 	"github.com/altairalabs/omnia/pkg/runtime/contract"
 )
+
+// capabilityReportGracePeriod is how long after a Deployment becomes Available
+// the operator waits for the runtime to self-report its capabilities before
+// treating a non-reporting runtime as legacy (advertising nothing).
+const capabilityReportGracePeriod = 60 * time.Second
 
 // capabilityDecision is the outcome of comparing required vs advertised caps.
 type capabilityDecision int
@@ -76,6 +86,92 @@ func evaluateCapabilities(
 func capabilitiesMismatchForCurrentGen(ar *omniav1alpha1.AgentRuntime) bool {
 	cond := meta.FindStatusCondition(ar.Status.Conditions, ConditionTypeCapabilitiesSatisfied)
 	return cond != nil && cond.Status == metav1.ConditionFalse && cond.ObservedGeneration == ar.Generation
+}
+
+// earliestRequeue returns the soonest non-zero requeue delay among a and b, or 0
+// when both are 0 (no requeue).
+func earliestRequeue(a, b time.Duration) time.Duration {
+	switch {
+	case a == 0:
+		return b
+	case b == 0:
+		return a
+	case a < b:
+		return a
+	default:
+		return b
+	}
+}
+
+// deploymentAvailable reports whether a Deployment's Available condition is True,
+// and how long it has been available.
+func deploymentAvailable(d *appsv1.Deployment, now time.Time) (bool, time.Duration) {
+	if d == nil {
+		return false, 0
+	}
+	for _, c := range d.Status.Conditions {
+		if c.Type == appsv1.DeploymentAvailable && c.Status == corev1.ConditionTrue {
+			return true, now.Sub(c.LastTransitionTime.Time)
+		}
+	}
+	return false, 0
+}
+
+// enforceCapabilities gates the AgentRuntime on the capabilities its running
+// runtime advertises (§4.4). It sets the CapabilitiesSatisfied condition and, on
+// a missing required capability, emits a Warning event; the deployment builder
+// scales to 0 while the condition is False for the current generation. Returns a
+// requeue delay while still waiting within the report grace window.
+func (r *AgentRuntimeReconciler) enforceCapabilities(
+	log logr.Logger, ar *omniav1alpha1.AgentRuntime, deployment *appsv1.Deployment,
+) time.Duration {
+	// Already determined missing for this generation: the runtime proved it lacks
+	// a required capability and the Deployment is scaled to 0. Keep the verdict
+	// until a spec/image change bumps the generation — re-evaluating now (no pod
+	// running, so not Available) would flip to pending, scale back up, and
+	// oscillate.
+	if capabilitiesMismatchForCurrentGen(ar) {
+		return 0
+	}
+
+	required := requiredCapabilities(ar)
+	if len(required) == 0 {
+		SetCondition(&ar.Status.Conditions, ar.Generation, ConditionTypeCapabilitiesSatisfied,
+			metav1.ConditionTrue, reasonCapabilitiesSatisfied, "no capability requirements")
+		return 0
+	}
+
+	available, since := deploymentAvailable(deployment, time.Now())
+	reported := meta.IsStatusConditionPresentAndEqual(ar.Status.Conditions,
+		k8s.ConditionRuntimeCapabilitiesReported, metav1.ConditionTrue)
+
+	decision, missing := evaluateCapabilities(required, ar.Status.RuntimeCapabilities,
+		reported, available, since, capabilityReportGracePeriod)
+
+	switch decision {
+	case capsSatisfied:
+		SetCondition(&ar.Status.Conditions, ar.Generation, ConditionTypeCapabilitiesSatisfied,
+			metav1.ConditionTrue, reasonCapabilitiesSatisfied, "runtime advertises all required capabilities")
+		return 0
+	case capsPending:
+		SetCondition(&ar.Status.Conditions, ar.Generation, ConditionTypeCapabilitiesSatisfied,
+			metav1.ConditionUnknown, reasonCapabilitiesPending, "waiting for the runtime to report its capabilities")
+		if available && since < capabilityReportGracePeriod {
+			return capabilityReportGracePeriod - since // re-check when the grace window elapses
+		}
+		return 0 // not yet Available — a deployment/status event will re-trigger
+	default: // capsMissing
+		msg := fmt.Sprintf("runtime is missing required capabilities %v; advertises %v",
+			missing, ar.Status.RuntimeCapabilities)
+		log.Info("capability mismatch: scaling agent to zero", "missing", missing,
+			"advertised", ar.Status.RuntimeCapabilities)
+		SetCondition(&ar.Status.Conditions, ar.Generation, ConditionTypeCapabilitiesSatisfied,
+			metav1.ConditionFalse, reasonCapabilitiesMissing, msg)
+		if r.Recorder != nil {
+			r.Recorder.Event(ar, corev1.EventTypeWarning, reasonCapabilitiesMissing, msg)
+		}
+		return 0
+	}
 }
 
 // requiredCapabilities returns the runtime capabilities this AgentRuntime's spec
