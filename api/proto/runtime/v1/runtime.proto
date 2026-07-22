@@ -7,7 +7,7 @@ package omnia.runtime.v1;
 
 option go_package = "github.com/altairalabs/omnia/pkg/runtime/v1;runtimev1";
 
-// Contract-Version: 1.1.0
+// Contract-Version: 1.2.0
 //
 // The version of this contract, as consumed by third-party runtime
 // implementations. Bump the minor version for additive changes (new message,
@@ -333,6 +333,12 @@ message HealthResponse {
   // the top of this file). A runtime that reports an empty value predates
   // contract versioning and must be treated as unversioned.
   string contract_version = 3;
+
+  // capabilities lists the contract features this runtime implements (e.g.
+  // "invoke", "duplex_audio", "client_tools"). An OPEN set — consumers must
+  // display/ignore names they don't recognize. Empty => a pre-negotiation
+  // (legacy) runtime.
+  repeated string capabilities = 4;
 }
 
 // HasConversationRequest asks whether one session's context is resumable.
