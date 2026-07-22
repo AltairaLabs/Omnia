@@ -25,7 +25,6 @@ import (
 
 	"github.com/go-logr/logr"
 	appsv1 "k8s.io/api/apps/v1"
-	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -35,9 +34,7 @@ import (
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
-	"sigs.k8s.io/controller-runtime/pkg/handler"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
@@ -848,48 +845,5 @@ func (r *AgentRuntimeReconciler) reconcileA2AStatus(
 	agentRuntime.Status.A2A.Clients = clientStatuses
 }
 
-// SetupWithManager sets up the controller with the Manager.
-func (r *AgentRuntimeReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	r.gatewayAPIPresent = gatewayAPIAvailable(mgr.GetRESTMapper())
-
-	b := ctrl.NewControllerManagedBy(mgr).
-		WithOptions(controller.Options{MaxConcurrentReconciles: 3}).
-		For(&omniav1alpha1.AgentRuntime{}).
-		Owns(&appsv1.Deployment{}).
-		Owns(&corev1.Service{}).
-		Owns(&autoscalingv2.HorizontalPodAutoscaler{}).
-		// Watch Provider changes and reconcile AgentRuntimes that reference them
-		Watches(
-			&omniav1alpha1.Provider{},
-			handler.EnqueueRequestsFromMapFunc(r.findAgentRuntimesForProvider),
-		).
-		// Watch PromptPack changes and reconcile AgentRuntimes that reference them
-		Watches(
-			&omniav1alpha1.PromptPack{},
-			handler.EnqueueRequestsFromMapFunc(r.findAgentRuntimesForPromptPack),
-		).
-		// Watch ToolRegistry changes and reconcile AgentRuntimes that reference them.
-		// Without this, an agent never recovers when its ToolRegistry appears/changes (#1491).
-		Watches(
-			&omniav1alpha1.ToolRegistry{},
-			handler.EnqueueRequestsFromMapFunc(r.findAgentRuntimesForToolRegistry),
-		).
-		// Watch Secret changes and reconcile AgentRuntimes that use them for credentials
-		// This triggers pod rollouts when API keys are rotated
-		Watches(
-			&corev1.Secret{},
-			handler.EnqueueRequestsFromMapFunc(r.findAgentRuntimesForSecret),
-		).
-		// Watch Workspace changes and reconcile the AgentRuntimes in its namespace.
-		// Without this, an agent reconciled before its Workspace exists never gets
-		// its workspace-reader binding or OMNIA_WORKSPACE_NAME, and never recovers
-		// (#1875) — the pod no longer discovers the workspace for itself.
-		Watches(
-			&omniav1alpha1.Workspace{},
-			handler.EnqueueRequestsFromMapFunc(r.findAgentRuntimesForWorkspace),
-		)
-
-	b = r.registerFacadeWatches(b)
-
-	return b.Named("agentruntime").Complete(r)
-}
+// SetupWithManager and the controller's watch wiring live in
+// agentruntime_watches.go.
