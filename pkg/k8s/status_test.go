@@ -18,10 +18,13 @@ package k8s
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 )
@@ -111,6 +114,20 @@ func TestPatchAgentRuntimeCapabilities_SetsFieldAndCondition(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("RuntimeCapabilitiesReported condition not set")
+	}
+}
+
+func TestPatchAgentRuntimeCapabilities_GetError(t *testing.T) {
+	c := fake.NewClientBuilder().WithScheme(Scheme()).
+		WithInterceptorFuncs(interceptor.Funcs{
+			Get: func(_ context.Context, _ client.WithWatch, _ client.ObjectKey,
+				_ client.Object, _ ...client.GetOption) error {
+				return fmt.Errorf("boom")
+			},
+		}).Build()
+
+	if err := PatchAgentRuntimeCapabilities(context.Background(), c, "a", "ns", nil); err == nil {
+		t.Fatal("expected error when the AgentRuntime cannot be fetched")
 	}
 }
 
