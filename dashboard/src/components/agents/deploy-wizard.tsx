@@ -118,7 +118,6 @@ const STEPS = [
 const FRAMEWORKS = [
   { value: "promptkit", label: "PromptKit" },
   { value: "langchain", label: "LangChain" },
-  { value: "autogen", label: "AutoGen" },
   { value: "custom", label: "Custom" },
 ] as const;
 
@@ -543,7 +542,7 @@ export function DeployWizard({ open, onOpenChange }: Readonly<DeployWizardProps>
         return true;
       case 1: // Framework
         // Only promptkit has a built-in default runtime image; every other
-        // framework type (including langchain/autogen, not just custom)
+        // framework type (including langchain, not just custom)
         // requires an explicit image or it deploys unschedulable (#FrameworkImageUnavailable).
         // Trim so whitespace-only input cannot pass as a real image reference.
         return formData.framework === "promptkit" || formData.customImage.trim().length > 0;

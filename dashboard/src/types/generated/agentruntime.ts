@@ -703,7 +703,7 @@ export interface AgentRuntimeSpec {
   }[];
   /** framework specifies which agent framework to use.
    * Defaults to PromptKit, the only framework this repo builds and tests.
-   * Any other type (langchain, autogen, custom) requires an explicit image
+   * Any other type (langchain, custom) requires an explicit image
    * via spec.framework.image or an operator --framework-image entry, and
    * must implement the omnia.runtime.v1 gRPC contract. */
   framework?: {
@@ -712,7 +712,7 @@ export interface AgentRuntimeSpec {
      * For built-in frameworks, this allows using a custom build or private registry. */
     image?: string;
     /** type specifies the agent framework to use. */
-    type: "promptkit" | "langchain" | "autogen" | "custom";
+    type: "promptkit" | "langchain" | "custom";
     /** version specifies the framework version to use.
      * If not specified, the latest supported version is used. */
     version?: string;

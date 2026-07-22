@@ -67,3 +67,6 @@ docs/superpowers/
 
 # runtime-conformance CLI binary (from `go build ./cmd/runtime-conformance/`)
 /runtime-conformance
+
+# av-preprocessor example CLI binary
+/av-preprocessor

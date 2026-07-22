@@ -19,11 +19,6 @@ const frameworkMeta: Record<
     icon: <PythonIcon className="h-3 w-3" />,
     color: "bg-green-500/15 text-green-700 dark:text-green-400 border-green-500/20",
   },
-  autogen: {
-    label: "AutoGen",
-    icon: <PythonIcon className="h-3 w-3" />,
-    color: "bg-blue-500/15 text-blue-700 dark:text-blue-400 border-blue-500/20",
-  },
   custom: {
     label: "Custom",
     icon: <ContainerIcon className="h-3 w-3" />,

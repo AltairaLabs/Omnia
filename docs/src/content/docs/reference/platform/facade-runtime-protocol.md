@@ -24,7 +24,7 @@ For the client-facing WebSocket protocol (browser ↔ facade), see the
 
 ## Contract version
 
-The contract is versioned. The current version is **1.0.0**, declared in two
+The contract is versioned. The current version is **1.3.0**, declared in two
 places that are asserted equal by `pkg/runtime/contract/version_test.go`:
 
 - the `// Contract-Version:` marker at the top of
@@ -34,6 +34,67 @@ places that are asserted equal by `pkg/runtime/contract/version_test.go`:
 The minor version is bumped for additive changes — a new message, a new
 optional field, a new `oneof` variant. The major version is bumped for any
 change that would break an existing conformant runtime.
+
+## Capabilities
+
+A runtime advertises which optional contract surfaces it implements via the
+`repeated string capabilities` field on its `Health` response. This lets the
+operator and facade adapt — and lets a runtime honestly say what it does *not*
+do. The set is **open**: a newer runtime may advertise a name not listed here,
+and consumers must display or ignore unknown names rather than reject them. An
+empty set means "pre-negotiation" (legacy) — the platform assumes the
+lowest-common-denominator behaviour.
+
+The capability names this contract build defines
+(`pkg/runtime/contract/capabilities.go`):
+
+| Capability | Meaning |
+|---|---|
+| `invoke` | serves the one-shot `Invoke` RPC (function mode, `spec.mode: function`) |
+| `duplex_audio` | serves duplex audio sessions (`DuplexStart` / `audio_input` / `media_chunk`) |
+| `client_tools` | completes the client-side tool round-trip (`tool_call` → `client_tool_result`) |
+| `consent_grants` | observes and propagates consent grants |
+| `media_storage_ref` | resolves `storage_ref` attachments to fetchable media |
+| `interruption` | emits realtime voice interruption (barge-in) signals |
+
+Advertisement must be **honest**: an over-claiming runtime — one that advertises
+a capability whose probe then fails — fails conformance (see below). The
+operator gates on advertised capabilities and will not schedule a runtime that
+claims less than the AgentRuntime requires.
+
+## Per-session negotiation
+
+`RuntimeHello` is the runtime's **first** `ServerMessage` on every `Converse`
+stream. It carries the session's authoritative `capabilities` and, for a duplex
+session, a bounded `MediaNegotiation` counter-offer — the audio format the
+runtime requires (`codec` / `sample_rate` / `channels`; `frame_rate` /
+`resolution` are carried for a future video wave but not yet enforced).
+
+The facade relays the counter-offer to the browser as a `session_config`
+WebSocket message, and the client (re)captures at that format — or the facade
+**fails the session closed** (`UNSATISFIABLE_FORMAT`) before any audio flows
+when it cannot be satisfied. A runtime that never sends a `RuntimeHello` is
+treated as **legacy**: the facade proceeds with the client's unilateral
+`DuplexStart` format, exactly as before negotiation existed.
+
+## Conformance
+
+The contract ships a protocol conformance suite —
+[`pkg/runtime/conformance`](https://github.com/AltairaLabs/Omnia/tree/main/pkg/runtime/conformance)
+and the `runtime-conformance` CLI. Point it at any runtime's gRPC endpoint to
+check it against this contract:
+
+```sh
+runtime-conformance --addr <host:port>
+```
+
+It probes `Health`/contract-version, the first-frame `RuntimeHello`, text-turn
+shape, graceful handling of malformed input, and capability honesty (an
+advertised `invoke` / `duplex_audio` must actually work; an unadvertised one
+must return `Unimplemented`). This is exactly how to measure any runtime's gap —
+including an unsupported LangChain container's. See
+[Authoring a custom runtime](/how-to/security/authoring-a-custom-runtime/) for
+the full checklist.
 
 ## Implementing this contract in your own runtime
 
@@ -66,12 +127,17 @@ A conformant runtime must:
 4. Read caller identity from the flat `x-omnia-*` gRPC metadata below —
    `context.invocation_metadata()` or your language's equivalent. The raw
    `Authorization` bearer token is deliberately withheld.
-5. Serve `Health`, and report the contract version it was built against.
+5. Serve `Health`, report the contract version it was built against, and
+   advertise the capabilities it actually implements (see
+   [Capabilities](#capabilities)) — honestly, since conformance fails an
+   over-claiming runtime.
 6. Never forward the caller's credentials to third-party tool upstreams.
 
-Full authoring guidance, the platform-input contract (PromptPack, ToolRegistry,
-skills, providers), and the conformance suite land with later waves of the
-custom-runtime epic.
+For step-by-step guidance see
+[Authoring a custom runtime](/how-to/security/authoring-a-custom-runtime/), and
+verify your implementation with the [conformance suite](#conformance). Published
+proto stubs and the platform-input contract (PromptPack, ToolRegistry, skills,
+providers) land with later waves of the custom-runtime epic.
 
 ## gRPC service surface
 

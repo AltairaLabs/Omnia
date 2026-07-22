@@ -23,7 +23,7 @@ import type { PromptPackTrack } from "@/types/agent-runtime";
 // Shared types — kept in sync with deploy-wizard.tsx
 // ---------------------------------------------------------------------------
 
-export type FrameworkType = "promptkit" | "langchain" | "autogen" | "custom";
+export type FrameworkType = "promptkit" | "langchain" | "custom";
 export type FacadeType = "websocket" | "grpc" | "rest";
 export type ContextStoreType = "memory" | "redis";
 export type AgentMode = "agent" | "function";
@@ -70,7 +70,6 @@ const PROMPT_PACK_TRACKS: { value: PromptPackTrack; label: string }[] = [
 const FRAMEWORKS: { value: FrameworkType; label: string; description: string }[] = [
   { value: "promptkit", label: "PromptKit", description: "AltairaLabs' native framework" },
   { value: "langchain", label: "LangChain", description: "Popular Python framework" },
-  { value: "autogen", label: "AutoGen", description: "Microsoft's agent framework" },
   { value: "custom", label: "Custom", description: "Your own container image" },
 ];
 
@@ -86,7 +85,7 @@ interface FrameworkStepProps {
 /**
  * Only `promptkit` has a built-in default runtime image (operator
  * `--framework-image=promptkit=...` / chart `framework.image`). Every other
- * framework type — including the built-in `langchain`/`autogen` choices, not
+ * framework type — including the built-in `langchain` choice, not
  * just `custom` — blocks with `FrameworkImageUnavailable` unless an image is
  * supplied here or configured cluster-wide via `framework.images.<type>`.
  */

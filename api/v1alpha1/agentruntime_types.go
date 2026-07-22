@@ -536,7 +536,7 @@ type ProviderRef struct {
 }
 
 // FrameworkType defines which agent framework to use.
-// +kubebuilder:validation:Enum=promptkit;langchain;autogen;custom
+// +kubebuilder:validation:Enum=promptkit;langchain;custom
 type FrameworkType string
 
 const (
@@ -550,17 +550,15 @@ const (
 	// image implements omnia.runtime.v1 independently and may lag the
 	// contract.
 	FrameworkTypeLangChain FrameworkType = "langchain"
-	// FrameworkTypeAutoGen is reserved. NOT IMPLEMENTED: no image is built or
-	// defaulted, so an AgentRuntime declaring it blocks with
-	// FrameworkImageUnavailable unless spec.framework.image is set.
-	FrameworkTypeAutoGen FrameworkType = "autogen"
 	// FrameworkTypeCustom uses a user-provided container image implementing
 	// the omnia.runtime.v1 gRPC contract. Requires spec.framework.image.
 	FrameworkTypeCustom FrameworkType = "custom"
 )
 
-// FrameworkConfig specifies which agent framework to use.
-// This enables Omnia's "no vendor lock-in" promise by supporting multiple frameworks.
+// FrameworkConfig specifies which agent framework to use. PromptKit is the only
+// framework this repo builds, tests, and releases; any other type requires a
+// bring-your-own image that implements the omnia.runtime.v1 gRPC contract
+// (verifiable with the runtime-conformance suite).
 type FrameworkConfig struct {
 	// type specifies the agent framework to use.
 	// +kubebuilder:validation:Required
@@ -1388,7 +1386,7 @@ type AgentRuntimeSpec struct {
 
 	// framework specifies which agent framework to use.
 	// Defaults to PromptKit, the only framework this repo builds and tests.
-	// Any other type (langchain, autogen, custom) requires an explicit image
+	// Any other type (langchain, custom) requires an explicit image
 	// via spec.framework.image or an operator --framework-image entry, and
 	// must implement the omnia.runtime.v1 gRPC contract.
 	// +optional

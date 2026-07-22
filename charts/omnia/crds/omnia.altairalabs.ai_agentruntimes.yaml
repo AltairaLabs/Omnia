@@ -1384,7 +1384,7 @@ spec:
                 description: |-
                   framework specifies which agent framework to use.
                   Defaults to PromptKit, the only framework this repo builds and tests.
-                  Any other type (langchain, autogen, custom) requires an explicit image
+                  Any other type (langchain, custom) requires an explicit image
                   via spec.framework.image or an operator --framework-image entry, and
                   must implement the omnia.runtime.v1 gRPC contract.
                 properties:
@@ -1400,7 +1400,6 @@ spec:
                     enum:
                     - promptkit
                     - langchain
-                    - autogen
                     - custom
                     type: string
                   version:

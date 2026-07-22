@@ -446,7 +446,7 @@ describe("DeployWizard integration", () => {
   });
 
   // Only `promptkit` has a built-in default runtime image (custom-runtime
-  // wave 1). Selecting langchain/autogen in the wizard must block Next until
+  // wave 1). Selecting langchain in the wizard must block Next until
   // an image is supplied — same as `custom` — or the wizard silently submits
   // an AgentRuntime that is permanently unschedulable with no way to fix it
   // from the UI.

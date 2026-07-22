@@ -513,7 +513,6 @@ export const crdConstraints: Record<string, Record<string, FieldConstraint>> =
       "enum": [
         "promptkit",
         "langchain",
-        "autogen",
         "custom"
       ],
       "required": true
