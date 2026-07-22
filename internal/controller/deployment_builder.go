@@ -156,6 +156,12 @@ func (r *AgentRuntimeReconciler) buildDeploymentSpec(
 	if agentRuntime.Spec.Runtime != nil && agentRuntime.Spec.Runtime.Replicas != nil {
 		replicas = *agentRuntime.Spec.Runtime.Replicas
 	}
+	if capabilitiesMismatchForCurrentGen(agentRuntime) {
+		// The runtime lacks a required capability for this generation: stop
+		// wasting resources on an agent that can't serve its facade. Fixing the
+		// runtime image bumps the generation and lifts this (§4.4 / 3a-enforce).
+		replicas = 0
+	}
 
 	facadePort := primaryFacadePort(agentRuntime)
 
