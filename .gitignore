@@ -64,3 +64,6 @@ docs/superpowers/
 **/out/
 /omnia-arena-controller
 /memory-api
+
+# runtime-conformance CLI binary (from `go build ./cmd/runtime-conformance/`)
+/runtime-conformance
