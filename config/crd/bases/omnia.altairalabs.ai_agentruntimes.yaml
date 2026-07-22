@@ -279,6 +279,40 @@ spec:
                 description: duplex configures the realtime voice/duplex console for
                   this agent.
                 properties:
+                  audio:
+                    description: |-
+                      audio declares the realtime audio format the runtime requires for this
+                      agent's duplex sessions (recommendedSampleRate / channels / format). The
+                      runtime advertises it as a bounded counter-offer in RuntimeHello; the
+                      facade relays it to the client, which captures at that format, or the
+                      session fails at open when the client cannot satisfy it. Unset means the
+                      runtime accepts the client's proposed format.
+                    properties:
+                      channels:
+                        description: channels is the audio channel count the client
+                          should capture/play (1=mono).
+                        format: int32
+                        type: integer
+                      format:
+                        description: format is the PCM sample format the client should
+                          send, e.g. "pcm16".
+                        type: string
+                      maxDurationSeconds:
+                        description: maxDurationSeconds is the maximum audio duration.
+                        format: int32
+                        minimum: 1
+                        type: integer
+                      recommendedSampleRate:
+                        description: recommendedSampleRate is the optimal sample rate
+                          in Hz.
+                        format: int32
+                        minimum: 1
+                        type: integer
+                      supportsSegmentSelection:
+                        description: supportsSegmentSelection indicates if the provider
+                          supports selecting audio segments.
+                        type: boolean
+                    type: object
                   enabled:
                     description: enabled turns on the realtime voice console for this
                       agent.
