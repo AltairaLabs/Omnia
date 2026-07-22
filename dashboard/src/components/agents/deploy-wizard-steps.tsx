@@ -17,6 +17,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge";
 import { FieldError } from "@/components/ui/field-error";
 import { cn } from "@/lib/utils";
+import type { PromptPackTrack } from "@/types/agent-runtime";
 
 // ---------------------------------------------------------------------------
 // Shared types — kept in sync with deploy-wizard.tsx
@@ -39,7 +40,7 @@ export interface WizardFormData {
   customImage: string;
   // Step 3: PromptPack
   promptPackName: string;
-  promptPackTrack: string;
+  promptPackTrack: PromptPackTrack;
   // Step 4: Provider
   providerRefName: string;
   // Step 5: Tools & Context
@@ -56,6 +57,15 @@ export interface WizardFormData {
   facadeType: FacadeType;
   facadePort: number;
 }
+
+// Release tracks offered by the PromptPack step. Typed as PromptPackTrack so a
+// value spec.promptPackRef.track does not accept fails typecheck rather than
+// the API server (#1882 — the radio used to emit "canary", which is not in the
+// CRD's stable|prerelease enum, so every Canary deploy was rejected).
+const PROMPT_PACK_TRACKS: { value: PromptPackTrack; label: string }[] = [
+  { value: "stable", label: "Stable" },
+  { value: "prerelease", label: "Prerelease" },
+];
 
 const FRAMEWORKS: { value: FrameworkType; label: string; description: string }[] = [
   { value: "promptkit", label: "PromptKit", description: "AltairaLabs' native framework" },
@@ -203,17 +213,17 @@ export function PromptPackStep({
         <Label>Release Track</Label>
         <RadioGroup
           value={formData.promptPackTrack}
-          onValueChange={(v) => updateField("promptPackTrack", v)}
+          onValueChange={(v) => updateField("promptPackTrack", v as PromptPackTrack)}
           className="flex gap-4"
         >
-          <div className="flex items-center space-x-2">
-            <RadioGroupItem value="stable" id="track-stable" />
-            <Label htmlFor="track-stable" className="cursor-pointer">Stable</Label>
-          </div>
-          <div className="flex items-center space-x-2">
-            <RadioGroupItem value="canary" id="track-canary" />
-            <Label htmlFor="track-canary" className="cursor-pointer">Canary</Label>
-          </div>
+          {PROMPT_PACK_TRACKS.map((track) => (
+            <div key={track.value} className="flex items-center space-x-2">
+              <RadioGroupItem value={track.value} id={`track-${track.value}`} />
+              <Label htmlFor={`track-${track.value}`} className="cursor-pointer">
+                {track.label}
+              </Label>
+            </div>
+          ))}
         </RadioGroup>
       </div>
     </div>
