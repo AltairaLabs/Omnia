@@ -7,7 +7,7 @@ package omnia.runtime.v1;
 
 option go_package = "github.com/altairalabs/omnia/pkg/runtime/v1;runtimev1";
 
-// Contract-Version: 1.2.0
+// Contract-Version: 1.3.0
 //
 // The version of this contract, as consumed by third-party runtime
 // implementations. Bump the minor version for additive changes (new message,
@@ -139,6 +139,13 @@ message ServerMessage {
 
     // interruption signals a barge-in; the client clears buffered audio.
     Interruption interruption = 7;
+
+    // runtime_hello is the runtime's first ServerMessage on a Converse stream:
+    // the session's authoritative capability set plus, for a duplex session, a
+    // bounded media counter-offer (codec/sample_rate/channels) the facade
+    // relays to the client. A runtime that never sends a hello is legacy — the
+    // facade proceeds with today's unilateral DuplexStart behaviour.
+    RuntimeHello runtime_hello = 8;
   }
 }
 
@@ -390,6 +397,33 @@ message DuplexStart {
   int32 channels = 3;
   // system_instruction is the optional system prompt for the session.
   string system_instruction = 4;
+}
+
+// RuntimeHello is the runtime's first ServerMessage on a Converse stream. It
+// carries the session's authoritative capability set and, for a duplex session,
+// the media parameters the runtime requires — a bounded counter-offer to the
+// facade's DuplexStart proposal. Absence of a hello marks a legacy runtime.
+message RuntimeHello {
+  // capabilities is the per-session, authoritative capability set (open set;
+  // consumers display or ignore unknown values).
+  repeated string capabilities = 1;
+  // media is the bounded media counter-offer. Set only for a duplex session.
+  MediaNegotiation media = 2;
+}
+
+// MediaNegotiation is the bounded counter-offer parameter set. A zero value for
+// a field means "no requirement / accept the client's proposal" for that field.
+message MediaNegotiation {
+  // codec is the required audio encoding, e.g. "pcm".
+  string codec = 1;
+  // sample_rate is the required sample rate in Hz, e.g. 24000.
+  int32 sample_rate = 2;
+  // channels is the required channel count, e.g. 1 for mono.
+  int32 channels = 3;
+  // frame_rate is the required video frame rate (carried, not yet enforced).
+  int32 frame_rate = 4;
+  // resolution is the required video resolution (carried, not yet enforced).
+  int32 resolution = 5;
 }
 
 // AudioInputChunk is one inbound audio frame during a duplex session.
