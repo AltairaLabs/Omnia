@@ -32,6 +32,12 @@ import (
 	runtimev1 "github.com/altairalabs/omnia/pkg/runtime/v1"
 )
 
+// Short aliases keep the fakes' Invoke signatures within the line-length limit.
+type (
+	invReq  = runtimev1.InvocationRequest
+	invResp = runtimev1.InvocationResponse
+)
+
 // dialFake registers srv on an in-process bufconn gRPC server and returns a
 // client connection to it. The server and connection are cleaned up with t.
 func dialFake(t *testing.T, srv runtimev1.RuntimeServiceServer) *grpc.ClientConn {
@@ -112,7 +118,7 @@ func (conformantFake) Converse(stream runtimev1.RuntimeService_ConverseServer) e
 	return stream.Send(doneFrame())
 }
 
-func (conformantFake) Invoke(context.Context, *runtimev1.InvocationRequest) (*runtimev1.InvocationResponse, error) {
+func (conformantFake) Invoke(context.Context, *invReq) (*invResp, error) {
 	return &runtimev1.InvocationResponse{OutputJson: "{}"}, nil
 }
 
@@ -240,9 +246,112 @@ func (legacyFake) Converse(stream runtimev1.RuntimeService_ConverseServer) error
 	return stream.Send(doneFrame())
 }
 
+// A consistent legacy runtime advertises nothing and implements nothing beyond
+// the text stream — so Invoke is Unimplemented, matching its empty capability set.
+func (legacyFake) Invoke(context.Context, *invReq) (*invResp, error) {
+	return nil, status.Error(codes.Unimplemented, "legacy: no invoke")
+}
+
 func TestRun_LegacyRuntime_SkipsHelloChecks(t *testing.T) {
 	res := runAgainst(t, legacyFake{})
 	require.Equal(t, StatusSkip, findCheck(t, res, "hello-first").Status)
 	require.Equal(t, StatusSkip, findCheck(t, res, "text-turn-shape").Status)
 	require.True(t, res.Passed, "a legacy runtime must not fail the run")
+}
+
+// ── Invoke + duplex honesty checks (Task 3) ───────────────────────────────
+
+// capsExcept returns the known capability set minus one name.
+func capsExcept(exclude string) []string {
+	var out []string
+	for _, c := range contract.KnownCapabilities() {
+		if c != exclude {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+func healthWithCaps(caps []string) *runtimev1.HealthResponse {
+	return &runtimev1.HealthResponse{Healthy: true, ContractVersion: contract.Version, Capabilities: caps}
+}
+
+func TestRun_InvokeAdvertisedMustWork(t *testing.T) {
+	res := runAgainst(t, conformantFake{})
+	require.Equal(t, StatusPass, findCheck(t, res, "invoke-honesty").Status)
+	require.Equal(t, StatusPass, findCheck(t, res, "duplex-honesty").Status)
+	require.True(t, res.Passed)
+}
+
+// overClaimInvokeFake advertises `invoke` but Invoke returns Unimplemented.
+type overClaimInvokeFake struct{ conformantFake }
+
+func (overClaimInvokeFake) Invoke(context.Context, *invReq) (*invResp, error) {
+	return nil, status.Error(codes.Unimplemented, "not implemented")
+}
+
+func TestRun_InvokeOverClaimFails(t *testing.T) {
+	res := runAgainst(t, overClaimInvokeFake{})
+	c := findCheck(t, res, "invoke-honesty")
+	require.Equal(t, StatusFail, c.Status)
+	require.Contains(t, c.Detail, "Unimplemented")
+	require.False(t, res.Passed)
+}
+
+// noInvokeCapFake does not advertise `invoke` and Invoke returns Unimplemented.
+type noInvokeCapFake struct{ conformantFake }
+
+func (noInvokeCapFake) Health(context.Context, *runtimev1.HealthRequest) (*runtimev1.HealthResponse, error) {
+	return healthWithCaps(capsExcept(contract.CapabilityInvoke)), nil
+}
+func (noInvokeCapFake) Invoke(context.Context, *invReq) (*invResp, error) {
+	return nil, status.Error(codes.Unimplemented, "not implemented")
+}
+
+func TestRun_InvokeUnadvertised_ReturnsUnimplemented_Passes(t *testing.T) {
+	res := runAgainst(t, noInvokeCapFake{})
+	require.Equal(t, StatusPass, findCheck(t, res, "invoke-honesty").Status)
+}
+
+// answersButUnadvertisedFake does not advertise `invoke` yet Invoke answers.
+type answersButUnadvertisedFake struct{ conformantFake }
+
+func (answersButUnadvertisedFake) Health(context.Context, *runtimev1.HealthRequest) (*runtimev1.HealthResponse, error) {
+	return healthWithCaps(capsExcept(contract.CapabilityInvoke)), nil
+}
+
+func TestRun_InvokeUnadvertised_ButAnswers_Fails(t *testing.T) {
+	res := runAgainst(t, answersButUnadvertisedFake{})
+	c := findCheck(t, res, "invoke-honesty")
+	require.Equal(t, StatusFail, c.Status)
+	require.Contains(t, c.Detail, "not advertised")
+}
+
+// overClaimDuplexFake advertises duplex_audio but Converse returns Unimplemented.
+type overClaimDuplexFake struct{ conformantFake }
+
+func (overClaimDuplexFake) Converse(stream runtimev1.RuntimeService_ConverseServer) error {
+	if _, err := stream.Recv(); err != nil {
+		return err
+	}
+	return status.Error(codes.Unimplemented, "no duplex")
+}
+
+func TestRun_DuplexOverClaimFails(t *testing.T) {
+	res := runAgainst(t, overClaimDuplexFake{})
+	c := findCheck(t, res, "duplex-honesty")
+	require.Equal(t, StatusFail, c.Status)
+	require.False(t, res.Passed)
+}
+
+// noDuplexCapFake does not advertise duplex_audio.
+type noDuplexCapFake struct{ conformantFake }
+
+func (noDuplexCapFake) Health(context.Context, *runtimev1.HealthRequest) (*runtimev1.HealthResponse, error) {
+	return healthWithCaps(capsExcept(contract.CapabilityDuplexAudio)), nil
+}
+
+func TestRun_DuplexNotAdvertised_Skips(t *testing.T) {
+	res := runAgainst(t, noDuplexCapFake{})
+	require.Equal(t, StatusSkip, findCheck(t, res, "duplex-honesty").Status)
 }

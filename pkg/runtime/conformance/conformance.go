@@ -77,7 +77,8 @@ func Run(ctx context.Context, cfg Config) Result {
 	checks = append(checks, hc)
 	checks = append(checks, checkConverse(ctx, client, caps)...)
 	checks = append(checks, checkMalformedInput(ctx, client, caps))
-	// Invoke + duplex honesty probes are added in Task 3; each gates on caps.
+	checks = append(checks, checkInvokeHonesty(ctx, client, caps))
+	checks = append(checks, checkDuplexHonesty(ctx, client, caps))
 
 	return finalize(checks)
 }

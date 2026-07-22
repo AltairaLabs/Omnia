@@ -26,6 +26,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/altairalabs/omnia/pkg/runtime/contract"
 	runtimev1 "github.com/altairalabs/omnia/pkg/runtime/v1"
 )
 
@@ -178,4 +179,61 @@ func isTransportCrash(err error) bool {
 	default:
 		return false
 	}
+}
+
+// checkInvokeHonesty asserts advertisement matches behaviour: an advertised
+// `invoke` must not return Unimplemented; an unadvertised `invoke` must.
+func checkInvokeHonesty(ctx context.Context, client rtClient, caps map[string]bool) CheckResult {
+	const name = "invoke-honesty"
+	if caps == nil {
+		return CheckResult{name, StatusSkip, healthFailedReason}
+	}
+	cctx, cancel := context.WithTimeout(ctx, converseTimeout)
+	defer cancel()
+	_, err := client.Invoke(cctx, &runtimev1.InvocationRequest{InputJson: "{}", InvocationId: probeSession})
+	unimplemented := status.Code(err) == codes.Unimplemented
+
+	if caps[contract.CapabilityInvoke] {
+		if unimplemented {
+			return CheckResult{name, StatusFail, "advertises `invoke` but Invoke returns Unimplemented"}
+		}
+		return CheckResult{name, StatusPass, ""}
+	}
+	if unimplemented {
+		return CheckResult{name, StatusPass, ""}
+	}
+	return CheckResult{name, StatusFail, "Invoke is answered but `invoke` is not advertised"}
+}
+
+// checkDuplexHonesty asserts an advertised `duplex_audio` accepts a DuplexStart
+// and emits at least one on-protocol frame (not Unimplemented / not a crash).
+func checkDuplexHonesty(ctx context.Context, client rtClient, caps map[string]bool) CheckResult {
+	const name = "duplex-honesty"
+	if caps == nil {
+		return CheckResult{name, StatusSkip, healthFailedReason}
+	}
+	if !caps[contract.CapabilityDuplexAudio] {
+		return CheckResult{name, StatusSkip, "duplex_audio not advertised"}
+	}
+	cctx, cancel := context.WithTimeout(ctx, converseTimeout)
+	defer cancel()
+	stream, err := client.Converse(cctx)
+	if err != nil {
+		return CheckResult{name, StatusFail, fmt.Sprintf("Converse failed to open: %v", err)}
+	}
+	_ = stream.Send(&runtimev1.ClientMessage{
+		SessionId:   probeSession,
+		DuplexStart: &runtimev1.DuplexStart{Codec: "pcm", SampleRate: 16000, Channels: 1},
+	})
+	frame, recvErr := stream.Recv()
+	if recvErr == nil && frame != nil {
+		return CheckResult{name, StatusPass, ""}
+	}
+	if status.Code(recvErr) == codes.Unimplemented {
+		return CheckResult{name, StatusFail, "advertises `duplex_audio` but the session returns Unimplemented"}
+	}
+	if isTransportCrash(recvErr) {
+		return CheckResult{name, StatusFail, fmt.Sprintf("duplex session crashed: %v", recvErr)}
+	}
+	return CheckResult{name, StatusFail, "duplex session closed without emitting any frame"}
 }
