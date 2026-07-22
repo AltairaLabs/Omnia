@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 
@@ -54,9 +55,10 @@ func (c *captureBinaryWriter) WriteUploadReady(_ *facade.UploadReadyInfo) error 
 func (c *captureBinaryWriter) WriteUploadComplete(_ *facade.UploadCompleteInfo) error {
 	return nil
 }
-func (c *captureBinaryWriter) WriteMediaChunk(_ *facade.MediaChunkInfo) error { return nil }
-func (c *captureBinaryWriter) WriteInterrupt() error                          { return nil }
-func (c *captureBinaryWriter) SupportsBinary() bool                           { return true }
+func (c *captureBinaryWriter) WriteMediaChunk(_ *facade.MediaChunkInfo) error       { return nil }
+func (c *captureBinaryWriter) WriteInterrupt() error                                { return nil }
+func (c *captureBinaryWriter) WriteSessionConfig(_ *facade.SessionConfigInfo) error { return nil }
+func (c *captureBinaryWriter) SupportsBinary() bool                                 { return true }
 func (c *captureBinaryWriter) WriteBinaryMediaChunk(_ [facade.MediaIDSize]byte, _ uint32, _ bool, _ string, payload []byte) error {
 	cp := make([]byte, len(payload))
 	copy(cp, payload)
@@ -383,4 +385,85 @@ func TestRelayOut_ForwardsInterruption(t *testing.T) {
 	if got := w.interruptCalls.Load(); got != 1 {
 		t.Errorf("WriteInterrupt called %d times, want 1", got)
 	}
+}
+
+// negotiationWriter records the session_config counter-offer and any error code
+// relayed to the client. It embeds captureBinaryWriter for all other methods.
+type negotiationWriter struct {
+	captureBinaryWriter
+	sessionConfig *facade.SessionConfigInfo
+	errorCode     string
+}
+
+func (n *negotiationWriter) WriteSessionConfig(cfg *facade.SessionConfigInfo) error {
+	n.sessionConfig = cfg
+	return nil
+}
+func (n *negotiationWriter) WriteError(code, _ string) error {
+	n.errorCode = code
+	return nil
+}
+
+// TestRelayHello_RelaysAudioCounterOffer verifies an audio RuntimeHello is
+// relayed to the client as a session_config with the negotiated format.
+func TestRelayHello_RelaysAudioCounterOffer(t *testing.T) {
+	w := &negotiationWriter{captureBinaryWriter: captureBinaryWriter{got: make(chan []byte, 1)}}
+	sink := &grpcDuplexSink{sessionID: "sess-hello", writer: w}
+
+	cont := sink.handleServerMessage(&runtimev1.ServerMessage{
+		Message: &runtimev1.ServerMessage_RuntimeHello{RuntimeHello: &runtimev1.RuntimeHello{
+			Media: &runtimev1.MediaNegotiation{Codec: "pcm", SampleRate: 24000, Channels: 1},
+		}},
+	})
+
+	require.True(t, cont, "relaying continues after an audio counter-offer")
+	require.NotNil(t, w.sessionConfig)
+	require.Equal(t, "pcm", w.sessionConfig.Codec)
+	require.Equal(t, 24000, w.sessionConfig.SampleRate)
+	require.Equal(t, 1, w.sessionConfig.Channels)
+	require.Empty(t, w.errorCode)
+}
+
+// TestRelayHello_FailClosedOnVideoCounterOffer verifies a video counter-offer
+// (unsupported on this audio-only path) fails the session closed: an error is
+// relayed, the stream is cancelled, and relaying stops.
+func TestRelayHello_FailClosedOnVideoCounterOffer(t *testing.T) {
+	cancelled := false
+	w := &negotiationWriter{captureBinaryWriter: captureBinaryWriter{got: make(chan []byte, 1)}}
+	sink := &grpcDuplexSink{sessionID: "sess-video", writer: w, cancel: func() { cancelled = true }}
+
+	cont := sink.handleServerMessage(&runtimev1.ServerMessage{
+		Message: &runtimev1.ServerMessage_RuntimeHello{RuntimeHello: &runtimev1.RuntimeHello{
+			Media: &runtimev1.MediaNegotiation{Codec: "h264", FrameRate: 30, Resolution: 720},
+		}},
+	})
+
+	require.False(t, cont, "video counter-offer must fail closed")
+	require.Equal(t, facade.ErrorCodeUnsatisfiableFormat, w.errorCode)
+	require.True(t, cancelled, "fail-closed cancels the runtime stream")
+	require.Nil(t, w.sessionConfig)
+}
+
+// TestRelayOut_LegacyStreamsMediaChunks verifies a runtime that never sends a
+// hello (legacy) still has its MediaChunks relayed, with no session_config.
+func TestRelayOut_LegacyStreamsMediaChunks(t *testing.T) {
+	stream := &fakeConverseClient{msgs: []*runtimev1.ServerMessage{
+		{Message: &runtimev1.ServerMessage_MediaChunk{MediaChunk: &runtimev1.MediaChunk{
+			Data: []byte{1, 2, 3}, MimeType: "audio/pcm",
+		}}},
+	}}
+	w := &negotiationWriter{captureBinaryWriter: captureBinaryWriter{got: make(chan []byte, 1)}}
+	sink := &grpcDuplexSink{sessionID: "sess-legacy", writer: w, stream: stream}
+
+	done := make(chan struct{})
+	go func() { sink.relayOut(); close(done) }()
+
+	select {
+	case got := <-w.got:
+		require.Equal(t, []byte{1, 2, 3}, got)
+	case <-time.After(3 * time.Second):
+		t.Fatal("legacy media chunk not relayed")
+	}
+	<-done
+	require.Nil(t, w.sessionConfig, "legacy path relays no session_config")
 }

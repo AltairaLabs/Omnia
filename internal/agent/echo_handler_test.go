@@ -119,6 +119,10 @@ func (m *mockResponseWriter) WriteInterrupt() error {
 	return m.err
 }
 
+func (m *mockResponseWriter) WriteSessionConfig(_ *facade.SessionConfigInfo) error {
+	return m.err
+}
+
 func (m *mockResponseWriter) SupportsBinary() bool {
 	return false
 }

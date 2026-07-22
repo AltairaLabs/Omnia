@@ -74,29 +74,69 @@ func (g *grpcDuplexSink) Start(ctx context.Context, s *facade.AudioSessionStart)
 	return nil
 }
 
-// relayOut reads ServerMessages from the runtime stream and forwards any
-// MediaChunk payloads to the WebSocket client via WriteBinaryMediaChunk.
-// It runs until the stream ends or the context is cancelled.
+// relayOut reads ServerMessages from the runtime stream and forwards them to
+// the WebSocket client: a RuntimeHello (always first on a compliant runtime) is
+// relayed as a session_config counter-offer or fails the session closed;
+// MediaChunk/Interruption are forwarded as before. A runtime that never sends a
+// hello (legacy) simply streams MediaChunks, which are relayed unchanged. It
+// runs until the stream ends, the context is cancelled, or a fail-closed hello.
 func (g *grpcDuplexSink) relayOut() {
 	for {
 		resp, err := g.stream.Recv()
 		if err != nil {
 			return
 		}
-		if mc, ok := resp.Message.(*runtimev1.ServerMessage_MediaChunk); ok {
-			var mediaID [facade.MediaIDSize]byte
-			_ = g.writer.WriteBinaryMediaChunk(
-				mediaID,
-				uint32(mc.MediaChunk.Sequence), //nolint:gosec // sequence is non-negative protocol value
-				mc.MediaChunk.IsLast,
-				mc.MediaChunk.MimeType,
-				mc.MediaChunk.Data,
-			)
-		}
-		if _, ok := resp.Message.(*runtimev1.ServerMessage_Interruption); ok {
-			_ = g.writer.WriteInterrupt()
+		if !g.handleServerMessage(resp) {
+			return
 		}
 	}
+}
+
+// handleServerMessage dispatches one ServerMessage to the client. It returns
+// false when relaying must stop (a fail-closed counter-offer).
+func (g *grpcDuplexSink) handleServerMessage(resp *runtimev1.ServerMessage) bool {
+	switch m := resp.Message.(type) {
+	case *runtimev1.ServerMessage_RuntimeHello:
+		return g.relayHello(m.RuntimeHello)
+	case *runtimev1.ServerMessage_MediaChunk:
+		var mediaID [facade.MediaIDSize]byte
+		_ = g.writer.WriteBinaryMediaChunk(
+			mediaID,
+			uint32(m.MediaChunk.Sequence), //nolint:gosec // sequence is non-negative protocol value
+			m.MediaChunk.IsLast,
+			m.MediaChunk.MimeType,
+			m.MediaChunk.Data,
+		)
+	case *runtimev1.ServerMessage_Interruption:
+		_ = g.writer.WriteInterrupt()
+	}
+	return true
+}
+
+// relayHello relays the runtime's per-session hello to the client. It forwards
+// the audio counter-offer as a session_config message so the client (re)captures
+// at the required format, or fails the session closed when the counter-offer
+// requires an unsupported (video) format. Returns false to stop relaying.
+func (g *grpcDuplexSink) relayHello(hello *runtimev1.RuntimeHello) bool {
+	media := hello.GetMedia()
+	if media == nil {
+		return true // capabilities-only hello; nothing to relay on the duplex path
+	}
+	if media.GetFrameRate() != 0 || media.GetResolution() != 0 {
+		// Video counter-offer: this audio-only path cannot satisfy it. Fail closed.
+		_ = g.writer.WriteError(facade.ErrorCodeUnsatisfiableFormat,
+			"runtime requires a video duplex format this facade does not support")
+		if g.cancel != nil {
+			g.cancel()
+		}
+		return false
+	}
+	_ = g.writer.WriteSessionConfig(&facade.SessionConfigInfo{
+		Codec:      media.GetCodec(),
+		SampleRate: int(media.GetSampleRate()),
+		Channels:   int(media.GetChannels()),
+	})
+	return true
 }
 
 // SendAudio forwards a raw audio chunk to the runtime over the open stream.

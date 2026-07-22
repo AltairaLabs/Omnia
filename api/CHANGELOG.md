@@ -10,6 +10,29 @@ or `api/proto/`, add an entry below with the date, affected API, and reason.
 
 ## Unreleased
 
+### Added (custom-runtime Wave 3b: RuntimeHello + bounded media counter-offer, §4.2–4.3)
+
+- **Contract version 1.2.0 → 1.3.0.** Additive `omnia.runtime.v1` change (new oneof
+  variant), bumped in both `api/proto/runtime/v1/runtime.proto` and
+  `pkg/runtime/contract/version.go`.
+- **New gRPC message (runtime → facade).** `RuntimeHello` is added as `ServerMessage`
+  oneof field 8. The runtime sends it as the **first** `ServerMessage` on every
+  `Converse` stream: the session's authoritative `capabilities`, plus (for a duplex
+  session) a `MediaNegotiation` counter-offer (`codec` / `sample_rate` / `channels`;
+  `frame_rate` / `resolution` carried but not yet enforced). A runtime that never sends a
+  hello is treated as legacy — the facade keeps today's unilateral `DuplexStart`
+  behaviour. Additive; existing clients that ignore the new variant are unaffected.
+- **Counter-offer source (CRD).** `spec.duplex.audio` (`AudioRequirements`:
+  `recommendedSampleRate` / `channels` / `format`) declares the required duplex audio
+  format; the runtime advertises it in `RuntimeHello.media` and prefers it over the
+  client's proposal.
+- **New WebSocket message (facade → client).** `session_config` (`SessionConfigInfo`:
+  `codec` / `sample_rate` / `channels`) relays the counter-offer; the client (re)captures
+  at that format. See `api/websocket/asyncapi.yaml`.
+- **New client-visible error.** `UNSATISFIABLE_FORMAT` is emitted when the counter-offer
+  requires an unsupported (video) duplex format on this audio-only path — the session
+  fails closed before audio flows.
+
 ### Changed (resume: the context store decides resumability, #1876)
 
 - **Contract version 1.0.0 → 1.1.0.** Adding `HasConversation` is an additive change to

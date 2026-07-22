@@ -87,6 +87,8 @@ channels:
         $ref: "#/components/messages/MediaChunk"
       interrupt:
         $ref: "#/components/messages/Interrupt"
+      sessionConfig:
+        $ref: "#/components/messages/SessionConfig"
 
 operations:
   sendMessage:
@@ -160,6 +162,14 @@ operations:
     summary: Server signals barge-in; client should clear buffered audio
     messages:
       - $ref: "#/channels/agentWs/messages/interrupt"
+
+  receiveSessionConfig:
+    action: receive
+    channel:
+      $ref: "#/channels/agentWs"
+    summary: Server relays the negotiated duplex audio format; client (re)captures at it
+    messages:
+      - $ref: "#/channels/agentWs/messages/sessionConfig"
 
 components:
   messages:
@@ -427,6 +437,29 @@ components:
             type: string
             format: date-time
 
+    SessionConfig:
+      name: SessionConfig
+      title: Negotiated duplex audio format
+      summary: |
+        Relays the runtime's negotiated duplex audio format (the RuntimeHello
+        counter-offer). The client (re)captures at this codec / sample_rate /
+        channels for the remainder of the session. Sent once at duplex-session
+        start, before audio flows.
+      payload:
+        type: object
+        required: [type, timestamp]
+        properties:
+          type:
+            type: string
+            const: session_config
+          session_id:
+            type: string
+          session_config:
+            $ref: "#/components/schemas/SessionConfigInfo"
+          timestamp:
+            type: string
+            format: date-time
+
   schemas:
     ContentPart:
       type: object
@@ -592,6 +625,21 @@ components:
           description: Base64-encoded chunk data
         mime_type:
           type: string
+
+    SessionConfigInfo:
+      type: object
+      required: [codec, sample_rate, channels]
+      description: The negotiated duplex audio format the client should capture at.
+      properties:
+        codec:
+          type: string
+          description: Audio encoding, e.g. "pcm".
+        sample_rate:
+          type: integer
+          description: Sample rate in Hz, e.g. 24000.
+        channels:
+          type: integer
+          description: Channel count, e.g. 1 for mono.
 
     ConnectedInfo:
       type: object
