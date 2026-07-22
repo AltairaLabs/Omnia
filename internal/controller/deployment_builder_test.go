@@ -289,12 +289,6 @@ func TestBuiltinDefaultImage(t *testing.T) {
 			want:          "",
 		},
 		{
-			// #1206: AutoGen must NOT silently fall back to the PromptKit image.
-			name:          "AutoGen has no built-in image",
-			frameworkType: string(omniav1alpha1.FrameworkTypeAutoGen),
-			want:          "",
-		},
-		{
 			name:          "Unknown framework type has no built-in image",
 			frameworkType: "unknown",
 			want:          "",

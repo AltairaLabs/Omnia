@@ -64,7 +64,7 @@ func TestResolveFrameworkImage(t *testing.T) {
 		{"langchain from map", arWithFramework(omniav1alpha1.FrameworkTypeLangChain, ""), "ghcr.io/altairalabs/omnia-langchain-runtime:v1", true},
 		{"promptkit from map", arWithFramework(omniav1alpha1.FrameworkTypePromptKit, ""), "ghcr.io/altairalabs/omnia-runtime:v1", true},
 		{"nil framework -> promptkit", arWithFramework("", ""), "ghcr.io/altairalabs/omnia-runtime:v1", true},
-		{"autogen -> blocked", arWithFramework(omniav1alpha1.FrameworkTypeAutoGen, ""), "", false},
+		{"custom -> blocked", arWithFramework(omniav1alpha1.FrameworkTypeCustom, ""), "", false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -82,9 +82,9 @@ func TestResolveFrameworkImage(t *testing.T) {
 func TestReconcileResources_UnresolvableFramework_Blocks(t *testing.T) {
 	scheme := newTestScheme(t)
 	ar := &omniav1alpha1.AgentRuntime{
-		ObjectMeta: metav1.ObjectMeta{Name: "autogen-agent", Namespace: "fw1206-ns"},
+		ObjectMeta: metav1.ObjectMeta{Name: "custom-agent", Namespace: "fw1206-ns"},
 		Spec: omniav1alpha1.AgentRuntimeSpec{
-			Framework: &omniav1alpha1.FrameworkConfig{Type: omniav1alpha1.FrameworkTypeAutoGen},
+			Framework: &omniav1alpha1.FrameworkConfig{Type: omniav1alpha1.FrameworkTypeCustom},
 		},
 	}
 	c := fake.NewClientBuilder().WithScheme(scheme).
@@ -92,7 +92,7 @@ func TestReconcileResources_UnresolvableFramework_Blocks(t *testing.T) {
 		WithStatusSubresource(&omniav1alpha1.AgentRuntime{}).
 		Build()
 	rec := record.NewFakeRecorder(10)
-	// No FrameworkImages: autogen has no built-in image -> must block.
+	// No FrameworkImages and no spec.framework.image: custom has no built-in image -> must block.
 	r := &AgentRuntimeReconciler{Client: c, Scheme: scheme, Recorder: rec}
 
 	dep, err := r.reconcileResources(context.Background(), logr.Discard(), ar, nil, nil, nil)
@@ -224,8 +224,8 @@ func TestResolveFrameworkImage_BareDevFallback(t *testing.T) {
 	if _, ok := r.resolveFrameworkImage(arWithFramework(omniav1alpha1.FrameworkTypeLangChain, "")); ok {
 		t.Fatal("langchain must block with no explicit image configured")
 	}
-	// autogen has no built-in -> blocked even bare.
-	if _, ok := r.resolveFrameworkImage(arWithFramework(omniav1alpha1.FrameworkTypeAutoGen, "")); ok {
-		t.Fatal("autogen must block even with no map")
+	// custom has no built-in -> blocked even bare (no map, no explicit image).
+	if _, ok := r.resolveFrameworkImage(arWithFramework(omniav1alpha1.FrameworkTypeCustom, "")); ok {
+		t.Fatal("custom must block with no explicit image configured")
 	}
 }
