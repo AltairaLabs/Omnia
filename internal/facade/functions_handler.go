@@ -89,7 +89,7 @@ type InvocationInvoker interface {
 type FunctionsHandler struct {
 	registry     FunctionRegistry
 	invoker      InvocationInvoker
-	sessionStore session.Store
+	sessionStore session.Recorder
 	sessionMeta  FunctionSessionMeta
 	funcInvoker  *FunctionInvoker
 	log          logr.Logger
@@ -129,7 +129,7 @@ func NewFunctionsHandler(registry FunctionRegistry, invoker InvocationInvoker, l
 // WithSessionStore wires session persistence onto the handler. Each
 // invocation creates one `sessions` row at request start and closes
 // it with the terminal status when the response is written.
-func (h *FunctionsHandler) WithSessionStore(store session.Store, meta FunctionSessionMeta) *FunctionsHandler {
+func (h *FunctionsHandler) WithSessionStore(store session.Recorder, meta FunctionSessionMeta) *FunctionsHandler {
 	h.sessionStore = store
 	h.sessionMeta = meta
 	h.funcInvoker = NewFunctionInvoker(FunctionInvokerConfig{

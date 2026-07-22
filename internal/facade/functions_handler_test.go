@@ -356,7 +356,7 @@ type stubSessionStore struct {
 	session.Store
 
 	mu        sync.Mutex
-	creates   []session.CreateSessionOptions
+	creates   []session.SessionRecordOptions
 	events    []session.RuntimeEvent
 	statuses  []session.SessionStatusUpdate
 	createErr error
@@ -364,7 +364,7 @@ type stubSessionStore struct {
 	eventErr  error
 }
 
-func (s *stubSessionStore) CreateSession(_ context.Context, opts session.CreateSessionOptions) (*session.Session, error) {
+func (s *stubSessionStore) EnsureSessionRecord(_ context.Context, opts session.SessionRecordOptions) (*session.Session, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.creates = append(s.creates, opts)

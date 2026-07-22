@@ -237,14 +237,14 @@ func mockSessionAPI(t *testing.T) *httptest.Server {
 
 // --- Tests ---
 
-func TestCreateSession(t *testing.T) {
+func TestEnsureSessionRecord(t *testing.T) {
 	srv := mockSessionAPI(t)
 	defer srv.Close()
 
 	store := NewStore(srv.URL, logr.Discard())
 	t.Cleanup(func() { _ = store.Close() })
 
-	sess, err := store.CreateSession(context.Background(), session.CreateSessionOptions{
+	sess, err := store.EnsureSessionRecord(context.Background(), session.SessionRecordOptions{
 		AgentName: "test-agent",
 		Namespace: "default",
 		TTL:       30 * time.Minute,
@@ -263,14 +263,14 @@ func TestCreateSession(t *testing.T) {
 	}
 }
 
-func TestCreateSession_NoTTL(t *testing.T) {
+func TestEnsureSessionRecord_NoTTL(t *testing.T) {
 	srv := mockSessionAPI(t)
 	defer srv.Close()
 
 	store := NewStore(srv.URL, logr.Discard())
 	t.Cleanup(func() { _ = store.Close() })
 
-	sess, err := store.CreateSession(context.Background(), session.CreateSessionOptions{
+	sess, err := store.EnsureSessionRecord(context.Background(), session.SessionRecordOptions{
 		AgentName: "test-agent",
 		Namespace: "default",
 	})
@@ -290,7 +290,7 @@ func TestGetSession_Found(t *testing.T) {
 	t.Cleanup(func() { _ = store.Close() })
 
 	// Create a session first.
-	created, err := store.CreateSession(context.Background(), session.CreateSessionOptions{
+	created, err := store.EnsureSessionRecord(context.Background(), session.SessionRecordOptions{
 		AgentName: "test-agent",
 		Namespace: "default",
 	})
@@ -410,7 +410,7 @@ func TestAppendMessage_OK(t *testing.T) {
 	store := NewStore(srv.URL, logr.Discard())
 	t.Cleanup(func() { _ = store.Close() })
 
-	created, err := store.CreateSession(context.Background(), session.CreateSessionOptions{
+	created, err := store.EnsureSessionRecord(context.Background(), session.SessionRecordOptions{
 		AgentName: "a",
 		Namespace: "ns",
 	})
@@ -475,7 +475,7 @@ func TestUpdateSessionStatus_OK(t *testing.T) {
 	store := NewStore(srv.URL, logr.Discard())
 	t.Cleanup(func() { _ = store.Close() })
 
-	created, err := store.CreateSession(context.Background(), session.CreateSessionOptions{
+	created, err := store.EnsureSessionRecord(context.Background(), session.SessionRecordOptions{
 		AgentName: "a",
 		Namespace: "ns",
 	})
@@ -537,7 +537,7 @@ func TestRefreshTTL_OK(t *testing.T) {
 	store := NewStore(srv.URL, logr.Discard())
 	t.Cleanup(func() { _ = store.Close() })
 
-	created, err := store.CreateSession(context.Background(), session.CreateSessionOptions{
+	created, err := store.EnsureSessionRecord(context.Background(), session.SessionRecordOptions{
 		AgentName: "a",
 		Namespace: "ns",
 	})
@@ -638,9 +638,9 @@ func TestServerErrorResponses(t *testing.T) {
 	t.Cleanup(func() { _ = store.Close() })
 	ctx := context.Background()
 
-	_, err := store.CreateSession(ctx, session.CreateSessionOptions{AgentName: "a", Namespace: "ns"})
+	_, err := store.EnsureSessionRecord(ctx, session.SessionRecordOptions{AgentName: "a", Namespace: "ns"})
 	if err == nil {
-		t.Fatal("CreateSession: expected error")
+		t.Fatal("EnsureSessionRecord: expected error")
 	}
 
 	_, err = store.GetSession(ctx, "x")
@@ -728,7 +728,7 @@ func TestDoJSON_RequestCreationError(t *testing.T) {
 	store := NewStore("://invalid-url", logr.Discard())
 	t.Cleanup(func() { _ = store.Close() })
 
-	_, err := store.CreateSession(context.Background(), session.CreateSessionOptions{
+	_, err := store.EnsureSessionRecord(context.Background(), session.SessionRecordOptions{
 		AgentName: "a",
 		Namespace: "ns",
 	})
@@ -751,7 +751,7 @@ func TestDoRequest_NilBody(t *testing.T) {
 	}
 }
 
-func TestCreateSession_InvalidResponseJSON(t *testing.T) {
+func TestEnsureSessionRecord_InvalidResponseJSON(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
@@ -761,7 +761,7 @@ func TestCreateSession_InvalidResponseJSON(t *testing.T) {
 
 	store := NewStore(srv.URL, logr.Discard())
 	t.Cleanup(func() { _ = store.Close() })
-	_, err := store.CreateSession(context.Background(), session.CreateSessionOptions{
+	_, err := store.EnsureSessionRecord(context.Background(), session.SessionRecordOptions{
 		AgentName: "a",
 		Namespace: "ns",
 	})
@@ -859,7 +859,7 @@ func TestRetry_NonRetryableStatus(t *testing.T) {
 
 	store := NewStore(srv.URL, logr.Discard())
 	t.Cleanup(func() { _ = store.Close() })
-	_, err := store.CreateSession(context.Background(), session.CreateSessionOptions{
+	_, err := store.EnsureSessionRecord(context.Background(), session.SessionRecordOptions{
 		AgentName: "a", Namespace: "ns",
 	})
 	if err == nil {
@@ -940,7 +940,7 @@ func TestCircuitBreaker_NormalOperationDoesNotTrip(t *testing.T) {
 
 	// Successful requests should not trip the breaker.
 	for i := range 5 {
-		_, err := store.CreateSession(context.Background(), session.CreateSessionOptions{
+		_, err := store.EnsureSessionRecord(context.Background(), session.SessionRecordOptions{
 			AgentName: "a",
 			Namespace: "ns",
 		})
@@ -998,7 +998,7 @@ func TestRetry_CancelledContextStopsRetry(t *testing.T) {
 	}
 }
 
-func TestCreateSession_409ConflictReturnsExisting(t *testing.T) {
+func TestEnsureSessionRecord_409ConflictReturnsExisting(t *testing.T) {
 	// Server returns 409 on POST (duplicate) and 200 on GET.
 	existingSession := testSessionAPI("550e8400-e29b-41d4-a716-446655440003", "test-agent", "default")
 	mux := http.NewServeMux()
@@ -1016,7 +1016,7 @@ func TestCreateSession_409ConflictReturnsExisting(t *testing.T) {
 
 	store := NewStore(srv.URL, logr.Discard())
 	t.Cleanup(func() { _ = store.Close() })
-	sess, err := store.CreateSession(context.Background(), session.CreateSessionOptions{
+	sess, err := store.EnsureSessionRecord(context.Background(), session.SessionRecordOptions{
 		AgentName: "test-agent",
 		Namespace: "default",
 	})
@@ -1035,7 +1035,7 @@ func TestRecordToolCall_OK(t *testing.T) {
 	store := NewStore(srv.URL, logr.Discard())
 	t.Cleanup(func() { _ = store.Close() })
 
-	created, err := store.CreateSession(context.Background(), session.CreateSessionOptions{
+	created, err := store.EnsureSessionRecord(context.Background(), session.SessionRecordOptions{
 		AgentName: "a", Namespace: "ns",
 	})
 	if err != nil {
@@ -1072,7 +1072,7 @@ func TestGetToolCalls_OK(t *testing.T) {
 	store := NewStore(srv.URL, logr.Discard())
 	t.Cleanup(func() { _ = store.Close() })
 
-	created, err := store.CreateSession(context.Background(), session.CreateSessionOptions{
+	created, err := store.EnsureSessionRecord(context.Background(), session.SessionRecordOptions{
 		AgentName: "a", Namespace: "ns",
 	})
 	if err != nil {
@@ -1112,7 +1112,7 @@ func TestRecordProviderCall_OK(t *testing.T) {
 	store := NewStore(srv.URL, logr.Discard())
 	t.Cleanup(func() { _ = store.Close() })
 
-	created, err := store.CreateSession(context.Background(), session.CreateSessionOptions{
+	created, err := store.EnsureSessionRecord(context.Background(), session.SessionRecordOptions{
 		AgentName: "a", Namespace: "ns",
 	})
 	if err != nil {
@@ -1150,7 +1150,7 @@ func TestGetProviderCalls_OK(t *testing.T) {
 	store := NewStore(srv.URL, logr.Discard())
 	t.Cleanup(func() { _ = store.Close() })
 
-	created, err := store.CreateSession(context.Background(), session.CreateSessionOptions{
+	created, err := store.EnsureSessionRecord(context.Background(), session.SessionRecordOptions{
 		AgentName: "a", Namespace: "ns",
 	})
 	if err != nil {
@@ -1526,14 +1526,14 @@ func TestGetRuntimeEvents_NotFound(t *testing.T) {
 	}
 }
 
-func TestCreateSession_WithCohortFields(t *testing.T) {
+func TestEnsureSessionRecord_WithCohortFields(t *testing.T) {
 	srv := mockSessionAPI(t)
 	defer srv.Close()
 
 	store := NewStore(srv.URL, logr.Discard())
 	t.Cleanup(func() { _ = store.Close() })
 
-	sess, err := store.CreateSession(context.Background(), session.CreateSessionOptions{
+	sess, err := store.EnsureSessionRecord(context.Background(), session.SessionRecordOptions{
 		AgentName: "test-agent",
 		Namespace: "default",
 		CohortID:  "cohort-99",

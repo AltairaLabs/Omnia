@@ -17,7 +17,7 @@ import (
 
 	"github.com/altairalabs/omnia/internal/agent"
 	"github.com/altairalabs/omnia/internal/facade"
-	"github.com/altairalabs/omnia/internal/session"
+	"github.com/altairalabs/omnia/internal/session/sessiontest"
 )
 
 // TestReadyz_NotReadyWhenDraining verifies that the /readyz handler returns 503
@@ -46,7 +46,7 @@ func TestReadyz_NotReadyWhenDraining(t *testing.T) {
 func TestReadyz_ReadyWhenNotDraining(t *testing.T) {
 	t.Parallel()
 
-	store := session.NewMemoryStore()
+	store := sessiontest.NewStore()
 	t.Cleanup(func() { _ = store.Close() })
 
 	s := facade.NewServer(facade.DefaultServerConfig(), store, nil, logr.Discard())
@@ -68,7 +68,7 @@ func TestReadyz_ReadyWhenNotDraining(t *testing.T) {
 func TestBuildWebSocketServer_PropagatesDrainTimeout(t *testing.T) {
 	freshPromRegistry(t)
 
-	store := session.NewMemoryStore()
+	store := sessiontest.NewStore()
 	t.Cleanup(func() { _ = store.Close() })
 
 	want := 90 * time.Second
@@ -99,7 +99,7 @@ func TestBuildWebSocketServer_PropagatesDrainTimeout(t *testing.T) {
 func TestBuildWebSocketServer_DefaultDrainTimeoutWhenCRDUnset(t *testing.T) {
 	freshPromRegistry(t)
 
-	store := session.NewMemoryStore()
+	store := sessiontest.NewStore()
 	t.Cleanup(func() { _ = store.Close() })
 
 	cfg := &agent.Config{

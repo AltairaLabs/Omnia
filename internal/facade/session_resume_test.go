@@ -21,9 +21,8 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/altairalabs/omnia/internal/session/sessiontest"
 	"github.com/go-logr/logr"
-
-	"github.com/altairalabs/omnia/internal/session"
 )
 
 // probeHandler is a MessageHandler that also implements ResumeProber, standing
@@ -47,7 +46,7 @@ func (p *probeHandler) HasConversation(_ context.Context, sessionID string) (Res
 
 func newResumeServer(t *testing.T, h MessageHandler) (*Server, *ensureSessionStore) {
 	t.Helper()
-	backing := session.NewMemoryStore()
+	backing := sessiontest.NewStore()
 	t.Cleanup(func() { _ = backing.Close() })
 	store := &ensureSessionStore{Store: backing}
 	return NewServer(DefaultServerConfig(), store, h, logr.Discard()), store
@@ -83,7 +82,7 @@ func TestEnsureSession_ExpiredContextReportsExpiry(t *testing.T) {
 		t.Fatalf("ensureSession error = %v, want errSessionExpired", err)
 	}
 	if store.createCalls != 0 {
-		t.Fatalf("CreateSession called %d times, want 0", store.createCalls)
+		t.Fatalf("EnsureSessionRecord called %d times, want 0", store.createCalls)
 	}
 }
 
@@ -109,7 +108,7 @@ func TestEnsureSession_UnavailableStoreIsNotExpiry(t *testing.T) {
 				t.Fatal("ensureSession reported expiry for an unavailable store")
 			}
 			if store.createCalls != 0 {
-				t.Fatalf("CreateSession called %d times, want 0", store.createCalls)
+				t.Fatalf("EnsureSessionRecord called %d times, want 0", store.createCalls)
 			}
 		})
 	}
@@ -140,7 +139,7 @@ func TestEnsureSession_OwnAnnouncedIDIsNotProbed(t *testing.T) {
 		t.Fatalf("probe calls = %v, want none", handler.calls)
 	}
 	if store.createCalls != 1 {
-		t.Fatalf("CreateSession called %d times, want 1", store.createCalls)
+		t.Fatalf("EnsureSessionRecord called %d times, want 1", store.createCalls)
 	}
 }
 
@@ -170,7 +169,7 @@ func TestEnsureSession_EstablishedSessionCostsNothing(t *testing.T) {
 	}
 
 	if store.createCalls != 1 {
-		t.Fatalf("CreateSession called %d times across 6 messages, want 1", store.createCalls)
+		t.Fatalf("EnsureSessionRecord called %d times across 6 messages, want 1", store.createCalls)
 	}
 	if len(handler.calls) != 1 {
 		t.Fatalf("probe called %d times across 6 messages, want 1", len(handler.calls))
@@ -194,7 +193,7 @@ func TestEnsureSession_OlderRuntimeContractDegrades(t *testing.T) {
 		t.Fatalf("sessionID = %q, want %q", sessionID, "prior-session")
 	}
 	if store.createCalls != 1 {
-		t.Fatalf("CreateSession called %d times, want 1", store.createCalls)
+		t.Fatalf("EnsureSessionRecord called %d times, want 1", store.createCalls)
 	}
 }
 
@@ -212,6 +211,53 @@ func TestEnsureSession_NonProbingHandlerAllowsSession(t *testing.T) {
 		t.Fatalf("sessionID = %q, want %q", sessionID, "prior-session")
 	}
 	if store.createCalls != 1 {
-		t.Fatalf("CreateSession called %d times, want 1", store.createCalls)
+		t.Fatalf("EnsureSessionRecord called %d times, want 1", store.createCalls)
+	}
+}
+
+// With no archive configured — session-api undiscoverable — a conversation must
+// still work. Resumability comes from the context store, so the archive is a
+// sink the facade can do without; previously this path was papered over by an
+// in-memory store that satisfied the interface and discarded every write.
+func TestEnsureSession_NoArchiveConfigured(t *testing.T) {
+	handler := &probeHandler{state: ResumeStateResumable}
+	server := NewServer(DefaultServerConfig(), nil, handler, logr.Discard())
+	conn := &Connection{
+		agentName:     "agent",
+		namespace:     "default",
+		workspaceName: "ws",
+		sessionID:     "minted-by-connection",
+	}
+
+	// The id the connection already holds is the session.
+	sessionID, err := server.ensureSession(context.Background(), conn, "minted-by-connection", logr.Discard())
+	if err != nil {
+		t.Fatalf("a missing archive must not fail the turn: %v", err)
+	}
+	if sessionID != "minted-by-connection" {
+		t.Fatalf("sessionID = %q, want minted-by-connection", sessionID)
+	}
+
+	// A resume request is still answered by the context store, not the archive.
+	resumed, err := server.ensureSession(context.Background(), conn, "prior-session", logr.Discard())
+	if err != nil {
+		t.Fatalf("resume must still work without an archive: %v", err)
+	}
+	if resumed != "prior-session" {
+		t.Fatalf("sessionID = %q, want prior-session", resumed)
+	}
+	if len(handler.calls) != 1 {
+		t.Fatalf("expected the context store to be consulted once, got %v", handler.calls)
+	}
+}
+
+// And an expired context must still be reported honestly with no archive.
+func TestEnsureSession_NoArchiveStillReportsExpiry(t *testing.T) {
+	handler := &probeHandler{state: ResumeStateNotFound}
+	server := NewServer(DefaultServerConfig(), nil, handler, logr.Discard())
+	conn := &Connection{agentName: "agent", namespace: "default", workspaceName: "ws"}
+
+	if _, err := server.ensureSession(context.Background(), conn, "prior-session", logr.Discard()); !errors.Is(err, errSessionExpired) {
+		t.Fatalf("expected errSessionExpired, got %v", err)
 	}
 }

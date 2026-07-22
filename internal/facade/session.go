@@ -257,7 +257,7 @@ var errSessionExpired = errors.New("session context expired")
 // message — probing for it would reject every new conversation.
 //
 // The archive row is created unconditionally rather than read first;
-// CreateSession treats 409 as success, so it is create-if-absent. That keeps
+// EnsureSessionRecord treats 409 as success, so it is create-if-absent. That keeps
 // session-api a write-only archive and restores the row for a session whose
 // context outlived it.
 func (s *Server) ensureSession(ctx context.Context, c *Connection, sessionID string, log logr.Logger) (string, error) {
@@ -288,8 +288,19 @@ func (s *Server) ensureSession(ctx context.Context, c *Connection, sessionID str
 	}
 	virtualUserID := virtualUserIDForSession(c.userID, fallbackSeed)
 
-	// Create new session, preserving the requested ID when provided.
-	sess, err := s.sessionStore.CreateSession(ctx, session.CreateSessionOptions{
+	// No archive configured. The conversation is fully served from the context
+	// store, so there is nothing to wait for and nothing to fail on — the id
+	// the connection already holds is the session (#1876).
+	if s.sessionStore == nil {
+		if sessionID == "" {
+			sessionID = c.SessionID()
+		}
+		s.metrics.SessionCreated()
+		return sessionID, nil
+	}
+
+	// Register the archive record, preserving the requested ID when provided.
+	sess, err := s.sessionStore.EnsureSessionRecord(ctx, session.SessionRecordOptions{
 		ID:                sessionID,
 		AgentName:         c.agentName,
 		Namespace:         c.namespace,

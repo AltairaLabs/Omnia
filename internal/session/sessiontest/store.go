@@ -14,12 +14,15 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// MemoryStore is an in-memory Store implementation for use in tests.
-// It is NOT used in production — all deployed binaries use httpclient.Store
-// backed by session-api. This exists solely as a lightweight test double
-// that avoids requiring external infrastructure (postgres, redis).
-
-package session
+// Package sessiontest provides a test double for session.Store.
+//
+// It is deliberately its own package so misuse is visible at the import line: a
+// production file importing "sessiontest" is obviously wrong in review and
+// trivially greppable in CI. It previously lived in package session as
+// MemoryStore, where nothing distinguished it from a real implementation — and
+// the agent wired it in as a fallback when session-api could not be discovered,
+// producing an archive that silently discarded every write.
+package sessiontest
 
 import (
 	"context"
@@ -28,12 +31,44 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	sessionpkg "github.com/altairalabs/omnia/internal/session"
 )
 
-// MemoryStore implements Store using in-memory storage.
-// This implementation is thread-safe and suitable for testing
-// and single-instance development deployments.
-type MemoryStore struct {
+// The implementation below is the original, unchanged. These aliases let it
+// keep referring to the session types unqualified, so this file stays a
+// verbatim move rather than a rewrite.
+type (
+	Session                = sessionpkg.Session
+	SessionRecordOptions   = sessionpkg.SessionRecordOptions
+	DecorateSessionOptions = sessionpkg.DecorateSessionOptions
+	SessionStatusUpdate    = sessionpkg.SessionStatusUpdate
+	Message                = sessionpkg.Message
+	ToolCall               = sessionpkg.ToolCall
+	ProviderCall           = sessionpkg.ProviderCall
+	RuntimeEvent           = sessionpkg.RuntimeEvent
+	EvalResult             = sessionpkg.EvalResult
+)
+
+const (
+	ToolCallStatusPending       = sessionpkg.ToolCallStatusPending
+	ProviderCallStatusCompleted = sessionpkg.ProviderCallStatusCompleted
+)
+
+var (
+	ErrSessionNotFound  = sessionpkg.ErrSessionNotFound
+	ErrSessionExpired   = sessionpkg.ErrSessionExpired
+	ErrInvalidSessionID = sessionpkg.ErrInvalidSessionID
+)
+
+// Store implements session.Store in memory, for tests. It is thread-safe.
+//
+// It is NOT a deployment option. Session data is read back through session-api
+// — the dashboard queries that, not an agent's process — so an agent holding
+// this store records into a map nothing ever reads. That was the failure mode
+// behind #1223: the agent looked healthy while every session, token and cost
+// figure went missing.
+type Store struct {
 	mu            sync.RWMutex
 	sessions      map[string]*Session
 	closed        bool
@@ -42,9 +77,9 @@ type MemoryStore struct {
 	runtimeEvents map[string][]RuntimeEvent // keyed by sessionID
 }
 
-// NewMemoryStore creates a new in-memory session store.
-func NewMemoryStore() *MemoryStore {
-	return &MemoryStore{
+// NewStore creates a new in-memory session store.
+func NewStore() *Store {
+	return &Store{
 		sessions:      make(map[string]*Session),
 		toolCalls:     make(map[string][]ToolCall),
 		providerCalls: make(map[string][]ProviderCall),
@@ -53,7 +88,7 @@ func NewMemoryStore() *MemoryStore {
 }
 
 // CreateSession creates a new session and returns it.
-func (m *MemoryStore) CreateSession(ctx context.Context, opts CreateSessionOptions) (*Session, error) {
+func (m *Store) EnsureSessionRecord(ctx context.Context, opts SessionRecordOptions) (*Session, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -104,7 +139,7 @@ func (m *MemoryStore) CreateSession(ctx context.Context, opts CreateSessionOptio
 }
 
 // GetSession retrieves a session by ID.
-func (m *MemoryStore) GetSession(ctx context.Context, sessionID string) (*Session, error) {
+func (m *Store) GetSession(ctx context.Context, sessionID string) (*Session, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -129,7 +164,7 @@ func (m *MemoryStore) GetSession(ctx context.Context, sessionID string) (*Sessio
 }
 
 // DeleteSession removes a session.
-func (m *MemoryStore) DeleteSession(ctx context.Context, sessionID string) error {
+func (m *Store) DeleteSession(ctx context.Context, sessionID string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -153,7 +188,7 @@ func (m *MemoryStore) DeleteSession(ctx context.Context, sessionID string) error
 }
 
 // AppendMessage adds a message to the session's conversation history.
-func (m *MemoryStore) AppendMessage(ctx context.Context, sessionID string, msg Message) error {
+func (m *Store) AppendMessage(ctx context.Context, sessionID string, msg Message) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -196,7 +231,7 @@ func (m *MemoryStore) AppendMessage(ctx context.Context, sessionID string, msg M
 }
 
 // GetMessages retrieves all messages for a session.
-func (m *MemoryStore) GetMessages(ctx context.Context, sessionID string) ([]Message, error) {
+func (m *Store) GetMessages(ctx context.Context, sessionID string) ([]Message, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -224,7 +259,7 @@ func (m *MemoryStore) GetMessages(ctx context.Context, sessionID string) ([]Mess
 }
 
 // RefreshTTL extends the session's expiration time.
-func (m *MemoryStore) RefreshTTL(ctx context.Context, sessionID string, ttl time.Duration) error {
+func (m *Store) RefreshTTL(ctx context.Context, sessionID string, ttl time.Duration) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -252,7 +287,7 @@ func (m *MemoryStore) RefreshTTL(ctx context.Context, sessionID string, ttl time
 }
 
 // Close releases resources held by the store.
-func (m *MemoryStore) Close() error {
+func (m *Store) Close() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -265,7 +300,7 @@ func (m *MemoryStore) Close() error {
 }
 
 // UpdateSessionStatus atomically increments session-level counters.
-func (m *MemoryStore) UpdateSessionStatus(ctx context.Context, sessionID string, update SessionStatusUpdate) error {
+func (m *Store) UpdateSessionStatus(ctx context.Context, sessionID string, update SessionStatusUpdate) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -286,7 +321,7 @@ func (m *MemoryStore) UpdateSessionStatus(ctx context.Context, sessionID string,
 		return ErrSessionExpired
 	}
 
-	if update.SetStatus != "" && !isTerminalStatus(session.Status) {
+	if update.SetStatus != "" && !sessionpkg.IsTerminalStatus(session.Status) {
 		session.Status = update.SetStatus
 	}
 
@@ -301,7 +336,7 @@ func (m *MemoryStore) UpdateSessionStatus(ctx context.Context, sessionID string,
 
 // DecorateSession merges tags and state into an existing session without
 // touching counters or lifecycle status. Tag merges are idempotent.
-func (m *MemoryStore) DecorateSession(ctx context.Context, sessionID string, opts DecorateSessionOptions) error {
+func (m *Store) DecorateSession(ctx context.Context, sessionID string, opts DecorateSessionOptions) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -363,7 +398,7 @@ func mergeSessionTags(existing, removeTags, addTags []string) []string {
 }
 
 // RecordToolCall records or updates a tool call for the session.
-func (m *MemoryStore) RecordToolCall(ctx context.Context, sessionID string, tc ToolCall) error {
+func (m *Store) RecordToolCall(ctx context.Context, sessionID string, tc ToolCall) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -394,7 +429,7 @@ func (m *MemoryStore) RecordToolCall(ctx context.Context, sessionID string, tc T
 }
 
 // RecordProviderCall records or updates a provider call for the session.
-func (m *MemoryStore) RecordProviderCall(ctx context.Context, sessionID string, pc ProviderCall) error {
+func (m *Store) RecordProviderCall(ctx context.Context, sessionID string, pc ProviderCall) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -427,7 +462,7 @@ func (m *MemoryStore) RecordProviderCall(ctx context.Context, sessionID string, 
 }
 
 // GetToolCalls retrieves tool calls for a session ordered by created_at.
-func (m *MemoryStore) GetToolCalls(ctx context.Context, sessionID string, limit, offset int) ([]ToolCall, error) {
+func (m *Store) GetToolCalls(ctx context.Context, sessionID string, limit, offset int) ([]ToolCall, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -449,7 +484,7 @@ func (m *MemoryStore) GetToolCalls(ctx context.Context, sessionID string, limit,
 }
 
 // GetProviderCalls retrieves provider calls for a session ordered by created_at.
-func (m *MemoryStore) GetProviderCalls(ctx context.Context, sessionID string, limit, offset int) ([]ProviderCall, error) {
+func (m *Store) GetProviderCalls(ctx context.Context, sessionID string, limit, offset int) ([]ProviderCall, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -472,12 +507,12 @@ func (m *MemoryStore) GetProviderCalls(ctx context.Context, sessionID string, li
 
 // RecordEvalResult records an eval result (no-op storage in memory store — eval results
 // are persisted via the session-api eval_results table in production).
-func (m *MemoryStore) RecordEvalResult(_ context.Context, _ string, _ EvalResult) error {
+func (m *Store) RecordEvalResult(_ context.Context, _ string, _ EvalResult) error {
 	return nil
 }
 
 // RecordRuntimeEvent records a runtime lifecycle event for the session.
-func (m *MemoryStore) RecordRuntimeEvent(ctx context.Context, sessionID string, evt RuntimeEvent) error {
+func (m *Store) RecordRuntimeEvent(ctx context.Context, sessionID string, evt RuntimeEvent) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -504,7 +539,7 @@ func (m *MemoryStore) RecordRuntimeEvent(ctx context.Context, sessionID string, 
 }
 
 // GetRuntimeEvents retrieves runtime events for a session ordered by timestamp.
-func (m *MemoryStore) GetRuntimeEvents(ctx context.Context, sessionID string, limit, offset int) ([]RuntimeEvent, error) {
+func (m *Store) GetRuntimeEvents(ctx context.Context, sessionID string, limit, offset int) ([]RuntimeEvent, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -542,7 +577,7 @@ func paginateSlice[T any](items []T, limit, offset int) []T {
 
 // CleanupExpired removes all expired sessions.
 // This method can be called periodically to free memory.
-func (m *MemoryStore) CleanupExpired() int {
+func (m *Store) CleanupExpired() int {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -557,14 +592,14 @@ func (m *MemoryStore) CleanupExpired() int {
 }
 
 // Count returns the number of sessions in the store.
-func (m *MemoryStore) Count() int {
+func (m *Store) Count() int {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return len(m.sessions)
 }
 
 // copySession creates a deep copy of a session.
-func (m *MemoryStore) copySession(s *Session) *Session {
+func (m *Store) copySession(s *Session) *Session {
 	cp := &Session{
 		ID:                 s.ID,
 		AgentName:          s.AgentName,
@@ -612,5 +647,5 @@ func (m *MemoryStore) copySession(s *Session) *Session {
 	return cp
 }
 
-// Ensure MemoryStore implements Store interface.
-var _ Store = (*MemoryStore)(nil)
+// Ensure Store satisfies the session.Store interface.
+var _ sessionpkg.Store = (*Store)(nil)

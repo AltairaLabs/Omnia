@@ -28,11 +28,12 @@ import (
 	"github.com/gorilla/websocket"
 
 	"github.com/altairalabs/omnia/internal/session"
+	"github.com/altairalabs/omnia/internal/session/sessiontest"
 )
 
 func TestCleanupConnection_MarksSessionCompleted(t *testing.T) {
 	handler := &mockHandler{}
-	server, ts := newTestServer(t, handler)
+	_, ts, archive := newTestServerWithStore(t, handler)
 
 	wsConn, resp, err := websocket.DefaultDialer.Dial(wsURL(ts.URL)+"?agent=test-agent", nil)
 	if err != nil {
@@ -71,7 +72,7 @@ func TestCleanupConnection_MarksSessionCompleted(t *testing.T) {
 
 	// Verify the session is marked as completed
 	ctx := context.Background()
-	updated, err := server.sessionStore.GetSession(ctx, sessionID)
+	updated, err := archive.GetSession(ctx, sessionID)
 	if err != nil {
 		t.Fatalf("GetSession failed: %v", err)
 	}
@@ -108,7 +109,7 @@ func TestCleanupConnection_ErrorStatusNotOverwritten(t *testing.T) {
 			return writer.WriteError("INTERNAL_ERROR", "forced error")
 		},
 	}
-	server, ts := newTestServer(t, handler)
+	_, ts, archive := newTestServerWithStore(t, handler)
 
 	wsConn, resp, err := websocket.DefaultDialer.Dial(wsURL(ts.URL)+"?agent=test-agent", nil)
 	if err != nil {
@@ -149,7 +150,7 @@ func TestCleanupConnection_ErrorStatusNotOverwritten(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	ctx := context.Background()
-	updated, err := server.sessionStore.GetSession(ctx, sessionID)
+	updated, err := archive.GetSession(ctx, sessionID)
 	if err != nil {
 		t.Fatalf("GetSession failed: %v", err)
 	}
@@ -274,7 +275,7 @@ func (s *spySessionStore) completedCalls() int {
 // when parkOnClose returns true (session parked), cleanupConnection must NOT
 // call UpdateSessionStatus(SessionStatusCompleted).
 func TestParkOnClose_SkipsCompletionWhenParked(t *testing.T) {
-	spy := &spySessionStore{Store: session.NewMemoryStore()}
+	spy := &spySessionStore{Store: sessiontest.NewStore()}
 
 	s := NewServer(DefaultServerConfig(), spy, nil, logr.Discard(), WithGraceWindow(time.Minute))
 
@@ -379,7 +380,7 @@ func readServerMsg(t *testing.T, conn *websocket.Conn) ServerMessage {
 // "active" forever (#1876). This exercises the real onExpire wiring installed by
 // NewServer, not the registry callback in isolation.
 func TestParkExpiry_CompletesSession(t *testing.T) {
-	spy := &spySessionStore{Store: session.NewMemoryStore()}
+	spy := &spySessionStore{Store: sessiontest.NewStore()}
 
 	s := NewServer(DefaultServerConfig(), spy, nil, logr.Discard(),
 		WithGraceWindow(20*time.Millisecond))
@@ -416,7 +417,7 @@ func TestParkExpiry_CompletesSession(t *testing.T) {
 // processMessage, so sessionPersisted stays false. Completing it on park expiry
 // would write a terminal status for a row that does not exist.
 func TestParkExpiry_SkipsCompletionForUnpersistedSession(t *testing.T) {
-	spy := &spySessionStore{Store: session.NewMemoryStore()}
+	spy := &spySessionStore{Store: sessiontest.NewStore()}
 
 	s := NewServer(DefaultServerConfig(), spy, nil, logr.Discard(),
 		WithGraceWindow(20*time.Millisecond))

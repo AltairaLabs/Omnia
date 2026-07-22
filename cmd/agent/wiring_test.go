@@ -26,6 +26,7 @@ import (
 	"github.com/altairalabs/omnia/internal/facade"
 	"github.com/altairalabs/omnia/internal/media"
 	"github.com/altairalabs/omnia/internal/session"
+	"github.com/altairalabs/omnia/internal/session/sessiontest"
 	"github.com/altairalabs/omnia/pkg/identity"
 	"github.com/altairalabs/omnia/pkg/policy"
 )
@@ -119,7 +120,7 @@ func TestBuildWebSocketServer_PseudonymizesUserIDHeader(t *testing.T) {
 	// unauthenticated WS dial (B2 wiring).
 	t.Setenv(envFacadeAllowUnauthenticated, "true")
 
-	store := session.NewMemoryStore()
+	store := sessiontest.NewStore()
 	t.Cleanup(func() { _ = store.Close() })
 
 	handler := &captureHandler{name: "wiring-test"}
@@ -189,7 +190,7 @@ func TestBuildWebSocketServer_StrictDefaultRejectsUnauthenticatedUpgrade(t *test
 	// pollution from prior tests in the same package.
 	t.Setenv(envFacadeAllowUnauthenticated, "")
 
-	store := session.NewMemoryStore()
+	store := sessiontest.NewStore()
 	t.Cleanup(func() { _ = store.Close() })
 
 	handler := &captureHandler{name: "strict"}
@@ -229,7 +230,7 @@ func TestBuildWebSocketServer_StrictDefaultRejectsUnauthenticatedUpgrade(t *test
 func TestBuildWebSocketServer_WiresMediaStorage(t *testing.T) {
 	freshPromRegistry(t)
 
-	store := session.NewMemoryStore()
+	store := sessiontest.NewStore()
 	t.Cleanup(func() { _ = store.Close() })
 
 	cfg := &agent.Config{AgentName: probeAgentName, Namespace: "ns"}
@@ -262,7 +263,7 @@ func TestBuildWebSocketServer_WiresMediaStorage(t *testing.T) {
 func TestBuildWebSocketServer_RegistersWebSocketRoutes(t *testing.T) {
 	freshPromRegistry(t)
 
-	store := session.NewMemoryStore()
+	store := sessiontest.NewStore()
 	t.Cleanup(func() { _ = store.Close() })
 
 	cfg := &agent.Config{AgentName: probeAgentName, Namespace: "ns"}
@@ -293,7 +294,7 @@ func TestBuildWebSocketServer_RegistersWebSocketRoutes(t *testing.T) {
 // twin server and mounts /ws on its mux.
 func TestBuildWebSocketServer_InternalTwinEnabled(t *testing.T) {
 	freshPromRegistry(t)
-	store := session.NewMemoryStore()
+	store := sessiontest.NewStore()
 	t.Cleanup(func() { _ = store.Close() })
 
 	cfg := &agent.Config{AgentName: probeAgentName, Namespace: "ns", InternalFacadePort: agent.DefaultInternalFacadePort}
@@ -320,7 +321,7 @@ func TestBuildWebSocketServer_InternalTwinEnabled(t *testing.T) {
 // in Milestone A, or disabled entirely).
 func TestBuildWebSocketServer_InternalTwinDisabled(t *testing.T) {
 	freshPromRegistry(t)
-	store := session.NewMemoryStore()
+	store := sessiontest.NewStore()
 	t.Cleanup(func() { _ = store.Close() })
 
 	cfg := &agent.Config{AgentName: probeAgentName, Namespace: "ns"} // InternalFacadePort: 0

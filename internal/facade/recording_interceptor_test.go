@@ -13,6 +13,7 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/altairalabs/omnia/internal/session"
+	"github.com/altairalabs/omnia/internal/session/sessiontest"
 	runtimev1 "github.com/altairalabs/omnia/pkg/runtime/v1"
 	"github.com/altairalabs/omnia/pkg/session/httpclient"
 )
@@ -90,9 +91,9 @@ func newRecordingClient(t *testing.T, p *httpclient.PrivacyPolicyResponse) (*Run
 		content: "assistant reply",
 		usage:   &runtimev1.Usage{InputTokens: 10, OutputTokens: 5},
 	})
-	store := session.NewMemoryStore()
-	_, err := store.CreateSession(context.Background(),
-		session.CreateSessionOptions{ID: recTestSessionID, AgentName: "a", Namespace: "ns"})
+	store := sessiontest.NewStore()
+	_, err := store.EnsureSessionRecord(context.Background(),
+		session.SessionRecordOptions{ID: recTestSessionID, AgentName: "a", Namespace: "ns"})
 	require.NoError(t, err)
 
 	rc, err := NewRuntimeClient(RuntimeClientConfig{

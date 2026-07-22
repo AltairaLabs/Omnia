@@ -28,7 +28,7 @@ import (
 
 	"github.com/altairalabs/omnia/internal/facade"
 	"github.com/altairalabs/omnia/internal/runtime/duplexmock"
-	"github.com/altairalabs/omnia/internal/session"
+	"github.com/altairalabs/omnia/internal/session/sessiontest"
 )
 
 // wsURLFromHTTP converts an http:// URL to a ws:// URL.
@@ -83,7 +83,7 @@ func TestDuplexAudio_EndToEnd_WSToRuntimeEcho(t *testing.T) {
 	defer func() { _ = runtimeClient.Close() }()
 
 	// --- 2. Build a real facade.Server with WithDuplexSinkFactory ---
-	store := session.NewMemoryStore()
+	store := sessiontest.NewStore()
 	defer func() { _ = store.Close() }()
 
 	cfg := facade.DefaultServerConfig()

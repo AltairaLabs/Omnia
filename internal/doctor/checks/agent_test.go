@@ -91,7 +91,7 @@ type MockStore struct {
 	ProviderCallsErr error
 }
 
-func (m *MockStore) CreateSession(_ context.Context, _ session.CreateSessionOptions) (*session.Session, error) {
+func (m *MockStore) EnsureSessionRecord(_ context.Context, _ session.SessionRecordOptions) (*session.Session, error) {
 	panic("not used")
 }
 func (m *MockStore) GetSession(_ context.Context, _ string) (*session.Session, error) {

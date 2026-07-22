@@ -166,11 +166,18 @@ func initSessionStore(log logr.Logger) (session.Store, string, error) {
 }
 
 // sessionStoreFromResolver selects the session store. A service-discovery
-// failure is LOUD: it logs at error level and the returned "memory" mode drives
-// the omnia_agent_session_store metric, because falling back to the in-memory
-// store means sessions are NOT recorded to session-api. Previously this was a
-// silent info-level log and the agent reported healthy while dropping all
-// session/token/cost product data (issue #1223).
+// failure is LOUD: it logs at error level and the returned "none" mode drives
+// the omnia_agent_session_store metric, because without session-api the agent
+// records no session/token/cost product data. Previously this was a silent
+// info-level log and the agent reported healthy while dropping all of it
+// (issue #1223).
+//
+// The failure returns NO store rather than an in-memory one. The in-memory
+// store satisfied the interface while discarding every write, so an operator
+// reading the code saw "a store" and the facade carried a session archive that
+// silently went nowhere. Conversations never needed it: resumability comes from
+// the runtime's context store (#1876), and the facade treats a nil store as
+// "no archive configured" and serves normally.
 func sessionStoreFromResolver(
 	ctx context.Context, resolver serviceURLResolver, log logr.Logger,
 ) (session.Store, string, error) {
@@ -180,7 +187,7 @@ func sessionStoreFromResolver(
 			"session store fallback",
 			"reason", "session-api service discovery failed",
 			"impact", "no session/token/cost product data; dashboard session views will be empty")
-		return session.NewMemoryStore(), agent.SessionStoreModeMemory, nil
+		return nil, agent.SessionStoreModeNone, nil
 	}
 	log.Info("using session-api HTTP store", "url", urls.SessionURL)
 	return httpclient.NewStore(urls.SessionURL, log, httpclient.WithSource(session.SourceFacade)),

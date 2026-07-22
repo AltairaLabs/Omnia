@@ -62,7 +62,7 @@ type InvocationResult struct {
 type FunctionInvokerConfig struct {
 	Registry     FunctionRegistry
 	Invoker      InvocationInvoker
-	SessionStore session.Store       // optional; if nil, no session rows are written
+	SessionStore session.Recorder    // optional; if nil, no session rows are written
 	SessionMeta  FunctionSessionMeta // ignored when SessionStore is nil
 	// MaxBodyBytes caps input size. 0 means no guard (useful when the caller
 	// already enforces the limit, e.g. via http.MaxBytesReader). The HTTP
@@ -197,7 +197,7 @@ func (i *FunctionInvoker) openSession(ctx context.Context, invocationID, virtual
 	if i.cfg.SessionStore == nil {
 		return
 	}
-	if _, err := i.cfg.SessionStore.CreateSession(ctx, session.CreateSessionOptions{
+	if _, err := i.cfg.SessionStore.EnsureSessionRecord(ctx, session.SessionRecordOptions{
 		ID:                invocationID,
 		AgentName:         i.cfg.SessionMeta.AgentName,
 		Namespace:         i.cfg.SessionMeta.Namespace,

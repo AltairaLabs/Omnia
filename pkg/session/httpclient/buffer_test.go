@@ -321,7 +321,7 @@ func TestBufferedWrite_Disabled(t *testing.T) {
 	}
 }
 
-func TestBufferedWrite_CreateSessionNotBuffered(t *testing.T) {
+func TestBufferedWrite_EnsureSessionRecordNotBuffered(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusBadGateway)
 	}))
@@ -334,15 +334,15 @@ func TestBufferedWrite_CreateSessionNotBuffered(t *testing.T) {
 		_, _ = store.GetSession(context.Background(), "x")
 	}
 
-	// CreateSession should NOT buffer — it must return an error.
-	_, err := store.CreateSession(context.Background(), session.CreateSessionOptions{
+	// EnsureSessionRecord should NOT buffer — it must return an error.
+	_, err := store.EnsureSessionRecord(context.Background(), session.SessionRecordOptions{
 		AgentName: "a", Namespace: "ns",
 	})
 	if err == nil {
-		t.Fatal("expected error for CreateSession (not buffered)")
+		t.Fatal("expected error for EnsureSessionRecord (not buffered)")
 	}
 	if store.Buffered() != 0 {
-		t.Fatalf("expected 0 buffered after CreateSession failure, got %d", store.Buffered())
+		t.Fatalf("expected 0 buffered after EnsureSessionRecord failure, got %d", store.Buffered())
 	}
 }
 

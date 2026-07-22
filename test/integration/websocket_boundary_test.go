@@ -33,7 +33,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/altairalabs/omnia/internal/facade"
-	"github.com/altairalabs/omnia/internal/session"
+	"github.com/altairalabs/omnia/internal/session/sessiontest"
 )
 
 // wsURL converts an HTTP URL to a WebSocket URL.
@@ -45,7 +45,7 @@ func wsURL(httpURL string) string {
 func newTestFacade(t *testing.T, handler facade.MessageHandler) (*facade.Server, *httptest.Server) {
 	t.Helper()
 
-	store := session.NewMemoryStore()
+	store := sessiontest.NewStore()
 	cfg := facade.DefaultServerConfig()
 	cfg.PingInterval = 100 * time.Millisecond
 	cfg.PongTimeout = 200 * time.Millisecond

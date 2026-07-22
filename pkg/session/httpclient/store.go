@@ -219,9 +219,16 @@ func (s *Store) notifyFlush(state gobreaker.State) {
 	}
 }
 
-// CreateSession creates a new session via POST /api/v1/sessions.
-// This is NOT buffered — callers need the session ID synchronously.
-func (s *Store) CreateSession(ctx context.Context, opts session.CreateSessionOptions) (*session.Session, error) {
+// EnsureSessionRecord registers the session in the archive via
+// POST /api/v1/sessions, carrying the metadata that later captured writes are
+// attached to and queried by.
+//
+// It does not create the conversation — that lives in the runtime's context
+// store — and it does not allocate the id, which is minted here when the caller
+// supplies none. session-api's own create is INSERT ... WHERE NOT EXISTS and
+// returns 409 for a duplicate, so calling this for a session that already has a
+// record is safe.
+func (s *Store) EnsureSessionRecord(ctx context.Context, opts session.SessionRecordOptions) (*session.Session, error) {
 	id := opts.ID
 	if id == "" {
 		id = uuid.New().String()

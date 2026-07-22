@@ -45,7 +45,7 @@ type mockSessionStore struct {
 	appendFn      func(ctx context.Context, sessionID string, msg session.Message) error
 }
 
-func (m *mockSessionStore) CreateSession(_ context.Context, _ session.CreateSessionOptions) (*session.Session, error) {
+func (m *mockSessionStore) EnsureSessionRecord(_ context.Context, _ session.SessionRecordOptions) (*session.Session, error) {
 	return nil, nil
 }
 

@@ -152,7 +152,7 @@ func (m *arenaSessionManager) OnEvent(event *events.Event) {
 	}
 
 	// We won the race — create the session and event store.
-	opts := session.CreateSessionOptions{
+	opts := session.SessionRecordOptions{
 		ID:            pgID,
 		AgentName:     m.meta.JobName,
 		Namespace:     m.meta.Namespace,
@@ -194,7 +194,7 @@ const (
 
 // createSessionWithRetry attempts to create a session with exponential backoff.
 // Transient errors (timeouts, server errors) are retried up to sessionCreateMaxRetries times.
-func (m *arenaSessionManager) createSessionWithRetry(opts session.CreateSessionOptions) (*session.Session, error) {
+func (m *arenaSessionManager) createSessionWithRetry(opts session.SessionRecordOptions) (*session.Session, error) {
 	var lastErr error
 	for attempt := range sessionCreateMaxRetries {
 		if attempt > 0 {
@@ -205,7 +205,7 @@ func (m *arenaSessionManager) createSessionWithRetry(opts session.CreateSessionO
 		}
 
 		ctx, cancel := context.WithTimeout(context.Background(), sessionCreateTimeout)
-		sess, err := m.store.CreateSession(ctx, opts)
+		sess, err := m.store.EnsureSessionRecord(ctx, opts)
 		cancel()
 
 		if err == nil {

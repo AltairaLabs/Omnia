@@ -14,12 +14,13 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package session
+package sessiontest
 
 import (
 	"context"
 	"testing"
 
+	"github.com/altairalabs/omnia/internal/session"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -29,11 +30,11 @@ const (
 	mdSourceArena = "source:arena"
 )
 
-func TestMemoryStore_DecorateSession(t *testing.T) {
+func TestStore_DecorateSession(t *testing.T) {
 	ctx := context.Background()
-	m := NewMemoryStore()
+	m := NewStore()
 
-	_, err := m.CreateSession(ctx, CreateSessionOptions{
+	_, err := m.EnsureSessionRecord(ctx, session.SessionRecordOptions{
 		ID:           "s1",
 		AgentName:    "agent",
 		Tags:         []string{mdTag1, "tag2"},
@@ -72,16 +73,16 @@ func TestMemoryStore_DecorateSession(t *testing.T) {
 	assert.Equal(t, []string{"tag2", "arena-job:demo", "source:final"}, got3.Tags)
 }
 
-func TestMemoryStore_DecorateSession_NotFound(t *testing.T) {
+func TestStore_DecorateSession_NotFound(t *testing.T) {
 	ctx := context.Background()
-	m := NewMemoryStore()
+	m := NewStore()
 
 	err := m.DecorateSession(ctx, "missing", DecorateSessionOptions{AddTags: []string{"x"}})
-	assert.ErrorIs(t, err, ErrSessionNotFound)
+	assert.ErrorIs(t, err, session.ErrSessionNotFound)
 }
 
-func TestMemoryStore_DecorateSession_Guards(t *testing.T) {
-	m := NewMemoryStore()
+func TestStore_DecorateSession_Guards(t *testing.T) {
+	m := NewStore()
 
 	// Empty session ID is rejected.
 	err := m.DecorateSession(context.Background(), "", DecorateSessionOptions{AddTags: []string{"x"}})

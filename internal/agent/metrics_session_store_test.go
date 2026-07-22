@@ -18,12 +18,12 @@ func TestSetSessionStoreMode(t *testing.T) {
 		}, []string{"mode"}),
 	}
 
-	m.SetSessionStoreMode(SessionStoreModeMemory)
-	assert.Equal(t, 1.0, testutil.ToFloat64(m.SessionStore.WithLabelValues(SessionStoreModeMemory)))
+	m.SetSessionStoreMode(SessionStoreModeNone)
+	assert.Equal(t, 1.0, testutil.ToFloat64(m.SessionStore.WithLabelValues(SessionStoreModeNone)))
 	assert.Equal(t, 0.0, testutil.ToFloat64(m.SessionStore.WithLabelValues(SessionStoreModeHTTPClient)))
 
-	// Flipping to httpclient must reset memory back to 0.
+	// Flipping to httpclient must reset the none-mode gauge back to 0.
 	m.SetSessionStoreMode(SessionStoreModeHTTPClient)
 	assert.Equal(t, 1.0, testutil.ToFloat64(m.SessionStore.WithLabelValues(SessionStoreModeHTTPClient)))
-	assert.Equal(t, 0.0, testutil.ToFloat64(m.SessionStore.WithLabelValues(SessionStoreModeMemory)))
+	assert.Equal(t, 0.0, testutil.ToFloat64(m.SessionStore.WithLabelValues(SessionStoreModeNone)))
 }
