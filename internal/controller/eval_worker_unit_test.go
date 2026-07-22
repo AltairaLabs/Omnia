@@ -468,10 +468,24 @@ func TestReconcileEvalWorker_PerGroup_CreatesAndCleansUp(t *testing.T) {
 
 const testWorkspaceReaderClusterRole = "agent-workspace-reader"
 
+// evalWorkerNsWorkspace owns the "ns" namespace these tests deploy into. The
+// eval-worker binds a reader scoped to its own workspace, so a Workspace is a
+// precondition for the binding to exist at all (#1875).
+func evalWorkerNsWorkspace() *omniav1alpha1.Workspace {
+	return &omniav1alpha1.Workspace{
+		ObjectMeta: metav1.ObjectMeta{Name: "eval-ws", UID: "eval-ws-uid"},
+		Spec: omniav1alpha1.WorkspaceSpec{
+			DisplayName: "Eval",
+			Namespace:   omniav1alpha1.NamespaceConfig{Name: "ns"},
+		},
+	}
+}
+
 func TestEnsureEvalWorkerRBAC_CreatesObjects(t *testing.T) {
 	scheme := evalWorkerTestScheme()
 	r := &AgentRuntimeReconciler{
-		Client:                          fake.NewClientBuilder().WithScheme(scheme).Build(),
+		Client: fake.NewClientBuilder().WithScheme(scheme).
+			WithObjects(evalWorkerNsWorkspace()).Build(),
 		Scheme:                          scheme,
 		AgentWorkspaceReaderClusterRole: testWorkspaceReaderClusterRole,
 	}
@@ -500,14 +514,17 @@ func TestEnsureEvalWorkerRBAC_CreatesObjects(t *testing.T) {
 	crb := &rbacv1.ClusterRoleBinding{}
 	require.NoError(t, r.Get(context.Background(),
 		types.NamespacedName{Name: "ns-" + name + "-workspace-reader"}, crb))
-	require.Equal(t, testWorkspaceReaderClusterRole, crb.RoleRef.Name)
+	// Scoped to the eval-worker's own workspace, not the cluster-wide reader (#1875).
+	require.Equal(t, WorkspaceReaderClusterRoleName("eval-ws"), crb.RoleRef.Name)
+	require.NotEqual(t, testWorkspaceReaderClusterRole, crb.RoleRef.Name)
 	require.Equal(t, "ns", crb.Labels[labelWorkspaceReaderFor])
 }
 
 func TestEnsureEvalWorkerRBAC_OverriddenServiceAccount(t *testing.T) {
 	scheme := evalWorkerTestScheme()
 	r := &AgentRuntimeReconciler{
-		Client:                          fake.NewClientBuilder().WithScheme(scheme).Build(),
+		Client: fake.NewClientBuilder().WithScheme(scheme).
+			WithObjects(evalWorkerNsWorkspace()).Build(),
 		Scheme:                          scheme,
 		AgentWorkspaceReaderClusterRole: testWorkspaceReaderClusterRole,
 	}

@@ -83,6 +83,22 @@ func (r *AgentRuntimeReconciler) reconcileWorkspaceReaderBinding(
 	log := logf.FromContext(ctx)
 	name := fmt.Sprintf("%s-%s-workspace-reader", agentRuntime.Namespace, agentRuntime.Name)
 
+	// Bind the reader scoped to this agent's own workspace rather than the
+	// cluster-wide one (#1875). No workspace means no binding, rather than one
+	// pointing at a role that will never exist.
+	wsName, _ := r.resolveWorkspaceForNamespace(agentRuntime.Namespace)
+	if wsName == "" {
+		log.V(1).Info("skipping workspace-reader ClusterRoleBinding",
+			"reason", "no Workspace owns this namespace",
+			"namespace", agentRuntime.Namespace)
+		return nil
+	}
+	roleName := WorkspaceReaderClusterRoleName(wsName)
+
+	if err := deleteStaleRoleRefBinding(ctx, r.Client, name, roleName); err != nil {
+		return err
+	}
+
 	crb := &rbacv1.ClusterRoleBinding{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: name,
@@ -94,12 +110,14 @@ func (r *AgentRuntimeReconciler) reconcileWorkspaceReaderBinding(
 			labelAppName:      labelValueOmniaAgent,
 			labelAppInstance:  agentRuntime.Name,
 			labelAppManagedBy: labelValueOmniaOperator,
+			// Intentionally the NAMESPACE, not the workspace name — this label
+			// is consumed as a namespace and is tested that way.
 			"omnia.altairalabs.ai/workspace-reader-for": agentRuntime.Namespace,
 		}
 		crb.RoleRef = rbacv1.RoleRef{
-			APIGroup: "rbac.authorization.k8s.io",
-			Kind:     "ClusterRole",
-			Name:     r.AgentWorkspaceReaderClusterRole,
+			APIGroup: rbacAPIGroup,
+			Kind:     kindClusterRole,
+			Name:     roleName,
 		}
 		crb.Subjects = []rbacv1.Subject{
 			{

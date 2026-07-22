@@ -219,7 +219,10 @@ func TestReconcileWorkspaceReaderBinding_Creates(t *testing.T) {
 	require.NoError(t, omniav1alpha1.AddToScheme(scheme))
 	require.NoError(t, rbacv1.AddToScheme(scheme))
 
-	fakeClient := fake.NewClientBuilder().WithScheme(scheme).Build()
+	// A Workspace owning the namespace is a precondition: the binding targets a
+	// per-workspace role, so with no workspace there is nothing to bind (#1875).
+	fakeClient := fake.NewClientBuilder().WithScheme(scheme).
+		WithObjects(testNsWorkspace()).Build()
 
 	r := &AgentRuntimeReconciler{
 		Client:                          fakeClient,
@@ -238,11 +241,14 @@ func TestReconcileWorkspaceReaderBinding_Creates(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, "ClusterRole", crb.RoleRef.Kind)
-	assert.Equal(t, "omnia-agent-workspace-reader", crb.RoleRef.Name)
+	// Binds the reader scoped to this agent's own workspace, not the
+	// cluster-wide one (#1875).
+	assert.Equal(t, "omnia-workspace-test-ws-reader", crb.RoleRef.Name)
 	assert.Len(t, crb.Subjects, 1)
 	assert.Equal(t, "ServiceAccount", crb.Subjects[0].Kind)
 	assert.Equal(t, "test-agent-facade", crb.Subjects[0].Name)
 	assert.Equal(t, "test-ns", crb.Subjects[0].Namespace)
+	// This label intentionally holds the NAMESPACE, not the workspace name.
 	assert.Equal(t, "test-ns", crb.Labels["omnia.altairalabs.ai/workspace-reader-for"])
 }
 
@@ -268,7 +274,8 @@ func TestReconcileWorkspaceReaderBinding_FollowsPodOverrideServiceAccount(t *tes
 	scheme := runtime.NewScheme()
 	require.NoError(t, omniav1alpha1.AddToScheme(scheme))
 	require.NoError(t, rbacv1.AddToScheme(scheme))
-	fakeClient := fake.NewClientBuilder().WithScheme(scheme).Build()
+	fakeClient := fake.NewClientBuilder().WithScheme(scheme).
+		WithObjects(testNsWorkspace()).Build()
 
 	r := &AgentRuntimeReconciler{
 		Client:                          fakeClient,
@@ -297,7 +304,8 @@ func TestReconcileWorkspaceReaderBinding_SubjectFlipsOnOverrideChange(t *testing
 	scheme := runtime.NewScheme()
 	require.NoError(t, omniav1alpha1.AddToScheme(scheme))
 	require.NoError(t, rbacv1.AddToScheme(scheme))
-	fakeClient := fake.NewClientBuilder().WithScheme(scheme).Build()
+	fakeClient := fake.NewClientBuilder().WithScheme(scheme).
+		WithObjects(testNsWorkspace()).Build()
 	r := &AgentRuntimeReconciler{
 		Client:                          fakeClient,
 		Scheme:                          scheme,

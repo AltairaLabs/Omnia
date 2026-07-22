@@ -21,7 +21,9 @@ import (
 	"fmt"
 
 	rbacv1 "k8s.io/api/rbac/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
@@ -33,6 +35,29 @@ import (
 // NAME (e.g. "demo"), not the namespace that workspace owns ("omnia-demo").
 func WorkspaceReaderClusterRoleName(workspaceName string) string {
 	return fmt.Sprintf("omnia-workspace-%s-reader", workspaceName)
+}
+
+// deleteStaleRoleRefBinding removes a ClusterRoleBinding whose roleRef points
+// somewhere other than roleName, so the caller's CreateOrUpdate can recreate it.
+//
+// roleRef is immutable: the API server rejects an update that changes it. Every
+// binding created before #1875 points at the cluster-wide reader, so without
+// this an upgrade fails reconcile forever rather than repointing.
+func deleteStaleRoleRefBinding(ctx context.Context, c client.Client, name, roleName string) error {
+	existing := &rbacv1.ClusterRoleBinding{}
+	err := c.Get(ctx, client.ObjectKey{Name: name}, existing)
+	switch {
+	case apierrors.IsNotFound(err):
+		return nil
+	case err != nil:
+		return fmt.Errorf("get workspace-reader binding %q: %w", name, err)
+	case existing.RoleRef.Name == roleName:
+		return nil
+	}
+	if err := c.Delete(ctx, existing); err != nil && !apierrors.IsNotFound(err) {
+		return fmt.Errorf("delete stale workspace-reader binding %q: %w", name, err)
+	}
+	return nil
 }
 
 // reconcileWorkspaceReaderClusterRole ensures a ClusterRole granting get on

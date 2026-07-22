@@ -1,10 +1,15 @@
-# ClusterRole granting service pods (facade/runtime/session-api/memory-api)
+# ClusterRole granting per-workspace SERVICE pods (session-api, memory-api)
 # read access to cluster-scoped CRDs they resolve at runtime:
-#   - workspaces: agents resolve per-workspace service URLs from
-#     Workspace.status.services; the memory-api consolidation worker lists
-#     Workspaces cluster-wide to find those opted into each MemoryPolicy.
+#   - workspaces: the memory-api consolidation worker lists Workspaces
+#     cluster-wide to find those opted into each MemoryPolicy.
 #   - memorypolicies: the memory-api consolidation worker lists MemoryPolicy
 #     CRs cluster-wide each pass to decide which workspaces to consolidate.
+#
+# Agent pods (facade/runtime) and Arena eval-workers do NOT bind this role.
+# They read only their own Workspace, via a per-workspace ClusterRole the
+# Workspace reconciler creates with verbs: [get] and resourceNames scoped to
+# that one workspace (internal/controller/workspace_rbac.go, #1875). The
+# cluster-wide list survives here only because consolidation genuinely needs it.
 #
 # NOTE: the enterprise privacy watcher also needs sessionprivacypolicies +
 # agentruntimes, but they must NOT be added here — the core operator doesn't

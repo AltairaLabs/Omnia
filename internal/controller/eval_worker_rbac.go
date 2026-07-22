@@ -222,6 +222,20 @@ func (r *AgentRuntimeReconciler) ensureEvalWorkerWorkspaceReaderBinding(
 	log := logf.FromContext(ctx)
 	name := fmt.Sprintf("%s-%s-workspace-reader", namespace, evalWorkerName(serviceGroup))
 
+	// Scoped to this eval-worker's own workspace rather than the cluster-wide
+	// reader (#1875). No workspace means no binding.
+	wsName, _ := r.resolveWorkspaceForNamespace(namespace)
+	if wsName == "" {
+		log.V(1).Info("skipping eval worker workspace-reader ClusterRoleBinding",
+			"reason", "no Workspace owns this namespace", "namespace", namespace)
+		return nil
+	}
+	roleName := WorkspaceReaderClusterRoleName(wsName)
+
+	if err := deleteStaleRoleRefBinding(ctx, r.Client, name, roleName); err != nil {
+		return err
+	}
+
 	crb := &rbacv1.ClusterRoleBinding{
 		ObjectMeta: metav1.ObjectMeta{Name: name},
 	}
@@ -233,7 +247,7 @@ func (r *AgentRuntimeReconciler) ensureEvalWorkerWorkspaceReaderBinding(
 		crb.RoleRef = rbacv1.RoleRef{
 			APIGroup: rbacAPIGroup,
 			Kind:     kindClusterRole,
-			Name:     r.AgentWorkspaceReaderClusterRole,
+			Name:     roleName,
 		}
 		crb.Subjects = []rbacv1.Subject{
 			{
