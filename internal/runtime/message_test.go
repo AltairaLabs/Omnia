@@ -18,6 +18,7 @@ package runtime
 
 import (
 	"context"
+	"io"
 	"testing"
 
 	"github.com/go-logr/logr"
@@ -160,6 +161,40 @@ func TestConverse_TextPathSendsHelloFirst(t *testing.T) {
 	require.True(t, ok, "first ServerMessage must be RuntimeHello, got %T", stream.sentMessages[0].Message)
 	require.Equal(t, Capabilities(), hello.RuntimeHello.GetCapabilities())
 	require.Nil(t, hello.RuntimeHello.GetMedia(), "text path carries no media counter-offer")
+}
+
+// TestConverse_TextHelloSendError verifies Converse returns an error when the
+// initial RuntimeHello cannot be sent on the text path.
+func TestConverse_TextHelloSendError(t *testing.T) {
+	tmpDir := t.TempDir()
+	packPath := tmpDir + "/pack.promptpack"
+	packContent := `{
+		"id": "test-pack",
+		"name": "test-pack",
+		"version": "1.0.0",
+		"template_engine": {"version": "v1", "syntax": "{{variable}}"},
+		"prompts": {
+			"default": {"id": "default", "name": "default", "version": "1.0.0", "system_template": "You are a test assistant."}
+		}
+	}`
+	require.NoError(t, writeTestFile(t, packPath, packContent))
+
+	server := NewServer(
+		WithLogger(logr.Discard()),
+		WithPackPath(packPath),
+		WithPromptName("default"),
+		WithMockProvider(true),
+		WithProviderInfo("mock", "mock-model"),
+	)
+	defer func() { _ = server.Close() }()
+
+	stream := newMockStream(context.Background(), []*runtimev1.ClientMessage{
+		{SessionId: "sess-hello-senderr", Content: "Hello"},
+	})
+	stream.sendErr = io.ErrClosedPipe
+
+	err := server.Converse(stream)
+	require.Error(t, err, "Converse must fail when the hello cannot be sent")
 }
 
 func TestConverse_EmitsLLMSpanWithGenAIAttributes(t *testing.T) {

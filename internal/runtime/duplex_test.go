@@ -34,12 +34,19 @@ import (
 
 // fakeConverseServer is a test double for RuntimeService_ConverseServer.
 type fakeConverseServer struct {
-	ctx  context.Context
-	recv chan *runtimev1.ClientMessage
-	sent chan *runtimev1.ServerMessage
+	ctx     context.Context
+	recv    chan *runtimev1.ClientMessage
+	sent    chan *runtimev1.ServerMessage
+	sendErr error // when set, Send returns it instead of buffering
 }
 
-func (f *fakeConverseServer) Send(m *runtimev1.ServerMessage) error { f.sent <- m; return nil }
+func (f *fakeConverseServer) Send(m *runtimev1.ServerMessage) error {
+	if f.sendErr != nil {
+		return f.sendErr
+	}
+	f.sent <- m
+	return nil
+}
 func (f *fakeConverseServer) Recv() (*runtimev1.ClientMessage, error) {
 	m, ok := <-f.recv
 	if !ok {
@@ -333,6 +340,24 @@ func TestHandleDuplexSession_SendsHelloWithCounterOffer(t *testing.T) {
 	cfg := mock.LastConfig()
 	require.NotNil(t, cfg)
 	require.Equal(t, 24000, cfg.Config.SampleRate, "counter-offer applied to provider")
+}
+
+// TestHandleDuplexSession_HelloSendError verifies handleDuplexSession propagates
+// a failure to send the initial RuntimeHello.
+func TestHandleDuplexSession_HelloSendError(t *testing.T) {
+	s := newTestServerWithDuplexProvider(t, duplexmock.New())
+	fake := &fakeConverseServer{
+		ctx:     context.Background(),
+		recv:    make(chan *runtimev1.ClientMessage, 1),
+		sent:    make(chan *runtimev1.ServerMessage, 1),
+		sendErr: io.ErrClosedPipe,
+	}
+	start := &runtimev1.ClientMessage{
+		SessionId:   "sess-hello-err",
+		DuplexStart: &runtimev1.DuplexStart{Codec: defaultAudioCodec, SampleRate: 16000, Channels: 1},
+	}
+	err := s.handleDuplexSession(fake.ctx, fake, start)
+	require.ErrorIs(t, err, io.ErrClosedPipe)
 }
 
 // TestHandleDuplexSession_HelloWithoutCounterOfferEchoesClient verifies that with

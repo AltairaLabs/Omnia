@@ -39,6 +39,7 @@ var eosChunk = &providers.StreamChunk{
 
 // duplexMediaParams holds the per-session audio parameters negotiated from DuplexStart.
 type duplexMediaParams struct {
+	codec      string
 	mimeType   string
 	sampleRate int
 	channels   int
@@ -90,6 +91,7 @@ func buildStreamingConfig(ds *runtimev1.DuplexStart, required *DuplexAudioParams
 		SystemInstruction: ds.GetSystemInstruction(),
 	}
 	params := duplexMediaParams{
+		codec:      codec,
 		mimeType:   "audio/" + codec,
 		sampleRate: sampleRate,
 		channels:   channels,
@@ -102,19 +104,10 @@ func buildStreamingConfig(ds *runtimev1.DuplexStart, required *DuplexAudioParams
 // yet enforced).
 func mediaNegotiationFromParams(p duplexMediaParams) *runtimev1.MediaNegotiation {
 	return &runtimev1.MediaNegotiation{
-		Codec:      p.codecName(),
+		Codec:      p.codec,
 		SampleRate: int32(p.sampleRate), //nolint:gosec // sample rate is a small positive constant
 		Channels:   int32(p.channels),   //nolint:gosec // channel count is a small positive constant
 	}
-}
-
-// codecName recovers the bare codec from the "audio/<codec>" mimeType.
-func (p duplexMediaParams) codecName() string {
-	const prefix = "audio/"
-	if len(p.mimeType) > len(prefix) && p.mimeType[:len(prefix)] == prefix {
-		return p.mimeType[len(prefix):]
-	}
-	return p.mimeType
 }
 
 // handleDuplexSession bridges a Converse stream into a PromptKit duplex conversation.

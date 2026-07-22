@@ -310,3 +310,7 @@ func (m *mockResponseWriter) WriteBinaryMediaChunk(_ [facade.MediaIDSize]byte, _
 func (m *mockResponseWriter) WriteInterrupt() error {
 	return nil
 }
+
+func (m *mockResponseWriter) WriteSessionConfig(_ *facade.SessionConfigInfo) error {
+	return nil
+}

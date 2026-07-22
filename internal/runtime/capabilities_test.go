@@ -33,3 +33,21 @@ func TestCapabilities_AdvertisesTheImplementedSet(t *testing.T) {
 		assert.Contains(t, contract.KnownCapabilities(), c)
 	}
 }
+
+func TestWithDuplexAudio_SetsRequiredFormat(t *testing.T) {
+	want := &DuplexAudioParams{Codec: "pcm", SampleRate: 24000, Channels: 1}
+	s := NewServer(WithDuplexAudio(want))
+	assert.Same(t, want, s.duplexAudio)
+}
+
+func TestWithContextWindow_AndMediaResolverWiring(t *testing.T) {
+	// WithMediaBasePath wires a resolver; HasMediaResolver reports it.
+	s := NewServer(WithMediaBasePath("/etc/omnia/media"), WithContextWindow(4096))
+	assert.True(t, s.HasMediaResolver(), "WithMediaBasePath should wire a media resolver")
+	assert.NotEmpty(t, s.sdkOptions, "WithContextWindow should append an sdk token-budget option")
+
+	// A zero base path wires nothing; a zero context window appends nothing.
+	empty := NewServer(WithMediaBasePath(""), WithContextWindow(0))
+	assert.False(t, empty.HasMediaResolver())
+	assert.Empty(t, empty.sdkOptions)
+}

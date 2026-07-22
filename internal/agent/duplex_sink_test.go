@@ -444,6 +444,21 @@ func TestRelayHello_FailClosedOnVideoCounterOffer(t *testing.T) {
 	require.Nil(t, w.sessionConfig)
 }
 
+// TestRelayHello_NilMediaIsNoop verifies a capabilities-only hello (no media)
+// is a no-op on the duplex path: relaying continues, nothing is sent.
+func TestRelayHello_NilMediaIsNoop(t *testing.T) {
+	w := &negotiationWriter{captureBinaryWriter: captureBinaryWriter{got: make(chan []byte, 1)}}
+	sink := &grpcDuplexSink{sessionID: "sess-nilmedia", writer: w}
+
+	cont := sink.handleServerMessage(&runtimev1.ServerMessage{
+		Message: &runtimev1.ServerMessage_RuntimeHello{RuntimeHello: &runtimev1.RuntimeHello{}},
+	})
+
+	require.True(t, cont)
+	require.Nil(t, w.sessionConfig)
+	require.Empty(t, w.errorCode)
+}
+
 // TestRelayOut_LegacyStreamsMediaChunks verifies a runtime that never sends a
 // hello (legacy) still has its MediaChunks relayed, with no session_config.
 func TestRelayOut_LegacyStreamsMediaChunks(t *testing.T) {
