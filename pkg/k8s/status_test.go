@@ -18,10 +18,13 @@ package k8s
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 )
@@ -77,6 +80,54 @@ func TestPatchAgentRuntimeCondition_SetsCondition(t *testing.T) {
 	}
 	if cond.ObservedGeneration != 3 {
 		t.Errorf("expected observedGeneration 3, got %d", cond.ObservedGeneration)
+	}
+}
+
+func TestPatchAgentRuntimeCapabilities_SetsFieldAndCondition(t *testing.T) {
+	s := Scheme()
+	ar := &omniav1alpha1.AgentRuntime{
+		ObjectMeta: metav1.ObjectMeta{Name: "a", Namespace: "ns"},
+	}
+	c := fake.NewClientBuilder().WithScheme(s).WithRuntimeObjects(ar).WithStatusSubresource(ar).Build()
+
+	caps := []string{"invoke", "client_tools"}
+	if err := PatchAgentRuntimeCapabilities(context.Background(), c, "a", "ns", caps); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	got, err := GetAgentRuntime(context.Background(), c, "a", "ns")
+	if err != nil {
+		t.Fatalf("failed to get AgentRuntime: %v", err)
+	}
+	if len(got.Status.RuntimeCapabilities) != 2 || got.Status.RuntimeCapabilities[0] != "invoke" {
+		t.Fatalf("expected caps [invoke client_tools], got %v", got.Status.RuntimeCapabilities)
+	}
+
+	var found bool
+	for _, cond := range got.Status.Conditions {
+		if cond.Type == ConditionRuntimeCapabilitiesReported {
+			found = true
+			if cond.Status != metav1.ConditionTrue {
+				t.Errorf("expected status True, got %s", cond.Status)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("RuntimeCapabilitiesReported condition not set")
+	}
+}
+
+func TestPatchAgentRuntimeCapabilities_GetError(t *testing.T) {
+	c := fake.NewClientBuilder().WithScheme(Scheme()).
+		WithInterceptorFuncs(interceptor.Funcs{
+			Get: func(_ context.Context, _ client.WithWatch, _ client.ObjectKey,
+				_ client.Object, _ ...client.GetOption) error {
+				return fmt.Errorf("boom")
+			},
+		}).Build()
+
+	if err := PatchAgentRuntimeCapabilities(context.Background(), c, "a", "ns", nil); err == nil {
+		t.Fatal("expected error when the AgentRuntime cannot be fetched")
 	}
 }
 

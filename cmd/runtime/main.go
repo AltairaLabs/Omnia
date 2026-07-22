@@ -157,10 +157,9 @@ func main() {
 		defer patchCancel()
 		k8sClient, k8sErr := k8s.NewClient()
 		if k8sErr != nil {
-			log.Error(k8sErr, "failed to create k8s client for pack validation reporting")
-		} else if patchErr := reportPackValidation(patchCtx, k8sClient,
-			cfg.AgentName, cfg.Namespace, packValidationWarnings); patchErr != nil {
-			log.Error(patchErr, "failed to patch PackContentValid condition")
+			log.Error(k8sErr, "failed to create k8s client for status reporting")
+		} else {
+			reportStartupStatus(patchCtx, log, k8sClient, cfg.AgentName, cfg.Namespace, packValidationWarnings)
 		}
 	}
 

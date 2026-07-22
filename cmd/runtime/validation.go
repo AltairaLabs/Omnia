@@ -97,3 +97,24 @@ func reportPackValidation(
 		k8s.ConditionPackContentValid, metav1.ConditionTrue,
 		"PackContentValid", "Pack content validated successfully")
 }
+
+// reportCapabilities self-reports the runtime's advertised capabilities to the
+// AgentRuntime status so the control plane and `kubectl describe` can see them.
+func reportCapabilities(ctx context.Context, c client.Client, agentName, namespace string) error {
+	return k8s.PatchAgentRuntimeCapabilities(ctx, c, agentName, namespace, pkruntime.Capabilities())
+}
+
+// reportStartupStatus best-effort self-reports pack-validation and the runtime's
+// capabilities to the AgentRuntime status at startup. Errors are logged, not
+// fatal — a status-report failure must not stop the runtime serving.
+func reportStartupStatus(
+	ctx context.Context, log logr.Logger, c client.Client,
+	agentName, namespace string, warnings []string,
+) {
+	if err := reportPackValidation(ctx, c, agentName, namespace, warnings); err != nil {
+		log.Error(err, "failed to patch PackContentValid condition")
+	}
+	if err := reportCapabilities(ctx, c, agentName, namespace); err != nil {
+		log.Error(err, "failed to report runtime capabilities")
+	}
+}

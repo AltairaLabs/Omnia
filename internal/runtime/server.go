@@ -692,6 +692,7 @@ func (s *Server) Health(_ context.Context, _ *runtimev1.HealthRequest) (*runtime
 		Healthy:         s.healthy,
 		Status:          statusMsg,
 		ContractVersion: contract.Version,
+		Capabilities:    Capabilities(),
 	}, nil
 }
 

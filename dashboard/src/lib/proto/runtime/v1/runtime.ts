@@ -7,6 +7,106 @@
 /* eslint-disable */
 import { BinaryReader, BinaryWriter } from "@bufbuild/protobuf/wire";
 
+/** ToolExecution indicates where a tool is executed. */
+export enum ToolExecution {
+  /** TOOL_EXECUTION_SERVER - TOOL_EXECUTION_SERVER means the tool runs server-side in the runtime. */
+  TOOL_EXECUTION_SERVER = 0,
+  /** TOOL_EXECUTION_CLIENT - TOOL_EXECUTION_CLIENT means the tool must be fulfilled by the client. */
+  TOOL_EXECUTION_CLIENT = 1,
+  UNRECOGNIZED = -1,
+}
+
+export function toolExecutionFromJSON(object: any): ToolExecution {
+  switch (object) {
+    case 0:
+    case "TOOL_EXECUTION_SERVER":
+      return ToolExecution.TOOL_EXECUTION_SERVER;
+    case 1:
+    case "TOOL_EXECUTION_CLIENT":
+      return ToolExecution.TOOL_EXECUTION_CLIENT;
+    case -1:
+    case "UNRECOGNIZED":
+    default:
+      return ToolExecution.UNRECOGNIZED;
+  }
+}
+
+export function toolExecutionToJSON(object: ToolExecution): string {
+  switch (object) {
+    case ToolExecution.TOOL_EXECUTION_SERVER:
+      return "TOOL_EXECUTION_SERVER";
+    case ToolExecution.TOOL_EXECUTION_CLIENT:
+      return "TOOL_EXECUTION_CLIENT";
+    case ToolExecution.UNRECOGNIZED:
+    default:
+      return "UNRECOGNIZED";
+  }
+}
+
+/**
+ * ResumeState is the disposition of a session's working context.
+ *
+ * The three states exist because the facade must act differently on each: a
+ * missing conversation is a client-visible expiry, whereas an unreachable
+ * store is a server fault. Collapsing them would recreate the bug this RPC
+ * exists to fix — telling a client its session expired when in fact the
+ * context is intact and the store was merely briefly unreachable.
+ */
+export enum ResumeState {
+  /** RESUME_STATE_UNSPECIFIED - Unset. Treated as RESUME_STATE_UNAVAILABLE by callers. */
+  RESUME_STATE_UNSPECIFIED = 0,
+  /** RESUME_STATE_RESUMABLE - Context is present; sdk.Resume will succeed. */
+  RESUME_STATE_RESUMABLE = 1,
+  /**
+   * RESUME_STATE_NOT_FOUND - Store answered definitively that no context exists for this id — it
+   * expired, or was never persisted. The session cannot be continued.
+   */
+  RESUME_STATE_NOT_FOUND = 2,
+  /**
+   * RESUME_STATE_UNAVAILABLE - The store could not be consulted (unreachable, timed out, or no store is
+   * configured). Resumability is unknown; this is NOT an expiry.
+   */
+  RESUME_STATE_UNAVAILABLE = 3,
+  UNRECOGNIZED = -1,
+}
+
+export function resumeStateFromJSON(object: any): ResumeState {
+  switch (object) {
+    case 0:
+    case "RESUME_STATE_UNSPECIFIED":
+      return ResumeState.RESUME_STATE_UNSPECIFIED;
+    case 1:
+    case "RESUME_STATE_RESUMABLE":
+      return ResumeState.RESUME_STATE_RESUMABLE;
+    case 2:
+    case "RESUME_STATE_NOT_FOUND":
+      return ResumeState.RESUME_STATE_NOT_FOUND;
+    case 3:
+    case "RESUME_STATE_UNAVAILABLE":
+      return ResumeState.RESUME_STATE_UNAVAILABLE;
+    case -1:
+    case "UNRECOGNIZED":
+    default:
+      return ResumeState.UNRECOGNIZED;
+  }
+}
+
+export function resumeStateToJSON(object: ResumeState): string {
+  switch (object) {
+    case ResumeState.RESUME_STATE_UNSPECIFIED:
+      return "RESUME_STATE_UNSPECIFIED";
+    case ResumeState.RESUME_STATE_RESUMABLE:
+      return "RESUME_STATE_RESUMABLE";
+    case ResumeState.RESUME_STATE_NOT_FOUND:
+      return "RESUME_STATE_NOT_FOUND";
+    case ResumeState.RESUME_STATE_UNAVAILABLE:
+      return "RESUME_STATE_UNAVAILABLE";
+    case ResumeState.UNRECOGNIZED:
+    default:
+      return "UNRECOGNIZED";
+  }
+}
+
 /** ClientMessage represents a message from the client to the runtime. */
 export interface ClientMessage {
   /** session_id identifies the conversation session for state management. */
@@ -23,11 +123,44 @@ export interface ClientMessage {
    * If non-empty, this takes precedence over the content field.
    */
   parts: ContentPart[];
+  /**
+   * client_tool_result carries the result of a client-side tool execution.
+   * Set when responding to a ToolCall with execution=CLIENT.
+   */
+  clientToolResult?:
+    | ClientToolResult
+    | undefined;
+  /**
+   * consent_grants carries per-message consent category grants from the client.
+   * When present, these override stored consent for this request.
+   */
+  consentGrants: string[];
+  /**
+   * duplex_start, when set on the first message of a Converse stream, switches
+   * the stream into bidirectional audio mode (OSS duplex transport).
+   */
+  duplexStart?:
+    | DuplexStart
+    | undefined;
+  /** audio_input carries one inbound audio frame during a duplex session. */
+  audioInput?: AudioInputChunk | undefined;
 }
 
 export interface ClientMessage_MetadataEntry {
   key: string;
   value: string;
+}
+
+/** ClientToolResult carries the client's response to a client-side tool call. */
+export interface ClientToolResult {
+  /** call_id matches the ToolCall.id that this result is for. */
+  callId: string;
+  /** result_json contains the tool result as a JSON string. */
+  resultJson: string;
+  /** is_rejected indicates the client rejected the tool call. */
+  isRejected: boolean;
+  /** rejection_reason explains why the client rejected the tool call. */
+  rejectionReason: string;
 }
 
 /**
@@ -41,23 +174,29 @@ export interface ServerMessage {
     { $case: "chunk"; chunk: Chunk }
     | //
     /**
-     * tool_call is informational, indicating a tool is being invoked.
-     * The client/facade can display "Calling weather API..." but actual
-     * tool execution happens entirely in the runtime.
+     * tool_call notifies the facade of a client-side tool invocation.
+     * The facade forwards this to the WebSocket client, which must respond
+     * with a ClientToolResult before the conversation can continue.
+     * Server-side tool calls are handled internally by the runtime and
+     * are not sent on this stream.
      */
     { $case: "toolCall"; toolCall: ToolCall }
-    | //
-    /**
-     * tool_result is informational, containing the result of a tool call.
-     * This allows the UI to display tool results to the user.
-     */
-    { $case: "toolResult"; toolResult: ToolResult }
     | //
     /** done signals the completion of a response. */
     { $case: "done"; done: Done }
     | //
     /** error indicates an error occurred during processing. */
     { $case: "error"; error: Error }
+    | //
+    /**
+     * media_chunk contains a streaming media chunk (image, audio, video).
+     * Sent during streaming when the LLM produces media content, allowing
+     * the client to begin processing before the entire media is available.
+     */
+    { $case: "mediaChunk"; mediaChunk: MediaChunk }
+    | //
+    /** interruption signals a barge-in; the client clears buffered audio. */
+    { $case: "interruption"; interruption: Interruption }
     | undefined;
 }
 
@@ -67,7 +206,11 @@ export interface Chunk {
   content: string;
 }
 
-/** ToolCall represents a tool invocation (informational for UI display). */
+/**
+ * ToolCall represents a tool invocation.
+ * For server-side tools this is informational (UI display only).
+ * For client-side tools the client must send back a ClientToolResult.
+ */
 export interface ToolCall {
   /** id is a unique identifier for this tool call. */
   id: string;
@@ -75,6 +218,12 @@ export interface ToolCall {
   name: string;
   /** arguments_json contains the tool arguments as a JSON string. */
   argumentsJson: string;
+  /** execution indicates whether this tool runs server-side or client-side. */
+  execution: ToolExecution;
+  /** consent_message is a human-readable consent prompt for client-side tools. */
+  consentMessage: string;
+  /** categories are semantic consent categories (e.g., "location", "filesystem"). */
+  categories: string[];
 }
 
 /** ToolResult contains the result of a tool execution (informational for UI display). */
@@ -124,6 +273,11 @@ export interface MediaContent {
   url: string;
   /** mime_type indicates the media format (e.g., "image/png", "audio/mp3") */
   mimeType: string;
+  /**
+   * storage_ref is an opaque backend storage reference (e.g. "omnia://sessions/{id}/media/{mediaID}").
+   * When set, the runtime resolves it to media bytes at provider-call time via the injected media store.
+   */
+  storageRef: string;
 }
 
 /** Usage contains token usage and cost information. */
@@ -144,6 +298,78 @@ export interface Error {
   message: string;
 }
 
+/**
+ * Interruption signals that the in-flight response was interrupted (e.g. the
+ * user started speaking over the agent during a duplex session). The client
+ * must clear any buffered audio playback immediately.
+ */
+export interface Interruption {
+}
+
+/**
+ * MediaChunk contains a streaming media chunk for progressive media delivery.
+ * All chunks sharing the same media_id belong to the same media stream.
+ */
+export interface MediaChunk {
+  /** media_id is the unique identifier for this media stream. */
+  mediaId: string;
+  /** sequence is the 0-indexed sequence number for ordering chunks. */
+  sequence: number;
+  /** is_last indicates this is the final chunk for this media stream. */
+  isLast: boolean;
+  /** mime_type indicates the media format (e.g., "image/png", "audio/mp3"). */
+  mimeType: string;
+  /** data contains raw media bytes (avoids base64 overhead in gRPC path). */
+  data: Uint8Array;
+}
+
+/** InvocationRequest carries a Function call from the facade. */
+export interface InvocationRequest {
+  /**
+   * input_json is the raw JSON payload submitted by the caller. The facade
+   * has already validated this against AgentRuntime.spec.inputSchema; the
+   * runtime treats it as an opaque user message body.
+   */
+  inputJson: string;
+  /**
+   * invocation_id is a UUID for this Function call, used for log and
+   * trace correlation. Assigned by the facade.
+   */
+  invocationId: string;
+  /**
+   * metadata carries optional key-value context (caller identity, auth
+   * subject, custom headers). Not interpreted by the runtime.
+   */
+  metadata: { [key: string]: string };
+}
+
+export interface InvocationRequest_MetadataEntry {
+  key: string;
+  value: string;
+}
+
+/**
+ * InvocationResponse carries the runtime's reply to the facade. On
+ * success the facade then validates output_json against
+ * AgentRuntime.spec.outputSchema before returning to the HTTP caller.
+ */
+export interface InvocationResponse {
+  /**
+   * output_json is the raw assistant text. The facade validates it
+   * against the output schema; if invalid, the facade returns HTTP 502
+   * with this raw payload in the response body (per Q2 lock on #1103).
+   */
+  outputJson: string;
+  /** usage contains token + cost statistics for the call. */
+  usage?:
+    | Usage
+    | undefined;
+  /** duration_ms is the wall-clock time spent executing in the runtime. */
+  durationMs: number;
+  /** invocation_id echoes InvocationRequest.invocation_id for correlation. */
+  invocationId: string;
+}
+
 /** HealthRequest is an empty message for health checks. */
 export interface HealthRequest {
 }
@@ -154,10 +380,72 @@ export interface HealthResponse {
   healthy: boolean;
   /** status provides additional status information. */
   status: string;
+  /**
+   * contract_version is the omnia.runtime.v1 contract version this runtime
+   * was built against, as a semver string (see the Contract-Version marker at
+   * the top of this file). A runtime that reports an empty value predates
+   * contract versioning and must be treated as unversioned.
+   */
+  contractVersion: string;
+  /**
+   * capabilities lists the contract features this runtime implements (e.g.
+   * "invoke", "duplex_audio", "client_tools"). An OPEN set — consumers must
+   * display/ignore names they don't recognize. Empty => a pre-negotiation
+   * (legacy) runtime.
+   */
+  capabilities: string[];
+}
+
+/** HasConversationRequest asks whether one session's context is resumable. */
+export interface HasConversationRequest {
+  /** session_id is the conversation id to probe. */
+  sessionId: string;
+}
+
+/** HasConversationResponse reports one session's resume disposition. */
+export interface HasConversationResponse {
+  /** state is the disposition of the session's working context. */
+  state: ResumeState;
+  /**
+   * detail carries store-level error text when state is
+   * RESUME_STATE_UNAVAILABLE. Diagnostic only; never surfaced to end clients.
+   */
+  detail: string;
+}
+
+/** DuplexStart opens a bidirectional audio session on a Converse stream. */
+export interface DuplexStart {
+  /** codec is the audio encoding, e.g. "pcm". */
+  codec: string;
+  /** sample_rate in Hz, e.g. 16000. */
+  sampleRate: number;
+  /** channels, e.g. 1 for mono. */
+  channels: number;
+  /** system_instruction is the optional system prompt for the session. */
+  systemInstruction: string;
+}
+
+/** AudioInputChunk is one inbound audio frame during a duplex session. */
+export interface AudioInputChunk {
+  /** data is raw audio bytes (never base64 on the gRPC path). */
+  data: Uint8Array;
+  /** sequence is the 0-indexed frame number. */
+  sequence: number;
+  /** is_last marks the final frame (client hangup / stream end). */
+  isLast: boolean;
 }
 
 function createBaseClientMessage(): ClientMessage {
-  return { sessionId: "", content: "", metadata: {}, parts: [] };
+  return {
+    sessionId: "",
+    content: "",
+    metadata: {},
+    parts: [],
+    clientToolResult: undefined,
+    consentGrants: [],
+    duplexStart: undefined,
+    audioInput: undefined,
+  };
 }
 
 export const ClientMessage: MessageFns<ClientMessage> = {
@@ -173,6 +461,18 @@ export const ClientMessage: MessageFns<ClientMessage> = {
     });
     for (const v of message.parts) {
       ContentPart.encode(v!, writer.uint32(34).fork()).join();
+    }
+    if (message.clientToolResult !== undefined) {
+      ClientToolResult.encode(message.clientToolResult, writer.uint32(42).fork()).join();
+    }
+    for (const v of message.consentGrants) {
+      writer.uint32(50).string(v!);
+    }
+    if (message.duplexStart !== undefined) {
+      DuplexStart.encode(message.duplexStart, writer.uint32(58).fork()).join();
+    }
+    if (message.audioInput !== undefined) {
+      AudioInputChunk.encode(message.audioInput, writer.uint32(66).fork()).join();
     }
     return writer;
   },
@@ -219,6 +519,38 @@ export const ClientMessage: MessageFns<ClientMessage> = {
           message.parts.push(ContentPart.decode(reader, reader.uint32()));
           continue;
         }
+        case 5: {
+          if (tag !== 42) {
+            break;
+          }
+
+          message.clientToolResult = ClientToolResult.decode(reader, reader.uint32());
+          continue;
+        }
+        case 6: {
+          if (tag !== 50) {
+            break;
+          }
+
+          message.consentGrants.push(reader.string());
+          continue;
+        }
+        case 7: {
+          if (tag !== 58) {
+            break;
+          }
+
+          message.duplexStart = DuplexStart.decode(reader, reader.uint32());
+          continue;
+        }
+        case 8: {
+          if (tag !== 66) {
+            break;
+          }
+
+          message.audioInput = AudioInputChunk.decode(reader, reader.uint32());
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -242,6 +574,14 @@ export const ClientMessage: MessageFns<ClientMessage> = {
         )
         : {},
       parts: globalThis.Array.isArray(object?.parts) ? object.parts.map((e: any) => ContentPart.fromJSON(e)) : [],
+      clientToolResult: isSet(object.client_tool_result)
+        ? ClientToolResult.fromJSON(object.client_tool_result)
+        : undefined,
+      consentGrants: globalThis.Array.isArray(object?.consent_grants)
+        ? object.consent_grants.map((e: any) => globalThis.String(e))
+        : [],
+      duplexStart: isSet(object.duplex_start) ? DuplexStart.fromJSON(object.duplex_start) : undefined,
+      audioInput: isSet(object.audio_input) ? AudioInputChunk.fromJSON(object.audio_input) : undefined,
     };
   },
 
@@ -265,6 +605,18 @@ export const ClientMessage: MessageFns<ClientMessage> = {
     if (message.parts?.length) {
       obj.parts = message.parts.map((e) => ContentPart.toJSON(e));
     }
+    if (message.clientToolResult !== undefined) {
+      obj.client_tool_result = ClientToolResult.toJSON(message.clientToolResult);
+    }
+    if (message.consentGrants?.length) {
+      obj.consent_grants = message.consentGrants;
+    }
+    if (message.duplexStart !== undefined) {
+      obj.duplex_start = DuplexStart.toJSON(message.duplexStart);
+    }
+    if (message.audioInput !== undefined) {
+      obj.audio_input = AudioInputChunk.toJSON(message.audioInput);
+    }
     return obj;
   },
 
@@ -285,6 +637,16 @@ export const ClientMessage: MessageFns<ClientMessage> = {
       {},
     );
     message.parts = object.parts?.map((e) => ContentPart.fromPartial(e)) || [];
+    message.clientToolResult = (object.clientToolResult !== undefined && object.clientToolResult !== null)
+      ? ClientToolResult.fromPartial(object.clientToolResult)
+      : undefined;
+    message.consentGrants = object.consentGrants?.map((e) => e) || [];
+    message.duplexStart = (object.duplexStart !== undefined && object.duplexStart !== null)
+      ? DuplexStart.fromPartial(object.duplexStart)
+      : undefined;
+    message.audioInput = (object.audioInput !== undefined && object.audioInput !== null)
+      ? AudioInputChunk.fromPartial(object.audioInput)
+      : undefined;
     return message;
   },
 };
@@ -365,6 +727,114 @@ export const ClientMessage_MetadataEntry: MessageFns<ClientMessage_MetadataEntry
   },
 };
 
+function createBaseClientToolResult(): ClientToolResult {
+  return { callId: "", resultJson: "", isRejected: false, rejectionReason: "" };
+}
+
+export const ClientToolResult: MessageFns<ClientToolResult> = {
+  encode(message: ClientToolResult, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.callId !== "") {
+      writer.uint32(10).string(message.callId);
+    }
+    if (message.resultJson !== "") {
+      writer.uint32(18).string(message.resultJson);
+    }
+    if (message.isRejected !== false) {
+      writer.uint32(24).bool(message.isRejected);
+    }
+    if (message.rejectionReason !== "") {
+      writer.uint32(34).string(message.rejectionReason);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): ClientToolResult {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseClientToolResult();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.callId = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.resultJson = reader.string();
+          continue;
+        }
+        case 3: {
+          if (tag !== 24) {
+            break;
+          }
+
+          message.isRejected = reader.bool();
+          continue;
+        }
+        case 4: {
+          if (tag !== 34) {
+            break;
+          }
+
+          message.rejectionReason = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): ClientToolResult {
+    return {
+      callId: isSet(object.call_id) ? globalThis.String(object.call_id) : "",
+      resultJson: isSet(object.result_json) ? globalThis.String(object.result_json) : "",
+      isRejected: isSet(object.is_rejected) ? globalThis.Boolean(object.is_rejected) : false,
+      rejectionReason: isSet(object.rejection_reason) ? globalThis.String(object.rejection_reason) : "",
+    };
+  },
+
+  toJSON(message: ClientToolResult): unknown {
+    const obj: any = {};
+    if (message.callId !== "") {
+      obj.call_id = message.callId;
+    }
+    if (message.resultJson !== "") {
+      obj.result_json = message.resultJson;
+    }
+    if (message.isRejected !== false) {
+      obj.is_rejected = message.isRejected;
+    }
+    if (message.rejectionReason !== "") {
+      obj.rejection_reason = message.rejectionReason;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<ClientToolResult>, I>>(base?: I): ClientToolResult {
+    return ClientToolResult.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<ClientToolResult>, I>>(object: I): ClientToolResult {
+    const message = createBaseClientToolResult();
+    message.callId = object.callId ?? "";
+    message.resultJson = object.resultJson ?? "";
+    message.isRejected = object.isRejected ?? false;
+    message.rejectionReason = object.rejectionReason ?? "";
+    return message;
+  },
+};
+
 function createBaseServerMessage(): ServerMessage {
   return { message: undefined };
 }
@@ -378,14 +848,17 @@ export const ServerMessage: MessageFns<ServerMessage> = {
       case "toolCall":
         ToolCall.encode(message.message.toolCall, writer.uint32(18).fork()).join();
         break;
-      case "toolResult":
-        ToolResult.encode(message.message.toolResult, writer.uint32(26).fork()).join();
-        break;
       case "done":
         Done.encode(message.message.done, writer.uint32(34).fork()).join();
         break;
       case "error":
         Error.encode(message.message.error, writer.uint32(42).fork()).join();
+        break;
+      case "mediaChunk":
+        MediaChunk.encode(message.message.mediaChunk, writer.uint32(50).fork()).join();
+        break;
+      case "interruption":
+        Interruption.encode(message.message.interruption, writer.uint32(58).fork()).join();
         break;
     }
     return writer;
@@ -414,14 +887,6 @@ export const ServerMessage: MessageFns<ServerMessage> = {
           message.message = { $case: "toolCall", toolCall: ToolCall.decode(reader, reader.uint32()) };
           continue;
         }
-        case 3: {
-          if (tag !== 26) {
-            break;
-          }
-
-          message.message = { $case: "toolResult", toolResult: ToolResult.decode(reader, reader.uint32()) };
-          continue;
-        }
         case 4: {
           if (tag !== 34) {
             break;
@@ -436,6 +901,22 @@ export const ServerMessage: MessageFns<ServerMessage> = {
           }
 
           message.message = { $case: "error", error: Error.decode(reader, reader.uint32()) };
+          continue;
+        }
+        case 6: {
+          if (tag !== 50) {
+            break;
+          }
+
+          message.message = { $case: "mediaChunk", mediaChunk: MediaChunk.decode(reader, reader.uint32()) };
+          continue;
+        }
+        case 7: {
+          if (tag !== 58) {
+            break;
+          }
+
+          message.message = { $case: "interruption", interruption: Interruption.decode(reader, reader.uint32()) };
           continue;
         }
       }
@@ -453,12 +934,14 @@ export const ServerMessage: MessageFns<ServerMessage> = {
         ? { $case: "chunk", chunk: Chunk.fromJSON(object.chunk) }
         : isSet(object.tool_call)
         ? { $case: "toolCall", toolCall: ToolCall.fromJSON(object.tool_call) }
-        : isSet(object.tool_result)
-        ? { $case: "toolResult", toolResult: ToolResult.fromJSON(object.tool_result) }
         : isSet(object.done)
         ? { $case: "done", done: Done.fromJSON(object.done) }
         : isSet(object.error)
         ? { $case: "error", error: Error.fromJSON(object.error) }
+        : isSet(object.media_chunk)
+        ? { $case: "mediaChunk", mediaChunk: MediaChunk.fromJSON(object.media_chunk) }
+        : isSet(object.interruption)
+        ? { $case: "interruption", interruption: Interruption.fromJSON(object.interruption) }
         : undefined,
     };
   },
@@ -469,12 +952,14 @@ export const ServerMessage: MessageFns<ServerMessage> = {
       obj.chunk = Chunk.toJSON(message.message.chunk);
     } else if (message.message?.$case === "toolCall") {
       obj.tool_call = ToolCall.toJSON(message.message.toolCall);
-    } else if (message.message?.$case === "toolResult") {
-      obj.tool_result = ToolResult.toJSON(message.message.toolResult);
     } else if (message.message?.$case === "done") {
       obj.done = Done.toJSON(message.message.done);
     } else if (message.message?.$case === "error") {
       obj.error = Error.toJSON(message.message.error);
+    } else if (message.message?.$case === "mediaChunk") {
+      obj.media_chunk = MediaChunk.toJSON(message.message.mediaChunk);
+    } else if (message.message?.$case === "interruption") {
+      obj.interruption = Interruption.toJSON(message.message.interruption);
     }
     return obj;
   },
@@ -497,12 +982,6 @@ export const ServerMessage: MessageFns<ServerMessage> = {
         }
         break;
       }
-      case "toolResult": {
-        if (object.message?.toolResult !== undefined && object.message?.toolResult !== null) {
-          message.message = { $case: "toolResult", toolResult: ToolResult.fromPartial(object.message.toolResult) };
-        }
-        break;
-      }
       case "done": {
         if (object.message?.done !== undefined && object.message?.done !== null) {
           message.message = { $case: "done", done: Done.fromPartial(object.message.done) };
@@ -512,6 +991,21 @@ export const ServerMessage: MessageFns<ServerMessage> = {
       case "error": {
         if (object.message?.error !== undefined && object.message?.error !== null) {
           message.message = { $case: "error", error: Error.fromPartial(object.message.error) };
+        }
+        break;
+      }
+      case "mediaChunk": {
+        if (object.message?.mediaChunk !== undefined && object.message?.mediaChunk !== null) {
+          message.message = { $case: "mediaChunk", mediaChunk: MediaChunk.fromPartial(object.message.mediaChunk) };
+        }
+        break;
+      }
+      case "interruption": {
+        if (object.message?.interruption !== undefined && object.message?.interruption !== null) {
+          message.message = {
+            $case: "interruption",
+            interruption: Interruption.fromPartial(object.message.interruption),
+          };
         }
         break;
       }
@@ -579,7 +1073,7 @@ export const Chunk: MessageFns<Chunk> = {
 };
 
 function createBaseToolCall(): ToolCall {
-  return { id: "", name: "", argumentsJson: "" };
+  return { id: "", name: "", argumentsJson: "", execution: 0, consentMessage: "", categories: [] };
 }
 
 export const ToolCall: MessageFns<ToolCall> = {
@@ -592,6 +1086,15 @@ export const ToolCall: MessageFns<ToolCall> = {
     }
     if (message.argumentsJson !== "") {
       writer.uint32(26).string(message.argumentsJson);
+    }
+    if (message.execution !== 0) {
+      writer.uint32(32).int32(message.execution);
+    }
+    if (message.consentMessage !== "") {
+      writer.uint32(42).string(message.consentMessage);
+    }
+    for (const v of message.categories) {
+      writer.uint32(50).string(v!);
     }
     return writer;
   },
@@ -627,6 +1130,30 @@ export const ToolCall: MessageFns<ToolCall> = {
           message.argumentsJson = reader.string();
           continue;
         }
+        case 4: {
+          if (tag !== 32) {
+            break;
+          }
+
+          message.execution = reader.int32() as any;
+          continue;
+        }
+        case 5: {
+          if (tag !== 42) {
+            break;
+          }
+
+          message.consentMessage = reader.string();
+          continue;
+        }
+        case 6: {
+          if (tag !== 50) {
+            break;
+          }
+
+          message.categories.push(reader.string());
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -641,6 +1168,11 @@ export const ToolCall: MessageFns<ToolCall> = {
       id: isSet(object.id) ? globalThis.String(object.id) : "",
       name: isSet(object.name) ? globalThis.String(object.name) : "",
       argumentsJson: isSet(object.arguments_json) ? globalThis.String(object.arguments_json) : "",
+      execution: isSet(object.execution) ? toolExecutionFromJSON(object.execution) : 0,
+      consentMessage: isSet(object.consent_message) ? globalThis.String(object.consent_message) : "",
+      categories: globalThis.Array.isArray(object?.categories)
+        ? object.categories.map((e: any) => globalThis.String(e))
+        : [],
     };
   },
 
@@ -655,6 +1187,15 @@ export const ToolCall: MessageFns<ToolCall> = {
     if (message.argumentsJson !== "") {
       obj.arguments_json = message.argumentsJson;
     }
+    if (message.execution !== 0) {
+      obj.execution = toolExecutionToJSON(message.execution);
+    }
+    if (message.consentMessage !== "") {
+      obj.consent_message = message.consentMessage;
+    }
+    if (message.categories?.length) {
+      obj.categories = message.categories;
+    }
     return obj;
   },
 
@@ -666,6 +1207,9 @@ export const ToolCall: MessageFns<ToolCall> = {
     message.id = object.id ?? "";
     message.name = object.name ?? "";
     message.argumentsJson = object.argumentsJson ?? "";
+    message.execution = object.execution ?? 0;
+    message.consentMessage = object.consentMessage ?? "";
+    message.categories = object.categories?.map((e) => e) || [];
     return message;
   },
 };
@@ -949,7 +1493,7 @@ export const ContentPart: MessageFns<ContentPart> = {
 };
 
 function createBaseMediaContent(): MediaContent {
-  return { data: "", url: "", mimeType: "" };
+  return { data: "", url: "", mimeType: "", storageRef: "" };
 }
 
 export const MediaContent: MessageFns<MediaContent> = {
@@ -962,6 +1506,9 @@ export const MediaContent: MessageFns<MediaContent> = {
     }
     if (message.mimeType !== "") {
       writer.uint32(26).string(message.mimeType);
+    }
+    if (message.storageRef !== "") {
+      writer.uint32(34).string(message.storageRef);
     }
     return writer;
   },
@@ -997,6 +1544,14 @@ export const MediaContent: MessageFns<MediaContent> = {
           message.mimeType = reader.string();
           continue;
         }
+        case 4: {
+          if (tag !== 34) {
+            break;
+          }
+
+          message.storageRef = reader.string();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -1011,6 +1566,7 @@ export const MediaContent: MessageFns<MediaContent> = {
       data: isSet(object.data) ? globalThis.String(object.data) : "",
       url: isSet(object.url) ? globalThis.String(object.url) : "",
       mimeType: isSet(object.mime_type) ? globalThis.String(object.mime_type) : "",
+      storageRef: isSet(object.storage_ref) ? globalThis.String(object.storage_ref) : "",
     };
   },
 
@@ -1025,6 +1581,9 @@ export const MediaContent: MessageFns<MediaContent> = {
     if (message.mimeType !== "") {
       obj.mime_type = message.mimeType;
     }
+    if (message.storageRef !== "") {
+      obj.storage_ref = message.storageRef;
+    }
     return obj;
   },
 
@@ -1036,6 +1595,7 @@ export const MediaContent: MessageFns<MediaContent> = {
     message.data = object.data ?? "";
     message.url = object.url ?? "";
     message.mimeType = object.mimeType ?? "";
+    message.storageRef = object.storageRef ?? "";
     return message;
   },
 };
@@ -1208,6 +1768,476 @@ export const Error: MessageFns<Error> = {
   },
 };
 
+function createBaseInterruption(): Interruption {
+  return {};
+}
+
+export const Interruption: MessageFns<Interruption> = {
+  encode(_: Interruption, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): Interruption {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseInterruption();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(_: any): Interruption {
+    return {};
+  },
+
+  toJSON(_: Interruption): unknown {
+    const obj: any = {};
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<Interruption>, I>>(base?: I): Interruption {
+    return Interruption.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<Interruption>, I>>(_: I): Interruption {
+    const message = createBaseInterruption();
+    return message;
+  },
+};
+
+function createBaseMediaChunk(): MediaChunk {
+  return { mediaId: "", sequence: 0, isLast: false, mimeType: "", data: new Uint8Array(0) };
+}
+
+export const MediaChunk: MessageFns<MediaChunk> = {
+  encode(message: MediaChunk, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.mediaId !== "") {
+      writer.uint32(10).string(message.mediaId);
+    }
+    if (message.sequence !== 0) {
+      writer.uint32(16).int32(message.sequence);
+    }
+    if (message.isLast !== false) {
+      writer.uint32(24).bool(message.isLast);
+    }
+    if (message.mimeType !== "") {
+      writer.uint32(34).string(message.mimeType);
+    }
+    if (message.data.length !== 0) {
+      writer.uint32(42).bytes(message.data);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): MediaChunk {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseMediaChunk();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.mediaId = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 16) {
+            break;
+          }
+
+          message.sequence = reader.int32();
+          continue;
+        }
+        case 3: {
+          if (tag !== 24) {
+            break;
+          }
+
+          message.isLast = reader.bool();
+          continue;
+        }
+        case 4: {
+          if (tag !== 34) {
+            break;
+          }
+
+          message.mimeType = reader.string();
+          continue;
+        }
+        case 5: {
+          if (tag !== 42) {
+            break;
+          }
+
+          message.data = reader.bytes();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): MediaChunk {
+    return {
+      mediaId: isSet(object.media_id) ? globalThis.String(object.media_id) : "",
+      sequence: isSet(object.sequence) ? globalThis.Number(object.sequence) : 0,
+      isLast: isSet(object.is_last) ? globalThis.Boolean(object.is_last) : false,
+      mimeType: isSet(object.mime_type) ? globalThis.String(object.mime_type) : "",
+      data: isSet(object.data) ? bytesFromBase64(object.data) : new Uint8Array(0),
+    };
+  },
+
+  toJSON(message: MediaChunk): unknown {
+    const obj: any = {};
+    if (message.mediaId !== "") {
+      obj.media_id = message.mediaId;
+    }
+    if (message.sequence !== 0) {
+      obj.sequence = Math.round(message.sequence);
+    }
+    if (message.isLast !== false) {
+      obj.is_last = message.isLast;
+    }
+    if (message.mimeType !== "") {
+      obj.mime_type = message.mimeType;
+    }
+    if (message.data.length !== 0) {
+      obj.data = base64FromBytes(message.data);
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<MediaChunk>, I>>(base?: I): MediaChunk {
+    return MediaChunk.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<MediaChunk>, I>>(object: I): MediaChunk {
+    const message = createBaseMediaChunk();
+    message.mediaId = object.mediaId ?? "";
+    message.sequence = object.sequence ?? 0;
+    message.isLast = object.isLast ?? false;
+    message.mimeType = object.mimeType ?? "";
+    message.data = object.data ?? new Uint8Array(0);
+    return message;
+  },
+};
+
+function createBaseInvocationRequest(): InvocationRequest {
+  return { inputJson: "", invocationId: "", metadata: {} };
+}
+
+export const InvocationRequest: MessageFns<InvocationRequest> = {
+  encode(message: InvocationRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.inputJson !== "") {
+      writer.uint32(10).string(message.inputJson);
+    }
+    if (message.invocationId !== "") {
+      writer.uint32(18).string(message.invocationId);
+    }
+    globalThis.Object.entries(message.metadata).forEach(([key, value]: [string, string]) => {
+      InvocationRequest_MetadataEntry.encode({ key: key as any, value }, writer.uint32(26).fork()).join();
+    });
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): InvocationRequest {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseInvocationRequest();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.inputJson = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.invocationId = reader.string();
+          continue;
+        }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          const entry3 = InvocationRequest_MetadataEntry.decode(reader, reader.uint32());
+          if (entry3.value !== undefined) {
+            message.metadata[entry3.key] = entry3.value;
+          }
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): InvocationRequest {
+    return {
+      inputJson: isSet(object.input_json) ? globalThis.String(object.input_json) : "",
+      invocationId: isSet(object.invocation_id) ? globalThis.String(object.invocation_id) : "",
+      metadata: isObject(object.metadata)
+        ? (globalThis.Object.entries(object.metadata) as [string, any][]).reduce(
+          (acc: { [key: string]: string }, [key, value]: [string, any]) => {
+            acc[key] = globalThis.String(value);
+            return acc;
+          },
+          {},
+        )
+        : {},
+    };
+  },
+
+  toJSON(message: InvocationRequest): unknown {
+    const obj: any = {};
+    if (message.inputJson !== "") {
+      obj.input_json = message.inputJson;
+    }
+    if (message.invocationId !== "") {
+      obj.invocation_id = message.invocationId;
+    }
+    if (message.metadata) {
+      const entries = globalThis.Object.entries(message.metadata) as [string, string][];
+      if (entries.length > 0) {
+        obj.metadata = {};
+        entries.forEach(([k, v]) => {
+          obj.metadata[k] = v;
+        });
+      }
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<InvocationRequest>, I>>(base?: I): InvocationRequest {
+    return InvocationRequest.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<InvocationRequest>, I>>(object: I): InvocationRequest {
+    const message = createBaseInvocationRequest();
+    message.inputJson = object.inputJson ?? "";
+    message.invocationId = object.invocationId ?? "";
+    message.metadata = (globalThis.Object.entries(object.metadata ?? {}) as [string, string][]).reduce(
+      (acc: { [key: string]: string }, [key, value]: [string, string]) => {
+        if (value !== undefined) {
+          acc[key] = globalThis.String(value);
+        }
+        return acc;
+      },
+      {},
+    );
+    return message;
+  },
+};
+
+function createBaseInvocationRequest_MetadataEntry(): InvocationRequest_MetadataEntry {
+  return { key: "", value: "" };
+}
+
+export const InvocationRequest_MetadataEntry: MessageFns<InvocationRequest_MetadataEntry> = {
+  encode(message: InvocationRequest_MetadataEntry, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.key !== "") {
+      writer.uint32(10).string(message.key);
+    }
+    if (message.value !== "") {
+      writer.uint32(18).string(message.value);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): InvocationRequest_MetadataEntry {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseInvocationRequest_MetadataEntry();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.key = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.value = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): InvocationRequest_MetadataEntry {
+    return {
+      key: isSet(object.key) ? globalThis.String(object.key) : "",
+      value: isSet(object.value) ? globalThis.String(object.value) : "",
+    };
+  },
+
+  toJSON(message: InvocationRequest_MetadataEntry): unknown {
+    const obj: any = {};
+    if (message.key !== "") {
+      obj.key = message.key;
+    }
+    if (message.value !== "") {
+      obj.value = message.value;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<InvocationRequest_MetadataEntry>, I>>(base?: I): InvocationRequest_MetadataEntry {
+    return InvocationRequest_MetadataEntry.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<InvocationRequest_MetadataEntry>, I>>(
+    object: I,
+  ): InvocationRequest_MetadataEntry {
+    const message = createBaseInvocationRequest_MetadataEntry();
+    message.key = object.key ?? "";
+    message.value = object.value ?? "";
+    return message;
+  },
+};
+
+function createBaseInvocationResponse(): InvocationResponse {
+  return { outputJson: "", usage: undefined, durationMs: 0, invocationId: "" };
+}
+
+export const InvocationResponse: MessageFns<InvocationResponse> = {
+  encode(message: InvocationResponse, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.outputJson !== "") {
+      writer.uint32(10).string(message.outputJson);
+    }
+    if (message.usage !== undefined) {
+      Usage.encode(message.usage, writer.uint32(18).fork()).join();
+    }
+    if (message.durationMs !== 0) {
+      writer.uint32(24).int32(message.durationMs);
+    }
+    if (message.invocationId !== "") {
+      writer.uint32(34).string(message.invocationId);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): InvocationResponse {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseInvocationResponse();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.outputJson = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.usage = Usage.decode(reader, reader.uint32());
+          continue;
+        }
+        case 3: {
+          if (tag !== 24) {
+            break;
+          }
+
+          message.durationMs = reader.int32();
+          continue;
+        }
+        case 4: {
+          if (tag !== 34) {
+            break;
+          }
+
+          message.invocationId = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): InvocationResponse {
+    return {
+      outputJson: isSet(object.output_json) ? globalThis.String(object.output_json) : "",
+      usage: isSet(object.usage) ? Usage.fromJSON(object.usage) : undefined,
+      durationMs: isSet(object.duration_ms) ? globalThis.Number(object.duration_ms) : 0,
+      invocationId: isSet(object.invocation_id) ? globalThis.String(object.invocation_id) : "",
+    };
+  },
+
+  toJSON(message: InvocationResponse): unknown {
+    const obj: any = {};
+    if (message.outputJson !== "") {
+      obj.output_json = message.outputJson;
+    }
+    if (message.usage !== undefined) {
+      obj.usage = Usage.toJSON(message.usage);
+    }
+    if (message.durationMs !== 0) {
+      obj.duration_ms = Math.round(message.durationMs);
+    }
+    if (message.invocationId !== "") {
+      obj.invocation_id = message.invocationId;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<InvocationResponse>, I>>(base?: I): InvocationResponse {
+    return InvocationResponse.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<InvocationResponse>, I>>(object: I): InvocationResponse {
+    const message = createBaseInvocationResponse();
+    message.outputJson = object.outputJson ?? "";
+    message.usage = (object.usage !== undefined && object.usage !== null) ? Usage.fromPartial(object.usage) : undefined;
+    message.durationMs = object.durationMs ?? 0;
+    message.invocationId = object.invocationId ?? "";
+    return message;
+  },
+};
+
 function createBaseHealthRequest(): HealthRequest {
   return {};
 }
@@ -1252,7 +2282,7 @@ export const HealthRequest: MessageFns<HealthRequest> = {
 };
 
 function createBaseHealthResponse(): HealthResponse {
-  return { healthy: false, status: "" };
+  return { healthy: false, status: "", contractVersion: "", capabilities: [] };
 }
 
 export const HealthResponse: MessageFns<HealthResponse> = {
@@ -1262,6 +2292,12 @@ export const HealthResponse: MessageFns<HealthResponse> = {
     }
     if (message.status !== "") {
       writer.uint32(18).string(message.status);
+    }
+    if (message.contractVersion !== "") {
+      writer.uint32(26).string(message.contractVersion);
+    }
+    for (const v of message.capabilities) {
+      writer.uint32(34).string(v!);
     }
     return writer;
   },
@@ -1289,6 +2325,22 @@ export const HealthResponse: MessageFns<HealthResponse> = {
           message.status = reader.string();
           continue;
         }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.contractVersion = reader.string();
+          continue;
+        }
+        case 4: {
+          if (tag !== 34) {
+            break;
+          }
+
+          message.capabilities.push(reader.string());
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -1302,6 +2354,10 @@ export const HealthResponse: MessageFns<HealthResponse> = {
     return {
       healthy: isSet(object.healthy) ? globalThis.Boolean(object.healthy) : false,
       status: isSet(object.status) ? globalThis.String(object.status) : "",
+      contractVersion: isSet(object.contract_version) ? globalThis.String(object.contract_version) : "",
+      capabilities: globalThis.Array.isArray(object?.capabilities)
+        ? object.capabilities.map((e: any) => globalThis.String(e))
+        : [],
     };
   },
 
@@ -1313,6 +2369,12 @@ export const HealthResponse: MessageFns<HealthResponse> = {
     if (message.status !== "") {
       obj.status = message.status;
     }
+    if (message.contractVersion !== "") {
+      obj.contract_version = message.contractVersion;
+    }
+    if (message.capabilities?.length) {
+      obj.capabilities = message.capabilities;
+    }
     return obj;
   },
 
@@ -1323,9 +2385,370 @@ export const HealthResponse: MessageFns<HealthResponse> = {
     const message = createBaseHealthResponse();
     message.healthy = object.healthy ?? false;
     message.status = object.status ?? "";
+    message.contractVersion = object.contractVersion ?? "";
+    message.capabilities = object.capabilities?.map((e) => e) || [];
     return message;
   },
 };
+
+function createBaseHasConversationRequest(): HasConversationRequest {
+  return { sessionId: "" };
+}
+
+export const HasConversationRequest: MessageFns<HasConversationRequest> = {
+  encode(message: HasConversationRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.sessionId !== "") {
+      writer.uint32(10).string(message.sessionId);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): HasConversationRequest {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseHasConversationRequest();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.sessionId = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): HasConversationRequest {
+    return { sessionId: isSet(object.session_id) ? globalThis.String(object.session_id) : "" };
+  },
+
+  toJSON(message: HasConversationRequest): unknown {
+    const obj: any = {};
+    if (message.sessionId !== "") {
+      obj.session_id = message.sessionId;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<HasConversationRequest>, I>>(base?: I): HasConversationRequest {
+    return HasConversationRequest.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<HasConversationRequest>, I>>(object: I): HasConversationRequest {
+    const message = createBaseHasConversationRequest();
+    message.sessionId = object.sessionId ?? "";
+    return message;
+  },
+};
+
+function createBaseHasConversationResponse(): HasConversationResponse {
+  return { state: 0, detail: "" };
+}
+
+export const HasConversationResponse: MessageFns<HasConversationResponse> = {
+  encode(message: HasConversationResponse, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.state !== 0) {
+      writer.uint32(8).int32(message.state);
+    }
+    if (message.detail !== "") {
+      writer.uint32(18).string(message.detail);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): HasConversationResponse {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseHasConversationResponse();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 8) {
+            break;
+          }
+
+          message.state = reader.int32() as any;
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.detail = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): HasConversationResponse {
+    return {
+      state: isSet(object.state) ? resumeStateFromJSON(object.state) : 0,
+      detail: isSet(object.detail) ? globalThis.String(object.detail) : "",
+    };
+  },
+
+  toJSON(message: HasConversationResponse): unknown {
+    const obj: any = {};
+    if (message.state !== 0) {
+      obj.state = resumeStateToJSON(message.state);
+    }
+    if (message.detail !== "") {
+      obj.detail = message.detail;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<HasConversationResponse>, I>>(base?: I): HasConversationResponse {
+    return HasConversationResponse.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<HasConversationResponse>, I>>(object: I): HasConversationResponse {
+    const message = createBaseHasConversationResponse();
+    message.state = object.state ?? 0;
+    message.detail = object.detail ?? "";
+    return message;
+  },
+};
+
+function createBaseDuplexStart(): DuplexStart {
+  return { codec: "", sampleRate: 0, channels: 0, systemInstruction: "" };
+}
+
+export const DuplexStart: MessageFns<DuplexStart> = {
+  encode(message: DuplexStart, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.codec !== "") {
+      writer.uint32(10).string(message.codec);
+    }
+    if (message.sampleRate !== 0) {
+      writer.uint32(16).int32(message.sampleRate);
+    }
+    if (message.channels !== 0) {
+      writer.uint32(24).int32(message.channels);
+    }
+    if (message.systemInstruction !== "") {
+      writer.uint32(34).string(message.systemInstruction);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): DuplexStart {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseDuplexStart();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.codec = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 16) {
+            break;
+          }
+
+          message.sampleRate = reader.int32();
+          continue;
+        }
+        case 3: {
+          if (tag !== 24) {
+            break;
+          }
+
+          message.channels = reader.int32();
+          continue;
+        }
+        case 4: {
+          if (tag !== 34) {
+            break;
+          }
+
+          message.systemInstruction = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): DuplexStart {
+    return {
+      codec: isSet(object.codec) ? globalThis.String(object.codec) : "",
+      sampleRate: isSet(object.sample_rate) ? globalThis.Number(object.sample_rate) : 0,
+      channels: isSet(object.channels) ? globalThis.Number(object.channels) : 0,
+      systemInstruction: isSet(object.system_instruction) ? globalThis.String(object.system_instruction) : "",
+    };
+  },
+
+  toJSON(message: DuplexStart): unknown {
+    const obj: any = {};
+    if (message.codec !== "") {
+      obj.codec = message.codec;
+    }
+    if (message.sampleRate !== 0) {
+      obj.sample_rate = Math.round(message.sampleRate);
+    }
+    if (message.channels !== 0) {
+      obj.channels = Math.round(message.channels);
+    }
+    if (message.systemInstruction !== "") {
+      obj.system_instruction = message.systemInstruction;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<DuplexStart>, I>>(base?: I): DuplexStart {
+    return DuplexStart.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<DuplexStart>, I>>(object: I): DuplexStart {
+    const message = createBaseDuplexStart();
+    message.codec = object.codec ?? "";
+    message.sampleRate = object.sampleRate ?? 0;
+    message.channels = object.channels ?? 0;
+    message.systemInstruction = object.systemInstruction ?? "";
+    return message;
+  },
+};
+
+function createBaseAudioInputChunk(): AudioInputChunk {
+  return { data: new Uint8Array(0), sequence: 0, isLast: false };
+}
+
+export const AudioInputChunk: MessageFns<AudioInputChunk> = {
+  encode(message: AudioInputChunk, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.data.length !== 0) {
+      writer.uint32(10).bytes(message.data);
+    }
+    if (message.sequence !== 0) {
+      writer.uint32(16).uint32(message.sequence);
+    }
+    if (message.isLast !== false) {
+      writer.uint32(24).bool(message.isLast);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): AudioInputChunk {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseAudioInputChunk();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.data = reader.bytes();
+          continue;
+        }
+        case 2: {
+          if (tag !== 16) {
+            break;
+          }
+
+          message.sequence = reader.uint32();
+          continue;
+        }
+        case 3: {
+          if (tag !== 24) {
+            break;
+          }
+
+          message.isLast = reader.bool();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): AudioInputChunk {
+    return {
+      data: isSet(object.data) ? bytesFromBase64(object.data) : new Uint8Array(0),
+      sequence: isSet(object.sequence) ? globalThis.Number(object.sequence) : 0,
+      isLast: isSet(object.is_last) ? globalThis.Boolean(object.is_last) : false,
+    };
+  },
+
+  toJSON(message: AudioInputChunk): unknown {
+    const obj: any = {};
+    if (message.data.length !== 0) {
+      obj.data = base64FromBytes(message.data);
+    }
+    if (message.sequence !== 0) {
+      obj.sequence = Math.round(message.sequence);
+    }
+    if (message.isLast !== false) {
+      obj.is_last = message.isLast;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<AudioInputChunk>, I>>(base?: I): AudioInputChunk {
+    return AudioInputChunk.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<AudioInputChunk>, I>>(object: I): AudioInputChunk {
+    const message = createBaseAudioInputChunk();
+    message.data = object.data ?? new Uint8Array(0);
+    message.sequence = object.sequence ?? 0;
+    message.isLast = object.isLast ?? false;
+    return message;
+  },
+};
+
+function bytesFromBase64(b64: string): Uint8Array {
+  if ((globalThis as any).Buffer) {
+    return Uint8Array.from(globalThis.Buffer.from(b64, "base64"));
+  } else {
+    const bin = globalThis.atob(b64);
+    const arr = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; ++i) {
+      arr[i] = bin.charCodeAt(i);
+    }
+    return arr;
+  }
+}
+
+function base64FromBytes(arr: Uint8Array): string {
+  if ((globalThis as any).Buffer) {
+    return globalThis.Buffer.from(arr).toString("base64");
+  } else {
+    const bin: string[] = [];
+    arr.forEach((byte) => {
+      bin.push(globalThis.String.fromCharCode(byte));
+    });
+    return globalThis.btoa(bin.join(""));
+  }
+}
 
 type Builtin = Date | Function | Uint8Array | string | number | boolean | undefined;
 

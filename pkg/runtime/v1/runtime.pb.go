@@ -1328,8 +1328,13 @@ type HealthResponse struct {
 	// the top of this file). A runtime that reports an empty value predates
 	// contract versioning and must be treated as unversioned.
 	ContractVersion string `protobuf:"bytes,3,opt,name=contract_version,json=contractVersion,proto3" json:"contract_version,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// capabilities lists the contract features this runtime implements (e.g.
+	// "invoke", "duplex_audio", "client_tools"). An OPEN set — consumers must
+	// display/ignore names they don't recognize. Empty => a pre-negotiation
+	// (legacy) runtime.
+	Capabilities  []string `protobuf:"bytes,4,rep,name=capabilities,proto3" json:"capabilities,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *HealthResponse) Reset() {
@@ -1381,6 +1386,13 @@ func (x *HealthResponse) GetContractVersion() string {
 		return x.ContractVersion
 	}
 	return ""
+}
+
+func (x *HealthResponse) GetCapabilities() []string {
+	if x != nil {
+		return x.Capabilities
+	}
+	return nil
 }
 
 // HasConversationRequest asks whether one session's context is resumable.
@@ -1718,11 +1730,12 @@ const file_api_proto_runtime_v1_runtime_proto_rawDesc = "" +
 	"\vduration_ms\x18\x03 \x01(\x05R\n" +
 	"durationMs\x12#\n" +
 	"\rinvocation_id\x18\x04 \x01(\tR\finvocationId\"\x0f\n" +
-	"\rHealthRequest\"m\n" +
+	"\rHealthRequest\"\x91\x01\n" +
 	"\x0eHealthResponse\x12\x18\n" +
 	"\ahealthy\x18\x01 \x01(\bR\ahealthy\x12\x16\n" +
 	"\x06status\x18\x02 \x01(\tR\x06status\x12)\n" +
-	"\x10contract_version\x18\x03 \x01(\tR\x0fcontractVersion\"7\n" +
+	"\x10contract_version\x18\x03 \x01(\tR\x0fcontractVersion\x12\"\n" +
+	"\fcapabilities\x18\x04 \x03(\tR\fcapabilities\"7\n" +
 	"\x16HasConversationRequest\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\"f\n" +

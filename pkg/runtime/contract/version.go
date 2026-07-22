@@ -28,4 +28,4 @@ limitations under the License.
 package contract
 
 // Version is the omnia.runtime.v1 contract version implemented by this build.
-const Version = "1.1.0"
+const Version = "1.2.0"

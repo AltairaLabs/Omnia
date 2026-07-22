@@ -18,20 +18,92 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
 	"github.com/AltairaLabs/PromptKit/runtime/evals"
 	_ "github.com/AltairaLabs/PromptKit/runtime/evals/handlers"
 	omniav1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
+	pkruntime "github.com/altairalabs/omnia/internal/runtime"
 	"github.com/altairalabs/omnia/pkg/k8s"
 )
+
+func TestReportStartupStatus_ReportsBoth(t *testing.T) {
+	ar := &omniav1alpha1.AgentRuntime{ObjectMeta: metav1.ObjectMeta{Name: "a", Namespace: "ns"}}
+	c := fake.NewClientBuilder().WithScheme(k8s.Scheme()).
+		WithRuntimeObjects(ar).WithStatusSubresource(ar).Build()
+
+	reportStartupStatus(context.Background(), zap.New(zap.UseDevMode(true)), c, "a", "ns", nil)
+
+	got, err := k8s.GetAgentRuntime(context.Background(), c, "a", "ns")
+	if err != nil {
+		t.Fatalf("get AgentRuntime: %v", err)
+	}
+	if len(got.Status.RuntimeCapabilities) == 0 {
+		t.Fatalf("capabilities not reported")
+	}
+	var packCond bool
+	for _, cond := range got.Status.Conditions {
+		if cond.Type == k8s.ConditionPackContentValid {
+			packCond = true
+		}
+	}
+	if !packCond {
+		t.Fatalf("PackContentValid condition not set")
+	}
+}
+
+func TestReportStartupStatus_BestEffortOnError(t *testing.T) {
+	ar := &omniav1alpha1.AgentRuntime{ObjectMeta: metav1.ObjectMeta{Name: "a", Namespace: "ns"}}
+	// Fail the status patch so both reportPackValidation and reportCapabilities
+	// error; reportStartupStatus must log and return, not panic or propagate.
+	c := fake.NewClientBuilder().WithScheme(k8s.Scheme()).
+		WithRuntimeObjects(ar).WithStatusSubresource(ar).
+		WithInterceptorFuncs(interceptor.Funcs{
+			SubResourcePatch: func(_ context.Context, _ client.Client, _ string,
+				_ client.Object, _ client.Patch, _ ...client.SubResourcePatchOption) error {
+				return fmt.Errorf("boom")
+			},
+		}).Build()
+
+	reportStartupStatus(context.Background(), zap.New(zap.UseDevMode(true)), c, "a", "ns", []string{"warn"})
+
+	// The failed patches must not have persisted anything.
+	got, err := k8s.GetAgentRuntime(context.Background(), c, "a", "ns")
+	if err != nil {
+		t.Fatalf("get AgentRuntime: %v", err)
+	}
+	if len(got.Status.RuntimeCapabilities) != 0 {
+		t.Fatalf("expected no caps persisted after patch failure, got %v", got.Status.RuntimeCapabilities)
+	}
+}
+
+func TestReportCapabilities_PatchesStatus(t *testing.T) {
+	ar := &omniav1alpha1.AgentRuntime{ObjectMeta: metav1.ObjectMeta{Name: "a", Namespace: "ns"}}
+	c := fake.NewClientBuilder().WithScheme(k8s.Scheme()).
+		WithRuntimeObjects(ar).WithStatusSubresource(ar).Build()
+
+	if err := reportCapabilities(context.Background(), c, "a", "ns"); err != nil {
+		t.Fatalf("reportCapabilities: %v", err)
+	}
+
+	got, err := k8s.GetAgentRuntime(context.Background(), c, "a", "ns")
+	if err != nil {
+		t.Fatalf("get AgentRuntime: %v", err)
+	}
+	if len(got.Status.RuntimeCapabilities) != len(pkruntime.Capabilities()) {
+		t.Fatalf("expected %d caps, got %v", len(pkruntime.Capabilities()), got.Status.RuntimeCapabilities)
+	}
+}
 
 func TestValidatePackContent_PackFileNotFound(t *testing.T) {
 	log := zap.New(zap.UseDevMode(true))

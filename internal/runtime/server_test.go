@@ -1803,3 +1803,10 @@ func containsAll(s string, subs ...string) bool {
 	}
 	return true
 }
+
+func TestHealth_AdvertisesCapabilities(t *testing.T) {
+	s := NewServer(WithLogger(logr.Discard()))
+	resp, err := s.Health(context.Background(), &runtimev1.HealthRequest{})
+	require.NoError(t, err)
+	assert.ElementsMatch(t, Capabilities(), resp.Capabilities)
+}
