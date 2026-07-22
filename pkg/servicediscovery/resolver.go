@@ -32,9 +32,6 @@ import (
 
 // Environment variable names used for service URL overrides and namespace detection.
 const (
-	envSessionAPIURL  = "SESSION_API_URL"
-	envMemoryAPIURL   = "MEMORY_API_URL"
-	envPrivacyAPIURL  = "PRIVACY_API_URL"
 	envOmniaNamespace = "OMNIA_NAMESPACE"
 )
 
@@ -82,11 +79,8 @@ func NewResolver(c client.Client) *Resolver {
 func (r *Resolver) ResolveServiceURLs(
 	ctx context.Context, workspaceName, serviceGroup string,
 ) (*ServiceURLs, error) {
-	if urls := resolveFromEnv(); urls != nil {
-		return urls, nil
-	}
 	if r.client == nil {
-		return nil, fmt.Errorf("no env var overrides set and no Kubernetes client available")
+		return nil, fmt.Errorf("no Kubernetes client available to resolve service URLs")
 	}
 	if workspaceName == "" {
 		return nil, fmt.Errorf("workspace name is required to resolve service URLs")
@@ -190,22 +184,6 @@ func urlsForGroup(ws *omniav1alpha1.Workspace, serviceGroup string) (*ServiceURL
 		}, nil
 	}
 	return nil, fmt.Errorf("service group %q not found in workspace %q", serviceGroup, ws.Name)
-}
-
-// resolveFromEnv returns ServiceURLs from environment variables if both session and
-// memory URLs are set, otherwise returns nil. PrivacyURL is additive — it is
-// populated if set, but its absence does not block the env-var path.
-func resolveFromEnv() *ServiceURLs {
-	sessionURL := os.Getenv(envSessionAPIURL)
-	memoryURL := os.Getenv(envMemoryAPIURL)
-	if sessionURL != "" && memoryURL != "" {
-		return &ServiceURLs{
-			SessionURL: sessionURL,
-			MemoryURL:  memoryURL,
-			PrivacyURL: os.Getenv(envPrivacyAPIURL),
-		}
-	}
-	return nil
 }
 
 // ResolveByWorkspaceName is retained for cross-namespace consumers like the

@@ -988,11 +988,11 @@ func TestLoadFromCRD_MemoryEnabled(t *testing.T) {
 		},
 	}
 
-	// Service discovery resolves both URLs via env vars when both are set.
-	t.Setenv("SESSION_API_URL", "http://omnia-session-api.omnia-system:8080")
-	t.Setenv("MEMORY_API_URL", "http://omnia-memory-api.omnia-system:8080")
+	// Both URLs come from the workspace's service group.
+	t.Setenv(k8s.EnvWorkspaceName, "test-ws")
 
-	c := buildTestClient(ar)
+	c := buildTestClient(ar, workspaceWithServices("test-ws", "test-ns",
+		"http://omnia-session-api.omnia-system:8080", "http://omnia-memory-api.omnia-system:8080"))
 	cfg, err := LoadFromCRD(context.Background(), c, "test-agent", "test-ns")
 	require.NoError(t, err)
 
@@ -1167,16 +1167,40 @@ func TestLoadFromCRD_MemoryEnvOverride(t *testing.T) {
 		},
 	}
 
-	// Service discovery uses MEMORY_API_URL directly (no derivation from session URL).
-	t.Setenv("SESSION_API_URL", "http://omnia-session-api.omnia-system:8080")
-	t.Setenv("MEMORY_API_URL", "http://custom-memory-api:9090")
+	// The memory URL is its own field on the service group — it is never derived
+	// from the session URL, and (since env discovery was removed) never comes
+	// from MEMORY_API_URL. Setting that var proves it is ignored.
+	t.Setenv("MEMORY_API_URL", "http://should-be-ignored:9090")
+	t.Setenv(k8s.EnvWorkspaceName, "test-ws")
 
-	c := buildTestClient(ar)
+	c := buildTestClient(ar, workspaceWithServices("test-ws", "test-ns",
+		"http://omnia-session-api.omnia-system:8080", "http://custom-memory-api:9090"))
 	cfg, err := LoadFromCRD(context.Background(), c, "test-agent", "test-ns")
 	require.NoError(t, err)
 
 	assert.True(t, cfg.MemoryEnabled)
 	assert.Equal(t, "http://custom-memory-api:9090", cfg.MemoryAPIURL)
+}
+
+// workspaceWithServices builds a Workspace whose "default" service group
+// publishes the given URLs. Workspace name and namespace are kept distinct on
+// purpose — they are different identifiers (#1875).
+func workspaceWithServices(name, namespace, sessionURL, memoryURL string) *v1alpha1.Workspace {
+	return &v1alpha1.Workspace{
+		ObjectMeta: metav1.ObjectMeta{Name: name},
+		Spec: v1alpha1.WorkspaceSpec{
+			DisplayName: name,
+			Namespace:   v1alpha1.NamespaceConfig{Name: namespace},
+		},
+		Status: v1alpha1.WorkspaceStatus{
+			Services: []v1alpha1.ServiceGroupStatus{{
+				Name:       "default",
+				SessionURL: sessionURL,
+				MemoryURL:  memoryURL,
+				Ready:      true,
+			}},
+		},
+	}
 }
 
 func TestInjectAWSAccessKey(t *testing.T) {
