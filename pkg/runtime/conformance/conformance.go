@@ -71,7 +71,7 @@ var semverRE = regexp.MustCompile(`^\d+\.\d+\.\d+$`)
 // check records its own failure rather than aborting the run.
 func Run(ctx context.Context, cfg Config) Result {
 	client := runtimev1.NewRuntimeServiceClient(cfg.Conn)
-	var checks []CheckResult
+	checks := make([]CheckResult, 0, 6)
 
 	caps, hc := checkHealth(ctx, client)
 	checks = append(checks, hc)

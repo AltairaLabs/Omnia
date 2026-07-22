@@ -68,16 +68,16 @@ func run(addr string, timeout time.Duration) int {
 // printResult writes a per-check table and a summary line to w.
 func printResult(w io.Writer, res conformance.Result) {
 	tw := tabwriter.NewWriter(w, 0, 2, 2, ' ', 0)
-	fmt.Fprintln(tw, "CHECK\tSTATUS\tDETAIL")
+	_, _ = fmt.Fprintln(tw, "CHECK\tSTATUS\tDETAIL")
 	for _, c := range res.Checks {
-		fmt.Fprintf(tw, "%s\t%s\t%s\n", c.Name, c.Status, c.Detail)
+		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\n", c.Name, c.Status, c.Detail)
 	}
 	_ = tw.Flush()
+	summary := "\nFAIL: runtime is not conformant"
 	if res.Passed {
-		fmt.Fprintln(w, "\nPASS: runtime is conformant")
-		return
+		summary = "\nPASS: runtime is conformant"
 	}
-	fmt.Fprintln(w, "\nFAIL: runtime is not conformant")
+	_, _ = fmt.Fprintln(w, summary)
 }
 
 // exitCode maps a Result to a process exit code.
