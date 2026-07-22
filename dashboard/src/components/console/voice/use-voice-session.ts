@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { LiveAgentConnection } from "../../../lib/data/live-service";
 import type { ServerMessage } from "../../../types/websocket";
-import { MessageTypeInterrupt } from "../../../types/generated/websocket";
+import { MessageTypeInterrupt, MessageTypeSessionConfig } from "../../../types/generated/websocket";
 import { useMicCapture } from "./use-mic-capture";
 import { useStreamingPlayback } from "./use-streaming-playback";
 
@@ -19,6 +19,10 @@ export function useVoiceSession(opts: UseVoiceSessionOptions) {
   const { namespace, agentName, sampleRate, channels, onServerMessage } = opts;
   const [state, setState] = useState<VoiceState>("idle");
   const seqRef = useRef(0);
+  // formatRef holds the active capture format used for outbound frame metadata.
+  // Seeded from opts; updated when the runtime relays a session_config
+  // counter-offer so the metadata matches what the mic now captures.
+  const formatRef = useRef({ sampleRate, channels });
   // Tracks whether the current disconnect event was caused by an intentional hangup().
   const hangupInProgressRef = useRef(false);
   // True once the call has gone live at least once this session.
@@ -38,8 +42,8 @@ export function useVoiceSession(opts: UseVoiceSessionOptions) {
       conn.sendBinary(pcm, {
         sequence: seqRef.current++,
         isLast: false,
-        sampleRate,
-        channels,
+        sampleRate: formatRef.current.sampleRate,
+        channels: formatRef.current.channels,
       }),
   });
 
@@ -99,6 +103,16 @@ export function useVoiceSession(opts: UseVoiceSessionOptions) {
     const offMsg = conn.onMessage((m: ServerMessage) => {
       if (m.type === MessageTypeInterrupt) {
         playback.flush();
+        return;
+      }
+      if (m.type === MessageTypeSessionConfig && m.session_config) {
+        // The runtime's negotiated capture format (RuntimeHello counter-offer).
+        // Update the outbound frame metadata and re-capture at the new format.
+        // If the client cannot re-capture at the required format, the session
+        // cannot proceed — tear down to error (client-side fail-closed).
+        const { sample_rate, channels: ch } = m.session_config;
+        formatRef.current = { sampleRate: sample_rate, channels: ch };
+        mic.reconfigure(sample_rate, ch).catch(() => teardownToError());
         return;
       }
       onServerMessage?.(m);

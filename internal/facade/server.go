@@ -152,6 +152,9 @@ type ResponseWriter interface {
 	WriteError(code, message string) error
 	// WriteInterrupt tells the client to clear buffered audio (duplex barge-in).
 	WriteInterrupt() error
+	// WriteSessionConfig relays the runtime's negotiated duplex audio format
+	// (the RuntimeHello counter-offer) to the client, which (re)captures at it.
+	WriteSessionConfig(cfg *SessionConfigInfo) error
 	// WriteUploadReady sends upload URL information to the client.
 	WriteUploadReady(uploadReady *UploadReadyInfo) error
 	// WriteUploadComplete notifies the client that an upload is complete.

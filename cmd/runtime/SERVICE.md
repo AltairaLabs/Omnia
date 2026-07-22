@@ -19,10 +19,11 @@
   - `AudioInputChunk` — subsequent audio frames forwarded via `pumpDuplexInput` → `conv.SendChunk`. `is_last` on a chunk signals stream end; the pipeline drains and the session closes.
   - **gRPC** `Invoke` (function mode) — one-shot `InvocationRequest` with `input_json` (already validated by the Facade against `spec.inputSchema`).
 - **gRPC** `HasConversation` — the Facade asks whether a session's working context can still be resumed before continuing a conversation the client named. The runtime owns the context store, so it is the only component that can answer: a session-api row proves a conversation once existed, not that its turns survive. Answers `RESUMABLE` / `NOT_FOUND` / `UNAVAILABLE`, where `UNAVAILABLE` means the store could not be consulted and is explicitly not an expiry. Probes through `MessageReader.MessageCount` so the check cannot extend the lifetime of what it measures (see PromptKit#1649).
-- **AgentRuntime CRD** (read directly via the k8s client at startup): `spec.mode`, `spec.outputFormat`, and `spec.outputSchema` (used to constrain function-mode output), alongside the PromptPack, provider, tools, and eval config.
+- **AgentRuntime CRD** (read directly via the k8s client at startup): `spec.mode`, `spec.outputFormat`, and `spec.outputSchema` (used to constrain function-mode output), `spec.duplex.audio` (the required realtime audio format advertised as the `RuntimeHello` counter-offer), alongside the PromptPack, provider, tools, and eval config.
 
 ## Outputs
 - **gRPC** to Facade (bidirectional Converse stream):
+  - `RuntimeHello` — the **first** ServerMessage on every stream: the session's authoritative `capabilities` and, for a duplex session, a bounded `MediaNegotiation` counter-offer (`codec`/`sample_rate`/`channels`; `frame_rate`/`resolution` carried, not yet enforced) derived from `spec.duplex.audio`. Absence marks a legacy runtime. Contract 1.3.0.
   - Chunk — streaming LLM text
   - Done — response complete with final content
   - ToolCall — client-side tool call (execution=CLIENT only; server-side never sent)

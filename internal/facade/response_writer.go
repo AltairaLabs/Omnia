@@ -106,6 +106,12 @@ func (w *connResponseWriter) WriteInterrupt() error {
 	return w.server.sendMessage(w.conn, NewInterruptMessage(w.sessionID))
 }
 
+// WriteSessionConfig relays the runtime's negotiated duplex audio format to the
+// client, which (re)captures at that codec / sample rate / channels.
+func (w *connResponseWriter) WriteSessionConfig(cfg *SessionConfigInfo) error {
+	return w.server.sendMessage(w.conn, NewSessionConfigMessage(w.sessionID, cfg))
+}
+
 // WriteUploadReady sends upload URL information to the client.
 func (w *connResponseWriter) WriteUploadReady(uploadReady *UploadReadyInfo) error {
 	return w.server.sendMessage(w.conn, NewUploadReadyMessage(w.sessionID, uploadReady))

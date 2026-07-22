@@ -68,3 +68,47 @@ func TestConnResponseWriter_WriteInterrupt(t *testing.T) {
 		t.Error("msg.Timestamp should not be zero")
 	}
 }
+
+// TestConnResponseWriter_WriteSessionConfig verifies that WriteSessionConfig
+// sends a JSON ServerMessage with type "session_config" carrying the negotiated
+// duplex audio format to the WebSocket client.
+func TestConnResponseWriter_WriteSessionConfig(t *testing.T) {
+	handler := &mockHandler{
+		handleFunc: func(_ context.Context, _ string, _ *ClientMessage, writer ResponseWriter) error {
+			return writer.WriteSessionConfig(&SessionConfigInfo{Codec: "pcm", SampleRate: 24000, Channels: 1})
+		},
+	}
+
+	_, ts := newTestServer(t, handler)
+
+	ws, _, err := websocket.DefaultDialer.Dial(wsURL(ts.URL)+"?agent=test-agent", nil)
+	if err != nil {
+		t.Fatalf("Failed to connect: %v", err)
+	}
+	defer func() { _ = ws.Close() }()
+
+	sessionID := readConnected(t, ws)
+
+	if err := ws.WriteJSON(ClientMessage{
+		Type:      MessageTypeMessage,
+		SessionID: sessionID,
+		Content:   "start",
+	}); err != nil {
+		t.Fatalf("Failed to send message: %v", err)
+	}
+
+	var msg ServerMessage
+	if err := ws.ReadJSON(&msg); err != nil {
+		t.Fatalf("Failed to read session_config message: %v", err)
+	}
+
+	if msg.Type != MessageTypeSessionConfig {
+		t.Errorf("msg.Type = %q, want %q", msg.Type, MessageTypeSessionConfig)
+	}
+	if msg.SessionConfig == nil {
+		t.Fatal("msg.SessionConfig should not be nil")
+	}
+	if msg.SessionConfig.Codec != "pcm" || msg.SessionConfig.SampleRate != 24000 || msg.SessionConfig.Channels != 1 {
+		t.Errorf("msg.SessionConfig = %+v, want {pcm 24000 1}", msg.SessionConfig)
+	}
+}

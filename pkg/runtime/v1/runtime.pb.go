@@ -337,6 +337,7 @@ type ServerMessage struct {
 	//	*ServerMessage_Error
 	//	*ServerMessage_MediaChunk
 	//	*ServerMessage_Interruption
+	//	*ServerMessage_RuntimeHello
 	Message       isServerMessage_Message `protobuf_oneof:"message"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -433,6 +434,15 @@ func (x *ServerMessage) GetInterruption() *Interruption {
 	return nil
 }
 
+func (x *ServerMessage) GetRuntimeHello() *RuntimeHello {
+	if x != nil {
+		if x, ok := x.Message.(*ServerMessage_RuntimeHello); ok {
+			return x.RuntimeHello
+		}
+	}
+	return nil
+}
+
 type isServerMessage_Message interface {
 	isServerMessage_Message()
 }
@@ -473,6 +483,15 @@ type ServerMessage_Interruption struct {
 	Interruption *Interruption `protobuf:"bytes,7,opt,name=interruption,proto3,oneof"`
 }
 
+type ServerMessage_RuntimeHello struct {
+	// runtime_hello is the runtime's first ServerMessage on a Converse stream:
+	// the session's authoritative capability set plus, for a duplex session, a
+	// bounded media counter-offer (codec/sample_rate/channels) the facade
+	// relays to the client. A runtime that never sends a hello is legacy — the
+	// facade proceeds with today's unilateral DuplexStart behaviour.
+	RuntimeHello *RuntimeHello `protobuf:"bytes,8,opt,name=runtime_hello,json=runtimeHello,proto3,oneof"`
+}
+
 func (*ServerMessage_Chunk) isServerMessage_Message() {}
 
 func (*ServerMessage_ToolCall) isServerMessage_Message() {}
@@ -484,6 +503,8 @@ func (*ServerMessage_Error) isServerMessage_Message() {}
 func (*ServerMessage_MediaChunk) isServerMessage_Message() {}
 
 func (*ServerMessage_Interruption) isServerMessage_Message() {}
+
+func (*ServerMessage_RuntimeHello) isServerMessage_Message() {}
 
 // Chunk contains a partial text response for streaming output.
 type Chunk struct {
@@ -1570,6 +1591,148 @@ func (x *DuplexStart) GetSystemInstruction() string {
 	return ""
 }
 
+// RuntimeHello is the runtime's first ServerMessage on a Converse stream. It
+// carries the session's authoritative capability set and, for a duplex session,
+// the media parameters the runtime requires — a bounded counter-offer to the
+// facade's DuplexStart proposal. Absence of a hello marks a legacy runtime.
+type RuntimeHello struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// capabilities is the per-session, authoritative capability set (open set;
+	// consumers display or ignore unknown values).
+	Capabilities []string `protobuf:"bytes,1,rep,name=capabilities,proto3" json:"capabilities,omitempty"`
+	// media is the bounded media counter-offer. Set only for a duplex session.
+	Media         *MediaNegotiation `protobuf:"bytes,2,opt,name=media,proto3" json:"media,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RuntimeHello) Reset() {
+	*x = RuntimeHello{}
+	mi := &file_api_proto_runtime_v1_runtime_proto_msgTypes[20]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RuntimeHello) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RuntimeHello) ProtoMessage() {}
+
+func (x *RuntimeHello) ProtoReflect() protoreflect.Message {
+	mi := &file_api_proto_runtime_v1_runtime_proto_msgTypes[20]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RuntimeHello.ProtoReflect.Descriptor instead.
+func (*RuntimeHello) Descriptor() ([]byte, []int) {
+	return file_api_proto_runtime_v1_runtime_proto_rawDescGZIP(), []int{20}
+}
+
+func (x *RuntimeHello) GetCapabilities() []string {
+	if x != nil {
+		return x.Capabilities
+	}
+	return nil
+}
+
+func (x *RuntimeHello) GetMedia() *MediaNegotiation {
+	if x != nil {
+		return x.Media
+	}
+	return nil
+}
+
+// MediaNegotiation is the bounded counter-offer parameter set. A zero value for
+// a field means "no requirement / accept the client's proposal" for that field.
+type MediaNegotiation struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// codec is the required audio encoding, e.g. "pcm".
+	Codec string `protobuf:"bytes,1,opt,name=codec,proto3" json:"codec,omitempty"`
+	// sample_rate is the required sample rate in Hz, e.g. 24000.
+	SampleRate int32 `protobuf:"varint,2,opt,name=sample_rate,json=sampleRate,proto3" json:"sample_rate,omitempty"`
+	// channels is the required channel count, e.g. 1 for mono.
+	Channels int32 `protobuf:"varint,3,opt,name=channels,proto3" json:"channels,omitempty"`
+	// frame_rate is the required video frame rate (carried, not yet enforced).
+	FrameRate int32 `protobuf:"varint,4,opt,name=frame_rate,json=frameRate,proto3" json:"frame_rate,omitempty"`
+	// resolution is the required video resolution (carried, not yet enforced).
+	Resolution    int32 `protobuf:"varint,5,opt,name=resolution,proto3" json:"resolution,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MediaNegotiation) Reset() {
+	*x = MediaNegotiation{}
+	mi := &file_api_proto_runtime_v1_runtime_proto_msgTypes[21]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MediaNegotiation) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MediaNegotiation) ProtoMessage() {}
+
+func (x *MediaNegotiation) ProtoReflect() protoreflect.Message {
+	mi := &file_api_proto_runtime_v1_runtime_proto_msgTypes[21]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MediaNegotiation.ProtoReflect.Descriptor instead.
+func (*MediaNegotiation) Descriptor() ([]byte, []int) {
+	return file_api_proto_runtime_v1_runtime_proto_rawDescGZIP(), []int{21}
+}
+
+func (x *MediaNegotiation) GetCodec() string {
+	if x != nil {
+		return x.Codec
+	}
+	return ""
+}
+
+func (x *MediaNegotiation) GetSampleRate() int32 {
+	if x != nil {
+		return x.SampleRate
+	}
+	return 0
+}
+
+func (x *MediaNegotiation) GetChannels() int32 {
+	if x != nil {
+		return x.Channels
+	}
+	return 0
+}
+
+func (x *MediaNegotiation) GetFrameRate() int32 {
+	if x != nil {
+		return x.FrameRate
+	}
+	return 0
+}
+
+func (x *MediaNegotiation) GetResolution() int32 {
+	if x != nil {
+		return x.Resolution
+	}
+	return 0
+}
+
 // AudioInputChunk is one inbound audio frame during a duplex session.
 type AudioInputChunk struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -1585,7 +1748,7 @@ type AudioInputChunk struct {
 
 func (x *AudioInputChunk) Reset() {
 	*x = AudioInputChunk{}
-	mi := &file_api_proto_runtime_v1_runtime_proto_msgTypes[20]
+	mi := &file_api_proto_runtime_v1_runtime_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1597,7 +1760,7 @@ func (x *AudioInputChunk) String() string {
 func (*AudioInputChunk) ProtoMessage() {}
 
 func (x *AudioInputChunk) ProtoReflect() protoreflect.Message {
-	mi := &file_api_proto_runtime_v1_runtime_proto_msgTypes[20]
+	mi := &file_api_proto_runtime_v1_runtime_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1610,7 +1773,7 @@ func (x *AudioInputChunk) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AudioInputChunk.ProtoReflect.Descriptor instead.
 func (*AudioInputChunk) Descriptor() ([]byte, []int) {
-	return file_api_proto_runtime_v1_runtime_proto_rawDescGZIP(), []int{20}
+	return file_api_proto_runtime_v1_runtime_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *AudioInputChunk) GetData() []byte {
@@ -1659,7 +1822,7 @@ const file_api_proto_runtime_v1_runtime_proto_rawDesc = "" +
 	"resultJson\x12\x1f\n" +
 	"\vis_rejected\x18\x03 \x01(\bR\n" +
 	"isRejected\x12)\n" +
-	"\x10rejection_reason\x18\x04 \x01(\tR\x0frejectionReason\"\xec\x02\n" +
+	"\x10rejection_reason\x18\x04 \x01(\tR\x0frejectionReason\"\xb3\x03\n" +
 	"\rServerMessage\x12/\n" +
 	"\x05chunk\x18\x01 \x01(\v2\x17.omnia.runtime.v1.ChunkH\x00R\x05chunk\x129\n" +
 	"\ttool_call\x18\x02 \x01(\v2\x1a.omnia.runtime.v1.ToolCallH\x00R\btoolCall\x12,\n" +
@@ -1667,7 +1830,8 @@ const file_api_proto_runtime_v1_runtime_proto_rawDesc = "" +
 	"\x05error\x18\x05 \x01(\v2\x17.omnia.runtime.v1.ErrorH\x00R\x05error\x12?\n" +
 	"\vmedia_chunk\x18\x06 \x01(\v2\x1c.omnia.runtime.v1.MediaChunkH\x00R\n" +
 	"mediaChunk\x12D\n" +
-	"\finterruption\x18\a \x01(\v2\x1e.omnia.runtime.v1.InterruptionH\x00R\finterruptionB\t\n" +
+	"\finterruption\x18\a \x01(\v2\x1e.omnia.runtime.v1.InterruptionH\x00R\finterruption\x12E\n" +
+	"\rruntime_hello\x18\b \x01(\v2\x1e.omnia.runtime.v1.RuntimeHelloH\x00R\fruntimeHelloB\t\n" +
 	"\amessage\"!\n" +
 	"\x05Chunk\x12\x18\n" +
 	"\acontent\x18\x01 \x01(\tR\acontent\"\xdd\x01\n" +
@@ -1747,7 +1911,20 @@ const file_api_proto_runtime_v1_runtime_proto_rawDesc = "" +
 	"\vsample_rate\x18\x02 \x01(\x05R\n" +
 	"sampleRate\x12\x1a\n" +
 	"\bchannels\x18\x03 \x01(\x05R\bchannels\x12-\n" +
-	"\x12system_instruction\x18\x04 \x01(\tR\x11systemInstruction\"Z\n" +
+	"\x12system_instruction\x18\x04 \x01(\tR\x11systemInstruction\"l\n" +
+	"\fRuntimeHello\x12\"\n" +
+	"\fcapabilities\x18\x01 \x03(\tR\fcapabilities\x128\n" +
+	"\x05media\x18\x02 \x01(\v2\".omnia.runtime.v1.MediaNegotiationR\x05media\"\xa4\x01\n" +
+	"\x10MediaNegotiation\x12\x14\n" +
+	"\x05codec\x18\x01 \x01(\tR\x05codec\x12\x1f\n" +
+	"\vsample_rate\x18\x02 \x01(\x05R\n" +
+	"sampleRate\x12\x1a\n" +
+	"\bchannels\x18\x03 \x01(\x05R\bchannels\x12\x1d\n" +
+	"\n" +
+	"frame_rate\x18\x04 \x01(\x05R\tframeRate\x12\x1e\n" +
+	"\n" +
+	"resolution\x18\x05 \x01(\x05R\n" +
+	"resolution\"Z\n" +
 	"\x0fAudioInputChunk\x12\x12\n" +
 	"\x04data\x18\x01 \x01(\fR\x04data\x12\x1a\n" +
 	"\bsequence\x18\x02 \x01(\rR\bsequence\x12\x17\n" +
@@ -1779,7 +1956,7 @@ func file_api_proto_runtime_v1_runtime_proto_rawDescGZIP() []byte {
 }
 
 var file_api_proto_runtime_v1_runtime_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_api_proto_runtime_v1_runtime_proto_msgTypes = make([]protoimpl.MessageInfo, 23)
+var file_api_proto_runtime_v1_runtime_proto_msgTypes = make([]protoimpl.MessageInfo, 25)
 var file_api_proto_runtime_v1_runtime_proto_goTypes = []any{
 	(ToolExecution)(0),              // 0: omnia.runtime.v1.ToolExecution
 	(ResumeState)(0),                // 1: omnia.runtime.v1.ResumeState
@@ -1803,42 +1980,46 @@ var file_api_proto_runtime_v1_runtime_proto_goTypes = []any{
 	(*HasConversationRequest)(nil),  // 19: omnia.runtime.v1.HasConversationRequest
 	(*HasConversationResponse)(nil), // 20: omnia.runtime.v1.HasConversationResponse
 	(*DuplexStart)(nil),             // 21: omnia.runtime.v1.DuplexStart
-	(*AudioInputChunk)(nil),         // 22: omnia.runtime.v1.AudioInputChunk
-	nil,                             // 23: omnia.runtime.v1.ClientMessage.MetadataEntry
-	nil,                             // 24: omnia.runtime.v1.InvocationRequest.MetadataEntry
+	(*RuntimeHello)(nil),            // 22: omnia.runtime.v1.RuntimeHello
+	(*MediaNegotiation)(nil),        // 23: omnia.runtime.v1.MediaNegotiation
+	(*AudioInputChunk)(nil),         // 24: omnia.runtime.v1.AudioInputChunk
+	nil,                             // 25: omnia.runtime.v1.ClientMessage.MetadataEntry
+	nil,                             // 26: omnia.runtime.v1.InvocationRequest.MetadataEntry
 }
 var file_api_proto_runtime_v1_runtime_proto_depIdxs = []int32{
-	23, // 0: omnia.runtime.v1.ClientMessage.metadata:type_name -> omnia.runtime.v1.ClientMessage.MetadataEntry
+	25, // 0: omnia.runtime.v1.ClientMessage.metadata:type_name -> omnia.runtime.v1.ClientMessage.MetadataEntry
 	9,  // 1: omnia.runtime.v1.ClientMessage.parts:type_name -> omnia.runtime.v1.ContentPart
 	3,  // 2: omnia.runtime.v1.ClientMessage.client_tool_result:type_name -> omnia.runtime.v1.ClientToolResult
 	21, // 3: omnia.runtime.v1.ClientMessage.duplex_start:type_name -> omnia.runtime.v1.DuplexStart
-	22, // 4: omnia.runtime.v1.ClientMessage.audio_input:type_name -> omnia.runtime.v1.AudioInputChunk
+	24, // 4: omnia.runtime.v1.ClientMessage.audio_input:type_name -> omnia.runtime.v1.AudioInputChunk
 	5,  // 5: omnia.runtime.v1.ServerMessage.chunk:type_name -> omnia.runtime.v1.Chunk
 	6,  // 6: omnia.runtime.v1.ServerMessage.tool_call:type_name -> omnia.runtime.v1.ToolCall
 	8,  // 7: omnia.runtime.v1.ServerMessage.done:type_name -> omnia.runtime.v1.Done
 	12, // 8: omnia.runtime.v1.ServerMessage.error:type_name -> omnia.runtime.v1.Error
 	14, // 9: omnia.runtime.v1.ServerMessage.media_chunk:type_name -> omnia.runtime.v1.MediaChunk
 	13, // 10: omnia.runtime.v1.ServerMessage.interruption:type_name -> omnia.runtime.v1.Interruption
-	0,  // 11: omnia.runtime.v1.ToolCall.execution:type_name -> omnia.runtime.v1.ToolExecution
-	11, // 12: omnia.runtime.v1.Done.usage:type_name -> omnia.runtime.v1.Usage
-	9,  // 13: omnia.runtime.v1.Done.parts:type_name -> omnia.runtime.v1.ContentPart
-	10, // 14: omnia.runtime.v1.ContentPart.media:type_name -> omnia.runtime.v1.MediaContent
-	24, // 15: omnia.runtime.v1.InvocationRequest.metadata:type_name -> omnia.runtime.v1.InvocationRequest.MetadataEntry
-	11, // 16: omnia.runtime.v1.InvocationResponse.usage:type_name -> omnia.runtime.v1.Usage
-	1,  // 17: omnia.runtime.v1.HasConversationResponse.state:type_name -> omnia.runtime.v1.ResumeState
-	2,  // 18: omnia.runtime.v1.RuntimeService.Converse:input_type -> omnia.runtime.v1.ClientMessage
-	15, // 19: omnia.runtime.v1.RuntimeService.Invoke:input_type -> omnia.runtime.v1.InvocationRequest
-	17, // 20: omnia.runtime.v1.RuntimeService.Health:input_type -> omnia.runtime.v1.HealthRequest
-	19, // 21: omnia.runtime.v1.RuntimeService.HasConversation:input_type -> omnia.runtime.v1.HasConversationRequest
-	4,  // 22: omnia.runtime.v1.RuntimeService.Converse:output_type -> omnia.runtime.v1.ServerMessage
-	16, // 23: omnia.runtime.v1.RuntimeService.Invoke:output_type -> omnia.runtime.v1.InvocationResponse
-	18, // 24: omnia.runtime.v1.RuntimeService.Health:output_type -> omnia.runtime.v1.HealthResponse
-	20, // 25: omnia.runtime.v1.RuntimeService.HasConversation:output_type -> omnia.runtime.v1.HasConversationResponse
-	22, // [22:26] is the sub-list for method output_type
-	18, // [18:22] is the sub-list for method input_type
-	18, // [18:18] is the sub-list for extension type_name
-	18, // [18:18] is the sub-list for extension extendee
-	0,  // [0:18] is the sub-list for field type_name
+	22, // 11: omnia.runtime.v1.ServerMessage.runtime_hello:type_name -> omnia.runtime.v1.RuntimeHello
+	0,  // 12: omnia.runtime.v1.ToolCall.execution:type_name -> omnia.runtime.v1.ToolExecution
+	11, // 13: omnia.runtime.v1.Done.usage:type_name -> omnia.runtime.v1.Usage
+	9,  // 14: omnia.runtime.v1.Done.parts:type_name -> omnia.runtime.v1.ContentPart
+	10, // 15: omnia.runtime.v1.ContentPart.media:type_name -> omnia.runtime.v1.MediaContent
+	26, // 16: omnia.runtime.v1.InvocationRequest.metadata:type_name -> omnia.runtime.v1.InvocationRequest.MetadataEntry
+	11, // 17: omnia.runtime.v1.InvocationResponse.usage:type_name -> omnia.runtime.v1.Usage
+	1,  // 18: omnia.runtime.v1.HasConversationResponse.state:type_name -> omnia.runtime.v1.ResumeState
+	23, // 19: omnia.runtime.v1.RuntimeHello.media:type_name -> omnia.runtime.v1.MediaNegotiation
+	2,  // 20: omnia.runtime.v1.RuntimeService.Converse:input_type -> omnia.runtime.v1.ClientMessage
+	15, // 21: omnia.runtime.v1.RuntimeService.Invoke:input_type -> omnia.runtime.v1.InvocationRequest
+	17, // 22: omnia.runtime.v1.RuntimeService.Health:input_type -> omnia.runtime.v1.HealthRequest
+	19, // 23: omnia.runtime.v1.RuntimeService.HasConversation:input_type -> omnia.runtime.v1.HasConversationRequest
+	4,  // 24: omnia.runtime.v1.RuntimeService.Converse:output_type -> omnia.runtime.v1.ServerMessage
+	16, // 25: omnia.runtime.v1.RuntimeService.Invoke:output_type -> omnia.runtime.v1.InvocationResponse
+	18, // 26: omnia.runtime.v1.RuntimeService.Health:output_type -> omnia.runtime.v1.HealthResponse
+	20, // 27: omnia.runtime.v1.RuntimeService.HasConversation:output_type -> omnia.runtime.v1.HasConversationResponse
+	24, // [24:28] is the sub-list for method output_type
+	20, // [20:24] is the sub-list for method input_type
+	20, // [20:20] is the sub-list for extension type_name
+	20, // [20:20] is the sub-list for extension extendee
+	0,  // [0:20] is the sub-list for field type_name
 }
 
 func init() { file_api_proto_runtime_v1_runtime_proto_init() }
@@ -1853,6 +2034,7 @@ func file_api_proto_runtime_v1_runtime_proto_init() {
 		(*ServerMessage_Error)(nil),
 		(*ServerMessage_MediaChunk)(nil),
 		(*ServerMessage_Interruption)(nil),
+		(*ServerMessage_RuntimeHello)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -1860,7 +2042,7 @@ func file_api_proto_runtime_v1_runtime_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_api_proto_runtime_v1_runtime_proto_rawDesc), len(file_api_proto_runtime_v1_runtime_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   23,
+			NumMessages:   25,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

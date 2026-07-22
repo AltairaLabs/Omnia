@@ -816,6 +816,15 @@ type DuplexConfig struct {
 	// +kubebuilder:validation:Enum=audio;audiovideo
 	// +kubebuilder:default=audio
 	Mode string `json:"mode,omitempty"`
+
+	// audio declares the realtime audio format the runtime requires for this
+	// agent's duplex sessions (recommendedSampleRate / channels / format). The
+	// runtime advertises it as a bounded counter-offer in RuntimeHello; the
+	// facade relays it to the client, which captures at that format, or the
+	// session fails at open when the client cannot satisfy it. Unset means the
+	// runtime accepts the client's proposed format.
+	// +optional
+	Audio *AudioRequirements `json:"audio,omitempty"`
 }
 
 // DocumentRequirements defines requirements for document media.

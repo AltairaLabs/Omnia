@@ -45,7 +45,6 @@ import (
 	pkmemory "github.com/AltairaLabs/PromptKit/runtime/memory"
 	pkskills "github.com/AltairaLabs/PromptKit/runtime/skills"
 
-	v1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 	"github.com/altairalabs/omnia/internal/media"
 	"github.com/altairalabs/omnia/internal/runtime/skills"
 	"github.com/altairalabs/omnia/internal/runtime/tools"
@@ -146,6 +145,12 @@ type Server struct {
 	// storage_ref attachments resolve to a model-fetchable URL or bytes at
 	// provider-call time, every turn (#1817).
 	mediaStorage media.Storage
+
+	// duplexAudio is the required realtime audio format for duplex sessions
+	// (spec.duplex.audio). When set, it is advertised as the bounded
+	// counter-offer in RuntimeHello and preferred over the client's DuplexStart
+	// proposal. Nil means accept the client's proposed format.
+	duplexAudio *DuplexAudioParams
 }
 
 // ServerOption configures the server.
@@ -518,87 +523,6 @@ func WithSessionStore(store session.Store) ServerOption {
 	}
 }
 
-// WithMemoryStore sets the memory store for cross-session memory.
-// The store is typically an HTTP client backed by memory-api.
-func WithMemoryStore(store pkmemory.Store) ServerOption {
-	return func(s *Server) {
-		s.memoryStore = store
-	}
-}
-
-// WithWorkspaceUID sets the workspace UID for memory scope.
-func WithWorkspaceUID(uid string) ServerOption {
-	return func(s *Server) {
-		s.workspaceUID = uid
-	}
-}
-
-// WithMemoryRetrieval configures the retrieval strategy, access deny-filter,
-// and episodic limit (from spec.memory.retrieval). When strategy is "semantic"
-// and the memory store supports it, per-turn retrieval uses semantic hybrid
-// search with the deny-filter; otherwise keyword FTS. limit 0 falls back to
-// defaultEpisodicLimit (10).
-func WithMemoryRetrieval(strategy, denyCEL string, limit int) ServerOption {
-	return func(s *Server) {
-		s.memoryStrategy = strategy
-		s.memoryDenyCEL = denyCEL
-		s.memoryLimit = limit
-	}
-}
-
-// WithMemoryModes sets the two independent memory axes from
-// spec.memory.retrieval.enabled and spec.memory.tools.enabled. retrievalEnabled
-// gates ambient RAG auto-injection; toolsEnabled gates the memory__remember /
-// memory__recall tools. Both default true (see NewServer) when not set.
-func WithMemoryModes(retrievalEnabled, toolsEnabled bool) ServerOption {
-	return func(s *Server) {
-		s.memoryRetrievalEnabled = retrievalEnabled
-		s.memoryToolsEnabled = toolsEnabled
-	}
-}
-
-// WithMediaBasePath sets the base path for resolving mock:// URLs.
-func WithMediaBasePath(path string) ServerOption {
-	return func(s *Server) {
-		if path != "" {
-			s.mediaResolver = NewMediaResolver(path)
-		}
-	}
-}
-
-// HasMediaResolver reports whether a media resolver has been wired into the
-// server via WithMediaBasePath. Used by wiring tests in cmd/runtime to assert
-// that cmd/runtime/main.go forwards cfg.MediaBasePath to the server (without
-// which mock:// and file:// URL resolution in media chunks silently fails).
-func (s *Server) HasMediaResolver() bool {
-	return s.mediaResolver != nil
-}
-
-// WithContextWindow sets the token budget for conversation context.
-// When set, PromptKit automatically truncates older messages when the budget is exceeded.
-func WithContextWindow(tokens int) ServerOption {
-	return func(s *Server) {
-		if tokens > 0 {
-			s.sdkOptions = append(s.sdkOptions, sdk.WithTokenBudget(tokens))
-		}
-	}
-}
-
-// WithTruncationStrategy sets the strategy for handling context overflow.
-// Valid values: "sliding" (remove oldest), "summarize" (summarize before
-// removing), "custom" (the runtime implements truncation itself — no SDK
-// truncation is configured). "custom" is intended for custom runtimes
-// (spec.framework.type: custom); on this PromptKit runtime it means no
-// truncation is applied at all, which cmd/runtime warns about at startup.
-func WithTruncationStrategy(strategy string) ServerOption {
-	return func(s *Server) {
-		// "custom" means the custom runtime handles it - don't set SDK truncation
-		if strategy != "" && strategy != string(v1alpha1.TruncationStrategyCustom) {
-			s.sdkOptions = append(s.sdkOptions, sdk.WithTruncation(strategy))
-		}
-	}
-}
-
 // NewServer creates a new runtime server.
 func NewServer(opts ...ServerOption) *Server {
 	s := &Server{
@@ -791,6 +715,7 @@ func (s *Server) HasConversation(
 func (s *Server) Converse(stream runtimev1.RuntimeService_ConverseServer) error {
 	ctx := stream.Context()
 	var lastSessionID string
+	helloSent := false
 
 	defer func() {
 		// Remove conversation when stream ends to prevent unbounded map growth.
@@ -813,6 +738,8 @@ func (s *Server) Converse(stream runtimev1.RuntimeService_ConverseServer) error 
 
 		// Duplex audio sessions are handled as a self-contained sub-call:
 		// the stream is bridged to sdk.OpenDuplex for the duration of the session.
+		// handleDuplexSession emits its own RuntimeHello (with the media
+		// counter-offer) as the first ServerMessage.
 		if msg.GetDuplexStart() != nil {
 			if duplexErr := s.handleDuplexSession(ctx, stream, msg); duplexErr != nil {
 				s.log.Error(duplexErr, "duplex session failed", "sessionID", msg.GetSessionId())
@@ -821,6 +748,12 @@ func (s *Server) Converse(stream runtimev1.RuntimeService_ConverseServer) error 
 				}}})
 			}
 			return nil
+		}
+
+		// Text path: send the capabilities-only RuntimeHello as the first
+		// ServerMessage so the facade never treats a live runtime as legacy.
+		if helloErr := s.sendTextHelloOnce(stream, &helloSent); helloErr != nil {
+			return status.Errorf(codes.Internal, "failed to send runtime hello: %v", helloErr)
 		}
 
 		// Process the message

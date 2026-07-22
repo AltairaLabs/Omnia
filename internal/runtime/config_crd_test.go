@@ -523,6 +523,46 @@ func TestLoadFromCRD_InlineEvalGroups_Custom(t *testing.T) {
 	assert.Equal(t, []string{"pii-checks", "brand-voice"}, cfg.InlineEvalGroups)
 }
 
+func TestLoadFromCRD_DuplexAudio_Set(t *testing.T) {
+	ar := &v1alpha1.AgentRuntime{
+		ObjectMeta: metav1.ObjectMeta{Name: "agent", Namespace: "test-ns"},
+		Spec: v1alpha1.AgentRuntimeSpec{
+			PromptPackRef: v1alpha1.PromptPackRef{Name: "pack"},
+			Facades:       []v1alpha1.FacadeConfig{{Type: v1alpha1.FacadeTypeWebSocket}},
+			Duplex: &v1alpha1.DuplexConfig{
+				Enabled: true,
+				Audio: &v1alpha1.AudioRequirements{
+					Format:                "pcm16",
+					RecommendedSampleRate: int32Ptr(24000),
+					Channels:              int32Ptr(1),
+				},
+			},
+		},
+	}
+	c := buildTestClient(ar)
+	cfg, err := LoadFromCRD(context.Background(), c, "agent", "test-ns")
+	require.NoError(t, err)
+	require.NotNil(t, cfg.DuplexAudio)
+	assert.Equal(t, "pcm16", cfg.DuplexAudio.Codec)
+	assert.Equal(t, 24000, cfg.DuplexAudio.SampleRate)
+	assert.Equal(t, 1, cfg.DuplexAudio.Channels)
+}
+
+func TestLoadFromCRD_DuplexAudio_Absent(t *testing.T) {
+	ar := &v1alpha1.AgentRuntime{
+		ObjectMeta: metav1.ObjectMeta{Name: "agent", Namespace: "test-ns"},
+		Spec: v1alpha1.AgentRuntimeSpec{
+			PromptPackRef: v1alpha1.PromptPackRef{Name: "pack"},
+			Facades:       []v1alpha1.FacadeConfig{{Type: v1alpha1.FacadeTypeWebSocket}},
+			Duplex:        &v1alpha1.DuplexConfig{Enabled: true},
+		},
+	}
+	c := buildTestClient(ar)
+	cfg, err := LoadFromCRD(context.Background(), c, "agent", "test-ns")
+	require.NoError(t, err)
+	assert.Nil(t, cfg.DuplexAudio, "no spec.duplex.audio leaves DuplexAudio nil (accept client's proposal)")
+}
+
 // TestLoadFromCRD_PromptPackVersion_FallsBackToEnv is the #1847 regression: a
 // `track:` (or default-stable) AgentRuntime has spec.promptPackRef.Version ==
 // nil, so LoadFromCRD must fall back to OMNIA_PROMPTPACK_VERSION — set by the

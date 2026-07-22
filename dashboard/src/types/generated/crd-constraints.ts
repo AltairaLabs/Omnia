@@ -119,6 +119,23 @@ export const crdConstraints: Record<string, Record<string, FieldConstraint>> =
       ],
       "required": true
     },
+    "spec.duplex.audio.channels": {
+      "type": "integer"
+    },
+    "spec.duplex.audio.format": {
+      "type": "string"
+    },
+    "spec.duplex.audio.maxDurationSeconds": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "spec.duplex.audio.recommendedSampleRate": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "spec.duplex.audio.supportsSegmentSelection": {
+      "type": "boolean"
+    },
     "spec.duplex.enabled": {
       "type": "boolean"
     },

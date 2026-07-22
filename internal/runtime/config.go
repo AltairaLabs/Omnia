@@ -156,9 +156,25 @@ type Config struct {
 	TracingSampleRate float64 // Sampling rate (0.0 to 1.0)
 	TracingInsecure   bool    // Disable TLS for OTLP connection
 
+	// DuplexAudio is the required realtime audio format for duplex sessions,
+	// resolved from spec.duplex.audio. When set, the runtime advertises it as
+	// the bounded MediaNegotiation counter-offer in RuntimeHello and prefers it
+	// over the client's DuplexStart proposal. Nil means accept the client's
+	// proposed format.
+	DuplexAudio *DuplexAudioParams
+
 	// Server ports
 	GRPCPort   int
 	HealthPort int
+}
+
+// DuplexAudioParams is the resolved required audio format for duplex sessions.
+// A zero value for a field means "no requirement" for that field (the client's
+// proposal, or the built-in default, is used instead).
+type DuplexAudioParams struct {
+	Codec      string
+	SampleRate int
+	Channels   int
 }
 
 // Environment variable names.

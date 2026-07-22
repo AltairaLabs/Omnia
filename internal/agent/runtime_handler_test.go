@@ -1177,6 +1177,19 @@ func TestRuntimeHandler_ClientToolCall_ConcurrentSameSession(t *testing.T) {
 	assert.Contains(t, mock.received, tcB.ID)
 }
 
+// TestForwardResponse_RuntimeHelloConsumed verifies the text-path handler
+// consumes a RuntimeHello (capabilities only) without forwarding it or erroring.
+func TestForwardResponse_RuntimeHelloConsumed(t *testing.T) {
+	h := NewRuntimeHandler(nil)
+	w := &mockResponseWriter{}
+	err := h.forwardResponse(&runtimev1.ServerMessage{
+		Message: &runtimev1.ServerMessage_RuntimeHello{
+			RuntimeHello: &runtimev1.RuntimeHello{Capabilities: []string{"invoke"}},
+		},
+	}, w)
+	require.NoError(t, err)
+}
+
 func TestToGRPCContentParts_ForwardsStorageRef(t *testing.T) {
 	ref := "omnia://sessions/s1/media/m1"
 	parts := []facade.ContentPart{{

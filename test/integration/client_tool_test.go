@@ -81,6 +81,10 @@ func (m *concurrentMockWriter) WriteInterrupt() error {
 	return nil
 }
 
+func (m *concurrentMockWriter) WriteSessionConfig(_ *facade.SessionConfigInfo) error {
+	return nil
+}
+
 func (m *concurrentMockWriter) getToolCalls() []*facade.ToolCallInfo {
 	m.mu.Lock()
 	defer m.mu.Unlock()

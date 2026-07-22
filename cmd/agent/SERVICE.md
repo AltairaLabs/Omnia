@@ -33,9 +33,10 @@
   - `error` — error response
   - `media_chunk` — streaming audio/video (also used for duplex audio output)
   - `interruption` — barge-in signal; relayed to the browser as an `interrupt` WebSocket message
+  - `RuntimeHello` — the runtime's first ServerMessage (capabilities + duplex `MediaNegotiation` counter-offer). On the duplex path the audio counter-offer is relayed to the browser as a `session_config` message; a video counter-offer fails the session closed (`UNSATISFIABLE_FORMAT`). On the text path it carries capabilities only and is consumed, not forwarded.
 
 ## Outputs
-- **WebSocket** to browser/dashboard: ServerMessage (chunk, done, tool_call, error, connected, media_chunk, upload_ready, upload_complete, **interrupt** — signals barge-in; client should clear buffered audio). The `connected` message includes a `resumed` boolean field indicating whether this connection reattached to a parked realtime session.
+- **WebSocket** to browser/dashboard: ServerMessage (chunk, done, tool_call, error, connected, media_chunk, upload_ready, upload_complete, **interrupt** — signals barge-in; client should clear buffered audio; **session_config** — relays the runtime's negotiated duplex audio format (`codec`/`sample_rate`/`channels`) so the client (re)captures at it). The `connected` message includes a `resumed` boolean field indicating whether this connection reattached to a parked realtime session.
 - **gRPC** to Runtime: ClientMessage (user message, client tool result, `DuplexStart` to open a duplex audio session, `AudioInputChunk` per audio frame); `HasConversation` to ask whether a named session's working context can still be resumed
 - **HTTP** to Session API: session create, message append, `GET /api/v1/privacy-policy` (at connection time, cached 60s per WebSocket session). Writes only — session-api is never read to decide whether a conversation can continue (see "Resuming a session").
 

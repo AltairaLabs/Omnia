@@ -119,6 +119,10 @@ const (
 	MessageTypeMediaChunk     MessageType = "media_chunk"
 	// MessageTypeInterrupt tells the client to clear buffered audio (barge-in).
 	MessageTypeInterrupt MessageType = "interrupt"
+	// MessageTypeSessionConfig relays the runtime's negotiated duplex audio
+	// format (the RuntimeHello counter-offer) to the client, which (re)captures
+	// at that codec / sample_rate / channels.
+	MessageTypeSessionConfig MessageType = "session_config"
 )
 
 // ToolCallAckInfo contains acknowledgement of a client-side tool call.
@@ -208,6 +212,9 @@ type ServerMessage struct {
 	UploadComplete *UploadCompleteInfo `json:"upload_complete,omitempty"`
 	// MediaChunk contains streaming media chunk details (for media_chunk type).
 	MediaChunk *MediaChunkInfo `json:"media_chunk,omitempty"`
+	// SessionConfig contains the negotiated duplex audio format (for
+	// session_config type).
+	SessionConfig *SessionConfigInfo `json:"session_config,omitempty"`
 	// Connected contains connection info (for connected type).
 	Connected *ConnectedInfo `json:"connected,omitempty"`
 	// Timestamp is when the message was created.
@@ -300,6 +307,18 @@ type MediaChunkInfo struct {
 	MimeType string `json:"mime_type"`
 }
 
+// SessionConfigInfo carries the runtime's negotiated duplex audio format (the
+// RuntimeHello counter-offer) to the client. The client (re)captures at this
+// codec / sample rate / channels for the remainder of the session.
+type SessionConfigInfo struct {
+	// Codec is the required audio encoding, e.g. "pcm".
+	Codec string `json:"codec"`
+	// SampleRate is the required sample rate in Hz, e.g. 24000.
+	SampleRate int `json:"sample_rate"`
+	// Channels is the required channel count, e.g. 1 for mono.
+	Channels int `json:"channels"`
+}
+
 // ConnectionCapabilities represents negotiated connection features.
 // Sent in the connected message to inform the client of available capabilities.
 type ConnectionCapabilities struct {
@@ -332,6 +351,10 @@ const (
 	ErrorCodeUploadFailed     = "UPLOAD_FAILED"
 	ErrorCodeMediaNotEnabled  = "MEDIA_NOT_ENABLED"
 	ErrorCodeRateLimited      = "RATE_LIMITED"
+	// ErrorCodeUnsatisfiableFormat is sent when the runtime's duplex media
+	// counter-offer cannot be satisfied by this facade (e.g. it requires video,
+	// which this audio-only path does not implement).
+	ErrorCodeUnsatisfiableFormat = "UNSATISFIABLE_FORMAT"
 )
 
 // NewChunkMessage creates a new chunk message.
@@ -453,6 +476,17 @@ func NewUploadCompleteMessage(sessionID string, uploadComplete *UploadCompleteIn
 // NewInterruptMessage builds an interrupt control message (duplex barge-in).
 func NewInterruptMessage(sessionID string) *ServerMessage {
 	return &ServerMessage{Type: MessageTypeInterrupt, SessionID: sessionID, Timestamp: time.Now()}
+}
+
+// NewSessionConfigMessage builds a session_config message relaying the runtime's
+// negotiated duplex audio format to the client.
+func NewSessionConfigMessage(sessionID string, cfg *SessionConfigInfo) *ServerMessage {
+	return &ServerMessage{
+		Type:          MessageTypeSessionConfig,
+		SessionID:     sessionID,
+		SessionConfig: cfg,
+		Timestamp:     time.Now(),
+	}
 }
 
 // NewMediaChunkMessage creates a new media chunk message for streaming media responses.

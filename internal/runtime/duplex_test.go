@@ -34,12 +34,19 @@ import (
 
 // fakeConverseServer is a test double for RuntimeService_ConverseServer.
 type fakeConverseServer struct {
-	ctx  context.Context
-	recv chan *runtimev1.ClientMessage
-	sent chan *runtimev1.ServerMessage
+	ctx     context.Context
+	recv    chan *runtimev1.ClientMessage
+	sent    chan *runtimev1.ServerMessage
+	sendErr error // when set, Send returns it instead of buffering
 }
 
-func (f *fakeConverseServer) Send(m *runtimev1.ServerMessage) error { f.sent <- m; return nil }
+func (f *fakeConverseServer) Send(m *runtimev1.ServerMessage) error {
+	if f.sendErr != nil {
+		return f.sendErr
+	}
+	f.sent <- m
+	return nil
+}
 func (f *fakeConverseServer) Recv() (*runtimev1.ClientMessage, error) {
 	m, ok := <-f.recv
 	if !ok {
@@ -290,6 +297,97 @@ func TestHandleDuplexSession_HonorsDuplexStartParams(t *testing.T) {
 	if cfg.SystemInstruction != "be terse" {
 		t.Fatalf("system_instruction not propagated: got %q, want %q", cfg.SystemInstruction, "be terse")
 	}
+}
+
+// TestHandleDuplexSession_SendsHelloWithCounterOffer verifies that the runtime
+// sends a RuntimeHello as its first ServerMessage carrying its capabilities and,
+// when spec.duplex.audio requires a format, a bounded counter-offer that
+// overrides the client's DuplexStart proposal and is applied to the provider.
+func TestHandleDuplexSession_SendsHelloWithCounterOffer(t *testing.T) {
+	mock := duplexmock.New()
+	s := newTestServerWithDuplexProvider(t, mock)
+	// Operator requires 24kHz mono pcm; the client proposes 16kHz below.
+	s.duplexAudio = &DuplexAudioParams{Codec: defaultAudioCodec, SampleRate: 24000, Channels: 1}
+
+	fake := &fakeConverseServer{
+		ctx:  context.Background(),
+		recv: make(chan *runtimev1.ClientMessage, 2),
+		sent: make(chan *runtimev1.ServerMessage, 8),
+	}
+	start := &runtimev1.ClientMessage{
+		SessionId:   "sess-hello",
+		DuplexStart: &runtimev1.DuplexStart{Codec: defaultAudioCodec, SampleRate: 16000, Channels: 1},
+	}
+	go func() {
+		fake.recv <- &runtimev1.ClientMessage{SessionId: "sess-hello", AudioInput: &runtimev1.AudioInputChunk{IsLast: true}}
+		close(fake.recv)
+	}()
+	if err := s.handleDuplexSession(fake.ctx, fake, start); err != nil {
+		t.Fatalf("handleDuplexSession: %v", err)
+	}
+
+	// The FIRST ServerMessage must be the RuntimeHello.
+	first := <-fake.sent
+	hello, ok := first.Message.(*runtimev1.ServerMessage_RuntimeHello)
+	require.True(t, ok, "first ServerMessage must be RuntimeHello, got %T", first.Message)
+	require.Equal(t, Capabilities(), hello.RuntimeHello.GetCapabilities())
+	require.NotNil(t, hello.RuntimeHello.GetMedia())
+	require.Equal(t, int32(24000), hello.RuntimeHello.GetMedia().GetSampleRate(), "counter-offer overrides client's 16000")
+	require.Equal(t, int32(1), hello.RuntimeHello.GetMedia().GetChannels())
+	require.Equal(t, defaultAudioCodec, hello.RuntimeHello.GetMedia().GetCodec())
+
+	// The counter-offer is also applied to the provider's streaming config.
+	cfg := mock.LastConfig()
+	require.NotNil(t, cfg)
+	require.Equal(t, 24000, cfg.Config.SampleRate, "counter-offer applied to provider")
+}
+
+// TestHandleDuplexSession_HelloSendError verifies handleDuplexSession propagates
+// a failure to send the initial RuntimeHello.
+func TestHandleDuplexSession_HelloSendError(t *testing.T) {
+	s := newTestServerWithDuplexProvider(t, duplexmock.New())
+	fake := &fakeConverseServer{
+		ctx:     context.Background(),
+		recv:    make(chan *runtimev1.ClientMessage, 1),
+		sent:    make(chan *runtimev1.ServerMessage, 1),
+		sendErr: io.ErrClosedPipe,
+	}
+	start := &runtimev1.ClientMessage{
+		SessionId:   "sess-hello-err",
+		DuplexStart: &runtimev1.DuplexStart{Codec: defaultAudioCodec, SampleRate: 16000, Channels: 1},
+	}
+	err := s.handleDuplexSession(fake.ctx, fake, start)
+	require.ErrorIs(t, err, io.ErrClosedPipe)
+}
+
+// TestHandleDuplexSession_HelloWithoutCounterOfferEchoesClient verifies that with
+// no spec.duplex.audio the hello carries the client's proposed format (the runtime
+// accepts it) so a client that already captures at that format needs no change.
+func TestHandleDuplexSession_HelloWithoutCounterOfferEchoesClient(t *testing.T) {
+	mock := duplexmock.New()
+	s := newTestServerWithDuplexProvider(t, mock)
+
+	fake := &fakeConverseServer{
+		ctx:  context.Background(),
+		recv: make(chan *runtimev1.ClientMessage, 2),
+		sent: make(chan *runtimev1.ServerMessage, 8),
+	}
+	start := &runtimev1.ClientMessage{
+		SessionId:   "sess-echo",
+		DuplexStart: &runtimev1.DuplexStart{Codec: defaultAudioCodec, SampleRate: 16000, Channels: 1},
+	}
+	go func() {
+		fake.recv <- &runtimev1.ClientMessage{SessionId: "sess-echo", AudioInput: &runtimev1.AudioInputChunk{IsLast: true}}
+		close(fake.recv)
+	}()
+	if err := s.handleDuplexSession(fake.ctx, fake, start); err != nil {
+		t.Fatalf("handleDuplexSession: %v", err)
+	}
+
+	first := <-fake.sent
+	hello, ok := first.Message.(*runtimev1.ServerMessage_RuntimeHello)
+	require.True(t, ok, "first ServerMessage must be RuntimeHello, got %T", first.Message)
+	require.Equal(t, int32(16000), hello.RuntimeHello.GetMedia().GetSampleRate())
 }
 
 // TestHandleDuplexSession_DefaultsWhenZeroParams verifies that zero-value DuplexStart

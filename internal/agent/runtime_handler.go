@@ -422,6 +422,11 @@ func (h *RuntimeHandler) forwardResponse(resp *runtimev1.ServerMessage, writer f
 	case *runtimev1.ServerMessage_Error:
 		return writer.WriteError(msg.Error.Code, msg.Error.Message)
 
+	case *runtimev1.ServerMessage_RuntimeHello:
+		// The runtime's per-session hello. On the text path it carries only
+		// capabilities (no media counter-offer); consume it without forwarding.
+		return nil
+
 	default:
 		// Unknown message type, ignore
 		return nil

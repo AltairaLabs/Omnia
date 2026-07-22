@@ -593,6 +593,10 @@ func (m *MockResponseWriter) WriteInterrupt() error {
 	return nil
 }
 
+func (m *MockResponseWriter) WriteSessionConfig(_ *facade.SessionConfigInfo) error {
+	return nil
+}
+
 func (m *MockResponseWriter) SupportsBinary() bool {
 	return false
 }

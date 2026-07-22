@@ -197,6 +197,15 @@ export interface ServerMessage {
     | //
     /** interruption signals a barge-in; the client clears buffered audio. */
     { $case: "interruption"; interruption: Interruption }
+    | //
+    /**
+     * runtime_hello is the runtime's first ServerMessage on a Converse stream:
+     * the session's authoritative capability set plus, for a duplex session, a
+     * bounded media counter-offer (codec/sample_rate/channels) the facade
+     * relays to the client. A runtime that never sends a hello is legacy — the
+     * facade proceeds with today's unilateral DuplexStart behaviour.
+     */
+    { $case: "runtimeHello"; runtimeHello: RuntimeHello }
     | undefined;
 }
 
@@ -423,6 +432,39 @@ export interface DuplexStart {
   channels: number;
   /** system_instruction is the optional system prompt for the session. */
   systemInstruction: string;
+}
+
+/**
+ * RuntimeHello is the runtime's first ServerMessage on a Converse stream. It
+ * carries the session's authoritative capability set and, for a duplex session,
+ * the media parameters the runtime requires — a bounded counter-offer to the
+ * facade's DuplexStart proposal. Absence of a hello marks a legacy runtime.
+ */
+export interface RuntimeHello {
+  /**
+   * capabilities is the per-session, authoritative capability set (open set;
+   * consumers display or ignore unknown values).
+   */
+  capabilities: string[];
+  /** media is the bounded media counter-offer. Set only for a duplex session. */
+  media?: MediaNegotiation | undefined;
+}
+
+/**
+ * MediaNegotiation is the bounded counter-offer parameter set. A zero value for
+ * a field means "no requirement / accept the client's proposal" for that field.
+ */
+export interface MediaNegotiation {
+  /** codec is the required audio encoding, e.g. "pcm". */
+  codec: string;
+  /** sample_rate is the required sample rate in Hz, e.g. 24000. */
+  sampleRate: number;
+  /** channels is the required channel count, e.g. 1 for mono. */
+  channels: number;
+  /** frame_rate is the required video frame rate (carried, not yet enforced). */
+  frameRate: number;
+  /** resolution is the required video resolution (carried, not yet enforced). */
+  resolution: number;
 }
 
 /** AudioInputChunk is one inbound audio frame during a duplex session. */
@@ -860,6 +902,9 @@ export const ServerMessage: MessageFns<ServerMessage> = {
       case "interruption":
         Interruption.encode(message.message.interruption, writer.uint32(58).fork()).join();
         break;
+      case "runtimeHello":
+        RuntimeHello.encode(message.message.runtimeHello, writer.uint32(66).fork()).join();
+        break;
     }
     return writer;
   },
@@ -919,6 +964,14 @@ export const ServerMessage: MessageFns<ServerMessage> = {
           message.message = { $case: "interruption", interruption: Interruption.decode(reader, reader.uint32()) };
           continue;
         }
+        case 8: {
+          if (tag !== 66) {
+            break;
+          }
+
+          message.message = { $case: "runtimeHello", runtimeHello: RuntimeHello.decode(reader, reader.uint32()) };
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -942,6 +995,8 @@ export const ServerMessage: MessageFns<ServerMessage> = {
         ? { $case: "mediaChunk", mediaChunk: MediaChunk.fromJSON(object.media_chunk) }
         : isSet(object.interruption)
         ? { $case: "interruption", interruption: Interruption.fromJSON(object.interruption) }
+        : isSet(object.runtime_hello)
+        ? { $case: "runtimeHello", runtimeHello: RuntimeHello.fromJSON(object.runtime_hello) }
         : undefined,
     };
   },
@@ -960,6 +1015,8 @@ export const ServerMessage: MessageFns<ServerMessage> = {
       obj.media_chunk = MediaChunk.toJSON(message.message.mediaChunk);
     } else if (message.message?.$case === "interruption") {
       obj.interruption = Interruption.toJSON(message.message.interruption);
+    } else if (message.message?.$case === "runtimeHello") {
+      obj.runtime_hello = RuntimeHello.toJSON(message.message.runtimeHello);
     }
     return obj;
   },
@@ -1005,6 +1062,15 @@ export const ServerMessage: MessageFns<ServerMessage> = {
           message.message = {
             $case: "interruption",
             interruption: Interruption.fromPartial(object.message.interruption),
+          };
+        }
+        break;
+      }
+      case "runtimeHello": {
+        if (object.message?.runtimeHello !== undefined && object.message?.runtimeHello !== null) {
+          message.message = {
+            $case: "runtimeHello",
+            runtimeHello: RuntimeHello.fromPartial(object.message.runtimeHello),
           };
         }
         break;
@@ -2629,6 +2695,210 @@ export const DuplexStart: MessageFns<DuplexStart> = {
     message.sampleRate = object.sampleRate ?? 0;
     message.channels = object.channels ?? 0;
     message.systemInstruction = object.systemInstruction ?? "";
+    return message;
+  },
+};
+
+function createBaseRuntimeHello(): RuntimeHello {
+  return { capabilities: [], media: undefined };
+}
+
+export const RuntimeHello: MessageFns<RuntimeHello> = {
+  encode(message: RuntimeHello, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    for (const v of message.capabilities) {
+      writer.uint32(10).string(v!);
+    }
+    if (message.media !== undefined) {
+      MediaNegotiation.encode(message.media, writer.uint32(18).fork()).join();
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): RuntimeHello {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseRuntimeHello();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.capabilities.push(reader.string());
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.media = MediaNegotiation.decode(reader, reader.uint32());
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): RuntimeHello {
+    return {
+      capabilities: globalThis.Array.isArray(object?.capabilities)
+        ? object.capabilities.map((e: any) => globalThis.String(e))
+        : [],
+      media: isSet(object.media) ? MediaNegotiation.fromJSON(object.media) : undefined,
+    };
+  },
+
+  toJSON(message: RuntimeHello): unknown {
+    const obj: any = {};
+    if (message.capabilities?.length) {
+      obj.capabilities = message.capabilities;
+    }
+    if (message.media !== undefined) {
+      obj.media = MediaNegotiation.toJSON(message.media);
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<RuntimeHello>, I>>(base?: I): RuntimeHello {
+    return RuntimeHello.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<RuntimeHello>, I>>(object: I): RuntimeHello {
+    const message = createBaseRuntimeHello();
+    message.capabilities = object.capabilities?.map((e) => e) || [];
+    message.media = (object.media !== undefined && object.media !== null)
+      ? MediaNegotiation.fromPartial(object.media)
+      : undefined;
+    return message;
+  },
+};
+
+function createBaseMediaNegotiation(): MediaNegotiation {
+  return { codec: "", sampleRate: 0, channels: 0, frameRate: 0, resolution: 0 };
+}
+
+export const MediaNegotiation: MessageFns<MediaNegotiation> = {
+  encode(message: MediaNegotiation, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.codec !== "") {
+      writer.uint32(10).string(message.codec);
+    }
+    if (message.sampleRate !== 0) {
+      writer.uint32(16).int32(message.sampleRate);
+    }
+    if (message.channels !== 0) {
+      writer.uint32(24).int32(message.channels);
+    }
+    if (message.frameRate !== 0) {
+      writer.uint32(32).int32(message.frameRate);
+    }
+    if (message.resolution !== 0) {
+      writer.uint32(40).int32(message.resolution);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): MediaNegotiation {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseMediaNegotiation();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.codec = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 16) {
+            break;
+          }
+
+          message.sampleRate = reader.int32();
+          continue;
+        }
+        case 3: {
+          if (tag !== 24) {
+            break;
+          }
+
+          message.channels = reader.int32();
+          continue;
+        }
+        case 4: {
+          if (tag !== 32) {
+            break;
+          }
+
+          message.frameRate = reader.int32();
+          continue;
+        }
+        case 5: {
+          if (tag !== 40) {
+            break;
+          }
+
+          message.resolution = reader.int32();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): MediaNegotiation {
+    return {
+      codec: isSet(object.codec) ? globalThis.String(object.codec) : "",
+      sampleRate: isSet(object.sample_rate) ? globalThis.Number(object.sample_rate) : 0,
+      channels: isSet(object.channels) ? globalThis.Number(object.channels) : 0,
+      frameRate: isSet(object.frame_rate) ? globalThis.Number(object.frame_rate) : 0,
+      resolution: isSet(object.resolution) ? globalThis.Number(object.resolution) : 0,
+    };
+  },
+
+  toJSON(message: MediaNegotiation): unknown {
+    const obj: any = {};
+    if (message.codec !== "") {
+      obj.codec = message.codec;
+    }
+    if (message.sampleRate !== 0) {
+      obj.sample_rate = Math.round(message.sampleRate);
+    }
+    if (message.channels !== 0) {
+      obj.channels = Math.round(message.channels);
+    }
+    if (message.frameRate !== 0) {
+      obj.frame_rate = Math.round(message.frameRate);
+    }
+    if (message.resolution !== 0) {
+      obj.resolution = Math.round(message.resolution);
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<MediaNegotiation>, I>>(base?: I): MediaNegotiation {
+    return MediaNegotiation.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<MediaNegotiation>, I>>(object: I): MediaNegotiation {
+    const message = createBaseMediaNegotiation();
+    message.codec = object.codec ?? "";
+    message.sampleRate = object.sampleRate ?? 0;
+    message.channels = object.channels ?? 0;
+    message.frameRate = object.frameRate ?? 0;
+    message.resolution = object.resolution ?? 0;
     return message;
   },
 };
