@@ -937,6 +937,43 @@ func TestBuildRuntimeEnvVars_InjectsWorkspaceNameWithoutMemory(t *testing.T) {
 	assert.Empty(t, workspaceUID, "UID stays memory-gated")
 }
 
+// The FACADE container needs the workspace name too, and gets its own env list
+// — injecting only into the runtime left the facade unable to resolve service
+// discovery, so every agent silently lost session/token/cost recording
+// (#1223's failure mode, reintroduced and caught in review of #1875).
+func TestBuildFacadeEnvVars_InjectsWorkspaceName(t *testing.T) {
+	scheme := runtime.NewScheme()
+	require.NoError(t, omniav1alpha1.AddToScheme(scheme))
+
+	ws := &omniav1alpha1.Workspace{
+		ObjectMeta: metav1.ObjectMeta{Name: "demo", UID: "ws-uid-abc-123"},
+		Spec: omniav1alpha1.WorkspaceSpec{
+			DisplayName: "Demo",
+			Namespace:   omniav1alpha1.NamespaceConfig{Name: "omnia-demo"},
+		},
+	}
+
+	k8sClient := fake.NewClientBuilder().WithScheme(scheme).WithRuntimeObjects(ws).Build()
+	r := &AgentRuntimeReconciler{Client: k8sClient}
+
+	ar := &omniav1alpha1.AgentRuntime{}
+	ar.Name = "test-agent"
+	ar.Namespace = "omnia-demo"
+	ar.Spec.Facades = []omniav1alpha1.FacadeConfig{{Type: omniav1alpha1.FacadeTypeWebSocket}}
+
+	var workspaceName string
+	for _, ev := range r.buildFacadeEnvVars(ar) {
+		if ev.Name == "OMNIA_WORKSPACE_NAME" {
+			workspaceName = ev.Value
+		}
+	}
+
+	assert.Equal(t, "demo", workspaceName,
+		"facade cannot resolve its Workspace without this, and drops all session recording")
+	assert.NotEqual(t, "omnia-demo", workspaceName,
+		"namespace injected instead of workspace name")
+}
+
 func TestBuildRuntimeEnvVars_MemoryDisabled(t *testing.T) {
 	r := &AgentRuntimeReconciler{}
 

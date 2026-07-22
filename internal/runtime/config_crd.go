@@ -154,8 +154,6 @@ func LoadFromCRD(ctx context.Context, c client.Client, name, namespace string) (
 	// recurring bug class here (#1875). An unresolvable name is treated like any
 	// other discovery failure: loud, but non-fatal, so a pod that predates the
 	// operator injecting it still starts and falls back to env vars.
-	// Reuses the workspace name resolved above — the pod never infers it from
-	// its namespace, which is a different identifier (#1875).
 	urls, urlErr := resolver.ResolveServiceURLs(ctx, workspaceName, serviceGroup)
 	if urlErr != nil {
 		log := logf.FromContext(ctx)

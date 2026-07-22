@@ -42,9 +42,9 @@ func facadeServiceAccountName(agentRuntime *omniav1alpha1.AgentRuntime) string {
 // agent's own podOverrides SA, else the Workspace runtime-default SA, else the
 // operator-created <name>-facade SA. RBAC must target that SA — otherwise an
 // overridden/inherited pod SA (e.g. an Azure Workload Identity SA) never
-// receives the workspace-reader binding, service discovery's `list workspaces`
-// is denied, and the facade silently falls back to the in-memory session store
-// with no recording (issue #1223).
+// receives the workspace-reader binding, service discovery's scoped
+// `get workspaces/<name>` is denied, and the facade ends up with no session
+// archive at all and records nothing (issue #1223).
 
 // reconcileFacadeRBAC creates the ServiceAccount, Role, and RoleBinding for facade CRD reading.
 func (r *AgentRuntimeReconciler) reconcileFacadeRBAC(
@@ -84,8 +84,14 @@ func (r *AgentRuntimeReconciler) reconcileWorkspaceReaderBinding(
 	name := fmt.Sprintf("%s-%s-workspace-reader", agentRuntime.Namespace, agentRuntime.Name)
 
 	// Bind the reader scoped to this agent's own workspace rather than the
-	// cluster-wide one (#1875). No workspace means no binding, rather than one
-	// pointing at a role that will never exist.
+	// cluster-wide one (#1875).
+	//
+	// An unresolved workspace SKIPS this reconcile rather than creating a
+	// binding to a role that will never exist. It deliberately does not delete
+	// an existing binding: resolveWorkspaceForNamespace reports a transient API
+	// error and "no such workspace" identically, so deleting here would tear
+	// down a valid binding on a blip. A binding left pointing at a
+	// garbage-collected ClusterRole grants nothing, which is the safer failure.
 	wsName, _ := r.resolveWorkspaceForNamespace(agentRuntime.Namespace)
 	if wsName == "" {
 		log.V(1).Info("skipping workspace-reader ClusterRoleBinding",

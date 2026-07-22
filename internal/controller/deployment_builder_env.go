@@ -71,6 +71,18 @@ func (r *AgentRuntimeReconciler) buildFacadeEnvVars(
 		},
 	}
 
+	// The facade resolves the session-api URL from its own Workspace, so it
+	// needs the workspace name just as the runtime does. Facade and runtime are
+	// separate containers with independent env lists — injecting this only into
+	// the runtime leaves the facade unable to resolve service discovery at all,
+	// which costs every agent its session/token/cost recording (#1223, #1875).
+	if wsName, _ := r.resolveWorkspaceForNamespace(agentRuntime.Namespace); wsName != "" {
+		envVars = append(envVars, corev1.EnvVar{
+			Name:  envWorkspaceName,
+			Value: wsName,
+		})
+	}
+
 	// Determine handler mode - default to runtime if not specified
 	handlerMode := omniav1alpha1.HandlerModeRuntime
 	if f := primaryFacade(agentRuntime); f != nil && f.Handler != nil {
@@ -243,8 +255,7 @@ func (r *AgentRuntimeReconciler) buildRuntimeEnvVars(
 	// always needs it to Get its own Workspace instead of listing every one.
 	if wsName != "" {
 		envVars = append(envVars, corev1.EnvVar{
-			// Name must match pkg/k8s.EnvWorkspaceName.
-			Name:  "OMNIA_WORKSPACE_NAME",
+			Name:  envWorkspaceName,
 			Value: wsName,
 		})
 	}

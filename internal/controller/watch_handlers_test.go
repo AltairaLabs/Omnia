@@ -21,6 +21,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -270,6 +271,55 @@ func TestFindAgentRuntimesForSecret(t *testing.T) {
 			}
 		})
 	}
+}
+
+// An agent reconciled before its Workspace exists gets neither the
+// workspace-reader binding nor OMNIA_WORKSPACE_NAME, and no longer self-heals at
+// pod startup. The Workspace watch is what lets it recover (#1875).
+func TestFindAgentRuntimesForWorkspace(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = omniav1alpha1.AddToScheme(scheme)
+
+	// Workspace "demo" owns namespace "omnia-demo" — distinct identifiers.
+	workspace := &omniav1alpha1.Workspace{
+		ObjectMeta: metav1.ObjectMeta{Name: "demo"},
+		Spec: omniav1alpha1.WorkspaceSpec{
+			DisplayName: "Demo",
+			Namespace:   omniav1alpha1.NamespaceConfig{Name: "omnia-demo"},
+		},
+	}
+
+	inWorkspace := &omniav1alpha1.AgentRuntime{
+		ObjectMeta: metav1.ObjectMeta{Name: "agent-in-workspace", Namespace: "omnia-demo"},
+		Spec:       omniav1alpha1.AgentRuntimeSpec{PromptPackRef: omniav1alpha1.PromptPackRef{Name: "p"}},
+	}
+	elsewhere := &omniav1alpha1.AgentRuntime{
+		ObjectMeta: metav1.ObjectMeta{Name: "agent-elsewhere", Namespace: "other-ns"},
+		Spec:       omniav1alpha1.AgentRuntimeSpec{PromptPackRef: omniav1alpha1.PromptPackRef{Name: "p"}},
+	}
+
+	c := fake.NewClientBuilder().WithScheme(scheme).
+		WithObjects(workspace, inWorkspace, elsewhere).Build()
+	r := &AgentRuntimeReconciler{Client: c, Scheme: scheme}
+
+	requests := r.findAgentRuntimesForWorkspace(context.Background(), workspace)
+
+	require.Len(t, requests, 1, "only agents in the workspace's namespace are enqueued")
+	assert.Equal(t, "agent-in-workspace", requests[0].Name)
+	assert.Equal(t, "omnia-demo", requests[0].Namespace)
+}
+
+// A Workspace with no namespace configured enqueues nothing rather than
+// enqueueing every AgentRuntime in the cluster.
+func TestFindAgentRuntimesForWorkspace_NoNamespace(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = omniav1alpha1.AddToScheme(scheme)
+
+	workspace := &omniav1alpha1.Workspace{ObjectMeta: metav1.ObjectMeta{Name: "demo"}}
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(workspace).Build()
+	r := &AgentRuntimeReconciler{Client: c, Scheme: scheme}
+
+	assert.Empty(t, r.findAgentRuntimesForWorkspace(context.Background(), workspace))
 }
 
 func TestFindAgentRuntimesForProvider(t *testing.T) {

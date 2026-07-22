@@ -879,6 +879,14 @@ func (r *AgentRuntimeReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Watches(
 			&corev1.Secret{},
 			handler.EnqueueRequestsFromMapFunc(r.findAgentRuntimesForSecret),
+		).
+		// Watch Workspace changes and reconcile the AgentRuntimes in its namespace.
+		// Without this, an agent reconciled before its Workspace exists never gets
+		// its workspace-reader binding or OMNIA_WORKSPACE_NAME, and never recovers
+		// (#1875) — the pod no longer discovers the workspace for itself.
+		Watches(
+			&omniav1alpha1.Workspace{},
+			handler.EnqueueRequestsFromMapFunc(r.findAgentRuntimesForWorkspace),
 		)
 
 	b = r.registerFacadeWatches(b)

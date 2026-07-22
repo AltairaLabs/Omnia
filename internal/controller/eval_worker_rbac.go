@@ -223,7 +223,9 @@ func (r *AgentRuntimeReconciler) ensureEvalWorkerWorkspaceReaderBinding(
 	name := fmt.Sprintf("%s-%s-workspace-reader", namespace, evalWorkerName(serviceGroup))
 
 	// Scoped to this eval-worker's own workspace rather than the cluster-wide
-	// reader (#1875). No workspace means no binding.
+	// reader (#1875). An unresolved workspace skips this reconcile rather than
+	// deleting an existing binding — see the note in facade_rbac.go for why a
+	// transient lookup failure must not tear down valid RBAC.
 	wsName, _ := r.resolveWorkspaceForNamespace(namespace)
 	if wsName == "" {
 		log.V(1).Info("skipping eval worker workspace-reader ClusterRoleBinding",
