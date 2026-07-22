@@ -228,6 +228,12 @@ func (r *WorkspaceReconciler) reconcileRoleBindings(ctx context.Context, workspa
 	log := logf.FromContext(ctx)
 	namespaceName := workspace.Spec.Namespace.Name
 
+	// The per-workspace reader that agent pods and eval-workers bind, so they
+	// can get their own Workspace without listing every one (#1875).
+	if err := r.reconcileWorkspaceReaderClusterRole(ctx, workspace); err != nil {
+		return err
+	}
+
 	// Create RoleBindings for workspace ServiceAccounts
 	roles := []struct {
 		role        omniav1alpha1.WorkspaceRole
