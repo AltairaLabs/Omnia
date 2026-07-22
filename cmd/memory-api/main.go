@@ -608,8 +608,9 @@ func run() error {
 	if f.embeddingProviderName != "" {
 		// Embedding spend has no session, so it goes to session-api's
 		// provider_usage table directly. The emitter is best-effort and nil
-		// when SESSION_API_URL is unset (the Prometheus counter still works).
-		usageEmitter := newSessionUsageEmitter(f.sessionAPIURL, log)
+		// when no URL resolves (the Prometheus counter still works).
+		usageEmitter := newSessionUsageEmitter(
+			resolveSessionAPIURL(ctx, f.sessionAPIURL, f.workspace, f.serviceGroup, log), log)
 		embeddingSvc = createEmbeddingService(ctx, f.embeddingProviderName, f.workspace, detectNamespace(), pgStore, usageEmitter, log)
 	}
 
@@ -843,6 +844,46 @@ func buildAuditLogger(enterprise bool, pool *pgxpool.Pool, log logr.Logger) (*ee
 // auditSourceService identifies this service in forwarded audit events; the
 // privacy-api hub keys idempotency on (source_service, source_id).
 const auditSourceService = "memory-api"
+
+// resolveSessionAPIURL resolves the session-api base URL that embedding-spend
+// usage records are emitted to. memory-api makes embedding provider calls that
+// cost money but have no session, so the spend goes to session-api's
+// provider_usage table directly.
+//
+// An explicit --session-api-url flag wins, for operators pointing at an
+// out-of-band endpoint. Otherwise it resolves from this workspace's service
+// group, the same way the privacy-api URL does — memory-api holds a client, so
+// it has no business being told an endpoint its own workspace already knows.
+//
+// Returns "" when nothing resolves, which makes the emitter a no-op.
+func resolveSessionAPIURL(
+	ctx context.Context, flagValue, workspace, serviceGroup string, log logr.Logger,
+) string {
+	if flagValue != "" {
+		return flagValue
+	}
+	if workspace == "" || serviceGroup == "" {
+		return ""
+	}
+	kubeConfig, err := rest.InClusterConfig()
+	if err != nil {
+		log.V(1).Info("embedding usage emitter disabled", "reason", "no in-cluster kubeconfig")
+		return ""
+	}
+	c, err := client.New(kubeConfig, client.Options{Scheme: newPrivacyMiddlewareScheme()})
+	if err != nil {
+		log.V(1).Info("embedding usage emitter disabled", "reason", "k8s client creation failed")
+		return ""
+	}
+	sessionURL, err := servicediscovery.NewResolver(c).SessionURL(ctx, workspace, serviceGroup)
+	if err != nil {
+		log.V(1).Info("embedding usage emitter disabled",
+			"reason", "session-api URL not resolved from workspace",
+			"workspace", workspace, "serviceGroup", serviceGroup)
+		return ""
+	}
+	return sessionURL
+}
 
 // resolvePrivacyURL resolves the privacy-api base URL the audit forwarder ships
 // to, from Workspace CRD status.privacyURL via servicediscovery, reusing the
