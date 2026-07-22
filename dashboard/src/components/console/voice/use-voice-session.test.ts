@@ -1,11 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, act, waitFor } from "@testing-library/react";
-import { MessageTypeInterrupt } from "../../../types/generated/websocket";
+import { MessageTypeInterrupt, MessageTypeSessionConfig } from "../../../types/generated/websocket";
 
 const startMic = vi.fn().mockResolvedValue(undefined);
 const stopMic = vi.fn();
+const reconfigureMic = vi.fn().mockResolvedValue(undefined);
 vi.mock("./use-mic-capture", () => ({
-  useMicCapture: () => ({ start: startMic, stop: stopMic, level: 0 }),
+  useMicCapture: () => ({ start: startMic, stop: stopMic, reconfigure: reconfigureMic, level: 0 }),
 }));
 
 const flush = vi.fn();
@@ -86,6 +87,39 @@ describe("useVoiceSession", () => {
     });
     expect(flush).toHaveBeenCalled();
     expect(onServerMessage).not.toHaveBeenCalled();
+  });
+
+  it("a session_config server message reconfigures mic capture and is not forwarded", async () => {
+    const onServerMessage = vi.fn();
+    renderHook(() =>
+      useVoiceSession({ namespace: "default", agentName: "v", sampleRate: 16000, channels: 1, onServerMessage }),
+    );
+    const onMessageHandler = conn.onMessage.mock.calls[0][0] as (m: unknown) => void;
+    act(() => {
+      onMessageHandler({
+        type: MessageTypeSessionConfig,
+        session_config: { codec: "pcm", sample_rate: 24000, channels: 1 },
+      });
+    });
+    expect(reconfigureMic).toHaveBeenCalledWith(24000, 1);
+    expect(onServerMessage).not.toHaveBeenCalled();
+  });
+
+  it("a session_config the client cannot satisfy tears down to error", async () => {
+    reconfigureMic.mockRejectedValueOnce(new Error("cannot capture at 48000"));
+    const { result } = renderHook(() =>
+      useVoiceSession({ namespace: "default", agentName: "v", sampleRate: 16000, channels: 1 }),
+    );
+    const onMessageHandler = conn.onMessage.mock.calls[0][0] as (m: unknown) => void;
+    act(() => {
+      onMessageHandler({
+        type: MessageTypeSessionConfig,
+        session_config: { codec: "pcm", sample_rate: 48000, channels: 2 },
+      });
+    });
+    await waitFor(() => expect(result.current.state).toBe("error"));
+    expect(stopMic).toHaveBeenCalled();
+    expect(stopPlay).toHaveBeenCalled();
   });
 
   it("first connect (resumed:false) goes live; resumed:true stays live and keeps seq", async () => {

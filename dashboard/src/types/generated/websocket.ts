@@ -143,6 +143,12 @@ export const MessageTypeMediaChunk: MessageType = "media_chunk";
  */
 export const MessageTypeInterrupt: MessageType = "interrupt";
 /**
+ * MessageTypeSessionConfig relays the runtime's negotiated duplex audio
+ * format (the RuntimeHello counter-offer) to the client, which (re)captures
+ * at that codec / sample_rate / channels.
+ */
+export const MessageTypeSessionConfig: MessageType = "session_config";
+/**
  * ToolCallAckInfo contains acknowledgement of a client-side tool call.
  * Sent by the client to indicate it received the tool call and is working on it.
  */
@@ -288,6 +294,11 @@ export interface ServerMessage {
    * MediaChunk contains streaming media chunk details (for media_chunk type).
    */
   media_chunk?: MediaChunkInfo;
+  /**
+   * SessionConfig contains the negotiated duplex audio format (for
+   * session_config type).
+   */
+  session_config?: SessionConfigInfo;
   /**
    * Connected contains connection info (for connected type).
    */
@@ -443,6 +454,25 @@ export interface MediaChunkInfo {
   mime_type: string;
 }
 /**
+ * SessionConfigInfo carries the runtime's negotiated duplex audio format (the
+ * RuntimeHello counter-offer) to the client. The client (re)captures at this
+ * codec / sample rate / channels for the remainder of the session.
+ */
+export interface SessionConfigInfo {
+  /**
+   * Codec is the required audio encoding, e.g. "pcm".
+   */
+  codec: string;
+  /**
+   * SampleRate is the required sample rate in Hz, e.g. 24000.
+   */
+  sample_rate: number /* int */;
+  /**
+   * Channels is the required channel count, e.g. 1 for mono.
+   */
+  channels: number /* int */;
+}
+/**
  * ConnectionCapabilities represents negotiated connection features.
  * Sent in the connected message to inform the client of available capabilities.
  */
@@ -511,3 +541,9 @@ export const ErrorCodeMediaNotEnabled = "MEDIA_NOT_ENABLED";
  * Error codes.
  */
 export const ErrorCodeRateLimited = "RATE_LIMITED";
+/**
+ * ErrorCodeUnsatisfiableFormat is sent when the runtime's duplex media
+ * counter-offer cannot be satisfied by this facade (e.g. it requires video,
+ * which this audio-only path does not implement).
+ */
+export const ErrorCodeUnsatisfiableFormat = "UNSATISFIABLE_FORMAT";
