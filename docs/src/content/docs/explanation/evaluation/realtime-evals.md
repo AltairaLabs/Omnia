@@ -91,7 +91,7 @@ Realtime evals use two execution patterns depending on the agent's framework typ
 flowchart TB
     AR["AgentRuntime<br/><i>spec.evals.enabled: true</i>"]
 
-    AR --> NonPK["Non-PromptKit<br/>(langchain, autogen, custom)"]
+    AR --> NonPK["Non-PromptKit<br/>(langchain, custom)"]
     AR --> PK["PromptKit Agents"]
 
     NonPK --> PA1["<b>Pattern A only</b><br/>Facade → session-api<br/>→ Redis Streams → eval worker"]

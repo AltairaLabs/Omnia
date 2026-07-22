@@ -9,7 +9,7 @@ export type HandlerMode = "echo" | "demo" | "runtime";
 export type ContextStoreType = "memory" | "redis";
 export type ProviderType = "claude" | "openai" | "gemini" | "ollama" | "mock";
 export type AutoscalerType = "hpa" | "keda";
-export type FrameworkType = "promptkit" | "langchain" | "autogen" | "custom";
+export type FrameworkType = "promptkit" | "langchain" | "custom";
 
 // Enums
 export type PromptPackTrack = "stable" | "prerelease";

@@ -41,7 +41,6 @@ const LABELS = {
   agentFramework: 'label[data-slot="label"]:has-text("Agent Framework")',
   promptKit: 'text=PromptKit',
   langChain: 'text=LangChain',
-  autoGen: 'text=AutoGen',
   custom: 'label:has-text("Custom")',
   customText: 'text=Custom',
   promptPack: 'label[data-slot="label"]:has-text("PromptPack")',
@@ -204,7 +203,6 @@ test.describe('Deploy Agent Wizard', () => {
     // Verify all framework options are present
     await expect(dialog.locator(LABELS.promptKit)).toBeVisible();
     await expect(dialog.locator(LABELS.langChain)).toBeVisible();
-    await expect(dialog.locator(LABELS.autoGen)).toBeVisible();
     await expect(dialog.locator(LABELS.customText)).toBeVisible();
   });
 

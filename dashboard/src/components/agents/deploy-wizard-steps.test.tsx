@@ -64,9 +64,9 @@ describe("FrameworkStep", () => {
     ).toBeInTheDocument();
   });
 
-  it("renders the Container Image input for autogen", () => {
+  it("renders the Container Image input for langchain", () => {
     render(
-      <FrameworkStep formData={{ ...baseForm, framework: "autogen" }} updateField={vi.fn()} />,
+      <FrameworkStep formData={{ ...baseForm, framework: "langchain" }} updateField={vi.fn()} />,
     );
     expect(screen.getByLabelText("Container Image")).toBeInTheDocument();
   });
