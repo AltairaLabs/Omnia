@@ -142,11 +142,24 @@ func LoadFromCRD(ctx context.Context, c client.Client, name, namespace string) (
 	if serviceGroup == "" {
 		serviceGroup = "default"
 	}
-	urls, urlErr := resolver.ResolveServiceURLs(ctx, serviceGroup)
+	// The workspace name comes from the operator, never inferred from the
+	// namespace — they are different identifiers and conflating them is a
+	// recurring bug class here (#1875). An unresolvable name is treated like any
+	// other discovery failure: loud, but non-fatal, so a pod that predates the
+	// operator injecting it still starts and falls back to env vars.
+	wsName, wsNameErr := k8s.WorkspaceNameFromEnvOrLabels(ar.Labels)
+	if wsNameErr != nil {
+		logf.FromContext(ctx).V(1).Info("workspace name unresolved",
+			"reason", wsNameErr.Error(),
+			"impact", "service URLs can only come from env overrides")
+	}
+	// Called even when the name is unknown: the resolver checks env overrides
+	// before it needs a workspace, so this preserves the env-only path.
+	urls, urlErr := resolver.ResolveServiceURLs(ctx, wsName, serviceGroup)
 	if urlErr != nil {
 		log := logf.FromContext(ctx)
 		log.Error(urlErr, "service URL resolution failed, falling back to env vars",
-			"serviceGroup", serviceGroup)
+			"serviceGroup", serviceGroup, "workspace", wsName)
 	} else {
 		cfg.SessionAPIURL = urls.SessionURL
 		cfg.MemoryAPIURL = urls.MemoryURL

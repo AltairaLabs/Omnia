@@ -112,10 +112,16 @@ func main() {
 		if group == "" {
 			group = "default"
 		}
+		// Operator-injected workspace name; never inferred from the namespace,
+		// which is a different identifier (#1875).
+		wsName, wsErr := k8s.WorkspaceNameFromEnvOrLabels(nil)
+		if wsErr != nil {
+			log.Info("cannot resolve session-api URL", "error", wsErr.Error())
+		}
 		backoff := 2 * time.Second
-		for attempt := 1; attempt <= 15; attempt++ {
+		for attempt := 1; attempt <= 15 && wsErr == nil; attempt++ {
 			urls, resolveErr := resolver.ResolveServiceURLs(
-				context.Background(), group,
+				context.Background(), wsName, group,
 			)
 			if resolveErr == nil {
 				apiURL = urls.SessionURL
