@@ -1560,6 +1560,13 @@ type AgentRuntimeStatus struct {
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 
+	// runtimeCapabilities are the contract features the running runtime
+	// advertises, self-reported at startup. An open set — the control plane
+	// displays whatever is reported. Empty means the runtime predates capability
+	// advertisement (legacy) or has not reported yet.
+	// +optional
+	RuntimeCapabilities []string `json:"runtimeCapabilities,omitempty"`
+
 	// observedGeneration is the most recent generation observed by the controller.
 	// +optional
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`

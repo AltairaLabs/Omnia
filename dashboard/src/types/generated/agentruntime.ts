@@ -3188,6 +3188,11 @@ export interface AgentRuntimeStatus {
      * (mode replicaWeighted). Lets dashboards label the weight "approx". */
     trafficWeightEnforced?: boolean;
   };
+  /** runtimeCapabilities are the contract features the running runtime
+   * advertises, self-reported at startup. An open set — the control plane
+   * displays whatever is reported. Empty means the runtime predates capability
+   * advertisement (legacy) or has not reported yet. */
+  runtimeCapabilities?: string[];
   /** serviceEndpoint is the internal Kubernetes service endpoint for the agent facade.
    * Format: {name}.{namespace}.svc.cluster.local:{port}
    * This can be used by dashboard or other services to connect to the agent. */

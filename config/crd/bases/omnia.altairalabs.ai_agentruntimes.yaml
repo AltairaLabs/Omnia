@@ -6068,6 +6068,15 @@ spec:
                       (mode replicaWeighted). Lets dashboards label the weight "approx".
                     type: boolean
                 type: object
+              runtimeCapabilities:
+                description: |-
+                  runtimeCapabilities are the contract features the running runtime
+                  advertises, self-reported at startup. An open set — the control plane
+                  displays whatever is reported. Empty means the runtime predates capability
+                  advertisement (legacy) or has not reported yet.
+                items:
+                  type: string
+                type: array
               serviceEndpoint:
                 description: |-
                   serviceEndpoint is the internal Kubernetes service endpoint for the agent facade.
