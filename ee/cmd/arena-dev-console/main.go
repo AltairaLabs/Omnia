@@ -113,13 +113,18 @@ func main() {
 			group = "default"
 		}
 		// Operator-injected workspace name; never inferred from the namespace,
-		// which is a different identifier (#1875).
+		// which is a different identifier (#1875). Retrying is pointless when it
+		// is absent — it is a static env var, not a value that becomes available
+		// — so fail fast rather than burning the backoff schedule.
 		wsName, wsErr := k8s.WorkspaceNameFromEnvOrLabels(nil)
 		if wsErr != nil {
-			log.Info("cannot resolve session-api URL", "error", wsErr.Error())
+			log.Error(wsErr, "cannot resolve session-api URL",
+				"reason", "workspace name not injected",
+				"impact", "dev console cannot reach session-api")
+			os.Exit(1)
 		}
 		backoff := 2 * time.Second
-		for attempt := 1; attempt <= 15 && wsErr == nil; attempt++ {
+		for attempt := 1; attempt <= 15; attempt++ {
 			urls, resolveErr := resolver.ResolveServiceURLs(
 				context.Background(), wsName, group,
 			)
