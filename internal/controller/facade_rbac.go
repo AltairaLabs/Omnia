@@ -42,9 +42,9 @@ func facadeServiceAccountName(agentRuntime *omniav1alpha1.AgentRuntime) string {
 // agent's own podOverrides SA, else the Workspace runtime-default SA, else the
 // operator-created <name>-facade SA. RBAC must target that SA — otherwise an
 // overridden/inherited pod SA (e.g. an Azure Workload Identity SA) never
-// receives the workspace-reader binding, service discovery's `list workspaces`
-// is denied, and the facade silently falls back to the in-memory session store
-// with no recording (issue #1223).
+// receives the workspace-reader binding, service discovery's scoped
+// `get workspaces/<name>` is denied, and the facade ends up with no session
+// archive at all and records nothing (issue #1223).
 
 // reconcileFacadeRBAC creates the ServiceAccount, Role, and RoleBinding for facade CRD reading.
 func (r *AgentRuntimeReconciler) reconcileFacadeRBAC(
@@ -83,6 +83,28 @@ func (r *AgentRuntimeReconciler) reconcileWorkspaceReaderBinding(
 	log := logf.FromContext(ctx)
 	name := fmt.Sprintf("%s-%s-workspace-reader", agentRuntime.Namespace, agentRuntime.Name)
 
+	// Bind the reader scoped to this agent's own workspace rather than the
+	// cluster-wide one (#1875).
+	//
+	// An unresolved workspace SKIPS this reconcile rather than creating a
+	// binding to a role that will never exist. It deliberately does not delete
+	// an existing binding: resolveWorkspaceForNamespace reports a transient API
+	// error and "no such workspace" identically, so deleting here would tear
+	// down a valid binding on a blip. A binding left pointing at a
+	// garbage-collected ClusterRole grants nothing, which is the safer failure.
+	wsName, _ := r.resolveWorkspaceForNamespace(agentRuntime.Namespace)
+	if wsName == "" {
+		log.V(1).Info("skipping workspace-reader ClusterRoleBinding",
+			"reason", "no Workspace owns this namespace",
+			"namespace", agentRuntime.Namespace)
+		return nil
+	}
+	roleName := WorkspaceReaderClusterRoleName(wsName)
+
+	if err := deleteStaleRoleRefBinding(ctx, r.Client, name, roleName); err != nil {
+		return err
+	}
+
 	crb := &rbacv1.ClusterRoleBinding{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: name,
@@ -94,12 +116,14 @@ func (r *AgentRuntimeReconciler) reconcileWorkspaceReaderBinding(
 			labelAppName:      labelValueOmniaAgent,
 			labelAppInstance:  agentRuntime.Name,
 			labelAppManagedBy: labelValueOmniaOperator,
+			// Intentionally the NAMESPACE, not the workspace name — this label
+			// is consumed as a namespace and is tested that way.
 			"omnia.altairalabs.ai/workspace-reader-for": agentRuntime.Namespace,
 		}
 		crb.RoleRef = rbacv1.RoleRef{
-			APIGroup: "rbac.authorization.k8s.io",
-			Kind:     "ClusterRole",
-			Name:     r.AgentWorkspaceReaderClusterRole,
+			APIGroup: rbacAPIGroup,
+			Kind:     kindClusterRole,
+			Name:     roleName,
 		}
 		crb.Subjects = []rbacv1.Subject{
 			{

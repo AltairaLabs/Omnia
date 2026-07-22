@@ -66,43 +66,54 @@ func NewResolver(c client.Client) *Resolver {
 	return &Resolver{client: c}
 }
 
-// ResolveServiceURLs returns the session-api and memory-api URLs for the given
-// service group. It first checks environment variable overrides; if both are set,
-// they are returned immediately without any Kubernetes lookups. Otherwise it
-// requires a non-nil Kubernetes client to look up the Workspace CRD.
-func (r *Resolver) ResolveServiceURLs(ctx context.Context, serviceGroup string) (*ServiceURLs, error) {
+// ResolveServiceURLs returns the session-api and memory-api URLs for a service
+// group in the named workspace. It first checks environment variable overrides;
+// if both are set, they are returned immediately without any Kubernetes lookups.
+// Otherwise it requires a non-nil Kubernetes client and does a Get on the named
+// Workspace.
+//
+// The lookup is by name rather than a cluster-wide list filtered on
+// spec.namespace.name so that a caller's RBAC can be narrowed with
+// resourceNames — an agent pod has no business enumerating other workspaces
+// (#1875).
+//
+// workspaceName is the Workspace CR's metadata.name (e.g. "demo"), NOT the
+// namespace that workspace owns (e.g. "omnia-demo").
+func (r *Resolver) ResolveServiceURLs(
+	ctx context.Context, workspaceName, serviceGroup string,
+) (*ServiceURLs, error) {
 	if urls := resolveFromEnv(); urls != nil {
 		return urls, nil
 	}
 	if r.client == nil {
 		return nil, fmt.Errorf("no env var overrides set and no Kubernetes client available")
 	}
-	return r.resolveFromWorkspace(ctx, serviceGroup)
-}
-
-// resolveFromEnv returns ServiceURLs from environment variables if both session and
-// memory URLs are set, otherwise returns nil. PrivacyURL is additive — it is
-// populated if set, but its absence does not block the env-var path.
-func resolveFromEnv() *ServiceURLs {
-	sessionURL := os.Getenv(envSessionAPIURL)
-	memoryURL := os.Getenv(envMemoryAPIURL)
-	if sessionURL != "" && memoryURL != "" {
-		return &ServiceURLs{
-			SessionURL: sessionURL,
-			MemoryURL:  memoryURL,
-			PrivacyURL: os.Getenv(envPrivacyAPIURL),
-		}
+	if workspaceName == "" {
+		return nil, fmt.Errorf("workspace name is required to resolve service URLs")
 	}
-	return nil
-}
 
-// resolveFromWorkspace looks up the Workspace CRD and returns URLs from its status.
-func (r *Resolver) resolveFromWorkspace(ctx context.Context, serviceGroup string) (*ServiceURLs, error) {
-	ws, err := r.findWorkspaceByNamespace(ctx)
+	ws, err := r.GetWorkspace(ctx, workspaceName)
 	if err != nil {
-		return nil, fmt.Errorf("find workspace: %w", err)
+		return nil, err
 	}
+	return urlsForGroup(ws, serviceGroup)
+}
 
+// GetWorkspace fetches a Workspace by name. Exported so callers needing more
+// than URLs off the same object — the runtime wants metadata.uid to scope
+// memory — reuse this single read instead of issuing their own lookup.
+func (r *Resolver) GetWorkspace(
+	ctx context.Context, workspaceName string,
+) (*omniav1alpha1.Workspace, error) {
+	var ws omniav1alpha1.Workspace
+	if err := r.client.Get(ctx, client.ObjectKey{Name: workspaceName}, &ws); err != nil {
+		return nil, fmt.Errorf("get workspace %q: %w", workspaceName, err)
+	}
+	return &ws, nil
+}
+
+// urlsForGroup picks a service group's URLs out of a Workspace's status.
+func urlsForGroup(ws *omniav1alpha1.Workspace, serviceGroup string) (*ServiceURLs, error) {
 	for _, svc := range ws.Status.Services {
 		if svc.Name != serviceGroup {
 			continue
@@ -124,61 +135,30 @@ func (r *Resolver) resolveFromWorkspace(ctx context.Context, serviceGroup string
 	return nil, fmt.Errorf("service group %q not found in workspace %q", serviceGroup, ws.Name)
 }
 
-// ResolveByWorkspaceName returns the session-api and memory-api URLs for a
-// workspace looked up by its metadata.name rather than by the caller's namespace.
-// This is used by cross-namespace consumers like the doctor that run in omnia-system
-// but need to discover services in a workspace's namespace.
+// resolveFromEnv returns ServiceURLs from environment variables if both session and
+// memory URLs are set, otherwise returns nil. PrivacyURL is additive — it is
+// populated if set, but its absence does not block the env-var path.
+func resolveFromEnv() *ServiceURLs {
+	sessionURL := os.Getenv(envSessionAPIURL)
+	memoryURL := os.Getenv(envMemoryAPIURL)
+	if sessionURL != "" && memoryURL != "" {
+		return &ServiceURLs{
+			SessionURL: sessionURL,
+			MemoryURL:  memoryURL,
+			PrivacyURL: os.Getenv(envPrivacyAPIURL),
+		}
+	}
+	return nil
+}
+
+// ResolveByWorkspaceName is retained for cross-namespace consumers like the
+// doctor, which run in omnia-system and discover services in some other
+// workspace's namespace. It is now exactly ResolveServiceURLs — the two used to
+// differ only in how they located the Workspace, and both now do a Get.
 func (r *Resolver) ResolveByWorkspaceName(
 	ctx context.Context, workspaceName, serviceGroup string,
 ) (*ServiceURLs, error) {
-	if urls := resolveFromEnv(); urls != nil {
-		return urls, nil
-	}
-	if r.client == nil {
-		return nil, fmt.Errorf("no env var overrides set and no Kubernetes client available")
-	}
-
-	var ws omniav1alpha1.Workspace
-	if err := r.client.Get(ctx, client.ObjectKey{Name: workspaceName}, &ws); err != nil {
-		return nil, fmt.Errorf("get workspace %q: %w", workspaceName, err)
-	}
-
-	for _, svc := range ws.Status.Services {
-		if svc.Name != serviceGroup {
-			continue
-		}
-		if svc.SessionURL == "" {
-			return nil, fmt.Errorf("service group %q is not ready in workspace %q", serviceGroup, workspaceName)
-		}
-		return &ServiceURLs{
-			SessionURL: svc.SessionURL,
-			MemoryURL:  svc.MemoryURL,
-			PrivacyURL: ws.Status.PrivacyURL,
-		}, nil
-	}
-	return nil, fmt.Errorf("service group %q not found in workspace %q", serviceGroup, workspaceName)
-}
-
-// findWorkspaceByNamespace detects the current namespace and finds the Workspace
-// whose spec.namespace.name matches it. The namespace is read from the OMNIA_NAMESPACE
-// env var, falling back to the in-cluster service account token file.
-func (r *Resolver) findWorkspaceByNamespace(ctx context.Context) (*omniav1alpha1.Workspace, error) {
-	ns, err := currentNamespace()
-	if err != nil {
-		return nil, fmt.Errorf("detect namespace: %w", err)
-	}
-
-	var list omniav1alpha1.WorkspaceList
-	if err := r.client.List(ctx, &list); err != nil {
-		return nil, fmt.Errorf("list workspaces: %w", err)
-	}
-
-	for i := range list.Items {
-		if list.Items[i].Spec.Namespace.Name == ns {
-			return &list.Items[i], nil
-		}
-	}
-	return nil, fmt.Errorf("no workspace found for namespace %q", ns)
+	return r.ResolveServiceURLs(ctx, workspaceName, serviceGroup)
 }
 
 // currentNamespace returns the namespace this process is running in.

@@ -10,27 +10,52 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/altairalabs/omnia/internal/agent"
+	omniak8s "github.com/altairalabs/omnia/pkg/k8s"
 	"github.com/altairalabs/omnia/pkg/servicediscovery"
 )
 
 type fakeResolver struct {
 	urls *servicediscovery.ServiceURLs
 	err  error
+
+	gotWorkspace string
 }
 
-func (f *fakeResolver) ResolveServiceURLs(context.Context, string) (*servicediscovery.ServiceURLs, error) {
+func (f *fakeResolver) ResolveServiceURLs(
+	_ context.Context, workspaceName, _ string,
+) (*servicediscovery.ServiceURLs, error) {
+	f.gotWorkspace = workspaceName
 	return f.urls, f.err
 }
 
 func TestSessionStoreFromResolver_HTTPClientOnSuccess(t *testing.T) {
+	t.Setenv(omniak8s.EnvWorkspaceName, "demo")
+
+	resolver := &fakeResolver{urls: &servicediscovery.ServiceURLs{SessionURL: "http://session-api:8080"}}
+	store, mode, err := sessionStoreFromResolver(context.Background(), resolver, logr.Discard())
+
+	require.NoError(t, err)
+	assert.Equal(t, agent.SessionStoreModeHTTPClient, mode)
+	require.NotNil(t, store)
+	// The workspace NAME is passed through, not the namespace it owns (#1875).
+	assert.Equal(t, "demo", resolver.gotWorkspace)
+}
+
+// Without the operator-injected workspace name the facade cannot scope its
+// Workspace read, and must fail the same loud, non-fatal way as a discovery
+// error rather than guessing a name from its namespace (#1875).
+func TestSessionStoreFromResolver_NoArchiveWhenWorkspaceNameMissing(t *testing.T) {
+	t.Setenv(omniak8s.EnvWorkspaceName, "")
+
 	store, mode, err := sessionStoreFromResolver(
 		context.Background(),
 		&fakeResolver{urls: &servicediscovery.ServiceURLs{SessionURL: "http://session-api:8080"}},
 		logr.Discard(),
 	)
+
 	require.NoError(t, err)
-	assert.Equal(t, agent.SessionStoreModeHTTPClient, mode)
-	require.NotNil(t, store)
+	assert.Equal(t, agent.SessionStoreModeNone, mode)
+	require.Nil(t, store)
 }
 
 // TestSessionStoreFromResolver_MemoryFallbackOnDiscoveryFailure is the #1223

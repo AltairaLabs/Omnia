@@ -582,6 +582,20 @@ func (r *ArenaDevSessionReconciler) reconcileDeployment(ctx context.Context, ses
 		})
 	}
 
+	// When no SESSION_API_URL applies, the dev console resolves the URL from its
+	// own Workspace and needs the name to do that scoped read (#1875). Injected
+	// separately from the URL above because the two become available at
+	// different times: the Workspace object exists well before its
+	// status.services is populated, so the pod still needs its retry loop to
+	// wait out a late-ready service group — and without the name that loop
+	// cannot run at all, leaving the console to exit rather than start.
+	if wsName := r.resolveWorkspaceNameForNamespace(ctx, session.Namespace); wsName != "" {
+		envVars = append(envVars, corev1.EnvVar{
+			Name:  "OMNIA_WORKSPACE_NAME",
+			Value: wsName,
+		})
+	}
+
 	envVars = append(envVars, providerEnvVars...)
 	if r.MgmtPlaneJWKSURL != "" {
 		envVars = append(envVars, corev1.EnvVar{
@@ -804,6 +818,25 @@ func (r *ArenaDevSessionReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(&rbacv1.Role{}).
 		Owns(&rbacv1.RoleBinding{}).
 		Complete(r)
+}
+
+// resolveWorkspaceNameForNamespace returns the name of the Workspace that owns
+// the given namespace, or "" when none does.
+//
+// Unlike resolveSessionURLForWorkspace this does not depend on status, so it
+// returns a name for a Workspace whose service group is not ready yet — which
+// is the case the dev console's retry loop exists to handle (#1875).
+func (r *ArenaDevSessionReconciler) resolveWorkspaceNameForNamespace(ctx context.Context, namespace string) string {
+	var list corev1alpha1.WorkspaceList
+	if err := r.List(ctx, &list); err != nil {
+		return ""
+	}
+	for _, ws := range list.Items {
+		if ws.Spec.Namespace.Name == namespace {
+			return ws.Name
+		}
+	}
+	return ""
 }
 
 // resolveSessionURLForWorkspace looks up the session-api URL from the Workspace CRD status

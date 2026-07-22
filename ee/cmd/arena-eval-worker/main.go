@@ -276,7 +276,13 @@ func resolveSessionAPIURL(
 	if group == "" {
 		group = defaultSvcGroup
 	}
-	urls, err := resolver.ResolveServiceURLs(ctx, group)
+	// Operator-injected; the eval-worker has no AgentRuntime of its own to fall
+	// back to, so the env var is required here (#1875).
+	wsName, wsErr := k8s.WorkspaceNameFromEnvOrLabels(nil)
+	if wsErr != nil {
+		return "", fmt.Errorf("resolve session-api URL: %w", wsErr)
+	}
+	urls, err := resolver.ResolveServiceURLs(ctx, wsName, group)
 	if err != nil {
 		return "", fmt.Errorf("resolve session-api URL via Workspace CRD (service group %q): %w", group, err)
 	}

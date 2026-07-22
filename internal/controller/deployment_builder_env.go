@@ -71,6 +71,18 @@ func (r *AgentRuntimeReconciler) buildFacadeEnvVars(
 		},
 	}
 
+	// The facade resolves the session-api URL from its own Workspace, so it
+	// needs the workspace name just as the runtime does. Facade and runtime are
+	// separate containers with independent env lists — injecting this only into
+	// the runtime leaves the facade unable to resolve service discovery at all,
+	// which costs every agent its session/token/cost recording (#1223, #1875).
+	if wsName, _ := r.resolveWorkspaceForNamespace(agentRuntime.Namespace); wsName != "" {
+		envVars = append(envVars, corev1.EnvVar{
+			Name:  envWorkspaceName,
+			Value: wsName,
+		})
+	}
+
 	// Determine handler mode - default to runtime if not specified
 	handlerMode := omniav1alpha1.HandlerModeRuntime
 	if f := primaryFacade(agentRuntime); f != nil && f.Handler != nil {
@@ -235,18 +247,28 @@ func (r *AgentRuntimeReconciler) buildRuntimeEnvVars(
 		})
 	}
 
+	wsName, wsUID := r.resolveWorkspaceForNamespace(agentRuntime.Namespace)
+
+	// The operator is the only component that authoritatively knows which
+	// Workspace owns a namespace, so it pushes the name to the pod rather than
+	// leaving the pod to infer it. Injected unconditionally: service discovery
+	// always needs it to Get its own Workspace instead of listing every one.
+	if wsName != "" {
+		envVars = append(envVars, corev1.EnvVar{
+			Name:  envWorkspaceName,
+			Value: wsName,
+		})
+	}
+
 	// Memory: inject workspace UID so the runtime can scope memory operations.
 	// The memory_entities table uses workspace_id as UUID (the Workspace CR's UID).
-	if agentRuntime.Spec.Memory != nil && agentRuntime.Spec.Memory.Enabled {
-		wsUID := r.resolveWorkspaceUIDForNamespace(agentRuntime.Namespace)
-		if wsUID != "" {
-			envVars = append(envVars, corev1.EnvVar{
-				// Name must match internal/runtime's envWorkspaceUID — the runtime
-				// prefers this over a cluster-wide WorkspaceList (#1875).
-				Name:  "OMNIA_WORKSPACE_UID",
-				Value: wsUID,
-			})
-		}
+	if agentRuntime.Spec.Memory != nil && agentRuntime.Spec.Memory.Enabled && wsUID != "" {
+		envVars = append(envVars, corev1.EnvVar{
+			// Name must match internal/runtime's envWorkspaceUID — the runtime
+			// prefers this over reading the Workspace itself (#1875).
+			Name:  "OMNIA_WORKSPACE_UID",
+			Value: wsUID,
+		})
 	}
 
 	// Check for mock provider annotation (for E2E testing)
@@ -396,21 +418,25 @@ func (r *AgentRuntimeReconciler) appendPromptPackVersionEnv(
 	})
 }
 
-// defaultImageForFramework returns the default container image for a framework type.
-// resolveWorkspaceUIDForNamespace finds the Workspace CRD whose spec.namespace.name
-// matches the given namespace and returns its UID.
-func (r *AgentRuntimeReconciler) resolveWorkspaceUIDForNamespace(namespace string) string {
+// resolveWorkspaceForNamespace returns the name and UID of the Workspace that
+// owns the given namespace, or empty strings when it cannot be determined.
+//
+// The list is legitimate here: the operator holds cluster-wide read and is the
+// component that knows the namespace-to-workspace mapping. It is precisely the
+// lookup agent pods must NOT perform for themselves, which is why the results
+// are injected into them as env vars instead (#1875).
+func (r *AgentRuntimeReconciler) resolveWorkspaceForNamespace(namespace string) (name, uid string) {
 	if r.Client == nil {
-		return ""
+		return "", ""
 	}
 	var list omniav1alpha1.WorkspaceList
 	if err := r.List(context.Background(), &list); err != nil {
-		return ""
+		return "", ""
 	}
 	for _, ws := range list.Items {
 		if ws.Spec.Namespace.Name == namespace {
-			return string(ws.UID)
+			return ws.Name, string(ws.UID)
 		}
 	}
-	return ""
+	return "", ""
 }

@@ -161,6 +161,42 @@ func (r *AgentRuntimeReconciler) findAgentRuntimesForToolRegistry(ctx context.Co
 	return requests
 }
 
+// findAgentRuntimesForWorkspace returns reconcile requests for every AgentRuntime
+// in the namespace a Workspace owns.
+//
+// Without this, an agent never recovers when its Workspace appears after it
+// (#1875), the same failure #1491 fixed for ToolRegistry. Both the scoped
+// workspace-reader ClusterRoleBinding and the OMNIA_WORKSPACE_NAME env var are
+// resolved at AgentRuntime-reconcile time, so an agent reconciled before its
+// Workspace exists gets neither and stays that way — it no longer self-heals at
+// pod startup, because the pod no longer discovers the workspace for itself.
+func (r *AgentRuntimeReconciler) findAgentRuntimesForWorkspace(ctx context.Context, obj client.Object) []reconcile.Request {
+	workspace, ok := obj.(*omniav1alpha1.Workspace)
+	if !ok {
+		return nil
+	}
+	namespace := workspace.Spec.Namespace.Name
+	if namespace == "" {
+		return nil
+	}
+	log := logf.FromContext(ctx).WithValues("workspace", workspace.Name, "namespace", namespace)
+
+	var agentRuntimes omniav1alpha1.AgentRuntimeList
+	if err := r.List(ctx, &agentRuntimes, client.InNamespace(namespace)); err != nil {
+		log.Error(err, "failed to list AgentRuntimes for Workspace watch")
+		return nil
+	}
+
+	requests := make([]reconcile.Request, 0, len(agentRuntimes.Items))
+	for _, ar := range agentRuntimes.Items {
+		log.Info("enqueueing AgentRuntime for Workspace change", "agentruntime", ar.Name)
+		requests = append(requests, reconcile.Request{
+			NamespacedName: types.NamespacedName{Name: ar.Name, Namespace: ar.Namespace},
+		})
+	}
+	return requests
+}
+
 // filterAgentRuntimesByToolRegistry filters a list of AgentRuntimes to those that
 // reference the given ToolRegistry key ("namespace/name").
 func (r *AgentRuntimeReconciler) filterAgentRuntimesByToolRegistry(list *omniav1alpha1.AgentRuntimeList, key string, log logr.Logger) []reconcile.Request {

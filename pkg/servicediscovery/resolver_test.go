@@ -18,7 +18,6 @@ package servicediscovery
 
 import (
 	"context"
-	"os"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -59,7 +58,7 @@ func TestResolveServiceURLs_EnvVarOverride(t *testing.T) {
 	t.Setenv(envMemoryAPIURL, "http://memory-override.example.com")
 
 	r := NewResolver(nil)
-	urls, err := r.ResolveServiceURLs(context.Background(), "default")
+	urls, err := r.ResolveServiceURLs(context.Background(), testWorkspaceName, "default")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -76,7 +75,7 @@ func TestResolveServiceURLs_NoEnvNoClient(t *testing.T) {
 	t.Setenv(envMemoryAPIURL, "")
 
 	r := NewResolver(nil)
-	_, err := r.ResolveServiceURLs(context.Background(), "default")
+	_, err := r.ResolveServiceURLs(context.Background(), testWorkspaceName, "default")
 	if err == nil {
 		t.Fatal("expected error when no env vars and nil client")
 	}
@@ -102,7 +101,7 @@ func TestResolveServiceURLs_FromWorkspaceStatus(t *testing.T) {
 		Build()
 
 	r := NewResolver(fakeClient)
-	urls, err := r.ResolveServiceURLs(context.Background(), "default")
+	urls, err := r.ResolveServiceURLs(context.Background(), testWorkspaceName, "default")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -136,7 +135,7 @@ func TestResolveServiceURLs_ServiceGroupNotReady(t *testing.T) {
 		Build()
 
 	r := NewResolver(fakeClient)
-	urls, err := r.ResolveServiceURLs(context.Background(), "default")
+	urls, err := r.ResolveServiceURLs(context.Background(), testWorkspaceName, "default")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -164,7 +163,7 @@ func TestResolveServiceURLs_ServiceGroupNoURLs(t *testing.T) {
 		Build()
 
 	r := NewResolver(fakeClient)
-	_, err := r.ResolveServiceURLs(context.Background(), "default")
+	_, err := r.ResolveServiceURLs(context.Background(), testWorkspaceName, "default")
 	if err == nil {
 		t.Fatal("expected error when service group has no URLs")
 	}
@@ -190,65 +189,86 @@ func TestResolveServiceURLs_ServiceGroupNotFound(t *testing.T) {
 		Build()
 
 	r := NewResolver(fakeClient)
-	_, err := r.ResolveServiceURLs(context.Background(), "default")
+	_, err := r.ResolveServiceURLs(context.Background(), testWorkspaceName, "default")
 	if err == nil {
 		t.Fatal("expected error when service group not found")
 	}
 }
 
-func TestResolveServiceURLs_NoWorkspaceForNamespace(t *testing.T) {
+func TestResolveServiceURLs_WorkspaceNotFound(t *testing.T) {
 	t.Setenv(envSessionAPIURL, "")
 	t.Setenv(envMemoryAPIURL, "")
-	t.Setenv(envOmniaNamespace, "some-namespace")
 
-	// No workspace whose spec.namespace.name == "some-namespace"
+	// No Workspace named testWorkspaceName exists.
 	fakeClient := fake.NewClientBuilder().
 		WithScheme(newTestScheme()).
 		Build()
 
 	r := NewResolver(fakeClient)
-	_, err := r.ResolveServiceURLs(context.Background(), "default")
+	_, err := r.ResolveServiceURLs(context.Background(), testWorkspaceName, "default")
 	if err == nil {
-		t.Fatal("expected error when no workspace found for namespace")
+		t.Fatal("expected error when the named workspace does not exist")
 	}
 }
 
-func TestResolveServiceURLs_NamespaceFromFile(t *testing.T) {
+func TestResolveServiceURLs_RequiresAWorkspaceName(t *testing.T) {
 	t.Setenv(envSessionAPIURL, "")
 	t.Setenv(envMemoryAPIURL, "")
-	t.Setenv(envOmniaNamespace, "") // no env var; must fall back to file
 
-	// Write a temp namespace file.
-	nsFile := t.TempDir() + "/namespace"
-	if err := os.WriteFile(nsFile, []byte("file-ns"), 0600); err != nil {
-		t.Fatalf("write temp namespace file: %v", err)
+	fakeClient := fake.NewClientBuilder().WithScheme(newTestScheme()).Build()
+
+	r := NewResolver(fakeClient)
+	_, err := r.ResolveServiceURLs(context.Background(), "", "default")
+	if err == nil {
+		t.Fatal("expected error when no workspace name is supplied")
 	}
+}
 
-	// Temporarily override the namespace file path.
-	origPath := namespaceFilePath
-	namespaceFilePath = nsFile
-	t.Cleanup(func() { namespaceFilePath = origPath })
+// The workspace is named "demo" and owns the namespace "omnia-demo". Looking up
+// by the namespace must fail: resolution is by the Workspace's metadata.name,
+// and the two identifiers are not interchangeable (#1875).
+func TestResolveServiceURLs_NamespaceIsNotAWorkspaceName(t *testing.T) {
+	t.Setenv(envSessionAPIURL, "")
+	t.Setenv(envMemoryAPIURL, "")
 
-	ws := makeWorkspaceWithStatus(testWorkspaceName, "file-ns", []omniav1alpha1.ServiceGroupStatus{
-		{
-			Name:       "default",
-			SessionURL: "http://session.svc",
-			MemoryURL:  "http://memory.svc",
-			Ready:      true,
-		},
+	ws := makeWorkspaceWithStatus("demo", "omnia-demo", []omniav1alpha1.ServiceGroupStatus{
+		{Name: "default", SessionURL: "http://session.svc", MemoryURL: "http://memory.svc", Ready: true},
 	})
 	fakeClient := fake.NewClientBuilder().
 		WithScheme(newTestScheme()).
 		WithObjects(ws).
 		Build()
-
 	r := NewResolver(fakeClient)
-	urls, err := r.ResolveServiceURLs(context.Background(), "default")
+
+	if _, err := r.ResolveServiceURLs(context.Background(), "omnia-demo", "default"); err == nil {
+		t.Fatal("expected error: the namespace is not the workspace name")
+	}
+
+	urls, err := r.ResolveServiceURLs(context.Background(), "demo", "default")
 	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		t.Fatalf("unexpected error resolving by workspace name: %v", err)
 	}
 	if urls.SessionURL != "http://session.svc" {
 		t.Errorf("unexpected session URL: %s", urls.SessionURL)
+	}
+}
+
+// GetWorkspace exists so callers wanting more than URLs off the same object —
+// the runtime needs metadata.uid to scope memory — reuse one read (#1875).
+func TestGetWorkspace_ReturnsTheObjectIncludingUID(t *testing.T) {
+	ws := makeWorkspaceWithStatus("demo", "omnia-demo", nil)
+	ws.UID = "ws-uid-123"
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(newTestScheme()).
+		WithObjects(ws).
+		Build()
+
+	got, err := NewResolver(fakeClient).GetWorkspace(context.Background(), "demo")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if string(got.UID) != "ws-uid-123" {
+		t.Errorf("unexpected UID: %s", got.UID)
 	}
 }
 
@@ -343,7 +363,7 @@ func TestResolveServiceURLs_PrivacyURLEnvVar(t *testing.T) {
 	t.Setenv(envPrivacyAPIURL, "http://privacy-override.example.com")
 
 	r := NewResolver(nil)
-	urls, err := r.ResolveServiceURLs(context.Background(), "default")
+	urls, err := r.ResolveServiceURLs(context.Background(), testWorkspaceName, "default")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -359,7 +379,7 @@ func TestResolveServiceURLs_PrivacyURLEnvVarEmpty(t *testing.T) {
 	t.Setenv(envPrivacyAPIURL, "")
 
 	r := NewResolver(nil)
-	urls, err := r.ResolveServiceURLs(context.Background(), "default")
+	urls, err := r.ResolveServiceURLs(context.Background(), testWorkspaceName, "default")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -399,32 +419,12 @@ func TestResolveServiceURLs_PrivacyURLFromWorkspaceStatus(t *testing.T) {
 		Build()
 
 	r := NewResolver(fakeClient)
-	urls, err := r.ResolveServiceURLs(context.Background(), "default")
+	urls, err := r.ResolveServiceURLs(context.Background(), testWorkspaceName, "default")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if urls.PrivacyURL != "http://privacy.workspace-ns.svc.cluster.local" {
 		t.Errorf("unexpected privacy URL: %s", urls.PrivacyURL)
-	}
-}
-
-func TestResolveServiceURLs_NamespaceFileNotFound(t *testing.T) {
-	t.Setenv(envSessionAPIURL, "")
-	t.Setenv(envMemoryAPIURL, "")
-	t.Setenv(envOmniaNamespace, "")
-
-	origPath := namespaceFilePath
-	namespaceFilePath = "/nonexistent/namespace"
-	t.Cleanup(func() { namespaceFilePath = origPath })
-
-	fakeClient := fake.NewClientBuilder().
-		WithScheme(newTestScheme()).
-		Build()
-
-	r := NewResolver(fakeClient)
-	_, err := r.ResolveServiceURLs(context.Background(), "default")
-	if err == nil {
-		t.Fatal("expected error when namespace file not found")
 	}
 }
 

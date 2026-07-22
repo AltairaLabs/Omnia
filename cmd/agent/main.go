@@ -39,6 +39,7 @@ import (
 	"github.com/altairalabs/omnia/internal/media"
 	"github.com/altairalabs/omnia/internal/session"
 	"github.com/altairalabs/omnia/internal/tracing"
+	omniak8s "github.com/altairalabs/omnia/pkg/k8s"
 	"github.com/altairalabs/omnia/pkg/logging"
 	"github.com/altairalabs/omnia/pkg/servicediscovery"
 	"github.com/altairalabs/omnia/pkg/session/httpclient"
@@ -156,7 +157,7 @@ func main() {
 // serviceURLResolver is the subset of *servicediscovery.Resolver the session
 // store init needs. An interface so the store-selection logic is unit-testable.
 type serviceURLResolver interface {
-	ResolveServiceURLs(ctx context.Context, serviceGroup string) (*servicediscovery.ServiceURLs, error)
+	ResolveServiceURLs(ctx context.Context, workspaceName, serviceGroup string) (*servicediscovery.ServiceURLs, error)
 }
 
 // initSessionStore returns the session store and its mode (for the
@@ -181,7 +182,18 @@ func initSessionStore(log logr.Logger) (session.Store, string, error) {
 func sessionStoreFromResolver(
 	ctx context.Context, resolver serviceURLResolver, log logr.Logger,
 ) (session.Store, string, error) {
-	urls, err := resolver.ResolveServiceURLs(ctx, resolveServiceGroup())
+	// The operator injects the workspace name; the facade must not infer it from
+	// its namespace, which is a different identifier (#1875). A missing name is
+	// the same class of failure as a discovery error — loud, and no store.
+	wsName, wsErr := omniak8s.WorkspaceNameFromEnvOrLabels(nil)
+	if wsErr != nil {
+		log.Error(wsErr,
+			"session store fallback",
+			"reason", "workspace name unavailable for service discovery",
+			"impact", "no session/token/cost product data; dashboard session views will be empty")
+		return nil, agent.SessionStoreModeNone, nil
+	}
+	urls, err := resolver.ResolveServiceURLs(ctx, wsName, resolveServiceGroup())
 	if err != nil {
 		log.Error(err,
 			"session store fallback",
