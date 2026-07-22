@@ -99,6 +99,63 @@ func (r *Resolver) ResolveServiceURLs(
 	return urlsForGroup(ws, serviceGroup)
 }
 
+// SessionURL returns the session-api URL for a service group. Session is
+// required by every caller, so an absent URL is an error rather than an empty
+// string that fails later and further from the cause.
+func (r *Resolver) SessionURL(ctx context.Context, workspaceName, serviceGroup string) (string, error) {
+	group, err := r.serviceGroup(ctx, workspaceName, serviceGroup)
+	if err != nil {
+		return "", err
+	}
+	if group.SessionURL == "" {
+		return "", fmt.Errorf("service group %q in workspace %q has no session URL yet",
+			serviceGroup, workspaceName)
+	}
+	return group.SessionURL, nil
+}
+
+// MemoryURL returns the memory-api URL for a service group, or "" when the
+// group has none. A group without memory is a legitimate configuration, so the
+// caller decides whether that is a problem — unlike the env path this replaces,
+// which treated a missing memory URL as reason to abandon discovery entirely.
+func (r *Resolver) MemoryURL(ctx context.Context, workspaceName, serviceGroup string) (string, error) {
+	group, err := r.serviceGroup(ctx, workspaceName, serviceGroup)
+	if err != nil {
+		return "", err
+	}
+	return group.MemoryURL, nil
+}
+
+// PrivacyURL returns the workspace's privacy-api URL, or "" when none is
+// configured. Privacy is workspace-level rather than per service group; the
+// serviceGroup argument is accepted for call-site symmetry and ignored.
+func (r *Resolver) PrivacyURL(ctx context.Context, workspaceName, _ string) (string, error) {
+	ws, err := r.GetWorkspace(ctx, workspaceName)
+	if err != nil {
+		return "", err
+	}
+	return ws.Status.PrivacyURL, nil
+}
+
+// serviceGroup fetches the workspace and returns the named group's status.
+func (r *Resolver) serviceGroup(
+	ctx context.Context, workspaceName, serviceGroup string,
+) (*omniav1alpha1.ServiceGroupStatus, error) {
+	if workspaceName == "" {
+		return nil, fmt.Errorf("workspace name is required to resolve service URLs")
+	}
+	ws, err := r.GetWorkspace(ctx, workspaceName)
+	if err != nil {
+		return nil, err
+	}
+	for i := range ws.Status.Services {
+		if ws.Status.Services[i].Name == serviceGroup {
+			return &ws.Status.Services[i], nil
+		}
+	}
+	return nil, fmt.Errorf("service group %q not found in workspace %q", serviceGroup, workspaceName)
+}
+
 // GetWorkspace fetches a Workspace by name. Exported so callers needing more
 // than URLs off the same object — the runtime wants metadata.uid to scope
 // memory — reuse this single read instead of issuing their own lookup.

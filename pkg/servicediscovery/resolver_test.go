@@ -444,3 +444,50 @@ func TestDetectNamespace(t *testing.T) {
 		}
 	})
 }
+
+// A group with a session URL but no memory URL is legitimate. The old
+// all-or-nothing gate could not express this, which is why the facade could
+// never use the env path.
+func TestSessionURL_ResolvesWithoutAMemoryURL(t *testing.T) {
+	t.Setenv(envSessionAPIURL, "")
+	t.Setenv(envMemoryAPIURL, "")
+
+	ws := makeWorkspaceWithStatus("demo", "omnia-demo", []omniav1alpha1.ServiceGroupStatus{
+		{Name: "default", SessionURL: "http://session.svc"},
+	})
+	c := fake.NewClientBuilder().WithScheme(newTestScheme()).WithObjects(ws).Build()
+	r := NewResolver(c)
+
+	got, err := r.SessionURL(context.Background(), "demo", "default")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "http://session.svc" {
+		t.Errorf("unexpected session URL: %s", got)
+	}
+
+	// Absent memory is not an error — the caller did not require it.
+	mem, err := r.MemoryURL(context.Background(), "demo", "default")
+	if err != nil {
+		t.Fatalf("unexpected error for absent memory URL: %v", err)
+	}
+	if mem != "" {
+		t.Errorf("expected empty memory URL, got %s", mem)
+	}
+}
+
+// Session is required: every caller needs it, so its absence is an error
+// rather than an empty string that fails later and further away.
+func TestSessionURL_ErrorsWhenAbsent(t *testing.T) {
+	t.Setenv(envSessionAPIURL, "")
+	t.Setenv(envMemoryAPIURL, "")
+
+	ws := makeWorkspaceWithStatus("demo", "omnia-demo", []omniav1alpha1.ServiceGroupStatus{
+		{Name: "default"},
+	})
+	c := fake.NewClientBuilder().WithScheme(newTestScheme()).WithObjects(ws).Build()
+
+	if _, err := NewResolver(c).SessionURL(context.Background(), "demo", "default"); err == nil {
+		t.Fatal("expected an error when the group has no session URL")
+	}
+}
