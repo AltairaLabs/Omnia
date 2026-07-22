@@ -1,0 +1,36 @@
+# devroot manifests — served to the runtime by pkg/k8s.NewClient() when
+# OMNIA_CONFIG_DIR points here, in place of a real cluster (see the README).
+# Every apiVersion/kind here must be registered in pkg/k8s.Scheme().
+---
+# The agent's namespace, carrying the workspace label ResolveWorkspaceName reads.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: dev
+  labels:
+    omnia.altairalabs.ai/workspace: dev-workspace
+---
+# A mock provider — no real LLM key needed, so this runs fully offline.
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: Provider
+metadata:
+  name: mock-provider
+  namespace: dev
+spec:
+  type: mock
+  model: mock
+---
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: AgentRuntime
+metadata:
+  name: demo
+  namespace: dev
+spec:
+  promptPackRef:
+    name: demo-pack
+  facades:
+    - type: websocket
+  providers:
+    - name: default
+      providerRef:
+        name: mock-provider

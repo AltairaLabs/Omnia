@@ -20,6 +20,7 @@ package k8s
 
 import (
 	"fmt"
+	"os"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -38,9 +39,15 @@ func Scheme() *runtime.Scheme {
 	return s
 }
 
-// NewClient creates a controller-runtime client with the Omnia CRD scheme registered.
-// Uses in-cluster config (service account token).
+// NewClient creates a controller-runtime client with the Omnia CRD scheme
+// registered. In-cluster it uses the service-account config. For local dev,
+// when OMNIA_CONFIG_DIR is set it serves the CRDs from YAML manifests in that
+// directory instead of reaching a cluster (see newFileBackedClient), so a
+// binary runs with no Kubernetes. Unset -> unchanged in-cluster behaviour.
 func NewClient() (client.Client, error) {
+	if dir := os.Getenv(envConfigDir); dir != "" {
+		return newFileBackedClient(dir)
+	}
 	cfg, err := ctrl.GetConfig()
 	if err != nil {
 		return nil, fmt.Errorf("get k8s config: %w", err)
