@@ -18,9 +18,11 @@ package runtime
 
 import "github.com/altairalabs/omnia/pkg/runtime/contract"
 
-// Capabilities returns the contract capabilities this (OOTB) runtime implements.
-// A custom runtime built on pkg/runtime overrides this to advertise its own
-// subset; a legacy runtime advertises nothing and is flagged as pre-negotiation.
+// Capabilities returns the contract capabilities this built-in runtime binary
+// implements. It is specific to this binary — a third-party runtime advertises
+// its own set by populating HealthResponse.capabilities in its own Health
+// implementation (the future pkg/runtime SDK will offer a declarative helper).
+// A runtime that advertises nothing is treated as pre-negotiation (legacy).
 func Capabilities() []string {
 	return contract.KnownCapabilities()
 }
