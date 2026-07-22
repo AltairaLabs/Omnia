@@ -99,11 +99,10 @@ func main() {
 	// discovery retry (same pattern as eval-worker, see #750).
 	go startHealthServer(*healthPort, log)
 
-	// Resolve session-api URL: flag → env var → workspace CRD service discovery.
+	// Resolve session-api URL: explicit flag, else workspace CRD service
+	// discovery. There is no SESSION_API_URL env fallback — the console holds a
+	// client and resolves its own endpoint.
 	apiURL := *sessionAPIURL
-	if apiURL == "" {
-		apiURL = os.Getenv("SESSION_API_URL")
-	}
 	if apiURL == "" {
 		// Post-#717: resolve from Workspace CRD with retry.
 		k8sClient, _ := k8s.NewClient()
@@ -125,11 +124,11 @@ func main() {
 		}
 		backoff := 2 * time.Second
 		for attempt := 1; attempt <= 15; attempt++ {
-			urls, resolveErr := resolver.ResolveServiceURLs(
+			sessionURL, resolveErr := resolver.SessionURL(
 				context.Background(), wsName, group,
 			)
 			if resolveErr == nil {
-				apiURL = urls.SessionURL
+				apiURL = sessionURL
 				break
 			}
 			log.Info("session-api URL not ready, retrying",

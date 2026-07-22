@@ -575,20 +575,15 @@ func (r *ArenaDevSessionReconciler) reconcileDeployment(ctx context.Context, ses
 	}
 
 	// Inject SESSION_API_URL for session recording if a workspace is configured
-	if sessionURL := r.resolveSessionURLForWorkspace(ctx, session.Namespace); sessionURL != "" {
-		envVars = append(envVars, corev1.EnvVar{
-			Name:  "SESSION_API_URL",
-			Value: sessionURL,
-		})
-	}
-
-	// When no SESSION_API_URL applies, the dev console resolves the URL from its
-	// own Workspace and needs the name to do that scoped read (#1875). Injected
-	// separately from the URL above because the two become available at
-	// different times: the Workspace object exists well before its
-	// status.services is populated, so the pod still needs its retry loop to
-	// wait out a late-ready service group — and without the name that loop
-	// cannot run at all, leaving the console to exit rather than start.
+	// No SESSION_API_URL: the console resolves it from its own Workspace. The
+	// two become available at different times — the Workspace object exists well
+	// before its status.services is populated — so injecting the URL here would
+	// resolve to nothing during exactly the window the console's retry loop was
+	// written to wait out. Only the console can wait; the controller cannot.
+	//
+	// The workspace name IS injected: it is identity, and without it the retry
+	// loop cannot run at all, leaving the console to exit rather than start
+	// (#1875, #1897).
 	if wsName := r.resolveWorkspaceNameForNamespace(ctx, session.Namespace); wsName != "" {
 		envVars = append(envVars, corev1.EnvVar{
 			Name:  "OMNIA_WORKSPACE_NAME",

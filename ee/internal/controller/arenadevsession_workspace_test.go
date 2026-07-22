@@ -14,11 +14,14 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	appsv1 "k8s.io/api/apps/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	corev1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
+	omniav1alpha1 "github.com/altairalabs/omnia/ee/api/v1alpha1"
 )
 
 func devSessionWorkspaceScheme(t *testing.T) *runtime.Scheme {
@@ -78,4 +81,51 @@ func TestResolveWorkspaceNameForNamespace_NoOwningWorkspace(t *testing.T) {
 	r := &ArenaDevSessionReconciler{Client: c, Scheme: s}
 
 	assert.Empty(t, r.resolveWorkspaceNameForNamespace(context.Background(), "omnia-demo"))
+}
+
+// The dev console resolves its own session-api URL, so the controller must not
+// inject one. The fixture publishes a session URL so the old code WOULD have
+// injected it — that is what makes this test meaningful.
+func TestReconcileDeployment_DoesNotInjectSessionURL(t *testing.T) {
+	s := devSessionWorkspaceScheme(t)
+	require.NoError(t, appsv1.AddToScheme(s))
+	require.NoError(t, omniav1alpha1.AddToScheme(s))
+
+	ws := &corev1alpha1.Workspace{
+		ObjectMeta: metav1.ObjectMeta{Name: "demo"},
+		Spec: corev1alpha1.WorkspaceSpec{
+			Namespace: corev1alpha1.NamespaceConfig{Name: "omnia-demo"},
+		},
+		Status: corev1alpha1.WorkspaceStatus{
+			Services: []corev1alpha1.ServiceGroupStatus{{
+				Name:       "default",
+				SessionURL: "http://session.omnia-demo.svc:8080",
+				Ready:      true,
+			}},
+		},
+	}
+	session := &omniav1alpha1.ArenaDevSession{
+		ObjectMeta: metav1.ObjectMeta{Name: "dev", Namespace: "omnia-demo"},
+	}
+
+	c := fake.NewClientBuilder().WithScheme(s).WithObjects(ws, session).Build()
+	r := &ArenaDevSessionReconciler{Client: c, Scheme: s}
+
+	require.NoError(t, r.reconcileDeployment(context.Background(), session))
+
+	dep := &appsv1.Deployment{}
+	require.NoError(t, c.Get(context.Background(),
+		types.NamespacedName{Name: r.resourceName(session), Namespace: "omnia-demo"}, dep))
+
+	var sawWorkspaceName bool
+	for _, ev := range dep.Spec.Template.Spec.Containers[0].Env {
+		if ev.Name == "SESSION_API_URL" {
+			t.Fatal("controller still injects SESSION_API_URL")
+		}
+		if ev.Name == "OMNIA_WORKSPACE_NAME" {
+			sawWorkspaceName = true
+		}
+	}
+	require.True(t, sawWorkspaceName,
+		"the console cannot resolve anything without its workspace name")
 }
