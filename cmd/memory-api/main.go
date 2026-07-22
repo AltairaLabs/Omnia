@@ -845,16 +845,15 @@ func buildAuditLogger(enterprise bool, pool *pgxpool.Pool, log logr.Logger) (*ee
 const auditSourceService = "memory-api"
 
 // resolvePrivacyURL resolves the privacy-api base URL the audit forwarder ships
-// to, reusing the same resolution the privacy middleware uses for opt-out:
+// to, from Workspace CRD status.privacyURL via servicediscovery, reusing the
+// same resolution the privacy middleware uses for opt-out.
 //
-//  1. PRIVACY_API_URL env var — explicit override.
-//  2. Workspace CRD status.privacyURL via servicediscovery (in-cluster).
+// There is no PRIVACY_API_URL override. privacy-api is per-workspace like every
+// other service, so the workspace already knows its endpoint and a second
+// source of truth only invites drift.
 //
 // Returns "" when no URL can be resolved, in which case the forwarder is skipped.
 func resolvePrivacyURL(ctx context.Context, workspace, serviceGroup string, log logr.Logger) string {
-	if u := os.Getenv("PRIVACY_API_URL"); u != "" {
-		return u
-	}
 	if workspace == "" || serviceGroup == "" {
 		return ""
 	}
@@ -1198,11 +1197,11 @@ type privacyPrefStore interface {
 // resolvePrivacyPrefStore selects the PreferencesStore+ConsentSource implementation
 // for the privacy middleware. Resolution order:
 //
-//  1. PRIVACY_API_URL env var — if set, returns an HTTP client pointing at that URL.
-//  2. Workspace CRD lookup via servicediscovery — reads Workspace.status.privacyURL
+//  1. Workspace CRD lookup via servicediscovery — reads Workspace.status.privacyURL
 //     when both workspace name and serviceGroup are non-empty and a k8s client is
-//     available.
-//  3. Permissive no-op store — when no URL can be resolved, opt-out is disabled
+//     available. There is no env override: privacy-api is per-workspace, so the
+//     workspace is the only source of truth for its endpoint.
+//  2. Permissive no-op store — when no URL can be resolved, opt-out is disabled
 //     and all recording proceeds (fail-open).
 func resolvePrivacyPrefStore(
 	ctx context.Context,
@@ -1210,10 +1209,6 @@ func resolvePrivacyPrefStore(
 	k8sClient client.Client,
 	log logr.Logger,
 ) privacyPrefStore {
-	if privacyURL := os.Getenv("PRIVACY_API_URL"); privacyURL != "" {
-		return httpclient.New(privacyURL, log)
-	}
-
 	if workspace != "" && serviceGroup != "" && k8sClient != nil {
 		resolver := servicediscovery.NewResolver(k8sClient)
 		urls, err := resolver.ResolveByWorkspaceName(ctx, workspace, serviceGroup)

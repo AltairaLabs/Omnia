@@ -76,14 +76,6 @@ func TestBuildAuditForwarder_NilWhenNoPool(t *testing.T) {
 }
 
 // TestResolvePrivacyURL_EnvOverride verifies PRIVACY_API_URL is used as-is.
-func TestResolvePrivacyURL_EnvOverride(t *testing.T) {
-	t.Setenv("PRIVACY_API_URL", "http://privacy-api.omnia-system:8080")
-	got := resolvePrivacyURL(context.Background(), "", "", logr.Discard())
-	if got != "http://privacy-api.omnia-system:8080" {
-		t.Errorf("expected env URL, got %q", got)
-	}
-}
-
 // TestResolvePrivacyURL_EmptyWhenNoEnvNoWorkspace verifies resolution returns ""
 // (forwarder skipped) when neither env nor a workspace lookup is available.
 func TestResolvePrivacyURL_EmptyWhenNoEnvNoWorkspace(t *testing.T) {
@@ -91,5 +83,19 @@ func TestResolvePrivacyURL_EmptyWhenNoEnvNoWorkspace(t *testing.T) {
 	got := resolvePrivacyURL(context.Background(), "", "", logr.Discard())
 	if got != "" {
 		t.Errorf("expected empty URL, got %q", got)
+	}
+}
+
+// PRIVACY_API_URL is no longer honoured: privacy-api is per-workspace like
+// every other service, so its endpoint comes from the Workspace. With no
+// workspace supplied there is nothing to resolve, and the env var must not
+// stand in for it.
+func TestResolvePrivacyURL_IgnoresEnvOverride(t *testing.T) {
+	t.Setenv("PRIVACY_API_URL", "http://from-env:8080")
+
+	got := resolvePrivacyURL(context.Background(), "", "", logr.Discard())
+
+	if got != "" {
+		t.Fatalf("PRIVACY_API_URL still honoured: %s", got)
 	}
 }

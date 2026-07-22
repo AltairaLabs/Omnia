@@ -26,12 +26,15 @@ import (
 
 // TestResolvePrivacyPrefStore_EnvURL verifies that when PRIVACY_API_URL is set,
 // resolvePrivacyPrefStore returns an *httpclient.Client.
-func TestResolvePrivacyPrefStore_EnvURL(t *testing.T) {
+// PRIVACY_API_URL is no longer honoured: privacy-api is per-workspace, so its
+// endpoint comes from the Workspace. Setting the var must not produce an HTTP
+// client pointing at it.
+func TestResolvePrivacyPrefStore_IgnoresEnvURL(t *testing.T) {
 	t.Setenv("PRIVACY_API_URL", "http://privacy-api.omnia-system:8080")
 
 	store := resolvePrivacyPrefStore(context.Background(), "", "", nil, logr.Discard())
-	if _, ok := store.(*httpclient.Client); !ok {
-		t.Errorf("expected *httpclient.Client when PRIVACY_API_URL is set, got %T", store)
+	if _, ok := store.(*httpclient.Client); ok {
+		t.Error("PRIVACY_API_URL still produces an httpclient store")
 	}
 }
 
