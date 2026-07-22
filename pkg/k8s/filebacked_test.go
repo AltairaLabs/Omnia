@@ -76,6 +76,20 @@ func TestNewFileBackedClient_EmptyDirIsEmptyClient(t *testing.T) {
 	assert.Empty(t, list.Items)
 }
 
+// TestNewFileBackedClient_LoadsExampleDevroot guards the shipped example: the
+// manifests in examples/custom-runtime/devroot must stay valid against the
+// scheme and seed a usable client.
+func TestNewFileBackedClient_LoadsExampleDevroot(t *testing.T) {
+	c, err := newFileBackedClient("../../examples/custom-runtime/devroot")
+	require.NoError(t, err)
+
+	ar := &omniav1alpha1.AgentRuntime{}
+	require.NoError(t, c.Get(context.Background(),
+		client.ObjectKey{Name: "demo", Namespace: "dev"}, ar))
+	require.Len(t, ar.Spec.Providers, 1)
+	assert.Equal(t, "mock-provider", ar.Spec.Providers[0].ProviderRef.Name)
+}
+
 func TestNewClient_FileBackedWhenConfigDirSet(t *testing.T) {
 	dir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "ar.yaml"), []byte(
