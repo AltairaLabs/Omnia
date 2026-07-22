@@ -124,6 +124,44 @@ func TestConverse_EmitsConversationSpan(t *testing.T) {
 	assert.Equal(t, "test-session-tracing", val.AsString())
 }
 
+// TestConverse_TextPathSendsHelloFirst verifies the text (non-duplex) path
+// emits a capabilities-only RuntimeHello as its first ServerMessage, so the
+// facade never treats a live runtime as legacy.
+func TestConverse_TextPathSendsHelloFirst(t *testing.T) {
+	tmpDir := t.TempDir()
+	packPath := tmpDir + "/pack.promptpack"
+	packContent := `{
+		"id": "test-pack",
+		"name": "test-pack",
+		"version": "1.0.0",
+		"template_engine": {"version": "v1", "syntax": "{{variable}}"},
+		"prompts": {
+			"default": {"id": "default", "name": "default", "version": "1.0.0", "system_template": "You are a test assistant."}
+		}
+	}`
+	require.NoError(t, writeTestFile(t, packPath, packContent))
+
+	server := NewServer(
+		WithLogger(logr.Discard()),
+		WithPackPath(packPath),
+		WithPromptName("default"),
+		WithMockProvider(true),
+		WithProviderInfo("mock", "mock-model"),
+	)
+	defer func() { _ = server.Close() }()
+
+	stream := newMockStream(context.Background(), []*runtimev1.ClientMessage{
+		{SessionId: "sess-text-hello", Content: "Hello"},
+	})
+	_ = server.Converse(stream)
+
+	require.NotEmpty(t, stream.sentMessages, "expected at least the hello")
+	hello, ok := stream.sentMessages[0].Message.(*runtimev1.ServerMessage_RuntimeHello)
+	require.True(t, ok, "first ServerMessage must be RuntimeHello, got %T", stream.sentMessages[0].Message)
+	require.Equal(t, Capabilities(), hello.RuntimeHello.GetCapabilities())
+	require.Nil(t, hello.RuntimeHello.GetMedia(), "text path carries no media counter-offer")
+}
+
 func TestConverse_EmitsLLMSpanWithGenAIAttributes(t *testing.T) {
 	tmpDir := t.TempDir()
 	packPath := tmpDir + "/pack.promptpack"

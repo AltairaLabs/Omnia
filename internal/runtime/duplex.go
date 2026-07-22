@@ -47,11 +47,12 @@ type duplexMediaParams struct {
 // defaultAudioCodec is the fallback codec when DuplexStart omits one.
 const defaultAudioCodec = "pcm"
 
-// buildStreamingConfig converts the DuplexStart proto message into a
-// providers.StreamingInputConfig.  Zero values in ds are replaced with
-// sensible defaults (pcm / 16 kHz / mono) so existing sessions that send no
-// params continue to work unchanged.
-func buildStreamingConfig(ds *runtimev1.DuplexStart) (providers.StreamingInputConfig, duplexMediaParams) {
+// buildStreamingConfig resolves the effective duplex audio format and converts
+// it into a providers.StreamingInputConfig. The client's DuplexStart proposal
+// (with pcm / 16 kHz / mono defaults for omitted fields) is the baseline; any
+// non-zero field in required (spec.duplex.audio) overrides it — the bounded
+// counter-offer. required may be nil, meaning "accept the client's proposal".
+func buildStreamingConfig(ds *runtimev1.DuplexStart, required *DuplexAudioParams) (providers.StreamingInputConfig, duplexMediaParams) {
 	codec := ds.GetCodec()
 	if codec == "" {
 		codec = defaultAudioCodec
@@ -63,6 +64,20 @@ func buildStreamingConfig(ds *runtimev1.DuplexStart) (providers.StreamingInputCo
 	channels := int(ds.GetChannels())
 	if channels == 0 {
 		channels = 1
+	}
+
+	// Apply the runtime's required format (counter-offer): each non-zero field
+	// overrides the client's proposal.
+	if required != nil {
+		if required.Codec != "" {
+			codec = required.Codec
+		}
+		if required.SampleRate != 0 {
+			sampleRate = required.SampleRate
+		}
+		if required.Channels != 0 {
+			channels = required.Channels
+		}
 	}
 
 	cfg := providers.StreamingInputConfig{
@@ -80,6 +95,26 @@ func buildStreamingConfig(ds *runtimev1.DuplexStart) (providers.StreamingInputCo
 		channels:   channels,
 	}
 	return cfg, params
+}
+
+// mediaNegotiationFromParams builds the RuntimeHello media counter-offer from
+// the resolved per-session audio params. Video fields stay zero (carried, not
+// yet enforced).
+func mediaNegotiationFromParams(p duplexMediaParams) *runtimev1.MediaNegotiation {
+	return &runtimev1.MediaNegotiation{
+		Codec:      p.codecName(),
+		SampleRate: int32(p.sampleRate), //nolint:gosec // sample rate is a small positive constant
+		Channels:   int32(p.channels),   //nolint:gosec // channel count is a small positive constant
+	}
+}
+
+// codecName recovers the bare codec from the "audio/<codec>" mimeType.
+func (p duplexMediaParams) codecName() string {
+	const prefix = "audio/"
+	if len(p.mimeType) > len(prefix) && p.mimeType[:len(prefix)] == prefix {
+		return p.mimeType[len(prefix):]
+	}
+	return p.mimeType
 }
 
 // handleDuplexSession bridges a Converse stream into a PromptKit duplex conversation.
@@ -104,10 +139,19 @@ func (s *Server) handleDuplexSession(ctx context.Context, stream runtimev1.Runti
 	}
 
 	// Override the static WithStreamingConfig added by sdkOptions with the
-	// per-session params negotiated in DuplexStart.
+	// per-session params: the client's DuplexStart proposal reconciled against
+	// the runtime's required format (spec.duplex.audio) — the bounded counter-offer.
 	ds := start.GetDuplexStart()
-	streamCfg, mediaParams := buildStreamingConfig(ds)
+	streamCfg, mediaParams := buildStreamingConfig(ds, s.duplexAudio)
 	opts = append(opts, sdk.WithStreamingConfig(&streamCfg))
+
+	// RuntimeHello is the runtime's first ServerMessage on the stream: the
+	// session's authoritative capabilities plus the media counter-offer the
+	// facade relays to the client. Sent synchronously before the forward
+	// goroutine starts so it always precedes any audio chunk.
+	if helloErr := s.sendRuntimeHello(stream, mediaNegotiationFromParams(mediaParams)); helloErr != nil {
+		return helloErr
+	}
 
 	// If a per-session system instruction was supplied, inject it as a template
 	// variable so packs using {{system_instruction}} compile it into the system

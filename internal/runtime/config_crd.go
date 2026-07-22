@@ -32,6 +32,20 @@ import (
 	"github.com/altairalabs/omnia/pkg/servicediscovery"
 )
 
+// duplexAudioFromRequirements maps the operator-declared spec.duplex.audio
+// requirements onto the runtime's DuplexAudioParams. Unset sub-fields stay zero
+// so buildStreamingConfig falls back to the client's proposal for them.
+func duplexAudioFromRequirements(req *v1alpha1.AudioRequirements) *DuplexAudioParams {
+	p := &DuplexAudioParams{Codec: req.Format}
+	if req.RecommendedSampleRate != nil {
+		p.SampleRate = int(*req.RecommendedSampleRate)
+	}
+	if req.Channels != nil {
+		p.Channels = int(*req.Channels)
+	}
+	return p
+}
+
 // LoadFromCRD loads runtime configuration by reading the AgentRuntime CRD directly.
 // It resolves the provider from the CRD, reads the API key secret, and sets the
 // corresponding environment variable for the PromptKit SDK.
@@ -97,6 +111,12 @@ func LoadFromCRD(ctx context.Context, c client.Client, name, namespace string) (
 	// Media config from CRD
 	if ar.Spec.Media != nil && ar.Spec.Media.BasePath != "" {
 		cfg.MediaBasePath = ar.Spec.Media.BasePath
+	}
+
+	// Duplex required-audio config from CRD. Advertised as the RuntimeHello
+	// counter-offer and preferred over the client's DuplexStart proposal.
+	if ar.Spec.Duplex != nil && ar.Spec.Duplex.Audio != nil {
+		cfg.DuplexAudio = duplexAudioFromRequirements(ar.Spec.Duplex.Audio)
 	}
 
 	// Eval config from CRD
