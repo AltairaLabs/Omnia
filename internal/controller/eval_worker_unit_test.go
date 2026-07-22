@@ -416,8 +416,13 @@ func TestReconcileEvalWorker_WiringEndToEnd(t *testing.T) {
 		types.NamespacedName{Name: evalWorkerName(defaultSvcGroupName), Namespace: "ns"}, dep))
 
 	env := dep.Spec.Template.Spec.Containers[0].Env
-	require.Equal(t, "http://session-ws-default.ns:8080", envValue(env, "SESSION_API_URL"),
-		"eval-worker must be wired to its group's session-api URL")
+	// The worker resolves its own session-api URL, so it is wired with identity
+	// rather than the URL: workspace name + service group are what it needs to
+	// perform the scoped Get itself.
+	require.Empty(t, envValue(env, "SESSION_API_URL"),
+		"the operator must not inject a session URL the worker resolves for itself")
+	require.Equal(t, "ws", envValue(env, "OMNIA_WORKSPACE_NAME"),
+		"eval-worker cannot resolve anything without its workspace name")
 	require.Equal(t, "redis://wiring.example.com:6379/0", envValue(env, "REDIS_URL"),
 		"eval-worker must consume the GROUP redis, not the operator default")
 	require.Equal(t, defaultSvcGroupName, envValue(env, "OMNIA_SERVICE_GROUP"))
@@ -693,4 +698,44 @@ func roleGrantsGet(role *rbacv1.Role, resource string) bool {
 		}
 	}
 	return false
+}
+
+// The eval-worker resolves its own session URL now, so the operator must not
+// inject one. Injection resolved at pod-creation time, before the service
+// group's status was necessarily ready.
+func TestBuildEvalWorkerEnvVars_DoesNotInjectSessionURL(t *testing.T) {
+	scheme := evalWorkerTestScheme()
+
+	// The service group publishes a session URL, so the old code WOULD have
+	// injected it. That is what makes this test meaningful.
+	ws := evalWorkerNsWorkspace()
+	ws.Status.Services = []omniav1alpha1.ServiceGroupStatus{{
+		Name:       defaultSvcGroupName,
+		SessionURL: "http://session.ns.svc:8080",
+		Ready:      true,
+	}}
+
+	r := &AgentRuntimeReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).
+			WithObjects(ws).Build(),
+		Scheme: scheme,
+	}
+
+	var sawWorkspaceName, sawServiceGroup bool
+	for _, ev := range r.buildEvalWorkerEnvVars(context.Background(), "ns", defaultSvcGroupName) {
+		if ev.Name == "SESSION_API_URL" {
+			t.Fatal("operator still injects SESSION_API_URL")
+		}
+		switch ev.Name {
+		case "OMNIA_WORKSPACE_NAME":
+			sawWorkspaceName = true
+		case "OMNIA_SERVICE_GROUP":
+			sawServiceGroup = true
+		}
+	}
+	// Identity must still be pushed — without it the worker cannot resolve.
+	if !sawWorkspaceName || !sawServiceGroup {
+		t.Fatalf("identity vars missing: workspaceName=%v serviceGroup=%v",
+			sawWorkspaceName, sawServiceGroup)
+	}
 }

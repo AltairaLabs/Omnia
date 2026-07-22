@@ -347,14 +347,13 @@ func (r *AgentRuntimeReconciler) buildEvalWorkerEnvVars(ctx context.Context, nam
 		envVars = append(envVars, corev1.EnvVar{Name: envRedisURL, Value: redisURL})
 	}
 
-	if sessionURL := r.resolveSessionURLForWorkspace(ctx, namespace, serviceGroup); sessionURL != "" {
-		envVars = append(envVars, corev1.EnvVar{Name: envSessionAPIURL, Value: sessionURL})
-	}
-
-	// The eval-worker resolves its own service URLs from the Workspace when no
-	// session URL override applies, so it needs the workspace name for the same
-	// scoped Get the agent does. It has no AgentRuntime of its own to fall back
-	// to, so this injection is the only source (#1875).
+	// No SESSION_API_URL: the eval-worker holds a client and its own
+	// workspace-reader binding, so it resolves the URL itself. Injecting it here
+	// resolved at pod-creation time, before the service group's status is
+	// necessarily populated — the worker can wait for it, the operator cannot.
+	//
+	// The workspace name IS injected: it is identity, not service config, and
+	// the worker has no AgentRuntime of its own to read it from (#1875).
 	if wsName, _ := r.resolveWorkspaceForNamespace(namespace); wsName != "" {
 		envVars = append(envVars, corev1.EnvVar{Name: envWorkspaceName, Value: wsName})
 	}

@@ -250,20 +250,22 @@ func TestParseNamespaces_NeitherSet(t *testing.T) {
 	assert.Nil(t, result)
 }
 
-// TestResolveSessionAPIURL_EnvOverride verifies that an explicit
-// SESSION_API_URL env var takes precedence over service discovery.
-func TestResolveSessionAPIURL_EnvOverride(t *testing.T) {
-	url, err := resolveSessionAPIURL(context.Background(), nil, "http://explicit:8080")
-	require.NoError(t, err)
-	assert.Equal(t, "http://explicit:8080", url)
+// SESSION_API_URL is no longer an override: the worker resolves its own URL
+// from the Workspace, so setting the var must not change the outcome.
+func TestResolveSessionAPIURL_IgnoresEnvOverride(t *testing.T) {
+	t.Setenv(envSessionAPI, "http://should-be-ignored:8080")
+
+	_, err := resolveSessionAPIURL(context.Background(), nil)
+
+	require.Error(t, err, "a set SESSION_API_URL must not satisfy resolution")
 }
 
-// TestResolveSessionAPIURL_MissingEverything verifies we return a clear
-// error when neither the env var nor a resolver is available.
-func TestResolveSessionAPIURL_MissingEverything(t *testing.T) {
-	_, err := resolveSessionAPIURL(context.Background(), nil, "")
+// TestResolveSessionAPIURL_NoResolver verifies we return a clear error when
+// there is no client to resolve with.
+func TestResolveSessionAPIURL_NoResolver(t *testing.T) {
+	_, err := resolveSessionAPIURL(context.Background(), nil)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), envSessionAPI)
+	assert.Contains(t, err.Error(), "no Kubernetes client")
 }
 
 // TestResolveSessionAPIURL_FromWorkspaceCRD verifies that the resolver
@@ -301,7 +303,7 @@ func TestResolveSessionAPIURL_FromWorkspaceCRD(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(ws).Build()
 	resolver := servicediscovery.NewResolver(c)
 
-	url, err := resolveSessionAPIURL(context.Background(), resolver, "")
+	url, err := resolveSessionAPIURL(context.Background(), resolver)
 	require.NoError(t, err)
 	assert.Equal(t, "http://session-ws.ws-ns.svc:8080", url)
 }
