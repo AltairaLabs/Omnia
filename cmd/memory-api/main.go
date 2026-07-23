@@ -1174,7 +1174,7 @@ func wrapPrivacyMiddleware(ctx context.Context, next http.Handler, embeddingSvc 
 		return next
 	}
 
-	watcher := privacy.NewPolicyWatcher(k8sClient, log, workspace)
+	watcher := privacy.NewPolicyWatcher(k8sClient, log, workspace, detectNamespace())
 
 	// Start the watcher asynchronously; it syncs the policy cache in the background.
 	go func() {

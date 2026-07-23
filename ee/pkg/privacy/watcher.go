@@ -23,6 +23,17 @@ import (
 	omniav1alpha1 "github.com/altairalabs/omnia/ee/api/v1alpha1"
 )
 
+// globalPolicyNamespace and globalPolicyName identify the cluster-wide
+// default SessionPrivacyPolicy that GetEffectivePolicy falls back to when
+// neither an agent override nor a workspace service-group policy applies.
+// It lives outside any single workspace's namespace, so loadPolicies fetches
+// it explicitly (via Get) in addition to listing the watcher's own namespace
+// (#1899).
+const (
+	globalPolicyNamespace = "omnia-system"
+	globalPolicyName      = "default"
+)
+
 // EffectivePolicy contains the computed privacy policy fields relevant to
 // the session-api's redaction and opt-out logic.
 type EffectivePolicy struct {
@@ -54,9 +65,10 @@ type PolicyChangeCallback func(old, new *omniav1alpha1.SessionPrivacyPolicy)
 type PolicyWatcher struct {
 	client       client.Client
 	ownWorkspace string   // name of the Workspace this service instance belongs to
-	policies     sync.Map // key: "namespace/name" -> *omniav1alpha1.SessionPrivacyPolicy
+	ownNamespace string   // namespace this service instance's pod runs in (#1899)
+	policies     sync.Map // key: "namespace/name" -> *omniav1alpha1.SessionPrivacyPolicy (own ns + global default)
 	workspaces   sync.Map // key: name -> *corev1alpha1.Workspace (only ownWorkspace, #1899)
-	agents       sync.Map // key: "namespace/name" -> *corev1alpha1.AgentRuntime
+	agents       sync.Map // key: "namespace/name" -> *corev1alpha1.AgentRuntime (only ownNamespace, #1899)
 	pollInterval time.Duration
 	log          logr.Logger
 	onChange     PolicyChangeCallback
@@ -71,13 +83,18 @@ func (w *PolicyWatcher) OnPolicyChange(cb PolicyChangeCallback) {
 
 // NewPolicyWatcher creates a watcher that observes privacy-related CRDs
 // using a controller-runtime client. ownWorkspaceName is the name of the
-// Workspace this service instance belongs to (memory-api/session-api are
-// deployed one-per-workspace, #1899); the watcher only ever reads that one
-// Workspace, not the whole cluster.
-func NewPolicyWatcher(k8sClient client.Client, log logr.Logger, ownWorkspaceName string) *PolicyWatcher {
+// Workspace this service instance belongs to, and ownNamespace is the
+// namespace its own pod runs in (memory-api/session-api are deployed
+// one-per-workspace, #1899). The watcher only ever reads that one Workspace
+// and lists AgentRuntime/SessionPrivacyPolicy within that one namespace —
+// plus the cluster-wide default SessionPrivacyPolicy at
+// omnia-system/default, which it Gets explicitly — instead of listing
+// cluster-wide.
+func NewPolicyWatcher(k8sClient client.Client, log logr.Logger, ownWorkspaceName, ownNamespace string) *PolicyWatcher {
 	return &PolicyWatcher{
 		client:       k8sClient,
 		ownWorkspace: ownWorkspaceName,
+		ownNamespace: ownNamespace,
 		pollInterval: 30 * time.Second,
 		log:          log.WithName("policy-watcher"),
 	}
@@ -124,33 +141,36 @@ func (w *PolicyWatcher) loadAll(ctx context.Context) error {
 	return nil
 }
 
-// loadPolicies lists all SessionPrivacyPolicy resources and updates the cache.
+// loadPolicies lists SessionPrivacyPolicy resources in the watcher's own
+// namespace and additionally Gets the cluster-wide default policy at
+// omnia-system/default — the resolution chain's final fallback (#1899) — and
+// merges both into the cache. If ownNamespace is unset, the own-namespace
+// list is skipped (empty cache for that part), matching loadWorkspaces'
+// own-Workspace guard; the global default is still fetched regardless.
 func (w *PolicyWatcher) loadPolicies(ctx context.Context) error {
-	var list omniav1alpha1.SessionPrivacyPolicyList
-	if err := w.client.List(ctx, &list); err != nil {
-		return fmt.Errorf("listing policies: %w", err)
-	}
+	seen := make(map[string]bool)
 
-	seen := make(map[string]bool, len(list.Items))
-	for i := range list.Items {
-		p := &list.Items[i]
-		key := policyKey(p)
-		seen[key] = true
-		newVal := p.DeepCopy()
-
-		// Capture old value before storing, then invoke callback outside any lock.
-		var oldPolicy *omniav1alpha1.SessionPrivacyPolicy
-		if prev, ok := w.policies.Load(key); ok {
-			oldPolicy = prev.(*omniav1alpha1.SessionPrivacyPolicy)
+	if w.ownNamespace != "" {
+		var list omniav1alpha1.SessionPrivacyPolicyList
+		if err := w.client.List(ctx, &list, client.InNamespace(w.ownNamespace)); err != nil {
+			return fmt.Errorf("listing policies: %w", err)
 		}
-		w.policies.Store(key, newVal)
-		w.log.V(2).Info("policy cached", "key", key)
-		// Only notify on a genuine spec change to avoid churning downstream
-		// caches on every 30s no-op reload.
-		if w.onChange != nil && (oldPolicy == nil || !reflect.DeepEqual(oldPolicy.Spec, newVal.Spec)) {
-			w.onChange(oldPolicy, newVal)
+		for i := range list.Items {
+			w.cachePolicy(&list.Items[i], seen)
 		}
 	}
+
+	var globalDefault omniav1alpha1.SessionPrivacyPolicy
+	key := client.ObjectKey{Namespace: globalPolicyNamespace, Name: globalPolicyName}
+	switch err := w.client.Get(ctx, key, &globalDefault); {
+	case apierrors.IsNotFound(err):
+		// no cluster-wide default configured — nothing to cache, not an error
+	case err != nil:
+		return fmt.Errorf("get global default policy %s/%s: %w", globalPolicyNamespace, globalPolicyName, err)
+	default:
+		w.cachePolicy(&globalDefault, seen)
+	}
+
 	w.policies.Range(func(k, v any) bool {
 		if !seen[k.(string)] {
 			w.policies.Delete(k)
@@ -163,6 +183,26 @@ func (w *PolicyWatcher) loadPolicies(ctx context.Context) error {
 		return true
 	})
 	return nil
+}
+
+// cachePolicy stores p in the cache keyed by "namespace/name", marks that
+// key seen, and invokes the onChange callback on first observation or a
+// genuine spec change (never on a no-op reload).
+func (w *PolicyWatcher) cachePolicy(p *omniav1alpha1.SessionPrivacyPolicy, seen map[string]bool) {
+	key := policyKey(p)
+	seen[key] = true
+	newVal := p.DeepCopy()
+
+	// Capture old value before storing, then invoke callback outside any lock.
+	var oldPolicy *omniav1alpha1.SessionPrivacyPolicy
+	if prev, ok := w.policies.Load(key); ok {
+		oldPolicy = prev.(*omniav1alpha1.SessionPrivacyPolicy)
+	}
+	w.policies.Store(key, newVal)
+	w.log.V(2).Info("policy cached", "key", key)
+	if w.onChange != nil && (oldPolicy == nil || !reflect.DeepEqual(oldPolicy.Spec, newVal.Spec)) {
+		w.onChange(oldPolicy, newVal)
+	}
 }
 
 // loadWorkspaces Gets the watcher's OWN Workspace (memory-api/session-api are
@@ -194,20 +234,25 @@ func (w *PolicyWatcher) loadWorkspaces(ctx context.Context) error {
 	return nil
 }
 
-// loadAgentRuntimes lists all AgentRuntime resources and updates the cache.
+// loadAgentRuntimes lists AgentRuntime resources in the watcher's own
+// namespace and updates the cache (#1899). If ownNamespace is unset, the
+// list is skipped and the cache is left empty, matching loadWorkspaces'
+// own-Workspace guard.
 func (w *PolicyWatcher) loadAgentRuntimes(ctx context.Context) error {
-	var list corev1alpha1.AgentRuntimeList
-	if err := w.client.List(ctx, &list); err != nil {
-		return fmt.Errorf("listing agentruntimes: %w", err)
-	}
+	seen := make(map[string]bool)
 
-	seen := make(map[string]bool, len(list.Items))
-	for i := range list.Items {
-		ar := &list.Items[i]
-		key := ar.Namespace + "/" + ar.Name
-		seen[key] = true
-		w.agents.Store(key, ar.DeepCopy())
-		w.log.V(2).Info("agentruntime cached", "key", key)
+	if w.ownNamespace != "" {
+		var list corev1alpha1.AgentRuntimeList
+		if err := w.client.List(ctx, &list, client.InNamespace(w.ownNamespace)); err != nil {
+			return fmt.Errorf("listing agentruntimes: %w", err)
+		}
+		for i := range list.Items {
+			ar := &list.Items[i]
+			key := ar.Namespace + "/" + ar.Name
+			seen[key] = true
+			w.agents.Store(key, ar.DeepCopy())
+			w.log.V(2).Info("agentruntime cached", "key", key)
+		}
 	}
 	w.agents.Range(func(k, _ any) bool {
 		if !seen[k.(string)] {
@@ -246,7 +291,7 @@ func (w *PolicyWatcher) GetEffectivePolicy(namespace, agentName string) *Effecti
 	}
 
 	// 3. Global default
-	if p := w.lookupPolicy("omnia-system", "default"); p != nil {
+	if p := w.lookupPolicy(globalPolicyNamespace, globalPolicyName); p != nil {
 		return w.toEffective(p)
 	}
 

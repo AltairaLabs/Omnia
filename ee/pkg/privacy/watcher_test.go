@@ -234,7 +234,7 @@ func TestLoadPolicies_PopulatesCache(t *testing.T) {
 		WithObjects(p1, p2).
 		Build()
 
-	w := NewPolicyWatcher(fakeClient, logr.Discard(), "")
+	w := NewPolicyWatcher(fakeClient, logr.Discard(), "", testNamespace)
 	require.NoError(t, w.loadPolicies(context.Background()))
 
 	count := 0
@@ -254,7 +254,7 @@ func TestLoadPolicies_RemovesDeletedPolicies(t *testing.T) {
 		WithObjects(p1).
 		Build()
 
-	w := NewPolicyWatcher(fakeClient, logr.Discard(), "")
+	w := NewPolicyWatcher(fakeClient, logr.Discard(), "", testNamespace)
 	require.NoError(t, w.loadPolicies(context.Background()))
 
 	count := 0
@@ -269,6 +269,60 @@ func TestLoadPolicies_RemovesDeletedPolicies(t *testing.T) {
 	assert.Equal(t, 0, count)
 }
 
+// TestLoadPolicies_ScopedToOwnNamespacePlusGlobalDefault verifies that
+// loadPolicies caches SessionPrivacyPolicy resources from the watcher's own
+// namespace AND the cluster-wide default at omnia-system/default, but not
+// policies living in any other namespace (#1899).
+func TestLoadPolicies_ScopedToOwnNamespacePlusGlobalDefault(t *testing.T) {
+	scheme := testScheme()
+	own := &omniav1alpha1.SessionPrivacyPolicy{
+		ObjectMeta: metav1.ObjectMeta{Name: "own-policy", Namespace: "prod"},
+		Spec:       basicSpec(true),
+	}
+	global := &omniav1alpha1.SessionPrivacyPolicy{
+		ObjectMeta: metav1.ObjectMeta{Name: globalPolicyName, Namespace: globalPolicyNamespace},
+		Spec:       basicSpec(true),
+	}
+	other := &omniav1alpha1.SessionPrivacyPolicy{
+		ObjectMeta: metav1.ObjectMeta{Name: "other-policy", Namespace: "staging"},
+		Spec:       basicSpec(true),
+	}
+
+	fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(own, global, other).Build()
+	w := NewPolicyWatcher(fakeClient, logr.Discard(), "", "prod")
+	require.NoError(t, w.loadPolicies(context.Background()))
+
+	_, ok := w.policies.Load("prod/own-policy")
+	assert.True(t, ok, "own-namespace policy must be cached")
+
+	_, ok = w.policies.Load(globalPolicyNamespace + "/" + globalPolicyName)
+	assert.True(t, ok, "cluster-wide default policy must always be cached")
+
+	_, ok = w.policies.Load("staging/other-policy")
+	assert.False(t, ok, "must not cache policies from unrelated namespaces")
+}
+
+// TestLoadPolicies_GlobalDefaultNotFound_Tolerated verifies that a missing
+// cluster-wide default policy is not an error — own-namespace policies must
+// still load, since not every deployment configures a global default (#1899).
+func TestLoadPolicies_GlobalDefaultNotFound_Tolerated(t *testing.T) {
+	scheme := testScheme()
+	own := &omniav1alpha1.SessionPrivacyPolicy{
+		ObjectMeta: metav1.ObjectMeta{Name: "own-policy", Namespace: "prod"},
+		Spec:       basicSpec(true),
+	}
+
+	fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(own).Build()
+	w := NewPolicyWatcher(fakeClient, logr.Discard(), "", "prod")
+	require.NoError(t, w.loadPolicies(context.Background()), "missing global default must not error")
+
+	_, ok := w.policies.Load("prod/own-policy")
+	assert.True(t, ok, "own-namespace policy must still be cached")
+
+	_, ok = w.policies.Load(globalPolicyNamespace + "/" + globalPolicyName)
+	assert.False(t, ok, "absent global default must not appear in cache")
+}
+
 func TestLoadWorkspaces_PopulatesCache(t *testing.T) {
 	scheme := testScheme()
 	ws := &corev1alpha1.Workspace{
@@ -279,7 +333,7 @@ func TestLoadWorkspaces_PopulatesCache(t *testing.T) {
 	}
 
 	fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(ws).Build()
-	w := NewPolicyWatcher(fakeClient, logr.Discard(), "prod-ws")
+	w := NewPolicyWatcher(fakeClient, logr.Discard(), "prod-ws", "")
 	require.NoError(t, w.loadWorkspaces(context.Background()))
 
 	count := 0
@@ -308,7 +362,7 @@ func TestLoadWorkspaces_CachesOnlyOwnWorkspace(t *testing.T) {
 		Spec:       corev1alpha1.WorkspaceSpec{Namespace: corev1alpha1.NamespaceConfig{Name: "omnia-other"}},
 	}
 	fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(own, other).Build()
-	w := NewPolicyWatcher(fakeClient, logr.Discard(), "demo")
+	w := NewPolicyWatcher(fakeClient, logr.Discard(), "demo", "")
 	require.NoError(t, w.loadWorkspaces(context.Background()))
 
 	// Own workspace cached
@@ -326,7 +380,7 @@ func TestLoadWorkspaces_CachesOnlyOwnWorkspace(t *testing.T) {
 func TestLoadWorkspaces_OwnMissing_NoErrorEmptyCache(t *testing.T) {
 	scheme := testScheme()
 	fakeClient := fake.NewClientBuilder().WithScheme(scheme).Build() // none
-	w := NewPolicyWatcher(fakeClient, logr.Discard(), "demo")
+	w := NewPolicyWatcher(fakeClient, logr.Discard(), "demo", "")
 	require.NoError(t, w.loadWorkspaces(context.Background()), "own-missing must be non-fatal")
 
 	_, ok := w.workspaces.Load("demo")
@@ -348,7 +402,7 @@ func TestLoadWorkspaces_GetError_ReturnsWrappedError(t *testing.T) {
 		}).
 		Build()
 
-	w := NewPolicyWatcher(fakeClient, logr.Discard(), "demo")
+	w := NewPolicyWatcher(fakeClient, logr.Discard(), "demo", "")
 	err := w.loadWorkspaces(context.Background())
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "demo")
@@ -361,7 +415,7 @@ func TestLoadAgentRuntimes_PopulatesCache(t *testing.T) {
 	}
 
 	fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(ar).Build()
-	w := NewPolicyWatcher(fakeClient, logr.Discard(), "")
+	w := NewPolicyWatcher(fakeClient, logr.Discard(), "", "prod")
 	require.NoError(t, w.loadAgentRuntimes(context.Background()))
 
 	count := 0
@@ -369,10 +423,51 @@ func TestLoadAgentRuntimes_PopulatesCache(t *testing.T) {
 	assert.Equal(t, 1, count)
 }
 
+// TestLoadAgentRuntimes_ScopedToOwnNamespace verifies that loadAgentRuntimes
+// only caches AgentRuntimes from the watcher's own namespace, not every
+// AgentRuntime in the cluster (#1899) — memory-api/session-api are deployed
+// one-per-workspace and only ever need their own namespace's agents.
+func TestLoadAgentRuntimes_ScopedToOwnNamespace(t *testing.T) {
+	scheme := testScheme()
+	own := &corev1alpha1.AgentRuntime{
+		ObjectMeta: metav1.ObjectMeta{Name: "own-agent", Namespace: "prod"},
+	}
+	other := &corev1alpha1.AgentRuntime{
+		ObjectMeta: metav1.ObjectMeta{Name: "other-agent", Namespace: "staging"},
+	}
+
+	fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(own, other).Build()
+	w := NewPolicyWatcher(fakeClient, logr.Discard(), "", "prod")
+	require.NoError(t, w.loadAgentRuntimes(context.Background()))
+
+	_, ok := w.agents.Load("prod/own-agent")
+	assert.True(t, ok, "own-namespace agentruntime must be cached")
+
+	_, ok = w.agents.Load("staging/other-agent")
+	assert.False(t, ok, "must not cache agentruntimes from other namespaces")
+}
+
+// TestLoadAgentRuntimes_OwnNamespaceEmpty_NoListSkipped verifies that an
+// unset ownNamespace leaves the agent cache empty rather than falling back
+// to a cluster-wide list, matching loadWorkspaces' own-Workspace guard.
+func TestLoadAgentRuntimes_OwnNamespaceEmpty_NoListSkipped(t *testing.T) {
+	scheme := testScheme()
+	ar := &corev1alpha1.AgentRuntime{
+		ObjectMeta: metav1.ObjectMeta{Name: "my-agent", Namespace: "prod"},
+	}
+	fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(ar).Build()
+	w := NewPolicyWatcher(fakeClient, logr.Discard(), "", "")
+	require.NoError(t, w.loadAgentRuntimes(context.Background()))
+
+	count := 0
+	w.agents.Range(func(_, _ any) bool { count++; return true })
+	assert.Zero(t, count, "no ownNamespace configured must not list cluster-wide")
+}
+
 func TestNewPolicyWatcher(t *testing.T) {
 	scheme := testScheme()
 	fakeClient := fake.NewClientBuilder().WithScheme(scheme).Build()
-	w := NewPolicyWatcher(fakeClient, logr.Discard(), "")
+	w := NewPolicyWatcher(fakeClient, logr.Discard(), "", "")
 	require.NotNil(t, w)
 	assert.NotNil(t, w.client)
 }
@@ -385,7 +480,7 @@ func TestStart_CancellationStopsPolling(t *testing.T) {
 	}
 	fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(p).Build()
 
-	w := NewPolicyWatcher(fakeClient, logr.Discard(), "")
+	w := NewPolicyWatcher(fakeClient, logr.Discard(), "", "")
 	w.SetPollInterval(50 * time.Millisecond)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -406,7 +501,7 @@ func TestStart_CancellationStopsPolling(t *testing.T) {
 func TestStart_InitialLoadError(t *testing.T) {
 	// A client with no scheme can't list any resource — triggers error.
 	badClient := fake.NewClientBuilder().Build()
-	w := NewPolicyWatcher(badClient, logr.Discard(), "")
+	w := NewPolicyWatcher(badClient, logr.Discard(), "", "")
 	err := w.Start(context.Background())
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "initial policy load failed")
@@ -416,7 +511,7 @@ func TestStart_PollPicksUpNewPolicies(t *testing.T) {
 	scheme := testScheme()
 	fakeClient := fake.NewClientBuilder().WithScheme(scheme).Build()
 
-	w := NewPolicyWatcher(fakeClient, logr.Discard(), "")
+	w := NewPolicyWatcher(fakeClient, logr.Discard(), "", "")
 	w.SetPollInterval(50 * time.Millisecond)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -447,7 +542,7 @@ func TestOnPolicyChange_CallbackFiredOnAdd(t *testing.T) {
 		Spec:       basicSpec(true),
 	}
 	fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(p1).Build()
-	w := NewPolicyWatcher(fakeClient, logr.Discard(), "")
+	w := NewPolicyWatcher(fakeClient, logr.Discard(), "", testNamespace)
 
 	type transition struct {
 		old, new *omniav1alpha1.SessionPrivacyPolicy
@@ -474,7 +569,7 @@ func TestOnPolicyChange_CallbackFiredOnSpecChange(t *testing.T) {
 		Spec:       basicSpec(true),
 	}
 	fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(p1).Build()
-	w := NewPolicyWatcher(fakeClient, logr.Discard(), "")
+	w := NewPolicyWatcher(fakeClient, logr.Discard(), "", testNamespace)
 
 	type transition struct {
 		old, new *omniav1alpha1.SessionPrivacyPolicy
@@ -514,7 +609,7 @@ func TestOnPolicyChange_CallbackFiredOnDelete(t *testing.T) {
 		Spec:       basicSpec(true),
 	}
 	fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(p1).Build()
-	w := NewPolicyWatcher(fakeClient, logr.Discard(), "")
+	w := NewPolicyWatcher(fakeClient, logr.Discard(), "", testNamespace)
 
 	type transition struct {
 		old, new *omniav1alpha1.SessionPrivacyPolicy
@@ -546,7 +641,7 @@ func TestOnPolicyChange_ReplacedCallback(t *testing.T) {
 		Spec:       basicSpec(true),
 	}
 	fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(p1).Build()
-	w := NewPolicyWatcher(fakeClient, logr.Discard(), "")
+	w := NewPolicyWatcher(fakeClient, logr.Discard(), "", testNamespace)
 
 	first := 0
 	second := 0
