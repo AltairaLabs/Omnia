@@ -89,10 +89,12 @@ type WorkspaceReconciler struct {
 	// session-api and memory-api instances.
 	ServiceBuilder *ServiceBuilder
 
-	// AgentWorkspaceReaderClusterRole is the ClusterRole that grants
-	// get/list/watch on Workspaces. Per-workspace service pods (session-api,
-	// memory-api) need this to resolve their config from the Workspace CRD.
-	AgentWorkspaceReaderClusterRole string
+	// WorkspaceReaderRBACEnabled gates creation of the per-workspace service-pod
+	// Workspace-reader ClusterRoleBinding. Per-workspace service pods (session-api,
+	// memory-api) bind the get-only per-workspace reader ClusterRole to resolve
+	// their config from their own Workspace CRD. False in local-dev / tests where
+	// RBAC is not provisioned, so no binding is created.
+	WorkspaceReaderRBACEnabled bool
 
 	// OperatorNamespace is the namespace where the operator + dashboard run
 	// (typically "omnia-system"). When a Workspace enables network isolation,
@@ -110,13 +112,22 @@ type WorkspaceReconciler struct {
 	// validate caller tokens. Empty disables the binding.
 	SessionAPITokenReviewClusterRole string
 
-	// MemoryEnterpriseReaderClusterRole is the install-wide ClusterRole the
-	// chart provisions (enterprise builds only) to grant cluster reads on
-	// sessionprivacypolicies + agentruntimes. When set, the reconciler binds
-	// each per-workspace memory-api ServiceAccount to it so the enterprise
-	// memory-policy/privacy watcher can list those CRDs (#1444). Empty
-	// disables the binding (OSS installs).
-	MemoryEnterpriseReaderClusterRole string
+	// PrivacyDefaultReaderClusterRole is the install-wide ClusterRole the chart
+	// provisions (enterprise builds only) granting get on any "default"-named
+	// SessionPrivacyPolicy cluster-wide. When set, the reconciler binds each
+	// per-workspace service-pod ServiceAccount (session-api, memory-api,
+	// privacy-api) to it so the privacy watcher's Get of the global
+	// omnia-system/default policy succeeds without a per-pod omnia-system
+	// RoleBinding (#1899). Empty disables the binding (OSS installs).
+	PrivacyDefaultReaderClusterRole string
+
+	// MemoryConsolidationReaderClusterRole is the install-wide ClusterRole the
+	// chart provisions (enterprise builds only) granting cluster-wide
+	// get;list;watch on memorypolicies. When set, the reconciler binds ONLY each
+	// per-workspace memory-api ServiceAccount to it so the consolidation lister
+	// can enumerate MemoryPolicy CRDs across workspaces (#1899). Empty disables
+	// the binding (OSS installs).
+	MemoryConsolidationReaderClusterRole string
 }
 
 // +kubebuilder:rbac:groups=omnia.altairalabs.ai,resources=workspaces,verbs=get;list;watch;create;update;patch;delete

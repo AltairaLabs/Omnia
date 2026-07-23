@@ -159,7 +159,9 @@ spec:
             - --session-redis-url={{ $sessionRedisURL }}
             {{- end }}
             {{- end }}
-            - --agent-workspace-reader-clusterrole={{ include "omnia.fullname" . }}-agent-workspace-reader
+            {{- if .Values.rbac.create }}
+            - --workspace-reader-rbac=true
+            {{- end }}
             {{- if .Values.defaultExposure.enabled }}
             {{- /* Operator-provisioned default external exposure (#1553). Opt-in
               per agent via the primary facade's expose.enabled
@@ -255,11 +257,15 @@ spec:
             {{- if .Values.enterprise.enabled }}
             - --enterprise
             - --policy-broker-image={{ .Values.enterprise.policyBroker.image.repository }}:{{ .Values.enterprise.policyBroker.image.tag | default .Chart.AppVersion }}
-            # On enterprise builds, the managed memory-api runs a privacy/memory-policy
-            # watcher that lists SessionPrivacyPolicy + AgentRuntime CRDs cluster-wide.
-            # Tell the operator the reader ClusterRole name so it binds each memory-api
-            # ServiceAccount to it (#1444).
-            - --memory-enterprise-reader-clusterrole={{ include "omnia.fullname" . }}-memory-enterprise-reader
+            # On enterprise builds, every service pod (session-api, memory-api,
+            # privacy-api) runs a privacy watcher. Own-namespace SessionPrivacyPolicy +
+            # AgentRuntime reads come from a namespaced Role the operator creates; these
+            # two ClusterRoles cover the cross-namespace reads. privacy-default-reader:
+            # get on the global omnia-system/default policy (bound to all service pods).
+            # memory-consolidation-reader: cluster-wide memorypolicies (memory-api only).
+            # Tell the operator both names so it binds the right SAs (#1899).
+            - --privacy-default-reader-clusterrole={{ include "omnia.fullname" . }}-privacy-default-reader
+            - --memory-consolidation-reader-clusterrole={{ include "omnia.fullname" . }}-memory-consolidation-reader
             # License endpoint (arena-controller), stamped onto data-plane pods as
             # OPERATOR_API_URL so they log a startup nag when unlicensed (#1682).
             # FQDN with namespace because data-plane pods run in workspace namespaces.

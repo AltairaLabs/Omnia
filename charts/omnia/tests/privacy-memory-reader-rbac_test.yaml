@@ -1,0 +1,81 @@
+suite: privacy-default + memory-consolidation reader ClusterRoles
+release:
+  name: omnia
+values:
+  - ../values-chart-tests.yaml
+templates:
+  - templates/privacy-default-reader-clusterrole.yaml
+  - templates/memory-consolidation-reader-clusterrole.yaml
+tests:
+  # Both roles are enterprise-gated (sessionprivacypolicies / memorypolicies are
+  # EE CRDs, #1899). Community installs must render zero docs.
+  - it: renders nothing without enterprise (privacy-default reader)
+    template: templates/privacy-default-reader-clusterrole.yaml
+    set:
+      rbac.create: true
+      enterprise.enabled: false
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: renders nothing without enterprise (memory-consolidation reader)
+    template: templates/memory-consolidation-reader-clusterrole.yaml
+    set:
+      rbac.create: true
+      enterprise.enabled: false
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  # privacy-default reader: get on the "default"-named SessionPrivacyPolicy only,
+  # cluster-wide. The resourceNames scope is what keeps per-workspace policies
+  # (never named "default") from leaking, so assert it explicitly.
+  - it: grants get on the default SessionPrivacyPolicy, scoped by resourceNames
+    template: templates/privacy-default-reader-clusterrole.yaml
+    set:
+      rbac.create: true
+      enterprise.enabled: true
+      enterprise.arena.queue.type: memory
+    asserts:
+      - hasDocuments:
+          count: 1
+      - equal:
+          path: metadata.name
+          value: omnia-privacy-default-reader
+      - contains:
+          path: rules
+          content:
+            apiGroups:
+              - omnia.altairalabs.ai
+            resources:
+              - sessionprivacypolicies
+            verbs:
+              - get
+            resourceNames:
+              - default
+
+  # memory-consolidation reader: cluster-wide get;list;watch on memorypolicies
+  # (the consolidation lister enumerates them across workspaces).
+  - it: grants cluster-wide read on memorypolicies
+    template: templates/memory-consolidation-reader-clusterrole.yaml
+    set:
+      rbac.create: true
+      enterprise.enabled: true
+      enterprise.arena.queue.type: memory
+    asserts:
+      - hasDocuments:
+          count: 1
+      - equal:
+          path: metadata.name
+          value: omnia-memory-consolidation-reader
+      - contains:
+          path: rules
+          content:
+            apiGroups:
+              - omnia.altairalabs.ai
+            resources:
+              - memorypolicies
+            verbs:
+              - get
+              - list
+              - watch

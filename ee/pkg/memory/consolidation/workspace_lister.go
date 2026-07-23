@@ -12,6 +12,7 @@ import (
 	"context"
 	"fmt"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	memoryv1 "github.com/altairalabs/omnia/api/v1alpha1"
@@ -34,34 +35,40 @@ type WorkspaceLister interface {
 	ForPolicy(ctx context.Context, policyName string) ([]Workspace, error)
 }
 
-// K8sWorkspaceLister implements WorkspaceLister against a
-// controller-runtime client. Cluster-wide list — the assumption is
-// that any Workspace CR in the cluster may opt into any MemoryPolicy.
+// K8sWorkspaceLister implements WorkspaceLister against a controller-runtime
+// client, scoped to the memory-api's OWN workspace. memory-api is deployed
+// per workspace, so it Gets its single Workspace by name rather than listing
+// every Workspace in the cluster (#1899).
 type K8sWorkspaceLister struct {
-	client client.Client
+	client       client.Client
+	ownWorkspace string
 }
 
-// NewK8sWorkspaceLister constructs a K8sWorkspaceLister.
-func NewK8sWorkspaceLister(c client.Client) *K8sWorkspaceLister {
-	return &K8sWorkspaceLister{client: c}
+// NewK8sWorkspaceLister constructs a lister scoped to ownWorkspace (the
+// Workspace CR's metadata.name, e.g. "demo" — not the namespace it owns).
+func NewK8sWorkspaceLister(c client.Client, ownWorkspace string) *K8sWorkspaceLister {
+	return &K8sWorkspaceLister{client: c, ownWorkspace: ownWorkspace}
 }
 
-// ForPolicy returns every Workspace whose services[*].memory.policyRef
-// equals policyName. Service groups with no memory block or no
-// policyRef are skipped.
+// ForPolicy returns the memory-api's own Workspace when it opts into policyName
+// via any services[*].memory.policyRef, else an empty slice. A missing own
+// Workspace is non-fatal (transient at boot / mid-reconcile): logged upstream
+// by returning empty, matching #1875's tolerance.
 func (l *K8sWorkspaceLister) ForPolicy(ctx context.Context, policyName string) ([]Workspace, error) {
-	var list memoryv1.WorkspaceList
-	if err := l.client.List(ctx, &list); err != nil {
-		return nil, fmt.Errorf("list Workspaces: %w", err)
+	if l.ownWorkspace == "" {
+		return nil, nil
 	}
-	out := make([]Workspace, 0, len(list.Items))
-	for _, w := range list.Items {
-		if !workspaceOptsInto(w, policyName) {
-			continue
+	var w memoryv1.Workspace
+	if err := l.client.Get(ctx, client.ObjectKey{Name: l.ownWorkspace}, &w); err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil, nil
 		}
-		out = append(out, Workspace{Name: w.Name, UID: string(w.UID)})
+		return nil, fmt.Errorf("get own Workspace %q: %w", l.ownWorkspace, err)
 	}
-	return out, nil
+	if !workspaceOptsInto(w, policyName) {
+		return nil, nil
+	}
+	return []Workspace{{Name: w.Name, UID: string(w.UID)}}, nil
 }
 
 func workspaceOptsInto(w memoryv1.Workspace, policyName string) bool {

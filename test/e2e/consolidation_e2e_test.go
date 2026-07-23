@@ -290,6 +290,11 @@ spec:
         args:
         - --enterprise=true
         - --consolidation-interval=%[2]s
+        # memory-api is per-workspace: the operator injects --workspace in prod,
+        # so the consolidation + privacy-watcher paths Get their OWN Workspace by
+        # name rather than listing the cluster (#1899). This standalone manifest
+        # must set it too, or ForPolicy short-circuits to zero workspaces.
+        - --workspace=%[3]s
         ports:
         - name: api
           containerPort: 8080
@@ -324,7 +329,7 @@ spec:
   ports:
   - port: 8080
     targetPort: 8080
-`, memoryApiImage, consE2EConsolidateInt)
+`, memoryApiImage, consE2EConsolidateInt, consE2EWorkspaceName)
 		cmd = exec.Command("kubectl", "apply", "-f", "-")
 		cmd.Stdin = strings.NewReader(memoryApiManifest)
 		_, err = utils.Run(cmd)

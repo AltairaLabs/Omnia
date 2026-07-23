@@ -76,10 +76,10 @@ func newTestReconciler(scheme *k8sruntime.Scheme, objs ...k8sruntime.Object) *Wo
 		MemoryImagePullPolicy:  corev1.PullIfNotPresent,
 	}
 	return &WorkspaceReconciler{
-		Client:                          cl,
-		Scheme:                          scheme,
-		ServiceBuilder:                  sb,
-		AgentWorkspaceReaderClusterRole: "omnia-agent-workspace-reader",
+		Client:                     cl,
+		Scheme:                     scheme,
+		ServiceBuilder:             sb,
+		WorkspaceReaderRBACEnabled: true,
 	}
 }
 
@@ -143,6 +143,117 @@ func TestReconcileServices_ManagedCreatesDeploymentsAndServices(t *testing.T) {
 	g.Expect(ws.Status.Services[0].MemoryURL).To(Equal("http://memory-myws-primary.myws-ns:8080"))
 	// Not ready because fake client doesn't set ReadyReplicas
 	g.Expect(ws.Status.Services[0].Ready).To(BeFalse())
+}
+
+// TestReconcileServices_ServicePodBindsPerWorkspaceReader asserts that the
+// per-workspace service pods (session-api, memory-api) bind the get-only
+// per-workspace Workspace reader ClusterRole (resourceNames-scoped to their own
+// workspace), NOT the cluster-wide agent-workspace-reader. A pod in workspace
+// "demo" must not be able to enumerate the config of other workspaces (#1899).
+// The workspace is named "demo" and owns the distinct namespace "omnia-demo"
+// (the #1875 name/namespace convention).
+func TestReconcileServices_ServicePodBindsPerWorkspaceReader(t *testing.T) {
+	g := NewWithT(t)
+	scheme := testScheme()
+
+	ws := newTestWorkspace("demo", "omnia-demo", []omniav1alpha1.WorkspaceServiceGroup{
+		{
+			Name: "default",
+			Mode: omniav1alpha1.ServiceModeManaged,
+			Memory: &omniav1alpha1.MemoryServiceConfig{
+				Database: omniav1alpha1.DatabaseConfig{
+					SecretRef: corev1.LocalObjectReference{Name: "db-secret"},
+				},
+			},
+			Session: &omniav1alpha1.SessionServiceConfig{
+				Database: omniav1alpha1.DatabaseConfig{
+					SecretRef: corev1.LocalObjectReference{Name: "db-secret"},
+				},
+			},
+		},
+	})
+
+	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "omnia-demo"}}
+	r := newTestReconciler(scheme, ws, ns)
+	r.WorkspaceReaderRBACEnabled = true
+
+	ctx := context.Background()
+	g.Expect(r.reconcileServices(ctx, ws)).To(Succeed())
+
+	crb := &rbacv1.ClusterRoleBinding{}
+	key := client.ObjectKey{Name: fmt.Sprintf("service-%s-%s", "omnia-demo", "memory-demo-default")}
+	g.Expect(r.Get(ctx, key, crb)).To(Succeed())
+	g.Expect(crb.RoleRef.Name).To(Equal(WorkspaceReaderClusterRoleName("demo")))
+	g.Expect(crb.RoleRef.Name).NotTo(Equal("omnia-agent-workspace-reader"),
+		"service pods must no longer bind the cluster-wide reader")
+	g.Expect(crb.Subjects).To(HaveLen(1))
+	g.Expect(crb.Subjects[0].Name).To(Equal("memory-demo-default"))
+	g.Expect(crb.Subjects[0].Namespace).To(Equal("omnia-demo"))
+}
+
+// TestReconcileServices_ServicePodReaderTargetsOverriddenSA asserts that when a
+// service group overrides its pod ServiceAccount (e.g. memory-api runs as an
+// Azure Workload-Identity SA), the service-pod Workspace-reader ClusterRoleBinding
+// AND the namespaced secrets RoleBinding target the OVERRIDDEN SA the pod actually
+// runs as — not the default per-deployment SA the pod never uses. Binding the
+// default SA leaves the WI-SA memory-api without get on its own Workspace, so its
+// privacy-policy watcher and consolidation worker 403 every poll and privacy
+// enforcement silently degrades (#1899). Mirrors the tokenreview/enterprise-reader
+// effective-SA fix (#1817) for the service-pod bindings.
+func TestReconcileServices_ServicePodReaderTargetsOverriddenSA(t *testing.T) {
+	g := NewWithT(t)
+	scheme := testScheme()
+
+	const wiSA = "wi-sa"
+	ws := newTestWorkspace("demo", "omnia-demo", []omniav1alpha1.WorkspaceServiceGroup{
+		{
+			Name: "default",
+			Mode: omniav1alpha1.ServiceModeManaged,
+			Memory: &omniav1alpha1.MemoryServiceConfig{
+				Database: omniav1alpha1.DatabaseConfig{
+					SecretRef: corev1.LocalObjectReference{Name: "db-secret"},
+				},
+				PodOverrides: &omniav1alpha1.PodOverrides{ServiceAccountName: wiSA},
+			},
+			Session: &omniav1alpha1.SessionServiceConfig{
+				Database: omniav1alpha1.DatabaseConfig{
+					SecretRef: corev1.LocalObjectReference{Name: "db-secret"},
+				},
+			},
+		},
+	})
+
+	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "omnia-demo"}}
+	r := newTestReconciler(scheme, ws, ns)
+	r.WorkspaceReaderRBACEnabled = true
+
+	ctx := context.Background()
+	g.Expect(r.reconcileServices(ctx, ws)).To(Succeed())
+
+	// The memory-api pod runs as wi-sa, so its Workspace-reader binding's subject
+	// must be wi-sa — NOT the unused default memory-demo-default SA.
+	crb := &rbacv1.ClusterRoleBinding{}
+	key := client.ObjectKey{Name: fmt.Sprintf("service-%s-%s", "omnia-demo", "memory-demo-default")}
+	g.Expect(r.Get(ctx, key, crb)).To(Succeed())
+	g.Expect(crb.RoleRef.Name).To(Equal(WorkspaceReaderClusterRoleName("demo")))
+	g.Expect(crb.Subjects).To(HaveLen(1))
+	g.Expect(crb.Subjects[0].Name).To(Equal(wiSA),
+		"service-pod Workspace reader must bind the effective (override) SA, not the default")
+	g.Expect(crb.Subjects[0].Namespace).To(Equal("omnia-demo"))
+
+	// The namespaced secrets RoleBinding must likewise target wi-sa.
+	rb := &rbacv1.RoleBinding{}
+	rbKey := client.ObjectKey{Name: "service-memory-demo-default-secrets", Namespace: "omnia-demo"}
+	g.Expect(r.Get(ctx, rbKey, rb)).To(Succeed())
+	g.Expect(rb.Subjects).To(HaveLen(1))
+	g.Expect(rb.Subjects[0].Name).To(Equal(wiSA),
+		"service-pod secrets RoleBinding must bind the effective (override) SA, not the default")
+
+	// session-api has no override, so its reader subject stays the default SA.
+	sessionCRB := &rbacv1.ClusterRoleBinding{}
+	sessionKey := client.ObjectKey{Name: fmt.Sprintf("service-%s-%s", "omnia-demo", "session-demo-default")}
+	g.Expect(r.Get(ctx, sessionKey, sessionCRB)).To(Succeed())
+	g.Expect(sessionCRB.Subjects[0].Name).To(Equal("session-demo-default"))
 }
 
 // TestReconcileServices_GroupRedisWiredIntoDeployments is a WIRING test: it
@@ -293,7 +404,8 @@ func TestReconcileServices_BindingsTargetOverriddenServiceAccount(t *testing.T) 
 	r := newTestReconciler(scheme, ws, ns)
 	r.ServiceBuilder.ServiceAuth = ServiceAuthConfig{Enabled: true}
 	r.SessionAPITokenReviewClusterRole = "omnia-session-api-tokenreview"
-	r.MemoryEnterpriseReaderClusterRole = "omnia-memory-enterprise-reader"
+	r.PrivacyDefaultReaderClusterRole = "omnia-privacy-default-reader"
+	r.MemoryConsolidationReaderClusterRole = "omnia-memory-consolidation-reader"
 
 	ctx := context.Background()
 	err := r.reconcileServices(ctx, ws)
@@ -308,11 +420,22 @@ func TestReconcileServices_BindingsTargetOverriddenServiceAccount(t *testing.T) 
 	g.Expect(memoryTR.Subjects[0].Name).To(Equal(wiSA))
 	g.Expect(memoryTR.Subjects[0].Namespace).To(Equal("myws-ns"))
 
-	// ...and its enterprise-reader binding likewise targets the WI SA.
-	memoryER := &rbacv1.ClusterRoleBinding{}
-	err = r.Get(ctx, types.NamespacedName{Name: "memory-enterprise-reader-myws-ns-" + wiSA}, memoryER)
-	g.Expect(err).NotTo(HaveOccurred(), "enterprise-reader binding must target the overridden memory-api SA")
-	g.Expect(memoryER.Subjects[0].Name).To(Equal(wiSA))
+	// ...and its privacy-default + memory-consolidation ClusterRoleBindings and
+	// the namespaced privacy-reader RoleBinding likewise target the WI SA.
+	memoryPD := &rbacv1.ClusterRoleBinding{}
+	err = r.Get(ctx, types.NamespacedName{Name: "privacy-default-myws-ns-" + wiSA}, memoryPD)
+	g.Expect(err).NotTo(HaveOccurred(), "privacy-default binding must target the overridden memory-api SA")
+	g.Expect(memoryPD.Subjects[0].Name).To(Equal(wiSA))
+
+	memoryConsolidation := &rbacv1.ClusterRoleBinding{}
+	err = r.Get(ctx, types.NamespacedName{Name: "memory-consolidation-myws-ns-" + wiSA}, memoryConsolidation)
+	g.Expect(err).NotTo(HaveOccurred(), "memory-consolidation binding must target the overridden memory-api SA")
+	g.Expect(memoryConsolidation.Subjects[0].Name).To(Equal(wiSA))
+
+	memoryPR := &rbacv1.RoleBinding{}
+	err = r.Get(ctx, types.NamespacedName{Name: "service-" + wiSA + "-privacy-reader", Namespace: "myws-ns"}, memoryPR)
+	g.Expect(err).NotTo(HaveOccurred(), "namespaced privacy-reader binding must target the overridden memory-api SA")
+	g.Expect(memoryPR.Subjects[0].Name).To(Equal(wiSA))
 
 	// No binding must be created against the unused default memory SA.
 	staleTR := &rbacv1.ClusterRoleBinding{}
@@ -324,6 +447,79 @@ func TestReconcileServices_BindingsTargetOverriddenServiceAccount(t *testing.T) 
 	err = r.Get(ctx, types.NamespacedName{Name: "session-tokenreview-myws-ns-session-myws-primary"}, sessionTR)
 	g.Expect(err).NotTo(HaveOccurred())
 	g.Expect(sessionTR.Subjects[0].Name).To(Equal("session-myws-primary"))
+}
+
+// TestReconcileServices_ScopedPrivacyReaderGrants verifies the #1899 RBAC
+// restructure: reconciling a managed service group provisions a namespaced
+// privacy-reader Role (list;watch on sessionprivacypolicies + agentruntimes),
+// binds both session-api and memory-api SAs to it and to the privacy-default
+// ClusterRole, and binds ONLY the memory-api SA to the memory-consolidation
+// ClusterRole (session-api must NOT get it).
+func TestReconcileServices_ScopedPrivacyReaderGrants(t *testing.T) {
+	g := NewWithT(t)
+	scheme := testScheme()
+
+	ws := newTestWorkspace("demo", "omnia-demo", []omniav1alpha1.WorkspaceServiceGroup{
+		{
+			Name: "default",
+			Mode: omniav1alpha1.ServiceModeManaged,
+			Memory: &omniav1alpha1.MemoryServiceConfig{
+				Database: omniav1alpha1.DatabaseConfig{
+					SecretRef: corev1.LocalObjectReference{Name: "db-secret"},
+				},
+			},
+			Session: &omniav1alpha1.SessionServiceConfig{
+				Database: omniav1alpha1.DatabaseConfig{
+					SecretRef: corev1.LocalObjectReference{Name: "db-secret"},
+				},
+			},
+		},
+	})
+
+	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "omnia-demo"}}
+	r := newTestReconciler(scheme, ws, ns)
+	r.PrivacyDefaultReaderClusterRole = "omnia-privacy-default-reader"
+	r.MemoryConsolidationReaderClusterRole = "omnia-memory-consolidation-reader"
+
+	ctx := context.Background()
+	g.Expect(r.reconcileServices(ctx, ws)).To(Succeed())
+
+	const sessionSA = "session-demo-default"
+	const memorySA = "memory-demo-default"
+
+	// The shared namespaced privacy-reader Role: list;watch on the two CRDs.
+	role := &rbacv1.Role{}
+	g.Expect(r.Get(ctx, types.NamespacedName{Name: "service-omnia-demo-privacy-reader", Namespace: "omnia-demo"}, role)).To(Succeed())
+	g.Expect(role.Rules).To(HaveLen(1))
+	g.Expect(role.Rules[0].Resources).To(ConsistOf("sessionprivacypolicies", "agentruntimes"))
+	g.Expect(role.Rules[0].Verbs).To(ConsistOf("list", "watch"))
+
+	// Both SAs bound to the namespaced Role.
+	for _, sa := range []string{sessionSA, memorySA} {
+		rb := &rbacv1.RoleBinding{}
+		g.Expect(r.Get(ctx, types.NamespacedName{Name: "service-" + sa + "-privacy-reader", Namespace: "omnia-demo"}, rb)).
+			To(Succeed(), "namespaced privacy-reader binding for "+sa)
+		g.Expect(rb.RoleRef.Name).To(Equal("service-omnia-demo-privacy-reader"))
+		g.Expect(rb.Subjects[0].Name).To(Equal(sa))
+	}
+
+	// Both SAs bound to the privacy-default ClusterRole.
+	for _, sa := range []string{sessionSA, memorySA} {
+		crb := &rbacv1.ClusterRoleBinding{}
+		g.Expect(r.Get(ctx, types.NamespacedName{Name: "privacy-default-omnia-demo-" + sa}, crb)).
+			To(Succeed(), "privacy-default binding for "+sa)
+		g.Expect(crb.RoleRef.Name).To(Equal("omnia-privacy-default-reader"))
+	}
+
+	// ONLY the memory-api SA is bound to the memory-consolidation ClusterRole.
+	memoryConsolidation := &rbacv1.ClusterRoleBinding{}
+	g.Expect(r.Get(ctx, types.NamespacedName{Name: "memory-consolidation-omnia-demo-" + memorySA}, memoryConsolidation)).To(Succeed())
+	g.Expect(memoryConsolidation.RoleRef.Name).To(Equal("omnia-memory-consolidation-reader"))
+	g.Expect(memoryConsolidation.Subjects[0].Name).To(Equal(memorySA))
+
+	sessionConsolidation := &rbacv1.ClusterRoleBinding{}
+	err := r.Get(ctx, types.NamespacedName{Name: "memory-consolidation-omnia-demo-" + sessionSA}, sessionConsolidation)
+	g.Expect(apierrors.IsNotFound(err)).To(BeTrue(), "session-api must NOT get a memory-consolidation binding")
 }
 
 // TestReconcileServices_MemoryTokenReviewBindingCreateError verifies that when
@@ -382,7 +578,7 @@ func TestReconcileServices_MemoryTokenReviewBindingCreateError(t *testing.T) {
 		Client:                           cl,
 		Scheme:                           scheme,
 		ServiceBuilder:                   sb,
-		AgentWorkspaceReaderClusterRole:  "omnia-agent-workspace-reader",
+		WorkspaceReaderRBACEnabled:       true,
 		SessionAPITokenReviewClusterRole: "omnia-session-api-tokenreview",
 	}
 
@@ -811,7 +1007,7 @@ func TestReconcilePrivacyService_RemovalTearsDownResources(t *testing.T) {
 	r.ServiceBuilder.PrivacyImagePullPolicy = corev1.PullIfNotPresent
 	r.ServiceBuilder.ServiceAuth = ServiceAuthConfig{Enabled: true}
 	r.SessionAPITokenReviewClusterRole = "omnia-session-tokenreview"
-	r.MemoryEnterpriseReaderClusterRole = "omnia-enterprise-reader"
+	r.PrivacyDefaultReaderClusterRole = "omnia-privacy-default-reader"
 
 	ctx := context.Background()
 
@@ -826,8 +1022,11 @@ func TestReconcilePrivacyService_RemovalTearsDownResources(t *testing.T) {
 	tokenReviewCRBName := "session-tokenreview-myws-ns-" + testPrivacyDeployName
 	g.Expect(r.Get(ctx, types.NamespacedName{Name: tokenReviewCRBName}, &rbacv1.ClusterRoleBinding{})).To(Succeed())
 
-	enterpriseReaderCRBName := "memory-enterprise-reader-myws-ns-" + testPrivacyDeployName
-	g.Expect(r.Get(ctx, types.NamespacedName{Name: enterpriseReaderCRBName}, &rbacv1.ClusterRoleBinding{})).To(Succeed())
+	privacyDefaultCRBName := "privacy-default-myws-ns-" + testPrivacyDeployName
+	g.Expect(r.Get(ctx, types.NamespacedName{Name: privacyDefaultCRBName}, &rbacv1.ClusterRoleBinding{})).To(Succeed())
+
+	privacyReaderRBName := "service-" + testPrivacyDeployName + "-privacy-reader"
+	g.Expect(r.Get(ctx, types.NamespacedName{Name: privacyReaderRBName, Namespace: "myws-ns"}, &rbacv1.RoleBinding{})).To(Succeed())
 
 	// Phase 2: remove Spec.Privacy and reconcile again.
 	ws.Spec.Privacy = nil
@@ -847,8 +1046,11 @@ func TestReconcilePrivacyService_RemovalTearsDownResources(t *testing.T) {
 	g.Expect(r.Get(ctx, types.NamespacedName{Name: tokenReviewCRBName}, &rbacv1.ClusterRoleBinding{})).
 		To(MatchError(ContainSubstring("not found")), "privacy tokenreview CRB must be deleted")
 
-	g.Expect(r.Get(ctx, types.NamespacedName{Name: enterpriseReaderCRBName}, &rbacv1.ClusterRoleBinding{})).
-		To(MatchError(ContainSubstring("not found")), "privacy enterprise-reader CRB must be deleted")
+	g.Expect(r.Get(ctx, types.NamespacedName{Name: privacyDefaultCRBName}, &rbacv1.ClusterRoleBinding{})).
+		To(MatchError(ContainSubstring("not found")), "privacy-default CRB must be deleted")
+
+	g.Expect(r.Get(ctx, types.NamespacedName{Name: privacyReaderRBName, Namespace: "myws-ns"}, &rbacv1.RoleBinding{})).
+		To(MatchError(ContainSubstring("not found")), "privacy-reader RoleBinding must be deleted")
 
 	// PrivacyURL must be cleared.
 	g.Expect(ws.Status.PrivacyURL).To(BeEmpty())

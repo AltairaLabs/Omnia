@@ -360,7 +360,7 @@ func managerArgsPatch(extra ...string) string {
 		"--framework-image="+runtimeImageRef,
 		"--session-api-image="+sessionApiImage,
 		"--memory-api-image="+memoryApiImage,
-		"--agent-workspace-reader-clusterrole=omnia-agent-workspace-reader",
+		"--workspace-reader-rbac=true",
 	)
 	args = append(args, extra...)
 	patch := map[string]any{"spec": map[string]any{"template": map[string]any{

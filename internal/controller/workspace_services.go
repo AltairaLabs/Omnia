@@ -122,7 +122,9 @@ func (r *WorkspaceReconciler) reconcilePrivacyService(ctx context.Context, works
 	namespace := workspace.Spec.Namespace.Name
 	depName := fmt.Sprintf("privacy-%s", workspace.Name)
 
-	if err := r.reconcileServicePodSA(ctx, workspace, namespace, depName); err != nil {
+	// privacy-api has no podOverrides path, so its effective SA is the default
+	// per-deployment SA (depName).
+	if err := r.reconcileServicePodSA(ctx, workspace, namespace, depName, depName); err != nil {
 		return fmt.Errorf("service account %s: %w", depName, err)
 	}
 	// privacy-api validates caller tokens via the TokenReview API (same as
@@ -130,8 +132,18 @@ func (r *WorkspaceReconciler) reconcilePrivacyService(ctx context.Context, works
 	if err := r.reconcileSessionAPITokenReviewBinding(ctx, namespace, depName); err != nil {
 		return fmt.Errorf("privacy tokenreview binding: %w", err)
 	}
-	if err := r.reconcileEnterpriseReaderBinding(ctx, namespace, depName); err != nil {
-		return fmt.Errorf("privacy enterprise reader binding: %w", err)
+	// privacy-api also runs the privacy watcher (own-namespace list;watch + global
+	// default Get). It gets the namespaced reader Role + binding and the
+	// default-policy ClusterRoleBinding, but NOT the memory-consolidation grant
+	// (memorypolicies are memory-api's concern). No-op on OSS installs (#1899).
+	if err := r.reconcilePrivacyReaderRole(ctx, workspace, namespace); err != nil {
+		return fmt.Errorf("privacy reader role: %w", err)
+	}
+	if err := r.reconcilePrivacyReaderBinding(ctx, workspace, namespace, depName); err != nil {
+		return fmt.Errorf("privacy reader binding: %w", err)
+	}
+	if err := r.reconcilePrivacyDefaultBinding(ctx, namespace, depName); err != nil {
+		return fmt.Errorf("privacy default binding: %w", err)
 	}
 	if err := r.reconcileServiceAuthNetworkHardening(ctx, workspace, namespace); err != nil {
 		return fmt.Errorf("privacy network hardening: %w", err)
@@ -155,8 +167,12 @@ func (r *WorkspaceReconciler) reconcilePrivacyService(ctx context.Context, works
 // spec.privacy is removed from a live Workspace. The Deployment, Service, and
 // ServiceAccount carry owner-references to the Workspace and would be GC'd on
 // Workspace deletion, but they are NOT cleaned up when only spec.privacy is
-// removed. The two ClusterRoleBindings are cluster-scoped and are never
-// covered by owner-ref GC, so they must always be deleted explicitly here.
+// removed. The tokenreview + privacy-default ClusterRoleBindings are
+// cluster-scoped and are never covered by owner-ref GC, so they must always be
+// deleted explicitly here. The privacy pod's namespaced privacy-reader
+// RoleBinding IS owner-ref-GC'd on Workspace deletion, but not on spec.privacy
+// removal, so it too is deleted here. The shared namespaced privacy-reader Role
+// is left in place — session-api/memory-api in the same namespace still use it.
 // NotFound errors are ignored so the function is idempotent.
 func (r *WorkspaceReconciler) cleanupPrivacyService(ctx context.Context, workspace *omniav1alpha1.Workspace) error {
 	namespace := workspace.Spec.Namespace.Name
@@ -177,10 +193,14 @@ func (r *WorkspaceReconciler) cleanupPrivacyService(ctx context.Context, workspa
 	trCRB := &rbacv1.ClusterRoleBinding{}
 	trCRB.Name = fmt.Sprintf("session-tokenreview-%s-%s", namespace, depName)
 
-	erCRB := &rbacv1.ClusterRoleBinding{}
-	erCRB.Name = fmt.Sprintf("memory-enterprise-reader-%s-%s", namespace, depName)
+	pdCRB := &rbacv1.ClusterRoleBinding{}
+	pdCRB.Name = privacyDefaultBindingName(namespace, depName)
 
-	for _, obj := range []client.Object{dep, svc, sa, trCRB, erCRB} {
+	prRB := &rbacv1.RoleBinding{}
+	prRB.Name = privacyReaderBindingName(depName)
+	prRB.Namespace = namespace
+
+	for _, obj := range []client.Object{dep, svc, sa, trCRB, pdCRB, prRB} {
 		if err := r.Delete(ctx, obj); err != nil && !apierrors.IsNotFound(err) {
 			return fmt.Errorf("cleanup privacy resource %s: %w", obj.GetName(), err)
 		}
@@ -238,9 +258,17 @@ func (r *WorkspaceReconciler) reconcileManagedServiceGroup(
 	// Reconcile ServiceAccounts for service pods. Per-workspace session-api
 	// and memory-api need to read the cluster-scoped Workspace CRD to
 	// resolve their own config (workspace name, service group, DB secret).
-	for _, depName := range []string{sessionDepName, memoryDepName} {
-		if err := r.reconcileServicePodSA(ctx, workspace, namespace, depName); err != nil {
-			return omniav1alpha1.ServiceGroupStatus{}, fmt.Errorf("service account %s: %w", depName, err)
+	// The Workspace-reader + secrets bindings must target the EFFECTIVE SA the
+	// pod actually runs as (override-aware), consistent with the tokenreview and
+	// enterprise-reader bindings below — binding the default SA leaves an
+	// override-SA pod (e.g. a Workload-Identity memory-api) without get on its
+	// own Workspace (#1899).
+	for _, svc := range []struct{ dep, sa string }{
+		{sessionDepName, sessionSA},
+		{memoryDepName, memorySA},
+	} {
+		if err := r.reconcileServicePodSA(ctx, workspace, namespace, svc.dep, svc.sa); err != nil {
+			return omniav1alpha1.ServiceGroupStatus{}, fmt.Errorf("service account %s: %w", svc.dep, err)
 		}
 	}
 
@@ -256,15 +284,13 @@ func (r *WorkspaceReconciler) reconcileManagedServiceGroup(
 	}
 
 	// On enterprise builds, BOTH memory-api and session-api run a privacy-policy
-	// watcher that lists SessionPrivacyPolicy + AgentRuntime CRDs cluster-wide.
-	// Bind each SA to the enterprise reader ClusterRole (provisioned by the
-	// chart) so the watchers can start (#1444 memory-api, #1567 session-api).
-	// No-op on OSS installs.
-	if err := r.reconcileEnterpriseReaderBinding(ctx, namespace, memorySA); err != nil {
-		return omniav1alpha1.ServiceGroupStatus{}, fmt.Errorf("memory enterprise reader binding: %w", err)
-	}
-	if err := r.reconcileEnterpriseReaderBinding(ctx, namespace, sessionSA); err != nil {
-		return omniav1alpha1.ServiceGroupStatus{}, fmt.Errorf("session enterprise reader binding: %w", err)
+	// watcher that lists SessionPrivacyPolicy + AgentRuntime CRDs in their own
+	// namespace and Gets the global default policy at omnia-system/default. Grant
+	// those via a namespaced Role (list;watch) + a cluster-wide default-policy
+	// reader (get default only). memory-api additionally lists memorypolicies
+	// cluster-wide for consolidation. No-op on OSS installs (#1899, #1444/#1567).
+	if err := r.reconcileServiceGroupPrivacyReaders(ctx, workspace, namespace, sessionSA, memorySA); err != nil {
+		return omniav1alpha1.ServiceGroupStatus{}, err
 	}
 
 	// Internal-service-auth network hardening: default-deny ingress +
@@ -371,17 +397,32 @@ func (r *WorkspaceReconciler) isDeploymentReady(ctx context.Context, name, names
 	return dep.Status.ReadyReplicas > 0
 }
 
-// reconcileServicePodSA ensures a ServiceAccount and ClusterRoleBinding exist
-// for a per-workspace service pod. The service pods (session-api, memory-api)
-// need to read the cluster-scoped Workspace CRD to resolve their own config.
-// The ClusterRoleBinding grants the agent-workspace-reader ClusterRole which
-// provides get/list/watch on Workspaces.
+// reconcileServicePodSA ensures a ServiceAccount, ClusterRoleBinding, and
+// namespaced RoleBinding exist for a per-workspace service pod. The service pods
+// (session-api, memory-api) need to Get the cluster-scoped Workspace CRD to
+// resolve their own config and read the DB secret in their namespace.
+//
+// name is the default per-deployment SA name (also the ServiceAccount object it
+// creates — the fallback SA for the non-override case). saName is the EFFECTIVE
+// SA the pod actually runs as (override-aware, from podServiceAccountName): both
+// bindings' subjects target saName, not name — so an override-SA pod (e.g. a
+// Workload-Identity memory-api) still receives get on its own Workspace and read
+// on its DB secret, consistent with the tokenreview/enterprise-reader bindings
+// (#1899, #1817).
+//
+// The ClusterRoleBinding binds the get-only per-workspace Workspace reader
+// ClusterRole (resourceNames-scoped to this workspace), NOT the cluster-wide
+// agent-workspace-reader — a pod in one workspace must not be able to enumerate
+// the config of others (#1899). Gated on WorkspaceReaderRBACEnabled so
+// local-dev / envtest without RBAC provisioned still reconcile.
 func (r *WorkspaceReconciler) reconcileServicePodSA(
 	ctx context.Context,
 	workspace *omniav1alpha1.Workspace,
-	namespace, name string,
+	namespace, name, saName string,
 ) error {
-	// ServiceAccount
+	// ServiceAccount — always the default per-deployment SA. Harmless (unused)
+	// when the pod runs as an override SA; the actual grant subjects below use
+	// saName.
 	sa := &corev1.ServiceAccount{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
 	}
@@ -397,60 +438,82 @@ func (r *WorkspaceReconciler) reconcileServicePodSA(
 		return err
 	}
 
-	// ClusterRoleBinding — binds the SA to the agent-workspace-reader ClusterRole
-	// which grants get/list/watch on Workspaces.
-	crbName := fmt.Sprintf("service-%s-%s", namespace, name)
-	crb := &rbacv1.ClusterRoleBinding{
-		ObjectMeta: metav1.ObjectMeta{Name: crbName},
-		Subjects: []rbacv1.Subject{{
-			Kind:      "ServiceAccount",
-			Name:      name,
-			Namespace: namespace,
-		}},
-		RoleRef: rbacv1.RoleRef{
-			APIGroup: "rbac.authorization.k8s.io",
-			Kind:     "ClusterRole",
-			Name:     r.AgentWorkspaceReaderClusterRole,
-		},
-	}
-	existingCRB := &rbacv1.ClusterRoleBinding{}
-	if err := r.Get(ctx, client.ObjectKeyFromObject(crb), existingCRB); apierrors.IsNotFound(err) {
-		if err := r.Create(ctx, crb); err != nil {
-			return err
-		}
-	} else if err != nil {
+	if err := r.reconcileServicePodReaderBinding(ctx, workspace, namespace, name, saName); err != nil {
 		return err
 	}
+	return r.reconcileServicePodSecretsBinding(ctx, workspace, namespace, name, saName)
+}
 
-	// RoleBinding — grants the service pod access to secrets in its namespace
-	// (needed to read database connection strings from the secretRef).
+// reconcileServicePodReaderBinding binds the effective service-pod SA to the
+// get-only per-workspace Workspace reader ClusterRole (resourceNames-scoped to
+// this workspace), NOT a cluster-wide role. roleRef is immutable, so an upgrade
+// from the old cluster-wide binding must delete + recreate; the SUBJECT is not
+// immutable but a plain create-if-NotFound never repoints it, so CreateOrUpdate
+// reconciles it when the override SA changes (mirrors the facade path). Skipped
+// when RBAC isn't provisioned (local-dev / envtest), mirroring the agent path.
+func (r *WorkspaceReconciler) reconcileServicePodReaderBinding(
+	ctx context.Context,
+	workspace *omniav1alpha1.Workspace,
+	namespace, name, saName string,
+) error {
+	if !r.WorkspaceReaderRBACEnabled {
+		return nil
+	}
+	crbName := fmt.Sprintf("service-%s-%s", namespace, name)
+	roleName := WorkspaceReaderClusterRoleName(workspace.Name)
+	if err := deleteStaleRoleRefBinding(ctx, r.Client, crbName, roleName); err != nil {
+		return err
+	}
+	crb := &rbacv1.ClusterRoleBinding{
+		ObjectMeta: metav1.ObjectMeta{Name: crbName},
+	}
+	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, crb, func() error {
+		crb.RoleRef = rbacv1.RoleRef{
+			APIGroup: "rbac.authorization.k8s.io",
+			Kind:     "ClusterRole",
+			Name:     roleName,
+		}
+		crb.Subjects = []rbacv1.Subject{{
+			Kind:      kindServiceAccount,
+			Name:      saName,
+			Namespace: namespace,
+		}}
+		return nil
+	})
+	return err
+}
+
+// reconcileServicePodSecretsBinding binds the effective service-pod SA to the
+// namespaced editor ClusterRole via a RoleBinding, granting the pod access to
+// secrets in its namespace (needed to read database connection strings from the
+// secretRef). The subject is the effective SA (saName), reconciled via
+// CreateOrUpdate so an override-SA change is repointed.
+func (r *WorkspaceReconciler) reconcileServicePodSecretsBinding(
+	ctx context.Context,
+	workspace *omniav1alpha1.Workspace,
+	namespace, name, saName string,
+) error {
 	rbName := fmt.Sprintf("service-%s-secrets", name)
 	rb := &rbacv1.RoleBinding{
 		ObjectMeta: metav1.ObjectMeta{Name: rbName, Namespace: namespace},
-		Subjects: []rbacv1.Subject{{
-			Kind:      "ServiceAccount",
-			Name:      name,
-			Namespace: namespace,
-		}},
-		RoleRef: rbacv1.RoleRef{
-			APIGroup: "rbac.authorization.k8s.io",
-			Kind:     "ClusterRole",
-			Name:     clusterRoleEditor,
-		},
 	}
-	existingRB := &rbacv1.RoleBinding{}
-	if err := r.Get(ctx, client.ObjectKeyFromObject(rb), existingRB); apierrors.IsNotFound(err) {
+	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, rb, func() error {
 		if err := controllerutil.SetControllerReference(workspace, rb, r.Scheme); err != nil {
 			return err
 		}
-		if err := r.Create(ctx, rb); err != nil {
-			return err
+		rb.RoleRef = rbacv1.RoleRef{
+			APIGroup: "rbac.authorization.k8s.io",
+			Kind:     "ClusterRole",
+			Name:     clusterRoleEditor,
 		}
-	} else if err != nil {
-		return err
-	}
-
-	return nil
+		rb.Subjects = []rbacv1.Subject{{
+			Kind:      kindServiceAccount,
+			Name:      saName,
+			Namespace: namespace,
+		}}
+		return nil
+	})
+	return err
 }
 
 // reconcileSessionAPITokenReviewBinding binds the per-workspace session-api
@@ -476,7 +539,7 @@ func (r *WorkspaceReconciler) reconcileSessionAPITokenReviewBinding(
 	crb := &rbacv1.ClusterRoleBinding{
 		ObjectMeta: metav1.ObjectMeta{Name: crbName},
 		Subjects: []rbacv1.Subject{{
-			Kind:      "ServiceAccount",
+			Kind:      kindServiceAccount,
 			Name:      sessionSAName,
 			Namespace: namespace,
 		}},
@@ -495,45 +558,199 @@ func (r *WorkspaceReconciler) reconcileSessionAPITokenReviewBinding(
 	return nil
 }
 
-// reconcileEnterpriseReaderBinding binds a per-workspace service's
-// ServiceAccount to the install-wide enterprise reader ClusterRole. On
-// enterprise builds BOTH the managed memory-api AND session-api start a
-// privacy-policy watcher that lists SessionPrivacyPolicy + AgentRuntime CRDs
-// cluster-wide; without this binding the watcher fails to start with a forbidden
-// error and SessionPrivacyPolicy enforcement is silently skipped (#1444 covered
-// memory-api; #1567 extends it to session-api). These are cluster-scoped reads,
-// so the grant must be a ClusterRole + ClusterRoleBinding. The ClusterRole is
-// provisioned by the Helm chart (enterprise only); here we only create the
-// binding for this service's SA. No-op when the ClusterRole name is unset (OSS).
-// The CRB name keeps the legacy "memory-enterprise-reader-" prefix so existing
-// memory-api bindings aren't orphaned; the SA name keeps each binding unique.
-func (r *WorkspaceReconciler) reconcileEnterpriseReaderBinding(
+// Resources the privacy watcher lists;watches in its own namespace. Extracted
+// so the Role rule can't drift from the watcher's expectations.
+const (
+	resSessionPrivacyPolicies = "sessionprivacypolicies"
+	resAgentRuntimes          = "agentruntimes"
+)
+
+// privacyReaderRoleName is the namespaced Role granting list;watch on
+// sessionprivacypolicies + agentruntimes in a workspace's namespace. One per
+// namespace, shared by every service pod (session-api, memory-api, privacy-api).
+func privacyReaderRoleName(namespace string) string {
+	return fmt.Sprintf("service-%s-privacy-reader", namespace)
+}
+
+// privacyReaderBindingName is the per-SA namespaced RoleBinding to the
+// namespaced privacy-reader Role.
+func privacyReaderBindingName(saName string) string {
+	return fmt.Sprintf("service-%s-privacy-reader", saName)
+}
+
+// privacyDefaultBindingName is the per-SA ClusterRoleBinding to the
+// privacy-default-reader ClusterRole (get on the global default policy).
+func privacyDefaultBindingName(namespace, saName string) string {
+	return fmt.Sprintf("privacy-default-%s-%s", namespace, saName)
+}
+
+// memoryConsolidationBindingName is the memory-api-only ClusterRoleBinding to
+// the memory-consolidation-reader ClusterRole (cluster-wide memorypolicies).
+func memoryConsolidationBindingName(namespace, saName string) string {
+	return fmt.Sprintf("memory-consolidation-%s-%s", namespace, saName)
+}
+
+// reconcilePrivacyReaderRole ensures the namespaced Role granting list;watch on
+// sessionprivacypolicies + agentruntimes in a workspace's namespace. Every
+// service pod (session-api, memory-api, privacy-api) runs a privacy watcher that
+// lists those CRDs in its OWN namespace (ee/pkg/privacy/watcher.go, #1899), so
+// the grant is namespaced — a pod in one workspace can no longer enumerate the
+// policies/agents of others. The Role is owner-referenced to the (cluster-scoped)
+// Workspace so it is garbage-collected with it; idempotent CreateOrUpdate lets
+// every service group in the namespace re-ensure the single shared Role.
+func (r *WorkspaceReconciler) reconcilePrivacyReaderRole(
+	ctx context.Context,
+	workspace *omniav1alpha1.Workspace,
+	namespace string,
+) error {
+	role := &rbacv1.Role{
+		ObjectMeta: metav1.ObjectMeta{Name: privacyReaderRoleName(namespace), Namespace: namespace},
+	}
+	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, role, func() error {
+		if err := controllerutil.SetControllerReference(workspace, role, r.Scheme); err != nil {
+			return err
+		}
+		role.Rules = []rbacv1.PolicyRule{{
+			APIGroups: []string{omniaAPIGroup},
+			Resources: []string{resSessionPrivacyPolicies, resAgentRuntimes},
+			Verbs:     []string{verbList, verbWatch},
+		}}
+		return nil
+	})
+	return err
+}
+
+// reconcilePrivacyReaderBinding binds a service pod's effective SA to the
+// namespaced privacy-reader Role. The subject is reconciled via CreateOrUpdate
+// so an override-SA change is repointed; the RoleBinding is owner-referenced to
+// the Workspace and GC'd with it. roleRef never changes (always the same
+// namespaced Role), so no stale-ref deletion is needed.
+func (r *WorkspaceReconciler) reconcilePrivacyReaderBinding(
+	ctx context.Context,
+	workspace *omniav1alpha1.Workspace,
+	namespace, saName string,
+) error {
+	rb := &rbacv1.RoleBinding{
+		ObjectMeta: metav1.ObjectMeta{Name: privacyReaderBindingName(saName), Namespace: namespace},
+	}
+	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, rb, func() error {
+		if err := controllerutil.SetControllerReference(workspace, rb, r.Scheme); err != nil {
+			return err
+		}
+		rb.RoleRef = rbacv1.RoleRef{
+			APIGroup: rbacAPIGroup,
+			Kind:     kindRole,
+			Name:     privacyReaderRoleName(namespace),
+		}
+		rb.Subjects = []rbacv1.Subject{{
+			Kind:      kindServiceAccount,
+			Name:      saName,
+			Namespace: namespace,
+		}}
+		return nil
+	})
+	return err
+}
+
+// reconcilePrivacyDefaultBinding binds a service pod's effective SA to the
+// install-wide privacy-default-reader ClusterRole, which grants get on any
+// "default"-named SessionPrivacyPolicy cluster-wide. The watcher Gets the global
+// default policy at omnia-system/default (ee/pkg/privacy/watcher.go, #1899); this
+// mild, documented over-grant satisfies that single cross-namespace read without
+// a per-pod omnia-system RoleBinding (per-workspace policies are not named
+// "default", so it leaks nothing). roleRef is immutable, so an upgrade from an
+// old cluster-wide binding must delete + recreate. No-op when the ClusterRole
+// name is unset (OSS / kustomize).
+func (r *WorkspaceReconciler) reconcilePrivacyDefaultBinding(
 	ctx context.Context,
 	namespace, saName string,
 ) error {
-	if r.MemoryEnterpriseReaderClusterRole == "" {
+	if r.PrivacyDefaultReaderClusterRole == "" {
 		return nil
 	}
-
-	crbName := fmt.Sprintf("memory-enterprise-reader-%s-%s", namespace, saName)
-	crb := &rbacv1.ClusterRoleBinding{
-		ObjectMeta: metav1.ObjectMeta{Name: crbName},
-		Subjects: []rbacv1.Subject{{
-			Kind:      "ServiceAccount",
+	crbName := privacyDefaultBindingName(namespace, saName)
+	if err := deleteStaleRoleRefBinding(ctx, r.Client, crbName, r.PrivacyDefaultReaderClusterRole); err != nil {
+		return err
+	}
+	crb := &rbacv1.ClusterRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: crbName}}
+	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, crb, func() error {
+		crb.RoleRef = rbacv1.RoleRef{
+			APIGroup: rbacAPIGroup,
+			Kind:     kindClusterRole,
+			Name:     r.PrivacyDefaultReaderClusterRole,
+		}
+		crb.Subjects = []rbacv1.Subject{{
+			Kind:      kindServiceAccount,
 			Name:      saName,
 			Namespace: namespace,
-		}},
-		RoleRef: rbacv1.RoleRef{
-			APIGroup: "rbac.authorization.k8s.io",
-			Kind:     "ClusterRole",
-			Name:     r.MemoryEnterpriseReaderClusterRole,
-		},
+		}}
+		return nil
+	})
+	return err
+}
+
+// reconcileMemoryConsolidationBinding binds ONLY the memory-api SA to the
+// install-wide memory-consolidation-reader ClusterRole, granting cluster-wide
+// get;list;watch on memorypolicies. The memory-api consolidation lister
+// genuinely enumerates MemoryPolicy CRDs across workspaces, so this grant stays
+// cluster-wide — but scoped to memory-api alone (session-api / privacy-api never
+// bind it). roleRef is immutable → delete-stale + CreateOrUpdate. No-op when the
+// ClusterRole name is unset (OSS / kustomize).
+func (r *WorkspaceReconciler) reconcileMemoryConsolidationBinding(
+	ctx context.Context,
+	namespace, memorySAName string,
+) error {
+	if r.MemoryConsolidationReaderClusterRole == "" {
+		return nil
 	}
-	existing := &rbacv1.ClusterRoleBinding{}
-	if err := r.Get(ctx, client.ObjectKeyFromObject(crb), existing); apierrors.IsNotFound(err) {
-		return r.Create(ctx, crb)
-	} else if err != nil {
+	crbName := memoryConsolidationBindingName(namespace, memorySAName)
+	if err := deleteStaleRoleRefBinding(ctx, r.Client, crbName, r.MemoryConsolidationReaderClusterRole); err != nil {
 		return err
+	}
+	crb := &rbacv1.ClusterRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: crbName}}
+	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, crb, func() error {
+		crb.RoleRef = rbacv1.RoleRef{
+			APIGroup: rbacAPIGroup,
+			Kind:     kindClusterRole,
+			Name:     r.MemoryConsolidationReaderClusterRole,
+		}
+		crb.Subjects = []rbacv1.Subject{{
+			Kind:      kindServiceAccount,
+			Name:      memorySAName,
+			Namespace: namespace,
+		}}
+		return nil
+	})
+	return err
+}
+
+// reconcileServiceGroupPrivacyReaders wires the privacy/memory reader grants for
+// one managed service group: the shared namespaced Role, then per-SA bindings.
+// Both session-api and memory-api get the namespaced reader + the default-policy
+// ClusterRoleBinding; ONLY memory-api additionally gets the cluster-wide
+// memorypolicies consolidation binding.
+func (r *WorkspaceReconciler) reconcileServiceGroupPrivacyReaders(
+	ctx context.Context,
+	workspace *omniav1alpha1.Workspace,
+	namespace, sessionSA, memorySA string,
+) error {
+	if err := r.reconcilePrivacyReaderRole(ctx, workspace, namespace); err != nil {
+		return fmt.Errorf("privacy reader role: %w", err)
+	}
+	if err := r.reconcilePrivacyReaderBinding(ctx, workspace, namespace, memorySA); err != nil {
+		return fmt.Errorf("memory privacy reader binding: %w", err)
+	}
+	if err := r.reconcilePrivacyDefaultBinding(ctx, namespace, memorySA); err != nil {
+		return fmt.Errorf("memory privacy default binding: %w", err)
+	}
+	if err := r.reconcileMemoryConsolidationBinding(ctx, namespace, memorySA); err != nil {
+		return fmt.Errorf("memory consolidation binding: %w", err)
+	}
+	if err := r.reconcilePrivacyReaderBinding(ctx, workspace, namespace, sessionSA); err != nil {
+		return fmt.Errorf("session privacy reader binding: %w", err)
+	}
+	if err := r.reconcilePrivacyDefaultBinding(ctx, namespace, sessionSA); err != nil {
+		return fmt.Errorf("session privacy default binding: %w", err)
 	}
 	return nil
 }

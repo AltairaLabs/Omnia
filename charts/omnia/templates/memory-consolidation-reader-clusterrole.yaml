@@ -1,0 +1,28 @@
+{{- if and .Values.rbac.create .Values.enterprise.enabled -}}
+{{- /*
+  The enterprise memory-api consolidation lister genuinely enumerates
+  MemoryPolicy CRDs cluster-wide to find every workspace opted into each policy,
+  so this grant stays cluster-scoped. It is bound ONLY to memory-api
+  ServiceAccounts (session-api / privacy-api never bind it), keeping least
+  privilege — the split off the former shared enterprise reader (#1899).
+
+  The operator binds each per-workspace memory-api ServiceAccount to this role at
+  reconcile time (told the name via --memory-consolidation-reader-clusterrole).
+  Enterprise-gated because memorypolicies is an EE CRD.
+*/}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "omnia.fullname" . }}-memory-consolidation-reader
+  labels:
+    {{- include "omnia.labels" . | nindent 4 }}
+rules:
+  - apiGroups:
+      - omnia.altairalabs.ai
+    resources:
+      - memorypolicies
+    verbs:
+      - get
+      - list
+      - watch
+{{- end }}

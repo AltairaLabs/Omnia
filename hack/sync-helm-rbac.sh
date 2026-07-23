@@ -30,8 +30,8 @@
 #     resource simply has no effect). In exchange, kustomize and Helm
 #     deployments are guaranteed to have identical operator permissions.
 #   - Non-shared Helm ClusterRoles (workspace-owner/editor/viewer,
-#     agent-workspace-reader, metrics-reader) are still hand-maintained.
-#     hack/verify-rbac-sync.sh catches drift on those.
+#     metrics-reader) are still hand-maintained. hack/verify-rbac-sync.sh
+#     catches drift on those.
 #
 # Usage:
 #   ./hack/sync-helm-rbac.sh        # regenerate

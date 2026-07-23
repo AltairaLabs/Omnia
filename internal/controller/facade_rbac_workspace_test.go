@@ -48,9 +48,9 @@ func TestReconcileWorkspaceReaderBinding_BindsThePerWorkspaceRole(t *testing.T) 
 	ar := workspaceReaderAgent()
 	c := fake.NewClientBuilder().WithScheme(s).WithObjects(demoWorkspace(), ar).Build()
 	r := &AgentRuntimeReconciler{
-		Client:                          c,
-		Scheme:                          s,
-		AgentWorkspaceReaderClusterRole: "omnia-agent-workspace-reader",
+		Client:                     c,
+		Scheme:                     s,
+		WorkspaceReaderRBACEnabled: true,
 	}
 
 	require.NoError(t, r.reconcileWorkspaceReaderBinding(context.Background(), ar))
@@ -85,9 +85,9 @@ func TestReconcileWorkspaceReaderBinding_RepointsAnExistingBinding(t *testing.T)
 	c := fake.NewClientBuilder().WithScheme(s).
 		WithObjects(demoWorkspace(), ar, existing).Build()
 	r := &AgentRuntimeReconciler{
-		Client:                          c,
-		Scheme:                          s,
-		AgentWorkspaceReaderClusterRole: "omnia-agent-workspace-reader",
+		Client:                     c,
+		Scheme:                     s,
+		WorkspaceReaderRBACEnabled: true,
 	}
 
 	require.NoError(t, r.reconcileWorkspaceReaderBinding(context.Background(), ar))
@@ -105,9 +105,9 @@ func TestReconcileWorkspaceReaderBinding_SkipsWhenNamespaceHasNoWorkspace(t *tes
 	ar := workspaceReaderAgent()
 	c := fake.NewClientBuilder().WithScheme(s).WithObjects(ar).Build() // no Workspace
 	r := &AgentRuntimeReconciler{
-		Client:                          c,
-		Scheme:                          s,
-		AgentWorkspaceReaderClusterRole: "omnia-agent-workspace-reader",
+		Client:                     c,
+		Scheme:                     s,
+		WorkspaceReaderRBACEnabled: true,
 	}
 
 	require.NoError(t, r.reconcileWorkspaceReaderBinding(context.Background(), ar))

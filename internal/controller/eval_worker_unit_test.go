@@ -491,8 +491,8 @@ func TestEnsureEvalWorkerRBAC_CreatesObjects(t *testing.T) {
 	r := &AgentRuntimeReconciler{
 		Client: fake.NewClientBuilder().WithScheme(scheme).
 			WithObjects(evalWorkerNsWorkspace()).Build(),
-		Scheme:                          scheme,
-		AgentWorkspaceReaderClusterRole: testWorkspaceReaderClusterRole,
+		Scheme:                     scheme,
+		WorkspaceReaderRBACEnabled: true,
 	}
 
 	require.NoError(t, r.ensureEvalWorkerRBAC(context.Background(), "ns", defaultSvcGroupName, nil))
@@ -530,8 +530,8 @@ func TestEnsureEvalWorkerRBAC_OverriddenServiceAccount(t *testing.T) {
 	r := &AgentRuntimeReconciler{
 		Client: fake.NewClientBuilder().WithScheme(scheme).
 			WithObjects(evalWorkerNsWorkspace()).Build(),
-		Scheme:                          scheme,
-		AgentWorkspaceReaderClusterRole: testWorkspaceReaderClusterRole,
+		Scheme:                     scheme,
+		WorkspaceReaderRBACEnabled: true,
 	}
 
 	// Point the worker at an external (e.g. workload-identity) SA.
@@ -561,7 +561,7 @@ func TestEnsureEvalWorkerRBAC_SkipsCRBWhenNoClusterRole(t *testing.T) {
 	r := &AgentRuntimeReconciler{
 		Client: fake.NewClientBuilder().WithScheme(scheme).Build(),
 		Scheme: scheme,
-		// AgentWorkspaceReaderClusterRole intentionally empty.
+		// WorkspaceReaderRBACEnabled intentionally false (RBAC not provisioned).
 	}
 
 	require.NoError(t, r.ensureEvalWorkerRBAC(context.Background(), "ns", defaultSvcGroupName, nil))

@@ -110,9 +110,11 @@ type AgentRuntimeReconciler struct {
 	EvalWorkerImage string
 	// EvalWorkerImagePullPolicy sets the imagePullPolicy on eval worker containers
 	EvalWorkerImagePullPolicy corev1.PullPolicy
-	// AgentWorkspaceReaderClusterRole is the name of the ClusterRole that grants
-	// agent pods read access to Workspace CRDs (for service URL resolution).
-	AgentWorkspaceReaderClusterRole string
+	// WorkspaceReaderRBACEnabled gates creation of the per-workspace agent /
+	// eval-worker Workspace-reader ClusterRoleBinding. When true, bindings to the
+	// per-workspace get-only reader ClusterRole are reconciled; false in local-dev
+	// / tests where RBAC is not provisioned, so no binding is created.
+	WorkspaceReaderRBACEnabled bool
 	// DefaultExposure configures external exposure (#1553). See DefaultExposureConfig.
 	DefaultExposure DefaultExposureConfig
 	// LicenseAPIURL is the operator/arena-controller license endpoint,

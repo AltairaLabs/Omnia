@@ -97,7 +97,7 @@ func main() {
 	var evalWorkerImage string
 	var evalWorkerImagePullPolicy string
 	var policyBrokerImage string
-	var agentWorkspaceReaderClusterRole string
+	var workspaceReaderRBACEnabled bool
 	var defaultExposureBaseDomain string
 	var defaultExposureGatewayName string
 	var defaultExposureGatewayNamespace string
@@ -112,7 +112,8 @@ func main() {
 	var sessionAPIAuthIstioMTLS bool
 	var sessionAPIAuthExtraSubjects string
 	var sessionAPITokenReviewClusterRole string
-	var memoryEnterpriseReaderClusterRole string
+	var privacyDefaultReaderClusterRole string
+	var memoryConsolidationReaderClusterRole string
 	var enterpriseEnabled bool
 	var licenseServerURL string
 	var licenseAPIURL string
@@ -206,8 +207,9 @@ func main() {
 		"Image pull policy for the arena-eval-worker container.")
 	flag.StringVar(&policyBrokerImage, "policy-broker-image", "",
 		"Image for the ToolPolicy decision-broker sidecar. If empty, uses the default from policy_broker_sidecar.go.")
-	flag.StringVar(&agentWorkspaceReaderClusterRole, "agent-workspace-reader-clusterrole", "",
-		"Name of the ClusterRole granting agent pods read access to Workspace CRDs. If empty, no binding is created.")
+	flag.BoolVar(&workspaceReaderRBACEnabled, "workspace-reader-rbac", false,
+		"Enable per-workspace Workspace-reader ClusterRoleBindings for agent, eval-worker, and service pods. "+
+			"False = no bindings (local dev).")
 	flag.StringVar(&defaultExposureBaseDomain, "default-exposure-base-domain", "",
 		"Base domain for agent HTTPRoute hostnames (#1553). Empty disables default exposure.")
 	flag.StringVar(&defaultExposureGatewayName, "default-exposure-gateway-name", "",
@@ -255,10 +257,16 @@ func main() {
 		"Name of the install-wide ClusterRole granting authentication.k8s.io/tokenreviews:create. "+
 			"When --session-api-auth-enabled is set, the operator binds each per-workspace session-api "+
 			"ServiceAccount to it so session-api can validate caller tokens. Provisioned by the chart.")
-	flag.StringVar(&memoryEnterpriseReaderClusterRole, "memory-enterprise-reader-clusterrole", "",
-		"Name of the install-wide ClusterRole granting cluster reads on sessionprivacypolicies + "+
-			"agentruntimes. On enterprise builds the operator binds each per-workspace memory-api "+
-			"ServiceAccount to it so the privacy/memory-policy watcher can start. Provisioned by the "+
+	flag.StringVar(&privacyDefaultReaderClusterRole, "privacy-default-reader-clusterrole", "",
+		"Name of the install-wide ClusterRole granting get on any \"default\"-named SessionPrivacyPolicy "+
+			"cluster-wide. On enterprise builds the operator binds each per-workspace service-pod "+
+			"ServiceAccount (session-api, memory-api, privacy-api) to it so the privacy watcher can Get the "+
+			"global omnia-system/default policy. Provisioned by the chart (enterprise only); empty disables "+
+			"the binding.")
+	flag.StringVar(&memoryConsolidationReaderClusterRole, "memory-consolidation-reader-clusterrole", "",
+		"Name of the install-wide ClusterRole granting cluster-wide get;list;watch on memorypolicies. On "+
+			"enterprise builds the operator binds ONLY each per-workspace memory-api ServiceAccount to it so "+
+			"the consolidation lister can enumerate MemoryPolicy CRDs across workspaces. Provisioned by the "+
 			"chart (enterprise only); empty disables the binding.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
 	flag.BoolVar(&enableLeaderElection, "leader-elect", false,
@@ -404,9 +412,9 @@ func main() {
 			Name: sessionRedisURLSecretName,
 			Key:  sessionRedisURLSecretKey,
 		},
-		EvalWorkerImage:                 evalWorkerImage,
-		EvalWorkerImagePullPolicy:       corev1.PullPolicy(evalWorkerImagePullPolicy),
-		AgentWorkspaceReaderClusterRole: agentWorkspaceReaderClusterRole,
+		EvalWorkerImage:            evalWorkerImage,
+		EvalWorkerImagePullPolicy:  corev1.PullPolicy(evalWorkerImagePullPolicy),
+		WorkspaceReaderRBACEnabled: workspaceReaderRBACEnabled,
 		DefaultExposure: controller.DefaultExposureConfig{
 			BaseDomain:       defaultExposureBaseDomain,
 			GatewayName:      defaultExposureGatewayName,
@@ -480,10 +488,11 @@ func main() {
 			Enterprise:    enterpriseEnabled,
 			LicenseAPIURL: licenseAPIURL,
 		},
-		AgentWorkspaceReaderClusterRole:   agentWorkspaceReaderClusterRole,
-		OperatorNamespace:                 os.Getenv("POD_NAMESPACE"),
-		SessionAPITokenReviewClusterRole:  sessionAPITokenReviewClusterRole,
-		MemoryEnterpriseReaderClusterRole: memoryEnterpriseReaderClusterRole,
+		WorkspaceReaderRBACEnabled:           workspaceReaderRBACEnabled,
+		OperatorNamespace:                    os.Getenv("POD_NAMESPACE"),
+		SessionAPITokenReviewClusterRole:     sessionAPITokenReviewClusterRole,
+		PrivacyDefaultReaderClusterRole:      privacyDefaultReaderClusterRole,
+		MemoryConsolidationReaderClusterRole: memoryConsolidationReaderClusterRole,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, errUnableToCreateController, logKeyController, "Workspace")
 		os.Exit(1)

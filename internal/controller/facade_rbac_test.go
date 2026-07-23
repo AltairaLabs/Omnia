@@ -225,9 +225,9 @@ func TestReconcileWorkspaceReaderBinding_Creates(t *testing.T) {
 		WithObjects(testNsWorkspace()).Build()
 
 	r := &AgentRuntimeReconciler{
-		Client:                          fakeClient,
-		Scheme:                          scheme,
-		AgentWorkspaceReaderClusterRole: "omnia-agent-workspace-reader",
+		Client:                     fakeClient,
+		Scheme:                     scheme,
+		WorkspaceReaderRBACEnabled: true,
 	}
 
 	err := r.reconcileWorkspaceReaderBinding(context.Background(), ar)
@@ -278,9 +278,9 @@ func TestReconcileWorkspaceReaderBinding_FollowsPodOverrideServiceAccount(t *tes
 		WithObjects(testNsWorkspace()).Build()
 
 	r := &AgentRuntimeReconciler{
-		Client:                          fakeClient,
-		Scheme:                          scheme,
-		AgentWorkspaceReaderClusterRole: "omnia-agent-workspace-reader",
+		Client:                     fakeClient,
+		Scheme:                     scheme,
+		WorkspaceReaderRBACEnabled: true,
 	}
 
 	require.NoError(t, r.reconcileWorkspaceReaderBinding(context.Background(), ar))
@@ -307,9 +307,9 @@ func TestReconcileWorkspaceReaderBinding_SubjectFlipsOnOverrideChange(t *testing
 	fakeClient := fake.NewClientBuilder().WithScheme(scheme).
 		WithObjects(testNsWorkspace()).Build()
 	r := &AgentRuntimeReconciler{
-		Client:                          fakeClient,
-		Scheme:                          scheme,
-		AgentWorkspaceReaderClusterRole: "omnia-agent-workspace-reader",
+		Client:                     fakeClient,
+		Scheme:                     scheme,
+		WorkspaceReaderRBACEnabled: true,
 	}
 
 	ar := &omniav1alpha1.AgentRuntime{
@@ -347,7 +347,7 @@ func TestReconcileWorkspaceReaderBinding_SkipsWhenUnconfigured(t *testing.T) {
 	r := &AgentRuntimeReconciler{
 		Client: fakeClient,
 		Scheme: scheme,
-		// AgentWorkspaceReaderClusterRole intentionally empty
+		// WorkspaceReaderRBACEnabled intentionally false (RBAC not provisioned)
 	}
 
 	err := r.reconcileWorkspaceReaderBinding(context.Background(), ar)
@@ -388,9 +388,9 @@ func TestReconcileWorkspaceReaderBinding_UpdatesExisting(t *testing.T) {
 	fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(existing).Build()
 
 	r := &AgentRuntimeReconciler{
-		Client:                          fakeClient,
-		Scheme:                          scheme,
-		AgentWorkspaceReaderClusterRole: "omnia-agent-workspace-reader",
+		Client:                     fakeClient,
+		Scheme:                     scheme,
+		WorkspaceReaderRBACEnabled: true,
 	}
 
 	err := r.reconcileWorkspaceReaderBinding(context.Background(), ar)
