@@ -1,5 +1,5 @@
 /*
-Copyright 2026.
+Copyright 2026 Altaira Labs.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package main
+package promptkit
 
 import (
 	"context"
@@ -31,32 +31,25 @@ import (
 
 // envMediaStorageBaseURL lets an operator pin the exact base URL the runtime
 // uses to build download URLs for the "local" media backend, bypassing the
-// best-effort guess in localMediaBaseURL. Not part of the shared
-// internal/media env contract (media.Env*) because it exists only to work
-// around the runtime's lack of a reliable facade-port signal.
+// best-effort guess in localMediaBaseURL. Not part of the shared internal/media
+// env contract (media.Env*) because it exists only to work around the runtime's
+// lack of a reliable facade-port signal.
 const envMediaStorageBaseURL = "OMNIA_MEDIA_STORAGE_BASE_URL"
 
 // envFacadePortFallback mirrors the facade's own OMNIA_FACADE_PORT env var
 // (internal/agent/config.go EnvFacadePort). The runtime binary intentionally
-// does not import internal/agent (a facade-only config package) just to
-// reuse this string literal.
+// does not import internal/agent (a facade-only config package) just to reuse
+// this string literal.
 const envFacadePortFallback = "OMNIA_FACADE_PORT"
 
-// defaultFacadePortGuess mirrors agent.DefaultFacadePort
-// (internal/agent/config.go) — the facade's well-known default port when
-// nothing else says otherwise.
+// defaultFacadePortGuess mirrors agent.DefaultFacadePort (internal/agent/config.go)
+// — the facade's well-known default port when nothing else says otherwise.
 const defaultFacadePortGuess = 8080
 
 // mediaStorageServerOpts builds the pkruntime.ServerOption slice (0 or 1
 // elements) that wires the runtime's media.Storage backend, mirroring
-// cmd/agent/main.go's initMediaStorage. It is the piece that was missing
-// entirely from cmd/runtime/main.go: WithMediaStorage and HasMediaStorage
-// were defined and unit-tested in internal/runtime, but nothing in the
-// runtime binary ever called WithMediaStorage, so storage_ref attachments
-// were inert in production (#1817 Task 4-5 follow-up).
-//
-// Returns the options plus a cleanup func (nil when storage is disabled) for
-// main() to defer.
+// cmd/agent/main.go's initMediaStorage. Returns the options plus a cleanup func
+// (nil when storage is disabled) for the caller to defer (#1817).
 func mediaStorageServerOpts(log logr.Logger) ([]pkruntime.ServerOption, func()) {
 	store, cleanup := initMediaStorage(log)
 	if store == nil {
@@ -65,17 +58,11 @@ func mediaStorageServerOpts(log logr.Logger) ([]pkruntime.ServerOption, func()) 
 	return []pkruntime.ServerOption{pkruntime.WithMediaStorage(store)}, cleanup
 }
 
-// initMediaStorage builds the media.Storage backend selected by the
-// OMNIA_MEDIA_* environment contract (internal/media/env.go) — the same env
-// vars the facade (cmd/agent) reads via internal/agent.Config. The runtime's
-// pkruntime.Config is CRD-derived and intentionally doesn't carry these
-// fields: media storage backend selection has no CRD representation today
-// (AgentRuntime's spec.media only carries BasePath, a different concern —
-// see internal/runtime/config_crd.go) and is pod-env-only for both binaries.
-//
-// The actual per-backend construction lives in media.Build
-// (internal/media/builder.go), shared with cmd/agent, so the four
-// backend-construction paths aren't duplicated per binary.
+// initMediaStorage builds the media.Storage backend selected by the OMNIA_MEDIA_*
+// environment contract (internal/media/env.go) — the same env vars the facade
+// (cmd/agent) reads via internal/agent.Config. The runtime's pkruntime.Config is
+// CRD-derived and intentionally doesn't carry these fields: media storage backend
+// selection has no CRD representation today and is pod-env-only for both binaries.
 func initMediaStorage(log logr.Logger) (media.Storage, func()) {
 	storageType := media.BackendType(getEnvOrDefault(media.EnvStorageType, string(media.BackendTypeNone)))
 	if storageType == media.BackendTypeNone || storageType == "" {
@@ -120,24 +107,15 @@ func initMediaStorage(log logr.Logger) (media.Storage, func()) {
 }
 
 // localMediaBaseURL resolves the base URL the runtime uses to build download
-// URLs for the "local" backend's presigned-ish links.
+// URLs for the "local" backend's presigned-ish links. Cloud backends issue
+// self-authenticating presigned URLs, so only the local backend needs this. The
+// local backend's download URL is facade-relative (localhost:<facadePort>),
+// reachable because both containers share the pod network namespace.
 //
-// Cloud backends (S3/GCS/Azure) issue self-authenticating presigned URLs the
-// runtime can fetch from anywhere, so they need no special handling. The
-// local backend's download URL is facade-relative
-// (http://localhost:<facadePort>) — reachable from the runtime container
-// because both run as sidecars in the same pod network namespace.
-// OMNIA_FACADE_PORT is now always set on the runtime container too (the
-// controller mirrors it onto both containers — buildRuntimeEnvVars in
-// internal/controller/deployment_builder_env.go), so this is normally a
-// direct read rather than a guess; the fallback below only matters when the
-// binary runs outside the operator's control (demo mode, E2E, manual
-// podOverrides that omit it).
-//
-// Resolution order: an explicit override, then a same-named env var in case
-// an operator has mirrored it onto this container, then the facade's
-// documented default. The fallback paths log clearly so a misconfigured local
-// backend is visible instead of silently serving broken download URLs.
+// Resolution order: an explicit override, then a same-named env var in case an
+// operator mirrored it onto this container, then the facade's documented default.
+// The fallback paths log clearly so a misconfigured local backend is visible
+// instead of silently serving broken download URLs.
 func localMediaBaseURL(log logr.Logger) string {
 	if v := os.Getenv(envMediaStorageBaseURL); v != "" {
 		return v
@@ -157,14 +135,6 @@ func localMediaBaseURL(log logr.Logger) string {
 	return baseURL
 }
 
-// getEnvOrDefault returns the env var value or def when unset/empty.
-func getEnvOrDefault(key, def string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return def
-}
-
 // getEnvInt64 parses the env var as an int64, returning def when unset or
 // unparseable.
 func getEnvInt64(key string, def int64) int64 {
@@ -179,8 +149,8 @@ func getEnvInt64(key string, def int64) int64 {
 	return parsed
 }
 
-// getEnvDuration parses the env var as a time.Duration, returning def when
-// unset or unparseable.
+// getEnvDuration parses the env var as a time.Duration, returning def when unset
+// or unparseable.
 func getEnvDuration(key string, def time.Duration) time.Duration {
 	v := os.Getenv(key)
 	if v == "" {

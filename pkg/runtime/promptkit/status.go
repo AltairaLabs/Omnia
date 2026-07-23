@@ -1,5 +1,5 @@
 /*
-Copyright 2026.
+Copyright 2026 Altaira Labs.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -14,13 +14,14 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package main
+package promptkit
 
 import (
 	"context"
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/go-logr/logr"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -28,60 +29,33 @@ import (
 
 	"github.com/AltairaLabs/PromptKit/runtime/evals"
 	pkruntime "github.com/altairalabs/omnia/internal/runtime"
-	"github.com/altairalabs/omnia/internal/schema"
 	"github.com/altairalabs/omnia/pkg/k8s"
 )
 
 // maxConditionMessageLen is the maximum length for a condition message.
 const maxConditionMessageLen = 1024
 
-// packReadyError returns nil when the pack at packPath is present and passes
-// schema validation, or an error describing why the runtime cannot serve it.
-// The runtime readiness probe calls this on every check, so a pod whose mounted
-// pack is invalid — including a broken pack rolled onto a live agent — drops out
-// of the Service rather than accepting conversations that fail at open-time
-// (#1299). The schema validator uses an embedded schema, so a Validate error is
-// a definitive invalid-pack result, not a transient network failure.
-func packReadyError(validator *schema.SchemaValidator, packPath string) error {
-	data, err := os.ReadFile(packPath)
-	if err != nil {
-		return fmt.Errorf("pack file unreadable: %w", err)
-	}
-	if validator != nil {
-		if err := validator.Validate(data); err != nil {
-			return fmt.Errorf("pack schema invalid: %w", err)
-		}
-	}
-	return nil
-}
+// statusReportTimeout bounds the best-effort startup status patch.
+const statusReportTimeout = 5 * time.Second
 
 // validatePackContent runs pack-level validation and returns warnings.
 func validatePackContent(packPath string, evalDefs []evals.EvalDef, log logr.Logger) []string {
 	var warnings []string
-
-	// Check pack file is readable
 	if _, err := os.Stat(packPath); err != nil {
 		return []string{fmt.Sprintf("pack file not found: %v", err)}
 	}
-
-	// Check for unregistered eval types
 	if missing := pkruntime.ValidateEvalDefs(evalDefs); len(missing) > 0 {
 		warnings = append(warnings, fmt.Sprintf("unregistered eval types: %v", missing))
 	}
-
 	if len(warnings) > 0 {
 		log.Info("pack content validation issues found", "warnings", warnings)
 	}
-
 	return warnings
 }
 
 // reportPackValidation patches the PackContentValid condition on the AgentRuntime.
 func reportPackValidation(
-	ctx context.Context,
-	c client.Client,
-	agentName, namespace string,
-	warnings []string,
+	ctx context.Context, c client.Client, agentName, namespace string, warnings []string,
 ) error {
 	if len(warnings) > 0 {
 		msg := strings.Join(warnings, "; ")
@@ -92,7 +66,6 @@ func reportPackValidation(
 			k8s.ConditionPackContentValid, metav1.ConditionFalse,
 			"ContentIssuesFound", msg)
 	}
-
 	return k8s.PatchAgentRuntimeCondition(ctx, c, agentName, namespace,
 		k8s.ConditionPackContentValid, metav1.ConditionTrue,
 		"PackContentValid", "Pack content validated successfully")
