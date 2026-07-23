@@ -43,6 +43,7 @@ const (
 	kindRole           = "Role"
 	verbGet            = "get"
 	verbList           = "list"
+	verbWatch          = "watch"
 )
 
 // evalWorkerRBACLabels is the label set carried by every operator-managed

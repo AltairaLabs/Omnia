@@ -1,0 +1,34 @@
+{{- if and .Values.rbac.create .Values.enterprise.enabled -}}
+{{- /*
+  Every enterprise service pod (session-api, memory-api, privacy-api) runs a
+  privacy-policy watcher (ee/pkg/privacy/watcher.go). The watcher lists
+  SessionPrivacyPolicy + AgentRuntime CRDs in its OWN namespace (granted by the
+  namespaced privacy-reader Role the Workspace reconciler creates), and Gets the
+  single global default policy at omnia-system/default.
+
+  This ClusterRole satisfies that one cross-namespace Get cheaply: it grants get
+  on any SessionPrivacyPolicy NAMED "default", cluster-wide. That is a deliberate,
+  documented mild over-grant — it avoids minting a per-pod RoleBinding in the
+  omnia-system namespace for every service pod. Per-workspace policies are never
+  named "default", so this does NOT leak their contents.
+
+  The operator binds each per-workspace service-pod ServiceAccount to this role
+  at reconcile time (told the name via --privacy-default-reader-clusterrole).
+  Enterprise-gated because sessionprivacypolicies is an EE CRD (#1899).
+*/}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "omnia.fullname" . }}-privacy-default-reader
+  labels:
+    {{- include "omnia.labels" . | nindent 4 }}
+rules:
+  - apiGroups:
+      - omnia.altairalabs.ai
+    resources:
+      - sessionprivacypolicies
+    verbs:
+      - get
+    resourceNames:
+      - default
+{{- end }}

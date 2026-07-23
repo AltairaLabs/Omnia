@@ -67,10 +67,12 @@ func deleteStaleRoleRefBinding(ctx context.Context, c client.Client, name, roleN
 //
 // The cluster-wide agent-workspace-reader ClusterRole is gone (#1899).
 // session-api and memory-api service pods bind this same per-workspace
-// get-only role too — their remaining cluster-wide need (the EE memory
-// consolidation worker's MemoryPolicy list) is served by a separate,
-// enterprise-gated reader role
-// (charts/omnia/templates/memory-enterprise-reader-clusterrole.yaml).
+// get-only role too. Their privacy-watcher reads are scoped separately: a
+// namespaced privacy-reader Role (list;watch on sessionprivacypolicies +
+// agentruntimes) plus a narrow cluster-wide get on the global default policy
+// (charts/omnia/templates/privacy-default-reader-clusterrole.yaml); memory-api
+// alone additionally binds the memory-consolidation reader for its cluster-wide
+// MemoryPolicy list (charts/omnia/templates/memory-consolidation-reader-clusterrole.yaml).
 //
 // The grant is deliberately get-only. RBAC resourceNames cannot restrict
 // collection verbs — there is no way to express "list just one" — and that is
