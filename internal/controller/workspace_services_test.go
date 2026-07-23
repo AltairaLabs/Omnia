@@ -191,6 +191,71 @@ func TestReconcileServices_ServicePodBindsPerWorkspaceReader(t *testing.T) {
 	g.Expect(crb.Subjects[0].Namespace).To(Equal("omnia-demo"))
 }
 
+// TestReconcileServices_ServicePodReaderTargetsOverriddenSA asserts that when a
+// service group overrides its pod ServiceAccount (e.g. memory-api runs as an
+// Azure Workload-Identity SA), the service-pod Workspace-reader ClusterRoleBinding
+// AND the namespaced secrets RoleBinding target the OVERRIDDEN SA the pod actually
+// runs as — not the default per-deployment SA the pod never uses. Binding the
+// default SA leaves the WI-SA memory-api without get on its own Workspace, so its
+// privacy-policy watcher and consolidation worker 403 every poll and privacy
+// enforcement silently degrades (#1899). Mirrors the tokenreview/enterprise-reader
+// effective-SA fix (#1817) for the service-pod bindings.
+func TestReconcileServices_ServicePodReaderTargetsOverriddenSA(t *testing.T) {
+	g := NewWithT(t)
+	scheme := testScheme()
+
+	const wiSA = "wi-sa"
+	ws := newTestWorkspace("demo", "omnia-demo", []omniav1alpha1.WorkspaceServiceGroup{
+		{
+			Name: "default",
+			Mode: omniav1alpha1.ServiceModeManaged,
+			Memory: &omniav1alpha1.MemoryServiceConfig{
+				Database: omniav1alpha1.DatabaseConfig{
+					SecretRef: corev1.LocalObjectReference{Name: "db-secret"},
+				},
+				PodOverrides: &omniav1alpha1.PodOverrides{ServiceAccountName: wiSA},
+			},
+			Session: &omniav1alpha1.SessionServiceConfig{
+				Database: omniav1alpha1.DatabaseConfig{
+					SecretRef: corev1.LocalObjectReference{Name: "db-secret"},
+				},
+			},
+		},
+	})
+
+	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "omnia-demo"}}
+	r := newTestReconciler(scheme, ws, ns)
+	r.WorkspaceReaderRBACEnabled = true
+
+	ctx := context.Background()
+	g.Expect(r.reconcileServices(ctx, ws)).To(Succeed())
+
+	// The memory-api pod runs as wi-sa, so its Workspace-reader binding's subject
+	// must be wi-sa — NOT the unused default memory-demo-default SA.
+	crb := &rbacv1.ClusterRoleBinding{}
+	key := client.ObjectKey{Name: fmt.Sprintf("service-%s-%s", "omnia-demo", "memory-demo-default")}
+	g.Expect(r.Get(ctx, key, crb)).To(Succeed())
+	g.Expect(crb.RoleRef.Name).To(Equal(WorkspaceReaderClusterRoleName("demo")))
+	g.Expect(crb.Subjects).To(HaveLen(1))
+	g.Expect(crb.Subjects[0].Name).To(Equal(wiSA),
+		"service-pod Workspace reader must bind the effective (override) SA, not the default")
+	g.Expect(crb.Subjects[0].Namespace).To(Equal("omnia-demo"))
+
+	// The namespaced secrets RoleBinding must likewise target wi-sa.
+	rb := &rbacv1.RoleBinding{}
+	rbKey := client.ObjectKey{Name: "service-memory-demo-default-secrets", Namespace: "omnia-demo"}
+	g.Expect(r.Get(ctx, rbKey, rb)).To(Succeed())
+	g.Expect(rb.Subjects).To(HaveLen(1))
+	g.Expect(rb.Subjects[0].Name).To(Equal(wiSA),
+		"service-pod secrets RoleBinding must bind the effective (override) SA, not the default")
+
+	// session-api has no override, so its reader subject stays the default SA.
+	sessionCRB := &rbacv1.ClusterRoleBinding{}
+	sessionKey := client.ObjectKey{Name: fmt.Sprintf("service-%s-%s", "omnia-demo", "session-demo-default")}
+	g.Expect(r.Get(ctx, sessionKey, sessionCRB)).To(Succeed())
+	g.Expect(sessionCRB.Subjects[0].Name).To(Equal("session-demo-default"))
+}
+
 // TestReconcileServices_GroupRedisWiredIntoDeployments is a WIRING test: it
 // drives the full operator path (reconcileServices → reconcileManagedServiceGroup
 // → ServiceBuilder.Build*Deployment → client Create) and asserts the group-level

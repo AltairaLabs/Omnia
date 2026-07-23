@@ -122,7 +122,9 @@ func (r *WorkspaceReconciler) reconcilePrivacyService(ctx context.Context, works
 	namespace := workspace.Spec.Namespace.Name
 	depName := fmt.Sprintf("privacy-%s", workspace.Name)
 
-	if err := r.reconcileServicePodSA(ctx, workspace, namespace, depName); err != nil {
+	// privacy-api has no podOverrides path, so its effective SA is the default
+	// per-deployment SA (depName).
+	if err := r.reconcileServicePodSA(ctx, workspace, namespace, depName, depName); err != nil {
 		return fmt.Errorf("service account %s: %w", depName, err)
 	}
 	// privacy-api validates caller tokens via the TokenReview API (same as
@@ -238,9 +240,17 @@ func (r *WorkspaceReconciler) reconcileManagedServiceGroup(
 	// Reconcile ServiceAccounts for service pods. Per-workspace session-api
 	// and memory-api need to read the cluster-scoped Workspace CRD to
 	// resolve their own config (workspace name, service group, DB secret).
-	for _, depName := range []string{sessionDepName, memoryDepName} {
-		if err := r.reconcileServicePodSA(ctx, workspace, namespace, depName); err != nil {
-			return omniav1alpha1.ServiceGroupStatus{}, fmt.Errorf("service account %s: %w", depName, err)
+	// The Workspace-reader + secrets bindings must target the EFFECTIVE SA the
+	// pod actually runs as (override-aware), consistent with the tokenreview and
+	// enterprise-reader bindings below — binding the default SA leaves an
+	// override-SA pod (e.g. a Workload-Identity memory-api) without get on its
+	// own Workspace (#1899).
+	for _, svc := range []struct{ dep, sa string }{
+		{sessionDepName, sessionSA},
+		{memoryDepName, memorySA},
+	} {
+		if err := r.reconcileServicePodSA(ctx, workspace, namespace, svc.dep, svc.sa); err != nil {
+			return omniav1alpha1.ServiceGroupStatus{}, fmt.Errorf("service account %s: %w", svc.dep, err)
 		}
 	}
 
@@ -371,9 +381,19 @@ func (r *WorkspaceReconciler) isDeploymentReady(ctx context.Context, name, names
 	return dep.Status.ReadyReplicas > 0
 }
 
-// reconcileServicePodSA ensures a ServiceAccount and ClusterRoleBinding exist
-// for a per-workspace service pod. The service pods (session-api, memory-api)
-// need to Get the cluster-scoped Workspace CRD to resolve their own config.
+// reconcileServicePodSA ensures a ServiceAccount, ClusterRoleBinding, and
+// namespaced RoleBinding exist for a per-workspace service pod. The service pods
+// (session-api, memory-api) need to Get the cluster-scoped Workspace CRD to
+// resolve their own config and read the DB secret in their namespace.
+//
+// name is the default per-deployment SA name (also the ServiceAccount object it
+// creates — the fallback SA for the non-override case). saName is the EFFECTIVE
+// SA the pod actually runs as (override-aware, from podServiceAccountName): both
+// bindings' subjects target saName, not name — so an override-SA pod (e.g. a
+// Workload-Identity memory-api) still receives get on its own Workspace and read
+// on its DB secret, consistent with the tokenreview/enterprise-reader bindings
+// (#1899, #1817).
+//
 // The ClusterRoleBinding binds the get-only per-workspace Workspace reader
 // ClusterRole (resourceNames-scoped to this workspace), NOT the cluster-wide
 // agent-workspace-reader — a pod in one workspace must not be able to enumerate
@@ -382,9 +402,11 @@ func (r *WorkspaceReconciler) isDeploymentReady(ctx context.Context, name, names
 func (r *WorkspaceReconciler) reconcileServicePodSA(
 	ctx context.Context,
 	workspace *omniav1alpha1.Workspace,
-	namespace, name string,
+	namespace, name, saName string,
 ) error {
-	// ServiceAccount
+	// ServiceAccount — always the default per-deployment SA. Harmless (unused)
+	// when the pod runs as an override SA; the actual grant subjects below use
+	// saName.
 	sa := &corev1.ServiceAccount{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
 	}
@@ -400,69 +422,82 @@ func (r *WorkspaceReconciler) reconcileServicePodSA(
 		return err
 	}
 
-	// ClusterRoleBinding — bind to the get-only per-workspace Workspace reader
-	// (resourceNames-scoped to this workspace), NOT a cluster-wide role. memory-api
-	// / session-api read only their own Workspace (#1899). roleRef is immutable, so
-	// an upgrade from the old cluster-wide binding must delete + recreate. Skipped
-	// when RBAC isn't provisioned (local-dev / envtest), mirroring the agent path.
-	if r.WorkspaceReaderRBACEnabled {
-		crbName := fmt.Sprintf("service-%s-%s", namespace, name)
-		roleName := WorkspaceReaderClusterRoleName(workspace.Name)
-		if err := deleteStaleRoleRefBinding(ctx, r.Client, crbName, roleName); err != nil {
-			return err
-		}
-		crb := &rbacv1.ClusterRoleBinding{
-			ObjectMeta: metav1.ObjectMeta{Name: crbName},
-			Subjects: []rbacv1.Subject{{
-				Kind:      "ServiceAccount",
-				Name:      name,
-				Namespace: namespace,
-			}},
-			RoleRef: rbacv1.RoleRef{
-				APIGroup: "rbac.authorization.k8s.io",
-				Kind:     "ClusterRole",
-				Name:     roleName,
-			},
-		}
-		existingCRB := &rbacv1.ClusterRoleBinding{}
-		if err := r.Get(ctx, client.ObjectKeyFromObject(crb), existingCRB); apierrors.IsNotFound(err) {
-			if err := r.Create(ctx, crb); err != nil {
-				return err
-			}
-		} else if err != nil {
-			return err
-		}
+	if err := r.reconcileServicePodReaderBinding(ctx, workspace, namespace, name, saName); err != nil {
+		return err
 	}
+	return r.reconcileServicePodSecretsBinding(ctx, workspace, namespace, name, saName)
+}
 
-	// RoleBinding — grants the service pod access to secrets in its namespace
-	// (needed to read database connection strings from the secretRef).
+// reconcileServicePodReaderBinding binds the effective service-pod SA to the
+// get-only per-workspace Workspace reader ClusterRole (resourceNames-scoped to
+// this workspace), NOT a cluster-wide role. roleRef is immutable, so an upgrade
+// from the old cluster-wide binding must delete + recreate; the SUBJECT is not
+// immutable but a plain create-if-NotFound never repoints it, so CreateOrUpdate
+// reconciles it when the override SA changes (mirrors the facade path). Skipped
+// when RBAC isn't provisioned (local-dev / envtest), mirroring the agent path.
+func (r *WorkspaceReconciler) reconcileServicePodReaderBinding(
+	ctx context.Context,
+	workspace *omniav1alpha1.Workspace,
+	namespace, name, saName string,
+) error {
+	if !r.WorkspaceReaderRBACEnabled {
+		return nil
+	}
+	crbName := fmt.Sprintf("service-%s-%s", namespace, name)
+	roleName := WorkspaceReaderClusterRoleName(workspace.Name)
+	if err := deleteStaleRoleRefBinding(ctx, r.Client, crbName, roleName); err != nil {
+		return err
+	}
+	crb := &rbacv1.ClusterRoleBinding{
+		ObjectMeta: metav1.ObjectMeta{Name: crbName},
+	}
+	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, crb, func() error {
+		crb.RoleRef = rbacv1.RoleRef{
+			APIGroup: "rbac.authorization.k8s.io",
+			Kind:     "ClusterRole",
+			Name:     roleName,
+		}
+		crb.Subjects = []rbacv1.Subject{{
+			Kind:      kindServiceAccount,
+			Name:      saName,
+			Namespace: namespace,
+		}}
+		return nil
+	})
+	return err
+}
+
+// reconcileServicePodSecretsBinding binds the effective service-pod SA to the
+// namespaced editor ClusterRole via a RoleBinding, granting the pod access to
+// secrets in its namespace (needed to read database connection strings from the
+// secretRef). The subject is the effective SA (saName), reconciled via
+// CreateOrUpdate so an override-SA change is repointed.
+func (r *WorkspaceReconciler) reconcileServicePodSecretsBinding(
+	ctx context.Context,
+	workspace *omniav1alpha1.Workspace,
+	namespace, name, saName string,
+) error {
 	rbName := fmt.Sprintf("service-%s-secrets", name)
 	rb := &rbacv1.RoleBinding{
 		ObjectMeta: metav1.ObjectMeta{Name: rbName, Namespace: namespace},
-		Subjects: []rbacv1.Subject{{
-			Kind:      "ServiceAccount",
-			Name:      name,
-			Namespace: namespace,
-		}},
-		RoleRef: rbacv1.RoleRef{
-			APIGroup: "rbac.authorization.k8s.io",
-			Kind:     "ClusterRole",
-			Name:     clusterRoleEditor,
-		},
 	}
-	existingRB := &rbacv1.RoleBinding{}
-	if err := r.Get(ctx, client.ObjectKeyFromObject(rb), existingRB); apierrors.IsNotFound(err) {
+	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, rb, func() error {
 		if err := controllerutil.SetControllerReference(workspace, rb, r.Scheme); err != nil {
 			return err
 		}
-		if err := r.Create(ctx, rb); err != nil {
-			return err
+		rb.RoleRef = rbacv1.RoleRef{
+			APIGroup: "rbac.authorization.k8s.io",
+			Kind:     "ClusterRole",
+			Name:     clusterRoleEditor,
 		}
-	} else if err != nil {
-		return err
-	}
-
-	return nil
+		rb.Subjects = []rbacv1.Subject{{
+			Kind:      kindServiceAccount,
+			Name:      saName,
+			Namespace: namespace,
+		}}
+		return nil
+	})
+	return err
 }
 
 // reconcileSessionAPITokenReviewBinding binds the per-workspace session-api
@@ -488,7 +523,7 @@ func (r *WorkspaceReconciler) reconcileSessionAPITokenReviewBinding(
 	crb := &rbacv1.ClusterRoleBinding{
 		ObjectMeta: metav1.ObjectMeta{Name: crbName},
 		Subjects: []rbacv1.Subject{{
-			Kind:      "ServiceAccount",
+			Kind:      kindServiceAccount,
 			Name:      sessionSAName,
 			Namespace: namespace,
 		}},
@@ -531,7 +566,7 @@ func (r *WorkspaceReconciler) reconcileEnterpriseReaderBinding(
 	crb := &rbacv1.ClusterRoleBinding{
 		ObjectMeta: metav1.ObjectMeta{Name: crbName},
 		Subjects: []rbacv1.Subject{{
-			Kind:      "ServiceAccount",
+			Kind:      kindServiceAccount,
 			Name:      saName,
 			Namespace: namespace,
 		}},
