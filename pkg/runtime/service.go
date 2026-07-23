@@ -156,13 +156,48 @@ func (e *streamEmitter) Done(d Done) error {
 	})
 }
 
-// ToolCall and Media are wired in Task 4.
-func (e *streamEmitter) ToolCall(_ ClientToolCall) (ClientToolResult, error) {
-	return ClientToolResult{}, status.Error(codes.Unimplemented, "tool calls not yet wired")
+// ToolCall sends a client-execution ToolCall and blocks for the client's
+// matching ClientToolResult, which the SDK reads off the same stream.
+func (e *streamEmitter) ToolCall(call ClientToolCall) (ClientToolResult, error) {
+	send := &runtimev1.ServerMessage{
+		Message: &runtimev1.ServerMessage_ToolCall{ToolCall: &runtimev1.ToolCall{
+			Id:             call.ID,
+			Name:           call.Name,
+			ArgumentsJson:  call.ArgumentsJSON,
+			Execution:      runtimev1.ToolExecution_TOOL_EXECUTION_CLIENT,
+			ConsentMessage: call.ConsentMessage,
+			Categories:     call.Categories,
+		}},
+	}
+	if err := e.stream.Send(send); err != nil {
+		return ClientToolResult{}, err
+	}
+	msg, err := e.stream.Recv()
+	if err != nil {
+		return ClientToolResult{}, err
+	}
+	res := msg.GetClientToolResult()
+	if res == nil {
+		return ClientToolResult{}, status.Error(codes.FailedPrecondition, "expected ClientToolResult after ToolCall")
+	}
+	return ClientToolResult{
+		CallID:          res.GetCallId(),
+		ResultJSON:      res.GetResultJson(),
+		IsRejected:      res.GetIsRejected(),
+		RejectionReason: res.GetRejectionReason(),
+	}, nil
 }
 
-func (e *streamEmitter) Media(_ MediaChunk) error {
-	return status.Error(codes.Unimplemented, "media not yet wired")
+func (e *streamEmitter) Media(chunk MediaChunk) error {
+	return e.stream.Send(&runtimev1.ServerMessage{
+		Message: &runtimev1.ServerMessage_MediaChunk{MediaChunk: &runtimev1.MediaChunk{
+			MediaId:  chunk.MediaID,
+			Sequence: chunk.Sequence,
+			IsLast:   chunk.IsLast,
+			MimeType: chunk.MimeType,
+			Data:     chunk.Data,
+		}},
+	})
 }
 
 func mapUsageToProto(u *Usage) *runtimev1.Usage {

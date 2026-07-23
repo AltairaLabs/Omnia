@@ -176,3 +176,79 @@ func TestConverse_DuplexStartRejectedGracefully(t *testing.T) {
 	}
 	assert.True(t, sawError, "duplex must be refused with an Error frame, not a crash")
 }
+
+func TestEmitter_ClientToolRoundTrip(t *testing.T) {
+	var got ClientToolResult
+	h := &stubHandler{
+		caps: []string{contract.CapabilityClientTools},
+		converse: func(_ context.Context, _ Turn, emit Emitter) error {
+			res, err := emit.ToolCall(ClientToolCall{ID: "call-1", Name: "get_location", ArgumentsJSON: "{}"})
+			if err != nil {
+				return err
+			}
+			got = res
+			return emit.Done(Done{Final: "done"})
+		},
+	}
+	client := runtimev1.NewRuntimeServiceClient(newTestConn(t, h))
+
+	stream, err := client.Converse(context.Background())
+	require.NoError(t, err)
+	require.NoError(t, stream.Send(&runtimev1.ClientMessage{SessionId: "s1", Content: "where am i"}))
+
+	// Read frames until the ToolCall arrives, then reply with a result.
+	var toolCall *runtimev1.ToolCall
+	for toolCall == nil {
+		msg, recvErr := stream.Recv()
+		require.NoError(t, recvErr)
+		toolCall = msg.GetToolCall()
+	}
+	assert.Equal(t, "call-1", toolCall.GetId())
+	assert.Equal(t, "get_location", toolCall.GetName())
+	assert.Equal(t, runtimev1.ToolExecution_TOOL_EXECUTION_CLIENT, toolCall.GetExecution())
+
+	require.NoError(t, stream.Send(&runtimev1.ClientMessage{
+		SessionId: "s1",
+		ClientToolResult: &runtimev1.ClientToolResult{
+			CallId:     "call-1",
+			ResultJson: `{"city":"Bristol"}`,
+		},
+	}))
+	require.NoError(t, stream.CloseSend())
+	for {
+		if _, recvErr := stream.Recv(); recvErr != nil {
+			break
+		}
+	}
+
+	assert.Equal(t, "call-1", got.CallID)
+	assert.Equal(t, `{"city":"Bristol"}`, got.ResultJSON)
+	assert.False(t, got.IsRejected)
+}
+
+func TestEmitter_Media(t *testing.T) {
+	h := &stubHandler{
+		caps: []string{contract.CapabilityClientTools},
+		converse: func(_ context.Context, _ Turn, emit Emitter) error {
+			if err := emit.Media(MediaChunk{
+				MediaID: "m1", Sequence: 0, IsLast: true, MimeType: "audio/pcm", Data: []byte{1, 2, 3},
+			}); err != nil {
+				return err
+			}
+			return emit.Done(Done{})
+		},
+	}
+	client := runtimev1.NewRuntimeServiceClient(newTestConn(t, h))
+	frames := drainConverse(t, client, "speak")
+
+	var mc *runtimev1.MediaChunk
+	for _, f := range frames {
+		if f.GetMediaChunk() != nil {
+			mc = f.GetMediaChunk()
+		}
+	}
+	require.NotNil(t, mc)
+	assert.Equal(t, "m1", mc.GetMediaId())
+	assert.True(t, mc.GetIsLast())
+	assert.Equal(t, []byte{1, 2, 3}, mc.GetData())
+}
