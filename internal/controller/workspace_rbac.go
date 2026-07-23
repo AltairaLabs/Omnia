@@ -65,9 +65,12 @@ func deleteStaleRoleRefBinding(ctx context.Context, c client.Client, name, roleN
 // cluster-wide reader, so a pod in workspace A can no longer enumerate the
 // configuration of B, C and D (#1875).
 //
-// The cluster-wide role still exists and is still bound by session-api and
-// memory-api service pods: memory consolidation genuinely lists Workspaces to
-// find those opted into each MemoryPolicy.
+// The cluster-wide agent-workspace-reader ClusterRole is gone (#1899).
+// session-api and memory-api service pods bind this same per-workspace
+// get-only role too — their remaining cluster-wide need (the EE memory
+// consolidation worker's MemoryPolicy list) is served by a separate,
+// enterprise-gated reader role
+// (charts/omnia/templates/memory-enterprise-reader-clusterrole.yaml).
 //
 // The grant is deliberately get-only. RBAC resourceNames cannot restrict
 // collection verbs — there is no way to express "list just one" — and that is

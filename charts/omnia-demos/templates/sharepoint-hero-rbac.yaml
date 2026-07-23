@@ -18,6 +18,14 @@ metadata:
 ---
 # Overriding the pod ServiceAccount drops the operator-provisioned per-agent
 # binding, so re-grant the CRD + Secret reads the facade/runtime/memory-api need.
+#
+# No manual Workspace-reader re-grant is needed here: the operator's
+# workspace-reader ClusterRoleBinding reconcile targets the EFFECTIVE pod SA
+# (podOverrides / workspace runtime-default, resolved via
+# effectiveFacadeServiceAccountName, #1817), so it already binds this WI SA to
+# the per-workspace get-only Workspace reader ClusterRole. The facade also
+# resolves its own workspace by name via a scoped Get, not a cluster-wide List
+# (#1875/#1902), so nothing here needs to re-grant that read.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
@@ -50,24 +58,6 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
   name: {{ $az.workloadIdentity.serviceAccountName }}
-subjects:
-  - kind: ServiceAccount
-    name: {{ $az.workloadIdentity.serviceAccountName }}
-    namespace: {{ .Values.namespace }}
----
-# Workspaces are cluster-scoped; the facade lists them for service discovery
-# (per-workspace session-api URL). The default binding is lost when the pod SA
-# is overridden, so re-bind the WI SA to the workspace-reader ClusterRole.
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: {{ .Values.namespace }}-{{ $az.workloadIdentity.serviceAccountName }}-workspace-reader
-  labels:
-    app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: omnia-agent-workspace-reader
 subjects:
   - kind: ServiceAccount
     name: {{ $az.workloadIdentity.serviceAccountName }}

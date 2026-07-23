@@ -6,8 +6,8 @@ values:
 templates:
   - templates/memory-enterprise-reader-clusterrole.yaml
 tests:
-  # memorypolicies moved off the cluster-wide agent-workspace-reader onto this
-  # EE reader (#1899): the memory-api consolidation lister genuinely lists
+  # memorypolicies moved off the deleted cluster-wide reader ClusterRole onto
+  # this EE reader (#1899): the memory-api consolidation lister genuinely lists
   # MemoryPolicy CRs cluster-wide to find workspaces opted into each policy.
   # Both memory-api and session-api bind this role. Assert the relocated grant
   # is present so the move can't silently regress.

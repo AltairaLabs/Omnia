@@ -5,13 +5,16 @@
   effective privacy policy for each agent. These are cluster-scoped reads, so
   the grant must be a ClusterRole; the operator binds each per-workspace
   memory-api ServiceAccount to this role at reconcile time (it is told the name
-  via --memory-enterprise-reader-clusterrole). Workspaces are already covered by
-  the agent-workspace-reader ClusterRole.
+  via --memory-enterprise-reader-clusterrole). Workspace reads are handled
+  separately: every per-workspace service pod (session-api, memory-api) binds
+  the per-workspace get-only Workspace reader ClusterRole the Workspace
+  reconciler creates (internal/controller/workspace_rbac.go, #1875/#1899) —
+  there is no cluster-wide Workspace reader anymore.
 
-  This is deliberately a SEPARATE role bound only to memory-api SAs (not the
-  shared agent-workspace-reader, which every facade/session pod binds) to keep
+  This is deliberately a SEPARATE role bound only to memory-api SAs, to keep
   least privilege — only the enterprise memory-api needs sessionprivacypolicies.
-  Enterprise-gated because sessionprivacypolicies is an EE CRD (#1444).
+  Enterprise-gated because sessionprivacypolicies is an EE CRD (#1444). It also
+  grants memorypolicies — see the rule-level comment below for why.
 */}}
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
@@ -30,7 +33,7 @@ rules:
       - list
       - watch
   {{- /*
-    memorypolicies moved here from the cluster-wide agent-workspace-reader
+    memorypolicies moved here from the deleted cluster-wide reader ClusterRole
     (#1899): the memory-api consolidation lister genuinely lists MemoryPolicy
     CRDs cluster-wide to find workspaces opted into each policy. Both memory-api
     and session-api bind this EE reader role; session-api holds an unused
