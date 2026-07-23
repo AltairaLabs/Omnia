@@ -215,7 +215,7 @@ func (r *AgentRuntimeReconciler) ensureEvalWorkerWorkspaceReaderBinding(
 	ctx context.Context,
 	namespace, serviceGroup, saName string,
 ) error {
-	if r.AgentWorkspaceReaderClusterRole == "" {
+	if !r.WorkspaceReaderRBACEnabled {
 		return nil
 	}
 

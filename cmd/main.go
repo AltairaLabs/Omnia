@@ -97,7 +97,7 @@ func main() {
 	var evalWorkerImage string
 	var evalWorkerImagePullPolicy string
 	var policyBrokerImage string
-	var agentWorkspaceReaderClusterRole string
+	var workspaceReaderRBACEnabled bool
 	var defaultExposureBaseDomain string
 	var defaultExposureGatewayName string
 	var defaultExposureGatewayNamespace string
@@ -206,8 +206,9 @@ func main() {
 		"Image pull policy for the arena-eval-worker container.")
 	flag.StringVar(&policyBrokerImage, "policy-broker-image", "",
 		"Image for the ToolPolicy decision-broker sidecar. If empty, uses the default from policy_broker_sidecar.go.")
-	flag.StringVar(&agentWorkspaceReaderClusterRole, "agent-workspace-reader-clusterrole", "",
-		"Name of the ClusterRole granting agent pods read access to Workspace CRDs. If empty, no binding is created.")
+	flag.BoolVar(&workspaceReaderRBACEnabled, "workspace-reader-rbac", false,
+		"Enable per-workspace Workspace-reader ClusterRoleBindings for agent, eval-worker, and service pods. "+
+			"False = no bindings (local dev).")
 	flag.StringVar(&defaultExposureBaseDomain, "default-exposure-base-domain", "",
 		"Base domain for agent HTTPRoute hostnames (#1553). Empty disables default exposure.")
 	flag.StringVar(&defaultExposureGatewayName, "default-exposure-gateway-name", "",
@@ -404,9 +405,9 @@ func main() {
 			Name: sessionRedisURLSecretName,
 			Key:  sessionRedisURLSecretKey,
 		},
-		EvalWorkerImage:                 evalWorkerImage,
-		EvalWorkerImagePullPolicy:       corev1.PullPolicy(evalWorkerImagePullPolicy),
-		AgentWorkspaceReaderClusterRole: agentWorkspaceReaderClusterRole,
+		EvalWorkerImage:            evalWorkerImage,
+		EvalWorkerImagePullPolicy:  corev1.PullPolicy(evalWorkerImagePullPolicy),
+		WorkspaceReaderRBACEnabled: workspaceReaderRBACEnabled,
 		DefaultExposure: controller.DefaultExposureConfig{
 			BaseDomain:       defaultExposureBaseDomain,
 			GatewayName:      defaultExposureGatewayName,
@@ -480,7 +481,7 @@ func main() {
 			Enterprise:    enterpriseEnabled,
 			LicenseAPIURL: licenseAPIURL,
 		},
-		AgentWorkspaceReaderClusterRole:   agentWorkspaceReaderClusterRole,
+		WorkspaceReaderRBACEnabled:        workspaceReaderRBACEnabled,
 		OperatorNamespace:                 os.Getenv("POD_NAMESPACE"),
 		SessionAPITokenReviewClusterRole:  sessionAPITokenReviewClusterRole,
 		MemoryEnterpriseReaderClusterRole: memoryEnterpriseReaderClusterRole,

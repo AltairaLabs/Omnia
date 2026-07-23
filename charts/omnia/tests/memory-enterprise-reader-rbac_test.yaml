@@ -1,0 +1,57 @@
+suite: enterprise memory-api reader grants privacy + memorypolicies reads
+release:
+  name: omnia
+values:
+  - ../values-chart-tests.yaml
+templates:
+  - templates/memory-enterprise-reader-clusterrole.yaml
+tests:
+  # memorypolicies moved off the cluster-wide agent-workspace-reader onto this
+  # EE reader (#1899): the memory-api consolidation lister genuinely lists
+  # MemoryPolicy CRs cluster-wide to find workspaces opted into each policy.
+  # Both memory-api and session-api bind this role. Assert the relocated grant
+  # is present so the move can't silently regress.
+  - it: does not render without enterprise
+    set:
+      rbac.create: true
+      enterprise.enabled: false
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: grants read on sessionprivacypolicies and agentruntimes
+    set:
+      rbac.create: true
+      enterprise.enabled: true
+      enterprise.arena.queue.type: memory
+    asserts:
+      - contains:
+          path: rules
+          content:
+            apiGroups:
+              - omnia.altairalabs.ai
+            resources:
+              - sessionprivacypolicies
+              - agentruntimes
+            verbs:
+              - get
+              - list
+              - watch
+
+  - it: grants read on memorypolicies (relocated from the cluster-wide reader, #1899)
+    set:
+      rbac.create: true
+      enterprise.enabled: true
+      enterprise.arena.queue.type: memory
+    asserts:
+      - contains:
+          path: rules
+          content:
+            apiGroups:
+              - omnia.altairalabs.ai
+            resources:
+              - memorypolicies
+            verbs:
+              - get
+              - list
+              - watch

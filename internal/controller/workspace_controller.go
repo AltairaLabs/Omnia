@@ -89,10 +89,12 @@ type WorkspaceReconciler struct {
 	// session-api and memory-api instances.
 	ServiceBuilder *ServiceBuilder
 
-	// AgentWorkspaceReaderClusterRole is the ClusterRole that grants
-	// get/list/watch on Workspaces. Per-workspace service pods (session-api,
-	// memory-api) need this to resolve their config from the Workspace CRD.
-	AgentWorkspaceReaderClusterRole string
+	// WorkspaceReaderRBACEnabled gates creation of the per-workspace service-pod
+	// Workspace-reader ClusterRoleBinding. Per-workspace service pods (session-api,
+	// memory-api) bind the get-only per-workspace reader ClusterRole to resolve
+	// their config from their own Workspace CRD. False in local-dev / tests where
+	// RBAC is not provisioned, so no binding is created.
+	WorkspaceReaderRBACEnabled bool
 
 	// OperatorNamespace is the namespace where the operator + dashboard run
 	// (typically "omnia-system"). When a Workspace enables network isolation,

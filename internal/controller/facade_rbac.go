@@ -75,7 +75,7 @@ func (r *AgentRuntimeReconciler) reconcileWorkspaceReaderBinding(
 	ctx context.Context,
 	agentRuntime *omniav1alpha1.AgentRuntime,
 ) error {
-	if r.AgentWorkspaceReaderClusterRole == "" {
+	if !r.WorkspaceReaderRBACEnabled {
 		// Not configured — skip (e.g. local dev, tests)
 		return nil
 	}

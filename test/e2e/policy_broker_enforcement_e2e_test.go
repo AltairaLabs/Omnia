@@ -602,7 +602,7 @@ func baselineManagerArgs() []string {
 		fmt.Sprintf("--framework-image=%s", runtimeImageRef),
 		fmt.Sprintf("--session-api-image=%s", sessionApiImage),
 		fmt.Sprintf("--memory-api-image=%s", memoryApiImage),
-		"--agent-workspace-reader-clusterrole=omnia-agent-workspace-reader",
+		"--workspace-reader-rbac=true",
 	}
 }
 

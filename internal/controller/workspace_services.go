@@ -373,9 +373,12 @@ func (r *WorkspaceReconciler) isDeploymentReady(ctx context.Context, name, names
 
 // reconcileServicePodSA ensures a ServiceAccount and ClusterRoleBinding exist
 // for a per-workspace service pod. The service pods (session-api, memory-api)
-// need to read the cluster-scoped Workspace CRD to resolve their own config.
-// The ClusterRoleBinding grants the agent-workspace-reader ClusterRole which
-// provides get/list/watch on Workspaces.
+// need to Get the cluster-scoped Workspace CRD to resolve their own config.
+// The ClusterRoleBinding binds the get-only per-workspace Workspace reader
+// ClusterRole (resourceNames-scoped to this workspace), NOT the cluster-wide
+// agent-workspace-reader — a pod in one workspace must not be able to enumerate
+// the config of others (#1899). Gated on WorkspaceReaderRBACEnabled so
+// local-dev / envtest without RBAC provisioned still reconcile.
 func (r *WorkspaceReconciler) reconcileServicePodSA(
 	ctx context.Context,
 	workspace *omniav1alpha1.Workspace,
@@ -397,29 +400,38 @@ func (r *WorkspaceReconciler) reconcileServicePodSA(
 		return err
 	}
 
-	// ClusterRoleBinding — binds the SA to the agent-workspace-reader ClusterRole
-	// which grants get/list/watch on Workspaces.
-	crbName := fmt.Sprintf("service-%s-%s", namespace, name)
-	crb := &rbacv1.ClusterRoleBinding{
-		ObjectMeta: metav1.ObjectMeta{Name: crbName},
-		Subjects: []rbacv1.Subject{{
-			Kind:      "ServiceAccount",
-			Name:      name,
-			Namespace: namespace,
-		}},
-		RoleRef: rbacv1.RoleRef{
-			APIGroup: "rbac.authorization.k8s.io",
-			Kind:     "ClusterRole",
-			Name:     r.AgentWorkspaceReaderClusterRole,
-		},
-	}
-	existingCRB := &rbacv1.ClusterRoleBinding{}
-	if err := r.Get(ctx, client.ObjectKeyFromObject(crb), existingCRB); apierrors.IsNotFound(err) {
-		if err := r.Create(ctx, crb); err != nil {
+	// ClusterRoleBinding — bind to the get-only per-workspace Workspace reader
+	// (resourceNames-scoped to this workspace), NOT a cluster-wide role. memory-api
+	// / session-api read only their own Workspace (#1899). roleRef is immutable, so
+	// an upgrade from the old cluster-wide binding must delete + recreate. Skipped
+	// when RBAC isn't provisioned (local-dev / envtest), mirroring the agent path.
+	if r.WorkspaceReaderRBACEnabled {
+		crbName := fmt.Sprintf("service-%s-%s", namespace, name)
+		roleName := WorkspaceReaderClusterRoleName(workspace.Name)
+		if err := deleteStaleRoleRefBinding(ctx, r.Client, crbName, roleName); err != nil {
 			return err
 		}
-	} else if err != nil {
-		return err
+		crb := &rbacv1.ClusterRoleBinding{
+			ObjectMeta: metav1.ObjectMeta{Name: crbName},
+			Subjects: []rbacv1.Subject{{
+				Kind:      "ServiceAccount",
+				Name:      name,
+				Namespace: namespace,
+			}},
+			RoleRef: rbacv1.RoleRef{
+				APIGroup: "rbac.authorization.k8s.io",
+				Kind:     "ClusterRole",
+				Name:     roleName,
+			},
+		}
+		existingCRB := &rbacv1.ClusterRoleBinding{}
+		if err := r.Get(ctx, client.ObjectKeyFromObject(crb), existingCRB); apierrors.IsNotFound(err) {
+			if err := r.Create(ctx, crb); err != nil {
+				return err
+			}
+		} else if err != nil {
+			return err
+		}
 	}
 
 	// RoleBinding — grants the service pod access to secrets in its namespace

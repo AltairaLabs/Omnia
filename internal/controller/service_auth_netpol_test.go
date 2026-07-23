@@ -59,7 +59,7 @@ func newAuthReconciler(t *testing.T, auth ServiceAuthConfig) *WorkspaceReconcile
 		Client:                           cl,
 		Scheme:                           scheme,
 		ServiceBuilder:                   sb,
-		AgentWorkspaceReaderClusterRole:  testAgentWorkspaceReaderRole,
+		WorkspaceReaderRBACEnabled:       true,
 		OperatorNamespace:                "omnia-system",
 		SessionAPITokenReviewClusterRole: "omnia-session-api-tokenreview",
 	}

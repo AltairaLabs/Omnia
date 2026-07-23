@@ -159,7 +159,9 @@ spec:
             - --session-redis-url={{ $sessionRedisURL }}
             {{- end }}
             {{- end }}
-            - --agent-workspace-reader-clusterrole={{ include "omnia.fullname" . }}-agent-workspace-reader
+            {{- if .Values.rbac.create }}
+            - --workspace-reader-rbac=true
+            {{- end }}
             {{- if .Values.defaultExposure.enabled }}
             {{- /* Operator-provisioned default external exposure (#1553). Opt-in
               per agent via the primary facade's expose.enabled

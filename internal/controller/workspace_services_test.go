@@ -76,10 +76,10 @@ func newTestReconciler(scheme *k8sruntime.Scheme, objs ...k8sruntime.Object) *Wo
 		MemoryImagePullPolicy:  corev1.PullIfNotPresent,
 	}
 	return &WorkspaceReconciler{
-		Client:                          cl,
-		Scheme:                          scheme,
-		ServiceBuilder:                  sb,
-		AgentWorkspaceReaderClusterRole: "omnia-agent-workspace-reader",
+		Client:                     cl,
+		Scheme:                     scheme,
+		ServiceBuilder:             sb,
+		WorkspaceReaderRBACEnabled: true,
 	}
 }
 
@@ -143,6 +143,52 @@ func TestReconcileServices_ManagedCreatesDeploymentsAndServices(t *testing.T) {
 	g.Expect(ws.Status.Services[0].MemoryURL).To(Equal("http://memory-myws-primary.myws-ns:8080"))
 	// Not ready because fake client doesn't set ReadyReplicas
 	g.Expect(ws.Status.Services[0].Ready).To(BeFalse())
+}
+
+// TestReconcileServices_ServicePodBindsPerWorkspaceReader asserts that the
+// per-workspace service pods (session-api, memory-api) bind the get-only
+// per-workspace Workspace reader ClusterRole (resourceNames-scoped to their own
+// workspace), NOT the cluster-wide agent-workspace-reader. A pod in workspace
+// "demo" must not be able to enumerate the config of other workspaces (#1899).
+// The workspace is named "demo" and owns the distinct namespace "omnia-demo"
+// (the #1875 name/namespace convention).
+func TestReconcileServices_ServicePodBindsPerWorkspaceReader(t *testing.T) {
+	g := NewWithT(t)
+	scheme := testScheme()
+
+	ws := newTestWorkspace("demo", "omnia-demo", []omniav1alpha1.WorkspaceServiceGroup{
+		{
+			Name: "default",
+			Mode: omniav1alpha1.ServiceModeManaged,
+			Memory: &omniav1alpha1.MemoryServiceConfig{
+				Database: omniav1alpha1.DatabaseConfig{
+					SecretRef: corev1.LocalObjectReference{Name: "db-secret"},
+				},
+			},
+			Session: &omniav1alpha1.SessionServiceConfig{
+				Database: omniav1alpha1.DatabaseConfig{
+					SecretRef: corev1.LocalObjectReference{Name: "db-secret"},
+				},
+			},
+		},
+	})
+
+	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "omnia-demo"}}
+	r := newTestReconciler(scheme, ws, ns)
+	r.WorkspaceReaderRBACEnabled = true
+
+	ctx := context.Background()
+	g.Expect(r.reconcileServices(ctx, ws)).To(Succeed())
+
+	crb := &rbacv1.ClusterRoleBinding{}
+	key := client.ObjectKey{Name: fmt.Sprintf("service-%s-%s", "omnia-demo", "memory-demo-default")}
+	g.Expect(r.Get(ctx, key, crb)).To(Succeed())
+	g.Expect(crb.RoleRef.Name).To(Equal(WorkspaceReaderClusterRoleName("demo")))
+	g.Expect(crb.RoleRef.Name).NotTo(Equal("omnia-agent-workspace-reader"),
+		"service pods must no longer bind the cluster-wide reader")
+	g.Expect(crb.Subjects).To(HaveLen(1))
+	g.Expect(crb.Subjects[0].Name).To(Equal("memory-demo-default"))
+	g.Expect(crb.Subjects[0].Namespace).To(Equal("omnia-demo"))
 }
 
 // TestReconcileServices_GroupRedisWiredIntoDeployments is a WIRING test: it
@@ -382,7 +428,7 @@ func TestReconcileServices_MemoryTokenReviewBindingCreateError(t *testing.T) {
 		Client:                           cl,
 		Scheme:                           scheme,
 		ServiceBuilder:                   sb,
-		AgentWorkspaceReaderClusterRole:  "omnia-agent-workspace-reader",
+		WorkspaceReaderRBACEnabled:       true,
 		SessionAPITokenReviewClusterRole: "omnia-session-api-tokenreview",
 	}
 

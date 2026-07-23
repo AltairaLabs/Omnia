@@ -29,4 +29,20 @@ rules:
       - get
       - list
       - watch
+  {{- /*
+    memorypolicies moved here from the cluster-wide agent-workspace-reader
+    (#1899): the memory-api consolidation lister genuinely lists MemoryPolicy
+    CRDs cluster-wide to find workspaces opted into each policy. Both memory-api
+    and session-api bind this EE reader role; session-api holds an unused
+    memorypolicies grant — an accepted trade-off for keeping one shared EE reader
+    (a memory-api-only split is a possible follow-up).
+  */}}
+  - apiGroups:
+      - omnia.altairalabs.ai
+    resources:
+      - memorypolicies
+    verbs:
+      - get
+      - list
+      - watch
 {{- end }}
