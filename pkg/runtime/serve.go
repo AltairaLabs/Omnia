@@ -41,10 +41,11 @@ func Serve(lis net.Listener, h Handler, opts ...Option) error {
 		o(&cfg)
 	}
 
-	serverOpts := []grpc.ServerOption{
+	serverOpts := make([]grpc.ServerOption, 0, 2+len(cfg.serverOptions))
+	serverOpts = append(serverOpts,
 		grpc.MaxRecvMsgSize(cfg.maxMessageSize),
 		grpc.MaxSendMsgSize(cfg.maxMessageSize),
-	}
+	)
 	serverOpts = append(serverOpts, cfg.serverOptions...)
 
 	server := grpc.NewServer(serverOpts...)
