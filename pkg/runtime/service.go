@@ -94,6 +94,39 @@ func (a *serviceAdapter) Invoke(
 	}, nil
 }
 
+// HasConversation answers a resume probe. Requires the Handler to implement
+// ConversationProber; otherwise every session is reported UNAVAILABLE (unknown,
+// not a definitive expiry).
+func (a *serviceAdapter) HasConversation(
+	ctx context.Context,
+	req *runtimev1.HasConversationRequest,
+) (*runtimev1.HasConversationResponse, error) {
+	if req.GetSessionId() == "" {
+		return nil, status.Error(codes.InvalidArgument, "session_id is required")
+	}
+	prober, ok := a.handler.(ConversationProber)
+	if !ok {
+		return &runtimev1.HasConversationResponse{
+			State:  runtimev1.ResumeState_RESUME_STATE_UNAVAILABLE,
+			Detail: "resume is not supported by this runtime",
+		}, nil
+	}
+	return &runtimev1.HasConversationResponse{
+		State: mapResumeState(prober.HasConversation(ctx, req.GetSessionId())),
+	}, nil
+}
+
+func mapResumeState(s ResumeState) runtimev1.ResumeState {
+	switch s {
+	case ResumeResumable:
+		return runtimev1.ResumeState_RESUME_STATE_RESUMABLE
+	case ResumeNotFound:
+		return runtimev1.ResumeState_RESUME_STATE_NOT_FOUND
+	default:
+		return runtimev1.ResumeState_RESUME_STATE_UNAVAILABLE
+	}
+}
+
 func converseRecvErr(err error) error {
 	if err == io.EOF {
 		return nil

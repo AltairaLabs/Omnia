@@ -307,3 +307,44 @@ func TestInvoke_ValidatesInput(t *testing.T) {
 	_, err := client.Invoke(context.Background(), &runtimev1.InvocationRequest{InputJson: "", InvocationId: ""})
 	assert.Equal(t, codes.InvalidArgument, status.Code(err))
 }
+
+type proberStub struct {
+	stubHandler
+	probe func(ctx context.Context, sessionID string) ResumeState
+}
+
+func (p *proberStub) HasConversation(ctx context.Context, sessionID string) ResumeState {
+	return p.probe(ctx, sessionID)
+}
+
+func TestHasConversation_UnavailableWithoutProber(t *testing.T) {
+	h := &stubHandler{caps: []string{contract.CapabilityClientTools}}
+	client := runtimev1.NewRuntimeServiceClient(newTestConn(t, h))
+
+	resp, err := client.HasConversation(context.Background(), &runtimev1.HasConversationRequest{SessionId: "s1"})
+	require.NoError(t, err)
+	assert.Equal(t, runtimev1.ResumeState_RESUME_STATE_UNAVAILABLE, resp.GetState())
+}
+
+func TestHasConversation_DelegatesAndMaps(t *testing.T) {
+	h := &proberStub{
+		stubHandler: stubHandler{caps: []string{contract.CapabilityClientTools}},
+		probe: func(_ context.Context, sessionID string) ResumeState {
+			assert.Equal(t, "s1", sessionID)
+			return ResumeResumable
+		},
+	}
+	client := runtimev1.NewRuntimeServiceClient(newTestConn(t, h))
+
+	resp, err := client.HasConversation(context.Background(), &runtimev1.HasConversationRequest{SessionId: "s1"})
+	require.NoError(t, err)
+	assert.Equal(t, runtimev1.ResumeState_RESUME_STATE_RESUMABLE, resp.GetState())
+}
+
+func TestHasConversation_EmptySessionInvalid(t *testing.T) {
+	h := &stubHandler{caps: []string{contract.CapabilityClientTools}}
+	client := runtimev1.NewRuntimeServiceClient(newTestConn(t, h))
+
+	_, err := client.HasConversation(context.Background(), &runtimev1.HasConversationRequest{SessionId: ""})
+	assert.Equal(t, codes.InvalidArgument, status.Code(err))
+}
