@@ -348,3 +348,144 @@ func TestHasConversation_EmptySessionInvalid(t *testing.T) {
 	_, err := client.HasConversation(context.Background(), &runtimev1.HasConversationRequest{SessionId: ""})
 	assert.Equal(t, codes.InvalidArgument, status.Code(err))
 }
+
+func TestHasConversation_MapsNotFound(t *testing.T) {
+	h := &proberStub{
+		stubHandler: stubHandler{caps: []string{contract.CapabilityClientTools}},
+		probe:       func(_ context.Context, _ string) ResumeState { return ResumeNotFound },
+	}
+	client := runtimev1.NewRuntimeServiceClient(newTestConn(t, h))
+
+	resp, err := client.HasConversation(context.Background(), &runtimev1.HasConversationRequest{SessionId: "s1"})
+	require.NoError(t, err)
+	assert.Equal(t, runtimev1.ResumeState_RESUME_STATE_NOT_FOUND, resp.GetState())
+}
+
+func TestConverse_PartsRoundTrip(t *testing.T) {
+	var gotParts []ContentPart
+	h := &stubHandler{
+		caps: []string{contract.CapabilityClientTools},
+		converse: func(_ context.Context, turn Turn, emit Emitter) error {
+			gotParts = turn.Parts
+			return emit.Done(Done{Parts: []ContentPart{
+				{Type: "text", Text: "reply"},
+				{Type: "image", Data: "YWJj", MimeType: "image/png", StorageRef: "omnia://out"},
+			}})
+		},
+	}
+	client := runtimev1.NewRuntimeServiceClient(newTestConn(t, h))
+
+	stream, err := client.Converse(context.Background())
+	require.NoError(t, err)
+	require.NoError(t, stream.Send(&runtimev1.ClientMessage{
+		SessionId: "s1",
+		Parts: []*runtimev1.ContentPart{
+			{Type: "text", Text: "hi"},
+			{Type: "image", Media: &runtimev1.MediaContent{
+				Data: "ZGVm", Url: "http://x", MimeType: "image/jpeg", StorageRef: "omnia://in",
+			}},
+		},
+	}))
+	require.NoError(t, stream.CloseSend())
+
+	var done *runtimev1.Done
+	for {
+		msg, recvErr := stream.Recv()
+		if recvErr != nil {
+			break
+		}
+		if msg.GetDone() != nil {
+			done = msg.GetDone()
+		}
+	}
+	// mapPartsFromProto: proto parts arrive as typed ContentParts.
+	require.Len(t, gotParts, 2)
+	assert.Equal(t, "hi", gotParts[0].Text)
+	assert.Equal(t, "image/jpeg", gotParts[1].MimeType)
+	assert.Equal(t, "http://x", gotParts[1].URL)
+	assert.Equal(t, "omnia://in", gotParts[1].StorageRef)
+	// mapPartsToProto: Done parts are marshalled back onto the wire.
+	require.NotNil(t, done)
+	require.Len(t, done.GetParts(), 2)
+	assert.Equal(t, "reply", done.GetParts()[0].GetText())
+	assert.Equal(t, "image/png", done.GetParts()[1].GetMedia().GetMimeType())
+	assert.Equal(t, "omnia://out", done.GetParts()[1].GetMedia().GetStorageRef())
+}
+
+func TestConverse_EmptyChunkDropped(t *testing.T) {
+	h := &stubHandler{
+		caps: []string{contract.CapabilityClientTools},
+		converse: func(_ context.Context, _ Turn, emit Emitter) error {
+			if err := emit.Chunk(""); err != nil {
+				return err
+			}
+			return emit.Done(Done{})
+		},
+	}
+	client := runtimev1.NewRuntimeServiceClient(newTestConn(t, h))
+	frames := drainConverse(t, client, "hi")
+	for _, f := range frames {
+		assert.Nil(t, f.GetChunk(), "empty chunk must not be sent")
+	}
+}
+
+func TestEmitter_ToolCallNonResultReplyFails(t *testing.T) {
+	toolErr := make(chan error, 1)
+	h := &stubHandler{
+		caps: []string{contract.CapabilityClientTools},
+		converse: func(_ context.Context, _ Turn, emit Emitter) error {
+			_, err := emit.ToolCall(ClientToolCall{ID: "c1", Name: "t"})
+			toolErr <- err
+			return emit.Done(Done{})
+		},
+	}
+	client := runtimev1.NewRuntimeServiceClient(newTestConn(t, h))
+	stream, err := client.Converse(context.Background())
+	require.NoError(t, err)
+	require.NoError(t, stream.Send(&runtimev1.ClientMessage{SessionId: "s1", Content: "go"}))
+
+	for {
+		msg, recvErr := stream.Recv()
+		require.NoError(t, recvErr)
+		if msg.GetToolCall() != nil {
+			break
+		}
+	}
+	// Reply with a non-ClientToolResult message; the SDK must reject it.
+	require.NoError(t, stream.Send(&runtimev1.ClientMessage{SessionId: "s1", Content: "not a result"}))
+	require.NoError(t, stream.CloseSend())
+	for {
+		if _, recvErr := stream.Recv(); recvErr != nil {
+			break
+		}
+	}
+
+	err = <-toolErr
+	require.Error(t, err)
+	assert.Equal(t, codes.FailedPrecondition, status.Code(err))
+}
+
+func TestServe_Options(t *testing.T) {
+	h := &stubHandler{caps: contract.KnownCapabilities()}
+	lis := bufconn.Listen(1024 * 1024)
+	go func() {
+		_ = Serve(lis, h, WithMaxMessageSize(1024*1024), WithServerOptions(grpc.MaxConcurrentStreams(10)))
+	}()
+
+	conn, err := grpc.NewClient(
+		"passthrough:///bufnet",
+		grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) {
+			return lis.DialContext(ctx)
+		}),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_ = conn.Close()
+		_ = lis.Close()
+	})
+
+	resp, err := runtimev1.NewRuntimeServiceClient(conn).Health(context.Background(), &runtimev1.HealthRequest{})
+	require.NoError(t, err)
+	assert.True(t, resp.GetHealthy())
+}
