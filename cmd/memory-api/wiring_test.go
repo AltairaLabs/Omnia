@@ -588,7 +588,7 @@ func TestBuildConsolidationWorkerOptions_AllFieldsWired(t *testing.T) {
 
 	t.Run("non-enterprise leaves Auditor nil", func(t *testing.T) {
 		freshPromRegistry(t)
-		opts := newConsolidationWorkerOptions(time.Hour, fakeClient, memory.NewPostgresMemoryStore(nil), nil, logr.Discard())
+		opts := newConsolidationWorkerOptions(time.Hour, fakeClient, "demo", memory.NewPostgresMemoryStore(nil), nil, logr.Discard())
 		for _, c := range checks {
 			if c.isNil(opts) {
 				t.Errorf("%s: %s", c.name, c.nilErr)
@@ -610,7 +610,7 @@ func TestBuildConsolidationWorkerOptions_AllFieldsWired(t *testing.T) {
 		freshPromRegistry(t)
 		auditLogger := eeaudit.NewLogger(nil, logr.Discard(), eemetrics.NewAuditMetrics(), eeaudit.LoggerConfig{})
 		t.Cleanup(func() { _ = auditLogger.Close() })
-		opts := newConsolidationWorkerOptions(time.Hour, fakeClient, memory.NewPostgresMemoryStore(nil), auditLogger, logr.Discard())
+		opts := newConsolidationWorkerOptions(time.Hour, fakeClient, "demo", memory.NewPostgresMemoryStore(nil), auditLogger, logr.Discard())
 		if opts.Auditor == nil {
 			t.Error("Auditor unwired in enterprise mode — consolidation audit rows silently dropped (consolidation v1 bug)")
 		}
@@ -696,7 +696,7 @@ func TestNewConsolidationWorker_ReturnsWorker(t *testing.T) {
 	if err != nil {
 		t.Fatalf("build fake client: %v", err)
 	}
-	w := newConsolidationWorker(time.Hour, fakeClient,
+	w := newConsolidationWorker(time.Hour, fakeClient, "demo",
 		memory.NewPostgresMemoryStore(nil), nil, logr.Discard())
 	if w == nil {
 		t.Fatal("expected non-nil worker from newConsolidationWorker")
@@ -995,7 +995,7 @@ func TestNewProjectionWorker_ReturnsWorker(t *testing.T) {
 	if err != nil {
 		t.Fatalf("build fake client: %v", err)
 	}
-	w := newProjectionWorker(30*time.Second, fakeClient,
+	w := newProjectionWorker(30*time.Second, fakeClient, "demo",
 		memory.NewPostgresMemoryStore(nil), prometheus.NewRegistry(), logr.Discard())
 	if w == nil {
 		t.Fatal("expected non-nil worker from newProjectionWorker")

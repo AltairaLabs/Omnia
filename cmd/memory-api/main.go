@@ -1457,7 +1457,7 @@ func buildConsolidationWorker(_ context.Context, f *flags, pgStore *memory.Postg
 	if !ok {
 		return nil
 	}
-	return newConsolidationWorker(interval, c, pgStore, auditLogger, log)
+	return newConsolidationWorker(interval, c, f.workspace, pgStore, auditLogger, log)
 }
 
 // buildProjectionWorker constructs the Memory Galaxy pre-render worker when the
@@ -1480,7 +1480,7 @@ func buildProjectionWorker(f *flags, pgStore *memory.PostgresMemoryStore, reg pr
 	if !ok {
 		return nil
 	}
-	return newProjectionWorker(interval, c, pgStore, reg, log)
+	return newProjectionWorker(interval, c, f.workspace, pgStore, reg, log)
 }
 
 // buildEmbeddingMetricsCollector constructs the embedding-pipeline metrics
@@ -1515,14 +1515,16 @@ func buildEmbeddingMetricsCollector(
 // newProjectionWorker composes the worker from already-acquired deps. Pure
 // function — wiring tests pass a fake client.Client + a fresh registry and
 // assert every field is populated without in-cluster kubeconfig or Postgres.
-func newProjectionWorker(interval time.Duration, c client.Client, pgStore *memory.PostgresMemoryStore, reg prometheus.Registerer, log logr.Logger) *projectionworker.Worker {
+// workspaceName scopes the Workspaces lister to memory-api's own Workspace
+// CR (#1899) — it is the operator-injected --workspace flag value.
+func newProjectionWorker(interval time.Duration, c client.Client, workspaceName string, pgStore *memory.PostgresMemoryStore, reg prometheus.Registerer, log logr.Logger) *projectionworker.Worker {
 	pool := pgStore.Pool()
 	metrics := projectionworker.NewMetrics()
 	metrics.MustRegister(reg)
 	return projectionworker.NewWorker(projectionworker.WorkerOptions{
 		Store:      pgStore,
 		Policies:   consolidation.NewK8sPolicyLister(c),
-		Workspaces: consolidation.NewK8sWorkspaceLister(c),
+		Workspaces: consolidation.NewK8sWorkspaceLister(c, workspaceName),
 		Lock:       memorypg.NewAdvisoryLockStore(pool),
 		Interval:   interval,
 		Metrics:    metrics,
@@ -1578,14 +1580,17 @@ func newClientForConsolidation(kubeConfig *rest.Config, log logr.Logger) (client
 
 // newConsolidationWorker composes the worker from already-acquired deps.
 // Pure function — wiring tests pass a fake client.Client and exercise it.
+// workspaceName scopes the Workspaces lister to memory-api's own Workspace
+// CR (#1899) — it is the operator-injected --workspace flag value.
 func newConsolidationWorker(
 	interval time.Duration,
 	c client.Client,
+	workspaceName string,
 	pgStore *memory.PostgresMemoryStore,
 	auditLogger *eeaudit.Logger,
 	log logr.Logger,
 ) *consolidation.Worker {
-	return consolidation.NewWorker(newConsolidationWorkerOptions(interval, c, pgStore, auditLogger, log))
+	return consolidation.NewWorker(newConsolidationWorkerOptions(interval, c, workspaceName, pgStore, auditLogger, log))
 }
 
 // newConsolidationWorkerOptions builds the WorkerOptions value from
@@ -1602,6 +1607,7 @@ func newConsolidationWorker(
 func newConsolidationWorkerOptions(
 	interval time.Duration,
 	c client.Client,
+	workspaceName string,
 	pgStore *memory.PostgresMemoryStore,
 	auditLogger *eeaudit.Logger,
 	log logr.Logger,
@@ -1617,7 +1623,7 @@ func newConsolidationWorkerOptions(
 		Store:           memorypg.NewConsolidationWriter(pool),
 		LockStore:       memorypg.NewAdvisoryLockStore(pool),
 		Policies:        consolidation.NewK8sPolicyLister(c),
-		Workspaces:      consolidation.NewK8sWorkspaceLister(c),
+		Workspaces:      consolidation.NewK8sWorkspaceLister(c, workspaceName),
 		PreFilterRunner: memorypg.NewPreFilterRunner(pool),
 		RunTracker:      memorypg.NewConsolidationRunStore(pool),
 		Client:          consolidation.NewClient(5 * time.Minute),
