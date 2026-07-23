@@ -76,11 +76,13 @@ func TestBuildAuditForwarder_NilWhenNoURL(t *testing.T) {
 }
 
 // TestResolvePrivacyURL_EnvOverride verifies PRIVACY_API_URL is used as-is.
-func TestResolvePrivacyURL_EnvOverride(t *testing.T) {
+// PRIVACY_API_URL is no longer honoured: privacy-api is per-workspace like
+// every other service, so its endpoint comes from the Workspace.
+func TestResolvePrivacyURL_IgnoresEnvOverride(t *testing.T) {
 	t.Setenv("PRIVACY_API_URL", "http://privacy-api.omnia-system:8080")
 	got := resolvePrivacyURL(context.Background(), "", "", logr.Discard())
-	if got != "http://privacy-api.omnia-system:8080" {
-		t.Errorf("expected env URL, got %q", got)
+	if got != "" {
+		t.Errorf("PRIVACY_API_URL still honoured: %q", got)
 	}
 }
 
@@ -91,5 +93,43 @@ func TestResolvePrivacyURL_EmptyWhenNoEnvNoWorkspace(t *testing.T) {
 	got := resolvePrivacyURL(context.Background(), "", "", logr.Discard())
 	if got != "" {
 		t.Errorf("expected empty URL, got %q", got)
+	}
+}
+
+// An explicit --session-api-url wins: an operator pointing memory-api at an
+// out-of-band session-api must not be overridden by workspace resolution.
+func TestResolveSessionAPIURL_FlagWins(t *testing.T) {
+	got := resolveSessionAPIURL(context.Background(),
+		"http://explicit:8080", "ws", "default", logr.Discard())
+
+	if got != "http://explicit:8080" {
+		t.Errorf("expected the flag value, got %q", got)
+	}
+}
+
+// SESSION_API_URL is not consulted directly — only the flag it feeds. With no
+// flag and no workspace there is nothing to resolve, so the emitter is a no-op.
+func TestResolveSessionAPIURL_EmptyWithoutWorkspace(t *testing.T) {
+	t.Setenv("SESSION_API_URL", "http://from-env:8080")
+
+	if got := resolveSessionAPIURL(context.Background(), "", "", "", logr.Discard()); got != "" {
+		t.Errorf("expected empty URL, got %q", got)
+	}
+}
+
+// A workspace with no service group cannot identify which group's session-api
+// to emit to, so it resolves to nothing rather than guessing "default".
+func TestResolveSessionAPIURL_EmptyWithoutServiceGroup(t *testing.T) {
+	if got := resolveSessionAPIURL(context.Background(), "", "ws", "", logr.Discard()); got != "" {
+		t.Errorf("expected empty URL, got %q", got)
+	}
+}
+
+// Out of cluster there is no kubeconfig, so resolution degrades to the no-op
+// emitter rather than failing memory-api startup — embedding spend reporting is
+// best-effort and the Prometheus counter still works.
+func TestResolveSessionAPIURL_EmptyWithoutInClusterConfig(t *testing.T) {
+	if got := resolveSessionAPIURL(context.Background(), "", "ws", "default", logr.Discard()); got != "" {
+		t.Errorf("expected empty URL outside a cluster, got %q", got)
 	}
 }

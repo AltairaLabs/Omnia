@@ -34,6 +34,10 @@ spec:
           env:
             - name: SHAREPOINT_SITE_ID
               value: {{ .Values.sharepointHero.adapter.sharepointSiteId | quote }}
+            # This is a third-party adapter image with no Kubernetes client, so
+            # it cannot resolve its own endpoint. It is one of the two documented
+            # exceptions where env injection is the interface rather than a
+            # duplicate source of truth — see pkg/servicediscovery/doc.go.
             - name: MEMORY_API_URL
               value: {{ .Values.sharepointHero.memoryApiUrl | quote }}
             - name: WORKSPACE_ID

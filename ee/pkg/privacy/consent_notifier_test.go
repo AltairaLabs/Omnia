@@ -156,26 +156,26 @@ func TestConsentNotifier_SATokenAttached(t *testing.T) {
 	assert.Equal(t, "Bearer test-sa-token", srv.authHeaderAt(0))
 }
 
-// TestConsentNotifier_EnvOverride asserts that the MEMORY_API_URLS env var
-// overrides the URLs passed to the constructor.
-func TestConsentNotifier_EnvOverride(t *testing.T) {
+// MEMORY_API_URLS is no longer honoured. The targets come from the workspace,
+// resolved by the caller, so a hand-supplied env list must not redirect the
+// fan-out away from them.
+func TestConsentNotifier_IgnoresEnvOverride(t *testing.T) {
 	srvEnv := newCaptureServer(http.StatusOK)
 	tsEnv := httptest.NewServer(srvEnv.handler())
 	defer tsEnv.Close()
 
-	// The env var target wins; the constructor-supplied URL is ignored.
 	t.Setenv("MEMORY_API_URLS", tsEnv.URL)
 
-	srvIgnored := newCaptureServer(http.StatusOK)
-	tsIgnored := httptest.NewServer(srvIgnored.handler())
-	defer tsIgnored.Close()
+	srvResolved := newCaptureServer(http.StatusOK)
+	tsResolved := httptest.NewServer(srvResolved.handler())
+	defer tsResolved.Close()
 
-	n := newTestNotifier([]string{tsIgnored.URL}, "test-workspace")
+	n := newTestNotifier([]string{tsResolved.URL}, "test-workspace")
 	_, err := n.NotifyRevocation(t.Context(), "user-env", ConsentMemoryContext)
 	require.NoError(t, err)
 
-	assert.Equal(t, 1, srvEnv.callCount(), "env-var server must be called")
-	assert.Equal(t, 0, srvIgnored.callCount(), "constructor URL must be ignored when env var is set")
+	assert.Equal(t, 1, srvResolved.callCount(), "the resolved target must be called")
+	assert.Equal(t, 0, srvEnv.callCount(), "MEMORY_API_URLS must not redirect the fan-out")
 }
 
 // TestNoopConsentNotifier_AlwaysDelivered confirms the no-op notifier returns

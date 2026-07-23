@@ -53,37 +53,15 @@ func makeWorkspaceWithStatus(
 	}
 }
 
-func TestResolveServiceURLs_EnvVarOverride(t *testing.T) {
-	t.Setenv(envSessionAPIURL, "http://session-override.example.com")
-	t.Setenv(envMemoryAPIURL, "http://memory-override.example.com")
-
-	r := NewResolver(nil)
-	urls, err := r.ResolveServiceURLs(context.Background(), testWorkspaceName, "default")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if urls.SessionURL != "http://session-override.example.com" {
-		t.Errorf("expected session override, got %s", urls.SessionURL)
-	}
-	if urls.MemoryURL != "http://memory-override.example.com" {
-		t.Errorf("expected memory override, got %s", urls.MemoryURL)
-	}
-}
-
-func TestResolveServiceURLs_NoEnvNoClient(t *testing.T) {
-	t.Setenv(envSessionAPIURL, "")
-	t.Setenv(envMemoryAPIURL, "")
-
+func TestResolveServiceURLs_NoClient(t *testing.T) {
 	r := NewResolver(nil)
 	_, err := r.ResolveServiceURLs(context.Background(), testWorkspaceName, "default")
 	if err == nil {
-		t.Fatal("expected error when no env vars and nil client")
+		t.Fatal("expected error when there is no Kubernetes client to resolve with")
 	}
 }
 
 func TestResolveServiceURLs_FromWorkspaceStatus(t *testing.T) {
-	t.Setenv(envSessionAPIURL, "")
-	t.Setenv(envMemoryAPIURL, "")
 	t.Setenv(envOmniaNamespace, "workspace-ns")
 
 	ws := makeWorkspaceWithStatus(testWorkspaceName, "workspace-ns", []omniav1alpha1.ServiceGroupStatus{
@@ -114,8 +92,6 @@ func TestResolveServiceURLs_FromWorkspaceStatus(t *testing.T) {
 }
 
 func TestResolveServiceURLs_ServiceGroupNotReady(t *testing.T) {
-	t.Setenv(envSessionAPIURL, "")
-	t.Setenv(envMemoryAPIURL, "")
 	t.Setenv(envOmniaNamespace, "workspace-ns")
 
 	// Ready=false but URLs populated — should succeed. Callers that only
@@ -145,8 +121,6 @@ func TestResolveServiceURLs_ServiceGroupNotReady(t *testing.T) {
 }
 
 func TestResolveServiceURLs_ServiceGroupNoURLs(t *testing.T) {
-	t.Setenv(envSessionAPIURL, "")
-	t.Setenv(envMemoryAPIURL, "")
 	t.Setenv(envOmniaNamespace, "workspace-ns")
 
 	// No URLs populated — should fail even if the group exists.
@@ -170,8 +144,6 @@ func TestResolveServiceURLs_ServiceGroupNoURLs(t *testing.T) {
 }
 
 func TestResolveServiceURLs_ServiceGroupNotFound(t *testing.T) {
-	t.Setenv(envSessionAPIURL, "")
-	t.Setenv(envMemoryAPIURL, "")
 	t.Setenv(envOmniaNamespace, "workspace-ns")
 
 	ws := makeWorkspaceWithStatus(testWorkspaceName, "workspace-ns", []omniav1alpha1.ServiceGroupStatus{
@@ -196,8 +168,6 @@ func TestResolveServiceURLs_ServiceGroupNotFound(t *testing.T) {
 }
 
 func TestResolveServiceURLs_WorkspaceNotFound(t *testing.T) {
-	t.Setenv(envSessionAPIURL, "")
-	t.Setenv(envMemoryAPIURL, "")
 
 	// No Workspace named testWorkspaceName exists.
 	fakeClient := fake.NewClientBuilder().
@@ -212,8 +182,6 @@ func TestResolveServiceURLs_WorkspaceNotFound(t *testing.T) {
 }
 
 func TestResolveServiceURLs_RequiresAWorkspaceName(t *testing.T) {
-	t.Setenv(envSessionAPIURL, "")
-	t.Setenv(envMemoryAPIURL, "")
 
 	fakeClient := fake.NewClientBuilder().WithScheme(newTestScheme()).Build()
 
@@ -228,8 +196,6 @@ func TestResolveServiceURLs_RequiresAWorkspaceName(t *testing.T) {
 // by the namespace must fail: resolution is by the Workspace's metadata.name,
 // and the two identifiers are not interchangeable (#1875).
 func TestResolveServiceURLs_NamespaceIsNotAWorkspaceName(t *testing.T) {
-	t.Setenv(envSessionAPIURL, "")
-	t.Setenv(envMemoryAPIURL, "")
 
 	ws := makeWorkspaceWithStatus("demo", "omnia-demo", []omniav1alpha1.ServiceGroupStatus{
 		{Name: "default", SessionURL: "http://session.svc", MemoryURL: "http://memory.svc", Ready: true},
@@ -273,8 +239,6 @@ func TestGetWorkspace_ReturnsTheObjectIncludingUID(t *testing.T) {
 }
 
 func TestResolveByWorkspaceName_Success(t *testing.T) {
-	t.Setenv(envSessionAPIURL, "")
-	t.Setenv(envMemoryAPIURL, "")
 
 	ws := makeWorkspaceWithStatus("dev-agents", "dev-agents", []omniav1alpha1.ServiceGroupStatus{
 		{
@@ -304,8 +268,6 @@ func TestResolveByWorkspaceName_Success(t *testing.T) {
 }
 
 func TestResolveByWorkspaceName_NotFound(t *testing.T) {
-	t.Setenv(envSessionAPIURL, "")
-	t.Setenv(envMemoryAPIURL, "")
 
 	fakeClient := fake.NewClientBuilder().
 		WithScheme(newTestScheme()).
@@ -319,8 +281,6 @@ func TestResolveByWorkspaceName_NotFound(t *testing.T) {
 }
 
 func TestResolveByWorkspaceName_ServiceGroupNotFound(t *testing.T) {
-	t.Setenv(envSessionAPIURL, "")
-	t.Setenv(envMemoryAPIURL, "")
 
 	ws := makeWorkspaceWithStatus("dev-agents", "dev-agents", []omniav1alpha1.ServiceGroupStatus{
 		{
@@ -343,55 +303,7 @@ func TestResolveByWorkspaceName_ServiceGroupNotFound(t *testing.T) {
 	}
 }
 
-func TestResolveByWorkspaceName_EnvVarOverride(t *testing.T) {
-	t.Setenv(envSessionAPIURL, "http://override-session")
-	t.Setenv(envMemoryAPIURL, "http://override-memory")
-
-	r := NewResolver(nil)
-	urls, err := r.ResolveByWorkspaceName(context.Background(), "any", "default")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if urls.SessionURL != "http://override-session" {
-		t.Errorf("unexpected session URL: %s", urls.SessionURL)
-	}
-}
-
-func TestResolveServiceURLs_PrivacyURLEnvVar(t *testing.T) {
-	t.Setenv(envSessionAPIURL, "http://session-override.example.com")
-	t.Setenv(envMemoryAPIURL, "http://memory-override.example.com")
-	t.Setenv(envPrivacyAPIURL, "http://privacy-override.example.com")
-
-	r := NewResolver(nil)
-	urls, err := r.ResolveServiceURLs(context.Background(), testWorkspaceName, "default")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if urls.PrivacyURL != "http://privacy-override.example.com" {
-		t.Errorf("expected privacy override, got %s", urls.PrivacyURL)
-	}
-}
-
-func TestResolveServiceURLs_PrivacyURLEnvVarEmpty(t *testing.T) {
-	// Privacy URL is optional — if not set, the struct still returns with empty PrivacyURL.
-	t.Setenv(envSessionAPIURL, "http://session-override.example.com")
-	t.Setenv(envMemoryAPIURL, "http://memory-override.example.com")
-	t.Setenv(envPrivacyAPIURL, "")
-
-	r := NewResolver(nil)
-	urls, err := r.ResolveServiceURLs(context.Background(), testWorkspaceName, "default")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if urls.PrivacyURL != "" {
-		t.Errorf("expected empty privacy URL, got %s", urls.PrivacyURL)
-	}
-}
-
 func TestResolveServiceURLs_PrivacyURLFromWorkspaceStatus(t *testing.T) {
-	t.Setenv(envSessionAPIURL, "")
-	t.Setenv(envMemoryAPIURL, "")
-	t.Setenv(envPrivacyAPIURL, "")
 	t.Setenv(envOmniaNamespace, "workspace-ns")
 
 	ws := &omniav1alpha1.Workspace{
@@ -443,4 +355,124 @@ func TestDetectNamespace(t *testing.T) {
 			t.Errorf("DetectNamespace() = %q, want default", got)
 		}
 	})
+}
+
+// A group with a session URL but no memory URL is legitimate. The old
+// all-or-nothing gate could not express this, which is why the facade could
+// never use the env path.
+func TestSessionURL_ResolvesWithoutAMemoryURL(t *testing.T) {
+
+	ws := makeWorkspaceWithStatus("demo", "omnia-demo", []omniav1alpha1.ServiceGroupStatus{
+		{Name: "default", SessionURL: "http://session.svc"},
+	})
+	c := fake.NewClientBuilder().WithScheme(newTestScheme()).WithObjects(ws).Build()
+	r := NewResolver(c)
+
+	got, err := r.SessionURL(context.Background(), "demo", "default")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "http://session.svc" {
+		t.Errorf("unexpected session URL: %s", got)
+	}
+
+	// Absent memory is not an error — the caller did not require it.
+	mem, err := r.MemoryURL(context.Background(), "demo", "default")
+	if err != nil {
+		t.Fatalf("unexpected error for absent memory URL: %v", err)
+	}
+	if mem != "" {
+		t.Errorf("expected empty memory URL, got %s", mem)
+	}
+}
+
+// Session is required: every caller needs it, so its absence is an error
+// rather than an empty string that fails later and further away.
+func TestSessionURL_ErrorsWhenAbsent(t *testing.T) {
+
+	ws := makeWorkspaceWithStatus("demo", "omnia-demo", []omniav1alpha1.ServiceGroupStatus{
+		{Name: "default"},
+	})
+	c := fake.NewClientBuilder().WithScheme(newTestScheme()).WithObjects(ws).Build()
+
+	if _, err := NewResolver(c).SessionURL(context.Background(), "demo", "default"); err == nil {
+		t.Fatal("expected an error when the group has no session URL")
+	}
+}
+
+// The env vars are no longer a discovery shortcut: with both set and a
+// Workspace that disagrees, the Workspace wins.
+func TestResolveServiceURLs_IgnoresEnvOverrides(t *testing.T) {
+	t.Setenv("SESSION_API_URL", "http://from-env")
+	t.Setenv("MEMORY_API_URL", "http://from-env")
+
+	ws := makeWorkspaceWithStatus("demo", "omnia-demo", []omniav1alpha1.ServiceGroupStatus{
+		{Name: "default", SessionURL: "http://from-workspace", Ready: true},
+	})
+	c := fake.NewClientBuilder().WithScheme(newTestScheme()).WithObjects(ws).Build()
+
+	urls, err := NewResolver(c).ResolveServiceURLs(context.Background(), "demo", "default")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if urls.SessionURL != "http://from-workspace" {
+		t.Errorf("env override still in effect: %s", urls.SessionURL)
+	}
+}
+
+// PrivacyURL is workspace-level rather than per service group, and resolves to
+// empty rather than erroring when no privacy-api is configured — privacy is
+// optional, unlike session.
+func TestPrivacyURL_FromWorkspaceStatus(t *testing.T) {
+	ws := makeWorkspaceWithStatus("demo", "omnia-demo", []omniav1alpha1.ServiceGroupStatus{
+		{Name: "default", SessionURL: "http://session.svc"},
+	})
+	ws.Status.PrivacyURL = "http://privacy.svc"
+	c := fake.NewClientBuilder().WithScheme(newTestScheme()).WithObjects(ws).Build()
+
+	got, err := NewResolver(c).PrivacyURL(context.Background(), "demo", "default")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "http://privacy.svc" {
+		t.Errorf("unexpected privacy URL: %s", got)
+	}
+}
+
+func TestPrivacyURL_EmptyWhenUnconfigured(t *testing.T) {
+	ws := makeWorkspaceWithStatus("demo", "omnia-demo", nil)
+	c := fake.NewClientBuilder().WithScheme(newTestScheme()).WithObjects(ws).Build()
+
+	got, err := NewResolver(c).PrivacyURL(context.Background(), "demo", "default")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "" {
+		t.Errorf("expected empty privacy URL, got %s", got)
+	}
+}
+
+func TestPrivacyURL_ErrorsWhenWorkspaceMissing(t *testing.T) {
+	c := fake.NewClientBuilder().WithScheme(newTestScheme()).Build()
+
+	if _, err := NewResolver(c).PrivacyURL(context.Background(), "demo", "default"); err == nil {
+		t.Fatal("expected an error when the workspace does not exist")
+	}
+}
+
+// The per-service accessors share serviceGroup(), so its failure modes are
+// asserted once here: an unknown group, and a missing workspace name.
+func TestMemoryURL_ErrorsOnUnknownServiceGroup(t *testing.T) {
+	ws := makeWorkspaceWithStatus("demo", "omnia-demo", []omniav1alpha1.ServiceGroupStatus{
+		{Name: "default", SessionURL: "http://session.svc"},
+	})
+	c := fake.NewClientBuilder().WithScheme(newTestScheme()).WithObjects(ws).Build()
+	r := NewResolver(c)
+
+	if _, err := r.MemoryURL(context.Background(), "demo", "no-such-group"); err == nil {
+		t.Fatal("expected an error for an unknown service group")
+	}
+	if _, err := r.MemoryURL(context.Background(), "", "default"); err == nil {
+		t.Fatal("expected an error when no workspace name is supplied")
+	}
 }

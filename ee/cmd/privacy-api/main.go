@@ -333,16 +333,15 @@ func run() error {
 			log.V(1).Info("redis warm cache enabled", "addr", opts.Addr, "ttl", cacheTTL)
 		}
 
-		// Consent notifier: fan-out revocations to all memory-api service-groups.
-		// Resolve memory URLs from workspace status; MEMORY_API_URLS env overrides at
-		// notifier construction time (if set, the notifier ignores memoryURLs).
+		// Consent notifier: fan-out revocations to this workspace's memory-api
+		// service-groups, resolved from workspace status. No env override.
 		memoryURLs, workspaceUID := resolveMemoryFanout(f, log)
 		if len(memoryURLs) == 0 {
 			// No fan-out targets: revocations are recorded then immediately marked
 			// delivered without any prune, and the stuck gauge stays 0 — the backstop
 			// is inert. Surface this at Info so an empty-target misconfiguration in an
 			// enterprise deploy is visible rather than hidden behind delivered=true.
-			log.Info("consent fan-out has no memory targets; revocations will not be pushed (check workspace status / MEMORY_API_URLS)")
+			log.Info("consent fan-out has no memory targets; revocations will not be pushed (check workspace status)")
 		} else {
 			log.V(1).Info("consent notifier configured", "memoryURLCount", len(memoryURLs))
 		}
@@ -503,9 +502,11 @@ func buildHandler(
 // memory_entities.workspace_id stores (the runtime writes string(ws.UID) there),
 // so it MUST be used as the ?workspace= scope on consent-revocation POSTs — the
 // workspace name would fail the uuid cast and match no rows. Returns (nil, "")
-// when no workspace is configured or the K8s lookup fails. Note: if
-// MEMORY_API_URLS is set, the MemoryAPINotifier constructor overrides the URLs
-// returned here (but not the UID, which it still needs for scoping).
+// when no workspace is configured or the K8s lookup fails.
+//
+// These URLs are the only source: there is no MEMORY_API_URLS override any
+// more, since privacy-api serves one workspace and that workspace knows its own
+// memory-api endpoints.
 func resolveMemoryFanout(f *flags, log logr.Logger) ([]string, string) {
 	if f.workspace == "" {
 		return nil, ""

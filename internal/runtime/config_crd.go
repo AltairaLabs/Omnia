@@ -163,25 +163,38 @@ func LoadFromCRD(ctx context.Context, c client.Client, name, namespace string) (
 		}
 	}
 
-	// Service URLs from Workspace CRD status (in-cluster) or env vars (local dev).
+	// Service URLs come from this workspace's service group. There is no env
+	// fallback: the Workspace is the only source of truth for an endpoint.
+	// The workspace name comes from the operator, never inferred from the
+	// namespace — they are different identifiers and conflating them is a
+	// recurring bug class here (#1875).
 	resolver := servicediscovery.NewResolver(c)
 	serviceGroup := ar.Spec.ServiceGroup
 	if serviceGroup == "" {
 		serviceGroup = "default"
 	}
-	// The workspace name comes from the operator, never inferred from the
-	// namespace — they are different identifiers and conflating them is a
-	// recurring bug class here (#1875). An unresolvable name is treated like any
-	// other discovery failure: loud, but non-fatal, so a pod that predates the
-	// operator injecting it still starts and falls back to env vars.
-	urls, urlErr := resolver.ResolveServiceURLs(ctx, workspaceName, serviceGroup)
-	if urlErr != nil {
-		log := logf.FromContext(ctx)
-		log.Error(urlErr, "service URL resolution failed, falling back to env vars",
-			"serviceGroup", serviceGroup, "workspace", workspaceName)
+	log := logf.FromContext(ctx)
+
+	// Session is required, but a failure here is non-fatal: the runtime still
+	// serves, it just has no archive to write to (#1223 keeps that loud).
+	if sessionURL, err := resolver.SessionURL(ctx, workspaceName, serviceGroup); err != nil {
+		log.Error(err, "session-api URL resolution failed",
+			"serviceGroup", serviceGroup, "workspace", workspaceName,
+			"impact", "no session/token/cost product data")
 	} else {
-		cfg.SessionAPIURL = urls.SessionURL
-		cfg.MemoryAPIURL = urls.MemoryURL
+		cfg.SessionAPIURL = sessionURL
+	}
+
+	// Memory is only required when the agent enables it, so it is resolved
+	// separately rather than as part of a fixed triple — a service group with no
+	// memory-api is a legitimate configuration.
+	if ar.Spec.Memory != nil && ar.Spec.Memory.Enabled {
+		if memoryURL, err := resolver.MemoryURL(ctx, workspaceName, serviceGroup); err != nil {
+			log.Error(err, "memory-api URL resolution failed",
+				"serviceGroup", serviceGroup, "workspace", workspaceName)
+		} else {
+			cfg.MemoryAPIURL = memoryURL
+		}
 	}
 
 	// Memory config from CRD

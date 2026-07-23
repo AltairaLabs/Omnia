@@ -109,17 +109,15 @@ func main() {
 	// liveness check before resolution succeeds.
 	go startHTTPServer(cfg.MetricsAddr, logger, evalRegistry)
 
-	// Resolve the session-api URL with retry. Prefers SESSION_API_URL for
-	// back-compat, otherwise looks up Workspace.status.services via the
-	// resolver. Retries because per-workspace services (session-api,
-	// memory-api) may still be starting when the eval-worker boots.
+	// Resolve the session-api URL with retry from Workspace.status.services.
+	// Retries because per-workspace services (session-api, memory-api) may
+	// still be starting when the eval-worker boots — the status is populated
+	// after the Workspace itself exists.
 	resolver := servicediscovery.NewResolver(k8sClient)
 	var sessionAPIURL string
 	backoff := 2 * time.Second
 	for attempt := 1; attempt <= 15; attempt++ {
-		sessionAPIURL, err = resolveSessionAPIURL(
-			context.Background(), resolver, cfg.SessionAPIURL,
-		)
+		sessionAPIURL, err = resolveSessionAPIURL(context.Background(), resolver)
 		if err == nil {
 			break
 		}
@@ -253,40 +251,38 @@ func loadConfig() (*workerEnvConfig, error) {
 	return cfg, nil
 }
 
-// resolveSessionAPIURL returns the session-api URL, preferring an explicit
-// SESSION_API_URL env var override and falling back to per-workspace service
-// discovery via the Workspace CRD. The resolver needs a Kubernetes client, so
-// this runs after the client is built in main — not inside loadConfig.
+// resolveSessionAPIURL returns the session-api URL for this worker's own
+// service group, read from Workspace.status.services. The resolver needs a
+// Kubernetes client, so this runs after the client is built in main — not
+// inside loadConfig.
 //
-// Post-#717 the operator no longer injects SESSION_API_URL on per-workspace
-// services; the URL lives in Workspace.status.services[*].sessionURL. See
-// pkg/servicediscovery and issue #742.
+// There is no env override. The worker holds a client and its own
+// workspace-reader binding, so it resolves for itself; an injected URL would
+// have been resolved at pod-creation time, before the service group's status is
+// necessarily populated. The caller retries, which is how a not-yet-ready group
+// is tolerated.
 func resolveSessionAPIURL(
 	ctx context.Context,
 	resolver *servicediscovery.Resolver,
-	envOverride string,
 ) (string, error) {
-	if envOverride != "" {
-		return envOverride, nil
-	}
 	if resolver == nil {
-		return "", fmt.Errorf("%s not set and no Kubernetes client for service discovery", envSessionAPI)
+		return "", fmt.Errorf("no Kubernetes client for service discovery")
 	}
 	group := os.Getenv(envServiceGroup)
 	if group == "" {
 		group = defaultSvcGroup
 	}
-	// Operator-injected; the eval-worker has no AgentRuntime of its own to fall
-	// back to, so the env var is required here (#1875).
+	// Operator-injected identity; the eval-worker has no AgentRuntime of its own
+	// to fall back to, so the env var is the only source (#1875).
 	wsName, wsErr := k8s.WorkspaceNameFromEnvOrLabels(nil)
 	if wsErr != nil {
 		return "", fmt.Errorf("resolve session-api URL: %w", wsErr)
 	}
-	urls, err := resolver.ResolveServiceURLs(ctx, wsName, group)
+	sessionURL, err := resolver.SessionURL(ctx, wsName, group)
 	if err != nil {
 		return "", fmt.Errorf("resolve session-api URL via Workspace CRD (service group %q): %w", group, err)
 	}
-	return urls.SessionURL, nil
+	return sessionURL, nil
 }
 
 // parseNamespaces reads NAMESPACES (comma-separated) with fallback to NAMESPACE.
