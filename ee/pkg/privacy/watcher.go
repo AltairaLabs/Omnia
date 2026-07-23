@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	corev1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
@@ -48,12 +49,13 @@ type PolicyChangeCallback func(old, new *omniav1alpha1.SessionPrivacyPolicy)
 //  4. nil (no policy applies)
 //
 // +kubebuilder:rbac:groups=omnia.altairalabs.ai,resources=sessionprivacypolicies,verbs=get;list;watch
-// +kubebuilder:rbac:groups=omnia.altairalabs.ai,resources=workspaces,verbs=get;list;watch
+// +kubebuilder:rbac:groups=omnia.altairalabs.ai,resources=workspaces,verbs=get
 // +kubebuilder:rbac:groups=omnia.altairalabs.ai,resources=agentruntimes,verbs=get;list;watch
 type PolicyWatcher struct {
 	client       client.Client
+	ownWorkspace string   // name of the Workspace this service instance belongs to
 	policies     sync.Map // key: "namespace/name" -> *omniav1alpha1.SessionPrivacyPolicy
-	workspaces   sync.Map // key: name -> *corev1alpha1.Workspace
+	workspaces   sync.Map // key: name -> *corev1alpha1.Workspace (only ownWorkspace, #1899)
 	agents       sync.Map // key: "namespace/name" -> *corev1alpha1.AgentRuntime
 	pollInterval time.Duration
 	log          logr.Logger
@@ -68,10 +70,14 @@ func (w *PolicyWatcher) OnPolicyChange(cb PolicyChangeCallback) {
 }
 
 // NewPolicyWatcher creates a watcher that observes privacy-related CRDs
-// using a controller-runtime client.
-func NewPolicyWatcher(k8sClient client.Client, log logr.Logger) *PolicyWatcher {
+// using a controller-runtime client. ownWorkspaceName is the name of the
+// Workspace this service instance belongs to (memory-api/session-api are
+// deployed one-per-workspace, #1899); the watcher only ever reads that one
+// Workspace, not the whole cluster.
+func NewPolicyWatcher(k8sClient client.Client, log logr.Logger, ownWorkspaceName string) *PolicyWatcher {
 	return &PolicyWatcher{
 		client:       k8sClient,
+		ownWorkspace: ownWorkspaceName,
 		pollInterval: 30 * time.Second,
 		log:          log.WithName("policy-watcher"),
 	}
@@ -159,19 +165,25 @@ func (w *PolicyWatcher) loadPolicies(ctx context.Context) error {
 	return nil
 }
 
-// loadWorkspaces lists all Workspace resources and updates the cache.
+// loadWorkspaces Gets the watcher's OWN Workspace (memory-api/session-api are
+// per-workspace) and caches just that one, instead of listing every Workspace
+// to reverse-map namespaces client-side (#1899). resolveServiceGroupPolicy
+// ranges this now-single-entry cache unchanged.
 func (w *PolicyWatcher) loadWorkspaces(ctx context.Context) error {
-	var list corev1alpha1.WorkspaceList
-	if err := w.client.List(ctx, &list); err != nil {
-		return fmt.Errorf("listing workspaces: %w", err)
-	}
-
-	seen := make(map[string]bool, len(list.Items))
-	for i := range list.Items {
-		ws := &list.Items[i]
-		seen[ws.Name] = true
-		w.workspaces.Store(ws.Name, ws.DeepCopy())
-		w.log.V(2).Info("workspace cached", "name", ws.Name)
+	seen := make(map[string]bool, 1)
+	if w.ownWorkspace != "" {
+		var ws corev1alpha1.Workspace
+		err := w.client.Get(ctx, client.ObjectKey{Name: w.ownWorkspace}, &ws)
+		switch {
+		case apierrors.IsNotFound(err):
+			// own Workspace absent (transient at boot) — cache nothing this pass
+		case err != nil:
+			return fmt.Errorf("get own workspace %q: %w", w.ownWorkspace, err)
+		default:
+			seen[ws.Name] = true
+			w.workspaces.Store(ws.Name, ws.DeepCopy())
+			w.log.V(2).Info("workspace cached", "name", ws.Name)
+		}
 	}
 	w.workspaces.Range(func(k, _ any) bool {
 		if !seen[k.(string)] {

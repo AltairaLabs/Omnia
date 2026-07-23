@@ -1049,7 +1049,7 @@ func wrapPrivacyMiddleware(
 		return next, nil, nil
 	}
 
-	watcher := privacy.NewPolicyWatcher(k8sClient, log)
+	watcher := privacy.NewPolicyWatcher(k8sClient, log, workspace)
 
 	// Start the watcher asynchronously; it syncs the cache in the background.
 	go func() {

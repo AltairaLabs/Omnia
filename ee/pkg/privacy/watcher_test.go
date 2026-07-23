@@ -232,7 +232,7 @@ func TestLoadPolicies_PopulatesCache(t *testing.T) {
 		WithObjects(p1, p2).
 		Build()
 
-	w := NewPolicyWatcher(fakeClient, logr.Discard())
+	w := NewPolicyWatcher(fakeClient, logr.Discard(), "")
 	require.NoError(t, w.loadPolicies(context.Background()))
 
 	count := 0
@@ -252,7 +252,7 @@ func TestLoadPolicies_RemovesDeletedPolicies(t *testing.T) {
 		WithObjects(p1).
 		Build()
 
-	w := NewPolicyWatcher(fakeClient, logr.Discard())
+	w := NewPolicyWatcher(fakeClient, logr.Discard(), "")
 	require.NoError(t, w.loadPolicies(context.Background()))
 
 	count := 0
@@ -277,12 +277,58 @@ func TestLoadWorkspaces_PopulatesCache(t *testing.T) {
 	}
 
 	fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(ws).Build()
-	w := NewPolicyWatcher(fakeClient, logr.Discard())
+	w := NewPolicyWatcher(fakeClient, logr.Discard(), "prod-ws")
 	require.NoError(t, w.loadWorkspaces(context.Background()))
 
 	count := 0
 	w.workspaces.Range(func(_, _ any) bool { count++; return true })
 	assert.Equal(t, 1, count)
+}
+
+// TestLoadWorkspaces_CachesOnlyOwnWorkspace verifies that the watcher, scoped
+// to its own workspace via a Get, resolves the service-group policy for that
+// workspace's namespace and does not cache — or depend on — other Workspace
+// objects existing in the cluster (#1899).
+func TestLoadWorkspaces_CachesOnlyOwnWorkspace(t *testing.T) {
+	scheme := testScheme()
+	own := &corev1alpha1.Workspace{
+		ObjectMeta: metav1.ObjectMeta{Name: "demo"},
+		Spec: corev1alpha1.WorkspaceSpec{
+			Namespace: corev1alpha1.NamespaceConfig{Name: "omnia-demo"},
+			Services: []corev1alpha1.WorkspaceServiceGroup{{
+				Name:             "default",
+				PrivacyPolicyRef: &corev1.LocalObjectReference{Name: "pp"},
+			}},
+		},
+	}
+	other := &corev1alpha1.Workspace{
+		ObjectMeta: metav1.ObjectMeta{Name: "other"},
+		Spec:       corev1alpha1.WorkspaceSpec{Namespace: corev1alpha1.NamespaceConfig{Name: "omnia-other"}},
+	}
+	fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(own, other).Build()
+	w := NewPolicyWatcher(fakeClient, logr.Discard(), "demo")
+	require.NoError(t, w.loadWorkspaces(context.Background()))
+
+	// Own workspace cached
+	_, ok := w.workspaces.Load("demo")
+	assert.True(t, ok, "own workspace not cached")
+
+	// Other workspace NOT cached
+	_, ok = w.workspaces.Load("other")
+	assert.False(t, ok, "must not cache workspaces it does not own")
+}
+
+// TestLoadWorkspaces_OwnMissing_NoErrorEmptyCache verifies that a transient
+// absence of the watcher's own Workspace (e.g. at boot, before the operator
+// has created it) is non-fatal and leaves the cache empty.
+func TestLoadWorkspaces_OwnMissing_NoErrorEmptyCache(t *testing.T) {
+	scheme := testScheme()
+	fakeClient := fake.NewClientBuilder().WithScheme(scheme).Build() // none
+	w := NewPolicyWatcher(fakeClient, logr.Discard(), "demo")
+	require.NoError(t, w.loadWorkspaces(context.Background()), "own-missing must be non-fatal")
+
+	_, ok := w.workspaces.Load("demo")
+	assert.False(t, ok, "nothing should be cached")
 }
 
 func TestLoadAgentRuntimes_PopulatesCache(t *testing.T) {
@@ -292,7 +338,7 @@ func TestLoadAgentRuntimes_PopulatesCache(t *testing.T) {
 	}
 
 	fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(ar).Build()
-	w := NewPolicyWatcher(fakeClient, logr.Discard())
+	w := NewPolicyWatcher(fakeClient, logr.Discard(), "")
 	require.NoError(t, w.loadAgentRuntimes(context.Background()))
 
 	count := 0
@@ -303,7 +349,7 @@ func TestLoadAgentRuntimes_PopulatesCache(t *testing.T) {
 func TestNewPolicyWatcher(t *testing.T) {
 	scheme := testScheme()
 	fakeClient := fake.NewClientBuilder().WithScheme(scheme).Build()
-	w := NewPolicyWatcher(fakeClient, logr.Discard())
+	w := NewPolicyWatcher(fakeClient, logr.Discard(), "")
 	require.NotNil(t, w)
 	assert.NotNil(t, w.client)
 }
@@ -316,7 +362,7 @@ func TestStart_CancellationStopsPolling(t *testing.T) {
 	}
 	fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(p).Build()
 
-	w := NewPolicyWatcher(fakeClient, logr.Discard())
+	w := NewPolicyWatcher(fakeClient, logr.Discard(), "")
 	w.SetPollInterval(50 * time.Millisecond)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -337,7 +383,7 @@ func TestStart_CancellationStopsPolling(t *testing.T) {
 func TestStart_InitialLoadError(t *testing.T) {
 	// A client with no scheme can't list any resource — triggers error.
 	badClient := fake.NewClientBuilder().Build()
-	w := NewPolicyWatcher(badClient, logr.Discard())
+	w := NewPolicyWatcher(badClient, logr.Discard(), "")
 	err := w.Start(context.Background())
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "initial policy load failed")
@@ -347,7 +393,7 @@ func TestStart_PollPicksUpNewPolicies(t *testing.T) {
 	scheme := testScheme()
 	fakeClient := fake.NewClientBuilder().WithScheme(scheme).Build()
 
-	w := NewPolicyWatcher(fakeClient, logr.Discard())
+	w := NewPolicyWatcher(fakeClient, logr.Discard(), "")
 	w.SetPollInterval(50 * time.Millisecond)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -378,7 +424,7 @@ func TestOnPolicyChange_CallbackFiredOnAdd(t *testing.T) {
 		Spec:       basicSpec(true),
 	}
 	fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(p1).Build()
-	w := NewPolicyWatcher(fakeClient, logr.Discard())
+	w := NewPolicyWatcher(fakeClient, logr.Discard(), "")
 
 	type transition struct {
 		old, new *omniav1alpha1.SessionPrivacyPolicy
@@ -405,7 +451,7 @@ func TestOnPolicyChange_CallbackFiredOnSpecChange(t *testing.T) {
 		Spec:       basicSpec(true),
 	}
 	fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(p1).Build()
-	w := NewPolicyWatcher(fakeClient, logr.Discard())
+	w := NewPolicyWatcher(fakeClient, logr.Discard(), "")
 
 	type transition struct {
 		old, new *omniav1alpha1.SessionPrivacyPolicy
@@ -445,7 +491,7 @@ func TestOnPolicyChange_CallbackFiredOnDelete(t *testing.T) {
 		Spec:       basicSpec(true),
 	}
 	fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(p1).Build()
-	w := NewPolicyWatcher(fakeClient, logr.Discard())
+	w := NewPolicyWatcher(fakeClient, logr.Discard(), "")
 
 	type transition struct {
 		old, new *omniav1alpha1.SessionPrivacyPolicy
@@ -477,7 +523,7 @@ func TestOnPolicyChange_ReplacedCallback(t *testing.T) {
 		Spec:       basicSpec(true),
 	}
 	fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(p1).Build()
-	w := NewPolicyWatcher(fakeClient, logr.Discard())
+	w := NewPolicyWatcher(fakeClient, logr.Discard(), "")
 
 	first := 0
 	second := 0

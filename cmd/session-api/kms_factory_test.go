@@ -258,6 +258,7 @@ func TestWireEncryptionResolver_SetsResolver(t *testing.T) {
 	watcher := privacy.NewPolicyWatcher(
 		fake.NewClientBuilder().Build(),
 		logr.Discard(),
+		"demo",
 	)
 
 	require.Nil(t, h.EncryptorResolver(), "should start with no resolver")
@@ -270,7 +271,7 @@ func TestWireEncryptionResolver_SetsResolver(t *testing.T) {
 func TestWireEncryptionResolver_NoSession(t *testing.T) {
 	svc := newEmptySessionService()
 	h := api.NewHandler(svc, logr.Discard())
-	watcher := privacy.NewPolicyWatcher(fake.NewClientBuilder().Build(), logr.Discard())
+	watcher := privacy.NewPolicyWatcher(fake.NewClientBuilder().Build(), logr.Discard(), "demo")
 
 	wireEncryptionResolver(h, svc, watcher, &countingFactory{}, logr.Discard())
 
@@ -287,7 +288,7 @@ func TestWireEncryptionResolver_NoSession(t *testing.T) {
 func TestWireEncryptionResolver_CallbackRegistered(t *testing.T) {
 	svc := newEmptySessionService()
 	h := api.NewHandler(svc, logr.Discard())
-	watcher := privacy.NewPolicyWatcher(fake.NewClientBuilder().Build(), logr.Discard())
+	watcher := privacy.NewPolicyWatcher(fake.NewClientBuilder().Build(), logr.Discard(), "demo")
 
 	called := false
 	// Install a sentinel callback first.

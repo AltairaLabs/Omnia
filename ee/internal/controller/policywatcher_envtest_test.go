@@ -42,7 +42,7 @@ var _ = Describe("PolicyWatcher envtest integration", func() {
 			k8s, err := client.New(cfg, client.Options{Scheme: scheme.Scheme})
 			Expect(err).NotTo(HaveOccurred())
 
-			pw := privacy.NewPolicyWatcher(k8s, logr.Discard())
+			pw := privacy.NewPolicyWatcher(k8s, logr.Discard(), "")
 			pw.SetPollInterval(500 * time.Millisecond)
 			Expect(pw).NotTo(BeNil())
 		})
@@ -51,7 +51,7 @@ var _ = Describe("PolicyWatcher envtest integration", func() {
 			k8s, err := client.New(cfg, client.Options{Scheme: scheme.Scheme})
 			Expect(err).NotTo(HaveOccurred())
 
-			pw := privacy.NewPolicyWatcher(k8s, logr.Discard())
+			pw := privacy.NewPolicyWatcher(k8s, logr.Discard(), "")
 			pw.SetPollInterval(500 * time.Millisecond)
 
 			watchCtx, watchCancel := context.WithCancel(ctx)
@@ -104,7 +104,7 @@ var _ = Describe("PolicyWatcher envtest integration", func() {
 			k8s, err := client.New(cfg, client.Options{Scheme: scheme.Scheme})
 			Expect(err).NotTo(HaveOccurred())
 
-			pw := privacy.NewPolicyWatcher(k8s, logr.Discard())
+			pw := privacy.NewPolicyWatcher(k8s, logr.Discard(), "")
 			pw.SetPollInterval(500 * time.Millisecond)
 
 			ensureNamespace("omnia-system")
@@ -145,7 +145,7 @@ var _ = Describe("PolicyWatcher envtest integration", func() {
 			k8s, err := client.New(cfg, client.Options{Scheme: scheme.Scheme})
 			Expect(err).NotTo(HaveOccurred())
 
-			pw := privacy.NewPolicyWatcher(k8s, logr.Discard())
+			pw := privacy.NewPolicyWatcher(k8s, logr.Discard(), "")
 			pw.SetPollInterval(500 * time.Millisecond)
 
 			watchCtx, watchCancel := context.WithCancel(ctx)
