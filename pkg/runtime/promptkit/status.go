@@ -91,22 +91,3 @@ func reportStartupStatus(
 		log.Error(err, "failed to report runtime capabilities")
 	}
 }
-
-// reportStartup validates pack content and, when the runtime is operator-managed
-// (agent name + namespace known), self-reports pack-validation and capabilities
-// to the AgentRuntime status. All failures are best-effort: they log and return
-// without affecting serving.
-func (r *Runtime) reportStartup(ctx context.Context) {
-	warnings := validatePackContent(r.cfg.PromptPackPath, r.evalDefs, r.log)
-	if r.cfg.AgentName == "" || r.cfg.Namespace == "" {
-		return
-	}
-	patchCtx, cancel := context.WithTimeout(ctx, statusReportTimeout)
-	defer cancel()
-	k8sClient, err := k8s.NewClient()
-	if err != nil {
-		r.log.Error(err, "failed to create k8s client for status reporting")
-		return
-	}
-	reportStartupStatus(patchCtx, r.log, k8sClient, r.cfg.AgentName, r.cfg.Namespace, warnings)
-}

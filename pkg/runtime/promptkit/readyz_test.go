@@ -4,7 +4,7 @@ Copyright 2026 Altaira Labs.
 SPDX-License-Identifier: Apache-2.0
 */
 
-package main
+package promptkit
 
 import (
 	"encoding/json"

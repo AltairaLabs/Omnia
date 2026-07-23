@@ -37,12 +37,9 @@ import (
 
 	"github.com/go-logr/logr"
 	"github.com/prometheus/client_golang/prometheus"
-	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/propagation"
 	"google.golang.org/grpc"
 
 	pkevals "github.com/AltairaLabs/PromptKit/runtime/evals"
-	"github.com/AltairaLabs/PromptKit/runtime/logger"
 	sdkmetrics "github.com/AltairaLabs/PromptKit/runtime/metrics"
 	"github.com/AltairaLabs/PromptKit/runtime/statestore"
 
@@ -107,45 +104,6 @@ func New(cfg *pkruntime.Config, opts ...Option) (*Runtime, error) {
 		return nil, fmt.Errorf("build logger: %w", err)
 	}
 	return newFromBuilder(cfg, b, logCleanup)
-}
-
-// FromEnv loads the operator-injected OMNIA_* configuration and constructs a
-// Runtime from it. It is the entry point a runtime binary's main() calls: the
-// operator injects the same environment it does for the built-in runtime. It
-// installs the global trace propagator, resolves the pack entry point, and
-// best-effort self-reports pack validation + capabilities to the AgentRuntime
-// status.
-func FromEnv(opts ...Option) (*Runtime, error) {
-	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
-		propagation.TraceContext{},
-		propagation.Baggage{},
-	))
-
-	b := applyOptions(opts)
-	logCleanup, err := b.ensureLogger()
-	if err != nil {
-		return nil, fmt.Errorf("build logger: %w", err)
-	}
-	if b.sdkLogger != nil {
-		logger.SetLogger(b.sdkLogger)
-	}
-
-	cfg, err := pkruntime.LoadConfigWithContext(context.Background())
-	if err != nil {
-		b.log.Error(err, "failed to load configuration")
-		runCleanup(logCleanup)
-		return nil, err
-	}
-	cfg.PromptName = pkruntime.ResolvePackEntry(cfg.PromptPackPath, cfg.PromptName, b.log)
-	logStartup(b.log, cfg)
-
-	rt, err := newFromBuilder(cfg, b, logCleanup)
-	if err != nil {
-		runCleanup(logCleanup)
-		return nil, err
-	}
-	rt.reportStartup(context.Background())
-	return rt, nil
 }
 
 // newFromBuilder is the shared construction core for New and FromEnv: it builds
@@ -371,25 +329,4 @@ func runCleanup(c func()) {
 	if c != nil {
 		c()
 	}
-}
-
-// logStartup emits the single structured startup line describing the resolved
-// runtime configuration.
-func logStartup(log logr.Logger, cfg *pkruntime.Config) {
-	log.Info("starting runtime",
-		"agent", cfg.AgentName,
-		"namespace", cfg.Namespace,
-		"grpcPort", cfg.GRPCPort,
-		"healthPort", cfg.HealthPort,
-		"packPath", cfg.PromptPackPath,
-		"promptName", cfg.PromptName,
-		"providerType", cfg.ProviderType,
-		"model", cfg.Model,
-		"baseURL", cfg.BaseURL,
-		"mockProvider", cfg.MockProvider,
-		"toolsConfigPath", cfg.ToolsConfigPath,
-		"tracingEnabled", cfg.TracingEnabled,
-		"evalEnabled", cfg.EvalEnabled,
-		"sessionAPIURL", cfg.SessionAPIURL,
-		"memoryEnabled", cfg.MemoryEnabled)
 }

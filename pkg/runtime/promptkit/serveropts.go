@@ -169,16 +169,18 @@ func loadEvalDefs(cfg *pkruntime.Config, log logr.Logger) []evals.EvalDef {
 // itself, but this PromptKit runtime has no custom implementation, so no
 // truncation is applied at all and context grows until the provider rejects the
 // request. The field is valid for custom runtimes (spec.framework.type: custom),
-// which is why this warns rather than failing.
-func warnIfCustomTruncation(log logr.Logger, strategy string) {
+// which is why this warns rather than failing. Returns true when a warning was
+// emitted.
+func warnIfCustomTruncation(log logr.Logger, strategy string) bool {
 	if strategy != string(omniav1alpha1.TruncationStrategyCustom) {
-		return
+		return false
 	}
 	log.Info("truncation disabled",
 		"reason", "customStrategyOnPromptKitRuntime",
 		"truncationStrategy", strategy,
 		"impact", "no truncation applied; context may exceed the provider limit",
 		"remedy", "use sliding or summarize, or run a custom runtime that implements truncation")
+	return true
 }
 
 // enrichToolRegistryMeta records ToolRegistry provenance on the tool manager so
