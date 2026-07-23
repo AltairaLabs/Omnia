@@ -64,6 +64,36 @@ func (a *serviceAdapter) Converse(stream runtimev1.RuntimeService_ConverseServer
 	}
 }
 
+// Invoke runs a one-shot function-mode call. Requires the Handler to implement
+// Invoker; otherwise it reports Unimplemented (so advertising honesty holds).
+func (a *serviceAdapter) Invoke(
+	ctx context.Context,
+	req *runtimev1.InvocationRequest,
+) (*runtimev1.InvocationResponse, error) {
+	invoker, ok := a.handler.(Invoker)
+	if !ok {
+		return nil, status.Error(codes.Unimplemented, "invoke is not supported by this runtime")
+	}
+	if req.GetInvocationId() == "" || req.GetInputJson() == "" {
+		return nil, status.Error(codes.InvalidArgument, "invocation_id and input_json are required")
+	}
+	resp, err := invoker.Invoke(ctx, InvocationRequest{
+		InputJSON:    req.GetInputJson(),
+		InvocationID: req.GetInvocationId(),
+		Metadata:     req.GetMetadata(),
+		Identity:     parseIdentity(ctx),
+	})
+	if err != nil {
+		return nil, status.Error(codes.Internal, "invocation failed")
+	}
+	return &runtimev1.InvocationResponse{
+		OutputJson:   resp.OutputJSON,
+		Usage:        mapUsageToProto(resp.Usage),
+		DurationMs:   resp.DurationMS,
+		InvocationId: req.GetInvocationId(),
+	}, nil
+}
+
 func converseRecvErr(err error) error {
 	if err == io.EOF {
 		return nil

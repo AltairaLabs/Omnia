@@ -10,7 +10,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
 )
 
@@ -251,4 +253,57 @@ func TestEmitter_Media(t *testing.T) {
 	assert.Equal(t, "m1", mc.GetMediaId())
 	assert.True(t, mc.GetIsLast())
 	assert.Equal(t, []byte{1, 2, 3}, mc.GetData())
+}
+
+// invokerStub is a Handler that also implements Invoker.
+type invokerStub struct {
+	stubHandler
+	invoke func(ctx context.Context, req InvocationRequest) (InvocationResponse, error)
+}
+
+func (i *invokerStub) Invoke(ctx context.Context, req InvocationRequest) (InvocationResponse, error) {
+	return i.invoke(ctx, req)
+}
+
+func TestInvoke_UnimplementedWithoutInvoker(t *testing.T) {
+	h := &stubHandler{caps: []string{contract.CapabilityClientTools}} // no invoke advertised, no Invoker
+	client := runtimev1.NewRuntimeServiceClient(newTestConn(t, h))
+
+	_, err := client.Invoke(context.Background(), &runtimev1.InvocationRequest{InputJson: "{}", InvocationId: "inv-1"})
+	assert.Equal(t, codes.Unimplemented, status.Code(err))
+}
+
+func TestInvoke_DelegatesToInvoker(t *testing.T) {
+	h := &invokerStub{
+		stubHandler: stubHandler{caps: []string{contract.CapabilityInvoke}},
+		invoke: func(_ context.Context, req InvocationRequest) (InvocationResponse, error) {
+			assert.Equal(t, `{"q":1}`, req.InputJSON)
+			assert.Equal(t, "inv-1", req.InvocationID)
+			return InvocationResponse{OutputJSON: `{"a":2}`, Usage: &Usage{OutputTokens: 5}, DurationMS: 12}, nil
+		},
+	}
+	client := runtimev1.NewRuntimeServiceClient(newTestConn(t, h))
+
+	resp, err := client.Invoke(
+		context.Background(),
+		&runtimev1.InvocationRequest{InputJson: `{"q":1}`, InvocationId: "inv-1"},
+	)
+	require.NoError(t, err)
+	assert.Equal(t, `{"a":2}`, resp.GetOutputJson())
+	assert.Equal(t, "inv-1", resp.GetInvocationId()) // echoed by the SDK
+	assert.Equal(t, int32(12), resp.GetDurationMs())
+	assert.Equal(t, int32(5), resp.GetUsage().GetOutputTokens())
+}
+
+func TestInvoke_ValidatesInput(t *testing.T) {
+	h := &invokerStub{
+		stubHandler: stubHandler{caps: []string{contract.CapabilityInvoke}},
+		invoke: func(_ context.Context, _ InvocationRequest) (InvocationResponse, error) {
+			return InvocationResponse{}, nil
+		},
+	}
+	client := runtimev1.NewRuntimeServiceClient(newTestConn(t, h))
+
+	_, err := client.Invoke(context.Background(), &runtimev1.InvocationRequest{InputJson: "", InvocationId: ""})
+	assert.Equal(t, codes.InvalidArgument, status.Code(err))
 }
