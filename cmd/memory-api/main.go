@@ -1463,8 +1463,8 @@ func buildConsolidationWorker(_ context.Context, f *flags, pgStore *memory.Postg
 // buildProjectionWorker constructs the Memory Galaxy pre-render worker when the
 // operator has set PROJECTION_INTERVAL. Returns nil (disabled) when the interval
 // is unset/unparseable or in-cluster k8s config is unavailable (the worker lists
-// MemoryPolicy + Workspace CRs cluster-wide, reusing the consolidation client).
-// Caller invokes go pw.Run(ctx).
+// MemoryPolicy CRs cluster-wide and Gets its own Workspace, reusing the
+// consolidation client). Caller invokes go pw.Run(ctx).
 func buildProjectionWorker(f *flags, pgStore *memory.PostgresMemoryStore, reg prometheus.Registerer, log logr.Logger) *projectionworker.Worker {
 	if !f.enterprise {
 		return nil

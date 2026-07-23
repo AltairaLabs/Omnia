@@ -10,6 +10,7 @@ package privacy
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -21,6 +22,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	corev1alpha1 "github.com/altairalabs/omnia/api/v1alpha1"
 	omniav1alpha1 "github.com/altairalabs/omnia/ee/api/v1alpha1"
@@ -329,6 +331,27 @@ func TestLoadWorkspaces_OwnMissing_NoErrorEmptyCache(t *testing.T) {
 
 	_, ok := w.workspaces.Load("demo")
 	assert.False(t, ok, "nothing should be cached")
+}
+
+// TestLoadWorkspaces_GetError_ReturnsWrappedError verifies that a non-NotFound
+// Get error on the watcher's own Workspace is wrapped and returned (unlike the
+// IsNotFound case, which is tolerated as transient).
+func TestLoadWorkspaces_GetError_ReturnsWrappedError(t *testing.T) {
+	scheme := testScheme()
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithInterceptorFuncs(interceptor.Funcs{
+			Get: func(ctx context.Context, cw client.WithWatch, key client.ObjectKey,
+				obj client.Object, opts ...client.GetOption) error {
+				return errors.New("boom")
+			},
+		}).
+		Build()
+
+	w := NewPolicyWatcher(fakeClient, logr.Discard(), "demo")
+	err := w.loadWorkspaces(context.Background())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "demo")
 }
 
 func TestLoadAgentRuntimes_PopulatesCache(t *testing.T) {
