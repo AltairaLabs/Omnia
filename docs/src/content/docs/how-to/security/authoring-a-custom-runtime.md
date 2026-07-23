@@ -33,6 +33,49 @@ offline against a directory of manifests (`OMNIA_CONFIG_DIR`). Read them
 alongside this page.
 :::
 
+## Go SDK: `pkg/runtime`
+
+Go authors do not need to hand-write the `omnia.runtime.v1` wire protocol.
+Implement the small `Handler` interface and `runtime.Serve` gives you a fully
+conformant runtime — hello-first, client-tool round-trips, `ServerMessage`
+marshalling, health, and capability advertisement are all handled for you.
+
+```go
+import (
+	"context"
+	"net"
+
+	rt "github.com/altairalabs/omnia/pkg/runtime"
+	"github.com/altairalabs/omnia/pkg/runtime/contract"
+)
+
+type myRuntime struct{}
+
+func (myRuntime) Capabilities() []string { return []string{contract.CapabilityClientTools} }
+
+func (myRuntime) Converse(ctx context.Context, turn rt.Turn, emit rt.Emitter) error {
+	// ... call your model / framework, stream output ...
+	if err := emit.Chunk("hello"); err != nil {
+		return err
+	}
+	return emit.Done(rt.Done{Final: "hello"})
+}
+
+func main() {
+	lis, _ := net.Listen("tcp", ":9090")
+	_ = rt.Serve(lis, myRuntime{})
+}
+```
+
+`Capabilities()` must be honest: implement the optional `Invoker` interface to
+advertise `invoke`, and the optional `ConversationProber` interface to answer
+resume probes. Do not advertise `duplex_audio` unless you handle duplex
+sessions. The Wave-4 conformance suite verifies advertisement matches behaviour.
+
+PromptKit-based runtimes should instead import
+`github.com/altairalabs/omnia/pkg/runtime/promptkit`, which exposes Omnia's
+first-party PromptKit runtime directly.
+
 ## Prerequisites
 
 - A container image you control, published to a registry the cluster can pull.
