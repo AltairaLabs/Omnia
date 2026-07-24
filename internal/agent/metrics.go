@@ -93,6 +93,23 @@ type Metrics struct {
 	// per inbound audio frame, in seconds.
 	AudioIngestDuration prometheus.Histogram
 
+	// Media data-plane ingest counters. These measure inbound binary media
+	// (audio/video) BEFORE it is handed to the runtime/PromptKit, closing the
+	// blind spot where a per-connection rate limiter silently dropped audio
+	// frames. A rising *RateLimitedTotal against a healthy *ReceivedTotal is the
+	// direct fingerprint of that class of bug.
+
+	// AudioFramesReceivedTotal counts inbound binary media frames admitted.
+	AudioFramesReceivedTotal prometheus.Counter
+	// AudioBytesReceivedTotal counts inbound binary media bytes admitted.
+	AudioBytesReceivedTotal prometheus.Counter
+	// MediaFramesRateLimitedTotal counts inbound binary media frames shed by the
+	// per-connection media byte-rate limiter (data-plane backpressure).
+	MediaFramesRateLimitedTotal prometheus.Counter
+	// ControlMessagesRateLimitedTotal counts inbound text/control messages shed
+	// by the per-connection message-count rate limiter (control-plane flood).
+	ControlMessagesRateLimitedTotal prometheus.Counter
+
 	// Realtime blip-resume counters
 
 	// RealtimeSessionsParkedTotal is the total number of realtime sessions parked
@@ -250,6 +267,30 @@ func NewMetrics(agentName, namespace string) *Metrics {
 			ConstLabels: labels,
 			// Sub-millisecond buckets for audio (10ms frame budgets are typical).
 			Buckets: []float64{0.0001, 0.0005, 0.001, 0.005, 0.01, 0.025, 0.05, 0.1},
+		}),
+
+		AudioFramesReceivedTotal: promauto.NewCounter(prometheus.CounterOpts{
+			Name:        "omnia_facade_audio_frames_received_total",
+			Help:        "Total inbound binary media frames admitted on the data plane (post rate-limit)",
+			ConstLabels: labels,
+		}),
+
+		AudioBytesReceivedTotal: promauto.NewCounter(prometheus.CounterOpts{
+			Name:        "omnia_facade_audio_bytes_received_total",
+			Help:        "Total inbound binary media bytes admitted on the data plane (post rate-limit)",
+			ConstLabels: labels,
+		}),
+
+		MediaFramesRateLimitedTotal: promauto.NewCounter(prometheus.CounterOpts{
+			Name:        "omnia_facade_media_frames_ratelimited_total",
+			Help:        "Inbound binary media frames shed by the per-connection media byte-rate limiter",
+			ConstLabels: labels,
+		}),
+
+		ControlMessagesRateLimitedTotal: promauto.NewCounter(prometheus.CounterOpts{
+			Name:        "omnia_facade_control_messages_ratelimited_total",
+			Help:        "Inbound text/control messages shed by the per-connection message-count rate limiter",
+			ConstLabels: labels,
 		}),
 
 		// Realtime blip-resume counters
@@ -465,6 +506,25 @@ func (m *Metrics) AudioSessionEnded() {
 // an inbound audio frame, in seconds.
 func (m *Metrics) AudioIngestLatency(seconds float64) {
 	m.AudioIngestDuration.Observe(seconds)
+}
+
+// MediaFrameReceived records an admitted inbound binary media frame of the
+// given size in bytes (data-plane throughput).
+func (m *Metrics) MediaFrameReceived(bytes int) {
+	m.AudioFramesReceivedTotal.Inc()
+	m.AudioBytesReceivedTotal.Add(float64(bytes))
+}
+
+// MediaFrameRateLimited records a binary media frame shed by the per-connection
+// media byte-rate limiter.
+func (m *Metrics) MediaFrameRateLimited() {
+	m.MediaFramesRateLimitedTotal.Inc()
+}
+
+// ControlMessageRateLimited records a text/control message shed by the
+// per-connection message-count rate limiter.
+func (m *Metrics) ControlMessageRateLimited() {
+	m.ControlMessagesRateLimitedTotal.Inc()
 }
 
 // RealtimeSessionParked records that a realtime session was parked after

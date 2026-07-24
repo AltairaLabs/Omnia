@@ -523,6 +523,9 @@ func (m *ensureSessionMetricsSpy) SessionCreated() {
 func (m *ensureSessionMetricsSpy) AudioSessionStarted()                             {}
 func (m *ensureSessionMetricsSpy) AudioSessionEnded()                               {}
 func (m *ensureSessionMetricsSpy) AudioIngestLatency(float64)                       {}
+func (m *ensureSessionMetricsSpy) MediaFrameReceived(int)                           {}
+func (m *ensureSessionMetricsSpy) MediaFrameRateLimited()                           {}
+func (m *ensureSessionMetricsSpy) ControlMessageRateLimited()                       {}
 func (m *ensureSessionMetricsSpy) RealtimeSessionParked()                           {}
 func (m *ensureSessionMetricsSpy) RealtimeSessionReattached()                       {}
 func (m *ensureSessionMetricsSpy) RealtimeSessionParkExpired()                      {}

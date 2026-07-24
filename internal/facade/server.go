@@ -53,68 +53,6 @@ const envAllowedOrigins = "OMNIA_ALLOWED_ORIGINS"
 // the header (#1449).
 const envVariant = "OMNIA_VARIANT"
 
-// ServerConfig contains configuration for the WebSocket server.
-type ServerConfig struct {
-	// ReadBufferSize is the size of the read buffer.
-	ReadBufferSize int
-	// WriteBufferSize is the size of the write buffer.
-	WriteBufferSize int
-	// PingInterval is how often to send ping messages.
-	PingInterval time.Duration
-	// PongTimeout is how long to wait for a pong response.
-	PongTimeout time.Duration
-	// WriteTimeout is the timeout for write operations.
-	WriteTimeout time.Duration
-	// MaxMessageSize is the maximum message size.
-	MaxMessageSize int64
-	// MaxConnections is the maximum number of concurrent WebSocket connections.
-	// 0 means unlimited (not recommended for production).
-	MaxConnections int
-	// PromptPackName is the PromptPack associated with this agent (from env).
-	PromptPackName string
-	// PromptPackVersion is the PromptPack version (from env).
-	PromptPackVersion string
-	// MessageRateLimit is the maximum sustained messages per second per connection.
-	// 0 disables rate limiting.
-	MessageRateLimit float64
-	// MessageRateBurst is the maximum burst size for per-connection rate limiting.
-	MessageRateBurst int
-	// MaxInFlightMessagesPerConnection limits concurrently processed messages per
-	// connection. 0 disables this cap.
-	MaxInFlightMessagesPerConnection int
-	// WorkspaceName is the workspace this agent belongs to (for session metadata).
-	WorkspaceName string
-	// MaxAudioSessions is the maximum number of concurrent audio sessions per pod.
-	// When a new session would exceed this cap the request is shed with
-	// ErrorCodeRateLimited. 0 applies the conservative default (8).
-	MaxAudioSessions int
-	// DrainTimeout is how long the facade keeps serving active realtime calls
-	// after receiving SIGTERM before tearing down remaining connections.
-	// New calls are shed immediately on drain. Defaults to 30s.
-	DrainTimeout time.Duration
-}
-
-// DefaultServerConfig returns a ServerConfig with default values.
-func DefaultServerConfig() ServerConfig {
-	return ServerConfig{
-		ReadBufferSize:   64 * 1024, // 64KB to reduce reallocation for larger messages
-		WriteBufferSize:  64 * 1024, // 64KB to reduce reallocation for larger messages
-		PingInterval:     30 * time.Second,
-		PongTimeout:      60 * time.Second,
-		WriteTimeout:     10 * time.Second,
-		MaxMessageSize:   16 * 1024 * 1024, // 16MB to support base64-encoded images
-		MaxConnections:   500,
-		MessageRateLimit: 50,
-		MessageRateBurst: 100,
-		// Keep one in-flight request per connection to avoid unbounded runtime
-		// stream fan-out and chunk interleaving the client cannot correlate.
-		MaxInFlightMessagesPerConnection: 1,
-		// Conservative audio session cap. Overridden via ServerConfig.MaxAudioSessions.
-		MaxAudioSessions: 8,
-		DrainTimeout:     30 * time.Second,
-	}
-}
-
 // MessageHandler handles incoming client messages.
 type MessageHandler interface {
 	// Name returns the handler name for metrics labeling.
@@ -240,136 +178,6 @@ type Server struct {
 }
 
 // ServerOption is a functional option for configuring the server.
-type ServerOption func(*Server)
-
-// WithMetrics sets the metrics collector for the server.
-func WithMetrics(m ServerMetrics) ServerOption {
-	return func(s *Server) {
-		s.metrics = m
-	}
-}
-
-// WithMediaStorage sets the media storage for the server.
-// When set, the server can handle upload_request messages from clients.
-func WithMediaStorage(ms media.Storage) ServerOption {
-	return func(s *Server) {
-		s.mediaStorage = ms
-	}
-}
-
-// WithTracingProvider sets the tracing provider for the server.
-// When set, the server creates spans for sessions and messages.
-func WithTracingProvider(p *tracing.Provider) ServerOption {
-	return func(s *Server) {
-		s.tracingProvider = p
-	}
-}
-
-// WithRecordingPool sets the recording worker pool for async session recording.
-func WithRecordingPool(p *RecordingPool) ServerOption {
-	return func(s *Server) {
-		s.recordingPool = p
-	}
-}
-
-// WithAllowedOrigins sets the allowed origins for WebSocket connections.
-// Origins should be scheme + host (e.g., "https://example.com").
-// When set, only requests from these origins are allowed.
-// When empty, the default gorilla/websocket same-origin check is used.
-func WithAllowedOrigins(origins []string) ServerOption {
-	return func(s *Server) {
-		s.allowedOrigins = origins
-	}
-}
-
-// WithMgmtPlaneValidator configures the server to run a single mgmt-plane
-// Validator. Convenience wrapper around WithAuthChain — exists to keep
-// the PR 1a/c API stable while the wider chain machinery (PR 2b+) lands.
-//
-// Identical semantics to WithAuthChain(auth.Chain{v}): the validator
-// runs first; ErrNoCredential falls through to the unauthenticated
-// upgrade path (PR 1 default); invalid/expired returns 401. Combine with
-// WithAuthChain instead of this option once data-plane validators are in
-// the mix.
-func WithMgmtPlaneValidator(v auth.Validator) ServerOption {
-	return WithAuthChain(auth.Chain{v})
-}
-
-// WithAuthChain configures the server to run the supplied auth chain on
-// every upgrade. Admit attaches the resulting identity to the
-// connection's PropagationFields. ErrNoCredential (no validator admits)
-// now returns 401 before Upgrade — PR 3 flipped this from the
-// behaviour-preserving default of proceeding unauthenticated, closing
-// pen-test finding C-3.
-//
-// Validator order matters — the first validator that admits wins, so
-// list the most specific credential style first. The conventional order
-// shipped by cmd/agent is clientKeys → oidc → edgeTrust → mgmt-plane.
-//
-// Empty chain still proceeds unauthenticated to keep the dev/test path
-// working when no validator can be constructed (no mgmt-plane key, no
-// externalAuth CRD). Set WithAllowUnauthenticated(false) at the server
-// to also reject those requests.
-func WithAuthChain(chain auth.Chain) ServerOption {
-	return func(s *Server) {
-		s.authChain = chain
-	}
-}
-
-// WithDuplexSinkFactory sets the factory used to create a DuplexSink for
-// each connection's persistent audio duplex stream. When nil (default),
-// inbound BinaryMessageTypeMediaChunk frames are rejected with a graceful
-// error — audio is not enabled. The factory is called lazily on the first
-// inbound media chunk for a given connection.
-//
-// The factory signature deliberately references only facade-exported types
-// (sessionID string, ResponseWriter) so internal/facade stays decoupled from
-// internal/agent. The real sink implementation in internal/agent satisfies
-// the DuplexSink interface and is injected here at binary wiring time in
-// cmd/agent.
-func WithDuplexSinkFactory(f func(sessionID string, w ResponseWriter) DuplexSink) ServerOption {
-	return func(s *Server) {
-		s.duplexSinkFactory = f
-	}
-}
-
-// WithAllowUnauthenticated controls the fallback behaviour when the
-// auth chain is empty (no validators configured). Defaults to true so
-// standalone dev/test binaries without a k8s client or mgmt-plane key
-// still accept WebSocket upgrades. Production deployments going through
-// cmd/agent always have at least the mgmt-plane validator in the chain,
-// so this flag does not affect them — they 401 on missing credentials
-// regardless.
-//
-// Set to false to reject every unauthenticated upgrade including the
-// empty-chain case. Useful for integration tests that want to prove the
-// strict default.
-func WithAllowUnauthenticated(allow bool) ServerOption {
-	return func(s *Server) {
-		s.allowUnauthenticated = allow
-	}
-}
-
-// WithRouteStore sets the RouteStore used by the parked session registry to
-// persist and remove pod-address route hints. Defaults to noopRouteStore{}.
-func WithRouteStore(rs RouteStore) ServerOption {
-	return func(s *Server) { s.routeStore = rs }
-}
-
-// WithPodAddr sets the "<podIP>:<port>" address for this pod. Written into
-// route hints when a realtime session is parked so a peer can redirect
-// reconnecting clients to the correct pod.
-func WithPodAddr(addr string) ServerOption {
-	return func(s *Server) { s.podAddr = addr }
-}
-
-// WithGraceWindow sets how long the parked session registry waits for a
-// client to reconnect before expiring the parked audio stream. When ≤0,
-// NewServer applies a conservative default of 15s.
-func WithGraceWindow(d time.Duration) ServerOption {
-	return func(s *Server) { s.graceWindow = d }
-}
-
 // NewServer creates a new WebSocket server.
 func NewServer(cfg ServerConfig, store session.Recorder, handler MessageHandler, log logr.Logger, opts ...ServerOption) *Server {
 	s := &Server{
@@ -783,6 +591,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if s.config.MessageRateLimit > 0 {
 		c.rateLimiter = rate.NewLimiter(rate.Limit(s.config.MessageRateLimit), s.config.MessageRateBurst)
+	}
+	if s.config.MediaByteRateLimit > 0 {
+		c.mediaRateLimiter = rate.NewLimiter(rate.Limit(s.config.MediaByteRateLimit), s.config.MediaByteRateBurst)
 	}
 
 	s.mu.Lock()

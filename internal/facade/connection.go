@@ -67,8 +67,15 @@ type Connection struct {
 	// via c.mu.
 	sessionConsentGrants []string
 
-	// rateLimiter enforces per-connection message rate limiting. Nil when disabled.
+	// rateLimiter enforces per-connection TEXT/control message rate limiting.
+	// Nil when disabled. Binary media frames are NOT gated by this — see
+	// mediaRateLimiter.
 	rateLimiter *rate.Limiter
+	// mediaRateLimiter enforces a per-connection BYTE-rate cap on inbound binary
+	// media frames (audio/video/upload). Nil when disabled. Bandwidth is the
+	// correct bound for the media data plane; a message-count limit would drop
+	// legitimate high-frame-rate audio (~187 frames/s at 24 kHz).
+	mediaRateLimiter *rate.Limiter
 	// inFlightMessages limits concurrently processed non-tool messages per connection.
 	// Nil when disabled.
 	inFlightMessages chan struct{}
@@ -79,6 +86,29 @@ type Connection struct {
 	// or when no duplexSinkFactory is configured on the Server.
 	// Protected by c.mu.
 	audioSession *audioSession
+}
+
+// admitMessage applies plane-appropriate rate limiting to an inbound frame and
+// reports whether it may proceed. Binary media frames (audio/video/upload) are
+// the DATA plane: they arrive at high frequency (~187 frames/s for 24 kHz PCM)
+// and are bounded by BANDWIDTH (mediaRateLimiter, bytes/s). A per-message COUNT
+// limit here would silently drop most audio frames, which the runtime then
+// forwards to the provider as a time-compressed stream — pitch-shifted, so the
+// provider mis-detects the spoken language. Text/control frames are the CONTROL
+// plane (the JSON-flood abuse vector) and keep the message-count limit
+// (rateLimiter). A nil limiter means that plane is unlimited. The returned
+// string is the client-facing reason when admitted is false.
+func (c *Connection) admitMessage(messageType, size int, now time.Time) (admitted bool, reason string) {
+	if messageType == websocket.BinaryMessage {
+		if c.mediaRateLimiter != nil && !c.mediaRateLimiter.AllowN(now, size) {
+			return false, "media rate limit exceeded"
+		}
+		return true, ""
+	}
+	if c.rateLimiter != nil && !c.rateLimiter.AllowN(now, 1) {
+		return false, "rate limit exceeded"
+	}
+	return true, ""
 }
 
 func (c *Connection) tryAcquireInFlightMessage() bool {
