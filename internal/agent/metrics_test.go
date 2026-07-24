@@ -167,6 +167,23 @@ func newMetricsWithRegistry(agentName, namespace string, reg prometheus.Register
 	})
 	reg.MustRegister(audioIngestDuration)
 
+	audioFramesReceivedTotal := prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "omnia_facade_audio_frames_received_total", Help: "test", ConstLabels: labels,
+	})
+	reg.MustRegister(audioFramesReceivedTotal)
+	audioBytesReceivedTotal := prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "omnia_facade_audio_bytes_received_total", Help: "test", ConstLabels: labels,
+	})
+	reg.MustRegister(audioBytesReceivedTotal)
+	mediaFramesRateLimitedTotal := prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "omnia_facade_media_frames_ratelimited_total", Help: "test", ConstLabels: labels,
+	})
+	reg.MustRegister(mediaFramesRateLimitedTotal)
+	controlMessagesRateLimitedTotal := prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "omnia_facade_control_messages_ratelimited_total", Help: "test", ConstLabels: labels,
+	})
+	reg.MustRegister(controlMessagesRateLimitedTotal)
+
 	return &Metrics{
 		ConnectionsActive:     connectionsActive,
 		ConnectionsTotal:      connectionsTotal,
@@ -186,7 +203,29 @@ func newMetricsWithRegistry(agentName, namespace string, reg prometheus.Register
 		MediaChunkBytesTotal:  mediaChunkBytesTotal,
 		AudioSessionsActive:   audioSessionsActive,
 		AudioIngestDuration:   audioIngestDuration,
+
+		AudioFramesReceivedTotal:        audioFramesReceivedTotal,
+		AudioBytesReceivedTotal:         audioBytesReceivedTotal,
+		MediaFramesRateLimitedTotal:     mediaFramesRateLimitedTotal,
+		ControlMessagesRateLimitedTotal: controlMessagesRateLimitedTotal,
 	}
+}
+
+// TestMetricsMediaIngest verifies the data-plane ingest counters move correctly.
+func TestMetricsMediaIngest(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	m := newMetricsWithRegistry("test-agent", "test-namespace", reg)
+
+	m.MediaFrameReceived(256)
+	m.MediaFrameReceived(512)
+	m.MediaFrameRateLimited()
+	m.ControlMessageRateLimited()
+	m.ControlMessageRateLimited()
+
+	assert.Equal(t, float64(2), getCounterValue(t, m.AudioFramesReceivedTotal))
+	assert.Equal(t, float64(768), getCounterValue(t, m.AudioBytesReceivedTotal))
+	assert.Equal(t, float64(1), getCounterValue(t, m.MediaFramesRateLimitedTotal))
+	assert.Equal(t, float64(2), getCounterValue(t, m.ControlMessagesRateLimitedTotal))
 }
 
 func TestNewMetrics(t *testing.T) {

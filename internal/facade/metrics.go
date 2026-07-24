@@ -66,6 +66,15 @@ type ServerMetrics interface {
 	// AudioIngestLatency records the facade-receive-to-sink-send latency for
 	// an inbound audio frame, in seconds.
 	AudioIngestLatency(seconds float64)
+	// MediaFrameReceived records an admitted inbound binary media frame of the
+	// given size in bytes (data-plane throughput).
+	MediaFrameReceived(bytes int)
+	// MediaFrameRateLimited records a binary media frame shed by the
+	// per-connection media byte-rate limiter.
+	MediaFrameRateLimited()
+	// ControlMessageRateLimited records a text/control message shed by the
+	// per-connection message-count rate limiter.
+	ControlMessageRateLimited()
 
 	// Realtime blip-resume metrics
 
@@ -153,6 +162,15 @@ func (n *NoOpMetrics) AudioSessionEnded() { /* no-op: null object pattern */ }
 
 // AudioIngestLatency is a no-op - metrics are disabled.
 func (n *NoOpMetrics) AudioIngestLatency(float64) { /* no-op: null object pattern */ }
+
+// MediaFrameReceived is a no-op - metrics are disabled.
+func (n *NoOpMetrics) MediaFrameReceived(int) { /* no-op: null object pattern */ }
+
+// MediaFrameRateLimited is a no-op - metrics are disabled.
+func (n *NoOpMetrics) MediaFrameRateLimited() { /* no-op: null object pattern */ }
+
+// ControlMessageRateLimited is a no-op - metrics are disabled.
+func (n *NoOpMetrics) ControlMessageRateLimited() { /* no-op: null object pattern */ }
 
 // RealtimeSessionParked is a no-op - metrics are disabled.
 func (n *NoOpMetrics) RealtimeSessionParked() { /* no-op: null object pattern */ }

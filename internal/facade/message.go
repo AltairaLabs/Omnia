@@ -41,15 +41,23 @@ func (s *Server) readMessageLoop(ctx context.Context, c *Connection, log logr.Lo
 
 		s.metrics.MessageReceived()
 
-		// Enforce per-connection rate limit
-		if c.rateLimiter != nil && !c.rateLimiter.Allow() {
-			log.V(1).Info("message rate limited")
-			s.sendError(c, "", ErrorCodeRateLimited, "rate limit exceeded")
+		// Rate limiting is split by plane (see admitMessage): binary media frames
+		// are bounded by bandwidth, text/control messages by message count.
+		isBinary := messageType == websocket.BinaryMessage
+		if admitted, reason := c.admitMessage(messageType, len(message), time.Now()); !admitted {
+			log.V(1).Info("message shed by rate limit", "binary", isBinary, "bytes", len(message))
+			if isBinary {
+				s.metrics.MediaFrameRateLimited()
+			} else {
+				s.metrics.ControlMessageRateLimited()
+			}
+			s.sendError(c, "", ErrorCodeRateLimited, reason)
 			continue
 		}
 
 		// Handle based on WebSocket message type
-		if messageType == websocket.BinaryMessage {
+		if isBinary {
+			s.metrics.MediaFrameReceived(len(message))
 			s.handleBinaryMessage(ctx, c, message, log)
 		} else {
 			s.handleClientMessage(ctx, c, message, log)
