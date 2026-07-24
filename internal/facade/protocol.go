@@ -197,6 +197,10 @@ type ServerMessage struct {
 	// Content is the message content (for chunk, done, error types).
 	// For text-only responses. If Parts is provided, it takes precedence.
 	Content string `json:"content,omitempty"`
+	// Role identifies the speaker for a chunk. Empty means the assistant (the
+	// default). "user" carries the caller's transcribed speech on the duplex
+	// path so the client renders it as a user message.
+	Role string `json:"role,omitempty"`
 	// Parts contains multi-modal content parts (text, images, audio, etc.).
 	// Used for responses that include media content.
 	Parts []ContentPart `json:"parts,omitempty"`
@@ -363,6 +367,21 @@ func NewChunkMessage(sessionID, content string) *ServerMessage {
 		Type:      MessageTypeChunk,
 		SessionID: sessionID,
 		Content:   content,
+		Timestamp: time.Now(),
+	}
+}
+
+// RoleUser marks a chunk as the caller's transcribed speech (duplex path).
+const RoleUser = "user"
+
+// NewUserTranscriptMessage creates a chunk message carrying the caller's
+// transcribed speech (role "user"), rendered by the client as a user message.
+func NewUserTranscriptMessage(sessionID, content string) *ServerMessage {
+	return &ServerMessage{
+		Type:      MessageTypeChunk,
+		SessionID: sessionID,
+		Content:   content,
+		Role:      RoleUser,
 		Timestamp: time.Now(),
 	}
 }

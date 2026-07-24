@@ -175,6 +175,9 @@ type DuplexAudioParams struct {
 	Codec      string
 	SampleRate int
 	Channels   int
+	// ChunkDurationMs is the provider audio-batching chunk duration in
+	// milliseconds. Zero means "use the built-in default" (defaultChunkDurationMs).
+	ChunkDurationMs int
 }
 
 // Environment variable names.

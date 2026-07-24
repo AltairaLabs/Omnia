@@ -109,6 +109,21 @@ func (g *grpcDuplexSink) handleServerMessage(resp *runtimev1.ServerMessage) bool
 		)
 	case *runtimev1.ServerMessage_Interruption:
 		_ = g.writer.WriteInterrupt()
+	case *runtimev1.ServerMessage_Chunk:
+		// Transcript text. Assistant deltas (default role) stream via WriteChunk;
+		// the caller's transcribed speech (role "user") renders as a user message.
+		// Both reuse the same console message path as text agents.
+		if content := m.Chunk.GetContent(); content != "" {
+			if m.Chunk.GetRole() == facade.RoleUser {
+				_ = g.writer.WriteUserTranscript(content)
+			} else {
+				_ = g.writer.WriteChunk(content)
+			}
+		}
+	case *runtimev1.ServerMessage_Done:
+		// End of an assistant turn: finalize the streaming assistant message so the
+		// next turn renders separately. Empty content keeps the streamed transcript.
+		_ = g.writer.WriteDone(m.Done.GetFinalContent())
 	}
 	return true
 }

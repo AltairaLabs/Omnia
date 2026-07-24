@@ -109,8 +109,12 @@ export function AgentConsole({ agentName, namespace, sessionId, className }: Rea
 
   // Get attachment config from agent's console configuration
   const { config: attachmentConfig, mediaRequirements, duplex } = useConsoleConfig(namespace, agentName);
-  const audioSampleRate = mediaRequirements.audio?.recommendedSampleRate ?? 24000;
-  const audioChannels = mediaRequirements.audio?.channels ?? 1;
+  // Realtime capture/playback rate is the negotiated duplex format
+  // (spec.duplex.audio → the runtime's RuntimeHello counter-offer). The
+  // file-upload media requirement's audio rate is the STT/Whisper rate and is
+  // wrong for realtime, so it must NOT seed the voice session.
+  const audioSampleRate = duplex?.audio?.recommendedSampleRate ?? mediaRequirements.audio?.recommendedSampleRate ?? 24000;
+  const audioChannels = duplex?.audio?.channels ?? mediaRequirements.audio?.channels ?? 1;
 
   const {
     sessionId: serverSessionId,

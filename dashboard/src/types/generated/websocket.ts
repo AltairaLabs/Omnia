@@ -266,6 +266,12 @@ export interface ServerMessage {
    */
   content?: string;
   /**
+   * Role identifies the speaker for a chunk. Empty means the assistant (the
+   * default). "user" carries the caller's transcribed speech on the duplex
+   * path so the client renders it as a user message.
+   */
+  role?: string;
+  /**
    * Parts contains multi-modal content parts (text, images, audio, etc.).
    * Used for responses that include media content.
    */
@@ -547,3 +553,7 @@ export const ErrorCodeRateLimited = "RATE_LIMITED";
  * which this audio-only path does not implement).
  */
 export const ErrorCodeUnsatisfiableFormat = "UNSATISFIABLE_FORMAT";
+/**
+ * RoleUser marks a chunk as the caller's transcribed speech (duplex path).
+ */
+export const RoleUser = "user";

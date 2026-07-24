@@ -25,6 +25,12 @@ export interface AgentRuntimeSpec {
       audio?: {
         /** channels is the audio channel count the client should capture/play (1=mono). */
         channels?: number;
+        /** chunkDurationMs is the audio chunk duration (milliseconds) the runtime
+         * batches to the realtime provider for spec.duplex sessions. Smaller values
+         * reduce interruption/response latency at the cost of more provider messages;
+         * larger values do the reverse. Defaults to 100ms when unset. Only meaningful
+         * for spec.duplex.audio (ignored for console file-upload audio). */
+        chunkDurationMs?: number;
         /** format is the PCM sample format the client should send, e.g. "pcm16". */
         format?: string;
         /** maxDurationSeconds is the maximum audio duration. */
@@ -109,6 +115,12 @@ export interface AgentRuntimeSpec {
     audio?: {
       /** channels is the audio channel count the client should capture/play (1=mono). */
       channels?: number;
+      /** chunkDurationMs is the audio chunk duration (milliseconds) the runtime
+       * batches to the realtime provider for spec.duplex sessions. Smaller values
+       * reduce interruption/response latency at the cost of more provider messages;
+       * larger values do the reverse. Defaults to 100ms when unset. Only meaningful
+       * for spec.duplex.audio (ignored for console file-upload audio). */
+      chunkDurationMs?: number;
       /** format is the PCM sample format the client should send, e.g. "pcm16". */
       format?: string;
       /** maxDurationSeconds is the maximum audio duration. */

@@ -541,6 +541,11 @@ func (m *MockResponseWriter) WriteChunk(content string) error {
 	return nil
 }
 
+func (m *MockResponseWriter) WriteUserTranscript(content string) error {
+	m.Chunks = append(m.Chunks, content)
+	return nil
+}
+
 func (m *MockResponseWriter) WriteChunkWithParts(_ []facade.ContentPart) error {
 	return nil
 }

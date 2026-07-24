@@ -41,12 +41,25 @@ import (
 // captureBinaryWriter is a ResponseWriter that records WriteBinaryMediaChunk payloads.
 // It implements facade.ResponseWriter (the full interface).
 type captureBinaryWriter struct {
-	got chan []byte
+	got             chan []byte
+	chunks          []string
+	userTranscripts []string
+	dones           []string
 }
 
-func (c *captureBinaryWriter) WriteChunk(_ string) error                        { return nil }
+func (c *captureBinaryWriter) WriteChunk(s string) error {
+	c.chunks = append(c.chunks, s)
+	return nil
+}
+func (c *captureBinaryWriter) WriteUserTranscript(s string) error {
+	c.userTranscripts = append(c.userTranscripts, s)
+	return nil
+}
 func (c *captureBinaryWriter) WriteChunkWithParts(_ []facade.ContentPart) error { return nil }
-func (c *captureBinaryWriter) WriteDone(_ string) error                         { return nil }
+func (c *captureBinaryWriter) WriteDone(s string) error {
+	c.dones = append(c.dones, s)
+	return nil
+}
 func (c *captureBinaryWriter) WriteDoneWithParts(_ []facade.ContentPart) error  { return nil }
 func (c *captureBinaryWriter) WriteToolCall(_ *facade.ToolCallInfo) error       { return nil }
 func (c *captureBinaryWriter) WriteToolResult(_ *facade.ToolResultInfo) error   { return nil }
@@ -481,4 +494,29 @@ func TestRelayOut_LegacyStreamsMediaChunks(t *testing.T) {
 	}
 	<-done
 	require.Nil(t, w.sessionConfig, "legacy path relays no session_config")
+}
+
+// TestHandleServerMessage_RelaysTranscriptAndDone covers the transcript relay:
+// assistant chunks -> WriteChunk, user-role chunks -> WriteUserTranscript,
+// empty chunks ignored, and Done -> WriteDone (turn seal).
+func TestHandleServerMessage_RelaysTranscriptAndDone(t *testing.T) {
+	w := &captureBinaryWriter{got: make(chan []byte, 1)}
+	sink := &grpcDuplexSink{sessionID: "sess-transcript", writer: w}
+
+	require.True(t, sink.handleServerMessage(&runtimev1.ServerMessage{
+		Message: &runtimev1.ServerMessage_Chunk{Chunk: &runtimev1.Chunk{Content: "the weather is sunny"}},
+	}))
+	require.True(t, sink.handleServerMessage(&runtimev1.ServerMessage{
+		Message: &runtimev1.ServerMessage_Chunk{Chunk: &runtimev1.Chunk{Content: "what is the weather", Role: facade.RoleUser}},
+	}))
+	require.True(t, sink.handleServerMessage(&runtimev1.ServerMessage{
+		Message: &runtimev1.ServerMessage_Chunk{Chunk: &runtimev1.Chunk{Content: ""}},
+	}))
+	require.True(t, sink.handleServerMessage(&runtimev1.ServerMessage{
+		Message: &runtimev1.ServerMessage_Done{Done: &runtimev1.Done{}},
+	}))
+
+	require.Equal(t, []string{"the weather is sunny"}, w.chunks)
+	require.Equal(t, []string{"what is the weather"}, w.userTranscripts)
+	require.Len(t, w.dones, 1)
 }

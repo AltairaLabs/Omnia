@@ -247,6 +247,10 @@ export interface DuplexConfig {
   enabled?: boolean;
   /** Transport mode — "audio" (default) or "audiovideo". */
   mode?: "audio" | "audiovideo";
+  /** Negotiated realtime audio format — the source of truth for the client
+   * capture/playback rate (the runtime advertises it as the RuntimeHello
+   * counter-offer). NOT the file-upload media requirement. */
+  audio?: { recommendedSampleRate?: number; channels?: number; format?: string };
 }
 
 // Spec

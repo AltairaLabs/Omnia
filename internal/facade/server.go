@@ -76,6 +76,9 @@ type ClientToolRouter interface {
 type ResponseWriter interface {
 	// WriteChunk sends a chunk of the response.
 	WriteChunk(content string) error
+	// WriteUserTranscript sends the caller's transcribed speech (duplex path) so
+	// the client renders it as a user message (role "user").
+	WriteUserTranscript(content string) error
 	// WriteChunkWithParts sends a chunk with multi-modal content parts.
 	WriteChunkWithParts(parts []ContentPart) error
 	// WriteDone signals the response is complete.

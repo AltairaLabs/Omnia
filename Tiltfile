@@ -21,6 +21,7 @@
 #   (NFS/RWX workspace-content storage is ALWAYS on in Tilt — not a toggle; see
 #    the ENABLE_NFS note below. The cluster-default RWO class is never used.)
 #   ENABLE_AUDIO_DEMO    - Gemini audio demo agent (needs a gemini-credentials Secret)
+#   ENABLE_VOICE_DEMO    - Gemini Live realtime voice agent (needs a gemini-credentials Secret)
 #   ENABLE_MEMORY_DEMO   - memory-api dev demo: a seeded galaxy across all tiers
 #   ENABLE_LANGCHAIN     - LangChain runtime demo agents
 #   DASHBOARD_PROD       - Build the dashboard as a prod image (enables the Monaco LSP editor)
@@ -54,6 +55,13 @@ ENABLE_DEMO = os.getenv('ENABLE_DEMO', 'false').lower() in ('true', '1', 'yes')
 # Note: You must create the gemini-credentials secret manually:
 #   kubectl create secret generic gemini-credentials -n omnia-demo --from-literal=api-key=$GEMINI_API_KEY
 ENABLE_AUDIO_DEMO = os.getenv('ENABLE_AUDIO_DEMO', '').lower() in ('true', '1', 'yes') or False
+
+# Set to True to enable the Gemini Live realtime VOICE demo (spec.duplex "call"
+# console). Requires a Gemini API key with Live/realtime access.
+# Can be set via environment: ENABLE_VOICE_DEMO=true tilt up
+# Reuses the same secret as the audio demo:
+#   kubectl create secret generic gemini-credentials -n omnia-demo --from-literal=api-key=$GEMINI_API_KEY
+ENABLE_VOICE_DEMO = os.getenv('ENABLE_VOICE_DEMO', '').lower() in ('true', '1', 'yes')
 
 # Set to True to enable the memory-API dev demo: fills every memory UI surface
 # in the omnia-demo workspace at realistic scale (seeder Job across all tiers,
@@ -709,7 +717,7 @@ else:
 
 # The omnia-demos chart deploys into omnia-demo (when any demo variant is on),
 # so the namespace must exist before the chart renders.
-if ENABLE_DEMO or ENABLE_AUDIO_DEMO or ENABLE_MEMORY_DEMO:
+if ENABLE_DEMO or ENABLE_AUDIO_DEMO or ENABLE_MEMORY_DEMO or ENABLE_VOICE_DEMO:
     namespace_create('omnia-demo')
 
 if ENABLE_FULL_STACK:
@@ -812,7 +820,7 @@ k8s_resource(
 # seeder, enterprise arena) and also pull the chart in.
 #
 # Build demo helm set values
-if ENABLE_DEMO or ENABLE_AUDIO_DEMO or ENABLE_MEMORY_DEMO:
+if ENABLE_DEMO or ENABLE_AUDIO_DEMO or ENABLE_MEMORY_DEMO or ENABLE_VOICE_DEMO:
     demo_helm_set = [
         'namespace=omnia-demo',
         # Use persistence for model cache
@@ -831,6 +839,21 @@ if ENABLE_DEMO or ENABLE_AUDIO_DEMO or ENABLE_MEMORY_DEMO:
         demo_helm_set.extend([
             'audioDemo.enabled=true',
         ])
+
+    if ENABLE_VOICE_DEMO:
+        demo_helm_set.extend([
+            'voiceDemo.enabled=true',
+        ])
+        # Voice-only (no ENABLE_DEMO): skip the heavy Ollama-backed vision/tools
+        # demos so a `ENABLE_VOICE_DEMO=true tilt up` brings just the demo
+        # workspace + the Gemini Live voice agent, not a 7Gi model pull.
+        if not ENABLE_DEMO:
+            demo_helm_set.extend([
+                'visionDemo.enabled=false',
+                'toolsDemo.enabled=false',
+                'compositionDemo.enabled=false',
+                'ollama.instances=null',
+            ])
 
     if ENABLE_LANGCHAIN:
         demo_helm_set.extend([
@@ -1275,6 +1298,24 @@ if ENABLE_AUDIO_DEMO:
         new_name='audio-demo',
         labels=['demo'],
         objects=audio_demo_objects,
+        resource_deps=['omnia-controller-manager'],
+    )
+
+if ENABLE_VOICE_DEMO:
+    # Voice demo resources (Gemini Live realtime duplex agent).
+    # Note: User must create the gemini-credentials secret before deploying.
+    voice_demo_objects = [
+        'voice-provider:provider',
+        'demo-voice-prompts:configmap',
+        'demo-voice-prompts:promptpack',
+        'voice-demo:agentruntime',
+    ]
+
+    k8s_resource(
+        workload='',  # No workload, just CRs (Deployment created by operator)
+        new_name='voice-demo',
+        labels=['demo'],
+        objects=voice_demo_objects,
         resource_deps=['omnia-controller-manager'],
     )
 

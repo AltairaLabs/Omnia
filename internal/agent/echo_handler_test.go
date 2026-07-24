@@ -48,6 +48,14 @@ func (m *mockResponseWriter) WriteChunk(content string) error {
 	return nil
 }
 
+func (m *mockResponseWriter) WriteUserTranscript(content string) error {
+	if m.err != nil {
+		return m.err
+	}
+	m.chunks = append(m.chunks, content)
+	return nil
+}
+
 func (m *mockResponseWriter) WriteChunkWithParts(parts []facade.ContentPart) error {
 	if m.err != nil {
 		return m.err

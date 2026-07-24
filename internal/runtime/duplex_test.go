@@ -426,6 +426,67 @@ func TestHandleDuplexSession_DefaultsWhenZeroParams(t *testing.T) {
 	}
 }
 
+func TestPcmBytesPerSample(t *testing.T) {
+	cases := map[string]int{"pcm": 2, "pcm16": 2, "": 2, "pcm24": 3, "pcm-24": 3, "pcm8": 1, "pcm-8": 1}
+	for codec, want := range cases {
+		if got := pcmBytesPerSample(codec); got != want {
+			t.Errorf("pcmBytesPerSample(%q): got %d, want %d", codec, got, want)
+		}
+	}
+}
+
+func TestAudioChunkSizeBytes(t *testing.T) {
+	cases := []struct {
+		name                                    string
+		sampleRate, channels, durMs, bytesPerSm int
+		want                                    int
+	}{
+		{"16k mono 100ms pcm16", 16000, 1, 100, 2, 3200},
+		{"24k mono 100ms pcm16", 24000, 1, 100, 2, 4800},
+		{"16k stereo 100ms pcm16", 16000, 2, 100, 2, 6400},
+		{"16k mono 20ms pcm16", 16000, 1, 20, 2, 640},
+		{"zero duration falls back to default", 16000, 1, 0, 2, 3200},
+	}
+	for _, c := range cases {
+		if got := audioChunkSizeBytes(c.sampleRate, c.channels, c.durMs, c.bytesPerSm); got != c.want {
+			t.Errorf("%s: got %d, want %d", c.name, got, c.want)
+		}
+	}
+}
+
+// TestHandleDuplexSession_SetsPositiveChunkSize guards the regression where the
+// provider StreamingMediaConfig carried ChunkSize=0, which real providers reject
+// with "chunk size must be positive for audio" (the duplexmock does not validate,
+// which is why this slipped through). A default 16kHz/mono session must carry
+// 100ms of PCM16 = 3200 bytes.
+func TestHandleDuplexSession_SetsPositiveChunkSize(t *testing.T) {
+	mock := duplexmock.New()
+	s := newTestServerWithDuplexProvider(t, mock)
+	fake := &fakeConverseServer{
+		ctx:  context.Background(),
+		recv: make(chan *runtimev1.ClientMessage, 2),
+		sent: make(chan *runtimev1.ServerMessage, 8),
+	}
+	start := &runtimev1.ClientMessage{SessionId: "sess-chunk", DuplexStart: &runtimev1.DuplexStart{}}
+	go func() {
+		fake.recv <- &runtimev1.ClientMessage{SessionId: "sess-chunk", AudioInput: &runtimev1.AudioInputChunk{IsLast: true}}
+		close(fake.recv)
+	}()
+	if err := s.handleDuplexSession(fake.ctx, fake, start); err != nil {
+		t.Fatalf("handleDuplexSession: %v", err)
+	}
+	cfg := mock.LastConfig()
+	if cfg == nil {
+		t.Fatal("CreateStreamSession never received a config")
+	}
+	if cfg.Config.ChunkSize != 3200 {
+		t.Fatalf("chunk size: got %d, want 3200 (100ms of 16kHz mono PCM16)", cfg.Config.ChunkSize)
+	}
+	if cfg.Config.BitDepth != 16 {
+		t.Fatalf("bit depth: got %d, want 16 (PCM16 — Gemini Live rejects 0)", cfg.Config.BitDepth)
+	}
+}
+
 // TestHandleDuplexSession_EchoesAudioWithNegotiatedMIME verifies that the MIME type
 // sent in the provider StreamChunk reflects the negotiated codec (not hardcoded "audio/pcm").
 func TestHandleDuplexSession_EchoesAudioWithNegotiatedMIME(t *testing.T) {
@@ -498,4 +559,65 @@ func TestForwardDuplexChunk_EmitsInterruption(t *testing.T) {
 	require.Len(t, fake.sent, 1)
 	_, ok := (<-fake.sent).Message.(*runtimev1.ServerMessage_Interruption)
 	require.True(t, ok, "expected ServerMessage_Interruption")
+}
+
+// TestForwardDuplexChunk covers each branch of the response-chunk forwarder,
+// including the transcript additions: assistant deltas, the user transcript
+// (Metadata[input_transcription] -> role "user"), and the assistant-turn-
+// complete -> Done seal.
+func TestForwardDuplexChunk(t *testing.T) {
+	s := &Server{}
+	newStream := func() *fakeConverseServer {
+		return &fakeConverseServer{ctx: context.Background(), sent: make(chan *runtimev1.ServerMessage, 4)}
+	}
+
+	// assistant delta -> Chunk with default (empty) role.
+	st := newStream()
+	require.NoError(t, s.forwardDuplexChunk(st, providers.StreamChunk{Delta: "hi there"}))
+	m := <-st.sent
+	require.Equal(t, "hi there", m.GetChunk().GetContent())
+	require.Equal(t, "", m.GetChunk().GetRole())
+
+	// user transcript -> Chunk with role "user".
+	st = newStream()
+	require.NoError(t, s.forwardDuplexChunk(st, providers.StreamChunk{
+		Metadata: map[string]any{metaKeyInputTranscription: "what is the weather"},
+	}))
+	m = <-st.sent
+	require.Equal(t, "what is the weather", m.GetChunk().GetContent())
+	require.Equal(t, chunkRoleUser, m.GetChunk().GetRole())
+
+	// non-string input_transcription value -> ignored (no send).
+	st = newStream()
+	require.NoError(t, s.forwardDuplexChunk(st, providers.StreamChunk{
+		Metadata: map[string]any{metaKeyInputTranscription: 123},
+	}))
+	require.Empty(t, st.sent)
+
+	// assistant turn complete -> Done seal.
+	st = newStream()
+	require.NoError(t, s.forwardDuplexChunk(st, providers.StreamChunk{
+		Metadata: map[string]any{metaKeyAssistantTurnComplete: true},
+	}))
+	m = <-st.sent
+	require.NotNil(t, m.GetDone())
+
+	// interruption -> Interruption.
+	st = newStream()
+	require.NoError(t, s.forwardDuplexChunk(st, providers.StreamChunk{Interrupted: true}))
+	m = <-st.sent
+	require.NotNil(t, m.GetInterruption())
+
+	// media -> MediaChunk.
+	st = newStream()
+	require.NoError(t, s.forwardDuplexChunk(st, providers.StreamChunk{
+		MediaData: &providers.StreamMediaData{Data: []byte{1, 2, 3}, MIMEType: "audio/pcm"},
+	}))
+	m = <-st.sent
+	require.Equal(t, []byte{1, 2, 3}, m.GetMediaChunk().GetData())
+
+	// empty chunk -> nothing forwarded.
+	st = newStream()
+	require.NoError(t, s.forwardDuplexChunk(st, providers.StreamChunk{}))
+	require.Empty(t, st.sent)
 }

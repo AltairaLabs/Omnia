@@ -116,6 +116,37 @@ function isLastMessageStreamingAssistant(messages: ConsoleMessage[]): boolean {
 }
 
 /**
+ * Upsert a streaming transcript chunk. role "user" (the duplex caller
+ * transcript) and "assistant" each accumulate into their own streaming
+ * message; a role switch seals the previous streaming message so turns render
+ * separately.
+ */
+function upsertTranscriptChunk(
+  message: ServerMessage,
+  messages: ConsoleMessage[],
+  updateLast: (updater: (msg: ConsoleMessage) => ConsoleMessage) => void,
+  addMessage: (msg: ConsoleMessage) => void
+): void {
+  const role: "user" | "assistant" = message.role === "user" ? "user" : "assistant";
+  const last = messages[messages.length - 1];
+  if (last?.isStreaming && last.role === role) {
+    updateLast((msg) => ({ ...msg, content: msg.content + (message.content || "") }));
+    return;
+  }
+  if (last?.isStreaming) {
+    updateLast((msg) => ({ ...msg, isStreaming: false }));
+  }
+  addMessage({
+    id: generateId(),
+    role,
+    content: message.content || "",
+    timestamp: new Date(message.timestamp),
+    isStreaming: true,
+    toolCalls: [],
+  });
+}
+
+/**
  * Build a ToolCallWithResult entry from a WebSocket tool_call message.
  * All tool calls received over WebSocket are client-side (requiring consent).
  */
@@ -218,19 +249,9 @@ export function useAgentConsole({
       }
 
       case "chunk": {
-        // Append to existing streaming message or create new
-        if (isLastMessageStreamingAssistant(messagesRef.current)) {
-          updateLastMessageInStore((msg) => ({ ...msg, content: msg.content + (message.content || "") }));
-        } else {
-          addMessageToStore({
-            id: generateId(),
-            role: "assistant",
-            content: message.content || "",
-            timestamp: new Date(message.timestamp),
-            isStreaming: true,
-            toolCalls: [],
-          });
-        }
+        // Transcript/streaming text — assistant (default) or user (duplex
+        // caller transcript). See upsertTranscriptChunk.
+        upsertTranscriptChunk(message, messagesRef.current, updateLastMessageInStore, addMessageToStore);
         break;
       }
 

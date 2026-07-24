@@ -510,7 +510,12 @@ func (*ServerMessage_RuntimeHello) isServerMessage_Message() {}
 type Chunk struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// content is the text chunk to append to the response.
-	Content       string `protobuf:"bytes,1,opt,name=content,proto3" json:"content,omitempty"`
+	Content string `protobuf:"bytes,1,opt,name=content,proto3" json:"content,omitempty"`
+	// role identifies the speaker for this text chunk. Empty means the assistant
+	// (the default, back-compatible with text agents). "user" is used on the
+	// duplex path to carry the caller's transcribed speech so the client renders
+	// it as a user message rather than assistant output.
+	Role          string `protobuf:"bytes,2,opt,name=role,proto3" json:"role,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -548,6 +553,13 @@ func (*Chunk) Descriptor() ([]byte, []int) {
 func (x *Chunk) GetContent() string {
 	if x != nil {
 		return x.Content
+	}
+	return ""
+}
+
+func (x *Chunk) GetRole() string {
+	if x != nil {
+		return x.Role
 	}
 	return ""
 }
@@ -1832,9 +1844,10 @@ const file_api_proto_runtime_v1_runtime_proto_rawDesc = "" +
 	"mediaChunk\x12D\n" +
 	"\finterruption\x18\a \x01(\v2\x1e.omnia.runtime.v1.InterruptionH\x00R\finterruption\x12E\n" +
 	"\rruntime_hello\x18\b \x01(\v2\x1e.omnia.runtime.v1.RuntimeHelloH\x00R\fruntimeHelloB\t\n" +
-	"\amessage\"!\n" +
+	"\amessage\"5\n" +
 	"\x05Chunk\x12\x18\n" +
-	"\acontent\x18\x01 \x01(\tR\acontent\"\xdd\x01\n" +
+	"\acontent\x18\x01 \x01(\tR\acontent\x12\x12\n" +
+	"\x04role\x18\x02 \x01(\tR\x04role\"\xdd\x01\n" +
 	"\bToolCall\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12%\n" +
