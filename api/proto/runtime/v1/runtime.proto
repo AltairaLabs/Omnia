@@ -153,6 +153,12 @@ message ServerMessage {
 message Chunk {
   // content is the text chunk to append to the response.
   string content = 1;
+
+  // role identifies the speaker for this text chunk. Empty means the assistant
+  // (the default, back-compatible with text agents). "user" is used on the
+  // duplex path to carry the caller's transcribed speech so the client renders
+  // it as a user message rather than assistant output.
+  string role = 2;
 }
 
 // ToolExecution indicates where a tool is executed.

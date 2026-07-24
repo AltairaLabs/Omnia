@@ -24,6 +24,10 @@ export const crdConstraints: Record<string, Record<string, FieldConstraint>> =
     "spec.console.mediaRequirements.audio.channels": {
       "type": "integer"
     },
+    "spec.console.mediaRequirements.audio.chunkDurationMs": {
+      "type": "integer",
+      "minimum": 1
+    },
     "spec.console.mediaRequirements.audio.format": {
       "type": "string"
     },
@@ -121,6 +125,10 @@ export const crdConstraints: Record<string, Record<string, FieldConstraint>> =
     },
     "spec.duplex.audio.channels": {
       "type": "integer"
+    },
+    "spec.duplex.audio.chunkDurationMs": {
+      "type": "integer",
+      "minimum": 1
     },
     "spec.duplex.audio.format": {
       "type": "string"

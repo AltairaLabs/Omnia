@@ -402,6 +402,125 @@ spec:
   {{- end }}
 {{- end }}
 {{- /* ============================================================================ */ -}}
+{{- /* Voice Demo Resources (Gemini Live realtime duplex) */ -}}
+{{- /* ============================================================================ */ -}}
+{{- if .Values.voiceDemo.enabled }}
+---
+# Provider for the realtime voice provider (OpenAI Realtime / Gemini Live)
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: Provider
+metadata:
+  name: voice-provider
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/name: omnia-voice-demo
+    app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
+spec:
+  type: {{ .Values.voiceDemo.provider.type }}
+  model: {{ .Values.voiceDemo.provider.model }}
+  {{- with .Values.voiceDemo.provider.baseURL }}
+  baseURL: {{ . }}
+  {{- end }}
+  credential:
+    secretRef:
+      name: {{ .Values.voiceDemo.provider.secretName }}
+  defaults:
+    temperature: {{ .Values.voiceDemo.provider.temperature | quote }}
+  pricing:
+    inputCostPer1K: {{ .Values.voiceDemo.provider.pricing.inputCostPer1K | quote }}
+    outputCostPer1K: {{ .Values.voiceDemo.provider.pricing.outputCostPer1K | quote }}
+    cachedCostPer1K: {{ .Values.voiceDemo.provider.pricing.cachedCostPer1K | quote }}
+---
+# ConfigMap for the voice demo PromptPack
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: demo-voice-prompts
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/name: omnia-voice-demo
+    app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
+data:
+  pack.json: |
+    {
+      "$schema": "https://promptpack.org/schema/latest/promptpack.schema.json",
+      "id": "demo-voice-prompts",
+      "name": "Demo Voice Prompts",
+      "version": "1.0.0",
+      "template_engine": {
+        "version": "v1",
+        "syntax": "{{"{{variable}}"}}"
+      },
+      "prompts": {
+        "default": {
+          "id": "default",
+          "name": "Voice Assistant",
+          "version": "1.0.0",
+          "system_template": {{ .Values.voiceDemo.promptPack.systemPrompt | toJson }},
+          "parameters": {
+            "temperature": {{ .Values.voiceDemo.provider.temperature }}
+          }
+        }
+      }
+    }
+---
+# PromptPack for the voice demo agent
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: PromptPack
+metadata:
+  name: demo-voice-prompts
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/name: omnia-voice-demo
+    app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
+spec:
+  packName: demo-voice-prompts
+  source:
+    type: configmap
+    configMapRef:
+      name: demo-voice-prompts
+  version: "1.0.0"
+---
+# Voice Demo AgentRuntime — Gemini Live realtime duplex (spec.duplex.enabled)
+apiVersion: omnia.altairalabs.ai/v1alpha1
+kind: AgentRuntime
+metadata:
+  name: {{ .Values.voiceDemo.agent.name }}
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/name: omnia-voice-demo
+    app.kubernetes.io/part-of: {{ include "omnia-demos.name" . }}
+    omnia.altairalabs.ai/workspace: demo
+spec:
+  promptPackRef:
+    name: demo-voice-prompts
+  providers:
+    - name: default
+      providerRef:
+        name: voice-provider
+  duplex:
+    enabled: true
+    mode: audio
+    audio:
+      recommendedSampleRate: {{ .Values.voiceDemo.duplex.recommendedSampleRate }}
+      channels: {{ .Values.voiceDemo.duplex.channels }}
+      format: {{ .Values.voiceDemo.duplex.format }}
+  facades:
+    - type: websocket
+      port: 8080
+      handler: {{ .Values.voiceDemo.agent.handler }}
+  context:
+    type: memory
+    ttl: "1h"
+  runtime:
+    replicas: {{ .Values.voiceDemo.agent.replicas }}
+    extraEnv:
+      - name: LOG_LEVEL
+        value: {{ .Values.voiceDemo.agent.logLevel }}
+    resources:
+      {{- toYaml .Values.voiceDemo.agent.resources | nindent 6 }}
+{{- end }}
+{{- /* ============================================================================ */ -}}
 {{- /* Tools Demo Resources (llama3.2 with tool calling) */ -}}
 {{- /* ============================================================================ */ -}}
 {{- if .Values.toolsDemo.enabled }}

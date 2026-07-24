@@ -44,6 +44,9 @@ func duplexAudioFromRequirements(req *v1alpha1.AudioRequirements) *DuplexAudioPa
 	if req.Channels != nil {
 		p.Channels = int(*req.Channels)
 	}
+	if req.ChunkDurationMs != nil {
+		p.ChunkDurationMs = int(*req.ChunkDurationMs)
+	}
 	return p
 }
 

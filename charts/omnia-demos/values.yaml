@@ -264,6 +264,73 @@ audioDemo:
       - If the audio quality is poor, mention it and do your best
 
 # ============================================================================
+# Voice Demo Agent (Gemini Live realtime duplex)
+# Realtime two-way voice ("call" console) via spec.duplex. Requires a Gemini
+# API key with Live/realtime access. Enable with: ENABLE_VOICE_DEMO=true tilt up
+# ============================================================================
+
+voiceDemo:
+  # -- Enable the realtime voice agent (requires a Gemini Live API key)
+  enabled: false
+
+  # -- Realtime voice provider. Default: OpenAI Realtime (gpt-realtime GA).
+  # Switch to Gemini Live via helm-set (type=gemini, model=gemini-3.1-flash-live-preview,
+  # baseURL=https://generativelanguage.googleapis.com/v1beta, duplex 16000/pcm)
+  # once PromptKit #1666/#1667 land.
+  provider:
+    # -- Provider type: openai | gemini
+    type: openai
+    # -- Realtime model (OpenAI gpt-realtime GA; Gemini gemini-3.1-flash-live-preview)
+    model: gpt-realtime
+    # -- API base URL override; leave empty for the provider default (OpenAI)
+    baseURL: ""
+    # -- Secret with the API key (key OPENAI_API_KEY or GEMINI_API_KEY)
+    secretName: openai-credentials
+    # -- Temperature for generation
+    temperature: 0.7
+    # -- Pricing per 1K tokens (for cost tracking)
+    pricing:
+      inputCostPer1K: "0.004"
+      outputCostPer1K: "0.016"
+      cachedCostPer1K: "0.0004"
+
+  # -- Agent configuration
+  agent:
+    # -- Agent name
+    name: voice-demo
+    # -- Facade handler type
+    handler: runtime
+    # -- Number of replicas
+    replicas: 1
+    # -- Log level (debug surfaces the duplex handshake + provider session)
+    logLevel: debug
+    # -- Resource requirements
+    resources:
+      requests:
+        cpu: "100m"
+        memory: "128Mi"
+      limits:
+        cpu: "500m"
+        memory: "256Mi"
+
+  # -- Realtime duplex audio format advertised as the bounded counter-offer in
+  # RuntimeHello. OpenAI Realtime uses 24 kHz PCM16; Gemini Live uses 16 kHz pcm.
+  duplex:
+    recommendedSampleRate: 24000
+    channels: 1
+    format: pcm16
+
+  # -- PromptPack configuration
+  promptPack:
+    # -- System prompt for the voice agent (kept short + spoken-style)
+    systemPrompt: |
+      You are a warm, concise voice assistant speaking with the user over a
+      live voice call. Keep replies short and conversational — a sentence or
+      two at a time. Do not use markdown, bullet points, headings, or emoji.
+      Spell out anything that must be spoken. If the user interrupts you, stop
+      immediately and listen.
+
+# ============================================================================
 # Tools Demo Agent (llama3.2 with tool calling)
 # Demonstrates tool/function calling capabilities
 # ============================================================================

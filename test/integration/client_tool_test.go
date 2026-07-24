@@ -49,6 +49,12 @@ func (m *concurrentMockWriter) WriteChunk(content string) error {
 	m.chunks = append(m.chunks, content)
 	return nil
 }
+func (m *concurrentMockWriter) WriteUserTranscript(content string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.chunks = append(m.chunks, content)
+	return nil
+}
 func (m *concurrentMockWriter) WriteChunkWithParts(_ []facade.ContentPart) error { return nil }
 func (m *concurrentMockWriter) WriteDone(content string) error {
 	m.mu.Lock()

@@ -38,6 +38,11 @@ func (w *connResponseWriter) WriteChunk(content string) error {
 	return w.server.sendMessage(w.conn, NewChunkMessage(w.sessionID, content))
 }
 
+// WriteUserTranscript sends the caller's transcribed speech as a user-role chunk.
+func (w *connResponseWriter) WriteUserTranscript(content string) error {
+	return w.server.sendMessage(w.conn, NewUserTranscriptMessage(w.sessionID, content))
+}
+
 // WriteChunkWithParts sends a chunk with multi-modal content parts.
 func (w *connResponseWriter) WriteChunkWithParts(parts []ContentPart) error {
 	return w.server.sendMessage(w.conn, NewChunkMessageWithParts(w.sessionID, parts))

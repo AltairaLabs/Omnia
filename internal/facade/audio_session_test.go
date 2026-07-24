@@ -78,6 +78,7 @@ type captureWriter struct {
 }
 
 func (c *captureWriter) WriteChunk(_ string) error                       { return nil }
+func (c *captureWriter) WriteUserTranscript(_ string) error              { return nil }
 func (c *captureWriter) WriteChunkWithParts(_ []ContentPart) error       { return nil }
 func (c *captureWriter) WriteDone(_ string) error                        { return nil }
 func (c *captureWriter) WriteDoneWithParts(_ []ContentPart) error        { return nil }

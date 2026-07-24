@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"time"
 
 	"github.com/AltairaLabs/PromptKit/runtime/providers"
 	"github.com/AltairaLabs/PromptKit/runtime/types"
@@ -47,6 +48,69 @@ type duplexMediaParams struct {
 
 // defaultAudioCodec is the fallback codec when DuplexStart omits one.
 const defaultAudioCodec = "pcm"
+
+// defaultChunkDurationMs is the audio-batching chunk duration used when
+// spec.duplex.audio does not set chunkDurationMs. 100ms matches PromptKit's
+// Gemini Live default; it is a latency/throughput knob (smaller = lower
+// interruption latency, more provider messages).
+const defaultChunkDurationMs = 100
+
+// Response-modality request. A duplex session is a spoken voice call, so the
+// model must reply with AUDIO — native-audio Live models (e.g. Gemini 3 Flash
+// Live) reject a TEXT-only modality.
+//
+// NOTE (provider-specific bridge): "response_modalities" is Gemini's wire key.
+// The intent ("audio out") is provider-agnostic, but PromptKit exposes no
+// first-class response-modality field on StreamingInputConfig — only its
+// provider-specific Metadata escape hatch — so this is the only lever to
+// override Gemini's TEXT default. It is safe cross-provider (adapters ignore
+// unknown metadata keys). TODO: replace with an agnostic StreamingInputConfig
+// field once PromptKit adds one (issue to file); then the per-provider spelling
+// moves into PromptKit where it belongs.
+const (
+	metaKeyResponseModalities = "response_modalities"
+	modalityAudio             = "AUDIO"
+
+	// metaKeyAssistantTurnComplete marks the StreamChunk that signals the end of
+	// an assistant turn on the duplex stream (PromptKit DuplexProviderStage).
+	metaKeyAssistantTurnComplete = "assistant_turn_complete"
+	// metaKeyInputTranscription carries the user's transcribed speech on the
+	// duplex stream (PromptKit DuplexProviderStage); the chunk has an empty Delta.
+	metaKeyInputTranscription = "input_transcription"
+
+	// chunkRoleUser tags a duplex text chunk as the caller's transcribed speech.
+	chunkRoleUser = "user"
+)
+
+// pcmBytesPerSample returns the bytes per sample for a PCM codec. Realtime
+// providers (Gemini Live, OpenAI Realtime) use 16-bit PCM (2 bytes); codecs
+// carrying an explicit bit-depth are honored so a future non-16-bit format
+// "just works" without touching the chunk-size math.
+func pcmBytesPerSample(codec string) int {
+	switch codec {
+	case "pcm24", "pcm-24":
+		return 3
+	case "pcm8", "pcm-8":
+		return 1
+	default:
+		return 2 // pcm / pcm16 and unknown → 16-bit PCM
+	}
+}
+
+// audioChunkSizeBytes computes the provider audio-batching chunk size in bytes:
+// chunkDurationMs of PCM audio at the given sample rate and channel count.
+// PromptKit's StreamingMediaConfig.Validate requires a positive, sample-aligned
+// value, so the result is always > 0 and a multiple of the sample size.
+func audioChunkSizeBytes(sampleRate, channels, chunkDurationMs, bytesPerSample int) int {
+	if chunkDurationMs <= 0 {
+		chunkDurationMs = defaultChunkDurationMs
+	}
+	framesPerChunk := sampleRate * chunkDurationMs / 1000
+	if framesPerChunk <= 0 {
+		framesPerChunk = 1
+	}
+	return framesPerChunk * bytesPerSample * channels
+}
 
 // buildStreamingConfig resolves the effective duplex audio format and converts
 // it into a providers.StreamingInputConfig. The client's DuplexStart proposal
@@ -81,14 +145,35 @@ func buildStreamingConfig(ds *runtimev1.DuplexStart, required *DuplexAudioParams
 		}
 	}
 
+	// Resolve the audio-batching chunk size. PromptKit's StreamingMediaConfig
+	// requires a positive, sample-aligned ChunkSize for audio; without it the
+	// provider session fails to open ("chunk size must be positive"). The
+	// duration is a per-agent knob (spec.duplex.audio.chunkDurationMs), defaulting
+	// to 100ms; the byte width comes from the codec, not a hardcoded 16-bit.
+	chunkDurationMs := defaultChunkDurationMs
+	if required != nil && required.ChunkDurationMs != 0 {
+		chunkDurationMs = required.ChunkDurationMs
+	}
+	bytesPerSample := pcmBytesPerSample(codec)
+	chunkSize := audioChunkSizeBytes(sampleRate, channels, chunkDurationMs, bytesPerSample)
+
 	cfg := providers.StreamingInputConfig{
 		Config: types.StreamingMediaConfig{
 			Type:       types.ContentTypeAudio,
 			Encoding:   codec,
 			SampleRate: sampleRate,
 			Channels:   channels,
+			ChunkSize:  chunkSize,
+			// BitDepth is required by realtime providers (Gemini Live rejects a
+			// zero/mismatched depth). Derived from the codec so it stays in lockstep
+			// with the chunk-size math: 16-bit PCM → 16, etc.
+			BitDepth: bytesPerSample * 8,
 		},
 		SystemInstruction: ds.GetSystemInstruction(),
+		// Request spoken (AUDIO) responses — this is a voice call.
+		Metadata: map[string]interface{}{
+			metaKeyResponseModalities: []string{modalityAudio},
+		},
 	}
 	params := duplexMediaParams{
 		codec:      codec,
@@ -137,6 +222,24 @@ func (s *Server) handleDuplexSession(ctx context.Context, stream runtimev1.Runti
 	ds := start.GetDuplexStart()
 	streamCfg, mediaParams := buildStreamingConfig(ds, s.duplexAudio)
 	opts = append(opts, sdk.WithStreamingConfig(&streamCfg))
+
+	// Rate-reconciliation telemetry: the effective rate feeds BOTH the provider
+	// (what OpenAI/Gemini is told the PCM is) and the RuntimeHello counter-offer
+	// (what the client is asked to capture at). Any divergence between the client's
+	// proposal, the CRD-required override, and the effective rate lands here.
+	requiredRate := 0
+	if s.duplexAudio != nil {
+		requiredRate = s.duplexAudio.SampleRate
+	}
+	log.Info("duplex rate reconciliation",
+		"duplexStartRate", ds.GetSampleRate(),
+		"duplexStartCodec", ds.GetCodec(),
+		"duplexStartChannels", ds.GetChannels(),
+		"requiredRate", requiredRate,
+		"effectiveRate", mediaParams.sampleRate,
+		"effectiveCodec", mediaParams.codec,
+		"chunkSize", streamCfg.Config.ChunkSize,
+		"bitDepth", streamCfg.Config.BitDepth)
 
 	// RuntimeHello is the runtime's first ServerMessage on the stream: the
 	// session's authoritative capabilities plus the media counter-offer the
@@ -202,6 +305,40 @@ func (s *Server) handleDuplexSession(ctx context.Context, stream runtimev1.Runti
 // an is_last chunk, EOF, or a stream receive error. The media params are the
 // negotiated codec / sample rate / channels from the session's DuplexStart.
 func (s *Server) pumpDuplexInput(ctx context.Context, stream runtimev1.RuntimeService_ConverseServer, conv *sdk.Conversation, params duplexMediaParams) error {
+	log := logctx.LoggerWithContext(s.log, ctx)
+
+	// Input-rate audit: measure the TRUE data rate of the inbound stream
+	// (bytes ÷ wall-clock, independent of any declared label) and compare it to
+	// params.sampleRate — the rate we tell the provider the PCM is. A live mic
+	// streams at 1×, so bytes/frameBytes/elapsed == the client's real capture
+	// rate. If measuredTrueRate diverges from effectiveRate, the client is
+	// sending PCM at one rate but it is being played back to the provider as
+	// another (e.g. 16 kHz data labelled 24 kHz → pitch-shifted → wrong language).
+	bytesPerSample := pcmBytesPerSample(params.codec)
+	var totalBytes, chunkCount int
+	var firstChunkAt, lastChunkAt time.Time
+	defer func() {
+		if totalBytes == 0 {
+			return
+		}
+		// elapsed spans first→last audio chunk (NOT function return), so trailing
+		// idle before is_last/EOF does not dilute the measured rate.
+		elapsed := lastChunkAt.Sub(firstChunkAt).Seconds()
+		frameBytes := bytesPerSample * params.channels
+		measuredTrueRate := 0
+		if elapsed > 0 && frameBytes > 0 {
+			measuredTrueRate = int(float64(totalBytes) / float64(frameBytes) / elapsed)
+		}
+		log.Info("duplex input rate audit",
+			"effectiveRate", params.sampleRate,
+			"measuredTrueRate", measuredTrueRate,
+			"totalBytes", totalBytes,
+			"chunkCount", chunkCount,
+			"activeElapsedSec", elapsed,
+			"channels", params.channels,
+			"bytesPerSample", bytesPerSample)
+	}()
+
 	for {
 		msg, err := stream.Recv()
 		if errors.Is(err, io.EOF) {
@@ -218,6 +355,13 @@ func (s *Server) pumpDuplexInput(ctx context.Context, stream runtimev1.RuntimeSe
 		}
 
 		if len(ai.GetData()) > 0 {
+			now := time.Now()
+			if firstChunkAt.IsZero() {
+				firstChunkAt = now
+			}
+			lastChunkAt = now
+			totalBytes += len(ai.GetData())
+			chunkCount++
 			chunk := &providers.StreamChunk{
 				MediaData: &providers.StreamMediaData{
 					Data:       ai.GetData(),
@@ -271,6 +415,27 @@ func (s *Server) forwardDuplexChunk(stream runtimev1.RuntimeService_ConverseServ
 			Message: &runtimev1.ServerMessage_Chunk{
 				Chunk: &runtimev1.Chunk{Content: chunk.Delta},
 			},
+		})
+	}
+	// User transcript: the caller's transcribed speech arrives with an empty
+	// Delta and the text in Metadata[input_transcription]. Forward it as a
+	// user-role chunk so the client renders it as a user message (the assistant
+	// path uses the default empty role above).
+	if v, ok := chunk.Metadata[metaKeyInputTranscription]; ok {
+		if transcript, isStr := v.(string); isStr && transcript != "" {
+			return stream.Send(&runtimev1.ServerMessage{
+				Message: &runtimev1.ServerMessage_Chunk{
+					Chunk: &runtimev1.Chunk{Content: transcript, Role: chunkRoleUser},
+				},
+			})
+		}
+	}
+	// End of an assistant turn: seal the streamed transcript so the client
+	// finalizes the current assistant message and the next turn starts a fresh
+	// one. Done carries no content — the client keeps the text it streamed.
+	if _, ok := chunk.Metadata[metaKeyAssistantTurnComplete]; ok {
+		return stream.Send(&runtimev1.ServerMessage{
+			Message: &runtimev1.ServerMessage_Done{Done: &runtimev1.Done{}},
 		})
 	}
 	return nil

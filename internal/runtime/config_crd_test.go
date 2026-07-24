@@ -535,6 +535,7 @@ func TestLoadFromCRD_DuplexAudio_Set(t *testing.T) {
 					Format:                "pcm16",
 					RecommendedSampleRate: int32Ptr(24000),
 					Channels:              int32Ptr(1),
+					ChunkDurationMs:       int32Ptr(20),
 				},
 			},
 		},
@@ -546,6 +547,7 @@ func TestLoadFromCRD_DuplexAudio_Set(t *testing.T) {
 	assert.Equal(t, "pcm16", cfg.DuplexAudio.Codec)
 	assert.Equal(t, 24000, cfg.DuplexAudio.SampleRate)
 	assert.Equal(t, 1, cfg.DuplexAudio.Channels)
+	assert.Equal(t, 20, cfg.DuplexAudio.ChunkDurationMs)
 }
 
 func TestLoadFromCRD_DuplexAudio_Absent(t *testing.T) {
